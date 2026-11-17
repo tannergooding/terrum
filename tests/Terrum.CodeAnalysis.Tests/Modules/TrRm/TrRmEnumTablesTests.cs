@@ -9,6 +9,7 @@ using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
+using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
@@ -201,6 +202,172 @@ internal sealed class TrRmEnumTablesTests
         Assert.That(localDefId, Is.EqualTo(0x1300_0001u));
         Assert.That(tables.EnumMembers.GetDeclarationKey(1), Is.EqualTo("color-red"));
         Assert.That(tables.EnumMembers.GetValue(1), Is.EqualTo(7));
+    }
+
+    [Test]
+    public void EmitsSourceNominalEnumsWithExplicitMemberKeys()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            namespace Example {
+                public enum Color : int32 { Red = 7, Blue = 7 }
+                public enum Size : int32 { Small = 1 }
+                public enum Empty : int32 { }
+                public Color GetColor() { return Color.Blue; }
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        var sourceColor = program.EnumDefinitions.Single(
+            static definition => definition.Name == "Example.Color");
+        Assert.That(sourceColor.Identity,
+            Is.TypeOf<BoundEnumDeclarationIdentity.Source>());
+        Assert.That(sourceColor.Members.All(
+            static member => member.DeclarationKey is null), Is.True);
+
+        TrRmSourceTypeExport[] exports = [
+            new("Example", "Color", "enum.颜色") {
+                EnumMemberDeclarationKeys = [
+                    "member.赤", "member.shared",
+                ],
+            },
+            new("Example", "Size", "enum.size") {
+                EnumMemberDeclarationKeys = ["member.shared"],
+            },
+            new("Example", "Empty", "enum.empty") {
+                EnumMemberDeclarationKeys = [],
+            },
+        ];
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "source-enum-module", "trrm/1-draft-nominal-enums-1", 1,
+            exports);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateNominalEnumsDraftAndGetExecutionTables(
+                TrRmArtifactIndex.ForNominalEnumsDraft(artifact));
+
+        Assert.That(tables.TypeDefs.Count, Is.EqualTo(3));
+        Assert.That(tables.EnumDefs.Count, Is.EqualTo(3));
+        Assert.That(tables.EnumMembers.Count, Is.EqualTo(3));
+        Assert.That(tables.Features.GetFeature(1).FeatureId, Is.EqualTo(11));
+        Assert.That(tables.Features.GetFeature(2).FeatureId, Is.EqualTo(18));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1, "enum.颜色",
+            out var colorDefId), Is.True);
+        var colorTypeDef = (int)(colorDefId & 0x00FF_FFFF);
+        var colorEnum = tables.EnumDefs.GetRowForTypeDef(colorTypeDef);
+        var (colorMemberFirst, colorMemberCount)
+            = tables.EnumDefs.GetMemberRange(colorEnum);
+        Assert.That(colorMemberCount, Is.EqualTo(2));
+        Assert.That(tables.EnumMembers.GetDeclarationKey(colorMemberFirst),
+            Is.EqualTo("member.赤"));
+        Assert.That(tables.EnumMembers.GetDeclarationKey(
+            colorMemberFirst + 1), Is.EqualTo("member.shared"));
+        Assert.That(tables.EnumMembers.GetValue(colorMemberFirst),
+            Is.EqualTo(7));
+        Assert.That(tables.EnumMembers.GetValue(colorMemberFirst + 1),
+            Is.EqualTo(7));
+
+        var emptyTypeDef = 0;
+        for (var row = 1; row <= tables.TypeDefs.Count; row++)
+        {
+            if (tables.TypeDefs.GetName(row) == "Empty")
+            {
+                emptyTypeDef = row;
+                break;
+            }
+        }
+        Assert.That(emptyTypeDef, Is.Not.Zero);
+        var emptyEnum = tables.EnumDefs.GetRowForTypeDef(emptyTypeDef);
+        Assert.That(tables.EnumDefs.GetMemberRange(emptyEnum),
+            Is.EqualTo((0, 0)));
+
+        var loaded = TrRmExecutableCompiler
+            .LoadNominalEnumsDraftScalarReturns(artifact);
+        var loadedColor = loaded.EnumDefinitions.Single(
+            static definition => definition.Name == "Example.Color");
+        Assert.That(loadedColor.Members.Select(
+                static member => member.DeclarationKey),
+            Is.EqualTo(["member.赤", "member.shared"]));
+        Assert.That(loaded.Functions.Single().ReturnType,
+            Is.EqualTo(BoundEnumTypes.Type(
+                loaded.EnumDefinitions.IndexOf(loadedColor))));
+        Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
+                "source-enum-module",
+                "trrm/1-draft-nominal-enums-1", 1),
+            Is.EqualTo(artifact));
+    }
+
+    [Test]
+    public void BindsSourceProducedEnumToItsExplicitProviderKey()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public enum Color : int32 {
+                Red = 7, AlsoRed = 7
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        var provider = TrRmExecutableCompiler.EmitStandard(program,
+            "source-enum-provider", "trrm/1-draft-nominal-enums-1", 0, [
+                new TrRmSourceTypeExport("", "Color", "Color") {
+                    EnumMemberDeclarationKeys = [
+                        "color-red", "color-also-red",
+                    ],
+                },
+            ]);
+        var consumer = CreateBoundEnumArtifact(isConsumer: true,
+            declarationKey: "color-red", blittable: false, flags: 0,
+            providerModuleIdentity: "source-enum-provider",
+            providerTargetRequirement: 0, providerExportKey: "Color");
+
+        Assert.DoesNotThrow(() =>
+            TrRmStructuralMetadataValidator
+                .ValidateNominalEnumsDraftProviderBindings(
+                    consumer, [provider]));
+    }
+
+    [Test]
+    public void RejectsIncompleteSourceNominalEnumKeyMaps()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public enum Color : int32 { Red = 7, Blue = 19 }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        const string schema = "trrm/1-draft-nominal-enums-1";
+
+        _ = Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.EmitStandard(program, "source-enum-module",
+                schema, 0));
+        _ = Assert.Throws<ArgumentException>(() =>
+            TrRmExecutableCompiler.EmitStandard(program, "source-enum-module",
+                schema, 0, [
+                    new TrRmSourceTypeExport("", "Color", "color") {
+                        EnumMemberDeclarationKeys = ["only-one"],
+                    },
+                ]));
+        _ = Assert.Throws<ArgumentException>(() =>
+            TrRmExecutableCompiler.EmitStandard(program, "source-enum-module",
+                schema, 0, [
+                    new TrRmSourceTypeExport("", "Color", "color") {
+                        EnumMemberDeclarationKeys = ["same", "same"],
+                    },
+                ]));
+        _ = Assert.Throws<ArgumentException>(() =>
+            TrRmExecutableCompiler.EmitStandard(program, "source-enum-module",
+                schema, 0, [
+                    new TrRmSourceTypeExport("", "Missing", "color") {
+                        EnumMemberDeclarationKeys = ["red", "blue"],
+                    },
+                ]));
+        _ = Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.EmitStandard(program, "source-enum-module",
+                "trrm/1-draft-layout-queries-1", 1, [
+                    new TrRmSourceTypeExport("", "Color", "color") {
+                        EnumMemberDeclarationKeys = ["red", "blue"],
+                    },
+                ]));
     }
 
     [Test]
@@ -399,6 +566,51 @@ internal sealed class TrRmEnumTablesTests
             var identity = Marshal.GetDelegateForFunctionPointer<EnumIdentity>(
                 NativeLibrary.GetExport(handle, "IdentityColor"));
             Assert.That(identity(0x1234), Is.EqualTo(0x1234));
+        }
+        finally
+        {
+            if (handle != IntPtr.Zero)
+            {
+                NativeLibrary.Free(handle);
+            }
+            await TestFileCleanup.DeleteWithRetryAsync(path)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public async Task ExecutesSourceProducedNominalEnumIdentityMethod()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public enum Color : int32 { Red = 7, Blue = 19 }
+            public Color IdentityColor(Color value) { return value; }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        var sourceExport = new TrRmSourceTypeExport("", "Color",
+            "color-type") {
+            EnumMemberDeclarationKeys = ["color-red", "color-blue"],
+        };
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "source-enum-module", "trrm/1-draft-nominal-enums-1", 1,
+            [sourceExport]);
+        var loaded = TrRmExecutableCompiler
+            .LoadNominalEnumsDraftIdentityLibrary(artifact);
+        var image = NativeEmitter.EmitLibrary(loaded, ["IdentityColor"],
+            NativeRuntimePolicy.FailFast);
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-source-enum-identity-{Guid.NewGuid():N}.dll");
+        var handle = IntPtr.Zero;
+        try
+        {
+            await File.WriteAllBytesAsync(path, image).ConfigureAwait(true);
+            handle = NativeLibrary.Load(path);
+            var identity = Marshal.GetDelegateForFunctionPointer<EnumIdentity>(
+                NativeLibrary.GetExport(handle, "IdentityColor"));
+            Assert.That(identity(0x2468), Is.EqualTo(0x2468));
         }
         finally
         {
@@ -1029,11 +1241,10 @@ internal sealed class TrRmEnumTablesTests
         bool includeTypedFrozenValues = false,
         uint consumerTargetRequirement = 0)
     {
-        const string providerIdentity = "provider";
-        const string exportKey = "color";
+        var exportKey = providerExportKey;
         var moduleIdentity = isConsumer ? "consumer" : providerModuleIdentity;
         var stringBytes = TrRmStringTableWriter.EncodeTextRows([
-            ("", 0), (moduleIdentity, 0), (providerIdentity, 0),
+            ("", 0), (moduleIdentity, 0), (providerModuleIdentity, 0),
             ("Color", 0), ("Red", 0), ("AlsoRed", 0),
             (declarationKey, 0), ("color-also-red", 0),
             (isConsumer ? exportKey : providerExportKey, 0),

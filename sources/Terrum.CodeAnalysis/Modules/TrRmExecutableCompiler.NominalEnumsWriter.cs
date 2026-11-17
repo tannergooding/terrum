@@ -3,7 +3,9 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Linq;
+using System.Text;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Semantics;
 
@@ -13,21 +15,357 @@ public static partial class TrRmExecutableCompiler
 {
     internal static byte[] EmitNominalEnumsDraftSource(
         BoundProgram program, string moduleIdentity,
-        uint moduleTargetRequirement)
+        uint moduleTargetRequirement,
+        IReadOnlyList<TrRmSourceTypeExport>? sourceTypeExports = null)
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentException.ThrowIfNullOrEmpty(moduleIdentity);
+        if (BoundEnumTypes.HasStandardDeclarations(
+                program.EnumDefinitions))
+        {
+            throw Unsupported(
+                "NominalEnumsDraft cannot persist Standard enum origins.");
+        }
+
+        var sourceEnumExports = sourceTypeExports is null
+            ? null
+            : NominalEnumsDraftSourceEnumExports.Capture(program,
+                moduleIdentity, sourceTypeExports);
+        if (sourceEnumExports is null
+            && program.EnumDefinitions.Any(static definition =>
+                definition.Identity
+                    is BoundEnumDeclarationIdentity.Source))
+        {
+            throw Unsupported(
+                "NominalEnumsDraft source enums require explicit TypeDef and member-key assignments.");
+        }
+
         if (program.Functions.IsEmpty)
         {
             return EmitNominalEnumsDraftDeclarationLibrary(program,
-                moduleIdentity, moduleTargetRequirement);
+                moduleIdentity, moduleTargetRequirement,
+                sourceEnumExports);
         }
 
         return IsNominalEnumsDraftIdentityLibrary(program)
             ? EmitNominalEnumsDraftIdentityLibrary(program, moduleIdentity,
-                moduleTargetRequirement)
+                moduleTargetRequirement, sourceEnumExports)
             : EmitNominalEnumsDraftConstantReturns(program, moduleIdentity,
-                moduleTargetRequirement);
+                moduleTargetRequirement, sourceEnumExports);
+    }
+
+    internal sealed record NominalEnumsDraftSourceEnumExport(
+        BoundEnumDefinition Definition,
+        BoundSourceEnumDeclarationHandle Declaration,
+        string ExportKey,
+        ImmutableArray<BoundSourceEnumMemberHandle> MemberDeclarations,
+        ImmutableArray<string> MemberDeclarationKeys);
+
+    internal sealed class NominalEnumsDraftSourceEnumExports
+    {
+        private readonly Dictionary<BoundSourceEnumDeclarationHandle,
+            NominalEnumsDraftSourceEnumExport> _byDeclaration;
+
+        private NominalEnumsDraftSourceEnumExports(BoundProgram program,
+            ImmutableArray<BoundEnumDefinition> enumDefinitions,
+            ImmutableArray<NominalEnumsDraftSourceEnumExport> exports)
+        {
+            Program = program;
+            EnumDefinitions = enumDefinitions;
+            Exports = exports;
+            _byDeclaration = [];
+            foreach (var export in exports)
+            {
+                _byDeclaration.Add(export.Declaration, export);
+            }
+        }
+
+        private BoundProgram Program { get; }
+        private ImmutableArray<BoundEnumDefinition> EnumDefinitions { get; }
+        private ImmutableArray<NominalEnumsDraftSourceEnumExport> Exports { get; }
+
+        internal static NominalEnumsDraftSourceEnumExports Capture(
+            BoundProgram program, string moduleIdentity,
+            IReadOnlyList<TrRmSourceTypeExport> typeExports)
+        {
+            if (!BoundEnumTypes.IsValidTable(program.EnumDefinitions))
+            {
+                throw new ArgumentException(
+                    "The source enum table is invalid.",
+                    nameof(program));
+            }
+
+            var sourceDefinitions
+                = new Dictionary<(string Namespace, string Name),
+                    List<BoundEnumDefinition>>();
+            var allSourceDefinitions
+                = ImmutableArray.CreateBuilder<BoundEnumDefinition>();
+            foreach (var definition in program.EnumDefinitions)
+            {
+                if (definition.Identity
+                    is not BoundEnumDeclarationIdentity.Source source)
+                {
+                    continue;
+                }
+
+                var declaration = source.Value;
+                if (!declaration.IsValid
+                    || !StringComparer.Ordinal.Equals(
+                        declaration.QualifiedName, definition.Name))
+                {
+                    throw new ArgumentException(
+                        "A source enum declaration does not match its checked program snapshot.",
+                        nameof(program));
+                }
+
+                var separator = declaration.QualifiedName.LastIndexOf(
+                    '.', StringComparison.Ordinal);
+                var selector = separator < 0
+                    ? (string.Empty, declaration.QualifiedName)
+                    : (declaration.QualifiedName[..separator],
+                        declaration.QualifiedName[(separator + 1)..]);
+                if (!sourceDefinitions.TryGetValue(selector,
+                        out var declarations))
+                {
+                    declarations = [];
+                    sourceDefinitions.Add(selector, declarations);
+                }
+                declarations.Add(definition);
+                allSourceDefinitions.Add(definition);
+            }
+
+            var existingExportKeys = new HashSet<string>(
+                StringComparer.Ordinal);
+            foreach (var definition in program.EnumDefinitions)
+            {
+                if (definition.Identity
+                        is BoundEnumDeclarationIdentity.Core core
+                    && StringComparer.Ordinal.Equals(
+                        core.Value.ProviderIdentity, moduleIdentity)
+                    && !existingExportKeys.Add(core.Value.ExportKey))
+                {
+                    throw new ArgumentException(
+                        "The checked program contains duplicate local enum ExportKeys.",
+                        nameof(program));
+                }
+            }
+            foreach (var function in program.Functions)
+            {
+                if (!function.IsPrivate && !function.IsInternal
+                    && !existingExportKeys.Add(function.Name))
+                {
+                    throw new ArgumentException(
+                        "The checked program contains duplicate exported names.",
+                        nameof(program));
+                }
+            }
+
+            var selected = new HashSet<BoundSourceEnumDeclarationHandle>();
+            var exports
+                = ImmutableArray.CreateBuilder<
+                    NominalEnumsDraftSourceEnumExport>(
+                    typeExports.Count);
+            foreach (var export in typeExports)
+            {
+                if (export is null || export.Namespace is null
+                    || string.IsNullOrEmpty(export.Name)
+                    || string.IsNullOrEmpty(export.ExportKey)
+                    || export.Namespace.Contains('\0',
+                        StringComparison.Ordinal)
+                    || export.Name.Contains('\0', StringComparison.Ordinal)
+                    || export.ExportKey.Contains('\0',
+                        StringComparison.Ordinal)
+                    || export.EnumMemberDeclarationKeys.IsDefault)
+                {
+                    throw new ArgumentException(
+                        "A NominalEnumsDraft source enum mapping is invalid.",
+                        nameof(typeExports));
+                }
+
+                if (!IsValidKeyText(export.ExportKey))
+                {
+                    throw new ArgumentException(
+                        "A NominalEnumsDraft ExportKey must be well-formed scalar text within Standard String limits.",
+                        nameof(typeExports));
+                }
+                if (!sourceDefinitions.TryGetValue(
+                        (export.Namespace, export.Name),
+                        out var declarations)
+                    || declarations.Count != 1)
+                {
+                    throw new ArgumentException(
+                        "A NominalEnumsDraft mapping must select one source enum in the checked program.",
+                        nameof(typeExports));
+                }
+
+                var definition = declarations[0];
+                if (definition.Identity
+                    is not BoundEnumDeclarationIdentity.Source source)
+                {
+                    throw new ArgumentException(
+                        "A NominalEnumsDraft mapping must select a source enum in the checked program.",
+                        nameof(typeExports));
+                }
+
+                var declaration = source.Value;
+                if (!definition.IsPublic || !declaration.IsPublic
+                    || declaration.IsFileLocal)
+                {
+                    throw new ArgumentException(
+                        "A NominalEnumsDraft source enum mapping must select a public namespace-level declaration.",
+                        nameof(typeExports));
+                }
+                if (definition.UnderlyingType != PrimitiveType.Int32
+                    || !definition.IsPrimary
+                    || definition.ModuleImport is not null)
+                {
+                    throw new NotSupportedException(
+                        "NominalEnumsDraft supports only complete public primary int32 source enums.");
+                }
+                if (!selected.Add(declaration)
+                    || !existingExportKeys.Add(export.ExportKey))
+                {
+                    throw new ArgumentException(
+                        "NominalEnumsDraft source enum declarations and ExportKeys must be unique.",
+                        nameof(typeExports));
+                }
+                if (export.EnumMemberDeclarationKeys.Length
+                    != definition.Members.Length)
+                {
+                    throw new ArgumentException(
+                        "A NominalEnumsDraft source enum requires one explicit key for every declared member.",
+                        nameof(typeExports));
+                }
+
+                var memberKeys
+                    = ImmutableArray.CreateBuilder<string>(
+                        export.EnumMemberDeclarationKeys.Length);
+                var memberDeclarations
+                    = ImmutableArray.CreateBuilder<
+                        BoundSourceEnumMemberHandle>(
+                        export.EnumMemberDeclarationKeys.Length);
+                var seenMemberKeys = new HashSet<string>(
+                    StringComparer.Ordinal);
+                for (var memberIndex = 0;
+                    memberIndex < definition.Members.Length;
+                    memberIndex++)
+                {
+                    var member = definition.Members[memberIndex];
+                    var key = export.EnumMemberDeclarationKeys[memberIndex];
+                    if (member.Identity
+                            is not BoundEnumMemberIdentity.Source memberSource
+                        || member.DeclaringEnum
+                            is not BoundEnumDeclarationIdentity.Source memberOwner
+                        || !ReferenceEquals(memberSource.Value.Owner,
+                            declaration)
+                        || !ReferenceEquals(memberOwner.Value, declaration)
+                        || string.IsNullOrEmpty(key)
+                        || key.Contains('\0', StringComparison.Ordinal)
+                        || !seenMemberKeys.Add(key))
+                    {
+                        throw new ArgumentException(
+                            "A NominalEnumsDraft member-key assignment does not match its unique source member.",
+                            nameof(typeExports));
+                    }
+
+                    if (!IsValidKeyText(key))
+                    {
+                        throw new ArgumentException(
+                            "A NominalEnumsDraft member key must be well-formed scalar text within Standard String limits.",
+                            nameof(typeExports));
+                    }
+                    memberDeclarations.Add(memberSource.Value);
+                    memberKeys.Add(key);
+                }
+
+                exports.Add(new NominalEnumsDraftSourceEnumExport(
+                    definition, declaration, export.ExportKey,
+                    memberDeclarations.MoveToImmutable(),
+                    memberKeys.MoveToImmutable()));
+            }
+
+            foreach (var definition in allSourceDefinitions)
+            {
+                if (!definition.IsPublic
+                    || definition.Identity
+                        is not BoundEnumDeclarationIdentity.Source source
+                    || source.Value.IsFileLocal
+                    || definition.UnderlyingType != PrimitiveType.Int32
+                    || !definition.IsPrimary)
+                {
+                    throw new NotSupportedException(
+                        "NominalEnumsDraft cannot retain a nonpublic, file-local, non-primary or non-int32 source enum.");
+                }
+                if (!selected.Contains(source.Value))
+                {
+                    throw new NotSupportedException(
+                        "Every retained source enum requires an explicit NominalEnumsDraft export and complete member-key assignment.");
+                }
+            }
+
+            return new NominalEnumsDraftSourceEnumExports(program,
+                program.EnumDefinitions, exports.MoveToImmutable());
+        }
+
+        private static bool IsValidKeyText(string key)
+        {
+            try
+            {
+                var byteCount = s_sourceTypeExportKeyEncoding.GetByteCount(key);
+                return byteCount is >= 1 and <= 0xFF_FFFF;
+            }
+            catch (EncoderFallbackException)
+            {
+                return false;
+            }
+        }
+
+        internal bool TryGet(BoundEnumDefinition definition,
+            out NominalEnumsDraftSourceEnumExport export)
+        {
+            if (definition.Identity
+                    is BoundEnumDeclarationIdentity.Source source
+                && _byDeclaration.TryGetValue(source.Value, out export!)
+                && ReferenceEquals(export.Definition, definition))
+            {
+                return true;
+            }
+
+            export = null!;
+            return false;
+        }
+
+        internal void ValidateProgram(BoundProgram program)
+        {
+            if (!ReferenceEquals(Program, program)
+                || program.EnumDefinitions.Length
+                    != EnumDefinitions.Length
+                || program.EnumDefinitions.Where((definition, index) =>
+                    !ReferenceEquals(definition, EnumDefinitions[index]))
+                    .Any())
+            {
+                throw new ArgumentException(
+                    "NominalEnumsDraft source enum assignments belong to another checked program snapshot.",
+                    nameof(program));
+            }
+        }
+
+        internal NominalEnumsDraftSourceEnumExports Rebase(
+            BoundProgram program)
+        {
+            if (program.EnumDefinitions.Length != EnumDefinitions.Length
+                || program.EnumDefinitions.Where((definition, index) =>
+                    !ReferenceEquals(definition, EnumDefinitions[index]))
+                    .Any())
+            {
+                throw new ArgumentException(
+                    "NominalEnumsDraft source enum assignments cannot be rebased to changed declarations.",
+                    nameof(program));
+            }
+
+            return new NominalEnumsDraftSourceEnumExports(program,
+                EnumDefinitions, Exports);
+        }
     }
 
     private static bool IsNominalEnumsDraftIdentityLibrary(
@@ -46,7 +384,8 @@ public static partial class TrRmExecutableCompiler
 
     private static byte[] EmitNominalEnumsDraftIdentityLibrary(
         BoundProgram program, string moduleIdentity,
-        uint moduleTargetRequirement)
+        uint moduleTargetRequirement,
+        NominalEnumsDraftSourceEnumExports? sourceEnumExports)
     {
         if (program.EntryPoint != -1
             || program.RuntimePolicy != BoundRuntimePolicy.FailFast
@@ -89,8 +428,11 @@ public static partial class TrRmExecutableCompiler
             LayoutCoreRegistration = program.LayoutCoreRegistration,
             RuntimePolicy = program.RuntimePolicy,
         };
+        var declarationSourceEnumExports
+            = sourceEnumExports?.Rebase(declarationProgram);
         var declarationArtifact = EmitNominalEnumsDraftDeclarationLibrary(
-            declarationProgram, moduleIdentity, moduleTargetRequirement);
+            declarationProgram, moduleIdentity, moduleTargetRequirement,
+            declarationSourceEnumExports);
         var declarationIndex
             = TrRmArtifactIndex.ForNominalEnumsDraft(declarationArtifact);
         var declarationTables
@@ -326,7 +668,8 @@ public static partial class TrRmExecutableCompiler
 
     internal static byte[] EmitNominalEnumsDraftConstantReturns(
         BoundProgram program, string moduleIdentity,
-        uint moduleTargetRequirement)
+        uint moduleTargetRequirement,
+        NominalEnumsDraftSourceEnumExports? sourceEnumExports = null)
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentException.ThrowIfNullOrEmpty(moduleIdentity);
@@ -372,8 +715,11 @@ public static partial class TrRmExecutableCompiler
             LayoutCoreRegistration = program.LayoutCoreRegistration,
             RuntimePolicy = program.RuntimePolicy,
         };
+        var declarationSourceEnumExports
+            = sourceEnumExports?.Rebase(declarationProgram);
         var declarationArtifact = EmitNominalEnumsDraftDeclarationLibrary(
-            declarationProgram, moduleIdentity, moduleTargetRequirement);
+            declarationProgram, moduleIdentity, moduleTargetRequirement,
+            declarationSourceEnumExports);
         var declarationIndex
             = TrRmArtifactIndex.ForNominalEnumsDraft(declarationArtifact);
         var declarationTables

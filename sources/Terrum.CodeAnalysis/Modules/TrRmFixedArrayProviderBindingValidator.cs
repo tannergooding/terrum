@@ -5,14 +5,29 @@ using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
+using Terrum.CodeAnalysis.Semantics;
 
 namespace Terrum.CodeAnalysis.Modules;
 
 internal readonly record struct TrRmStandardTypeProviderBinding(
     int ConsumerArtifactIndex, int ConsumerModuleRow, int ImportRow,
+    int ModuleRefRow,
     int ExpectedTypeDefRow, int ProviderArtifactIndex, int ProviderModuleRow,
-    int ProviderTypeDefRow, string ProducerIdentity, string ExportKey,
-    uint TargetRequirement, uint RuntimePolicy);
+    int ProviderTypeDefRow, int ExportRow, uint ActualDefinitionId,
+    string ProducerIdentity, string ExportKey, uint TargetRequirement,
+    uint RuntimePolicy);
+
+internal readonly record struct TrRmStandardFieldProviderBinding(
+    int ConsumerArtifactIndex, int ConsumerModuleRow, int ImportRow,
+    int ModuleRefRow, int ExpectedFieldDefRow, int ExpectedOwnerTypeDefRow,
+    int OwnerImportRow, int ProviderArtifactIndex, int ProviderModuleRow,
+    int ProviderTypeDefRow, int ProviderFieldDefRow, int ExportRow,
+    string ProducerIdentity, string ExportKey, uint TargetRequirement,
+    uint RuntimePolicy);
+
+internal readonly record struct TrRmStandardFieldProviderValidation(
+    ImmutableArray<TrRmStandardTypeProviderBinding> TypeBindings,
+    ImmutableArray<TrRmStandardFieldProviderBinding> FieldBindings);
 
 internal readonly record struct TrRmStandardMethodTypeSpecPair(
     int ExpectedArtifactIndex, int ExpectedModuleRow,
@@ -21,6 +36,10 @@ internal readonly record struct TrRmStandardMethodTypeSpecPair(
 
 internal static class TrRmFixedArrayProviderBindingValidator
 {
+    private const string LayoutQueriesSchemaIdentity
+        = "trrm/1-draft-layout-queries-1";
+    private const string C1M1SchemaIdentity
+        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1";
     private const string FixedArraySchemaIdentity
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
     private const string FixedArrayEmptyInitializationSchemaIdentity
@@ -35,8 +54,23 @@ internal static class TrRmFixedArrayProviderBindingValidator
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-scalar-frozen-values-copy-origin-return-coverage-repeat-initialization-1";
     private const string LocalAggregateLayoutSchemaIdentity
         = "trrm/1-draft-local-aggregate-layout-execution-1";
+    private const string InitializationReferenceLocalFieldLayoutSchemaIdentity
+        = "trrm/1-draft-init-reference-bodies-local-field-layout-1";
+    private const string InitializationReferenceNestedFieldDestinationsSchemaIdentity
+        = "trrm/1-draft-init-reference-bodies-local-field-layout-2";
     private const string GenericFixedArraySchemaIdentity
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1";
+
+    private static bool IsC1M1SchemaIdentity(string schemaIdentity)
+        => StringComparer.Ordinal.Equals(schemaIdentity,
+            C1M1SchemaIdentity);
+
+    private static bool IsInitializationReferenceLocalFieldLayoutSchemaIdentity(
+        string schemaIdentity)
+        => StringComparer.Ordinal.Equals(schemaIdentity,
+                InitializationReferenceLocalFieldLayoutSchemaIdentity)
+            || StringComparer.Ordinal.Equals(schemaIdentity,
+                InitializationReferenceNestedFieldDestinationsSchemaIdentity);
 
     internal static ImmutableArray<TrRmStandardTypeProviderBinding> Validate(
         TrRmStructuralMetadataValidator.ValidatedExecutionTables consumer,
@@ -102,6 +136,109 @@ internal static class TrRmFixedArrayProviderBindingValidator
         }
     }
 
+    internal static TrRmStandardFieldProviderValidation
+        ValidateFieldDefImports(
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables consumer,
+        byte[][] artifacts, string[] schemaIdentities,
+        ImmutableArray<TrRmStandardModuleSelection> modules,
+        int rootModuleRow)
+    {
+        if (consumer.Schema is not (TrRmArtifactSchema.Standard
+                or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft
+                or TrRmArtifactSchema.C1Draft
+                or TrRmArtifactSchema.C1M1Draft)
+            || artifacts.Length != schemaIdentities.Length
+            || artifacts.Length == 0)
+        {
+            throw new InvalidDataException(
+                "Invalid TRRM Standard FieldDef provider binding.");
+        }
+
+        var nestedFieldDestinations = schemaIdentities.Length != 0
+            && schemaIdentities.All(static schemaIdentity =>
+                StringComparer.Ordinal.Equals(schemaIdentity,
+                    InitializationReferenceNestedFieldDestinationsSchemaIdentity));
+        foreach (var schemaIdentity in schemaIdentities)
+        {
+            if (!StringComparer.Ordinal.Equals(schemaIdentity,
+                    LayoutQueriesSchemaIdentity)
+                && !(nestedFieldDestinations
+                    && StringComparer.Ordinal.Equals(schemaIdentity,
+                        InitializationReferenceNestedFieldDestinationsSchemaIdentity)))
+            {
+                throw new InvalidDataException(
+                    "Invalid TRRM Standard FieldDef provider binding.");
+            }
+        }
+
+        var context = new ValidationContext(consumer, artifacts,
+            schemaIdentities, modules, a3ResourceLedger: null);
+        return context.ValidateFieldDefImports(rootModuleRow,
+            nestedFieldDestinations);
+    }
+
+    internal static ImmutableArray<TrRmStandardTypeProviderBinding>
+        ValidateC1M1TypeDefImports(
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables consumer,
+        byte[][] artifacts, string[] schemaIdentities,
+        ImmutableArray<TrRmStandardModuleSelection> modules,
+        int rootModuleRow)
+    {
+        var isC1M1ProviderSchema = schemaIdentities.Length != 0
+            && IsC1M1SchemaIdentity(schemaIdentities[0]);
+        var isEN1ProviderSchema = schemaIdentities.Length != 0
+            && TrRmExecutableCompiler
+                .IsSelectedC1EnumClosureSchemaIdentity(
+                    schemaIdentities[0]);
+        if ((consumer.Schema != TrRmArtifactSchema.C1M1Draft
+                && (!consumer.Schema.UsesC1EnumClosure()
+                    || !isEN1ProviderSchema))
+            || artifacts.Length != schemaIdentities.Length
+            || artifacts.Length == 0
+            || (!isC1M1ProviderSchema && !isEN1ProviderSchema))
+        {
+            throw new InvalidDataException(
+                "Invalid TRRM C1M1/EN1 TypeDef provider binding.");
+        }
+
+        for (var artifactIndex = 1;
+            artifactIndex < schemaIdentities.Length; artifactIndex++)
+        {
+            if (!StringComparer.Ordinal.Equals(schemaIdentities[0],
+                    schemaIdentities[artifactIndex]))
+            {
+                throw new InvalidDataException(
+                    "Invalid TRRM C1M1/EN1 TypeDef provider binding.");
+            }
+        }
+
+        var context = new ValidationContext(consumer, artifacts,
+            schemaIdentities, modules, a3ResourceLedger: null);
+        return context.ValidateC1M1TypeDefImports(rootModuleRow);
+    }
+
+    internal static TrRmStandardTypeProviderBinding
+        ValidateGenericMethodTypeDefImport(
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables consumer,
+        byte[][] artifacts, string[] schemaIdentities,
+        ImmutableArray<TrRmStandardModuleSelection> modules,
+        int artifactIndex, int moduleRow, int importRow)
+    {
+        if (artifactIndex < 0 || artifactIndex >= artifacts.Length
+            || artifactIndex >= schemaIdentities.Length
+            || !StandardGenericMethodSchema.IsGenericMethodCalls(
+                schemaIdentities[artifactIndex]))
+        {
+            throw InvalidBinding();
+        }
+
+        var context = new ValidationContext(consumer, artifacts,
+            schemaIdentities, modules, a3ResourceLedger: null,
+            allowGenericMethodTypeProviders: true);
+        return context.ValidateGenericMethodTypeDefImport(artifactIndex,
+            moduleRow, importRow);
+    }
+
     internal static void ValidateMethodTypeSpecPairs(
         TrRmStructuralMetadataValidator.ValidatedExecutionTables consumer,
         byte[][] artifacts, string[] schemaIdentities,
@@ -141,6 +278,15 @@ internal static class TrRmFixedArrayProviderBindingValidator
         TypeOrigin? RightFormalOwner = null,
         bool AllowInitQualifier = false, ulong Depth = 1);
 
+    private sealed record TypeFormalSubstitution(
+        TypeOrigin ExpectedOwner, TypeOrigin ActualOwner,
+        ImmutableArray<uint> Arguments,
+        TypeFormalSubstitution? Parent);
+
+    private readonly record struct ResolvedFieldPathOwner(
+        TypeOrigin Expected, TypeOrigin Actual,
+        TypeFormalSubstitution? Substitutions);
+
     private ref struct ValidationContext
     {
         private readonly TrRmStructuralMetadataValidator.ValidatedExecutionTables
@@ -149,6 +295,7 @@ internal static class TrRmFixedArrayProviderBindingValidator
         private readonly string[] _schemaIdentities;
         private readonly ImmutableArray<TrRmStandardModuleSelection> _modules;
         private readonly TrRmA3LayoutResourceLedger? _a3ResourceLedger;
+        private readonly bool _allowGenericMethodTypeProviders;
         private readonly Dictionary<(int ArtifactIndex, int ImportRow),
             ImportResolution> _imports;
         private readonly HashSet<TypeOrigin> _visitedLocalTypes;
@@ -165,13 +312,16 @@ internal static class TrRmFixedArrayProviderBindingValidator
             TrRmStructuralMetadataValidator.ValidatedExecutionTables consumer,
             byte[][] artifacts, string[] schemaIdentities,
             ImmutableArray<TrRmStandardModuleSelection> modules,
-            TrRmA3LayoutResourceLedger? a3ResourceLedger)
+            TrRmA3LayoutResourceLedger? a3ResourceLedger,
+            bool allowGenericMethodTypeProviders = false)
         {
             _consumer = consumer;
             _artifacts = artifacts;
             _schemaIdentities = schemaIdentities;
             _modules = modules;
             _a3ResourceLedger = a3ResourceLedger;
+            _allowGenericMethodTypeProviders
+                = allowGenericMethodTypeProviders;
             _a3ResourceLedger?.ConsumeWork(4);
             _imports = [];
             _visitedLocalTypes = [];
@@ -198,8 +348,13 @@ internal static class TrRmFixedArrayProviderBindingValidator
                 moduleIndex++)
             {
                 var module = _modules[moduleIndex];
-                if (!IsFixedArraySchemaIdentity(
-                        _schemaIdentities[module.ArtifactIndex]))
+                var schemaIdentity
+                    = _schemaIdentities[module.ArtifactIndex];
+                var isInitializationReferenceLocalFieldLayout
+                    = IsInitializationReferenceLocalFieldLayoutSchemaIdentity(
+                        schemaIdentity);
+                if (!IsFixedArraySchemaIdentity(schemaIdentity)
+                    && !isInitializationReferenceLocalFieldLayout)
                 {
                     continue;
                 }
@@ -235,6 +390,32 @@ internal static class TrRmFixedArrayProviderBindingValidator
                 for (var typeDefRow = typeDefStart;
                     typeDefRow < typeDefEnd; typeDefRow++)
                 {
+                    if (isInitializationReferenceLocalFieldLayout
+                        && !moduleTables.TypeDefs.HasDeclaredCopy(typeDefRow))
+                    {
+                        continue;
+                    }
+
+                    if (isInitializationReferenceLocalFieldLayout)
+                    {
+                        if (!moduleTables.TargetProfiles.TryGetProfile(
+                                TrRmTargetProfileTableReader.WindowsX64NativeProfileId,
+                                TrRmTargetProfileTableReader.WindowsX64NativeProfileRuleRevision,
+                                out var profileRow))
+                        {
+                            throw InvalidBinding();
+                        }
+
+                        var layoutRow = moduleTables.Layouts
+                            .GetLayoutForProfile(typeDefRow,
+                                checked((uint)profileRow));
+                        if (moduleTables.Layouts.GetLayoutKind(layoutRow)
+                            is not (1 or 3))
+                        {
+                            throw InvalidBinding();
+                        }
+                    }
+
                     var (fieldStart, fieldEnd)
                         = moduleTables.TypeDefs.GetFieldRange(typeDefRow);
                     for (var fieldRow = fieldStart; fieldRow < fieldEnd;
@@ -298,6 +479,939 @@ internal static class TrRmFixedArrayProviderBindingValidator
 
             ConsumeWork(checked((ulong)orderedBindings.Count + 1UL));
             return [.. orderedBindings];
+        }
+
+        internal TrRmStandardFieldProviderValidation
+            ValidateFieldDefImports(int rootModuleRow,
+                bool nestedFieldDestinations)
+        {
+            if (_artifacts.Length != _schemaIdentities.Length
+                || _artifacts.Length == 0 || rootModuleRow <= 0
+                || rootModuleRow > _consumer.Modules.Count)
+            {
+                throw InvalidFieldBinding();
+            }
+
+            var pendingTypes = new Queue<TypeOriginPair>();
+            var fieldBindings
+                = new List<TrRmStandardFieldProviderBinding>();
+            var ownerImports
+                = new Dictionary<(int ArtifactIndex, int ModuleRow,
+                    int TypeDefRow), int>();
+            foreach (var module in _modules)
+            {
+                var moduleTables = GetTables(module.ArtifactIndex);
+                for (var importRow = 1;
+                    importRow <= moduleTables.Imports.Count; importRow++)
+                {
+                    var moduleRefRow = moduleTables.Imports
+                        .GetModuleRefForImportRow(importRow);
+                    if (moduleTables.ModuleRefs.GetOwnerModule(moduleRefRow)
+                            != module.ModuleRow
+                        || (moduleTables.Imports
+                            .GetExpectedDefinitionForImportRow(importRow)
+                            >> 24) != 0x13)
+                    {
+                        continue;
+                    }
+
+                    var typeDefRow = checked((int)(
+                        moduleTables.Imports
+                            .GetExpectedDefinitionForImportRow(importRow)
+                        & 0x00FF_FFFF));
+                    if (!ownerImports.TryAdd(
+                            (module.ArtifactIndex, module.ModuleRow,
+                                typeDefRow), importRow))
+                    {
+                        throw InvalidFieldBinding();
+                    }
+                }
+            }
+
+            for (var moduleIndex = 0; moduleIndex < _modules.Length;
+                moduleIndex++)
+            {
+                var module = _modules[moduleIndex];
+                var moduleTables = GetTables(module.ArtifactIndex);
+                var usedModuleRefs
+                    = new bool[moduleTables.ModuleRefs.Count + 1];
+                var isRootModule = module.ArtifactIndex == 0
+                    && module.ModuleRow == rootModuleRow;
+                for (var importRow = 1;
+                    importRow <= moduleTables.Imports.Count; importRow++)
+                {
+                    ConsumeWork();
+                    var moduleRefRow = moduleTables.Imports
+                        .GetModuleRefForImportRow(importRow);
+                    if (moduleTables.ModuleRefs.GetOwnerModule(moduleRefRow)
+                        != module.ModuleRow)
+                    {
+                        continue;
+                    }
+
+                    var expectedDefinition = moduleTables.Imports
+                        .GetExpectedDefinitionForImportRow(importRow);
+                    switch (expectedDefinition >> 24)
+                    {
+                        case 0x13:
+                        {
+                            var resolution = ResolveImport(
+                                module.ArtifactIndex, module.ModuleRow,
+                                moduleTables, importRow);
+                            AddTypePair(resolution.Expected,
+                                resolution.Actual, isInlineStorage: false,
+                                pendingTypes);
+                            usedModuleRefs[moduleRefRow] = true;
+                            break;
+                        }
+
+                        case 0x14:
+                        {
+                            var expectedFieldRow = checked((int)(
+                                expectedDefinition & 0x00FF_FFFF));
+                            var expectedOwnerTypeDefRow
+                                = moduleTables.Fields.GetOwnerTypeDef(
+                                    expectedFieldRow);
+                            if (!ownerImports.TryGetValue(
+                                    (module.ArtifactIndex,
+                                        module.ModuleRow,
+                                        expectedOwnerTypeDefRow),
+                                    out var ownerImportRow))
+                            {
+                                throw InvalidFieldBinding();
+                            }
+
+                            fieldBindings.Add(ResolveFieldImport(
+                                module.ArtifactIndex, module.ModuleRow,
+                                moduleTables, importRow, expectedDefinition,
+                                ownerImportRow, pendingTypes));
+                            usedModuleRefs[moduleRefRow] = true;
+                            break;
+                        }
+
+                        default:
+                            if (!isRootModule
+                                && nestedFieldDestinations
+                                && (expectedDefinition >> 24) == 0x16)
+                            {
+                                usedModuleRefs[moduleRefRow] = true;
+                                break;
+                            }
+                            if (!isRootModule)
+                            {
+                                throw new NotSupportedException(
+                                    "A Standard FieldDef provider Module may retain only the selected profile's provider Imports.");
+                            }
+                            break;
+                    }
+                }
+
+                if (!isRootModule)
+                {
+                    var (moduleRefStart, moduleRefEnd)
+                        = moduleTables.Modules.GetModuleRefRange(
+                            module.ModuleRow);
+                    for (var moduleRefRow = moduleRefStart;
+                        moduleRefRow < moduleRefEnd; moduleRefRow++)
+                    {
+                        if (!usedModuleRefs[moduleRefRow])
+                        {
+                            throw InvalidFieldBinding();
+                        }
+                    }
+                }
+            }
+
+            while (pendingTypes.TryDequeue(out var pair))
+            {
+                ConsumeWork();
+                ValidateTypePair(pair, pendingTypes);
+            }
+
+            ValidateRetainedFieldReferenceUses(ownerImports, fieldBindings);
+
+            var typeBindings
+                = new List<TrRmStandardTypeProviderBinding>(_imports.Count);
+            foreach (var resolution in _imports.Values)
+            {
+                typeBindings.Add(resolution.Binding);
+            }
+
+            typeBindings.Sort(static (left, right) =>
+            {
+                var result = left.ConsumerArtifactIndex.CompareTo(
+                    right.ConsumerArtifactIndex);
+                return result != 0
+                    ? result
+                    : left.ImportRow.CompareTo(right.ImportRow);
+            });
+            fieldBindings.Sort(static (left, right) =>
+            {
+                var result = left.ConsumerArtifactIndex.CompareTo(
+                    right.ConsumerArtifactIndex);
+                if (result != 0)
+                {
+                    return result;
+                }
+
+                result = left.ConsumerModuleRow.CompareTo(
+                    right.ConsumerModuleRow);
+                return result != 0
+                    ? result
+                    : left.ImportRow.CompareTo(right.ImportRow);
+            });
+            return new TrRmStandardFieldProviderValidation(
+                [.. typeBindings], [.. fieldBindings]);
+        }
+
+        internal ImmutableArray<TrRmStandardTypeProviderBinding>
+            ValidateC1M1TypeDefImports(int rootModuleRow)
+        {
+            if (_artifacts.Length != _schemaIdentities.Length
+                || _artifacts.Length == 0 || rootModuleRow <= 0
+                || rootModuleRow > _consumer.Modules.Count)
+            {
+                throw InvalidBinding();
+            }
+
+            var pendingTypes = new Queue<TypeOriginPair>();
+            foreach (var module in _modules)
+            {
+                var tables = GetTables(module.ArtifactIndex);
+                var isRootModule = module.ArtifactIndex == 0
+                    && module.ModuleRow == rootModuleRow;
+                var (methodStart, methodEnd)
+                    = tables.Modules.GetMethodDefRange(module.ModuleRow);
+                if (!isRootModule && methodStart != methodEnd)
+                {
+                    throw new NotSupportedException(
+                        "A selected C1 type provider Module may not contain MethodDefs.");
+                }
+
+                var usedModuleRefs = new bool[tables.ModuleRefs.Count + 1];
+                var (typeDefStart, typeDefEnd)
+                    = tables.Modules.GetTypeDefRange(module.ModuleRow);
+                for (var typeDefRow = typeDefStart;
+                    typeDefRow < typeDefEnd; typeDefRow++)
+                {
+                    var (fieldStart, fieldEnd)
+                        = tables.TypeDefs.GetFieldRange(typeDefRow);
+                    for (var fieldRow = fieldStart; fieldRow < fieldEnd;
+                        fieldRow++)
+                    {
+                        ValidateC1TypeSpecImportUses(tables,
+                            tables.Fields.GetTypeSpecRef(fieldRow));
+                    }
+                }
+
+                for (var importRow = 1;
+                    importRow <= tables.Imports.Count; importRow++)
+                {
+                    ConsumeWork();
+                    var moduleRefRow = tables.Imports
+                        .GetModuleRefForImportRow(importRow);
+                    if (tables.ModuleRefs.GetOwnerModule(moduleRefRow)
+                        != module.ModuleRow)
+                    {
+                        continue;
+                    }
+
+                    var expectedDefinition = tables.Imports
+                        .GetExpectedDefinitionForImportRow(importRow);
+                    if ((expectedDefinition >> 24) != 0x13)
+                    {
+                        throw new NotSupportedException(
+                            "A selected C1 class type-reference Module may retain only TypeDef Imports.");
+                    }
+
+                    var resolution = ResolveImport(module.ArtifactIndex,
+                        module.ModuleRow, tables, importRow);
+                    AddTypePair(resolution.Expected, resolution.Actual,
+                        isInlineStorage: false, pendingTypes);
+                    usedModuleRefs[moduleRefRow] = true;
+                }
+
+                var (moduleRefStart, moduleRefEnd)
+                    = tables.Modules.GetModuleRefRange(module.ModuleRow);
+                for (var moduleRefRow = moduleRefStart;
+                    moduleRefRow < moduleRefEnd; moduleRefRow++)
+                {
+                    if (!usedModuleRefs[moduleRefRow])
+                    {
+                        throw InvalidBinding();
+                    }
+                }
+            }
+
+            while (pendingTypes.TryDequeue(out var pair))
+            {
+                ConsumeWork();
+                ValidateTypePair(pair, pendingTypes);
+            }
+
+            var orderedBindings
+                = new List<TrRmStandardTypeProviderBinding>(_imports.Count);
+            foreach (var resolution in _imports.Values)
+            {
+                orderedBindings.Add(resolution.Binding);
+            }
+
+            orderedBindings.Sort(static (left, right) =>
+            {
+                var result = left.ConsumerArtifactIndex.CompareTo(
+                    right.ConsumerArtifactIndex);
+                if (result != 0)
+                {
+                    return result;
+                }
+
+                result = left.ConsumerModuleRow.CompareTo(
+                    right.ConsumerModuleRow);
+                return result != 0
+                    ? result
+                    : left.ImportRow.CompareTo(right.ImportRow);
+            });
+            return [.. orderedBindings];
+        }
+
+        internal TrRmStandardTypeProviderBinding
+            ValidateGenericMethodTypeDefImport(int artifactIndex,
+                int moduleRow, int importRow)
+        {
+            if (artifactIndex < 0 || artifactIndex >= _artifacts.Length
+                || !StandardGenericMethodSchema.IsGenericMethodCalls(
+                    _schemaIdentities[artifactIndex]))
+            {
+                throw InvalidBinding();
+            }
+
+            var tables = GetTables(artifactIndex);
+            if ((uint)moduleRow > (uint)tables.Modules.Count
+                || moduleRow <= 0
+                || (uint)importRow > (uint)tables.Imports.Count
+                || importRow <= 0
+                || tables.ModuleRefs.GetOwnerModule(
+                    tables.Imports.GetModuleRefForImportRow(importRow))
+                    != moduleRow
+                || (tables.Imports.GetExpectedDefinitionForImportRow(
+                        importRow) >> 24) != 0x13)
+            {
+                throw InvalidBinding();
+            }
+
+            var resolution = ResolveImport(artifactIndex, moduleRow,
+                tables, importRow);
+            var pendingTypes = new Queue<TypeOriginPair>();
+            AddTypePair(resolution.Expected, resolution.Actual,
+                isInlineStorage: false, pendingTypes);
+            while (pendingTypes.TryDequeue(out var pair))
+            {
+                ValidateTypePair(pair, pendingTypes);
+            }
+
+            return resolution.Binding;
+        }
+
+        private void ValidateC1TypeSpecImportUses(
+            TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+            uint typeSpecRef)
+        {
+            var pending = new Stack<uint>();
+            var visitedRows = new HashSet<int>();
+            pending.Push(typeSpecRef);
+            while (pending.TryPop(out var currentTypeSpecRef))
+            {
+                ConsumeWork();
+                var reference = tables.TypeSpecs.GetTypeSpecRef(
+                    currentTypeSpecRef);
+                if (!reference.IsRow || !visitedRows.Add(reference.Row))
+                {
+                    continue;
+                }
+
+                var row = tables.TypeSpecs.GetRow(reference.Row);
+                switch (reference.Form)
+                {
+                    case 0x02:
+                    {
+                        var typeDefRow = checked((int)Read(row, 2));
+                        if (tables.Imports.IsExpectedDefinition(
+                                0x1300_0000u
+                                | checked((uint)typeDefRow)))
+                        {
+                            throw InvalidBinding();
+                        }
+                        break;
+                    }
+
+                    case 0x03:
+                        break;
+
+                    case >= 0x06 and <= 0x0B:
+                    case 0x0E:
+                        pending.Push(Read(row, 2));
+                        break;
+
+                    case 0x0C:
+                        pending.Push(Read(row, 3));
+                        break;
+
+                    case 0x05:
+                        throw new NotSupportedException(
+                            "The C1M1 class type-reference projection does not yet support constructed generic field types.");
+
+                    case 0x04:
+                    case 0x0D:
+                    case 0x0F:
+                    case 0x10:
+                    case 0x11:
+                        throw new NotSupportedException(
+                            "The C1M1 class type-reference projection does not support formal, function-pointer, existential, captured or fixed-array field types.");
+                }
+            }
+        }
+
+        private TrRmStandardFieldProviderBinding ResolveFieldImport(
+            int artifactIndex, int moduleRow,
+            TrRmStructuralMetadataValidator.ValidatedExecutionTables consumer,
+            int importRow, uint expectedDefinition, int ownerImportRow,
+            Queue<TypeOriginPair> pendingTypes)
+        {
+            var expectedFieldRow = checked((int)(
+                expectedDefinition & 0x00FF_FFFF));
+            var expectedOwnerTypeDefRow
+                = consumer.Fields.GetOwnerTypeDef(expectedFieldRow);
+            var (expectedFirst, expectedEnd)
+                = consumer.TypeDefs.GetFieldRange(expectedOwnerTypeDefRow);
+            var fieldOrdinal = expectedFieldRow - expectedFirst;
+            if (fieldOrdinal < 0 || expectedFieldRow >= expectedEnd
+                || consumer.TypeDefs.GetOwnerModule(
+                    expectedOwnerTypeDefRow) != moduleRow)
+            {
+                throw InvalidFieldBinding();
+            }
+
+            var moduleRefRow = consumer.Imports
+                .GetModuleRefForImportRow(importRow);
+            var fieldBinding = consumer.Imports
+                .GetBindingForImportRow(importRow);
+            var fieldProducer = consumer.ModuleRefs
+                .GetProducerIdentity(moduleRefRow);
+            if (!StringComparer.Ordinal.Equals(fieldProducer,
+                    fieldBinding.ProducerIdentity)
+                || consumer.ModuleRefs.GetRequirements(moduleRefRow)
+                    != (fieldBinding.TargetRequirement,
+                        fieldBinding.RuntimePolicy)
+                || consumer.ModuleRefs.GetOwnerModule(moduleRefRow)
+                    != moduleRow)
+            {
+                throw InvalidFieldBinding();
+            }
+
+            var ownerResolution = ResolveImport(artifactIndex, moduleRow,
+                consumer, ownerImportRow);
+            var ownerBinding = ownerResolution.Binding;
+            if (!StringComparer.Ordinal.Equals(
+                    ownerBinding.ProducerIdentity,
+                    fieldBinding.ProducerIdentity)
+                || ownerBinding.TargetRequirement
+                    != fieldBinding.TargetRequirement
+                || ownerBinding.RuntimePolicy != fieldBinding.RuntimePolicy)
+            {
+                throw InvalidFieldBinding();
+            }
+
+            AddTypePair(ownerResolution.Expected, ownerResolution.Actual,
+                isInlineStorage: false, pendingTypes);
+
+            var selected = FindModule(fieldBinding.ProducerIdentity);
+            var provider = GetTables(selected.ArtifactIndex);
+            if ((selected.ArtifactIndex == artifactIndex
+                    && selected.ModuleRow == moduleRow)
+                || provider.Modules.GetRequirements(selected.ModuleRow)
+                    != (fieldBinding.TargetRequirement,
+                        fieldBinding.RuntimePolicy)
+                || !provider.Exports.TryGetDefinitionForKey(
+                    selected.ModuleRow, fieldBinding.ExportKey,
+                    out var actualDefinition)
+                || (actualDefinition >> 24) != 0x14)
+            {
+                throw InvalidFieldBinding();
+            }
+
+            var providerFieldRow = checked((int)(
+                actualDefinition & 0x00FF_FFFF));
+            var providerTypeDefRow = ownerResolution.Actual.TypeDefRow;
+            var (providerFirst, providerEnd)
+                = provider.TypeDefs.GetFieldRange(providerTypeDefRow);
+            var expectedProviderFieldRow = checked(providerFirst + fieldOrdinal);
+            if (providerFieldRow != expectedProviderFieldRow
+                || providerFieldRow >= providerEnd
+                || provider.Fields.GetOwnerTypeDef(providerFieldRow)
+                    != providerTypeDefRow
+                || !provider.Exports.TryGetExportRowForKey(
+                    selected.ModuleRow, fieldBinding.ExportKey,
+                    out var exportRow))
+            {
+                throw InvalidFieldBinding();
+            }
+
+            return new TrRmStandardFieldProviderBinding(
+                artifactIndex, moduleRow, importRow, moduleRefRow,
+                expectedFieldRow, expectedOwnerTypeDefRow, ownerImportRow,
+                selected.ArtifactIndex, selected.ModuleRow,
+                providerTypeDefRow, providerFieldRow, exportRow,
+                fieldBinding.ProducerIdentity, fieldBinding.ExportKey,
+                fieldBinding.TargetRequirement, fieldBinding.RuntimePolicy);
+        }
+
+        private void ValidateRetainedFieldReferenceUses(
+            Dictionary<(int ArtifactIndex, int ModuleRow, int TypeDefRow),
+                int> ownerImports,
+            List<TrRmStandardFieldProviderBinding> fieldBindings)
+        {
+            var importedFieldRows
+                = new HashSet<(int ArtifactIndex, int ModuleRow, int FieldRow)>();
+            var boundImportRows
+                = new HashSet<(int ArtifactIndex, int ImportRow)>();
+            var fieldBindingsByImport
+                = new Dictionary<(int ArtifactIndex, int ImportRow),
+                    TrRmStandardFieldProviderBinding>(fieldBindings.Count);
+            foreach (var binding in fieldBindings)
+            {
+                _ = importedFieldRows.Add((binding.ConsumerArtifactIndex,
+                    binding.ConsumerModuleRow, binding.ExpectedFieldDefRow));
+                _ = boundImportRows.Add((binding.ConsumerArtifactIndex,
+                    binding.ImportRow));
+                if (!fieldBindingsByImport.TryAdd(
+                    (binding.ConsumerArtifactIndex, binding.ImportRow),
+                    binding))
+                {
+                    throw InvalidFieldBinding();
+                }
+            }
+
+            var validatedGlobalReferences = new HashSet<int>();
+            for (var moduleIndex = 0; moduleIndex < _modules.Length;
+                moduleIndex++)
+            {
+                var module = _modules[moduleIndex];
+                var tables = GetTables(module.ArtifactIndex);
+                var (methodStart, methodEnd)
+                    = tables.Modules.GetMethodDefRange(module.ModuleRow);
+                for (var methodRow = methodStart;
+                    methodRow < methodEnd; methodRow++)
+                {
+                    var bodyRow = tables.Methods.GetBodyRow(methodRow);
+                    if (bodyRow == 0 || tables.Bodies.GetRow(bodyRow)[0] != 0x01)
+                    {
+                        continue;
+                    }
+
+                    var body = tables.Bodies.GetRegisterBody(bodyRow,
+                        tables.Contracts.Count);
+                    for (var mapIndex = 0;
+                        mapIndex < body.FieldCount; mapIndex++)
+                    {
+                        var token = BinaryPrimitives.ReadUInt32LittleEndian(
+                            body.FieldMap[(mapIndex * sizeof(uint))..]);
+                        if ((token >> 24) == 0x1D)
+                        {
+                            continue;
+                        }
+
+                        ValidateRetainedFieldReference(
+                            module.ArtifactIndex, tables, token,
+                            ownerImports, importedFieldRows,
+                            boundImportRows);
+                    }
+                }
+
+                if (!validatedGlobalReferences.Add(module.ArtifactIndex))
+                {
+                    continue;
+                }
+
+                for (var fieldPathRow = 1;
+                    fieldPathRow <= tables.FieldPaths.Count; fieldPathRow++)
+                {
+                    var fieldCount
+                        = tables.FieldPaths.GetFieldCount(fieldPathRow);
+                    var fieldReferences = new uint[fieldCount];
+                    for (var fieldOrdinal = 0;
+                        fieldOrdinal < fieldCount; fieldOrdinal++)
+                    {
+                        var fieldReference
+                            = tables.FieldPaths.GetFieldReference(
+                                fieldPathRow, fieldOrdinal);
+                        fieldReferences[fieldOrdinal] = fieldReference;
+                        ValidateRetainedFieldReference(
+                            module.ArtifactIndex, tables,
+                            fieldReference,
+                            ownerImports, importedFieldRows,
+                            boundImportRows);
+                    }
+
+                    var usingModuleRow = GetFieldReferenceOwnerModule(
+                        module.ArtifactIndex, tables, fieldReferences[0]);
+                    ValidateFieldPathOwnerChain(module.ArtifactIndex,
+                        usingModuleRow,
+                        tables.FieldPaths.GetRootTypeSpecRef(fieldPathRow),
+                        fieldReferences, fieldBindingsByImport);
+                }
+
+                for (var dependencyFieldRow = 1;
+                    dependencyFieldRow
+                        <= tables.TargetLayoutDependencyFields.Count;
+                    dependencyFieldRow++)
+                {
+                    ValidateRetainedFieldReference(
+                        module.ArtifactIndex, tables,
+                        tables.TargetLayoutDependencyFields
+                            .GetFieldReference(dependencyFieldRow),
+                        ownerImports, importedFieldRows, boundImportRows);
+                }
+
+                for (var dependencyRow = 1;
+                    dependencyRow <= tables.TargetLayoutDependencies.Count;
+                    dependencyRow++)
+                {
+                    if (tables.TargetLayoutDependencies.GetQueryKind(
+                            dependencyRow) is not (3 or 4))
+                    {
+                        continue;
+                    }
+
+                    var (fieldFirst, fieldCount)
+                        = tables.TargetLayoutDependencies.GetFieldRange(
+                            dependencyRow);
+                    var fieldReferences = new uint[fieldCount];
+                    for (var fieldOrdinal = 0;
+                        fieldOrdinal < fieldCount; fieldOrdinal++)
+                    {
+                        fieldReferences[fieldOrdinal]
+                            = tables.TargetLayoutDependencyFields
+                                .GetFieldReference(fieldFirst + fieldOrdinal);
+                    }
+
+                    var usingModuleRow = GetFieldReferenceOwnerModule(
+                        module.ArtifactIndex, tables, fieldReferences[0]);
+                    ValidateFieldPathOwnerChain(module.ArtifactIndex,
+                        usingModuleRow,
+                        tables.TargetLayoutDependencies
+                            .GetSubjectTypeSpecRef(dependencyRow),
+                        fieldReferences, fieldBindingsByImport);
+                }
+            }
+        }
+
+        private readonly int GetFieldReferenceOwnerModule(
+            int artifactIndex,
+            TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+            uint fieldReference)
+        {
+            ConsumeWork();
+            var row = checked((int)(fieldReference & 0x00FF_FFFF));
+            var moduleRow = (fieldReference >> 24) switch {
+                0x14 => tables.TypeDefs.GetOwnerModule(
+                    tables.Fields.GetOwnerTypeDef(row)),
+                0x1C => tables.ModuleRefs.GetOwnerModule(
+                    tables.Imports.GetModuleRefForImportRow(row)),
+                _ => throw InvalidFieldBinding(),
+            };
+            var moduleIsSelected = false;
+            foreach (var module in _modules)
+            {
+                if (module.ArtifactIndex == artifactIndex
+                    && module.ModuleRow == moduleRow)
+                {
+                    moduleIsSelected = true;
+                    break;
+                }
+            }
+            if (!moduleIsSelected)
+            {
+                throw InvalidFieldBinding();
+            }
+            return moduleRow;
+        }
+
+        private void ValidateFieldPathOwnerChain(
+            int artifactIndex, int moduleRow, uint rootTypeSpecRef,
+            ReadOnlySpan<uint> fieldReferences,
+            Dictionary<(int ArtifactIndex, int ImportRow),
+                TrRmStandardFieldProviderBinding> fieldBindings)
+        {
+            if (fieldReferences.IsEmpty
+                || !TryResolveInlineFieldPathOwner(artifactIndex,
+                    moduleRow, rootTypeSpecRef, null, out var current))
+            {
+                throw InvalidFieldBinding();
+            }
+
+            for (var ordinal = 0; ordinal < fieldReferences.Length;
+                ordinal++)
+            {
+                ConsumeWork();
+                var fieldReference = fieldReferences[ordinal];
+                var fieldRow = checked((int)(
+                    fieldReference & 0x00FF_FFFF));
+
+                int expectedFieldRow;
+                switch (fieldReference >> 24)
+                {
+                    case 0x14:
+                        expectedFieldRow = fieldRow;
+                        if (current.Expected.ArtifactIndex != artifactIndex
+                            || current.Expected.ModuleRow != moduleRow
+                            || current.Expected.TypeDefRow
+                                != GetTables(artifactIndex).Fields
+                                    .GetOwnerTypeDef(expectedFieldRow)
+                            || current.Actual != current.Expected)
+                        {
+                            throw InvalidFieldBinding();
+                        }
+                        break;
+
+                    case 0x1C:
+                    {
+                        if (!fieldBindings.TryGetValue(
+                                (artifactIndex, fieldRow),
+                                out var binding)
+                            || binding.ConsumerModuleRow != moduleRow
+                            || binding.ExpectedOwnerTypeDefRow
+                                != current.Expected.TypeDefRow
+                            || binding.ProviderArtifactIndex
+                                != current.Actual.ArtifactIndex
+                            || binding.ProviderModuleRow
+                                != current.Actual.ModuleRow
+                            || binding.ProviderTypeDefRow
+                                != current.Actual.TypeDefRow)
+                        {
+                            throw InvalidFieldBinding();
+                        }
+                        expectedFieldRow
+                            = binding.ExpectedFieldDefRow;
+                        break;
+                    }
+
+                    default:
+                        throw InvalidFieldBinding();
+                }
+
+                if (ordinal + 1 == fieldReferences.Length)
+                {
+                    continue;
+                }
+
+                var fieldTypeSpecRef = GetTables(artifactIndex).Fields
+                    .GetTypeSpecRef(expectedFieldRow);
+                if (!TryResolveInlineFieldPathOwner(artifactIndex,
+                    moduleRow, fieldTypeSpecRef,
+                    current.Substitutions, out current))
+                {
+                    throw InvalidFieldBinding();
+                }
+            }
+        }
+
+        private bool TryResolveInlineFieldPathOwner(
+            int artifactIndex, int moduleRow, uint typeSpecRef,
+            TypeFormalSubstitution? substitutions,
+            out ResolvedFieldPathOwner owner)
+        {
+            owner = default;
+            ConsumeWork();
+            var tables = GetTables(artifactIndex);
+            var reference = tables.TypeSpecs.GetTypeSpecRef(typeSpecRef);
+            if (reference.Qualifiers != 0 || !reference.IsRow)
+            {
+                return false;
+            }
+
+            if (reference.Form == 0x04)
+            {
+                var formalRow = checked((int)Read(
+                    tables.TypeSpecs.GetRow(reference.Row), 2));
+                var ownerDefinition
+                    = tables.GenericParams.GetOwnerDefId(formalRow);
+                if ((ownerDefinition >> 24) != 0x13
+                    || tables.GenericParams.GetFormalKind(formalRow) != 1)
+                {
+                    return false;
+                }
+
+                var ownerTypeDefRow = checked((int)(
+                    ownerDefinition & 0x00FF_FFFF));
+                var formalOrdinal = checked((int)
+                    tables.GenericParams.GetOrdinal(formalRow));
+                for (var frame = substitutions; frame is not null;
+                    frame = frame.Parent)
+                {
+                    if (frame.ExpectedOwner.ArtifactIndex != artifactIndex
+                        || frame.ExpectedOwner.ModuleRow != moduleRow
+                        || frame.ExpectedOwner.TypeDefRow
+                            != ownerTypeDefRow)
+                    {
+                        continue;
+                    }
+
+                    var ownerTables = GetTables(
+                        frame.ExpectedOwner.ArtifactIndex);
+                    var (formalFirst, formalCount)
+                        = ownerTables.TypeDefs.GetGenericRange(
+                            frame.ExpectedOwner.TypeDefRow);
+                    if ((uint)formalOrdinal >= (uint)formalCount
+                        || formalRow != formalFirst + formalOrdinal
+                        || (uint)formalOrdinal
+                            >= (uint)frame.Arguments.Length
+                        || ownerTables.GenericParams.GetFormalKind(
+                            formalFirst + formalOrdinal) != 1)
+                    {
+                        return false;
+                    }
+
+                    return TryResolveInlineFieldPathOwner(artifactIndex,
+                        moduleRow, frame.Arguments[formalOrdinal],
+                        frame.Parent, out owner);
+                }
+
+                return false;
+            }
+
+            if (reference.Form is not (0x02 or 0x03 or 0x05))
+            {
+                return false;
+            }
+
+            var tablesForOwner = GetTables(artifactIndex);
+            var typeDefReference = reference;
+            var typeDefRowBytes = tablesForOwner.TypeSpecs.GetRow(
+                reference.Row);
+            var typeArgumentCount = 0;
+            if (reference.Form == 0x05)
+            {
+                typeDefReference = tablesForOwner.TypeSpecs.GetTypeSpecRef(
+                    Read(typeDefRowBytes, 2));
+                typeArgumentCount
+                    = tablesForOwner.TypeSpecs
+                        .GetConstructedArgumentCount(reference.Row);
+            }
+
+            if (typeDefReference.Form is not (0x02 or 0x03)
+                || !typeDefReference.IsRow)
+            {
+                return false;
+            }
+            var typeDefRowData = tablesForOwner.TypeSpecs.GetRow(
+                typeDefReference.Row);
+            var typeOrigin = ResolveNominalType(tablesForOwner,
+                artifactIndex, moduleRow, typeDefReference, typeDefRowData);
+            if (!IsInlineStructType(typeOrigin.Expected)
+                || !IsInlineStructType(typeOrigin.Actual))
+            {
+                return false;
+            }
+
+            var expectedTables = GetTables(
+                typeOrigin.Expected.ArtifactIndex);
+            var actualTables = GetTables(typeOrigin.Actual.ArtifactIndex);
+            var (expectedFormalFirst, expectedFormalCount)
+                = expectedTables.TypeDefs.GetGenericRange(
+                    typeOrigin.Expected.TypeDefRow);
+            var (actualFormalFirst, actualFormalCount)
+                = actualTables.TypeDefs.GetGenericRange(
+                    typeOrigin.Actual.TypeDefRow);
+            if (expectedFormalCount != actualFormalCount
+                || expectedFormalCount != typeArgumentCount)
+            {
+                return false;
+            }
+
+            var arguments = ImmutableArray.CreateBuilder<uint>(
+                typeArgumentCount);
+            for (var ordinal = 0; ordinal < typeArgumentCount; ordinal++)
+            {
+                ConsumeWork();
+                var expectedFormalKind
+                    = expectedTables.GenericParams.GetFormalKind(
+                        expectedFormalFirst + ordinal);
+                var actualFormalKind
+                    = actualTables.GenericParams.GetFormalKind(
+                        actualFormalFirst + ordinal);
+                if (expectedFormalKind != actualFormalKind)
+                {
+                    return false;
+                }
+
+                var argument = tablesForOwner.TypeSpecs
+                    .GetConstructedArgument(reference.Row, ordinal);
+                if (expectedFormalKind == 1)
+                {
+                    _ = tablesForOwner.TypeSpecs.GetTypeSpecRef(argument);
+                }
+                else if (expectedFormalKind != 2)
+                {
+                    return false;
+                }
+                arguments.Add(argument);
+            }
+
+            owner = new ResolvedFieldPathOwner(
+                typeOrigin.Expected, typeOrigin.Actual,
+                new TypeFormalSubstitution(typeOrigin.Expected,
+                    typeOrigin.Actual, arguments.MoveToImmutable(),
+                    substitutions));
+            return true;
+        }
+
+        private bool IsInlineStructType(TypeOrigin type)
+        {
+            var tables = GetTables(type.ArtifactIndex);
+            return ((tables.TypeDefs.GetFlags(type.TypeDefRow) >> 2) & 7) == 1;
+        }
+
+        private static void ValidateRetainedFieldReference(
+            int artifactIndex,
+            TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+            uint fieldReference,
+            Dictionary<(int ArtifactIndex, int ModuleRow, int TypeDefRow),
+                int> ownerImports,
+            HashSet<(int ArtifactIndex, int ModuleRow, int FieldRow)>
+                importedFieldRows,
+            HashSet<(int ArtifactIndex, int ImportRow)> boundImportRows)
+        {
+            var row = checked((int)(fieldReference & 0x00FF_FFFF));
+            switch (fieldReference >> 24)
+            {
+                case 0x14:
+                {
+                    var ownerTypeDefRow
+                        = tables.Fields.GetOwnerTypeDef(row);
+                    var ownerModuleRow = tables.TypeDefs
+                        .GetOwnerModule(ownerTypeDefRow);
+                    if (ownerImports.ContainsKey((artifactIndex,
+                            ownerModuleRow, ownerTypeDefRow))
+                        && (!importedFieldRows.Contains((artifactIndex,
+                                ownerModuleRow, row))
+                            || fieldReference >> 24 == 0x14))
+                    {
+                        throw InvalidFieldBinding();
+                    }
+
+                    break;
+                }
+
+                case 0x1C:
+                    if (!boundImportRows.Contains((artifactIndex, row)))
+                    {
+                        throw InvalidFieldBinding();
+                    }
+                    break;
+
+                default:
+                    throw InvalidFieldBinding();
+            }
         }
 
         internal void ValidateMethodTypeSpecPairs(
@@ -550,7 +1664,28 @@ internal static class TrRmFixedArrayProviderBindingValidator
                 = expected.TypeDefs.GetGenericRange(expectedType);
             var (actualFormalFirst, actualFormalCount)
                 = actual.TypeDefs.GetGenericRange(actualType);
+            var isLayoutQueriesPair
+                = expected.Schema == TrRmArtifactSchema.Standard
+                && actual.Schema == TrRmArtifactSchema.Standard;
             ConsumeWork(4);
+            if (expectedKind == 4 || actualKind == 4)
+            {
+                if (expectedKind != 4 || actualKind != 4
+                    || expected.TypeDefs.GetOwnerModule(expectedType)
+                        != pair.Expected.ModuleRow
+                    || actual.TypeDefs.GetOwnerModule(actualType)
+                        != pair.Actual.ModuleRow
+                    || !expected.Schema.UsesC1EnumClosure()
+                    || !actual.Schema.UsesC1EnumClosure())
+                {
+                    throw InvalidBinding();
+                }
+
+                TrRmEnumProviderBindingValidator.ValidateC1EnumSnapshot(
+                    expected, expectedType, actual, actualType);
+                return;
+            }
+
             if (expected.TypeDefs.GetOwnerModule(expectedType)
                     != pair.Expected.ModuleRow
                 || actual.TypeDefs.GetOwnerModule(actualType)
@@ -564,16 +1699,17 @@ internal static class TrRmFixedArrayProviderBindingValidator
                 || expectedFormalCount != actualFormalCount
                 || (pair.IsInlineStorage
                     && (expectedKind != 1
-                        || !expected.TypeDefs.HasDeclaredCopy(expectedType)
-                        || !actual.TypeDefs.HasDeclaredCopy(actualType))))
+                        || (!isLayoutQueriesPair
+                            && (!expected.TypeDefs.HasDeclaredCopy(expectedType)
+                                || !actual.TypeDefs.HasDeclaredCopy(actualType))))))
             {
                 throw InvalidBinding();
             }
 
             if (expectedFormalCount != 0
-                && (!IsGenericFixedArraySchemaIdentity(
+                && (!IsGenericTypeProviderSchemaIdentity(
                         _schemaIdentities[pair.Expected.ArtifactIndex])
-                    || !IsGenericFixedArraySchemaIdentity(
+                    || !IsGenericTypeProviderSchemaIdentity(
                         _schemaIdentities[pair.Actual.ArtifactIndex])))
             {
                 throw InvalidBinding();
@@ -581,7 +1717,18 @@ internal static class TrRmFixedArrayProviderBindingValidator
 
             if (pair.IsInlineStorage)
             {
-                if (expectedFormalCount == 0)
+                if (isLayoutQueriesPair)
+                {
+                    if (expectedFormalCount != 0
+                        || !expected.Layouts.HasBlittableLayout(
+                            expectedType, 1, 1)
+                        || !actual.Layouts.HasBlittableLayout(actualType,
+                            1, 1))
+                    {
+                        throw InvalidBinding();
+                    }
+                }
+                else if (expectedFormalCount == 0)
                 {
                     using var depthContext = _a3ResourceLedger is null
                         ? default
@@ -629,6 +1776,10 @@ internal static class TrRmFixedArrayProviderBindingValidator
                 ConsumeWork();
                 var expectedField = expectedFirst + ordinal;
                 var actualField = actualFirst + ordinal;
+                var compareAsInlineStorage
+                    = !IsC1M1SchemaIdentity(
+                        _schemaIdentities[pair.Expected.ArtifactIndex])
+                        && (expected.Fields.GetFlags(expectedField) & 8) == 0;
                 if (expected.Fields.GetFlags(expectedField)
                         != actual.Fields.GetFlags(actualField)
                     || !FieldNamesMatch(expected, expectedField,
@@ -638,8 +1789,7 @@ internal static class TrRmFixedArrayProviderBindingValidator
                         expected.Fields.GetTypeSpecRef(expectedField),
                         actual, pair.Actual.ArtifactIndex, pair.Actual.ModuleRow,
                         actual.Fields.GetTypeSpecRef(actualField),
-                        isInlineStorage:
-                            (expected.Fields.GetFlags(expectedField) & 8) == 0,
+                        isInlineStorage: compareAsInlineStorage,
                         pendingTypes,
                         leftFormalOwner: expectedFormalCount == 0
                             ? null : pair.Expected,
@@ -655,7 +1805,10 @@ internal static class TrRmFixedArrayProviderBindingValidator
                     pendingTypes,
                     expectedFormalCount == 0 ? null : pair.Expected,
                     actualFormalCount == 0 ? null : pair.Actual,
-                    checked(pair.Depth + 1)))
+                    checked(pair.Depth + 1),
+                    compareLayoutFieldTypesAsInlineStorage:
+                        !IsC1M1SchemaIdentity(
+                            _schemaIdentities[pair.Expected.ArtifactIndex])))
             {
                 throw InvalidBinding();
             }
@@ -720,11 +1873,32 @@ internal static class TrRmFixedArrayProviderBindingValidator
                         != actual.GenericParams.GetOwnershipDomain(actualFormal)
                     || expected.GenericParams.GetNullabilityDomain(
                         expectedFormal)
-                        != actual.GenericParams.GetNullabilityDomain(actualFormal)
-                    || expected.GenericParams.GetConstantTypeSpecRef(
-                        expectedFormal)
-                        != actual.GenericParams.GetConstantTypeSpecRef(
+                        != actual.GenericParams.GetNullabilityDomain(
                             actualFormal))
+                {
+                    return false;
+                }
+
+                var formalKind
+                    = expected.GenericParams.GetFormalKind(expectedFormal);
+                var expectedConstantTypeSpec
+                    = expected.GenericParams.GetConstantTypeSpecRef(
+                        expectedFormal);
+                var actualConstantTypeSpec
+                    = actual.GenericParams.GetConstantTypeSpecRef(
+                        actualFormal);
+                if ((expectedConstantTypeSpec == 0)
+                        != (actualConstantTypeSpec == 0)
+                    || (expectedConstantTypeSpec != 0
+                        && !TypeSpecsMatch(expected,
+                            expectedOrigin.ArtifactIndex,
+                            expectedOrigin.ModuleRow,
+                            expectedConstantTypeSpec, actual,
+                            actualOrigin.ArtifactIndex,
+                            actualOrigin.ModuleRow, actualConstantTypeSpec,
+                            isInlineStorage: false, pendingTypes,
+                            expectedOrigin, actualOrigin,
+                            checked(depth + 1))))
                 {
                     return false;
                 }
@@ -738,14 +1912,19 @@ internal static class TrRmFixedArrayProviderBindingValidator
                 var actualHasDefault = actualDefault != 0;
                 if (expectedHasDefault != actualHasDefault
                     || (expectedDefault != 0
-                        && !TypeSpecsMatch(expected,
-                            expectedOrigin.ArtifactIndex,
-                            expectedOrigin.ModuleRow, expectedDefault,
-                            actual, actualOrigin.ArtifactIndex,
-                            actualOrigin.ModuleRow, actualDefault,
-                            isInlineStorage: false, pendingTypes,
-                            expectedOrigin, actualOrigin,
-                            checked(depth + 1))))
+                        && (formalKind == 1
+                            ? !TypeSpecsMatch(expected,
+                                expectedOrigin.ArtifactIndex,
+                                expectedOrigin.ModuleRow, expectedDefault,
+                                actual, actualOrigin.ArtifactIndex,
+                                actualOrigin.ModuleRow, actualDefault,
+                                isInlineStorage: false, pendingTypes,
+                                expectedOrigin, actualOrigin,
+                                checked(depth + 1))
+                            : !GenericConstantDefaultsMatch(
+                                expectedOrigin, actualOrigin, expected,
+                                actual, expectedFormal, actualFormal,
+                                expectedDefault, actualDefault))))
                 {
                     return false;
                 }
@@ -768,10 +1947,26 @@ internal static class TrRmFixedArrayProviderBindingValidator
                         = expectedConstraintFirst + constraintOrdinal;
                     var actualConstraint
                         = actualConstraintFirst + constraintOrdinal;
-                    if (expected.Constraints.GetKind(expectedConstraint)
+                    var constraintKind
+                        = expected.Constraints.GetKind(expectedConstraint);
+                    var expectedPayload
+                        = expected.Constraints.GetPayload(expectedConstraint);
+                    var actualPayload
+                        = actual.Constraints.GetPayload(actualConstraint);
+                    if (constraintKind
                             != actual.Constraints.GetKind(actualConstraint)
-                        || expected.Constraints.GetPayload(expectedConstraint)
-                            != actual.Constraints.GetPayload(actualConstraint))
+                        || (constraintKind == 1
+                            ? !TypeSpecsMatch(expected,
+                                expectedOrigin.ArtifactIndex,
+                                expectedOrigin.ModuleRow, expectedPayload,
+                                actual, actualOrigin.ArtifactIndex,
+                                actualOrigin.ModuleRow, actualPayload,
+                                isInlineStorage: false, pendingTypes,
+                                expectedOrigin, actualOrigin,
+                                checked(depth + 1))
+                            : constraintKind == 2
+                                ? expectedPayload != actualPayload
+                                : true))
                     {
                         return false;
                     }
@@ -781,13 +1976,92 @@ internal static class TrRmFixedArrayProviderBindingValidator
             return true;
         }
 
+        private bool GenericConstantDefaultsMatch(
+            TypeOrigin expectedOrigin, TypeOrigin actualOrigin,
+            TrRmStructuralMetadataValidator.ValidatedExecutionTables expected,
+            TrRmStructuralMetadataValidator.ValidatedExecutionTables actual,
+            int expectedFormal, int actualFormal,
+            uint expectedDefault, uint actualDefault)
+        {
+            var expectedKind = expected.ConstantSources.GetKind(
+                checked((int)expectedDefault));
+            var actualKind = actual.ConstantSources.GetKind(
+                checked((int)actualDefault));
+            if (expectedKind != actualKind)
+            {
+                return false;
+            }
+
+            var expectedDomain = expected.GenericParams
+                .GetConstantTypeSpecRef(expectedFormal);
+            var actualDomain = actual.GenericParams
+                .GetConstantTypeSpecRef(actualFormal);
+            if (expectedKind == 1)
+            {
+                var expectedPayload
+                    = TrRmConstantSourceValueValidator.GetFrozenScalarPayload(
+                        checked((int)expectedDefault), expectedDomain,
+                        expectedOrigin.ModuleRow,
+                        expected.ConstantSources,
+                        expected.FrozenValueNodes, expected.Blobs,
+                        expected.TypeSpecs, expected.Features,
+                        expected.Modules, expected.TypeDefs,
+                        expected.EnumDefs, expected.Imports,
+                        _a3ResourceLedger, expected.Fields,
+                        expected.TransparentConstantDomains);
+                var actualPayload
+                    = TrRmConstantSourceValueValidator.GetFrozenScalarPayload(
+                        checked((int)actualDefault), actualDomain,
+                        actualOrigin.ModuleRow, actual.ConstantSources,
+                        actual.FrozenValueNodes, actual.Blobs,
+                        actual.TypeSpecs, actual.Features, actual.Modules,
+                        actual.TypeDefs, actual.EnumDefs, actual.Imports,
+                        _a3ResourceLedger, actual.Fields,
+                        actual.TransparentConstantDomains);
+                return expectedPayload.SequenceEqual(actualPayload);
+            }
+
+            if (expectedKind == 4)
+            {
+                var expectedFormalRow = checked((int)
+                    expected.ConstantSources.GetPayloadReference(
+                        checked((int)expectedDefault)));
+                var actualFormalRow = checked((int)
+                    actual.ConstantSources.GetPayloadReference(
+                        checked((int)actualDefault)));
+                var expectedOwner = expected.GenericParams
+                    .GetOwnerDefId(expectedFormalRow);
+                var actualOwner = actual.GenericParams
+                    .GetOwnerDefId(actualFormalRow);
+                return expectedOwner
+                        == (0x1300_0000u
+                            | checked((uint)expectedOrigin.TypeDefRow))
+                    && actualOwner
+                        == (0x1300_0000u
+                            | checked((uint)actualOrigin.TypeDefRow))
+                    && expected.GenericParams.GetFormalKind(
+                        expectedFormalRow) == 2
+                    && actual.GenericParams.GetFormalKind(
+                        actualFormalRow) == 2
+                    && expected.GenericParams.GetOrdinal(expectedFormalRow)
+                        == actual.GenericParams.GetOrdinal(actualFormalRow)
+                    && expected.GenericParams.GetOrdinal(expectedFormalRow)
+                        < expected.GenericParams.GetOrdinal(expectedFormal)
+                    && actual.GenericParams.GetOrdinal(actualFormalRow)
+                        < actual.GenericParams.GetOrdinal(actualFormal);
+            }
+
+            return false;
+        }
+
         private bool LayoutsMatch(TypeOrigin expectedOrigin,
             TypeOrigin actualOrigin,
             TrRmStructuralMetadataValidator.ValidatedExecutionTables expected,
             TrRmStructuralMetadataValidator.ValidatedExecutionTables actual,
             Queue<TypeOriginPair> pendingTypes,
             TypeOrigin? leftFormalOwner = null,
-            TypeOrigin? rightFormalOwner = null, ulong depth = 1)
+            TypeOrigin? rightFormalOwner = null, ulong depth = 1,
+            bool compareLayoutFieldTypesAsInlineStorage = true)
         {
             var (expectedFirst, expectedCount)
                 = expected.TypeDefs.GetLayoutRange(expectedOrigin.TypeDefRow);
@@ -861,7 +2135,9 @@ internal static class TrRmFixedArrayProviderBindingValidator
                             actual, actualOrigin.ArtifactIndex,
                             actualOrigin.ModuleRow,
                             actual.Fields.GetTypeSpecRef(actualField),
-                            isInlineStorage: true, pendingTypes,
+                            isInlineStorage:
+                                compareLayoutFieldTypesAsInlineStorage,
+                            pendingTypes,
                             leftFormalOwner, rightFormalOwner,
                             depth: checked(depth + 1)))
                     {
@@ -1273,6 +2549,12 @@ internal static class TrRmFixedArrayProviderBindingValidator
             if (reference.Form == 0x02)
             {
                 var typeDefRow = checked((int)Read(row, 2));
+                if (tables.Imports.IsExpectedDefinition(
+                        0x1300_0000u | checked((uint)typeDefRow)))
+                {
+                    throw InvalidBinding();
+                }
+
                 return new TypeOriginPair(
                     new TypeOrigin(artifactIndex,
                         tables.TypeDefs.GetOwnerModule(typeDefRow),
@@ -1332,7 +2614,7 @@ internal static class TrRmFixedArrayProviderBindingValidator
             var binding = consumer.Imports.GetBindingForImportRow(importRow);
             if (expectedModule != moduleRow
                 || (expectedRequiresGenericSchema
-                    && !IsGenericFixedArraySchemaIdentity(
+                    && !IsGenericTypeProviderSchemaIdentity(
                         _schemaIdentities[artifactIndex]))
                 || consumer.ModuleRefs.GetOwnerModule(moduleRefRow) != moduleRow)
             {
@@ -1354,7 +2636,7 @@ internal static class TrRmFixedArrayProviderBindingValidator
             var selected = FindModule(binding.ProducerIdentity);
             if ((selected.ArtifactIndex == artifactIndex
                     && selected.ModuleRow == moduleRow)
-                || !IsFixedArraySchemaIdentity(
+                || !IsTypeProviderSchemaIdentity(
                     _schemaIdentities[selected.ArtifactIndex]))
             {
                 throw InvalidBinding();
@@ -1366,7 +2648,10 @@ internal static class TrRmFixedArrayProviderBindingValidator
                 || !provider.Exports.TryGetDefinitionForKey(
                     selected.ModuleRow, binding.ExportKey,
                     out var providerDefinition)
-                || (providerDefinition >> 24) != 0x13)
+                || (providerDefinition >> 24) != 0x13
+                || !provider.Exports.TryGetExportRowForKey(
+                    selected.ModuleRow, binding.ExportKey,
+                    out var providerExportRow))
             {
                 throw InvalidBinding();
             }
@@ -1382,18 +2667,20 @@ internal static class TrRmFixedArrayProviderBindingValidator
                         providerTypeDefRow).Count != 0
                     || consumer.TypeDefs.HasDeclaredUnique(expectedTypeDefRow)
                     || provider.TypeDefs.HasDeclaredUnique(providerTypeDefRow))
-                    && (!IsGenericFixedArraySchemaIdentity(
+                    && (!IsGenericTypeProviderSchemaIdentity(
                             _schemaIdentities[artifactIndex])
-                        || !IsGenericFixedArraySchemaIdentity(
+                        || !IsGenericTypeProviderSchemaIdentity(
                             _schemaIdentities[selected.ArtifactIndex]))))
             {
                 throw InvalidBinding();
             }
 
             var providerBinding = new TrRmStandardTypeProviderBinding(
-                artifactIndex, moduleRow, importRow, expectedTypeDefRow,
+                artifactIndex, moduleRow, importRow, moduleRefRow,
+                expectedTypeDefRow,
                 selected.ArtifactIndex, selected.ModuleRow,
-                providerTypeDefRow, binding.ProducerIdentity,
+                providerTypeDefRow, providerExportRow, providerDefinition,
+                binding.ProducerIdentity,
                 binding.ExportKey, binding.TargetRequirement,
                 binding.RuntimePolicy);
             var result = new ImportResolution(
@@ -1520,8 +2807,19 @@ internal static class TrRmFixedArrayProviderBindingValidator
             }
 
             if (artifactIndex <= 0 || artifactIndex >= _artifacts.Length
-                || !IsFixedArraySchemaIdentity(
-                    _schemaIdentities[artifactIndex]))
+                || !(StringComparer.Ordinal.Equals(
+                        _schemaIdentities[artifactIndex],
+                        LayoutQueriesSchemaIdentity)
+                    || (_allowGenericMethodTypeProviders
+                        && StandardGenericMethodSchema.IsGenericMethodCalls(
+                        _schemaIdentities[artifactIndex])
+                    )
+                    || IsC1M1SchemaIdentity(
+                        _schemaIdentities[artifactIndex])
+                    || IsInitializationReferenceLocalFieldLayoutSchemaIdentity(
+                        _schemaIdentities[artifactIndex])
+                    || IsFixedArraySchemaIdentity(
+                        _schemaIdentities[artifactIndex])))
             {
                 throw InvalidBinding();
             }
@@ -1533,6 +2831,79 @@ internal static class TrRmFixedArrayProviderBindingValidator
             }
 
             // Nested substitutions revisit immutable provider snapshots.
+            if (StringComparer.Ordinal.Equals(
+                    _schemaIdentities[artifactIndex],
+                    LayoutQueriesSchemaIdentity))
+            {
+                var standardTables
+                    = TrRmStructuralMetadataValidator
+                        .ValidateAndGetExecutionTables(
+                            new TrRmArtifactIndex(
+                                _artifacts[artifactIndex]));
+                _cachedProviderTables = standardTables;
+                _cachedProviderArtifactIndex = artifactIndex;
+                _hasCachedProviderTables = true;
+                return standardTables;
+            }
+
+            if (IsInitializationReferenceLocalFieldLayoutSchemaIdentity(
+                    _schemaIdentities[artifactIndex]))
+            {
+                var initializationReferenceIndex
+                    = StringComparer.Ordinal.Equals(
+                        _schemaIdentities[artifactIndex],
+                        InitializationReferenceNestedFieldDestinationsSchemaIdentity)
+                    ? TrRmArtifactIndex
+                        .ForInitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft(
+                            _artifacts[artifactIndex])
+                    : TrRmArtifactIndex
+                        .ForInitializationReferenceLocalFieldLayoutDraft(
+                            _artifacts[artifactIndex]);
+                var initializationReferenceTables
+                    = TrRmStructuralMetadataValidator
+                        .ValidateAndGetExecutionTables(
+                            initializationReferenceIndex);
+                _cachedProviderTables = initializationReferenceTables;
+                _cachedProviderArtifactIndex = artifactIndex;
+                _hasCachedProviderTables = true;
+                return initializationReferenceTables;
+            }
+
+            if (_allowGenericMethodTypeProviders
+                && StandardGenericMethodSchema.IsGenericMethodCalls(
+                    _schemaIdentities[artifactIndex]))
+            {
+                var schema
+                    = StringComparer.Ordinal.Equals(
+                        _schemaIdentities[artifactIndex],
+                        StandardGenericMethodSchema.GenericMethodCalls)
+                    ? TrRmArtifactSchema.GenericMethodCallsDraft
+                    : TrRmArtifactSchema
+                        .GenericMethodCallsParameterLabelsDraft;
+                var genericMethodTables
+                    = TrRmStructuralMetadataValidator
+                        .ValidateGenericMethodCallsDraftAndGetExecutionTables(
+                            new TrRmArtifactIndex(
+                                _artifacts[artifactIndex], schema));
+                _cachedProviderTables = genericMethodTables;
+                _cachedProviderArtifactIndex = artifactIndex;
+                _hasCachedProviderTables = true;
+                return genericMethodTables;
+            }
+
+            if (IsC1M1SchemaIdentity(
+                    _schemaIdentities[artifactIndex]))
+            {
+                var c1m1Index = TrRmArtifactIndex.ForC1M1Draft(
+                    _artifacts[artifactIndex]);
+                var c1m1Tables = TrRmStructuralMetadataValidator
+                    .ValidateC1AndGetExecutionTables(c1m1Index);
+                _cachedProviderTables = c1m1Tables;
+                _cachedProviderArtifactIndex = artifactIndex;
+                _hasCachedProviderTables = true;
+                return c1m1Tables;
+            }
+
             var schema = GetFixedArraySchema(_schemaIdentities[artifactIndex]);
             var index = _a3ResourceLedger is not null
                 ? new TrRmArtifactIndex(_artifacts[artifactIndex], schema,
@@ -1678,6 +3049,33 @@ internal static class TrRmFixedArrayProviderBindingValidator
                 GenericFixedArraySchemaIdentity);
         }
 
+        private readonly bool IsTypeProviderSchemaIdentity(
+            string schemaIdentity)
+            => StringComparer.Ordinal.Equals(schemaIdentity,
+                LayoutQueriesSchemaIdentity)
+                || (_allowGenericMethodTypeProviders
+                    && StandardGenericMethodSchema.IsGenericMethodCalls(
+                        schemaIdentity))
+                || IsInitializationReferenceLocalFieldLayoutSchemaIdentity(
+                    schemaIdentity)
+                || IsC1M1SchemaIdentity(schemaIdentity)
+                || IsFixedArraySchemaIdentity(schemaIdentity);
+
+        private readonly bool IsGenericTypeProviderSchemaIdentity(
+            string schemaIdentity)
+            => StringComparer.Ordinal.Equals(schemaIdentity,
+                LayoutQueriesSchemaIdentity)
+                || (_allowGenericMethodTypeProviders
+                    && StandardGenericMethodSchema.IsGenericMethodCalls(
+                        schemaIdentity))
+                || IsGenericFixedArraySchemaIdentity(schemaIdentity);
+
+        private readonly bool IsC1M1SchemaIdentity(string schemaIdentity)
+            => TrRmFixedArrayProviderBindingValidator
+                .IsC1M1SchemaIdentity(schemaIdentity)
+                || TrRmExecutableCompiler
+                    .IsSelectedC1EnumClosureSchemaIdentity(schemaIdentity);
+
         private readonly TrRmArtifactSchema GetFixedArraySchema(
             string schemaIdentity)
         {
@@ -1761,5 +3159,8 @@ internal static class TrRmFixedArrayProviderBindingValidator
 
         private static InvalidDataException InvalidBinding()
             => new("Invalid TRRM fixed-array TypeDef provider binding.");
+
+        private static InvalidDataException InvalidFieldBinding()
+            => new("Invalid TRRM Standard FieldDef provider binding.");
     }
 }

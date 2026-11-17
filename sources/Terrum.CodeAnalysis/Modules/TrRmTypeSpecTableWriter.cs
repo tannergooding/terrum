@@ -136,6 +136,17 @@ public static class TrRmTypeSpecTableWriter
         return bytes;
     }
 
+    /// <summary>Creates a TypeSpec for the distinct <c>ref&lt;init T&gt;</c> type form.</summary>
+    /// <param name="innerTypeSpec">The complete referent TypeSpec reference.</param>
+    /// <param name="isWritable">Whether the reference preserves outer write authority.</param>
+    /// <returns>The encoded six-byte TypeSpec form 0x0E row.</returns>
+    public static byte[] InitializationReference(uint innerTypeSpec,
+        bool isWritable = false)
+    {
+        ArgumentOutOfRangeException.ThrowIfZero(innerTypeSpec);
+        return ReferenceCore(0x0E, innerTypeSpec, isWritable ? (byte)1 : (byte)0);
+    }
+
     /// <summary>Creates an indexed-family TypeSpec that refers to an argument type.</summary>
     /// <param name="familyCode">The indexed family type code.</param>
     /// <param name="argumentTypeSpec">The argument TypeSpec reference.</param>

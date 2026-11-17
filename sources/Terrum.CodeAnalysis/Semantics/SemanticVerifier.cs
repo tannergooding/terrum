@@ -249,6 +249,7 @@ public static partial class SemanticVerifier
     private static VerificationSummaries VerifyCore(
         BoundProgram program, bool requireEntryPoint, bool allowExternal = false,
         bool allowGenericProofDependencies = false,
+        bool allowUnmaterializedInterfaceDefaults = false,
         bool deriveCopyOriginSummaries = false,
         IReadOnlySet<int>? duplicateNameViewIndexes = null,
         bool verifyPureEvaluationForms = true,
@@ -262,9 +263,10 @@ public static partial class SemanticVerifier
             {
                 summaries = VerifyCoreOnVerifierStack(program,
                     requireEntryPoint, allowExternal,
-                    allowGenericProofDependencies, deriveCopyOriginSummaries,
-                    duplicateNameViewIndexes, verifyPureEvaluationForms,
-                    pureEvaluationFailureProof);
+                    allowGenericProofDependencies,
+                    allowUnmaterializedInterfaceDefaults,
+                    deriveCopyOriginSummaries, duplicateNameViewIndexes,
+                    verifyPureEvaluationForms, pureEvaluationFailureProof);
             }
             catch (Exception exception)
             {
@@ -281,7 +283,9 @@ public static partial class SemanticVerifier
 
     private static VerificationSummaries VerifyCoreOnVerifierStack(
         BoundProgram program, bool requireEntryPoint, bool allowExternal,
-        bool allowGenericProofDependencies, bool deriveCopyOriginSummaries,
+        bool allowGenericProofDependencies,
+        bool allowUnmaterializedInterfaceDefaults,
+        bool deriveCopyOriginSummaries,
         IReadOnlySet<int>? duplicateNameViewIndexes,
         bool verifyPureEvaluationForms,
         bool pureEvaluationFailureProof)
@@ -348,6 +352,10 @@ public static partial class SemanticVerifier
         {
             throw Invalid();
         }
+        if (!BoundSpanTypeContract.IsValidTable(program))
+        {
+            throw InvalidEffect(default, "Span");
+        }
         var standardClassTypeSpecsValid = true;
         var standardClassDeclarationsComplete
             = BoundTreeTraversal.VisitStandardClassDeclarationTypeSpecs(
@@ -369,7 +377,8 @@ public static partial class SemanticVerifier
             || !BoundStandardClassDeclarationContract.IsValidTable(
                 program.StandardClassDeclarations,
                 program.GenericNominalTypeDefinitions)
-            || !IsValidGenericNominalConstantFormalBindings(program))
+            || !IsValidGenericNominalConstantFormalBindings(program)
+            || !IsValidGenericNominalTypeFormalBindings(program)
         {
             throw InvalidEffect(default, "GenericNominalType");
         }
@@ -697,7 +706,9 @@ public static partial class SemanticVerifier
         if (!BoundInterfaceContract.IsValidTable(program.Interfaces,
             type => ValidType(type, false, program),
             program.GenericNominalTypeDefinitions,
-            program.SourceGenericTypeDefinitions))
+            program.SourceGenericTypeDefinitions)
+            || !AreInterfaceParameterDefaultsValid(program,
+                allowUnmaterializedInterfaceDefaults))
         {
             throw Invalid();
         }
@@ -778,9 +789,30 @@ public static partial class SemanticVerifier
                 || @class.Fields.IsDefaultOrEmpty
                 || @class.Fields.Length > ManagedClassTypes.MaximumFields
                 || @class.Size is < 8 or > ManagedClassTypes.MaximumPayload
-                || (@class.Size & 7) != 0)
+                || (@class.Size & 7) != 0
+                || (@class.HasCleanup is bool hasCleanup
+                    && hasCleanup != (@class.CleanupMethod is not null))
+                || (@class.HasCleanup is null
+                    && @class.CleanupMethod is not null))
             {
                 throw Invalid();
+            }
+            if (@class.HasCleanup == true)
+            {
+                var cleanupFunctions = program.Functions.Where(function =>
+                    function.Name == @class.CleanupMethod).ToArray();
+                if (cleanupFunctions.Length != 1
+                    || !cleanupFunctions[0].IsCleanup
+                    || cleanupFunctions[0].DeclaringStruct != @class.Name
+                    || cleanupFunctions[0].Variables.IsEmpty
+                    || !ManagedClassTypes.IsClass(
+                        cleanupFunctions[0].Variables[0].Type)
+                    || ManagedClassTypes.ClassIndex(
+                        cleanupFunctions[0].Variables[0].Type)
+                        != classIndex)
+                {
+                    throw InvalidEffect(default, "Ownership");
+                }
             }
             if (referenceOnlyClassIndexes.Contains(classIndex))
             {
@@ -791,6 +823,8 @@ public static partial class SemanticVerifier
                 == CompilationOptions.WindowsX64NormalBackingAgreement
                 ? ValueLayout.MaximumAddressStorageSize : ValueLayout.MaximumSize;
             var fieldNames = new HashSet<string>(@class.Fields.Length, StringComparer.Ordinal);
+            var backingPropertyNames = new HashSet<string>(
+                StringComparer.Ordinal);
             foreach (var field in @class.Fields)
             {
                 if (field is null || BoundGenericNominalTypeTypes.IsType(field.Type)
@@ -842,11 +876,39 @@ public static partial class SemanticVerifier
                 {
                     throw Invalid();
                 }
+                if (field.BackingPropertyName is string backingPropertyName)
+                {
+                    if (string.IsNullOrWhiteSpace(backingPropertyName)
+                        || field.Name != "$property:" + backingPropertyName
+                        || !field.IsPrivate || field.IsInternal
+                        || !backingPropertyNames.Add(
+                            backingPropertyName))
+                    {
+                        throw Invalid();
+                    }
+                }
+                else if (field.Name.StartsWith("$property:",
+                    StringComparison.Ordinal))
+                {
+                    throw Invalid();
+                }
                 offset += classFieldWidth;
             }
             if (((offset + 7) & ~7) != @class.Size)
             {
                 throw Invalid();
+            }
+            foreach (var propertyName in backingPropertyNames)
+            {
+                if (program.Functions.Count(function =>
+                        function.DeclaringStruct == @class.Name
+                        && function.PropertyName == propertyName
+                        && function.PropertyAccessorKind
+                            == BoundPropertyAccessorKind.Getter
+                        && !function.IsStatic) != 1)
+                {
+                    throw Invalid();
+                }
             }
         }
         if (!BoundGenericNominalTypeContract.IsValidArgumentTypes(program))
@@ -1099,6 +1161,20 @@ public static partial class SemanticVerifier
         int[]? classFactoryCounts = null;
         Dictionary<string, string>? cleanupOwners = null;
         HashSet<string>?[]? fieldNamesByOwner = null;
+        Func<int, string, bool> hasFieldName = HasFieldName;
+        var propertyGetters = new Dictionary<string, BoundFunction>(
+            program.Functions.Length, StringComparer.Ordinal);
+        foreach (var function in program.Functions)
+        {
+            if (function.PropertyName is not null
+                && !string.IsNullOrEmpty(function.Name)
+                && function.Name.Contains(".#get:",
+                    StringComparison.Ordinal)
+                && !propertyGetters.TryAdd(function.Name, function))
+            {
+                throw Invalid();
+            }
+        }
         if (!allowGenericProofDependencies && !program.Classes.IsEmpty)
         {
             classIndexes = new Dictionary<string, int>(program.Classes.Length, StringComparer.Ordinal);
@@ -1492,31 +1568,16 @@ public static partial class SemanticVerifier
                 throw Invalid();
             }
             if (function.PropertyName is string propertyName
-                && (string.IsNullOrEmpty(propertyName) || function.DeclaringStruct is not string owner
-                    || (function.Name != owner + ".#get:" + propertyName
-                        && function.Name != owner + ".$producer.#get:" + propertyName)
-                    || function.IsConstructor || function.IsClassConstructor
-                    || function.IsCleanup || function.DoesNotReturn
-                    || (function.IsStatic
-                        ? declaringType < 0
-                            || (declaringType < ManagedClassTypes.First
-                                ? program.Structures[declaringType].IsUnique
-                                : declaringType
-                                    >= ManagedClassTypes.First
-                                        + program.Classes.Length)
-                            || function.ParameterCount != 0
-                            || (function.ReturnType is not (PrimitiveType.Bool or PrimitiveType.Char16
-                                or PrimitiveType.Char8 or PrimitiveType.Char32 or PrimitiveType.Rune
-                                or PrimitiveType.Int8 or PrimitiveType.Int16 or PrimitiveType.Int32
-                                or PrimitiveType.UInt8 or PrimitiveType.UInt16 or PrimitiveType.UInt32
-                                or PrimitiveType.Int64 or PrimitiveType.UInt64
-                                or PrimitiveType.Float32 or PrimitiveType.Float64)
-                                && !IsCopyStruct(program, function.ReturnType))
-                        : function.ParameterCount != 1 || function.Variables[0].IsMutable
-                            || IsUnique(program, function.Variables[0].Type))
-                    || !IsClassArgumentType(function.ReturnType, program.Structures,
-                        program.EnumDefinitions.Length)
-                    || (declaringType >= 0 && HasFieldName(declaringType, propertyName))))
+                && !IsValidPropertyAccessor(function, propertyName,
+                    declaringType, program, propertyGetters, hasFieldName))
+            {
+                throw Invalid();
+            }
+            if (function.PropertyName is null
+                && (function.Name.Contains(".#get:",
+                        StringComparison.Ordinal)
+                    || function.Name.Contains(".#set:",
+                        StringComparison.Ordinal)))
             {
                 throw Invalid();
             }
@@ -1543,16 +1604,32 @@ public static partial class SemanticVerifier
             {
                 throw Invalid();
             }
-            if (function.IsCleanup && (function.DeclaringStruct is null || function.IsConstructor
-                || function.IsStatic || function.IsPrivate || function.IsInternal
-                || function.RequiresUnsafeCaller || function.DoesNotReturn || function.ReturnType != PrimitiveType.Void
-                || function.ParameterCount != 1 || function.Variables[0].IsMutable))
+            if (function.IsCleanup && (function.DeclaringStruct is null
+                || function.IsConstructor || function.IsClassConstructor
+                || function.IsStatic || function.IsOperator
+                || function.PropertyName is not null || function.IsExternal
+                || function.DirectNativeImport is not null
+                || function.NativeCallableConvention is not null
+                || function.NativeVTableMethod is not null
+                || function.RequiresUnsafeCaller || function.DoesNotReturn
+                || function.ReturnType != PrimitiveType.Void
+                || function.ParameterCount != 1
+                || function.Variables.IsEmpty
+                || function.Variables[0].IsMutable
+                || (ManagedClassTypes.IsClass(
+                        function.Variables[0].Type)
+                    && ManagedClassTypes.IsWritable(
+                        function.Variables[0].Type))))
             {
                 throw Invalid();
             }
-            if (function.IsCleanup && (function.Variables.IsEmpty
-                || !IsUnique(program, function.Variables[0].Type)
-                || program.Structures[(int)function.Variables[0].Type - 100].CleanupMethod != function.Name))
+            if (function.IsCleanup
+                && ((!ManagedClassTypes.IsClass(
+                            function.Variables[0].Type)
+                        && !IsUnique(program,
+                            function.Variables[0].Type))
+                    || GetDeclaredCleanupMethod(program,
+                        function.Variables[0].Type) != function.Name))
             {
                 throw Invalid();
             }
@@ -1849,11 +1926,15 @@ public static partial class SemanticVerifier
                 }
                 VerifyOwnerScopes(function.Body, function, program);
                 VerifySpanScopes(function);
-                VerifyManagedRoots(function, program);
+                VerifyManagedRoots(function, program,
+                    allowUnmaterializedInterfaceDefaults);
                 var returns = Statement(function.Body, initialized, fieldMasks, declarations, function, program,
-                    ref functionRemaining, 0);
+                    ref functionRemaining, 0,
+                    allowUnmaterializedInterfaceDefaults:
+                        allowUnmaterializedInterfaceDefaults);
                 VerifyViewScopes(functionIndex, function.Body, function,
-                    initialized.StatementInputs);
+                    initialized.StatementInputs,
+                    allowUnmaterializedInterfaceDefaults);
                 if (function.DoesNotReturn && !returns)
                 {
                     throw InvalidEffect(function.Body.Span, "DoesNotReturn");
@@ -1975,7 +2056,8 @@ public static partial class SemanticVerifier
         }
     }
 
-    private static void VerifyManagedRoots(BoundFunction function, BoundProgram program)
+    private static void VerifyManagedRoots(BoundFunction function,
+        BoundProgram program, bool allowUnmaterializedInterfaceDefaults)
     {
         var retired = new HashSet<int>();
         var active = new HashSet<int>();
@@ -2261,6 +2343,11 @@ public static partial class SemanticVerifier
                     }
                     Expression(pathWrite.Value, scope, depth + 1);
                     break;
+                case BoundPendingInterfaceDefault when
+                    allowUnmaterializedInterfaceDefaults:
+                    break;
+                case BoundPendingInterfaceDefault pending:
+                    throw InvalidEffect(pending.Span, "InterfaceWitness");
                 case BoundConstant or BoundNull or BoundNativeFunctionAddress
                     or BoundRead or BoundMove or BoundReceiverLoan
                     or BoundMutableReceiverLoan or BoundOutArgument or BoundViewLength or BoundBufferLength:
@@ -2604,8 +2691,10 @@ public static partial class SemanticVerifier
         }
     }
 
-    private static void VerifyViewScopes(int functionActivation, BoundBlock body, BoundFunction function,
-        Dictionary<BoundStatement, InitializationState>? inputs)
+    private static void VerifyViewScopes(int functionActivation,
+        BoundBlock body, BoundFunction function,
+        Dictionary<BoundStatement, InitializationState>? inputs,
+        bool allowUnmaterializedInterfaceDefaults)
     {
         var roots = new int[function.Variables.Length];
         var exclusive = new bool[roots.Length];
@@ -2684,8 +2773,12 @@ public static partial class SemanticVerifier
                     }
                     break;
                 case BoundMutableReceiverLoan loan:
-                    if (loan.Variable < 0 || loan.Variable >= roots.Length
-                        || roots[loan.Variable] != 0 || exclusive[loan.Variable])
+                    if (loan.Variable < 0 || loan.Variable >= roots.Length)
+                    {
+                        throw InvalidEffect(loan.Span, "Ownership");
+                    }
+                    if (roots[loan.Variable] != 0
+                        || exclusive[loan.Variable])
                     {
                         throw InvalidEffect(loan.Span, "Ownership");
                     }
@@ -2943,6 +3036,11 @@ public static partial class SemanticVerifier
                 case BoundBufferRead buffer:
                     Expression(buffer.Index, depth + 1, acquiringRoot);
                     break;
+                case BoundPendingInterfaceDefault when
+                    allowUnmaterializedInterfaceDefaults:
+                    break;
+                case BoundPendingInterfaceDefault pending:
+                    throw InvalidEffect(pending.Span, "InterfaceWitness");
                 case BoundConstant or BoundNull or BoundNativeFunctionAddress
                     or BoundNativePointerAddress
                     or BoundRead or BoundBufferLength:
@@ -3844,31 +3942,38 @@ public static partial class SemanticVerifier
     internal static bool TryVerifySource(BoundProgram program, out int functionIndex, out TextSpan span, out bool exceededWorkLimit,
         out string? invalidEffect, bool allowGenericProofDependencies = false,
         bool verifyPureEvaluationForms = true,
-        bool pureEvaluationFailureProof = false)
+        bool pureEvaluationFailureProof = false,
+        bool allowUnmaterializedInterfaceDefaults = false)
         => TryVerifySourceCore(program, out _, out functionIndex, out span,
             out exceededWorkLimit, out invalidEffect, allowGenericProofDependencies,
             deriveCopyOriginSummaries: false,
             verifyPureEvaluationForms: verifyPureEvaluationForms,
-            pureEvaluationFailureProof: pureEvaluationFailureProof);
+            pureEvaluationFailureProof: pureEvaluationFailureProof,
+            allowUnmaterializedInterfaceDefaults:
+                allowUnmaterializedInterfaceDefaults);
 
     internal static bool TryVerifySourceWithCopyOriginSummaries(BoundProgram program,
         out BoundProgram verifiedProgram, out int functionIndex, out TextSpan span,
         out bool exceededWorkLimit, out string? invalidEffect,
         bool allowGenericProofDependencies = false,
         bool verifyPureEvaluationForms = true,
-        bool pureEvaluationFailureProof = false)
+        bool pureEvaluationFailureProof = false,
+        bool allowUnmaterializedInterfaceDefaults = false)
         => TryVerifySourceCore(program, out verifiedProgram, out functionIndex, out span,
             out exceededWorkLimit, out invalidEffect, allowGenericProofDependencies,
             deriveCopyOriginSummaries: true,
             verifyPureEvaluationForms: verifyPureEvaluationForms,
-            pureEvaluationFailureProof: pureEvaluationFailureProof);
+            pureEvaluationFailureProof: pureEvaluationFailureProof,
+            allowUnmaterializedInterfaceDefaults:
+                allowUnmaterializedInterfaceDefaults);
 
     private static bool TryVerifySourceCore(BoundProgram program,
         out BoundProgram verifiedProgram, out int functionIndex, out TextSpan span,
         out bool exceededWorkLimit, out string? invalidEffect,
         bool allowGenericProofDependencies, bool deriveCopyOriginSummaries,
         bool verifyPureEvaluationForms,
-        bool pureEvaluationFailureProof)
+        bool pureEvaluationFailureProof,
+        bool allowUnmaterializedInterfaceDefaults)
     {
         try
         {
@@ -3882,6 +3987,8 @@ public static partial class SemanticVerifier
                 summaries = VerifyCore(program,
                     requireEntryPoint: program.EntryPoint != -1, allowExternal: true,
                     allowGenericProofDependencies: allowGenericProofDependencies,
+                    allowUnmaterializedInterfaceDefaults:
+                        allowUnmaterializedInterfaceDefaults,
                     deriveCopyOriginSummaries: true,
                     verifyPureEvaluationForms: verifyPureEvaluationForms,
                     pureEvaluationFailureProof: pureEvaluationFailureProof);
@@ -3891,6 +3998,8 @@ public static partial class SemanticVerifier
                 summaries = VerifyCore(program,
                     requireEntryPoint: program.EntryPoint != -1, allowExternal: true,
                     allowGenericProofDependencies: allowGenericProofDependencies,
+                    allowUnmaterializedInterfaceDefaults:
+                        allowUnmaterializedInterfaceDefaults,
                     verifyPureEvaluationForms: verifyPureEvaluationForms,
                     pureEvaluationFailureProof: pureEvaluationFailureProof);
             }
@@ -3908,7 +4017,9 @@ public static partial class SemanticVerifier
                     out _, out var genericSpan,
                     out var genericExceededWorkLimit,
                     out var genericInvalidEffect,
-                    allowGenericProofDependencies: true))
+                    allowGenericProofDependencies: true,
+                    allowUnmaterializedInterfaceDefaults:
+                        allowUnmaterializedInterfaceDefaults))
                 {
                     verifiedProgram = program;
                     functionIndex = program.Functions.Length
@@ -4093,10 +4204,14 @@ public static partial class SemanticVerifier
             : (function.IsConstructor || function.IsClassConstructor)
                 && variable == 0;
 
-    private static bool Statement(BoundStatement statement, InitializationState initialized, uint[] fieldMasks, HashSet<int> declarations,
+    private static bool Statement(BoundStatement statement,
+        InitializationState initialized, uint[] fieldMasks,
+        HashSet<int> declarations,
         BoundFunction function, BoundProgram program, ref int remaining, int depth, bool reachable = true,
         List<CleanupScope>? cleanups = null, bool inCleanup = false, bool inUnsafe = false, FailureEdges? failures = null,
-        List<LoopScope>? loops = null, CleanupCountedLoop? countedLoop = null, BoundBinary? cleanupCounterStep = null)
+        List<LoopScope>? loops = null, CleanupCountedLoop? countedLoop = null,
+        BoundBinary? cleanupCounterStep = null,
+        bool allowUnmaterializedInterfaceDefaults = false)
     {
         Count(ref remaining, depth);
         initialized.Record(statement);
@@ -4132,7 +4247,11 @@ public static partial class SemanticVerifier
                         }
                         var childReturns = Statement(child, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1,
                             reachable && !returns, cleanups, inCleanup, inUnsafe, failures, loops,
-                            countedLoop: counted is not null && ReferenceEquals(child, counted.Loop) ? counted : null);
+                            countedLoop: counted is not null
+                                && ReferenceEquals(child, counted.Loop)
+                                    ? counted : null,
+                            allowUnmaterializedInterfaceDefaults:
+                                allowUnmaterializedInterfaceDefaults);
                         returns |= childReturns;
                     }
                     if (reachable && !returns)
@@ -4157,6 +4276,10 @@ public static partial class SemanticVerifier
                         local.Initializer, function, program))
                 {
                     throw Invalid();
+                }
+                if (IsClassOwnershipUnknown(program, local.Initializer.Type))
+                {
+                    throw InvalidEffect(local.Span, "Ownership");
                 }
                 initialized.ActivateStorage(local.Variable, (long)local.Span.Start + 1);
                 if (!CanCompleteNormally(local.Initializer, initialized, program,
@@ -4394,13 +4517,14 @@ public static partial class SemanticVerifier
                 var endType = function.Variables[end.Variable].Type;
                 if (initialized.HasPartialValue(end.Variable)
                     && (!IsUnique(program, endType) || endType == PrimitiveType.OwnedInt32Buffer
-                        || ManagedClassTypes.IsClass(endType)
-                        || program.Structures[(int)endType - 100].CleanupMethod is not null))
+                        || ManagedClassTypes.IsManaged(endType)
+                        || GetDeclaredCleanupMethod(program, endType)
+                            is not null))
                 {
                     throw InvalidEffect(end.Span, "Ownership");
                 }
                 var endMethod = IsUnique(program, endType) && endType != PrimitiveType.OwnedInt32Buffer
-                    ? program.Structures[(int)endType - 100].CleanupMethod : null;
+                    ? GetDeclaredCleanupMethod(program, endType) : null;
                 if (endMethod is null ? end.CleanupFunction != -1
                     : end.CleanupFunction < 0 || end.CleanupFunction >= program.Functions.Length
                         || program.Functions[end.CleanupFunction].Name != endMethod)
@@ -4432,8 +4556,8 @@ public static partial class SemanticVerifier
                 {
                     throw Invalid(drop.Span);
                 }
-                var method = function.Variables[drop.Variable].Type == PrimitiveType.OwnedInt32Buffer
-                    ? null : program.Structures[(int)function.Variables[drop.Variable].Type - 100].CleanupMethod;
+                var method = GetDeclaredCleanupMethod(program,
+                    function.Variables[drop.Variable].Type);
                 if (method is null ? drop.CleanupFunction != -1
                     : drop.CleanupFunction < 0 || drop.CleanupFunction >= program.Functions.Length
                         || program.Functions[drop.CleanupFunction].Name != method)
@@ -4513,6 +4637,11 @@ public static partial class SemanticVerifier
                             || !initialized.IsVacant(assignment.Variable))))
                 {
                     throw Invalid(assignment.Span);
+                }
+                if (IsClassOwnershipUnknown(program,
+                        assignment.Value.Type))
+                {
+                    throw InvalidEffect(assignment.Span, "Ownership");
                 }
                 if (HasActiveInitializationReservationForPlace(
                         assignment.Variable, StorageProjection.WholeObject,
@@ -4798,6 +4927,12 @@ public static partial class SemanticVerifier
                 {
                     throw Invalid(optionalAssignment.Span);
                 }
+                if (IsClassOwnershipUnknown(program,
+                        optionalAssignment.Place.Type))
+                {
+                    throw InvalidEffect(optionalAssignment.Span,
+                        "Ownership");
+                }
                 if (optionalAssignment.Place is BoundRead localPlace)
                 {
                     if (localPlace.Variable < 0 || localPlace.Variable >= initialized.Length
@@ -5012,6 +5147,7 @@ public static partial class SemanticVerifier
                         && initialized.MayBeStaticFieldInitialized(
                             staticFieldAssignment.Field))
                     || IsUnique(program, staticField.Type)
+                    || IsClassOwnershipUnknown(program, staticField.Type)
                     || staticFieldAssignment.Value.Type != staticField.Type)
                 {
                     throw Invalid(staticFieldAssignment.Span);
@@ -5171,11 +5307,29 @@ public static partial class SemanticVerifier
                     throw InvalidEffect(fieldAssignment.Span, "Ownership");
                 }
                 var targetField = Fields(program, ownerType)[fieldAssignment.Field];
+                var propertyInitializationAccessor
+                    = function.PropertyAccessorKind
+                        == BoundPropertyAccessorKind.Initializer;
+                var propertyInitializationWrite
+                    = propertyInitializationAccessor
+                        && fieldAssignment.Variable == 0
+                        && fieldAssignment.NestedFields.IsEmpty
+                        && function.PropertyName
+                            == targetField.BackingPropertyName;
+                if (fieldAssignment.IsInitializationAuthority
+                    != propertyInitializationWrite
+                    || (propertyInitializationAccessor
+                        && !propertyInitializationWrite))
+                {
+                    throw InvalidEffect(fieldAssignment.Span,
+                        "Initialization");
+                }
                 var requiresUnsafeCaller = RequiresUnsafeFieldAccess(
                     program, ownerType, targetField);
                 if (ManagedClassTypes.IsClass(ownerType) && !ManagedClassTypes.IsWritable(ownerType)
                     && !((function.IsConstructor || function.IsClassConstructor)
                         && fieldAssignment.Variable == 0 && fieldAssignment.NestedFields.IsEmpty)
+                    && !propertyInitializationWrite
                     && (fieldAssignment.NestedFields.IsEmpty || !ManagedClassTypes.IsClass(targetField.Type)))
                 {
                     throw Invalid();
@@ -5225,9 +5379,14 @@ public static partial class SemanticVerifier
                         || fieldAssignment.NestedFields.IsEmpty
                         || !ManagedClassTypes.IsClass(targetField.Type))
                     && !((function.IsConstructor || function.IsClassConstructor)
-                        && fieldAssignment.Variable == 0))
+                        && fieldAssignment.Variable == 0)
+                    && !propertyInitializationWrite)
                 {
                     throw Invalid();
+                }
+                if (IsClassOwnershipUnknown(program, targetField.Type))
+                {
+                    throw InvalidEffect(fieldAssignment.Span, "Ownership");
                 }
                 var fieldPlaceProjection = StorageProjection.ForFieldPath(
                     fieldProjectionPath);
@@ -5276,7 +5435,8 @@ public static partial class SemanticVerifier
                             && !(fieldAssignment.Variable == 0
                                 && function.DeclaringStruct is not null && !function.IsStatic)
                             && fieldSegments.All(segment =>
-                                program.Structures[(int)segment.OwnerType - 100].CleanupMethod is null)));
+                                GetDeclaredCleanupMethod(program,
+                                    segment.OwnerType) is null)));
                 var ownerPlaceIsPartial = fieldOwnerPath.Segments.IsEmpty
                     ? initialized.HasPartialValue(fieldAssignment.Variable)
                     : fieldOwnerDefinite != FullMask(program, fieldOwnerType);
@@ -5809,6 +5969,8 @@ public static partial class SemanticVerifier
                             program, ref remaining, depth + 1, failures,
                             statementCompound: false,
                             cleanupCounterStep: cleanupCounterStep,
+                            allowUnmaterializedInterfaceDefaults:
+                                allowUnmaterializedInterfaceDefaults,
                             discardedResult: true))
                     {
                         return true;
@@ -5863,7 +6025,9 @@ public static partial class SemanticVerifier
                     var unreachableThenMasks = (uint[])fieldMasks.Clone();
                     _ = Statement(conditional.Then, unreachableThenState, unreachableThenMasks,
                         declarations, function, program, ref remaining, depth + 1,
-                        false, cleanups, inCleanup, inUnsafe, failures, loops);
+                        false, cleanups, inCleanup, inUnsafe, failures, loops,
+                        allowUnmaterializedInterfaceDefaults:
+                            allowUnmaterializedInterfaceDefaults);
                     repeatSnapshotState.ReleaseState(unreachableThenState);
                     if (conditional.Else is not null)
                     {
@@ -5872,7 +6036,10 @@ public static partial class SemanticVerifier
                         var unreachableElseMasks = (uint[])fieldMasks.Clone();
                         _ = Statement(conditional.Else, unreachableElseState, unreachableElseMasks,
                             declarations, function, program, ref remaining, depth + 1,
-                            false, cleanups, inCleanup, inUnsafe, failures, loops);
+                            false, cleanups, inCleanup, inUnsafe, failures,
+                            loops,
+                            allowUnmaterializedInterfaceDefaults:
+                                allowUnmaterializedInterfaceDefaults);
                         repeatSnapshotState.ReleaseState(unreachableElseState);
                     }
                     return true;
@@ -5898,7 +6065,10 @@ public static partial class SemanticVerifier
                 var thenMasks = (uint[])fieldMasks.Clone();
                 MarkOutMasks(thenState, thenMasks, function, program);
                 var thenReturns = Statement(conditional.Then, thenState, thenMasks, declarations, function, program, ref remaining, depth + 1,
-                    reachable && thenReachable, cleanups, inCleanup, inUnsafe, failures, loops);
+                    reachable && thenReachable, cleanups, inCleanup, inUnsafe,
+                    failures, loops,
+                    allowUnmaterializedInterfaceDefaults:
+                        allowUnmaterializedInterfaceDefaults);
                 var elseState = Outcome(conditional.Condition, beforeCondition,
                     false, ref remaining, repeatSnapshotState);
                 foreach (var fact
@@ -5912,7 +6082,10 @@ public static partial class SemanticVerifier
                 MarkOutMasks(elseState, elseMasks, function, program);
                 var elseReturns = conditional.Else is not null
                     && Statement(conditional.Else, elseState, elseMasks, declarations, function, program, ref remaining, depth + 1,
-                        reachable && elseReachable, cleanups, inCleanup, inUnsafe, failures, loops);
+                        reachable && elseReachable, cleanups, inCleanup,
+                        inUnsafe, failures, loops,
+                        allowUnmaterializedInterfaceDefaults:
+                            allowUnmaterializedInterfaceDefaults);
                 var thenCompletes = thenReachable && !thenReturns;
                 var elseCompletes = elseReachable && !elseReturns;
                 for (var i = 0; i < initialized.Length; i++)
@@ -6062,14 +6235,19 @@ public static partial class SemanticVerifier
                         initialized.Clone(unreachableLoopState),
                         (uint[])fieldMasks.Clone(),
                         declarations, function, program, ref remaining, depth + 1,
-                        false, cleanups, inCleanup, inUnsafe, failures, loops);
+                        false, cleanups, inCleanup, inUnsafe, failures, loops,
+                        allowUnmaterializedInterfaceDefaults:
+                            allowUnmaterializedInterfaceDefaults);
                     if (verifiedIterator is not null)
                     {
                         _ = Statement(verifiedIterator,
                             initialized.Clone(unreachableLoopState),
                             (uint[])fieldMasks.Clone(),
                             declarations, function, program, ref remaining, depth + 1,
-                            false, cleanups, inCleanup, inUnsafe, failures, loops);
+                            false, cleanups, inCleanup, inUnsafe, failures,
+                            loops,
+                            allowUnmaterializedInterfaceDefaults:
+                                allowUnmaterializedInterfaceDefaults);
                     }
                     loops.RemoveAt(loops.Count - 1);
                     return true;
@@ -6128,7 +6306,10 @@ public static partial class SemanticVerifier
                     {
                         bodyReturns = Statement(verifiedBody, bodyState, bodyMasks,
                             iterationDeclarations, function, program, ref remaining, depth + 1,
-                            reachable && bodyReachable, cleanups, inCleanup, inUnsafe, failures, loops);
+                            reachable && bodyReachable, cleanups, inCleanup,
+                            inUnsafe, failures, loops,
+                            allowUnmaterializedInterfaceDefaults:
+                                allowUnmaterializedInterfaceDefaults);
                     }
                     finally
                     {
@@ -6174,7 +6355,10 @@ public static partial class SemanticVerifier
                         }
                         var iteratorReturns = Statement(verifiedIterator, iteratorState, iteratorMasks, iteratorDeclarations,
                             function, program, ref remaining, depth + 1, reachable && backEdges.HasEdges,
-                            cleanups, inCleanup, inUnsafe, failures, loops, cleanupCounterStep: countedLoop?.Step);
+                            cleanups, inCleanup, inUnsafe, failures, loops,
+                            cleanupCounterStep: countedLoop?.Step,
+                            allowUnmaterializedInterfaceDefaults:
+                                allowUnmaterializedInterfaceDefaults);
                         iterationDeclarations.UnionWith(iteratorDeclarations);
                         backEdges.Reset();
                         if (!iteratorReturns && bodyReachable && (loopScope.Continues.HasEdges || !bodyReturns))
@@ -6342,7 +6526,9 @@ public static partial class SemanticVerifier
                 var transferDeclarations = new HashSet<int>(declarations);
                 var transferDoesNotComplete = VerifyCleanupStack(cleanups, target.CleanupDepth,
                     transferState, transferMasks, transferDeclarations, function, program,
-                    ref remaining, depth + 1, reachable, inUnsafe);
+                    ref remaining, depth + 1, reachable, inUnsafe,
+                    allowUnmaterializedInterfaceDefaults:
+                        allowUnmaterializedInterfaceDefaults);
                 if (reachable && !transferDoesNotComplete)
                 {
                     transferState.CheckAndExitStorageScopesTo(target.ScopeActivation);
@@ -6353,7 +6539,9 @@ public static partial class SemanticVerifier
             }
             case BoundTryFinally cleanup:
                 return TryFinallyStatement(cleanup, initialized, fieldMasks, declarations, function, program,
-                    ref remaining, depth, reachable, cleanups, inCleanup, inUnsafe, failures, loops);
+                    ref remaining, depth, reachable, cleanups, inCleanup,
+                    inUnsafe, failures, loops,
+                    allowUnmaterializedInterfaceDefaults);
             case BoundViewScope view:
             {
                 using var repeatSnapshotState
@@ -6432,7 +6620,9 @@ public static partial class SemanticVerifier
                     unreachableBodyState[view.Variable] = true;
                     _ = Statement(view.Body, unreachableBodyState, (uint[])beforeViewMasks.Clone(),
                         declarations, function, program, ref remaining, depth + 1,
-                        false, cleanups, inCleanup, inUnsafe, failures, loops);
+                        false, cleanups, inCleanup, inUnsafe, failures, loops,
+                        allowUnmaterializedInterfaceDefaults:
+                            allowUnmaterializedInterfaceDefaults);
                     return true;
                 }
                 if (!EvaluateExpression(rangeBound, initialized, fieldMasks, declarations,
@@ -6444,7 +6634,9 @@ public static partial class SemanticVerifier
                     unreachableBodyState[view.Variable] = true;
                     _ = Statement(view.Body, unreachableBodyState, (uint[])beforeViewMasks.Clone(),
                         declarations, function, program, ref remaining, depth + 1,
-                        false, cleanups, inCleanup, inUnsafe, failures, loops);
+                        false, cleanups, inCleanup, inUnsafe, failures, loops,
+                        allowUnmaterializedInterfaceDefaults:
+                            allowUnmaterializedInterfaceDefaults);
                     return true;
                 }
                 if (RequiresNoFailureProof(function)
@@ -6455,7 +6647,10 @@ public static partial class SemanticVerifier
                 failures?.Add(initialized, fieldMasks);
                 initialized[view.Variable] = true;
                 var viewReturns = Statement(view.Body, initialized, fieldMasks, declarations, function, program,
-                    ref remaining, depth + 1, reachable, cleanups, inCleanup, inUnsafe, failures, loops);
+                    ref remaining, depth + 1, reachable, cleanups, inCleanup,
+                    inUnsafe, failures, loops,
+                    allowUnmaterializedInterfaceDefaults:
+                        allowUnmaterializedInterfaceDefaults);
                 initialized[view.Variable] = false;
                 return viewReturns;
             }
@@ -6465,10 +6660,15 @@ public static partial class SemanticVerifier
                     throw Invalid(unsafeBlock.Span);
                 }
                 return Statement(unsafeBlock.Body, initialized, fieldMasks, declarations, function, program,
-                    ref remaining, depth + 1, reachable, cleanups, inCleanup, inUnsafe: true, failures: failures, loops: loops);
+                    ref remaining, depth + 1, reachable, cleanups, inCleanup,
+                    inUnsafe: true, failures: failures, loops: loops,
+                    allowUnmaterializedInterfaceDefaults:
+                        allowUnmaterializedInterfaceDefaults);
             case BoundTryCatch recovery:
                 return TryCatchStatement(recovery, initialized, fieldMasks, declarations, function, program,
-                    ref remaining, depth, reachable, cleanups, inCleanup, inUnsafe, failures, loops);
+                    ref remaining, depth, reachable, cleanups, inCleanup,
+                    inUnsafe, failures, loops,
+                    allowUnmaterializedInterfaceDefaults);
             case BoundRequire requirement:
             {
                 using var repeatSnapshotState
@@ -6528,6 +6728,12 @@ public static partial class SemanticVerifier
                 if (inCleanup)
                 {
                     throw InvalidEffect(result.Span, "FinallyReturn");
+                }
+                if (result.Value is not null
+                    && IsClassOwnershipUnknown(program,
+                        result.Value.Type))
+                {
+                    throw InvalidEffect(result.Span, "Ownership");
                 }
                 if (result.Value is not null
                     && !CanCompleteNormally(result.Value, initialized, program,
@@ -6712,7 +6918,10 @@ public static partial class SemanticVerifier
                             var returnDeclarations = new HashSet<int>(declarations);
                             var cleanupDoesNotComplete = VerifyCleanupStack(cleanups, 0, returnState,
                                 returnMasks, returnDeclarations, function, program, ref remaining,
-                                depth + 1, reachable, inUnsafe, successfulReturn: predicate);
+                                depth + 1, reachable, inUnsafe,
+                                successfulReturn: predicate,
+                                allowUnmaterializedInterfaceDefaults:
+                                    allowUnmaterializedInterfaceDefaults);
                             if (!cleanupDoesNotComplete
                                 && VerifyNormalDeclarationPostconditions(
                                     returnState, returnMasks,
@@ -6767,7 +6976,10 @@ public static partial class SemanticVerifier
                         {
                             var cleanupDoesNotComplete = VerifyCleanupStack(cleanups, 0,
                                 returnState, returnMasks, returnDeclarations, function, program,
-                                ref remaining, depth + 1, reachable, inUnsafe, successfulReturn: true);
+                                ref remaining, depth + 1, reachable, inUnsafe,
+                                successfulReturn: true,
+                                allowUnmaterializedInterfaceDefaults:
+                                    allowUnmaterializedInterfaceDefaults);
                             if (!cleanupDoesNotComplete
                                 && VerifyNormalDeclarationPostconditions(
                                     returnState, returnMasks,
@@ -6836,7 +7048,9 @@ public static partial class SemanticVerifier
 
     private static bool TryFinallyStatement(BoundTryFinally cleanup, InitializationState initialized, uint[] fieldMasks,
         HashSet<int> declarations, BoundFunction function, BoundProgram program, ref int remaining, int depth,
-        bool reachable, List<CleanupScope> cleanups, bool inCleanup, bool inUnsafe, FailureEdges? failures, List<LoopScope> loops)
+        bool reachable, List<CleanupScope> cleanups, bool inCleanup, bool inUnsafe,
+        FailureEdges? failures, List<LoopScope> loops,
+        bool allowUnmaterializedInterfaceDefaults)
     {
         if (cleanup.Body is null || cleanup.Finally is null)
         {
@@ -6850,7 +7064,10 @@ public static partial class SemanticVerifier
         var cleanupScope = new CleanupScope(cleanup.Finally, [.. declarations], failures);
         cleanups.Add(cleanupScope);
         var tryReturns = Statement(cleanup.Body, initialized, fieldMasks, declarations, function, program,
-            ref remaining, depth + 1, reachable, cleanups, inCleanup, inUnsafe, cleanupFailures, loops);
+            ref remaining, depth + 1, reachable, cleanups, inCleanup, inUnsafe,
+            cleanupFailures, loops,
+            allowUnmaterializedInterfaceDefaults:
+                allowUnmaterializedInterfaceDefaults);
         cleanups.RemoveAt(cleanups.Count - 1);
         if (cleanupFailures?.HasEdges == true)
         {
@@ -6858,7 +7075,10 @@ public static partial class SemanticVerifier
             var exceptionalMasks = cleanupFailures.Masks;
             var finalizerDoesNotComplete = VerifyCleanup(cleanup.Finally, exceptionalState,
                 exceptionalMasks, [.. declarations], function, program, ref remaining,
-                depth + 1, reachable, inUnsafe, cleanupScope.Visible, failures: failures);
+                depth + 1, reachable, inUnsafe, cleanupScope.Visible,
+                failures: failures,
+                allowUnmaterializedInterfaceDefaults:
+                    allowUnmaterializedInterfaceDefaults);
             if (!finalizerDoesNotComplete)
             {
                 failures?.Add(exceptionalState, exceptionalMasks);
@@ -6879,14 +7099,19 @@ public static partial class SemanticVerifier
                 }
             }
             _ = VerifyCleanup(cleanup.Finally, unreachableState, unreachableMasks, declarations, function,
-                program, ref remaining, depth + 1, reachable: false, inUnsafe, cleanupScope.Visible);
+                program, ref remaining, depth + 1, reachable: false, inUnsafe,
+                cleanupScope.Visible,
+                allowUnmaterializedInterfaceDefaults:
+                    allowUnmaterializedInterfaceDefaults);
             ReleaseRepeatSnapshotStateIfTracked(unreachableState);
         }
         else
         {
             var finalizerDoesNotComplete = VerifyCleanup(cleanup.Finally, initialized, fieldMasks,
                 declarations, function, program, ref remaining, depth + 1, reachable, inUnsafe,
-                cleanupScope.Visible, failures: failures);
+                cleanupScope.Visible, failures: failures,
+                allowUnmaterializedInterfaceDefaults:
+                    allowUnmaterializedInterfaceDefaults);
             return tryReturns || (reachable && finalizerDoesNotComplete);
         }
         return true;
@@ -6894,7 +7119,9 @@ public static partial class SemanticVerifier
 
     private static bool TryCatchStatement(BoundTryCatch recovery, InitializationState initialized, uint[] fieldMasks,
         HashSet<int> declarations, BoundFunction function, BoundProgram program, ref int remaining, int depth,
-        bool reachable, List<CleanupScope> cleanups, bool inCleanup, bool inUnsafe, FailureEdges? failures, List<LoopScope> loops)
+        bool reachable, List<CleanupScope> cleanups, bool inCleanup, bool inUnsafe,
+        FailureEdges? failures, List<LoopScope> loops,
+        bool allowUnmaterializedInterfaceDefaults)
     {
         if (!inUnsafe)
         {
@@ -6921,7 +7148,10 @@ public static partial class SemanticVerifier
             cleanups.Add(recoveryScope!);
         }
         var recoveryBodyReturns = Statement(recovery.Body, initialized, fieldMasks, declarations, function,
-            program, ref remaining, depth + 1, reachable, cleanups, inCleanup, inUnsafe, caughtFailures, loops);
+            program, ref remaining, depth + 1, reachable, cleanups, inCleanup,
+            inUnsafe, caughtFailures, loops,
+            allowUnmaterializedInterfaceDefaults:
+                allowUnmaterializedInterfaceDefaults);
         var catchState = caughtFailures.HasEdges ? caughtFailures.State : recoveryEntryState;
         if (!ReferenceEquals(catchState, recoveryEntryState))
         {
@@ -6942,7 +7172,9 @@ public static partial class SemanticVerifier
                 catchesFailures: failures?.CatchesFailures == true) : null;
         var catchReturns = Statement(recovery.Catch, catchState, catchMasks, declarations, function,
             program, ref remaining, depth + 1, reachable && caughtFailures.HasEdges, cleanups,
-            inCleanup, inUnsafe, catchFailures, loops);
+            inCleanup, inUnsafe, catchFailures, loops,
+            allowUnmaterializedInterfaceDefaults:
+                allowUnmaterializedInterfaceDefaults);
         if (recovery.Finally is not null)
         {
             cleanups.RemoveAt(cleanups.Count - 1);
@@ -6952,7 +7184,10 @@ public static partial class SemanticVerifier
                 var exceptionalMasks = catchFailures.Masks;
                 var finalizerDoesNotComplete = VerifyCleanup(recovery.Finally, exceptionalState,
                     exceptionalMasks, [.. declarations], function, program, ref remaining,
-                    depth + 1, reachable, inUnsafe, recoveryScope!.Visible, failures: failures);
+                    depth + 1, reachable, inUnsafe, recoveryScope!.Visible,
+                    failures: failures,
+                    allowUnmaterializedInterfaceDefaults:
+                        allowUnmaterializedInterfaceDefaults);
                 if (!finalizerDoesNotComplete)
                 {
                     failures?.Add(exceptionalState, exceptionalMasks);
@@ -7002,7 +7237,10 @@ public static partial class SemanticVerifier
         {
             var finalizerDoesNotComplete = VerifyCleanup(recovery.Finally, initialized, fieldMasks,
                 declarations, function, program, ref remaining, depth + 1,
-                reachable && !recoveryReturns, inUnsafe, recoveryScope!.Visible, failures: failures);
+                reachable && !recoveryReturns, inUnsafe, recoveryScope!.Visible,
+                failures: failures,
+                allowUnmaterializedInterfaceDefaults:
+                    allowUnmaterializedInterfaceDefaults);
             recoveryReturns |= reachable && !recoveryReturns && finalizerDoesNotComplete;
         }
         ReleaseRepeatSnapshotStateIfTracked(catchState);
@@ -7012,7 +7250,8 @@ public static partial class SemanticVerifier
     private static bool VerifyCleanup(BoundBlock cleanup, InitializationState initialized, uint[] fieldMasks,
         HashSet<int> declarations, BoundFunction function, BoundProgram program, ref int remaining, int depth, bool reachable,
         bool inUnsafe, HashSet<int>? visible = null, bool? successfulReturn = null,
-        FailureEdges? failures = null)
+        FailureEdges? failures = null,
+        bool allowUnmaterializedInterfaceDefaults = false)
     {
         if (visible is not null)
         {
@@ -7035,13 +7274,16 @@ public static partial class SemanticVerifier
         var checkMasks = outputTransfer ? (uint[])fieldMasks.Clone() : fieldMasks;
         return Statement(cleanup, checkState, checkMasks, declarations, function,
             program, ref remaining, depth, reachable, inCleanup: true, inUnsafe: inUnsafe,
-            failures: failures);
+            failures: failures,
+            allowUnmaterializedInterfaceDefaults:
+                allowUnmaterializedInterfaceDefaults);
     }
 
     private static bool VerifyCleanupStack(List<CleanupScope> cleanups, int firstScope,
         InitializationState initialized, uint[] fieldMasks, HashSet<int> declarations,
         BoundFunction function, BoundProgram program, ref int remaining, int depth,
-        bool reachable, bool inUnsafe, bool? successfulReturn = null)
+        bool reachable, bool inUnsafe, bool? successfulReturn = null,
+        bool allowUnmaterializedInterfaceDefaults = false)
     {
         if (firstScope < 0 || firstScope > cleanups.Count)
         {
@@ -7052,7 +7294,8 @@ public static partial class SemanticVerifier
             var scope = cleanups[index];
             if (VerifyCleanup(scope.Body, initialized, fieldMasks, declarations, function,
                 program, ref remaining, depth, reachable, inUnsafe, scope.Visible,
-                successfulReturn, scope.OuterFailures))
+                successfulReturn, scope.OuterFailures,
+                allowUnmaterializedInterfaceDefaults))
             {
                 return true;
             }
@@ -7093,8 +7336,59 @@ public static partial class SemanticVerifier
         pending.Push(type);
         while (pending.TryPop(out var current))
         {
-            if (current == PrimitiveType.OwnedInt32Buffer || !IsUnique(program, current)
+            if (current == PrimitiveType.OwnedInt32Buffer
                 || !visited.Add(current))
+            {
+                continue;
+            }
+            if ((int)current >= ManagedClassTypes.First
+                && ManagedClassTypes.IsManaged(current))
+            {
+                var classIndex = ManagedClassTypes.ClassIndex(current);
+                if ((uint)classIndex >= (uint)program.Classes.Length)
+                {
+                    throw Invalid();
+                }
+
+                var @class = program.Classes[classIndex];
+                if (@class.HasCleanup is null)
+                {
+                    return true;
+                }
+                if (@class.HasCleanup == true)
+                {
+                    BoundFunction? cleanupFunction = null;
+                    foreach (var function in program.Functions)
+                    {
+                        if (function.Name != @class.CleanupMethod)
+                        {
+                            continue;
+                        }
+                        if (cleanupFunction is not null)
+                        {
+                            return true;
+                        }
+                        cleanupFunction = function;
+                    }
+                    if (cleanupFunction is null
+                        || !CleanupBodyCanBeProvenNonThrowing(
+                            cleanupFunction, current, program))
+                    {
+                        return true;
+                    }
+                }
+                foreach (var field in @class.Fields)
+                {
+                    if (ManagedClassTypes.IsManaged(field.Type)
+                        || IsUnique(program, field.Type))
+                    {
+                        pending.Push(field.Type);
+                    }
+                }
+                continue;
+            }
+            if (ManagedClassTypes.IsManaged(current)
+                || !IsUnique(program, current))
             {
                 continue;
             }
@@ -7255,7 +7549,7 @@ public static partial class SemanticVerifier
         }
 
         return expression switch {
-            BoundConstant or BoundNull => true,
+            BoundConstant or BoundPendingInterfaceDefault or BoundNull => true,
             BoundRead read => (uint)read.Variable < (uint)function.Variables.Length
                 && function.Variables[read.Variable].Type == read.Type,
             BoundStaticFieldRead => false,
@@ -8358,29 +8652,6 @@ public static partial class SemanticVerifier
                 return result;
             }
 
-            internal bool WriteRange(ulong index, int offset,
-                ReadOnlySpan<byte> bytes)
-            {
-                ChargeWork(4);
-                if (index >= Layout.ElementCount || offset < 0
-                    || offset > TemplateBytes.Length
-                    || bytes.Length > TemplateBytes.Length - offset)
-                {
-                    throw Invalid();
-                }
-
-                using var scratchState
-                    = _resources.ReserveState(
-                        new BigInteger(TemplateBytes.Length));
-                var elementBytes = Get(index);
-                for (var byteIndex = 0; byteIndex < bytes.Length; byteIndex++)
-                {
-                    ChargeWork(4);
-                    elementBytes[offset + byteIndex] = bytes[byteIndex];
-                }
-                return Set(index, elementBytes);
-            }
-
             internal bool HasTemplateChange(ReadOnlySpan<byte> bytes)
             {
                 if (bytes.Length != GuaranteedBytes.Length)
@@ -8434,107 +8705,6 @@ public static partial class SemanticVerifier
                 }
                 repeatFrame.Complete();
                 return result;
-            }
-
-            internal bool ApplyUnknownRangeWrite(int offset,
-                ReadOnlySpan<byte> bytes)
-            {
-                ChargeWork(2);
-                if (Layout.ElementCount == 0)
-                {
-                    throw Invalid();
-                }
-                if (Layout.ElementCount == 1)
-                {
-                    return WriteRange(0, offset, bytes);
-                }
-                return ApplyPossibleUnknownRangeWrite(offset, bytes);
-            }
-
-            internal bool ApplyPossibleExactRangeWrite(ulong index,
-                int offset, ReadOnlySpan<byte> bytes)
-            {
-                ChargeWork(4);
-                if (index >= Layout.ElementCount || offset < 0
-                    || offset > TemplateBytes.Length
-                    || bytes.Length > TemplateBytes.Length - offset)
-                {
-                    throw Invalid();
-                }
-
-                using var elementScratch = _resources.ReserveState(
-                    new BigInteger(TemplateBytes.Length));
-                var elementBytes = Get(index);
-                for (var byteIndex = 0; byteIndex < bytes.Length;
-                    byteIndex++)
-                {
-                    ChargeWork(7);
-                    elementBytes[offset + byteIndex]
-                        = (byte)(elementBytes[offset + byteIndex]
-                            & bytes[byteIndex]);
-                }
-                return Set(index, elementBytes);
-            }
-
-            internal bool ApplyPossibleUnknownRangeWrite(int offset,
-                ReadOnlySpan<byte> bytes)
-            {
-                ChargeWork(3);
-                if (Layout.ElementCount == 0 || offset < 0
-                    || offset > TemplateBytes.Length
-                    || bytes.Length > TemplateBytes.Length - offset)
-                {
-                    throw Invalid();
-                }
-
-                var mergedTemplate = CopyPayload(TemplateBytes);
-                ChargeWork();
-                for (var byteIndex = 0; byteIndex < bytes.Length;
-                    byteIndex++)
-                {
-                    ChargeWork(7);
-                    mergedTemplate[offset + byteIndex]
-                        = (byte)(mergedTemplate[offset + byteIndex]
-                            & bytes[byteIndex]);
-                }
-
-                var changed = !PayloadEquals(TemplateBytes, mergedTemplate);
-                var mergedElements
-                    = new List<KeyValuePair<ulong, byte[]>>(
-                        _elementBytes.Count);
-                foreach (var (index, elementBytes) in _elementBytes)
-                {
-                    ChargeWork();
-                    var mergedBytes = CopyPayload(elementBytes);
-                    for (var byteIndex = 0; byteIndex < bytes.Length;
-                        byteIndex++)
-                    {
-                        ChargeWork(7);
-                        mergedBytes[offset + byteIndex]
-                            = (byte)(mergedBytes[offset + byteIndex]
-                                & bytes[byteIndex]);
-                    }
-                    var equalsTemplate = PayloadEquals(
-                        mergedBytes, mergedTemplate);
-                    var equalsOriginal = PayloadEquals(
-                        elementBytes, mergedBytes);
-                    if (!equalsTemplate)
-                    {
-                        ChargeWork(6);
-                        mergedElements.Add(new KeyValuePair<ulong, byte[]>(
-                            index, mergedBytes));
-                    }
-                    else
-                    {
-                        ChargeWork(2);
-                    }
-                    changed |= !equalsOriginal || equalsTemplate;
-                }
-
-                ChargeWork();
-                _elementBytes = mergedElements;
-                TemplateBytes = mergedTemplate;
-                return changed;
             }
 
             internal RawUnionArrayElementState
@@ -8709,55 +8879,6 @@ public static partial class SemanticVerifier
                         outputState, out changed);
                 repeatFrame.Complete();
                 return result;
-            }
-
-            internal bool ApplyUnknownIndexWrite(ReadOnlySpan<byte> bytes)
-            {
-                ChargeWork(3);
-                if (bytes.Length != GuaranteedBytes.Length)
-                {
-                    throw Invalid();
-                }
-                if (Layout.ElementCount == 0)
-                {
-                    throw Invalid();
-                }
-                if (Layout.ElementCount == 1)
-                {
-                    return Set(0, bytes);
-                }
-
-                var mergedTemplate = MeetPayload(TemplateBytes, bytes);
-                ChargeWork();
-                var changed = !PayloadEquals(TemplateBytes, mergedTemplate);
-                var mergedElements
-                    = new List<KeyValuePair<ulong, byte[]>>(
-                        _elementBytes.Count);
-                foreach (var (index, elementBytes) in _elementBytes)
-                {
-                    ChargeWork();
-                    var mergedBytes = MeetPayload(elementBytes, bytes);
-                    var equalsTemplate = PayloadEquals(
-                        mergedBytes, mergedTemplate);
-                    var equalsOriginal = PayloadEquals(
-                        elementBytes, mergedBytes);
-                    if (!equalsTemplate)
-                    {
-                        ChargeWork(6);
-                        mergedElements.Add(new KeyValuePair<ulong, byte[]>(
-                            index, mergedBytes));
-                    }
-                    else
-                    {
-                        ChargeWork(2);
-                    }
-                    changed |= !equalsOriginal || equalsTemplate;
-                }
-
-                ChargeWork();
-                _elementBytes = mergedElements;
-                TemplateBytes = mergedTemplate;
-                return changed;
             }
 
             internal RawUnionArrayElementState CreateUnknownIndexWrite(
@@ -16718,6 +16839,27 @@ public static partial class SemanticVerifier
             {
                 if (argument.Kind == BoundGenericArgumentKind.Type)
                 {
+                    if (argument.TypeArgumentTerm is
+                        BoundGenericMethodTypeTerm argumentTerm)
+                    {
+                        if (!BoundGenericMethodTypeTerms
+                                .TryGetFormalDependencies(argumentTerm,
+                                    out var typeDependencies)
+                            || !BoundGenericMethodTypeTerms
+                                .TryGetConstantFormalDependencies(
+                                    argumentTerm,
+                                    out var constantDependencies))
+                        {
+                            return false;
+                        }
+                        if (!typeDependencies.IsEmpty
+                            || !constantDependencies.IsEmpty)
+                        {
+                            hasDependency = true;
+                            return true;
+                        }
+                    }
+
                     if (argument.Type == PrimitiveType.Void
                         || !HasGenericQueryTypeFormalDependency(
                             argument.Type, function, program, ref remaining,
@@ -16747,6 +16889,16 @@ public static partial class SemanticVerifier
                     CheckedReferenceTypes.Index(type)].ReferentType,
                 function, program, ref remaining, depth + 1,
                 out hasDependency);
+        }
+        else if (BoundSpanTypeTypes.IsValidType(type, program.SpanTypes))
+        {
+            var span = program.SpanTypes[
+                BoundSpanTypeTypes.Index(type)];
+            return TryGetGenericQuerySpanFormalOrdinal(span, function,
+                    program, out _)
+                && HasGenericQueryTypeFormalDependency(
+                    span.ElementType, function, program, ref remaining,
+                    depth + 1, out hasDependency);
         }
         else if (ManagedClassTypes.IsOptional(type))
         {
@@ -16882,22 +17034,70 @@ public static partial class SemanticVerifier
                 var argument = instance.Arguments[ordinal];
                 if (formal.Kind == BoundGenericArgumentKind.Type)
                 {
+                    if (argument is null
+                        || argument.Kind != BoundGenericArgumentKind.Type
+                        || argument.Type == PrimitiveType.Void)
+                    {
+                        return false;
+                    }
+
+                    BoundGenericMethodTypeTerm typeArgument;
+                    if (argument.TypeArgumentTerm is
+                        BoundGenericMethodTypeTerm retainedTypeArgument)
+                    {
+                        if (!BoundGenericMethodTypeTerms
+                                .TryGetFormalDependencies(
+                                    retainedTypeArgument,
+                                    out var retainedDependencies)
+                            || !BoundGenericMethodTypeTerms
+                                .TryGetConstantFormalDependencies(
+                                    retainedTypeArgument, out _)
+                            || (!retainedDependencies.IsEmpty
+                                && (function is null
+                                    || !TryGetCallerGenericTypeFormalOwner(
+                                        function, program,
+                                        out var callerFormalOwnerOrdinal,
+                                        out var callerFormalCount)
+                                    || !argument.HasTypeFormalOwnerIdentity
+                                    || argument.TypeFormalDefinitionOrdinal
+                                        != callerFormalOwnerOrdinal
+                                    || retainedDependencies.Any(
+                                        dependency => (uint)dependency
+                                            >= (uint)callerFormalCount))))
+                        {
+                            return false;
+                        }
+
+                        typeArgument = retainedTypeArgument;
+                    }
+                    else if (!TryGetGenericQueryTypeIdentityTerm(
+                        argument.Type, function, program,
+                        ref remaining, depth + 1,
+                        out typeArgument))
+                    {
+                        return false;
+                    }
+
                     if (formal.Constraints.IsDefault
                         || !formal.Constraints.IsEmpty
                         || formal.OwnershipDomain is not (1 or 2 or 3)
                         || formal.OwnershipDomain == 2
                         || formal.NullabilityDomain is not (1 or 2)
-                        || argument.Kind != BoundGenericArgumentKind.Type
-                        || argument.Type == PrimitiveType.Void
-                        || !TryGetGenericQueryTypeIdentityTerm(
-                            argument.Type, function, program,
-                            ref remaining, depth + 1,
-                            out var typeArgument))
+                        || typeArgument.TypeArguments.IsDefault
+                        || typeArgument.ConstantArguments.IsDefault)
                     {
                         return false;
                     }
-                    typeArguments.Add(ApplyGenericQueryTypeQualifiers(
-                        typeArgument, argument.Qualifiers));
+                    var qualifiedArgument
+                        = ApplyGenericQueryTypeQualifiers(typeArgument,
+                            argument.Qualifiers);
+                    if (!TryNormalizeGenericQueryFormalWriteQualifier(
+                            qualifiedArgument, function, program,
+                            out var normalizedArgument))
+                    {
+                        return false;
+                    }
+                    typeArguments.Add(normalizedArgument);
                 }
                 else if (formal.Kind
                         == BoundGenericArgumentKind.Constant
@@ -16914,6 +17114,8 @@ public static partial class SemanticVerifier
                                 default) {
                                 FormalDefinitionOrdinal =
                                     argument.ConstantFormalDefinitionOrdinal,
+                                FormalOwnerKind =
+                                    argument.ConstantFormalOwnerKind,
                             });
                     }
                     else if (argument.HasDecodedConstant
@@ -16974,6 +17176,18 @@ public static partial class SemanticVerifier
             {
                 return false;
             }
+            if (reference.IsReferentWritable)
+            {
+                if (referent.Kind
+                        != BoundGenericMethodTypeTermKind.Formal
+                    || function is null
+                    || !TryGetCallerGenericTypeFormal(function, program,
+                        reference.ReferentType, out var formal, out _)
+                    || formal is null || !formal.RequiresWritable)
+                {
+                    return false;
+                }
+            }
             term = reference.IsOptionalValue
                 ? new BoundGenericMethodTypeTerm(
                     BoundGenericMethodTypeTermKind.OptionalValue,
@@ -16984,6 +17198,30 @@ public static partial class SemanticVerifier
                     PrimitiveType.Void, -1, -1, [referent],
                     reference.IsWritable, reference.IsGarbageCollected,
                     reference.IsInitialization, reference.IsOptional);
+            return true;
+        }
+
+        if (BoundSpanTypeTypes.IsValidType(type, program.SpanTypes))
+        {
+            var span = program.SpanTypes[BoundSpanTypeTypes.Index(type)];
+            if (!TryGetGenericQuerySpanFormalOrdinal(span, function,
+                    program, out _)
+                || !TryGetGenericQueryTypeIdentityTerm(span.ElementType,
+                    function, program, ref remaining, depth + 1,
+                    out var element)
+                || (span.IsElementWritable
+                    && element.Kind
+                        != BoundGenericMethodTypeTermKind.Formal))
+            {
+                return false;
+            }
+
+            term = new BoundGenericMethodTypeTerm(
+                BoundGenericMethodTypeTermKind.Span,
+                PrimitiveType.Void, -1, -1, [element],
+                span.IsWritable, false, span.IsInitialization, false) {
+                IsElementWritable = span.IsElementWritable,
+            };
             return true;
         }
 
@@ -17169,8 +17407,21 @@ public static partial class SemanticVerifier
             if (argument.Kind
                     != BoundGenericMethodConstantArgumentKind.Formal
                 || argument.CallerDefinitionOrdinal < 0
-                || argument.CallerFormalOrdinal < 0
                 || argument.CallerConstantFormalOrdinal < 0)
+            {
+                return false;
+            }
+            if (argument.CallerFormalOwnerKind
+                == BoundGenericTypeFormalOwnerKind.GenericMethod)
+            {
+                if (argument.CallerFormalOrdinal < 0)
+                {
+                    return false;
+                }
+            }
+            else if (argument.CallerFormalOwnerKind
+                    != BoundGenericTypeFormalOwnerKind.SourceGenericType
+                || argument.CallerFormalOrdinal != -1)
             {
                 return false;
             }
@@ -17181,6 +17432,7 @@ public static partial class SemanticVerifier
                 PrimitiveType.Void, PrimitiveType.Void, default) {
                 FormalDefinitionOrdinal =
                     argument.CallerDefinitionOrdinal,
+                FormalOwnerKind = argument.CallerFormalOwnerKind,
             });
         }
 
@@ -17215,6 +17467,70 @@ public static partial class SemanticVerifier
                 IsGarbageCollected = (qualifiers & 0x02) != 0,
                 IsInitialization = (qualifiers & 0x04) != 0,
             };
+    }
+
+    private static bool TryNormalizeGenericQueryFormalWriteQualifier(
+        BoundGenericMethodTypeTerm term, BoundFunction? function,
+        BoundProgram program,
+        out BoundGenericMethodTypeTerm normalizedTerm)
+    {
+        normalizedTerm = term;
+        if (term.Kind == BoundGenericMethodTypeTermKind.OptionalValue
+            && term.TypeArguments.Length == 1)
+        {
+            if (!TryNormalizeGenericQueryFormalWriteQualifier(
+                    term.TypeArguments[0], function, program,
+                    out var normalizedArgument))
+            {
+                return false;
+            }
+            normalizedTerm = term with {
+                TypeArguments = [normalizedArgument],
+            };
+            return true;
+        }
+
+        if (term.Kind != BoundGenericMethodTypeTermKind.Formal
+            || !term.IsWritable)
+        {
+            return true;
+        }
+
+        if (function is null)
+        {
+            return false;
+        }
+
+        PrimitiveType formalType;
+        if ((uint)term.FormalOrdinal
+            < (uint)function.GenericMethodProofTypeParameters.Length)
+        {
+            formalType
+                = function.GenericMethodProofTypeParameters[
+                    term.FormalOrdinal];
+        }
+        else if (function.ImportedGenericMethod
+                is BoundGenericMethodImport imported
+            && (uint)term.FormalOrdinal < (uint)imported.Formals.Length)
+        {
+            formalType = imported.Formals[term.FormalOrdinal]
+                .PlaceholderType;
+        }
+        else
+        {
+            return false;
+        }
+
+        if (!TryGetCallerGenericTypeFormal(function, program, formalType,
+                out var formal, out var formalOrdinal)
+            || formalOrdinal != term.FormalOrdinal
+            || formal is null || !formal.RequiresWritable)
+        {
+            return false;
+        }
+
+        normalizedTerm = term with { IsWritable = false };
+        return true;
     }
 
     private static bool AssignOptionalQueryTypeTerm(
@@ -17572,6 +17888,12 @@ public static partial class SemanticVerifier
                     program, initialized, declarations, ref remaining,
                     depth + 1);
                 break;
+            case BoundPendingInterfaceDefault pending:
+                if (!program.AllowUnmaterializedInterfaceDefaults)
+                {
+                    throw InvalidEffect(pending.Span, "InterfaceWitness");
+                }
+                break;
             case BoundConstant constant:
                 if (!IsValidGenericUniquePropertyConstant(constant,
                     function, program))
@@ -17861,6 +18183,8 @@ public static partial class SemanticVerifier
                     || reborrowType.IsInitialization
                         != sourceReference.IsInitialization
                     || reborrowType.ReferentType != sourceReference.ReferentType
+                    || (reborrowType.IsReferentWritable
+                        && !sourceReference.IsReferentWritable)
                     || (reborrowType.IsWritable && !sourceReference.IsWritable)
                     || initialized.Dependencies is not BackingDependencies reborrowDependencies)
                 {
@@ -17987,7 +18311,9 @@ public static partial class SemanticVerifier
                 var writeReference = program.CheckedReferenceTypes[
                     CheckedReferenceTypes.Index(referenceWrite.Descriptor.Type)];
                 var uniqueStore = IsUnique(program, referenceWrite.Value.Type);
-                if ((!writeReference.IsWritable
+                if (IsClassOwnershipUnknown(program,
+                        referenceWrite.Value.Type)
+                    || (!writeReference.IsWritable
                         && !writeReference.IsInitialization)
                     || writeReference.IsGarbageCollected
                     || writeReference.IsOptional
@@ -19486,7 +19812,8 @@ public static partial class SemanticVerifier
                         || !function.Variables[moveRootVariable].IsMutable
                         || movedFieldPath.Segments.Any(segment =>
                             !Fields(program, segment.OwnerType)[segment.Field].IsMutable
-                            || program.Structures[(int)segment.OwnerType - 100].CleanupMethod is not null)))
+                        || GetDeclaredCleanupMethod(program,
+                            segment.OwnerType) is not null)))
                 {
                     throw InvalidEffect(move.Span, "Ownership");
                 }
@@ -20152,7 +20479,8 @@ public static partial class SemanticVerifier
                 VerifyCallExpression(call, initialized, fieldMasks,
                     declarations, function, program, ref remaining,
                     depth, failures, statementCompound,
-                    cleanupCounterStep);
+                    cleanupCounterStep,
+                    program.AllowUnmaterializedInterfaceDefaults);
                 break;
             default:
                 throw Invalid();
@@ -22592,7 +22920,9 @@ public static partial class SemanticVerifier
         HashSet<int> declarations, BoundFunction function,
         BoundProgram program, ref int remaining, int depth,
         FailureEdges? failures, bool statementCompound,
-        BoundBinary? cleanupCounterStep, bool discardedResult = false)
+        BoundBinary? cleanupCounterStep,
+        bool allowUnmaterializedInterfaceDefaults,
+        bool discardedResult = false)
     {
         if (call.Function < 0 || call.Function >= program.Functions.Length || call.Arguments.IsDefault)
         {
@@ -22601,7 +22931,8 @@ public static partial class SemanticVerifier
         if ((!call.ArgumentParameterIndices.IsDefault
                 && call.ArgumentParameterIndices.Length != call.Arguments.Length)
             || (!call.ArgumentImplicitReferenceTemporaries.IsDefault
-                && call.ArgumentImplicitReferenceTemporaries.Length != call.Arguments.Length))
+                && call.ArgumentImplicitReferenceTemporaries.Length != call.Arguments.Length)
+            || !call.DefaultedArguments.IsDefaultOrEmpty)
         {
             throw Invalid();
         }
@@ -22610,10 +22941,79 @@ public static partial class SemanticVerifier
             throw Limit();
         }
         var target = program.Functions[call.Function];
+        if (target.PropertyAccessorKind
+                == BoundPropertyAccessorKind.Initializer)
+        {
+            var callerMayInitialize = function.IsClassConstructor
+                || (function.PropertyAccessorKind
+                        == BoundPropertyAccessorKind.Initializer
+                    && function.PropertyName == target.PropertyName);
+            var receiverIsCurrentObject
+                = !call.Arguments.IsEmpty
+                    && (call.ArgumentParameterIndices.IsDefault
+                        || call.ParameterIndex(0) == 0)
+                    && call.Arguments[0] is (BoundRead {
+                        Variable: 0,
+                    } or BoundReceiverLoan {
+                        Variable: 0,
+                    } or BoundMutableReceiverLoan {
+                        Variable: 0,
+                    });
+            if (!callerMayInitialize
+                || function.DeclaringStruct != target.DeclaringStruct
+                || target.IsStatic || !receiverIsCurrentObject)
+            {
+                throw InvalidEffect(call.Span, "Initialization");
+            }
+        }
         if (!IsValidInterfaceCallIdentity(call, function, target, program))
         {
             throw InvalidEffect(call.Span, "InterfaceWitness");
         }
+        for (var argumentIndex = 0;
+            argumentIndex < call.Arguments.Length; argumentIndex++)
+        {
+            if (call.Arguments[argumentIndex]
+                is not BoundPendingInterfaceDefault pending)
+            {
+                continue;
+            }
+
+            if (!allowUnmaterializedInterfaceDefaults
+                || call.InterfaceCallIdentity
+                    is not BoundInterfaceCallIdentity interfaceIdentity
+                || interfaceIdentity.Requirement != pending.Requirement
+                || !BoundInterfaceContract
+                    .TryGetInterfaceMemberDefinition(
+                        pending.Requirement, program.Interfaces,
+                        static _ => true, out var member,
+                        allowOpenFormals: true,
+                        genericNominalTypeDefinitions:
+                            program.GenericNominalTypeDefinitions,
+                        sourceGenericTypeDefinitions:
+                            program.SourceGenericTypeDefinitions)
+                || member is null
+                || (uint)pending.ParameterOrdinal
+                    >= (uint)member.Parameters.Length
+                || call.ParameterIndex(argumentIndex)
+                    != pending.ParameterOrdinal + (target.IsStatic ? 0 : 1))
+            {
+                throw InvalidEffect(pending.Span, "InterfaceWitness");
+            }
+
+            var parameter = member.Parameters[pending.ParameterOrdinal];
+            if (parameter.Mode != BoundInterfaceParameterMode.Value
+                || parameter.Type.Kind
+                    != BoundInterfaceTypeKind.Primitive
+                || parameter.Type.PrimitiveType != pending.Type
+                || (!parameter.HasPendingDefault
+                    && parameter.DefaultExpression is null))
+            {
+                throw InvalidEffect(pending.Span, "InterfaceWitness");
+            }
+        }
+        var requiresMutableInterfaceReceiver
+            = IsMutableInterfaceCallReceiver(call, program);
         if (!IsValidGenericMethodInstantiation(call.GenericMethodCall,
                 program, function, initialized)
             || !IsGenericMethodOwnerCompatible(
@@ -22663,6 +23063,10 @@ public static partial class SemanticVerifier
         if (call.Arguments.Length != target.ParameterCount || call.Type != target.ReturnType)
         {
             throw Invalid();
+        }
+        if (IsClassOwnershipUnknown(program, call.Type))
+        {
+            throw InvalidEffect(call.Span, "Ownership");
         }
         if (target.DeclaringStruct is not null && !target.IsStatic && !target.IsConstructor
             && target.Variables[0].IsMutable
@@ -23074,12 +23478,24 @@ public static partial class SemanticVerifier
                             && !target.IsConstructor && target.Variables[0].IsMutable
                             && HasFields(program, mutableLoan.Type)
                             && !ManagedClassTypes.IsClass(mutableLoan.Type);
-                        if (parameterIndex != 0 || (!bufferMutation && !structMutation)
+                        var interfaceReceiverMutation = parameterIndex == 0
+                            && call.InterfaceCallIdentity is not null
+                            && !target.Variables.IsEmpty
+                            && target.Variables[0].IsMutable
+                            && requiresMutableInterfaceReceiver;
+                        if (parameterIndex != 0
+                            || (!bufferMutation && !structMutation
+                                && !interfaceReceiverMutation)
                             || mutableLoan.Variable < 0 || mutableLoan.Variable >= initialized.Length
                             || (bufferMutation && mutableLoan.Type != PrimitiveType.OwnedInt32Buffer)
                             || mutableLoan.Type != target.Variables[0].Type
                             || function.Variables[mutableLoan.Variable].Type != mutableLoan.Type
-                            || !function.Variables[mutableLoan.Variable].IsMutable
+                            || (!function.Variables[
+                                    mutableLoan.Variable].IsMutable
+                                && !IsWritableGenericMethodTypeArgument(
+                                    mutableLoan.Type, program)
+                                && !HasGenericWriteRequirement(
+                                    mutableLoan.Type, function, program))
                             || !initialized[mutableLoan.Variable])
                         {
                             throw InvalidEffect(mutableLoan.Span, "Ownership");
@@ -23090,9 +23506,18 @@ public static partial class SemanticVerifier
                     {
                         var bufferMutation = target.Intrinsic is BoundIntrinsic.BufferSet
                             or BoundIntrinsic.BufferTryAppend or BoundIntrinsic.BufferClear;
+                        var interfaceReceiverMutation = parameterIndex == 0
+                            && call.InterfaceCallIdentity is not null
+                            && !target.Variables.IsEmpty
+                            && target.Variables[0].IsMutable
+                            && requiresMutableInterfaceReceiver;
                         if (parameterIndex != 0 || (target.Intrinsic != BoundIntrinsic.None && !bufferMutation)
-                            || target.DeclaringStruct is null || target.IsStatic || target.IsConstructor
-                            || !target.Variables[0].IsMutable || mutableField.Place is null
+                            || (target.DeclaringStruct is null
+                                && !interfaceReceiverMutation)
+                            || target.IsStatic || target.IsConstructor
+                            || (!target.Variables[0].IsMutable
+                                && !interfaceReceiverMutation)
+                            || mutableField.Place is null
                             || mutableField.Type != target.Variables[0].Type
                             || mutableField.Place.Type != mutableField.Type
                             || (bufferMutation && mutableField.Type != PrimitiveType.OwnedInt32Buffer))
@@ -23153,11 +23578,21 @@ public static partial class SemanticVerifier
                         }
                         if (argument is not (BoundNativeStorageAddress or BoundNativeOutputReservation))
                         {
-                            if (IsUnique(program, argument.Type)
+                            var isClassReceiver = parameterIndex == 0
+                                && target.DeclaringStruct is not null
+                                && !target.IsStatic && !target.IsConstructor
+                                && !target.IsClassConstructor
+                                && ManagedClassTypes.IsClass(argument.Type)
+                                && target.Variables[0].Type
+                                    == argument.Type;
+                            if ((IsClassOwnershipUnknown(program,
+                                    argument.Type)
+                                    && !isClassReceiver)
+                                || (IsUnique(program, argument.Type)
                                 && argument is not (BoundMove or BoundFieldMove or BoundCall)
                                 && argument is not BoundRead {
                                     GenericCopyRefinementOrdinal: >= 0,
-                                })
+                                }))
                             {
                                 throw InvalidEffect(argument.Span, "Ownership");
                             }
@@ -24667,6 +25102,7 @@ public static partial class SemanticVerifier
             or PrimitiveType.NativeUtf8ZPointer
             or PrimitiveType.NativeStorageAddress
             or PrimitiveType.NativeRawPointer
+            || BoundSpanTypeTypes.IsValidType(type, program.SpanTypes)
             || NativeFixedArrayContract.IsCarrier(type)
             || (allowVoid && type == PrimitiveType.Void)
             || ((int)type >= 100 && (int)type - 100 < program.Structures.Length)
@@ -24967,7 +25403,9 @@ public static partial class SemanticVerifier
                         || !argument.Bits.IsCanonicalFor(carrierType)
                         || argument.CallerDefinitionOrdinal != -1
                         || argument.CallerFormalOrdinal != -1
-                        || argument.CallerConstantFormalOrdinal != -1)
+                        || argument.CallerConstantFormalOrdinal != -1
+                        || argument.CallerFormalOwnerKind
+                            != BoundGenericTypeFormalOwnerKind.GenericMethod)
                     {
                         return false;
                     }
@@ -24979,6 +25417,40 @@ public static partial class SemanticVerifier
                     || argument.DomainType != PrimitiveType.Void
                     || argument.CarrierType != PrimitiveType.Void
                     || argument.Bits != default
+                    || argument.CallerDefinitionOrdinal < 0)
+                {
+                    return false;
+                }
+
+                if (argument.CallerFormalOwnerKind
+                    == BoundGenericTypeFormalOwnerKind.SourceGenericType)
+                {
+                    if (argument.CallerFormalOrdinal != -1
+                        || (uint)argument.CallerDefinitionOrdinal
+                            >= (uint)program.SourceGenericTypeDefinitions
+                                .Length)
+                    {
+                        return false;
+                    }
+
+                    var callerDefinition =
+                        program.SourceGenericTypeDefinitions[
+                            argument.CallerDefinitionOrdinal];
+                    var callerFormal = callerDefinition.ConstantFormals
+                        .FirstOrDefault(candidate =>
+                            candidate.ConstantOrdinal
+                                == argument.CallerConstantFormalOrdinal);
+                    if (callerFormal is null
+                        || !AreGenericMethodTypeTermsEqual(
+                            callerFormal.Domain, domain, 0))
+                    {
+                        return false;
+                    }
+                    continue;
+                }
+
+                if (argument.CallerFormalOwnerKind
+                        != BoundGenericTypeFormalOwnerKind.GenericMethod
                     || (uint)argument.CallerDefinitionOrdinal
                         >= (uint)program.GenericMethodSignatures.Length
                     || program.Functions.All(function =>
@@ -24990,14 +25462,14 @@ public static partial class SemanticVerifier
 
                 var callerSignature = program.GenericMethodSignatures[
                     argument.CallerDefinitionOrdinal];
-                var callerFormal = callerSignature.ConstantFormals
+                var callerMethodFormal = callerSignature.ConstantFormals
                     .FirstOrDefault(candidate =>
                         candidate.Ordinal == argument.CallerFormalOrdinal);
-                if (callerFormal is null
-                    || callerFormal.ConstantOrdinal
+                if (callerMethodFormal is null
+                    || callerMethodFormal.ConstantOrdinal
                         != argument.CallerConstantFormalOrdinal
-                    || !AreGenericMethodTypeTermsEqual(callerFormal.Domain,
-                        domain, 0))
+                    || !AreGenericMethodTypeTermsEqual(
+                        callerMethodFormal.Domain, domain, 0))
                 {
                     return false;
                 }
@@ -25183,6 +25655,27 @@ public static partial class SemanticVerifier
                             .ExplicitImplementation)
                 {
                     if (member.DefaultTarget is not null
+                        || member.PendingGenericMethodName is not null)
+                    {
+                        return false;
+                    }
+
+                    if (member.GenericMethodDefinitionOrdinal >= 0)
+                    {
+                        if (member.TargetKind
+                                != BoundInterfaceWitnessTargetKind
+                                    .Implementation
+                            || member.FunctionIndex != -1)
+                        {
+                            return false;
+                        }
+                        if (!IsValidGenericInterfaceWitnessImplementation(
+                                witness, member, program))
+                        {
+                            return false;
+                        }
+                    }
+                    else if (member.GenericMethodDefinitionOrdinal != -1
                         || (uint)member.FunctionIndex
                             >= (uint)program.Functions.Length
                         || !IsValidInterfaceWitnessImplementation(
@@ -25192,6 +25685,8 @@ public static partial class SemanticVerifier
                     }
                 }
                 else if (member.FunctionIndex != -1
+                    || member.GenericMethodDefinitionOrdinal != -1
+                    || member.PendingGenericMethodName is not null
                     || member.DefaultTarget is not
                         BoundInterfaceMemberIdentity defaultTarget
                     || !BoundInterfaceContract.AreEquivalent(
@@ -25352,7 +25847,8 @@ public static partial class SemanticVerifier
         {
             return false;
         }
-        if (call.Arguments[0].Type != identity.ImplementingType)
+        if (!InterfaceReceiverTypeMatches(call.Arguments[0].Type,
+                identity.ImplementingType))
         {
             return false;
         }
@@ -25444,10 +25940,36 @@ public static partial class SemanticVerifier
                         program.GenericNominalTypeDefinitions,
                     sourceGenericTypeDefinitions:
                         program.SourceGenericTypeDefinitions)
-                || requiredMember is null
-                || requiredMember.Kind
-                    != BoundInterfaceMemberKind.Callable
+                || requiredMember is null)
+            {
+                return false;
+            }
+            var requiredAccessor
+                = requiredMember.Kind is (BoundInterfaceMemberKind.Property
+                    or BoundInterfaceMemberKind.Indexer)
+                    && (uint)identity.Requirement.AccessorOrdinal
+                        < (uint)requiredMember.Accessors.Length
+                    ? requiredMember.Accessors[
+                        identity.Requirement.AccessorOrdinal] : null;
+            var isCallable = requiredMember.Kind
+                == BoundInterfaceMemberKind.Callable;
+            var isPropertyGetter = requiredAccessor?.Kind
+                == BoundInterfaceAccessorKind.Get;
+            var isIndexerSetter = requiredMember.Kind
+                    == BoundInterfaceMemberKind.Indexer
+                && requiredAccessor?.Kind
+                    == BoundInterfaceAccessorKind.Set;
+            var isAccessorCall = isPropertyGetter || isIndexerSetter;
+            var receiverRequiresMutable = requiredAccessor?.IsMutable
+                ?? requiredMember.RequiresMutableReceiver;
+            var requiresUnsafeCaller = requiredAccessor?.RequiresUnsafeCaller
+                ?? requiredMember.RequiresUnsafeCaller;
+            var doesNotReturn = requiredAccessor?.DoesNotReturn
+                ?? requiredMember.DoesNotReturn;
+            if ((!isCallable && !isAccessorCall)
                 || requiredMember.IsStatic
+                || requiredMember.IsAsync
+                || requiredMember.NativeCallableConvention is not null
                 || !requiredMember.TypeParameters.IsEmpty
                 || !requiredMember.Constraints.IsEmpty
                 || !requiredMember.Attributes.IsEmpty
@@ -25457,21 +25979,33 @@ public static partial class SemanticVerifier
                     parameter.Mode != BoundInterfaceParameterMode.Value
                     || !parameter.Attributes.IsEmpty
                     || !parameter.AttributeTokens.IsEmpty)
+                || (isAccessorCall
+                    && (requiredMember.DoesNotReturn
+                        || (requiredMember.Kind
+                                == BoundInterfaceMemberKind.Property
+                            && !requiredMember.Parameters.IsEmpty)
+                        || requiredAccessor!.HasBody
+                        || !requiredAccessor.Attributes.IsEmpty
+                        || !requiredAccessor.AttributeTokens.IsEmpty
+                        || !requiredAccessor.ContractTokens.IsEmpty
+                        || !requiredAccessor.Dependencies.IsEmpty))
                 || requiredMember.ResultType
                     is not BoundInterfaceType requiredResult
                 || target.ParameterCount
                     != requiredMember.Parameters.Length + 1
+                        + (isIndexerSetter ? 1 : 0)
                 || target.Variables.Length != target.ParameterCount
                 || target.Variables[0].Type
                     != identity.ImplementingType
                 || target.Variables[0].IsMutable
+                    != receiverRequiresMutable
                 || !TryGetInterfaceProofPrimitiveType(requiredResult,
                     identity.Requirement.DeclaringInterface.TypeArguments,
                     caller, program, out var expectedResult)
-                || target.ReturnType != expectedResult
-                || target.RequiresUnsafeCaller
-                    != requiredMember.RequiresUnsafeCaller
-                || target.DoesNotReturn != requiredMember.DoesNotReturn)
+                || target.ReturnType != (isIndexerSetter
+                    ? PrimitiveType.Void : expectedResult)
+                || target.RequiresUnsafeCaller != requiresUnsafeCaller
+                || target.DoesNotReturn != doesNotReturn)
             {
                 return false;
             }
@@ -25486,6 +26020,18 @@ public static partial class SemanticVerifier
                     || target.Variables[ordinal + 1].Type
                         != expectedType
                     || target.Variables[ordinal + 1].IsMutable)
+                {
+                    return false;
+                }
+            }
+            if (isIndexerSetter)
+            {
+                var valueParameter = target.Variables[
+                    requiredMember.Parameters.Length + 1];
+                if (valueParameter.Type != expectedResult
+                    || valueParameter.IsMutable || valueParameter.IsOut
+                    || valueParameter.IsImplicitRef
+                    || valueParameter.IsCanonicalImplicitReference)
                 {
                     return false;
                 }
@@ -25508,14 +26054,23 @@ public static partial class SemanticVerifier
                 receiverFormalOrdinal = ordinal;
             }
 
-            return receiverFormalOrdinal >= 0
-                && program.GenericMethodSignatures[
-                    caller.GenericMethodProofDefinitionOrdinal]
-                    .Formals[receiverFormalOrdinal].InterfaceConstraints
-                    .Any(constraint =>
-                        BoundInterfaceContract.IsInInheritanceClosure(
-                            constraint, identity.RequestedInterface,
-                            program.Interfaces));
+            if (receiverFormalOrdinal < 0)
+            {
+                return false;
+            }
+
+            var receiverFormal = program.GenericMethodSignatures[
+                caller.GenericMethodProofDefinitionOrdinal]
+                .Formals[receiverFormalOrdinal];
+            return (!receiverRequiresMutable
+                    || (receiverFormal.RequiresWritable
+                        && HasWritableInterfaceCallReceiver(
+                            call.Arguments[0],
+                            identity.ImplementingType, caller, program)))
+                && receiverFormal.InterfaceConstraints.Any(constraint =>
+                    BoundInterfaceContract.IsInInheritanceClosure(
+                        constraint, identity.RequestedInterface,
+                        program.Interfaces));
         }
 
         if (target.InterfaceRequirement is not null
@@ -25541,11 +26096,20 @@ public static partial class SemanticVerifier
         var binding = witness.Members.SingleOrDefault(candidate =>
             BoundInterfaceContract.AreEquivalent(
                 candidate.Requirement, identity.Requirement));
+        var bindingSelectsCallTarget = binding is not null
+            && (binding.GenericMethodDefinitionOrdinal >= 0
+                ? binding.FunctionIndex == -1
+                    && call.GenericMethodCall?.DefinitionOrdinal
+                        == binding.GenericMethodDefinitionOrdinal
+                    && target.GenericMethodInstantiation?.DefinitionOrdinal
+                        == binding.GenericMethodDefinitionOrdinal
+                : binding.GenericMethodDefinitionOrdinal == -1
+                    && binding.FunctionIndex == call.Function);
         if (binding is null
             || binding.TargetKind is not (
                 BoundInterfaceWitnessTargetKind.Implementation
                 or BoundInterfaceWitnessTargetKind.ExplicitImplementation)
-            || binding.FunctionIndex != call.Function
+            || !bindingSelectsCallTarget
             || !BoundInterfaceContract.TryGetInterfaceMemberDefinition(
                 identity.Requirement, program.Interfaces,
                 type => ValidType(type, false, program),
@@ -25558,7 +26122,54 @@ public static partial class SemanticVerifier
         {
             return false;
         }
-        return true;
+        var requiresMutableReceiver = requirement.RequiresMutableReceiver;
+        if (requirement.Kind is BoundInterfaceMemberKind.Property
+                or BoundInterfaceMemberKind.Indexer)
+        {
+            if ((uint)identity.Requirement.AccessorOrdinal
+                >= (uint)requirement.Accessors.Length)
+            {
+                return false;
+            }
+            requiresMutableReceiver = requirement.Accessors[
+                identity.Requirement.AccessorOrdinal].IsMutable;
+        }
+
+        return !requiresMutableReceiver
+            || HasWritableInterfaceCallReceiver(call.Arguments[0],
+                identity.ImplementingType, caller, program);
+    }
+
+    private static bool IsMutableInterfaceCallReceiver(BoundCall call,
+        BoundProgram program)
+    {
+        if (call.InterfaceCallIdentity
+            is not BoundInterfaceCallIdentity identity
+            || !BoundInterfaceContract.TryGetInterfaceMemberDefinition(
+                identity.Requirement, program.Interfaces,
+                type => ValidType(type, false, program),
+                out var member,
+                allowOpenFormals: identity.IsConstraintCall,
+                genericNominalTypeDefinitions:
+                    program.GenericNominalTypeDefinitions,
+                sourceGenericTypeDefinitions:
+                    program.SourceGenericTypeDefinitions)
+            || member is null)
+        {
+            return false;
+        }
+
+        if (member.Kind is BoundInterfaceMemberKind.Property
+            or BoundInterfaceMemberKind.Indexer)
+        {
+            return (uint)identity.Requirement.AccessorOrdinal
+                    < (uint)member.Accessors.Length
+                && member.Accessors[
+                    identity.Requirement.AccessorOrdinal].IsMutable;
+        }
+
+        return member.Kind == BoundInterfaceMemberKind.Callable
+            && member.RequiresMutableReceiver;
     }
 
     private static bool HasInterfaceDefaultBody(
@@ -25590,6 +26201,450 @@ public static partial class SemanticVerifier
             && (uint)structureIndex < (uint)program.Structures.Length;
     }
 
+    private static bool TryGetInterfaceMethodReceiverMode(
+        BoundVariable receiver, PrimitiveType implementingType,
+        out bool requiresMutableReceiver)
+    {
+        requiresMutableReceiver = false;
+        if (ManagedClassTypes.IsClass(implementingType))
+        {
+            if (!ManagedClassTypes.IsClass(receiver.Type)
+                || ManagedClassTypes.IsOptional(receiver.Type)
+                || ManagedClassTypes.Readonly(receiver.Type)
+                    != implementingType
+                || receiver.IsMutable)
+            {
+                return false;
+            }
+
+            requiresMutableReceiver
+                = ManagedClassTypes.IsWritable(receiver.Type);
+            return true;
+        }
+
+        if (receiver.Type != implementingType)
+        {
+            return false;
+        }
+
+        requiresMutableReceiver = receiver.IsMutable;
+        return true;
+    }
+
+    private static bool InterfaceReceiverTypeMatches(
+        PrimitiveType receiverType, PrimitiveType implementingType)
+    {
+        if (ManagedClassTypes.IsClass(implementingType))
+        {
+            return ManagedClassTypes.IsClass(receiverType)
+                && !ManagedClassTypes.IsOptional(receiverType)
+                && ManagedClassTypes.Readonly(receiverType)
+                    == implementingType;
+        }
+
+        return receiverType == implementingType;
+    }
+
+    private static bool HasWritableInterfaceCallReceiver(
+        BoundExpression receiver, PrimitiveType implementingType,
+        BoundFunction caller, BoundProgram program)
+    {
+        for (var depth = 0;
+             receiver is BoundReadonlyProjection projection;
+             depth++)
+        {
+            if (depth >= MaximumDepth)
+            {
+                return false;
+            }
+            receiver = projection.Value;
+        }
+        if (!InterfaceReceiverTypeMatches(receiver.Type,
+                implementingType))
+        {
+            return false;
+        }
+        if (ManagedClassTypes.IsClass(implementingType))
+        {
+            if (ManagedClassTypes.IsWritable(receiver.Type))
+            {
+                return true;
+            }
+            if (receiver is BoundRead read
+                && (uint)read.Variable < (uint)caller.Variables.Length)
+            {
+                var sourceType = caller.Variables[read.Variable].Type;
+                return ManagedClassTypes.IsClass(sourceType)
+                    && !ManagedClassTypes.IsOptional(sourceType)
+                    && ManagedClassTypes.IsWritable(sourceType)
+                    && ManagedClassTypes.Readonly(sourceType)
+                        == implementingType;
+            }
+            return receiver is BoundFieldRead field
+                && ManagedClassTypes.IsWritable(field.Type);
+        }
+
+        return receiver switch {
+            BoundMutableReceiverLoan mutable =>
+                IsMutableInterfaceReceiverVariable(mutable.Variable,
+                    mutable.Type, implementingType, caller, program),
+            BoundReceiverLoan loan =>
+                IsMutableInterfaceReceiverVariable(loan.Variable,
+                    loan.Type, implementingType, caller, program),
+            BoundRead read =>
+                IsMutableInterfaceReceiverVariable(read.Variable,
+                    read.Type, implementingType, caller, program),
+            BoundMutableFieldLoan field =>
+                HasWritableInterfaceStructFieldPlace(field.Place,
+                    implementingType, caller, program),
+            BoundFieldLoan field =>
+                HasWritableInterfaceStructFieldPlace(field.Place,
+                    implementingType, caller, program),
+            BoundFieldRead field =>
+                HasWritableInterfaceStructFieldPlace(field,
+                    implementingType, caller, program),
+            _ => false,
+        };
+    }
+
+    private static bool IsMutableInterfaceReceiverVariable(int variable,
+        PrimitiveType receiverType, PrimitiveType implementingType,
+        BoundFunction caller, BoundProgram program) =>
+        receiverType == implementingType
+            && (uint)variable < (uint)caller.Variables.Length
+            && caller.Variables[variable].Type == implementingType
+            && (caller.Variables[variable].IsMutable
+                || HasGenericWriteRequirement(implementingType, caller,
+                    program));
+
+    private static bool HasGenericWriteRequirement(PrimitiveType type,
+        BoundFunction caller, BoundProgram program)
+    {
+        var definitionOrdinal
+            = caller.GenericMethodProofDefinitionOrdinal;
+        if ((uint)definitionOrdinal
+                >= (uint)program.GenericMethodSignatures.Length
+            || caller.GenericMethodProofTypeParameters.IsDefault
+            || caller.GenericMethodProofTypeParameters.Length
+                != program.GenericMethodSignatures[definitionOrdinal]
+                    .Formals.Length)
+        {
+            return false;
+        }
+
+        for (var ordinal = 0;
+            ordinal < caller.GenericMethodProofTypeParameters.Length;
+            ordinal++)
+        {
+            if (caller.GenericMethodProofTypeParameters[ordinal] == type
+                && program.GenericMethodSignatures[definitionOrdinal]
+                    .Formals[ordinal].RequiresWritable)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool HasWritableInterfaceStructFieldPlace(
+        BoundFieldRead place, PrimitiveType expectedType,
+        BoundFunction caller, BoundProgram program)
+    {
+        if (place is null || place.Type != expectedType)
+        {
+            return false;
+        }
+        BoundExpression current = place;
+        for (var depth = 0; depth < MaximumDepth; depth++)
+        {
+            if (current is not BoundFieldRead field)
+            {
+                return current is BoundRead root
+                    && (uint)root.Variable < (uint)caller.Variables.Length
+                    && root.Type == caller.Variables[root.Variable].Type
+                    && caller.Variables[root.Variable].IsMutable;
+            }
+            if (field.Receiver is null
+                || !HasFields(program, field.Receiver.Type)
+                || ManagedClassTypes.IsClass(field.Receiver.Type))
+            {
+                return false;
+            }
+            var owner = (int)field.Receiver.Type - 100;
+            if ((uint)owner >= (uint)program.Structures.Length
+                || (uint)field.Field
+                    >= (uint)program.Structures[owner].Fields.Length)
+            {
+                return false;
+            }
+            var declaration = program.Structures[owner].Fields[field.Field];
+            if (!declaration.IsMutable || declaration.Type != field.Type)
+            {
+                return false;
+            }
+            current = field.Receiver;
+        }
+        return false;
+    }
+
+    private static bool IsValidGenericInterfaceWitnessImplementation(
+        BoundInterfaceWitness witness,
+        BoundInterfaceWitnessMember binding,
+        BoundProgram program)
+    {
+        var definitionOrdinal
+            = binding.GenericMethodDefinitionOrdinal;
+        if ((uint)definitionOrdinal
+                >= (uint)program.GenericMethodDefinitions.Length
+            || (uint)definitionOrdinal
+                >= (uint)program.GenericMethodSignatures.Length
+            || !BoundInterfaceContract.TryGetInterfaceMemberDefinition(
+                binding.Requirement, program.Interfaces,
+                type => ValidType(type, false, program),
+                out var requirement,
+                genericNominalTypeDefinitions:
+                    program.GenericNominalTypeDefinitions,
+                sourceGenericTypeDefinitions:
+                    program.SourceGenericTypeDefinitions)
+            || requirement is null
+            || requirement.Kind != BoundInterfaceMemberKind.Callable
+            || requirement.IsStatic
+            || requirement.IsAsync
+            || requirement.NativeCallableConvention is not null
+            || requirement.TypeParameters.IsDefault
+            || requirement.TypeParameters.IsEmpty
+            || requirement.Constraints.IsDefault
+            || requirement.Constraints.Any(constraint =>
+                constraint.FormalScope
+                    != BoundInterfaceTypeParameterScope.Member
+                || constraint.Kind != BoundInterfaceConstraintKind.Type
+                || constraint.Type is null
+                || (uint)constraint.FormalOrdinal
+                    >= (uint)requirement.TypeParameters.Length)
+            || requirement.Attributes.IsDefault
+            || requirement.AttributeTokens.IsDefault
+            || requirement.Attributes.Any(static attribute =>
+                !StringComparer.Ordinal.Equals(attribute,
+                    "DoesNotReturn"))
+            || requirement.AttributeTokens.Length
+                != requirement.Attributes.Length
+            || requirement.DoesNotReturn
+                != requirement.Attributes.Any(static attribute =>
+                    StringComparer.Ordinal.Equals(attribute,
+                        "DoesNotReturn"))
+            || !requirement.ContractTokens.IsEmpty
+            || !requirement.Dependencies.IsEmpty)
+        {
+            return false;
+        }
+
+        var definition
+            = program.GenericMethodDefinitions[definitionOrdinal];
+        var signature
+            = program.GenericMethodSignatures[definitionOrdinal];
+        if (definition.ProofProgram is not BoundProgram proofProgram
+            || proofProgram.GenericMethodSignatures.IsDefault
+            || (uint)definitionOrdinal
+                >= (uint)proofProgram.GenericMethodSignatures.Length)
+        {
+            return false;
+        }
+        var methodSeparator = definition.Name.LastIndexOf('.');
+        var implementationMemberName = definition.Name[
+            (methodSeparator + 1)..];
+        if (definition.DefinitionOrdinal != definitionOrdinal
+            || !StringComparer.Ordinal.Equals(signature.Name,
+                definition.Name)
+            || !StringComparer.Ordinal.Equals(implementationMemberName,
+                requirement.Name)
+            || definition.Owner is not BoundGenericMethodOwner owner
+            || owner.ClosedType != witness.ImplementingType
+            || owner.SourceGenericTypeDefinitionIndex != -1
+            || !owner.TypeArguments.IsEmpty
+            || !owner.ConstantArguments.IsEmpty
+            || definition.IsStatic
+            || (definition.IsMutable
+                && !requirement.RequiresMutableReceiver)
+            || definition.Formals.Length
+                != requirement.TypeParameters.Length
+            || !definition.ConstantFormals.IsEmpty
+            || definition.FormalOrder.Length
+                != requirement.TypeParameters.Length
+            || signature.DefinitionOrdinal != definitionOrdinal
+            || signature.Owner is not BoundGenericMethodOwner signatureOwner
+            || signatureOwner.ClosedType != witness.ImplementingType
+            || signatureOwner.SourceGenericTypeDefinitionIndex != -1
+            || !signatureOwner.TypeArguments.IsEmpty
+            || !signatureOwner.ConstantArguments.IsEmpty
+            || signature.IsStatic
+            || (signature.IsMutable
+                && !requirement.RequiresMutableReceiver)
+            || definition.IsMutable != signature.IsMutable
+            || signature.Formals.Length
+                != requirement.TypeParameters.Length
+            || !signature.ConstantFormals.IsEmpty
+            || signature.FormalOrder.Length
+                != requirement.TypeParameters.Length
+            || definition.FunctionIndex < 0
+            || (uint)definition.FunctionIndex
+                >= (uint)proofProgram.Functions.Length)
+        {
+            return false;
+        }
+
+        bool InterfaceConstraintsMatch(int ordinal,
+            ImmutableArray<BoundInterfaceType> implementationConstraints)
+        {
+            var requiredConstraints = requirement.Constraints.Where(
+                constraint => constraint.FormalScope
+                    == BoundInterfaceTypeParameterScope.Member
+                    && constraint.FormalOrdinal == ordinal).ToArray();
+            if (requiredConstraints.Length
+                    != implementationConstraints.Length
+                || implementationConstraints.IsDefault)
+            {
+                return false;
+            }
+
+            var unmatched = implementationConstraints.ToList();
+            foreach (var constraint in requiredConstraints)
+            {
+                if (constraint.Kind != BoundInterfaceConstraintKind.Type
+                    || constraint.Type is not BoundInterfaceType requiredType)
+                {
+                    return false;
+                }
+
+                var substituted = BoundInterfaceContract
+                    .SubstituteTypeParameters(requiredType,
+                        binding.Requirement.DeclaringInterface.TypeArguments);
+                var matchIndex = unmatched.FindIndex(candidate =>
+                    BoundInterfaceContract.AreEquivalent(substituted,
+                        candidate));
+                if (matchIndex < 0)
+                {
+                    return false;
+                }
+                unmatched.RemoveAt(matchIndex);
+            }
+
+            return unmatched.Count == 0;
+        }
+
+        for (var ordinal = 0;
+            ordinal < requirement.TypeParameters.Length; ordinal++)
+        {
+            var requiredFormal = requirement.TypeParameters[ordinal];
+            var definitionFormal = definition.Formals[ordinal];
+            var signatureFormal = signature.Formals[ordinal];
+            var definitionSlot = definition.FormalOrder[ordinal];
+            var signatureSlot = signature.FormalOrder[ordinal];
+            if (requiredFormal.Ordinal != ordinal
+                || requiredFormal.Kind != BoundInterfaceFormalKind.Type
+                || requiredFormal.IsSelf
+                || !requiredFormal.Attributes.IsEmpty
+                || !requiredFormal.AttributeTokens.IsEmpty
+                || requiredFormal.ConstantType is not null
+                || requiredFormal.TypeDefault is not null
+                || requiredFormal.ConstantDefault is not null
+                || definitionFormal.Ordinal != ordinal
+                || definitionFormal.OwnershipDomain != 1
+                || definitionFormal.NullabilityDomain != 1
+                || !definitionFormal.Requirements.IsEmpty
+                || definitionFormal.TypeDefault is not null
+                || definitionFormal.RequiresBlittable
+                || definitionFormal.RequiresWritable
+                || !InterfaceConstraintsMatch(ordinal,
+                    definitionFormal.InterfaceConstraints)
+                || signatureFormal.Ordinal != ordinal
+                || signatureFormal.OwnershipDomain != 1
+                || signatureFormal.NullabilityDomain != 1
+                || !signatureFormal.Requirements.IsEmpty
+                || signatureFormal.HasTypeDefault
+                || signatureFormal.RequiresBlittable
+                || signatureFormal.RequiresWritable
+                || !InterfaceConstraintsMatch(ordinal,
+                    signatureFormal.InterfaceConstraints)
+                || !signatureFormal.DefaultTypeParameterDependencies.IsEmpty
+                || definitionSlot.Ordinal != ordinal
+                || definitionSlot.Kind != BoundGenericMethodFormalKind.Type
+                || definitionSlot.TypeFormalOrdinal != ordinal
+                || definitionSlot.ConstantFormalOrdinal != -1
+                || signatureSlot.Ordinal != ordinal
+                || signatureSlot.Kind != BoundGenericMethodFormalKind.Type
+                || signatureSlot.TypeFormalOrdinal != ordinal
+                || signatureSlot.ConstantFormalOrdinal != -1)
+            {
+                return false;
+            }
+        }
+
+        var function = proofProgram.Functions[
+            definition.FunctionIndex];
+        if (function.GenericMethodProofDefinitionOrdinal
+                != definitionOrdinal
+            || function.GenericMethodProofTypeParameters.Length
+                != proofProgram.GenericMethodSignatures[
+                    definitionOrdinal].Formals.Length)
+        {
+            return false;
+        }
+        if (function.IsExternal || function.IsStatic
+            || function.ParameterCount
+                != requirement.Parameters.Length + 1
+            || function.Variables.Length < function.ParameterCount)
+        {
+            return false;
+        }
+        if (!function.DependencyContracts.IsEmpty
+            || !function.DeclarationContractClauses.IsEmpty
+            || (function.RequiresUnsafeCaller
+                && !requirement.RequiresUnsafeCaller)
+            || (requirement.DoesNotReturn && !function.DoesNotReturn))
+        {
+            return false;
+        }
+        if (requirement.ResultType is not BoundInterfaceType resultType
+            || !TryGetInterfaceProofPrimitiveType(resultType,
+                binding.Requirement.DeclaringInterface.TypeArguments,
+                function, proofProgram, out var expectedResult))
+        {
+            return false;
+        }
+        if (function.ReturnType != expectedResult)
+        {
+            return false;
+        }
+        if (!TryGetInterfaceMethodReceiverMode(function.Variables[0],
+                witness.ImplementingType, out var functionRequiresMutable)
+            || functionRequiresMutable != definition.IsMutable)
+        {
+            return false;
+        }
+
+        for (var ordinal = 0; ordinal < requirement.Parameters.Length;
+            ordinal++)
+        {
+            var requiredParameter = requirement.Parameters[ordinal];
+            var actualParameter = function.Variables[ordinal + 1];
+            if (!requiredParameter.Attributes.IsEmpty
+                || !requiredParameter.AttributeTokens.IsEmpty
+                || !TryGetInterfaceProofPrimitiveType(
+                    requiredParameter.Type,
+                    binding.Requirement.DeclaringInterface.TypeArguments,
+                    function, proofProgram, out var expectedType)
+                || actualParameter.Type != expectedType
+                || !InterfaceWitnessParameterModeMatches(actualParameter,
+                    requiredParameter.Mode))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private static bool IsValidInterfaceWitnessImplementation(
         BoundInterfaceWitness witness,
         BoundInterfaceWitnessMember binding,
@@ -25611,39 +26666,47 @@ public static partial class SemanticVerifier
             return false;
         }
 
-        BoundInterfaceAccessor? getter = null;
-        var isPropertyGetter = requirement.Kind
+        BoundInterfaceAccessor? accessor = null;
+        var isPropertyMember = requirement.Kind
             is BoundInterfaceMemberKind.Property
                 or BoundInterfaceMemberKind.Indexer;
-        if (isPropertyGetter)
+        if (isPropertyMember)
         {
-            if (requirement.Kind != BoundInterfaceMemberKind.Property
-                || (uint)binding.Requirement.AccessorOrdinal
-                    >= (uint)requirement.Accessors.Length
-                || requirement.Accessors[
-                    binding.Requirement.AccessorOrdinal].Kind
-                    != BoundInterfaceAccessorKind.Get)
+            if ((uint)binding.Requirement.AccessorOrdinal
+                    >= (uint)requirement.Accessors.Length)
             {
                 return false;
             }
-            getter = requirement.Accessors[
+            accessor = requirement.Accessors[
                 binding.Requirement.AccessorOrdinal];
+            if (accessor.Kind != BoundInterfaceAccessorKind.Get
+                && (requirement.Kind
+                        != BoundInterfaceMemberKind.Indexer
+                    || accessor.Kind != BoundInterfaceAccessorKind.Set))
+            {
+                return false;
+            }
         }
         else if (requirement.Kind != BoundInterfaceMemberKind.Callable
             || !requirement.Accessors.IsEmpty)
         {
             return false;
         }
+        var isPropertyGetter = accessor?.Kind
+            == BoundInterfaceAccessorKind.Get;
+        var isIndexerSetter = requirement.Kind
+                == BoundInterfaceMemberKind.Indexer
+            && accessor?.Kind == BoundInterfaceAccessorKind.Set;
 
         if (!requirement.TypeParameters.IsEmpty
             || !requirement.Constraints.IsEmpty
             || !requirement.Attributes.IsEmpty
             || !requirement.ContractTokens.IsEmpty
             || !requirement.Dependencies.IsEmpty
-            || (getter is not null
-                && (!getter.Attributes.IsEmpty
-                    || !getter.ContractTokens.IsEmpty
-                    || !getter.Dependencies.IsEmpty))
+            || (accessor is not null
+                && (!accessor.Attributes.IsEmpty
+                    || !accessor.ContractTokens.IsEmpty
+                    || !accessor.Dependencies.IsEmpty))
             || requirement.ResultType is not BoundInterfaceType resultType)
         {
             return false;
@@ -25657,52 +26720,101 @@ public static partial class SemanticVerifier
         var receiverCount = requirement.IsStatic ? 0 : 1;
         var isExplicit = binding.TargetKind
             == BoundInterfaceWitnessTargetKind.ExplicitImplementation;
-        var functionName = isPropertyGetter
-            ? ownerName + ".#get:" + requirement.Name
+        var functionName = isIndexerSetter
+            ? ownerName + ".#set:" + requirement.Name
+            : isPropertyGetter
+                ? ownerName + ".#get:" + requirement.Name
             : ownerName + "." + requirement.Name;
-        var requiresUnsafeCaller = getter?.RequiresUnsafeCaller
+        var requiresUnsafeCaller = accessor?.RequiresUnsafeCaller
             ?? requirement.RequiresUnsafeCaller;
-        var targetAccessibility = getter?.Accessibility
+        var targetAccessibility = accessor?.Accessibility
             ?? requirement.Accessibility;
-        var doesNotReturn = getter?.DoesNotReturn
+        var doesNotReturn = accessor?.DoesNotReturn
             ?? requirement.DoesNotReturn;
-        if (function is null || function.IsExternal
-            || function.IsPrivate != isExplicit
+        var requiresMutableReceiver = accessor?.IsMutable
+            ?? requirement.RequiresMutableReceiver;
+        if (function is null || function.IsExternal)
+        {
+            return false;
+        }
+        if (function.IsPrivate != isExplicit)
+        {
+            return false;
+        }
+        if (!isExplicit
+            && targetAccessibility == BoundInterfaceAccessibility.Public
+            && function.IsInternal)
+        {
+            return false;
+        }
+        if (isExplicit
+            ? function.ExplicitInterfaceOwner is not
+                    BoundInterfaceType explicitOwner
+                || !BoundInterfaceContract.AreEquivalent(explicitOwner,
+                    binding.Requirement.DeclaringInterface)
+            : function.ExplicitInterfaceOwner is not null)
+        {
+            return false;
+        }
+        if (isExplicit && requirement.Kind
+            == BoundInterfaceMemberKind.Property)
+        {
+            return false;
+        }
+        if (function.IsConstructor || function.IsCleanup
+            || function.IsOperator
             || (!isExplicit
-                && targetAccessibility
-                    == BoundInterfaceAccessibility.Public
-                && function.IsInternal)
-            || (isExplicit
-                ? function.ExplicitInterfaceOwner is not
-                        BoundInterfaceType explicitOwner
-                    || !BoundInterfaceContract.AreEquivalent(
-                        explicitOwner,
-                        binding.Requirement.DeclaringInterface)
-                : function.ExplicitInterfaceOwner is not null)
-            || function.IsConstructor
-            || function.IsCleanup || function.IsOperator
-            || (isExplicit && isPropertyGetter)
-            || (!isExplicit && function.Name != functionName)
-            || function.DeclaringStruct != ownerName
-            || function.IsStatic != requirement.IsStatic
+                && !StringComparer.Ordinal.Equals(function.Name,
+                    functionName)
+                && !function.Name.EndsWith("." + functionName,
+                    StringComparison.Ordinal)))
+        {
+            return false;
+        }
+        if (function.DeclaringStruct != ownerName)
+        {
+            return false;
+        }
+        if (function.IsStatic != requirement.IsStatic
             || function.ParameterCount
                 != requirement.Parameters.Length + receiverCount
-            || function.Variables.Length < function.ParameterCount
-            || function.DependencyContracts.IsDefault
+                    + (isIndexerSetter ? 1 : 0)
+            || function.Variables.Length < function.ParameterCount)
+        {
+            return false;
+        }
+        if (function.DependencyContracts.IsDefault
             || !function.DependencyContracts.IsEmpty
             || function.DeclarationContractClauses.IsDefault
             || !function.DeclarationContractClauses.IsEmpty
             || (function.RequiresUnsafeCaller
                 && !requiresUnsafeCaller)
-            || (doesNotReturn && !function.DoesNotReturn)
-            || !TryGetInterfacePrimitiveType(resultType,
-                binding.Requirement.DeclaringInterface.TypeArguments,
-                program, out var expectedResult)
-            || function.ReturnType != expectedResult)
+            || (doesNotReturn && !function.DoesNotReturn))
         {
             return false;
         }
-        if (isPropertyGetter && function.PropertyName != requirement.Name)
+        var expectedResult = PrimitiveType.Void;
+        if (resultType.Kind == BoundInterfaceTypeKind.Primitive
+            && resultType.PrimitiveType == PrimitiveType.Void
+            && !resultType.IsWritable && !resultType.IsOptional
+            && !resultType.IsGarbageCollected
+            && !resultType.IsInitialization)
+        {
+            expectedResult = PrimitiveType.Void;
+        }
+        else if (!TryGetInterfacePrimitiveType(resultType,
+                    binding.Requirement.DeclaringInterface.TypeArguments,
+                    program, out expectedResult))
+        {
+            return false;
+        }
+        if (function.ReturnType != (isIndexerSetter
+                ? PrimitiveType.Void : expectedResult))
+        {
+            return false;
+        }
+        if ((isPropertyGetter || isIndexerSetter)
+            && function.PropertyName != requirement.Name)
         {
             return false;
         }
@@ -25725,8 +26837,33 @@ public static partial class SemanticVerifier
                 return false;
             }
         }
-        return receiverCount == 0
-            || function.Variables[0].Type == witness.ImplementingType;
+        if (isIndexerSetter)
+        {
+            var valueParameter = function.Variables[
+                requirement.Parameters.Length + receiverCount];
+            if (valueParameter.Type != expectedResult
+                || valueParameter.IsOut
+                || valueParameter.IsImplicitRef
+                || valueParameter.IsCanonicalImplicitReference)
+            {
+                return false;
+            }
+        }
+        if (receiverCount == 0)
+        {
+            return true;
+        }
+        if (!TryGetInterfaceMethodReceiverMode(function.Variables[0],
+                witness.ImplementingType,
+                out var implementationRequiresMutable))
+        {
+            return false;
+        }
+        if (implementationRequiresMutable && !requiresMutableReceiver)
+        {
+            return false;
+        }
+        return true;
     }
 
     private static bool TryGetInterfacePrimitiveType(
@@ -25876,6 +27013,102 @@ public static partial class SemanticVerifier
             && value.Bits.IsCanonicalFor(carrierType);
     }
 
+    private static bool AreInterfaceParameterDefaultsValid(
+        BoundProgram program, bool allowUnmaterializedDefaults)
+    {
+        foreach (var member in program.Interfaces.SelectMany(
+            static definition => definition.Members))
+        {
+            foreach (var parameter in member.Parameters)
+            {
+                if (parameter.HasPendingDefault)
+                {
+                    if (!allowUnmaterializedDefaults
+                        || parameter.Mode
+                            != BoundInterfaceParameterMode.Value
+                        || parameter.Type.Kind
+                            != BoundInterfaceTypeKind.Primitive
+                        || parameter.DefaultSyntaxSpan.Length <= 0
+                        || parameter.DefaultValue is not null
+                        || parameter.DefaultExpression is not null
+                        || parameter.DefaultExpressionSourceInputOrdinal != -1)
+                    {
+                        return false;
+                    }
+                    continue;
+                }
+
+                if (parameter.DefaultExpression is not null
+                    || parameter.DefaultExpressionSourceInputOrdinal != -1)
+                {
+                    if (!allowUnmaterializedDefaults
+                        || parameter.DefaultExpression
+                            is not BoundExpression expression
+                        || parameter.Mode
+                            != BoundInterfaceParameterMode.Value
+                        || parameter.Type.Kind
+                            != BoundInterfaceTypeKind.Primitive
+                        || expression.Type
+                            != parameter.Type.PrimitiveType
+                        || (uint)parameter
+                            .DefaultExpressionSourceInputOrdinal
+                            >= (uint)program.SourceInputCount)
+                    {
+                        return false;
+                    }
+                    continue;
+                }
+                if (parameter.DefaultValue is not BoundConstant value)
+                {
+                    continue;
+                }
+                if (parameter.Mode != BoundInterfaceParameterMode.Value
+                    || parameter.Type.Kind
+                        != BoundInterfaceTypeKind.Primitive
+                    || value.Type != parameter.Type.PrimitiveType
+                    || !IsValidInterfaceParameterDefaultValue(value,
+                        program))
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsValidInterfaceParameterDefaultValue(
+        BoundConstant value, BoundProgram program)
+    {
+        var type = value.Type;
+        var isEnum = BoundEnumTypes.IsType(type);
+        if (type is not (PrimitiveType.Bool or PrimitiveType.Char8
+                or PrimitiveType.Char16 or PrimitiveType.Char32
+                or PrimitiveType.Rune or PrimitiveType.Int8
+                or PrimitiveType.Int16 or PrimitiveType.Int32
+                or PrimitiveType.Int64 or PrimitiveType.UInt8
+                or PrimitiveType.UInt16 or PrimitiveType.UInt32
+                or PrimitiveType.UInt64 or PrimitiveType.Int128
+                or PrimitiveType.UInt128 or PrimitiveType.Float16
+                or PrimitiveType.BFloat16 or PrimitiveType.Float32
+                or PrimitiveType.Float64 or PrimitiveType.Float128
+                or PrimitiveType.Decimal32 or PrimitiveType.Decimal64
+                or PrimitiveType.Decimal128)
+            && (!isEnum
+                || !BoundEnumTypes.IsValidType(type,
+                    program.EnumDefinitions.Length)))
+        {
+            return false;
+        }
+
+        var carrierType = isEnum
+            ? program.EnumDefinitions[BoundEnumTypes.Index(type)]
+                .UnderlyingType
+            : type;
+        return value.RepresentationType == carrierType
+            && value.Bits.IsCanonicalFor(carrierType);
+    }
+
     private static bool TryProjectGenericMethodInterfaceFormals(
         BoundGenericMethodSignature signature,
         BoundProgram program,
@@ -25906,7 +27139,10 @@ public static partial class SemanticVerifier
                 var formal = signature.Formals[slot.TypeFormalOrdinal];
                 result.Add(new BoundInterfaceFormal(slot.Ordinal,
                     formal.Name, BoundInterfaceFormalKind.Type, false,
-                    [], [], null, null, null));
+                    [], [], null, null, null)
+                {
+                    RequiresWritable = formal.RequiresWritable,
+                });
                 continue;
             }
 
@@ -26385,7 +27621,7 @@ public static partial class SemanticVerifier
                 || definition.Formals.IsDefault
                 || definition.ConstantFormals.IsDefault
                 || definition.FormalOrder.IsDefault
-                || definition.RuntimeParameterCount is < 1 or > 8
+                || definition.RuntimeParameterCount is < 0 or > 8
                 || definition.Formals.Length
                     + definition.ConstantFormals.Length is < 1 or > 8
                 || definition.Formals.Length != signature.Formals.Length
@@ -26441,9 +27677,6 @@ public static partial class SemanticVerifier
                 || proofFunction.DeclaringStruct
                     != GenericMethodOwnerName(signature.Owner,
                         proofProgram)
-                || proofFunction.ParameterCount
-                    != definition.RuntimeParameterCount
-                        + definition.ConstantFormals.Length
                 || proofFunction.IsExternal
                 || proofFunction.Span != definition.Span)
             {
@@ -26452,6 +27685,14 @@ public static partial class SemanticVerifier
             }
             if (!IsValidGenericMethodProofReceiver(proofFunction,
                 signature, proofProgram))
+            {
+                invalidDefinitionIndex = definitionIndex;
+                return false;
+            }
+            if (!IsValidGenericMethodOwnerConstantProofVariables(
+                definition,
+                proofProgram.GenericMethodSignatures[definitionIndex].Owner,
+                proofFunction, proofProgram))
             {
                 invalidDefinitionIndex = definitionIndex;
                 return false;
@@ -26717,6 +27958,14 @@ public static partial class SemanticVerifier
                     return false;
                 }
             }
+
+            if (!IsValidGenericMethodOrdinaryParameterDefaults(
+                    program, definition, proofFunction, proofProgram,
+                    ref work))
+            {
+                invalidDefinitionIndex = definitionIndex;
+                return false;
+            }
         }
 
         if (!BoundTreeTraversal.VisitGenericMethodFunctions(program,
@@ -26727,6 +27976,485 @@ public static partial class SemanticVerifier
         }
 
         invalidDefinitionIndex = -1;
+        return true;
+    }
+
+    private static bool IsValidGenericMethodOwnerConstantProofVariables(
+        BoundGenericMethodDefinition definition,
+        BoundGenericMethodOwner? owner, BoundFunction proofFunction,
+        BoundProgram proofProgram)
+    {
+        var variableIndex = definition.RuntimeParameterCount
+            + definition.ConstantFormals.Length;
+        if (owner is null)
+        {
+            return proofFunction.ParameterCount == variableIndex;
+        }
+
+        if (owner.SourceGenericTypeDefinitionIndex < 0)
+        {
+            return owner.ConstantArguments.IsDefaultOrEmpty
+                && proofFunction.ParameterCount == variableIndex;
+        }
+
+        if ((uint)owner.SourceGenericTypeDefinitionIndex
+            >= (uint)proofProgram.SourceGenericTypeDefinitions.Length)
+        {
+            return false;
+        }
+
+        var ownerDefinition = proofProgram.SourceGenericTypeDefinitions[
+            owner.SourceGenericTypeDefinitionIndex];
+        var ownerConstantArguments = owner.ConstantArguments.IsDefault
+            ? ImmutableArray<BoundGenericMethodConstantArgument>.Empty
+            : owner.ConstantArguments;
+        if (ownerDefinition.Formals.IsDefault
+            || ownerDefinition.ConstantFormals.IsDefault
+            || ownerConstantArguments.Length
+            != ownerDefinition.ConstantFormals.Length)
+        {
+            return false;
+        }
+
+        var ownerTypeFormalCount = ownerDefinition.Formals.Count(
+            static formal =>
+                formal.Kind == BoundGenericMethodFormalKind.Type);
+        var ownerTypeArguments = owner.TypeArguments.IsDefault
+            ? ImmutableArray<PrimitiveType>.Empty : owner.TypeArguments;
+        if (ownerTypeFormalCount != ownerTypeArguments.Length)
+        {
+            return false;
+        }
+
+        var ownerTypeTerms = ImmutableArray.CreateBuilder<
+            BoundGenericMethodTypeTerm>(ownerTypeArguments.Length);
+        foreach (var ownerTypeArgument in ownerTypeArguments)
+        {
+            if (!TryGetGenericMethodActualTypeTerm(ownerTypeArgument,
+                proofFunction, proofProgram, 0, out var ownerTypeTerm))
+            {
+                return false;
+            }
+            ownerTypeTerms.Add(ownerTypeTerm);
+        }
+        var ownerConstantArgumentTerms = ownerConstantArguments
+            .Select(static actual =>
+                (BoundGenericMethodConstantArgument?)actual)
+            .ToImmutableArray();
+        var checkedOwnerTypeTerms = ownerTypeTerms.MoveToImmutable();
+
+        for (var ordinal = 0;
+            ordinal < ownerDefinition.ConstantFormals.Length; ordinal++)
+        {
+            var ownerFormal = ownerDefinition.ConstantFormals[ordinal];
+            var actual = ownerConstantArguments[ordinal];
+            if (ownerFormal.ConstantOrdinal != ordinal
+                || !BoundGenericMethodTypeTerms
+                    .TrySubstituteSourceGenericTypeFormals(
+                        ownerFormal.Domain, checkedOwnerTypeTerms,
+                        owner.SourceGenericTypeDefinitionIndex,
+                        ownerConstantArgumentTerms,
+                        out var expectedDomain)
+                || !AreGenericMethodTypeTermsEqual(expectedDomain,
+                    actual.Domain, 0))
+            {
+                return false;
+            }
+
+            if (actual.Kind
+                == BoundGenericMethodConstantArgumentKind.Value)
+            {
+                if (actual.CallerDefinitionOrdinal != -1
+                    || actual.CallerFormalOrdinal != -1
+                    || actual.CallerConstantFormalOrdinal != -1
+                    || actual.CallerFormalOwnerKind
+                        != BoundGenericTypeFormalOwnerKind.GenericMethod
+                    || actual.DomainType == PrimitiveType.Void
+                    || actual.CarrierType == PrimitiveType.Void
+                    || !actual.Bits.IsCanonicalFor(actual.CarrierType)
+                    || !TryGetGenericMethodConstantValueDomain(
+                        expectedDomain, proofFunction, proofProgram,
+                        out var domainType, out var carrierType)
+                    || actual.DomainType != domainType
+                    || actual.CarrierType != carrierType)
+                {
+                    return false;
+                }
+                continue;
+            }
+
+            if (actual.Kind
+                    != BoundGenericMethodConstantArgumentKind.Formal
+                || !IsValidGenericMethodConstantFormalIdentity(actual,
+                    proofProgram)
+                || !AreGenericMethodTypeTermsEqual(actual.Domain,
+                    expectedDomain, 0))
+            {
+                return false;
+            }
+
+            if (definition.ConstantFormals.Any(formal =>
+                formal.Name == ownerFormal.Name))
+            {
+                continue;
+            }
+
+            if (!TryGetGenericMethodConstantValueDomain(expectedDomain,
+                    proofFunction, proofProgram, out var formalType, out _)
+                || (uint)variableIndex >= (uint)proofFunction.Variables.Length)
+            {
+                return false;
+            }
+
+            var proofVariable = proofFunction.Variables[variableIndex++];
+            if (proofVariable is null
+                || proofVariable.Name != ownerFormal.Name
+                || proofVariable.Type != formalType
+                || proofVariable.IsMutable
+                || proofVariable.IsOut || proofVariable.IsInit)
+            {
+                return false;
+            }
+        }
+
+        return proofFunction.ParameterCount == variableIndex;
+    }
+
+    private static bool TryGetGenericMethodOwnerProofConstantFormalCount(
+        BoundGenericMethodOwner? owner,
+        ImmutableArray<BoundGenericMethodConstantFormalSignature>
+            methodConstantFormals,
+        BoundProgram program, out int count)
+    {
+        count = 0;
+        if (owner is null)
+        {
+            return true;
+        }
+
+        if (owner.SourceGenericTypeDefinitionIndex < 0)
+        {
+            return owner.ConstantArguments.IsDefaultOrEmpty;
+        }
+
+        if ((uint)owner.SourceGenericTypeDefinitionIndex
+                >= (uint)program.SourceGenericTypeDefinitions.Length)
+        {
+            return false;
+        }
+
+        var ownerDefinition = program.SourceGenericTypeDefinitions[
+            owner.SourceGenericTypeDefinitionIndex];
+        if (ownerDefinition.ConstantFormals.IsDefault)
+        {
+            return false;
+        }
+        var ownerConstantArguments = owner.ConstantArguments.IsDefault
+            ? ImmutableArray<BoundGenericMethodConstantArgument>.Empty
+            : owner.ConstantArguments;
+        if (ownerConstantArguments.Length
+            != ownerDefinition.ConstantFormals.Length)
+        {
+            return false;
+        }
+
+        foreach (var ownerFormal in ownerDefinition.ConstantFormals)
+        {
+            if ((uint)ownerFormal.ConstantOrdinal
+                >= (uint)ownerConstantArguments.Length)
+            {
+                return false;
+            }
+            var actual = ownerConstantArguments[
+                ownerFormal.ConstantOrdinal];
+            if (actual.Kind
+                == BoundGenericMethodConstantArgumentKind.Value)
+            {
+                continue;
+            }
+
+            if (actual.Kind
+                    != BoundGenericMethodConstantArgumentKind.Formal
+                || !IsValidGenericMethodConstantFormalIdentity(actual,
+                    program))
+            {
+                return false;
+            }
+
+            if (!methodConstantFormals.Any(methodFormal =>
+                methodFormal.Name == ownerFormal.Name))
+            {
+                count++;
+            }
+        }
+
+        return true;
+    }
+
+    internal static bool IsValidGenericMethodConstantFormalIdentity(
+        BoundGenericMethodConstantArgument argument, BoundProgram program)
+    {
+        if (argument.CallerDefinitionOrdinal < 0
+            || argument.CallerConstantFormalOrdinal < 0)
+        {
+            return false;
+        }
+
+        if (argument.CallerFormalOwnerKind
+            == BoundGenericTypeFormalOwnerKind.GenericMethod)
+        {
+            if (argument.CallerFormalOrdinal < 0
+                || (uint)argument.CallerDefinitionOrdinal
+                    >= (uint)program.GenericMethodSignatures.Length)
+            {
+                return false;
+            }
+
+            var signature = program.GenericMethodSignatures[
+                argument.CallerDefinitionOrdinal];
+            var formal = signature.ConstantFormals.FirstOrDefault(
+                candidate => candidate.Ordinal
+                    == argument.CallerFormalOrdinal);
+            return formal is not null
+                && formal.ConstantOrdinal
+                    == argument.CallerConstantFormalOrdinal;
+        }
+
+        if (argument.CallerFormalOwnerKind
+                != BoundGenericTypeFormalOwnerKind.SourceGenericType
+            || argument.CallerFormalOrdinal != -1
+            || (uint)argument.CallerDefinitionOrdinal
+                >= (uint)program.SourceGenericTypeDefinitions.Length)
+        {
+            return false;
+        }
+
+        return program.SourceGenericTypeDefinitions[
+                argument.CallerDefinitionOrdinal].ConstantFormals.Any(
+                    formal => formal.ConstantOrdinal
+                        == argument.CallerConstantFormalOrdinal);
+    }
+
+    private static bool IsValidGenericMethodOrdinaryParameterDefaults(
+        BoundProgram program, BoundGenericMethodDefinition definition,
+        BoundFunction proofFunction, BoundProgram proofProgram,
+        ref long work)
+    {
+        var receiverCount = definition.Owner is not null
+                && !definition.IsStatic
+            ? 1 : 0;
+        var ordinaryParameterCount = definition.RuntimeParameterCount
+            - receiverCount;
+        var defaults = definition.OrdinaryParameterDefaults;
+        if (ordinaryParameterCount < 0 || defaults.IsDefault
+            || defaults.Length != ordinaryParameterCount)
+        {
+            return false;
+        }
+
+        work += defaults.Length;
+        if (work > MaximumAnalysisVisits)
+        {
+            return false;
+        }
+
+        for (var parameterIndex = 0;
+            parameterIndex < defaults.Length; parameterIndex++)
+        {
+            var parameterDefault = defaults[parameterIndex];
+            if (parameterDefault is null)
+            {
+                continue;
+            }
+
+            var variableIndex = receiverCount + parameterIndex;
+            if ((uint)variableIndex >= (uint)proofFunction.Variables.Length
+                || parameterDefault.ParameterIndex != parameterIndex
+                || string.IsNullOrWhiteSpace(parameterDefault.ParameterName)
+                || parameterDefault.ParameterName
+                    != proofFunction.Variables[variableIndex].Name
+                || parameterDefault.ParameterType
+                    != proofFunction.Variables[variableIndex].Type
+                || !IsValidType(parameterDefault.ParameterType, false,
+                    proofProgram)
+                || parameterDefault.Value is not BoundExpression value
+                || value.Type != parameterDefault.ParameterType
+                || parameterDefault.FormalDependencies.IsDefault)
+            {
+                return false;
+            }
+
+            var previousOwnerDependency = -1;
+            var previousMethodDependency = -1;
+            var sawMethodDependency = false;
+            foreach (var dependency in parameterDefault.FormalDependencies)
+            {
+                work++;
+                if (work > MaximumAnalysisVisits || dependency is null
+                    || dependency.Domain is null)
+                {
+                    return false;
+                }
+
+                if (dependency.OwnerKind
+                    == BoundGenericTypeFormalOwnerKind.SourceGenericType)
+                {
+                    if (sawMethodDependency
+                        || definition.Owner is not BoundGenericMethodOwner
+                            owner
+                        || owner.SourceGenericTypeDefinitionIndex
+                            != dependency.DefinitionOrdinal
+                        || (uint)dependency.DefinitionOrdinal
+                            >= (uint)program.SourceGenericTypeDefinitions.Length
+                        || owner.ConstantArguments.IsDefault
+                        || (uint)dependency.ConstantFormalOrdinal
+                            >= (uint)owner.ConstantArguments.Length
+                        || dependency.ConstantFormalOrdinal
+                            <= previousOwnerDependency)
+                    {
+                        return false;
+                    }
+
+                    var ownerArgument = owner.ConstantArguments[
+                        dependency.ConstantFormalOrdinal];
+                    var ownerDefinition = program.SourceGenericTypeDefinitions[
+                        dependency.DefinitionOrdinal];
+                    if (ownerDefinition.ConstantFormals.IsDefault)
+                    {
+                        return false;
+                    }
+                    var ownerFormal = ownerDefinition.ConstantFormals
+                        .FirstOrDefault(formal => formal.ConstantOrdinal
+                            == dependency.ConstantFormalOrdinal);
+                    if (ownerFormal is null
+                        || ownerFormal.ConstantOrdinal
+                            != dependency.ConstantFormalOrdinal
+                        || ownerArgument is null
+                        || ownerArgument.ConstantOrdinal
+                            != dependency.ConstantFormalOrdinal
+                        || (ownerArgument.Kind
+                                != BoundGenericMethodConstantArgumentKind.Value
+                            && ownerArgument.Kind
+                                != BoundGenericMethodConstantArgumentKind.Formal)
+                        || !AreGenericMethodConstantDomainTermsEquivalent(
+                            dependency.Domain, ownerArgument.Domain,
+                            program, proofProgram))
+                    {
+                        return false;
+                    }
+                    previousOwnerDependency
+                        = dependency.ConstantFormalOrdinal;
+                    continue;
+                }
+
+                if (dependency.OwnerKind
+                        != BoundGenericTypeFormalOwnerKind.GenericMethod
+                    || dependency.DefinitionOrdinal
+                        != definition.DefinitionOrdinal
+                    || (uint)dependency.ConstantFormalOrdinal
+                        >= (uint)definition.ConstantFormals.Length
+                    || dependency.ConstantFormalOrdinal
+                        <= previousMethodDependency)
+                {
+                    return false;
+                }
+
+                var methodFormal = definition.ConstantFormals.FirstOrDefault(
+                    formal => formal.ConstantOrdinal
+                        == dependency.ConstantFormalOrdinal);
+                if (methodFormal is null
+                    || !AreGenericMethodConstantDomainTermsEquivalent(
+                        dependency.Domain, methodFormal.Domain, program,
+                        proofProgram))
+                {
+                    return false;
+                }
+                previousMethodDependency
+                    = dependency.ConstantFormalOrdinal;
+                sawMethodDependency = true;
+            }
+
+            var usedDependencies = new bool[
+                parameterDefault.FormalDependencies.Length];
+            long expressionVisits = 0;
+            var validExpression = value.HasValidNestedExpressions;
+            if (validExpression)
+            {
+                var traversalValid
+                    = BoundTreeTraversal.VisitExpressionTree(value,
+                        expression =>
+                        {
+                            expressionVisits++;
+                            if (expressionVisits > MaximumAnalysisVisits
+                                || !IsValidType(expression.Type, false,
+                                    proofProgram))
+                            {
+                                validExpression = false;
+                                return;
+                            }
+
+                            if (expression is not BoundRead read)
+                            {
+                                return;
+                            }
+
+                            if ((uint)read.Variable
+                                >= (uint)parameterDefault
+                                    .FormalDependencies.Length)
+                            {
+                                validExpression = false;
+                                return;
+                            }
+
+                            var dependency
+                                = parameterDefault.FormalDependencies[
+                                    read.Variable];
+                            var validReadType = false;
+                            if (dependency.OwnerKind
+                                == BoundGenericTypeFormalOwnerKind
+                                    .GenericMethod)
+                            {
+                                var methodFormal
+                                    = definition.ConstantFormals
+                                        .FirstOrDefault(formal =>
+                                            formal.ConstantOrdinal
+                                                == dependency
+                                                    .ConstantFormalOrdinal);
+                                validReadType = methodFormal is not null
+                                    && methodFormal.PlaceholderType
+                                        == read.Type;
+                            }
+                            else if (dependency.OwnerKind
+                                == BoundGenericTypeFormalOwnerKind
+                                    .SourceGenericType)
+                            {
+                                validReadType
+                                    = TryGetGenericMethodActualTypeTerm(
+                                        read.Type, proofFunction,
+                                        proofProgram, 0,
+                                        out var readTypeTerm)
+                                    && AreGenericMethodConstantDomainTermsEquivalent(
+                                        dependency.Domain, readTypeTerm,
+                                        program, proofProgram);
+                            }
+                            if (!validReadType)
+                            {
+                                validExpression = false;
+                                return;
+                            }
+                            usedDependencies[read.Variable] = true;
+                        });
+                validExpression &= traversalValid;
+            }
+            work += expressionVisits;
+            if (!validExpression
+                || work > MaximumAnalysisVisits
+                || usedDependencies.Any(static used => !used))
+            {
+                return false;
+            }
+        }
+
         return true;
     }
 
@@ -26823,6 +28551,8 @@ public static partial class SemanticVerifier
                     && (term.CallingConvention
                             != NativeCallingConvention.Native
                         || term.ParameterCount != 0))
+                || (term.Kind != BoundGenericMethodTypeTermKind.Span
+                    && term.IsElementWritable)
                 || (term.Kind != BoundGenericMethodTypeTermKind.Concrete
                     && term.AllowsVoid))
             {
@@ -26852,9 +28582,7 @@ public static partial class SemanticVerifier
                         || term.IsGarbageCollected
                         || term.IsInitialization
                         || term.IsOptional
-                        || (term.IsWritable
-                            && !formals[term.FormalOrdinal]
-                                .RequiresWritable)
+                        || term.IsWritable
                         || term.ConcreteType != PrimitiveType.Void)
                     {
                         return false;
@@ -27214,6 +28942,27 @@ public static partial class SemanticVerifier
                         && IsValidGenericMethodFixedArrayElementTerm(
                             term.TypeArguments[0], formals, program, 0)
                         && Visit(term.TypeArguments[0], depth + 1);
+                case BoundGenericMethodTypeTermKind.Span:
+                    return term.FormalOrdinal == -1
+                        && term.SourceGenericTypeDefinitionIndex == -1
+                        && term.ConcreteType == PrimitiveType.Void
+                        && !term.IsGarbageCollected
+                        && !term.IsOptional
+                        && term.NominalTypeIdentity is null
+                        && term.TypeArguments.Length == 1
+                        && !(term.TypeArguments[0].Kind
+                                == BoundGenericMethodTypeTermKind.Concrete
+                            && (term.TypeArguments[0].ConcreteType
+                                    == PrimitiveType.Void
+                                || term.TypeArguments[0].AllowsVoid))
+                        && (!term.IsElementWritable
+                            || (term.TypeArguments[0].Kind
+                                    == BoundGenericMethodTypeTermKind.Formal
+                                && (uint)term.TypeArguments[0].FormalOrdinal
+                                    < (uint)formals.Length
+                                && formals[term.TypeArguments[0]
+                                    .FormalOrdinal].RequiresWritable))
+                        && Visit(term.TypeArguments[0], depth + 1);
                 case BoundGenericMethodTypeTermKind.NativeFunctionPointer:
                     if (!IsValidGenericMethodFunctionPointerSignatureTerm(
                         term, formals, program, 0))
@@ -27259,6 +29008,7 @@ public static partial class SemanticVerifier
             BoundGenericMethodTypeTermKind.CheckedReference =>
                 term.IsOptional,
             BoundGenericMethodTypeTermKind.OptionalValue => true,
+            BoundGenericMethodTypeTermKind.Span => false,
             BoundGenericMethodTypeTermKind.SourceGeneric
                 or BoundGenericMethodTypeTermKind.ImportedGeneric
                 or BoundGenericMethodTypeTermKind.NativePointer
@@ -27282,6 +29032,19 @@ public static partial class SemanticVerifier
                 3 => domain is 1 or 2 or 3,
                 _ => false,
             });
+    }
+
+    internal static bool IsGenericNominalTypeArgumentTermAdmitted(
+        BoundGenericMethodTypeTerm term,
+        ImmutableArray<BoundGenericMethodFormal> formals,
+        byte ownershipDomain, byte nullabilityDomain,
+        BoundProgram program)
+    {
+        return !formals.IsDefault
+            && IsGenericMethodTypeTermInOwnershipDomain(term,
+                ownershipDomain, formals, program, 0)
+            && (nullabilityDomain != 1
+                || !IsNullableGenericMethodTypeTerm(term, formals, program));
     }
 
     private static byte? GetGenericMethodTypeTermOwnershipDomain(
@@ -27311,16 +29074,17 @@ public static partial class SemanticVerifier
                 return (uint)term.FormalOrdinal < (uint)formals.Length
                     ? formals[term.FormalOrdinal].OwnershipDomain : null;
             case BoundGenericMethodTypeTermKind.CheckedReference:
-                return term.TypeArguments.Length == 1
-                    && GetGenericMethodTypeTermOwnershipDomain(
-                        term.TypeArguments[0], formals, program,
-                        depth + 1) == 1 ? (byte)1 : null;
+                return !term.IsInitialization
+                    && term.TypeArguments.Length == 1 ? (byte)1 : null;
             case BoundGenericMethodTypeTermKind.OptionalValue:
                 return term.TypeArguments.Length == 1
                     ? GetGenericMethodTypeTermOwnershipDomain(
                         term.TypeArguments[0], formals, program,
                         depth + 1)
                     : null;
+            case BoundGenericMethodTypeTermKind.Span:
+                return !term.IsInitialization
+                    && term.TypeArguments.Length == 1 ? (byte)1 : null;
             case BoundGenericMethodTypeTermKind.SourceGeneric:
                 if ((uint)term.SourceGenericTypeDefinitionIndex
                     >= (uint)program.SourceGenericTypeDefinitions.Length)
@@ -27420,7 +29184,7 @@ public static partial class SemanticVerifier
                     return null;
                 }
                 return program.CoreTaskType?.Definition == identity
-                    ? (byte)2 : (byte)1;
+                    ? (byte)2 : null;
             case BoundGenericMethodTypeTermKind.NativePointer:
             case BoundGenericMethodTypeTermKind.NativeFixedArray:
             case BoundGenericMethodTypeTermKind.NativeFunctionPointer:
@@ -27448,6 +29212,8 @@ public static partial class SemanticVerifier
                 && IsWritableGenericMethodTypeTerm(
                     term.TypeArguments[0], formals, program),
             BoundGenericMethodTypeTermKind.NativePointer =>
+                term.IsWritable,
+            BoundGenericMethodTypeTermKind.Span =>
                 term.IsWritable,
             _ => false,
         };
@@ -27896,7 +29662,6 @@ public static partial class SemanticVerifier
                 return false;
             }
         }
-
         return true;
     }
 
@@ -28222,6 +29987,15 @@ public static partial class SemanticVerifier
                 return false;
             }
 
+            if (proofFunction is not null
+                && TryGetGenericMethodActualTypeTerm(proofType,
+                    proofFunction, proofProgram, 0, out var proofDomain)
+                && AreGenericMethodConstantDomainTermsEquivalent(domain,
+                    proofDomain, sourceProgram, proofProgram))
+            {
+                return true;
+            }
+
             var constantPlaceholderIndex = (int)proofType - 100;
             return constantPlaceholderIndex >= 0
                 && (uint)constantPlaceholderIndex
@@ -28426,30 +30200,57 @@ public static partial class SemanticVerifier
 
             if (sourceConstant.Kind
                     != BoundGenericMethodTypeConstantArgumentKind.Formal
-                || sourceConstant.FormalOwnerKind
-                    != BoundGenericTypeFormalOwnerKind.GenericMethod
                 || !proofArgument.HasConstantFormalIdentity
+                || proofArgument.ConstantFormalOwnerKind
+                    != sourceConstant.FormalOwnerKind
                 || proofArgument.ConstantFormalDefinitionOrdinal
                     != sourceConstant.FormalDefinitionOrdinal
                 || proofArgument.ConstantFormalOrdinal
                     != sourceConstant.FormalOrdinal
                 || proofArgument.ConstantFormalDomain is not
-                    BoundGenericMethodTypeTerm proofDomain
-                || (uint)sourceConstant.FormalDefinitionOrdinal
-                    >= (uint)sourceProgram.GenericMethodDefinitions.Length)
+                    BoundGenericMethodTypeTerm proofDomain)
             {
                 return false;
             }
 
-            var callerDefinition = sourceProgram.GenericMethodDefinitions[
-                sourceConstant.FormalDefinitionOrdinal];
-            var callerFormal = callerDefinition.ConstantFormals
-                .FirstOrDefault(candidate => candidate.ConstantOrdinal
-                    == sourceConstant.FormalOrdinal);
-            if (callerFormal is null
+            BoundGenericMethodTypeTerm? sourceDomain = null;
+            if (sourceConstant.FormalOwnerKind
+                == BoundGenericTypeFormalOwnerKind.GenericMethod)
+            {
+                if ((uint)sourceConstant.FormalDefinitionOrdinal
+                    >= (uint)sourceProgram.GenericMethodDefinitions.Length)
+                {
+                    return false;
+                }
+                sourceDomain = sourceProgram.GenericMethodDefinitions[
+                    sourceConstant.FormalDefinitionOrdinal].ConstantFormals
+                    .FirstOrDefault(candidate =>
+                        candidate.ConstantOrdinal
+                            == sourceConstant.FormalOrdinal)?.Domain;
+            }
+            else if (sourceConstant.FormalOwnerKind
+                == BoundGenericTypeFormalOwnerKind.SourceGenericType)
+            {
+                if ((uint)sourceConstant.FormalDefinitionOrdinal
+                    >= (uint)sourceProgram.SourceGenericTypeDefinitions
+                        .Length)
+                {
+                    return false;
+                }
+                sourceDomain = sourceProgram.SourceGenericTypeDefinitions[
+                    sourceConstant.FormalDefinitionOrdinal].ConstantFormals
+                    .FirstOrDefault(candidate =>
+                        candidate.ConstantOrdinal
+                            == sourceConstant.FormalOrdinal)?.Domain;
+            }
+            else
+            {
+                return false;
+            }
+
+            if (sourceDomain is null
                 || !AreGenericMethodConstantDomainTermsEquivalent(
-                    callerFormal.Domain, proofDomain, sourceProgram,
-                    proofProgram))
+                    sourceDomain, proofDomain, sourceProgram, proofProgram))
             {
                 return false;
             }
@@ -29038,6 +30839,8 @@ public static partial class SemanticVerifier
             || source.CallerFormalOrdinal != proof.CallerFormalOrdinal
             || source.CallerDefinitionOrdinal
                 != proof.CallerDefinitionOrdinal
+            || source.CallerFormalOwnerKind
+                != proof.CallerFormalOwnerKind
             || source.CallerConstantFormalOrdinal
                 != proof.CallerConstantFormalOrdinal
             || source.Bits != proof.Bits
@@ -29403,8 +31206,8 @@ public static partial class SemanticVerifier
                 : !string.IsNullOrEmpty(origin.ExportKey)
                     && (origin.MethodDefId >> 24) == 0x16
                     && (origin.MethodDefId & 0x00FF_FFFF) != 0)
-            && StringComparer.Ordinal.Equals(origin.SchemaIdentity,
-                "trrm/1-draft-generic-method-calls-1")
+            && StandardGenericMethodSchema.IsGenericMethodCalls(
+                origin.SchemaIdentity)
             && origin.TargetRequirement <= 1
             && origin.RuntimePolicy <= 1
             && !origin.ProviderArtifactDigest.IsDefault
@@ -29418,11 +31221,206 @@ public static partial class SemanticVerifier
             && !signature.FormalOrder.IsDefault
             && signature.FormalOrder.Length == import.Formals.Length
             && !import.Formals.IsDefault
+            && !import.ProofSupportFunctions.IsDefault
+            && import.ProofSupportFunctions.Length
+                <= MaximumFunctions
+            && import.ProofSupportFunctions.All(
+                static supportFunction => supportFunction is not null
+                    && supportFunction.IsExternal
+                    && supportFunction.IsPrivate
+                    && !supportFunction.IsStatic
+                    && supportFunction.DeclaringStruct is null
+                    && supportFunction.InterfaceRequirement is not null
+                    && supportFunction.GenericMethodProofCall is null
+                    && supportFunction.ParameterCount
+                        <= supportFunction.Variables.Length)
             && import.ProofFunction is not null
             && !import.ProofFunction.IsExternal
             && import.ProofFunction.ParameterCount
                 <= import.ProofFunction.Variables.Length
+            && IsValidGenericMethodImportSpanTypes(import)
+            && IsValidGenericMethodImportSupportFunctions(import)
             && IsValidGenericMethodImportBinding(import);
+    }
+
+    private static bool IsValidGenericMethodImportSpanTypes(
+        BoundGenericMethodImport import)
+    {
+        if (import.FormalTypeOwnerOrdinal < 0
+            || import.FormalTypeOwnerOrdinal >= MaximumAnalysisVisits
+            || !BoundSpanTypeContract.TryCreateTypeIdentityIndex(
+                import.SpanTypes, out _))
+        {
+            return false;
+        }
+
+        var formalOwner = BoundSpanTypeContract
+            .ImportedFormalDefinitionOrdinal
+            - import.FormalTypeOwnerOrdinal;
+        foreach (var spanType in import.SpanTypes)
+        {
+            if (spanType.ElementFormalDefinitionOrdinal != formalOwner)
+            {
+                continue;
+            }
+
+            var formalOrdinal = spanType.ElementFormalOrdinal;
+            if ((uint)formalOrdinal >= (uint)import.Formals.Length
+                || import.Formals[formalOrdinal].PlaceholderType
+                    != spanType.ElementType
+                || (spanType.IsElementWritable
+                    && !import.Formals[formalOrdinal].RequiresWritable))
+            {
+                return false;
+            }
+        }
+
+        return IsValidImportedSpanTypeUse(import.ProofFunction, import,
+            formalOwner);
+    }
+
+    private static bool IsValidImportedSpanTypeUse(
+        BoundFunction function, BoundGenericMethodImport import,
+        int formalOwner)
+    {
+        if (function.Variables.IsDefault)
+        {
+            return false;
+        }
+
+        var valid = function.Variables.All(variable =>
+            IsValidImportedSpanTypeUse(variable.Type, import,
+                formalOwner))
+            && IsValidImportedSpanTypeUse(function.ReturnType, import,
+                formalOwner);
+        if (!valid)
+        {
+            return false;
+        }
+
+        if (function.GenericMethodInstantiation
+                is BoundGenericMethodInstantiation instantiation
+            && (instantiation.TypeArguments.IsDefault
+                || instantiation.TypeArguments.Any(type =>
+                    !IsValidImportedSpanTypeUse(type, import,
+                        formalOwner))))
+        {
+            return false;
+        }
+        if (function.GenericMethodProofCall
+                is BoundGenericMethodInstantiation proofCall
+            && (proofCall.TypeArguments.IsDefault
+                || proofCall.TypeArguments.Any(type =>
+                    !IsValidImportedSpanTypeUse(type, import,
+                        formalOwner))))
+        {
+            return false;
+        }
+        if (!function.ImportedGenericMethodTypeArguments.IsDefaultOrEmpty
+            && function.ImportedGenericMethodTypeArguments.Any(type =>
+                !IsValidImportedSpanTypeUse(type, import, formalOwner)))
+        {
+            return false;
+        }
+
+        return BoundTreeTraversal.VisitExpressions(function.Body,
+            expression =>
+            {
+                valid &= IsValidImportedSpanTypeUse(expression.Type, import,
+                    formalOwner);
+                if (expression is BoundCall call)
+                {
+                    if (call.GenericMethodCall
+                            is BoundGenericMethodInstantiation genericCall)
+                    {
+                        valid &= !genericCall.TypeArguments.IsDefault
+                            && genericCall.TypeArguments.All(type =>
+                                IsValidImportedSpanTypeUse(type, import,
+                                    formalOwner));
+                    }
+                    if (!call.ImportedGenericMethodTypeArguments
+                        .IsDefaultOrEmpty)
+                    {
+                        valid &= call.ImportedGenericMethodTypeArguments
+                            .All(type =>
+                                IsValidImportedSpanTypeUse(type, import,
+                                    formalOwner));
+                    }
+                }
+            }) && valid;
+    }
+
+    private static bool IsValidImportedSpanTypeUse(PrimitiveType type,
+        BoundGenericMethodImport import, int formalOwner, int depth = 0)
+    {
+        if (!BoundSpanTypeTypes.IsType(type))
+        {
+            return true;
+        }
+        if (depth > MaximumDepth
+            || !BoundSpanTypeTypes.IsValidType(type, import.SpanTypes))
+        {
+            return false;
+        }
+
+        var spanType = import.SpanTypes[BoundSpanTypeTypes.Index(type)];
+        if (spanType.ElementFormalDefinitionOrdinal != -1
+            && spanType.ElementFormalDefinitionOrdinal != formalOwner)
+        {
+            return false;
+        }
+        if (spanType.ElementFormalDefinitionOrdinal == formalOwner)
+        {
+            var formalOrdinal = spanType.ElementFormalOrdinal;
+            if ((uint)formalOrdinal >= (uint)import.Formals.Length
+                || import.Formals[formalOrdinal].PlaceholderType
+                    != spanType.ElementType
+                || (spanType.IsElementWritable
+                    && !import.Formals[formalOrdinal].RequiresWritable))
+            {
+                return false;
+            }
+        }
+
+        return IsValidImportedSpanTypeUse(spanType.ElementType, import,
+            formalOwner, depth + 1);
+    }
+
+    private static bool IsValidGenericMethodImportSupportFunctions(
+        BoundGenericMethodImport import)
+    {
+        var supportFunctions = import.ProofSupportFunctions;
+        var usedSupportFunctions = new bool[supportFunctions.Length];
+        var valid = true;
+        var visited = BoundTreeTraversal.VisitExpressions(
+            import.ProofFunction.Body, expression =>
+            {
+                if (expression is not BoundCall call
+                    || call.InterfaceCallIdentity is not
+                        BoundInterfaceCallIdentity identity)
+                {
+                    return;
+                }
+
+                if ((uint)call.Function
+                        >= (uint)supportFunctions.Length
+                    || supportFunctions[call.Function]
+                        .InterfaceRequirement
+                        is not BoundInterfaceMemberIdentity requirement
+                    || !identity.IsConstraintCall
+                    || !BoundInterfaceContract.AreEquivalent(
+                        requirement, identity.Requirement)
+                    || supportFunctions[call.Function].ParameterCount
+                        != call.Arguments.Length)
+                {
+                    valid = false;
+                    return;
+                }
+
+                usedSupportFunctions[call.Function] = true;
+            });
+        return valid && visited
+            && usedSupportFunctions.All(static used => used);
     }
 
     private static bool IsValidGenericMethodImportBinding(
@@ -29438,6 +31436,9 @@ public static partial class SemanticVerifier
         if (binding.ImportRow is < 1 or > 0x00FF_FFFF
             || binding.ModuleRefRow is < 1 or > 0x00FF_FFFF
             || expected is null || provider is null
+            || binding.ExpectedInterfaceDefinitions.IsDefault
+            || binding.ExpectedInterfaceDefinitions.Length
+                > MaximumAnalysisVisits
             || expected.Binding is not null || provider.Binding is not null
             || ReferenceEquals(import, expected)
             || ReferenceEquals(import, provider)
@@ -29466,6 +31467,8 @@ public static partial class SemanticVerifier
                 == expectedFunction.RequiresUnsafeCaller
             && function.DoesNotReturn == expectedFunction.DoesNotReturn
             && ReferenceEquals(function.Body, provider.ProofFunction.Body)
+            && import.ProofSupportFunctions
+                .SequenceEqual(provider.ProofSupportFunctions)
             && function.Variables.Take(function.ParameterCount)
                 .Select(static variable =>
                     (variable.Type, variable.IsOut, variable.IsInit))
@@ -29657,6 +31660,24 @@ public static partial class SemanticVerifier
         return true;
     }
 
+    internal static bool IsGenericMethodFormalContractSatisfied(
+        byte targetOwnershipDomain, byte targetNullabilityDomain,
+        bool targetRequiresWritable, bool targetRequiresBlittable,
+        byte actualOwnershipDomain, byte actualNullabilityDomain,
+        bool actualRequiresWritable, bool actualRequiresBlittable)
+        => targetOwnershipDomain is 1 or 2 or 3
+            && targetNullabilityDomain is 1 or 2
+            && actualOwnershipDomain is 1 or 2 or 3
+            && actualNullabilityDomain is 1 or 2
+            && (targetOwnershipDomain != 1
+                || actualOwnershipDomain == 1)
+            && (targetOwnershipDomain != 2
+                || actualOwnershipDomain == 2)
+            && (targetNullabilityDomain != 1
+                || actualNullabilityDomain == 1)
+            && (!targetRequiresWritable || actualRequiresWritable)
+            && (!targetRequiresBlittable || actualRequiresBlittable);
+
     private static bool IsValidGenericMethodInstantiation(
         BoundGenericMethodInstantiation? instantiation,
         BoundProgram program, BoundFunction? callerFunction = null,
@@ -29693,9 +31714,7 @@ public static partial class SemanticVerifier
             var typeArgument = instantiation.TypeArguments[ordinal];
             var formal = formals[ordinal];
             if (!BoundGenericNominalTypeContract.IsValidConstantFormalUse(
-                    typeArgument,
-                    callerFunction?.GenericMethodProofDefinitionOrdinal,
-                    program))
+                    typeArgument, callerFunction, program))
             {
                 return false;
             }
@@ -29762,8 +31781,11 @@ public static partial class SemanticVerifier
     internal static bool IsValidGenericNominalConstantFormalBindings(
         BoundProgram program)
     {
-        foreach (var instance in program.GenericNominalTypeInstances)
+        for (var instanceIndex = 0;
+            instanceIndex < program.GenericNominalTypeInstances.Length;
+            instanceIndex++)
         {
+            var instance = program.GenericNominalTypeInstances[instanceIndex];
             if (instance.Arguments.IsDefault)
             {
                 return false;
@@ -29778,29 +31800,73 @@ public static partial class SemanticVerifier
             }
 
             BoundFunction? callerFunction = null;
-            var callerDefinitionOrdinals = instance.Arguments
+            var methodOwnerOrdinals = instance.Arguments
                 .Where(static argument =>
-                    argument.HasConstantFormalIdentity)
+                    argument.HasConstantFormalIdentity
+                    && argument.ConstantFormalOwnerKind
+                        == BoundGenericTypeFormalOwnerKind.GenericMethod)
                 .Select(static argument =>
                     argument.ConstantFormalDefinitionOrdinal)
-                .Distinct()
-                .Take(2)
-                .ToArray();
-            if (callerDefinitionOrdinals.Length > 1)
+                .Distinct().Take(2).ToArray();
+            if (methodOwnerOrdinals.Length > 1)
             {
                 return false;
             }
-            var callerDefinitionOrdinal = callerDefinitionOrdinals.Length == 0
-                ? -1 : callerDefinitionOrdinals[0];
-            if (callerDefinitionOrdinal >= 0)
+            var sourceOwnerOrdinals = instance.Arguments
+                .Where(static argument =>
+                    argument.HasConstantFormalIdentity
+                    && argument.ConstantFormalOwnerKind
+                        == BoundGenericTypeFormalOwnerKind.SourceGenericType)
+                .Select(static argument =>
+                    argument.ConstantFormalDefinitionOrdinal)
+                .Distinct().Take(2).ToArray();
+            if (sourceOwnerOrdinals.Length > 1)
+            {
+                return false;
+            }
+            if (methodOwnerOrdinals.Length != 0)
             {
                 callerFunction = program.Functions.FirstOrDefault(function =>
                     function.GenericMethodProofDefinitionOrdinal
-                        == callerDefinitionOrdinal);
+                        == methodOwnerOrdinals[0]);
                 if (callerFunction is null)
                 {
                     return false;
                 }
+            }
+            else if (sourceOwnerOrdinals.Length != 0)
+            {
+                // Resolve open owner type arguments in their exact proof context.
+                var matchingOwnerFunctions = program.Functions.Where(
+                    function =>
+                    {
+                        var definitionOrdinal
+                            = function.GenericMethodProofDefinitionOrdinal;
+                        return (uint)definitionOrdinal
+                                < (uint)program.GenericMethodSignatures.Length
+                            && program.GenericMethodSignatures[
+                                definitionOrdinal]?.Owner
+                                is BoundGenericMethodOwner owner
+                            && owner.SourceGenericTypeDefinitionIndex
+                                == sourceOwnerOrdinals[0];
+                    }).Take(2).ToArray();
+                if (matchingOwnerFunctions.Length > 1)
+                {
+                    return false;
+                }
+                if (matchingOwnerFunctions.Length == 1)
+                {
+                    callerFunction = matchingOwnerFunctions[0];
+                }
+            }
+            if (instance.Arguments.Any(static argument =>
+                    argument.HasConstantFormalIdentity)
+                && !BoundGenericNominalTypeContract
+                    .IsValidConstantFormalUse(
+                        BoundGenericNominalTypeTypes.Type(instanceIndex),
+                        callerFunction, program))
+            {
+                return false;
             }
 
             var typeArguments = ImmutableArray.CreateBuilder<
@@ -29824,8 +31890,15 @@ public static partial class SemanticVerifier
                     return false;
                 }
 
-                typeArguments.Add(ApplyGenericQueryTypeQualifiers(typeTerm,
-                    argument.Qualifiers));
+                var qualifiedArgument = ApplyGenericQueryTypeQualifiers(
+                    typeTerm, argument.Qualifiers);
+                if (!TryNormalizeGenericQueryFormalWriteQualifier(
+                        qualifiedArgument, callerFunction, program,
+                        out var normalizedArgument))
+                {
+                    return false;
+                }
+                typeArguments.Add(normalizedArgument);
             }
 
             var checkedTypeArguments = typeArguments.MoveToImmutable();
@@ -29894,6 +31967,216 @@ public static partial class SemanticVerifier
         return true;
     }
 
+    internal static bool IsValidGenericNominalTypeFormalBindings(
+        BoundProgram program)
+    {
+        if (program.GenericMethodTypeFormalOwners.IsDefault)
+        {
+            return false;
+        }
+
+        var formalOwners = new Dictionary<int,
+            ImmutableArray<BoundGenericTypeFormal>>();
+        foreach (var owner in program.GenericMethodTypeFormalOwners)
+        {
+            if (owner.Ordinal < 0)
+            {
+                if (owner.TypeFormalCount != 0 || owner.Formals.IsDefault)
+                {
+                    return false;
+                }
+                continue;
+            }
+            if (owner.Ordinal >= BoundSpanTypeTypes.MaximumCount
+                || owner.Formals.IsDefault
+                || owner.TypeFormalCount
+                    > MaximumArguments)
+            {
+                return false;
+            }
+            for (var formalOrdinal = 0;
+                formalOrdinal < owner.Formals.Length; formalOrdinal++)
+            {
+                var formal = owner.Formals[formalOrdinal];
+                if (formal.Ordinal != formalOrdinal
+                    || formal.OwnershipDomain is < 1 or > 3
+                    || formal.NullabilityDomain is < 1 or > 2)
+                {
+                    return false;
+                }
+            }
+            if (formalOwners.TryGetValue(owner.Ordinal,
+                    out var existingFormals))
+            {
+                if (!existingFormals.AsSpan().SequenceEqual(
+                        owner.Formals.AsSpan()))
+                {
+                    return false;
+                }
+            }
+            else
+            {
+                formalOwners.Add(owner.Ordinal, owner.Formals);
+            }
+        }
+
+        foreach (var definition in program.GenericMethodDefinitions)
+        {
+            if (definition.FormalTypeOwnerOrdinal >= 0
+                && !MatchesOwner(definition.FormalTypeOwnerOrdinal,
+                    definition.Formals))
+            {
+                return false;
+            }
+        }
+        foreach (var function in program.Functions)
+        {
+            if (function.ImportedGenericMethod is
+                BoundGenericMethodImport import
+                && import.FormalTypeOwnerOrdinal >= 0
+                && !MatchesOwner(import.FormalTypeOwnerOrdinal,
+                    import.Formals))
+            {
+                return false;
+            }
+
+            if (function.GenericMethodProofTypeFormalOwnerOrdinal >= 0
+                && !MatchesProofOwner(function))
+            {
+                return false;
+            }
+        }
+
+        foreach (var instance in program.GenericNominalTypeInstances)
+        {
+            foreach (var argument in instance.Arguments)
+            {
+                if (argument.TypeArgumentTerm is
+                    BoundGenericMethodTypeTerm typeArgumentTerm)
+                {
+                    if (!BoundGenericMethodTypeTerms
+                            .TryGetFormalDependencies(typeArgumentTerm,
+                                out var dependencies)
+                        || !BoundGenericMethodTypeTerms
+                            .TryGetConstantFormalDependencies(
+                                typeArgumentTerm, out _)
+                        || (!dependencies.IsEmpty
+                            && !argument.HasTypeFormalOwnerIdentity))
+                    {
+                        return false;
+                    }
+                }
+
+                if (!argument.HasTypeFormalOwnerIdentity)
+                {
+                    continue;
+                }
+
+                if (!formalOwners.TryGetValue(
+                        argument.TypeFormalDefinitionOrdinal,
+                        out var formals)
+                    || (argument.TypeFormalOrdinal >= 0
+                        && argument.TypeFormalOrdinal >= formals.Length)
+                    || (argument.TypeArgumentTerm is
+                            BoundGenericMethodTypeTerm typeTerm
+                        && BoundGenericMethodTypeTerms
+                            .TryGetFormalDependencies(typeTerm,
+                                out var termDependencies)
+                        && termDependencies.Any(dependency =>
+                            (uint)dependency >= (uint)formals.Length)))
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+
+        bool MatchesOwner(int ownerOrdinal,
+            ImmutableArray<BoundGenericMethodFormal> formals)
+        {
+            if (!formalOwners.TryGetValue(ownerOrdinal,
+                    out var ownerFormals)
+                || formals.IsDefault
+                || ownerFormals.Length != formals.Length)
+            {
+                return false;
+            }
+
+            for (var formalOrdinal = 0;
+                formalOrdinal < formals.Length; formalOrdinal++)
+            {
+                var sourceFormal = formals[formalOrdinal];
+                var ownerFormal = ownerFormals[formalOrdinal];
+                if (ownerFormal.Ordinal != sourceFormal.Ordinal
+                    || ownerFormal.PlaceholderType
+                        != sourceFormal.PlaceholderType
+                    || ownerFormal.OwnershipDomain
+                        != sourceFormal.OwnershipDomain
+                    || ownerFormal.NullabilityDomain
+                        != sourceFormal.NullabilityDomain
+                    || ownerFormal.RequiresWritable
+                        != sourceFormal.RequiresWritable
+                    || ownerFormal.RequiresBlittable
+                        != sourceFormal.RequiresBlittable)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        bool MatchesProofOwner(BoundFunction function)
+        {
+            var definitionOrdinal
+                = function.GenericMethodProofDefinitionOrdinal;
+            var ownerOrdinal
+                = function.GenericMethodProofTypeFormalOwnerOrdinal;
+            if ((uint)definitionOrdinal
+                    >= (uint)program.GenericMethodSignatures.Length
+                || !formalOwners.TryGetValue(ownerOrdinal,
+                    out var ownerFormals)
+                || function.GenericMethodProofTypeParameters.IsDefault)
+            {
+                return false;
+            }
+
+            var signature = program.GenericMethodSignatures[
+                definitionOrdinal];
+            var formals = signature.Formals;
+            if (formals.IsDefault
+                || function.GenericMethodProofTypeParameters.Length
+                    != formals.Length
+                || ownerFormals.Length != formals.Length)
+            {
+                return false;
+            }
+
+            for (var ordinal = 0; ordinal < formals.Length; ordinal++)
+            {
+                var formal = formals[ordinal];
+                var ownerFormal = ownerFormals[ordinal];
+                if (formal.Ordinal != ordinal
+                    || function.GenericMethodProofTypeParameters[ordinal]
+                        != ownerFormal.PlaceholderType
+                    || formal.OwnershipDomain
+                        != ownerFormal.OwnershipDomain
+                    || formal.NullabilityDomain
+                        != ownerFormal.NullabilityDomain
+                    || formal.RequiresWritable
+                        != ownerFormal.RequiresWritable
+                    || formal.RequiresBlittable
+                        != ownerFormal.RequiresBlittable)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+    }
+
     private static bool IsValidGenericMethodConstantFormalUse(
         BoundFunction function, BoundProgram program)
     {
@@ -29902,9 +32185,8 @@ public static partial class SemanticVerifier
             return true;
         }
 
-        var scope = function.GenericMethodProofDefinitionOrdinal;
         if (!BoundGenericNominalTypeContract.IsValidConstantFormalUse(
-                function.ReturnType, scope, program))
+                function.ReturnType, function, program))
         {
             return false;
         }
@@ -29912,7 +32194,7 @@ public static partial class SemanticVerifier
         foreach (var variable in function.Variables)
         {
             if (!BoundGenericNominalTypeContract.IsValidConstantFormalUse(
-                variable.Type, scope, program))
+                variable.Type, function, program))
             {
                 return false;
             }
@@ -29924,7 +32206,7 @@ public static partial class SemanticVerifier
                 {
                     if (!BoundGenericNominalTypeContract
                             .IsValidConstantFormalUse(expression.Type,
-                                scope, program))
+                                function, program))
                     {
                         isValid = false;
                     }
@@ -29984,6 +32266,8 @@ public static partial class SemanticVerifier
                 if (actual.CallerFormalOrdinal != -1
                     || actual.CallerDefinitionOrdinal != -1
                     || actual.CallerConstantFormalOrdinal != -1
+                    || actual.CallerFormalOwnerKind
+                        != BoundGenericTypeFormalOwnerKind.GenericMethod
                     || !BoundGenericMethodTypeTerms.TryGetFormalDependencies(
                         expectedDomain, out var dependencies)
                     || !dependencies.IsEmpty
@@ -30019,8 +32303,17 @@ public static partial class SemanticVerifier
         BoundGenericMethodTypeTerm expectedDomain,
         BoundFunction? callerFunction, BoundProgram program)
     {
+        if (actual.CallerFormalOwnerKind
+            == BoundGenericTypeFormalOwnerKind.SourceGenericType)
+        {
+            return IsValidGenericMethodOwnerConstantFormalForward(
+                actual, expectedDomain, callerFunction, program);
+        }
+
         if (callerFunction?.GenericMethodProofDefinitionOrdinal
                 is not int callerDefinitionOrdinal
+            || actual.CallerFormalOwnerKind
+                != BoundGenericTypeFormalOwnerKind.GenericMethod
             || actual.CallerDefinitionOrdinal
                 != callerDefinitionOrdinal
             || (uint)callerDefinitionOrdinal
@@ -30048,13 +32341,116 @@ public static partial class SemanticVerifier
             return false;
         }
 
+        if (!TryGetGenericMethodOwnerProofConstantFormalCount(
+                callerSignature.Owner, callerSignature.ConstantFormals,
+                program, out var ownerProofFormalCount))
+        {
+            return false;
+        }
+
         var parameterIndex = callerFunction.ParameterCount
+            - ownerProofFormalCount
             - callerSignature.ConstantFormals.Length
             + callerFormal.ConstantOrdinal;
         return (uint)parameterIndex
                 < (uint)callerFunction.Variables.Length
             && callerFunction.Variables[parameterIndex].Name
                 == callerFormal.Name
+            && !callerFunction.Variables[parameterIndex].IsMutable;
+    }
+
+    private static bool IsValidGenericMethodOwnerConstantFormalForward(
+        BoundGenericMethodConstantArgument actual,
+        BoundGenericMethodTypeTerm expectedDomain,
+        BoundFunction? callerFunction, BoundProgram program)
+    {
+        if (callerFunction?.GenericMethodProofDefinitionOrdinal
+                is not int callerDefinitionOrdinal
+            || (uint)callerDefinitionOrdinal
+                >= (uint)program.GenericMethodSignatures.Length
+            || (uint)actual.CallerDefinitionOrdinal
+                >= (uint)program.SourceGenericTypeDefinitions.Length
+            || actual.CallerFormalOrdinal != -1)
+        {
+            return false;
+        }
+
+        var callerSignature = program.GenericMethodSignatures[
+            callerDefinitionOrdinal];
+        var owner = callerSignature.Owner;
+        var ownerDefinition = program.SourceGenericTypeDefinitions[
+            actual.CallerDefinitionOrdinal];
+        if (owner is null
+            || owner.SourceGenericTypeDefinitionIndex
+                != actual.CallerDefinitionOrdinal
+            || owner.ConstantArguments.IsDefault
+            || owner.ConstantArguments.Length
+                != ownerDefinition.ConstantFormals.Length
+            || (uint)actual.CallerConstantFormalOrdinal
+                >= (uint)owner.ConstantArguments.Length)
+        {
+            return false;
+        }
+
+        var ownerFormal = ownerDefinition.ConstantFormals.FirstOrDefault(
+            candidate => candidate.ConstantOrdinal
+                == actual.CallerConstantFormalOrdinal);
+        var ownerArgument = owner.ConstantArguments[
+            actual.CallerConstantFormalOrdinal];
+        if (ownerFormal is null
+            || ownerArgument.Kind
+                != BoundGenericMethodConstantArgumentKind.Formal
+            || !IsValidGenericMethodConstantFormalIdentity(
+                ownerArgument, program)
+            || !AreGenericMethodTypeTermsEqual(ownerArgument.Domain,
+                expectedDomain, 0)
+            || !AreGenericMethodTypeTermsEqual(actual.Domain,
+                expectedDomain, 0)
+            || !TryGetGenericMethodConstantValueDomain(expectedDomain,
+                callerFunction, program, out var domainType,
+                out _))
+        {
+            return false;
+        }
+
+        var ownerFormalRank = 0;
+        var ownerProofFormalCount = 0;
+        foreach (var formal in ownerDefinition.ConstantFormals)
+        {
+            if (callerSignature.ConstantFormals.Any(methodFormal =>
+                    methodFormal.Name == formal.Name))
+            {
+                continue;
+            }
+
+            var argument = owner.ConstantArguments[formal.ConstantOrdinal];
+            if (argument.Kind
+                != BoundGenericMethodConstantArgumentKind.Formal)
+            {
+                continue;
+            }
+
+            if (!IsValidGenericMethodConstantFormalIdentity(argument,
+                program))
+            {
+                return false;
+            }
+
+            if (formal.ConstantOrdinal
+                < actual.CallerConstantFormalOrdinal)
+            {
+                ownerFormalRank++;
+            }
+            ownerProofFormalCount++;
+        }
+
+        var parameterIndex = callerFunction.ParameterCount
+            - ownerProofFormalCount + ownerFormalRank;
+        return (uint)parameterIndex
+                < (uint)callerFunction.Variables.Length
+            && callerFunction.Variables[parameterIndex].Name
+                == ownerFormal.Name
+            && callerFunction.Variables[parameterIndex].Type == domainType
             && !callerFunction.Variables[parameterIndex].IsMutable;
     }
 
@@ -30239,7 +32635,7 @@ public static partial class SemanticVerifier
         return false;
     }
 
-    private static bool TryGetGenericMethodActualTypeTerm(
+    internal static bool TryGetGenericMethodActualTypeTerm(
         PrimitiveType type, BoundFunction? callerFunction,
         BoundProgram program, int depth,
         out BoundGenericMethodTypeTerm term)
@@ -30310,6 +32706,7 @@ public static partial class SemanticVerifier
             || left.CallingConvention != right.CallingConvention
             || left.ParameterCount != right.ParameterCount
             || left.AllowsVoid != right.AllowsVoid
+            || left.IsElementWritable != right.IsElementWritable
             || left.TypeArguments.IsDefault
             || right.TypeArguments.IsDefault
             || left.TypeArguments.Length != right.TypeArguments.Length
@@ -30356,6 +32753,60 @@ public static partial class SemanticVerifier
         return true;
     }
 
+    private static bool TryGetGenericQuerySpanFormalOrdinal(
+        BoundSpanTypeDefinition spanType, BoundFunction? function,
+        BoundProgram program, out int formalOrdinal)
+    {
+        formalOrdinal = -1;
+        if (spanType.ElementFormalDefinitionOrdinal == -1)
+        {
+            return spanType.ElementFormalOrdinal == -1
+                && !spanType.IsElementWritable;
+        }
+
+        if (function is null)
+        {
+            return false;
+        }
+
+        if (spanType.ElementFormalDefinitionOrdinal >= 0)
+        {
+            var formalOwnerOrdinal
+                = function.GenericMethodProofTypeFormalOwnerOrdinal >= 0
+                    ? function.GenericMethodProofTypeFormalOwnerOrdinal
+                    : function.GenericMethodProofDefinitionOrdinal;
+            if (formalOwnerOrdinal
+                != spanType.ElementFormalDefinitionOrdinal)
+            {
+                return false;
+            }
+        }
+        else
+        {
+            var importedOwnerOrdinal = function.ImportedGenericMethod
+                    ?.FormalTypeOwnerOrdinal
+                    ?? function.GenericMethodProofTypeFormalOwnerOrdinal;
+            if (importedOwnerOrdinal < 0
+                    || spanType.ElementFormalDefinitionOrdinal
+                        != (long)BoundSpanTypeContract
+                            .ImportedFormalDefinitionOrdinal
+                        - importedOwnerOrdinal)
+            {
+                    return false;
+            }
+        }
+
+        if (!TryGetCallerGenericTypeFormal(function, program,
+                spanType.ElementType, out var formal, out formalOrdinal)
+            || formal is null
+            || (spanType.IsElementWritable
+                && !formal.RequiresWritable))
+        {
+            return false;
+        }
+        return true;
+    }
+
     private static bool TryGetCallerGenericTypeFormal(
         BoundFunction callerFunction, BoundProgram program,
         PrimitiveType typeArgument,
@@ -30365,34 +32816,126 @@ public static partial class SemanticVerifier
         ordinal = -1;
         var definitionOrdinal
             = callerFunction.GenericMethodProofDefinitionOrdinal;
-        if (definitionOrdinal < 0
-            || definitionOrdinal
-                >= program.GenericMethodSignatures.Length
-            || callerFunction.GenericMethodProofTypeParameters.Length
-                != program.GenericMethodSignatures[definitionOrdinal]
+        if (definitionOrdinal >= 0
+            && definitionOrdinal < program.GenericMethodSignatures.Length
+            && callerFunction.GenericMethodProofTypeParameters.Length
+                == program.GenericMethodSignatures[definitionOrdinal]
                     .Formals.Length)
+        {
+            for (var formalOrdinal = 0;
+                formalOrdinal
+                    < callerFunction.GenericMethodProofTypeParameters.Length;
+                formalOrdinal++)
+            {
+                if (callerFunction.GenericMethodProofTypeParameters[
+                        formalOrdinal] != typeArgument)
+                {
+                    continue;
+                }
+
+                formal = program.GenericMethodSignatures[definitionOrdinal]
+                    .Formals[formalOrdinal];
+                ordinal = formalOrdinal;
+                return true;
+            }
+        }
+
+        if (callerFunction.ImportedGenericMethod
+            is not BoundGenericMethodImport imported
+            || imported.FormalTypeOwnerOrdinal < 0
+            || imported.Formals.Length
+                != imported.Signature.Formals.Length)
         {
             return false;
         }
 
         for (var formalOrdinal = 0;
-            formalOrdinal
-                < callerFunction.GenericMethodProofTypeParameters.Length;
+            formalOrdinal < imported.Formals.Length;
             formalOrdinal++)
         {
-            if (callerFunction.GenericMethodProofTypeParameters[
-                    formalOrdinal] != typeArgument)
+            if (imported.Formals[formalOrdinal].PlaceholderType
+                != typeArgument)
             {
                 continue;
             }
 
-            formal = program.GenericMethodSignatures[definitionOrdinal]
-                .Formals[formalOrdinal];
+            formal = imported.Signature.Formals[formalOrdinal];
             ordinal = formalOrdinal;
             return true;
         }
 
+        var ownerOrdinal
+            = callerFunction.GenericMethodProofTypeFormalOwnerOrdinal;
+        if (ownerOrdinal >= 0
+            && !callerFunction.GenericMethodProofTypeParameters.IsDefault)
+        {
+            var owner = program.GenericMethodTypeFormalOwners
+                .FirstOrDefault(candidate => candidate.Ordinal
+                    == ownerOrdinal);
+            for (var formalOrdinal = 0;
+                formalOrdinal
+                    < callerFunction.GenericMethodProofTypeParameters.Length
+                    && (uint)formalOrdinal < (uint)owner.Formals.Length;
+                formalOrdinal++)
+            {
+                if (callerFunction.GenericMethodProofTypeParameters[
+                        formalOrdinal] != typeArgument)
+                {
+                    continue;
+                }
+
+                var ownerFormal = owner.Formals[formalOrdinal];
+                formal = new BoundGenericMethodFormalSignature(
+                    formalOrdinal, string.Empty,
+                    ownerFormal.OwnershipDomain,
+                    ownerFormal.NullabilityDomain, []) {
+                    RequiresWritable = ownerFormal.RequiresWritable,
+                    RequiresBlittable = ownerFormal.RequiresBlittable,
+                };
+                ordinal = formalOrdinal;
+                return true;
+            }
+        }
+
         return false;
+    }
+
+    private static bool TryGetCallerGenericTypeFormalOwner(
+        BoundFunction callerFunction, BoundProgram program,
+        out int ownerOrdinal, out int formalCount)
+    {
+        ownerOrdinal = -1;
+        formalCount = 0;
+        if (callerFunction.ImportedGenericMethod
+            is BoundGenericMethodImport imported)
+        {
+            ownerOrdinal = imported.FormalTypeOwnerOrdinal;
+            formalCount = imported.Formals.Length;
+            return ownerOrdinal >= 0 && !imported.Formals.IsDefault;
+        }
+
+        if (callerFunction.GenericMethodProofTypeFormalOwnerOrdinal >= 0)
+        {
+            ownerOrdinal
+                = callerFunction.GenericMethodProofTypeFormalOwnerOrdinal;
+            formalCount
+                = callerFunction.GenericMethodProofTypeParameters.Length;
+            return !callerFunction.GenericMethodProofTypeParameters.IsDefault;
+        }
+
+        var definitionOrdinal
+            = callerFunction.GenericMethodProofDefinitionOrdinal;
+        if (definitionOrdinal < 0
+            || program.GenericMethodDefinitions.FirstOrDefault(definition =>
+                definition.DefinitionOrdinal == definitionOrdinal) is not
+                BoundGenericMethodDefinition definition)
+        {
+            return false;
+        }
+
+        ownerOrdinal = definition.FormalTypeOwnerOrdinal;
+        formalCount = definition.Formals.Length;
+        return ownerOrdinal >= 0 && !definition.Formals.IsDefault;
     }
 
     private static bool IsUniqueGenericMethodTypeArgument(
@@ -30622,19 +33165,18 @@ public static partial class SemanticVerifier
         return PrimitiveTypeFacts.ScalarWidth(type,
                 program.EnumDefinitions) > 0
             || type == PrimitiveType.NativeRawPointer
+            || (BoundSpanTypeTypes.IsValidType(type, program.SpanTypes)
+                && !program.SpanTypes[BoundSpanTypeTypes.Index(type)]
+                    .IsInitialization)
             || NativePointerTypeContract.IsValidType(type,
                 program.NativePointerTypes)
             || NativeFunctionPointerContract.IsValidType(type,
                 program.NativeFunctionPointerSignatures)
-            || ManagedClassTypes.IsManaged(type)
+            || IsKnownCopyClassHandle(type, program)
             || BoundEnumTypes.IsValidType(type, program.EnumDefinitions)
             || ((int)type >= 100
                 && (int)type - 100 < program.Structures.Length
                 && !program.Structures[(int)type - 100].IsUnique)
-            || (BoundGenericNominalTypeTypes.IsType(type)
-                && BoundGenericNominalTypeContract.TryGetDefinition(
-                    type, program, out var nominalDefinition)
-                && nominalDefinition?.NominalKind == 2)
             || (NativeFixedArrayTypes.IsType(type)
                 && NativeFixedArrayContract.IsRootlessCopyFieldType(
                     type, program.Structures,
@@ -30653,6 +33195,12 @@ public static partial class SemanticVerifier
     private static bool IsWritableGenericMethodTypeArgument(
         PrimitiveType type, BoundProgram program)
     {
+        if (BoundSpanTypeTypes.IsValidType(type, program.SpanTypes)
+            && program.SpanTypes[BoundSpanTypeTypes.Index(type)]
+                .IsWritable)
+        {
+            return true;
+        }
         if (ManagedClassTypes.IsManaged(type)
             && ManagedClassTypes.IsWritable(type))
         {
@@ -30748,7 +33296,78 @@ public static partial class SemanticVerifier
         type == PrimitiveType.OwnedInt32Buffer
             || BoundGenericNominalTypeContract.IsCoreTaskType(type, program)
             || ((int)type >= 100 && (int)type - 100 < program.Structures.Length
-                && program.Structures[(int)type - 100].IsUnique);
+                && program.Structures[(int)type - 100].IsUnique)
+            || IsUniqueClassHandle(type, program);
+
+    private static bool IsUniqueClassHandle(PrimitiveType type,
+        BoundProgram program)
+    {
+        if ((int)type < ManagedClassTypes.First
+            || !ManagedClassTypes.IsManaged(type))
+        {
+            return false;
+        }
+
+        var classIndex = ManagedClassTypes.ClassIndex(type);
+        return (uint)classIndex < (uint)program.Classes.Length
+            && program.Classes[classIndex].IsUnique == true;
+    }
+
+    private static string? GetDeclaredCleanupMethod(
+        BoundProgram program, PrimitiveType type)
+    {
+        if (type == PrimitiveType.OwnedInt32Buffer)
+        {
+            return null;
+        }
+        if ((int)type >= ManagedClassTypes.First
+            && ManagedClassTypes.IsManaged(type))
+        {
+            var classIndex = ManagedClassTypes.ClassIndex(type);
+            return (uint)classIndex < (uint)program.Classes.Length
+                && program.Classes[classIndex].HasCleanup == true
+                    ? program.Classes[classIndex].CleanupMethod : null;
+        }
+        if (ManagedClassTypes.IsManaged(type))
+        {
+            return null;
+        }
+
+        var structureIndex = (int)type - 100;
+        return (uint)structureIndex < (uint)program.Structures.Length
+            ? program.Structures[structureIndex].CleanupMethod : null;
+    }
+
+    private static bool IsKnownCopyClassHandle(PrimitiveType type,
+        BoundProgram program)
+    {
+        if (!ManagedClassTypes.IsManaged(type))
+        {
+            return false;
+        }
+        if ((int)type < ManagedClassTypes.First)
+        {
+            return true;
+        }
+
+        var classIndex = ManagedClassTypes.ClassIndex(type);
+        return (uint)classIndex < (uint)program.Classes.Length
+            && program.Classes[classIndex].IsUnique == false;
+    }
+
+    private static bool IsClassOwnershipUnknown(PrimitiveType type,
+        BoundProgram program)
+    {
+        if ((int)type < ManagedClassTypes.First
+            || !ManagedClassTypes.IsManaged(type))
+        {
+            return false;
+        }
+
+        var classIndex = ManagedClassTypes.ClassIndex(type);
+        return (uint)classIndex < (uint)program.Classes.Length
+            && program.Classes[classIndex].IsUnique is null;
+    }
 
     private static bool RequiresUnsafeFieldAccess(BoundProgram program,
         PrimitiveType ownerType, BoundStructField field)
@@ -31374,6 +33993,15 @@ public static partial class SemanticVerifier
                 && BoundEnumTypes.AreEquivalent(expected, actual);
         }
         if (expected.Identity
+                is BoundEnumDeclarationIdentity.Standard expectedStandard
+            && actual.Identity
+                is BoundEnumDeclarationIdentity.Standard actualStandard)
+        {
+            return ReferenceEquals(expectedStandard.Value,
+                    actualStandard.Value)
+                && BoundEnumTypes.AreEquivalent(expected, actual);
+        }
+        if (expected.Identity
                 is BoundEnumDeclarationIdentity.Private expectedPrivate
             && actual.Identity
                 is BoundEnumDeclarationIdentity.Private actualPrivate)
@@ -31468,24 +34096,6 @@ public static partial class SemanticVerifier
             }
             var mappedIndex
                 = classReference.ExpectedNativePointerMapping[sourceIndex];
-    internal static bool IsGenericMethodFormalContractSatisfied(
-        byte targetOwnershipDomain, byte targetNullabilityDomain,
-        bool targetRequiresWritable, bool targetRequiresBlittable,
-        byte actualOwnershipDomain, byte actualNullabilityDomain,
-        bool actualRequiresWritable, bool actualRequiresBlittable)
-        => targetOwnershipDomain is 1 or 2 or 3
-            && targetNullabilityDomain is 1 or 2
-            && actualOwnershipDomain is 1 or 2 or 3
-            && actualNullabilityDomain is 1 or 2
-            && (targetOwnershipDomain != 1
-                || actualOwnershipDomain == 1)
-            && (targetOwnershipDomain != 2
-                || actualOwnershipDomain == 2)
-            && (targetNullabilityDomain != 1
-                || actualNullabilityDomain == 1)
-            && (!targetRequiresWritable || actualRequiresWritable)
-            && (!targetRequiresBlittable || actualRequiresBlittable);
-
             if (mappedIndex < 0
                 || (uint)mappedIndex
                     >= (uint)program.NativePointerTypes.Length)
@@ -34559,6 +37169,7 @@ public static partial class SemanticVerifier
             case BoundTypeIdentityQuery:
             case BoundLayoutQuery:
             case BoundConstant:
+            case BoundPendingInterfaceDefault:
             case BoundNull:
             case BoundRead:
             case BoundReceiverLoan:
@@ -34694,7 +37305,8 @@ public static partial class SemanticVerifier
                 read.Index, flowFacts, ref remaining),
             BoundSpanAdvance advance => FlowFacts(advance.View, flowFacts, ref remaining),
             BoundSnapshotSpan => 0,
-            BoundViewLength or BoundBufferLength or BoundConstant or BoundNull
+            BoundViewLength or BoundBufferLength or BoundConstant
+                or BoundPendingInterfaceDefault or BoundNull
                 or BoundRead or BoundReceiverLoan
                 or BoundMutableReceiverLoan or BoundMutableFieldLoan or BoundFieldLoan => 0,
             _ => AllFlowFacts,
@@ -35560,6 +38172,199 @@ public static partial class SemanticVerifier
         }
 
         return value + padding;
+    }
+
+    private static bool IsValidPropertyAccessor(BoundFunction function,
+        string propertyName, int declaringType, BoundProgram program,
+        IReadOnlyDictionary<string, BoundFunction> propertyGetters,
+        Func<int, string, bool> hasFieldName)
+    {
+        if (string.IsNullOrEmpty(propertyName)
+            || function.DeclaringStruct is not string owner
+            || function.IsConstructor || function.IsClassConstructor
+            || function.IsCleanup || function.DoesNotReturn)
+        {
+            return false;
+        }
+
+        var getterName = owner + ".#get:" + propertyName;
+        var getterPrefix = owner + ".#get:";
+        var getterIdentity = function.Name.StartsWith(getterPrefix,
+                StringComparison.Ordinal)
+            ? function.Name[getterPrefix.Length..] : null;
+        var isIndexerGetter = propertyName == "this"
+            && getterIdentity is not null
+            && (getterIdentity == "this"
+                || getterIdentity.EndsWith(":this",
+                    StringComparison.Ordinal));
+        var isGetter = function.Name == getterName
+            || function.Name == owner + ".$producer.#get:"
+                + propertyName
+            || isIndexerGetter;
+        if (isGetter
+            && !IsClassArgumentType(function.ReturnType,
+                program.Structures, program.EnumDefinitions.Length))
+        {
+            return false;
+        }
+        if (function.IsStatic)
+        {
+            return isGetter && declaringType >= 0
+                && (declaringType < ManagedClassTypes.First
+                    ? !program.Structures[declaringType].IsUnique
+                    : declaringType < ManagedClassTypes.First
+                        + program.Classes.Length)
+                && function.ParameterCount == 0
+                && (function.ReturnType is PrimitiveType.Bool
+                    or PrimitiveType.Char16 or PrimitiveType.Char8
+                    or PrimitiveType.Char32 or PrimitiveType.Rune
+                    or PrimitiveType.Int8 or PrimitiveType.Int16
+                    or PrimitiveType.Int32 or PrimitiveType.UInt8
+                    or PrimitiveType.UInt16 or PrimitiveType.UInt32
+                    or PrimitiveType.Int64 or PrimitiveType.UInt64
+                    or PrimitiveType.Float32 or PrimitiveType.Float64
+                    || IsCopyStruct(program, function.ReturnType))
+                && !hasFieldName(declaringType, propertyName);
+        }
+
+        if (function.Variables.IsEmpty
+            || IsUnique(program, function.Variables[0].Type))
+        {
+            return false;
+        }
+
+        if (isGetter)
+        {
+            if (propertyName == "this"
+                && function.ParameterCount > 1)
+            {
+                if (function.ParameterCount
+                    > function.Variables.Length)
+                {
+                    return false;
+                }
+                for (var index = 1;
+                    index < function.ParameterCount; index++)
+                {
+                    if (function.Variables[index].IsOut)
+                    {
+                        return false;
+                    }
+                }
+                return true;
+            }
+
+            return function.ParameterCount == 1
+                && (declaringType < 0
+                    || !hasFieldName(declaringType, propertyName));
+        }
+
+        if (function.PropertyAccessorKind is
+            BoundPropertyAccessorKind.Setter
+            or BoundPropertyAccessorKind.Initializer)
+        {
+            if (function.IsStatic
+                || !StringComparer.Ordinal.Equals(function.Name,
+                    owner + (function.PropertyAccessorKind
+                        == BoundPropertyAccessorKind.Setter
+                            ? ".#set:" : ".#init:") + propertyName)
+                || !propertyGetters.TryGetValue(getterName,
+                    out var namedGetter)
+                || namedGetter.PropertyAccessorKind
+                    != BoundPropertyAccessorKind.Getter
+                || namedGetter.PropertyName != propertyName
+                || namedGetter.IsStatic
+                || namedGetter.ParameterCount != 1
+                || function.ReturnType != PrimitiveType.Void
+                || function.ParameterCount != 2
+                || function.ParameterCount > function.Variables.Length
+                || function.Variables[1].Type != namedGetter.ReturnType
+                || function.Variables[1].IsOut
+                || function.Variables[1].IsInit
+                || function.Variables[1].IsImplicitRef
+                || function.Variables[1]
+                    .IsCanonicalImplicitReference)
+            {
+                return false;
+            }
+
+            if (function.PropertyAccessorKind
+                    == BoundPropertyAccessorKind.Initializer
+                && declaringType >= ManagedClassTypes.First
+                    && declaringType
+                        < ManagedClassTypes.First + program.Classes.Length)
+            {
+                return program.Classes[
+                        ManagedClassTypes.ClassIndex(
+                            function.Variables[0].Type)].Fields.Count(
+                        field => field.BackingPropertyName == propertyName)
+                    == 1;
+            }
+
+            return function.PropertyAccessorKind
+                == BoundPropertyAccessorKind.Setter;
+        }
+
+        if (propertyName != "this"
+            || declaringType >= ManagedClassTypes.First
+                + program.Classes.Length)
+        {
+            return false;
+        }
+
+        var setterPrefix = owner + ".#set:";
+        if (!function.Name.StartsWith(setterPrefix,
+                StringComparison.Ordinal))
+        {
+            return false;
+        }
+        var accessorIdentity = function.Name[setterPrefix.Length..];
+        if (accessorIdentity != "this"
+            && !accessorIdentity.EndsWith(":this",
+                StringComparison.Ordinal))
+        {
+            return false;
+        }
+        var expectedGetterName = owner + ".#get:"
+            + accessorIdentity;
+        if (!propertyGetters.TryGetValue(expectedGetterName,
+                out var getter)
+            || getter.PropertyName != propertyName
+            || getter.IsStatic
+            || getter.ParameterCount < 2
+            || getter.ParameterCount > getter.Variables.Length
+            || function.ReturnType != PrimitiveType.Void
+            || function.ParameterCount != getter.ParameterCount + 1
+            || function.ParameterCount > function.Variables.Length
+            || function.Variables[function.ParameterCount - 1].Type
+                != getter.ReturnType
+            || function.Variables[function.ParameterCount - 1].IsOut
+            || function.Variables[function.ParameterCount - 1]
+                .IsImplicitRef
+            || function.Variables[function.ParameterCount - 1]
+                .IsCanonicalImplicitReference)
+        {
+            return false;
+        }
+
+        for (var index = 1; index < getter.ParameterCount; index++)
+        {
+            var getterParameter = getter.Variables[index];
+            var setterParameter = function.Variables[index];
+            if (getterParameter.Type != setterParameter.Type
+                || getterParameter.IsOut != setterParameter.IsOut
+                || getterParameter.IsInit != setterParameter.IsInit
+                || getterParameter.IsImplicitRef
+                    != setterParameter.IsImplicitRef
+                || getterParameter.IsCanonicalImplicitReference
+                    != setterParameter.IsCanonicalImplicitReference
+                || getterParameter.IsOut)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static ArgumentException Invalid() =>

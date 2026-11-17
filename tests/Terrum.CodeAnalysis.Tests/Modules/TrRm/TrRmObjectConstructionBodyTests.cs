@@ -741,15 +741,16 @@ internal sealed class TrRmObjectConstructionBodyTests
                 0xF200_0002);
         }
 
-        var code = appendHalt
-            ? new byte[] {
-                0xED, instructionControl, (byte)actualRecordIndex,
-                (byte)(actualRecordIndex >> 8), 0x00,
-            }
-            : [
-                0xED, instructionControl, (byte)actualRecordIndex,
-                (byte)(actualRecordIndex >> 8),
-            ];
+        var code = new byte[appendHalt ? 5 : 4];
+        code[0] = 0xED;
+        code[1] = instructionControl;
+        BinaryPrimitives.WriteUInt16LittleEndian(code.AsSpan(2),
+            checked((ushort)actualRecordIndex));
+        if (appendHalt)
+        {
+            code[4] = 0x00;
+        }
+
         var entryStateRecord = (ushort)(actualRecordIndex == 0 ? 1 : 0);
         return TrRmRegisterBodyWriter.Encode(homes, types,
             ReadOnlyMemory<byte>.Empty, ReadOnlyMemory<byte>.Empty,
@@ -971,6 +972,7 @@ internal sealed class TrRmObjectConstructionBodyTests
         TrRmRegisterBodyMapValidator.Validate(body, methodDefRow, 1, features, modules,
             types, default, typeSpecs, default, default, methods, signatures,
             parameters, fields, default, default, default, default, default,
+            default, default,
             contracts, imports, default, default, moduleRefs, default,
             default, default, default);
     }

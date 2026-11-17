@@ -85,10 +85,10 @@ public readonly ref struct TrRmTypeDefTableReader
             _ = ReadName(row - 1);
             var flags = Read(row - 1, 8);
             var kind = (flags >> 2) & 7;
-            var supportsEnumTypeDefs = schema.SupportsNominalEnums()
-                || schema.UsesGenericConstantMethods();
+            var supportsEnumTypeDefs = schema.SupportsNominalEnumDeclarations();
             var maximumKind = supportsEnumTypeDefs ? 4u : 3u;
             var flagsMask = (supportsEnumTypeDefs ? 0x1Fu : 0x0Fu)
+                | (schema.SupportsClassDeclarationMutability() ? 0x80u : 0)
                 | (schema.SupportsDeclaredCopyEvidence()
                     ? DeclaredCopyFlag : 0)
                 | (schema.SupportsDeclaredUniqueEvidence()
@@ -99,6 +99,9 @@ public readonly ref struct TrRmTypeDefTableReader
                     && (!schema.SupportsDeclaredCopyEvidence() || kind != 1))
                 || ((flags & DeclaredUniqueFlag) != 0
                     && (!schema.SupportsDeclaredUniqueEvidence() || kind != 1))
+                || ((flags & 0x80) != 0
+                    && (!schema.SupportsClassDeclarationMutability()
+                        || kind != 2))
                 || (flags & (DeclaredCopyFlag | DeclaredUniqueFlag))
                     == (DeclaredCopyFlag | DeclaredUniqueFlag)
                 || !ValidRange(row, 12, fieldCount)
@@ -224,6 +227,25 @@ public readonly ref struct TrRmTypeDefTableReader
     internal bool HasDeclaredUnique(int row)
         => _schema.SupportsDeclaredUniqueEvidence()
             && (GetFlags(row) & DeclaredUniqueFlag) != 0;
+
+    internal bool TryGetDeclaredClassMutability(int row,
+        out bool isMutable)
+    {
+        CheckRow(row);
+        if (!_schema.SupportsClassDeclarationMutability())
+        {
+            isMutable = false;
+            return false;
+        }
+
+        if (GetKind(row) != 2)
+        {
+            throw InvalidType();
+        }
+
+        isMutable = (GetFlags(row) & 0x80) != 0;
+        return true;
+    }
 
     /// <summary>Gets the assigned nominal kind from a validated TypeDef row.</summary>
     public byte GetKind(int row)

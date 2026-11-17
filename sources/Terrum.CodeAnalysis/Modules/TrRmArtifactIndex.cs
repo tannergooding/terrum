@@ -10,6 +10,7 @@ internal enum TrRmArtifactSchema
 {
     Standard,
     InitializationReferenceLocalFieldLayoutDraft,
+    InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft,
     Development,
     DevelopmentFunctionPointerEffectsDraft,
     DevelopmentNativeConventionsDraft,
@@ -33,11 +34,22 @@ internal enum TrRmArtifactSchema
     RegisterExceptionRegionsDraft,
     GenericMethodCallsDraft,
     GenericMethodCallsParameterLabelsDraft,
+    GenericMethodCallsParameterLabelsReceiverAccessDraft,
     GenericConstantMethodsDraft,
     C1Draft,
+    C1ParameterLabelsReceiverAccessDraft,
     C1M1Draft,
+    C1M1ParameterLabelsReceiverAccessDraft,
     C1M1ConstructionDraft,
+    C1M1ConstructionParameterLabelsReceiverAccessDraft,
     C1M1Construction2Draft,
+    C1M1Construction2ParameterLabelsReceiverAccessDraft,
+    C1M1ConstructionL1R1PropertyInitializedStateDraft,
+    C1M1Construction2L1R1PropertyInitializedStateDraft,
+    C1M1ConstructionL1R1EnumClosureDraft,
+    C1M1Construction2L1R1EnumClosureDraft,
+    C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft,
+    C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft,
 }
 
 internal static class TrRmArtifactSchemaFacts
@@ -62,11 +74,34 @@ internal static class TrRmArtifactSchemaFacts
     internal static bool SupportsNominalEnumDeclarations(
         this TrRmArtifactSchema schema) =>
         schema.SupportsNominalEnums()
-            || schema.UsesGenericConstantMethods();
+            || schema.UsesGenericConstantMethods()
+            || schema.UsesC1EnumClosure();
 
     internal static bool UsesGenericConstantMethods(
         this TrRmArtifactSchema schema) =>
         schema == TrRmArtifactSchema.GenericConstantMethodsDraft;
+
+    internal static bool UsesC1EnumClosure(
+        this TrRmArtifactSchema schema)
+        => schema is
+            TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft;
+
+    internal static bool UsesTypedEnumMemberValues(
+        this TrRmArtifactSchema schema)
+        => schema.UsesGenericConstantMethods()
+            || schema.UsesC1EnumClosure();
+
+    internal static bool SupportsEnumUnderlyingTypeCode(
+        this TrRmArtifactSchema schema, byte typeCode)
+        => schema.SupportsNominalEnums()
+            ? typeCode == 0x08
+            : schema.UsesGenericConstantMethods()
+                ? typeCode is >= 0x06 and <= 0x0F
+                : schema.UsesC1EnumClosure()
+                    && typeCode is >= 0x06 and <= 0x11;
 
     internal static bool SupportsDeclaredCopyEvidence(
         this TrRmArtifactSchema schema) =>
@@ -78,7 +113,18 @@ internal static class TrRmArtifactSchemaFacts
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft
             or TrRmArtifactSchema.LocalAggregateLayoutDraft
             or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
+            or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft;
+
+    internal static bool UsesInitializationReferenceLocalFieldLayout(
+        this TrRmArtifactSchema schema)
+        => schema is TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
+            or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft;
+
+    internal static bool UsesNestedInitializationReferenceFieldDestinations(
+        this TrRmArtifactSchema schema)
+        => schema
+            == TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft;
 
     internal static bool SupportsDeclaredUniqueEvidence(
         this TrRmArtifactSchema schema) =>
@@ -95,10 +141,21 @@ internal static class TrRmArtifactSchemaFacts
                 .InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft
             or TrRmArtifactSchema.GenericMethodCallsDraft
             or TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft
+            or TrRmArtifactSchema.GenericMethodCallsParameterLabelsReceiverAccessDraft
             or TrRmArtifactSchema.C1Draft
+            or TrRmArtifactSchema.C1ParameterLabelsReceiverAccessDraft
             or TrRmArtifactSchema.C1M1Draft
+            or TrRmArtifactSchema.C1M1ParameterLabelsReceiverAccessDraft
             or TrRmArtifactSchema.C1M1ConstructionDraft
+            or TrRmArtifactSchema.C1M1ConstructionParameterLabelsReceiverAccessDraft
             or TrRmArtifactSchema.C1M1Construction2Draft
+            or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft
             or TrRmArtifactSchema.GenericConstantMethodsDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft
@@ -127,24 +184,63 @@ internal static class TrRmArtifactSchemaFacts
             or TrRmArtifactSchema
                 .InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft
             or TrRmArtifactSchema.C1Draft
+            or TrRmArtifactSchema.C1ParameterLabelsReceiverAccessDraft
             or TrRmArtifactSchema.C1M1Draft
+            or TrRmArtifactSchema.C1M1ParameterLabelsReceiverAccessDraft
             or TrRmArtifactSchema.C1M1ConstructionDraft
-            or TrRmArtifactSchema.C1M1Construction2Draft;
+            or TrRmArtifactSchema.C1M1ConstructionParameterLabelsReceiverAccessDraft
+            or TrRmArtifactSchema.C1M1Construction2Draft
+            or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft;
+
+    internal static bool UsesPropertyInitializedState(
+        this TrRmArtifactSchema schema)
+        => schema is
+            TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft;
 
     internal static bool SupportsClassDeclarationMutability(
         this TrRmArtifactSchema schema)
         => schema is TrRmArtifactSchema.C1M1Draft
+            or TrRmArtifactSchema.C1M1ParameterLabelsReceiverAccessDraft
             or TrRmArtifactSchema.C1M1ConstructionDraft
-            or TrRmArtifactSchema.C1M1Construction2Draft;
+            or TrRmArtifactSchema.C1M1ConstructionParameterLabelsReceiverAccessDraft
+            or TrRmArtifactSchema.C1M1Construction2Draft
+            or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft;
 
     internal static bool UsesConstructionContracts(
         this TrRmArtifactSchema schema)
         => schema is TrRmArtifactSchema.C1M1ConstructionDraft
-            or TrRmArtifactSchema.C1M1Construction2Draft;
+            or TrRmArtifactSchema.C1M1ConstructionParameterLabelsReceiverAccessDraft
+            or TrRmArtifactSchema.C1M1Construction2Draft
+            or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft;
 
     internal static bool UsesObjectConstruction(
         this TrRmArtifactSchema schema)
-        => schema == TrRmArtifactSchema.C1M1Construction2Draft;
+        => schema is TrRmArtifactSchema.C1M1Construction2Draft
+            or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft;
 
     internal static bool UsesRegisterExceptionRegions(
         this TrRmArtifactSchema schema) =>
@@ -154,20 +250,57 @@ internal static class TrRmArtifactSchemaFacts
         this TrRmArtifactSchema schema) =>
         schema is TrRmArtifactSchema.GenericMethodCallsDraft
             or TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft
+            or TrRmArtifactSchema.GenericMethodCallsParameterLabelsReceiverAccessDraft
             or TrRmArtifactSchema.C1Draft
+            or TrRmArtifactSchema.C1ParameterLabelsReceiverAccessDraft
             or TrRmArtifactSchema.C1M1Draft
+            or TrRmArtifactSchema.C1M1ParameterLabelsReceiverAccessDraft
             or TrRmArtifactSchema.C1M1ConstructionDraft
+            or TrRmArtifactSchema.C1M1ConstructionParameterLabelsReceiverAccessDraft
             or TrRmArtifactSchema.C1M1Construction2Draft
+            or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft
             or TrRmArtifactSchema.GenericConstantMethodsDraft;
 
     internal static bool UsesGenericWriteRequirements(
         this TrRmArtifactSchema schema) =>
         schema is TrRmArtifactSchema.GenericMethodCallsDraft
-            or TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft;
+            or TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft
+            or TrRmArtifactSchema.GenericMethodCallsParameterLabelsReceiverAccessDraft;
 
     internal static bool UsesMethodParameterLabels(
         this TrRmArtifactSchema schema) =>
-        schema == TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft;
+        schema is TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft
+            or TrRmArtifactSchema.GenericMethodCallsParameterLabelsReceiverAccessDraft
+            or TrRmArtifactSchema.C1ParameterLabelsReceiverAccessDraft
+            or TrRmArtifactSchema.C1M1ParameterLabelsReceiverAccessDraft
+            or TrRmArtifactSchema.C1M1ConstructionParameterLabelsReceiverAccessDraft
+            or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft;
+
+    internal static bool UsesMethodReceiverAccess(
+        this TrRmArtifactSchema schema)
+        => schema is TrRmArtifactSchema.GenericMethodCallsParameterLabelsReceiverAccessDraft
+            or TrRmArtifactSchema.C1ParameterLabelsReceiverAccessDraft
+            or TrRmArtifactSchema.C1M1ParameterLabelsReceiverAccessDraft
+            or TrRmArtifactSchema.C1M1ConstructionParameterLabelsReceiverAccessDraft
+            or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft;
 
     internal static bool UsesForeignInvocationContracts(
         this TrRmArtifactSchema schema) =>
@@ -287,6 +420,7 @@ public readonly ref struct TrRmArtifactIndex
         _usesNativePointerLoads = usesNativePointerLoads;
         if (schema is not (TrRmArtifactSchema.Standard or TrRmArtifactSchema.Development
             or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
+            or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft
             or TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft
             or TrRmArtifactSchema.DevelopmentNativeConventionsDraft
             or TrRmArtifactSchema.CopyOriginDraft
@@ -309,10 +443,21 @@ public readonly ref struct TrRmArtifactIndex
             or TrRmArtifactSchema.RegisterExceptionRegionsDraft
             or TrRmArtifactSchema.GenericMethodCallsDraft
             or TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft
+            or TrRmArtifactSchema.GenericMethodCallsParameterLabelsReceiverAccessDraft
             or TrRmArtifactSchema.C1Draft
+            or TrRmArtifactSchema.C1ParameterLabelsReceiverAccessDraft
             or TrRmArtifactSchema.C1M1Draft
+            or TrRmArtifactSchema.C1M1ParameterLabelsReceiverAccessDraft
             or TrRmArtifactSchema.C1M1ConstructionDraft
+            or TrRmArtifactSchema.C1M1ConstructionParameterLabelsReceiverAccessDraft
             or TrRmArtifactSchema.C1M1Construction2Draft
+            or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft
             or TrRmArtifactSchema.GenericConstantMethodsDraft))
         {
             throw InvalidArtifact();
@@ -737,6 +882,12 @@ public readonly ref struct TrRmArtifactIndex
         => new(artifact,
             TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft);
 
+    internal static TrRmArtifactIndex
+        ForInitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft(
+            ReadOnlySpan<byte> artifact)
+        => new(artifact,
+            TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft);
+
     internal static TrRmArtifactIndex ForRegisterExceptionRegionsDraft(
         ReadOnlySpan<byte> artifact)
         => new(artifact, TrRmArtifactSchema.RegisterExceptionRegionsDraft);
@@ -751,19 +902,99 @@ public readonly ref struct TrRmArtifactIndex
         => new(artifact,
             TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft);
 
+    internal static TrRmArtifactIndex
+        ForGenericMethodCallsParameterLabelsReceiverAccessDraft(
+            ReadOnlySpan<byte> artifact)
+        => new(artifact,
+            TrRmArtifactSchema.GenericMethodCallsParameterLabelsReceiverAccessDraft);
+
     internal static TrRmArtifactIndex ForC1Draft(ReadOnlySpan<byte> artifact)
         => new(artifact, TrRmArtifactSchema.C1Draft);
 
+    internal static TrRmArtifactIndex
+        ForC1ParameterLabelsReceiverAccessDraft(ReadOnlySpan<byte> artifact)
+        => new(artifact,
+            TrRmArtifactSchema.C1ParameterLabelsReceiverAccessDraft);
+
     internal static TrRmArtifactIndex ForC1M1Draft(ReadOnlySpan<byte> artifact)
         => new(artifact, TrRmArtifactSchema.C1M1Draft);
+
+    internal static TrRmArtifactIndex
+        ForC1M1ParameterLabelsReceiverAccessDraft(ReadOnlySpan<byte> artifact)
+        => new(artifact,
+            TrRmArtifactSchema.C1M1ParameterLabelsReceiverAccessDraft);
 
     internal static TrRmArtifactIndex ForC1M1ConstructionDraft(
         ReadOnlySpan<byte> artifact)
         => new(artifact, TrRmArtifactSchema.C1M1ConstructionDraft);
 
+    internal static TrRmArtifactIndex
+        ForC1M1ConstructionParameterLabelsReceiverAccessDraft(
+            ReadOnlySpan<byte> artifact)
+        => new(artifact,
+            TrRmArtifactSchema.C1M1ConstructionParameterLabelsReceiverAccessDraft);
+
     internal static TrRmArtifactIndex ForC1M1Construction2Draft(
         ReadOnlySpan<byte> artifact)
         => new(artifact, TrRmArtifactSchema.C1M1Construction2Draft);
+
+    internal static TrRmArtifactIndex
+        ForC1M1Construction2ParameterLabelsReceiverAccessDraft(
+            ReadOnlySpan<byte> artifact)
+        => new(artifact,
+            TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessDraft);
+
+    internal static TrRmArtifactIndex
+        ForC1M1ConstructionL1R1PropertyInitializedStateDraft(
+            ReadOnlySpan<byte> artifact)
+        => new(artifact,
+            TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft);
+
+    internal static TrRmArtifactIndex
+        ForC1M1Construction2L1R1PropertyInitializedStateDraft(
+            ReadOnlySpan<byte> artifact)
+        => new(artifact,
+            TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateDraft);
+
+    internal static TrRmArtifactIndex ForC1M1ConstructionL1R1EnumClosureDraft(
+        ReadOnlySpan<byte> artifact)
+        => new(artifact, TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft);
+
+    internal static TrRmArtifactIndex ForC1M1Construction2L1R1EnumClosureDraft(
+        ReadOnlySpan<byte> artifact)
+        => new(artifact, TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft);
+
+    internal static TrRmArtifactIndex
+        ForC1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft(
+            ReadOnlySpan<byte> artifact)
+        => new(artifact,
+            TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft);
+
+    internal static TrRmArtifactIndex
+        ForC1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft(
+            ReadOnlySpan<byte> artifact)
+        => new(artifact,
+            TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft);
+
+    internal static TrRmArtifactIndex ForC1M1ConstructionL1R1EnumClosureDraft(
+        ReadOnlySpan<byte> artifact)
+        => new(artifact, TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft);
+
+    internal static TrRmArtifactIndex ForC1M1Construction2L1R1EnumClosureDraft(
+        ReadOnlySpan<byte> artifact)
+        => new(artifact, TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft);
+
+    internal static TrRmArtifactIndex
+        ForC1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft(
+            ReadOnlySpan<byte> artifact)
+        => new(artifact,
+            TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft);
+
+    internal static TrRmArtifactIndex
+        ForC1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft(
+            ReadOnlySpan<byte> artifact)
+        => new(artifact,
+            TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft);
 
     internal static TrRmArtifactIndex ForGenericConstantMethodsDraft(
         ReadOnlySpan<byte> artifact)
@@ -1013,8 +1244,7 @@ public readonly ref struct TrRmArtifactIndex
     private static bool IsReferenceSlotTableKind(int kind, TrRmArtifactSchema schema)
         => !schema.IsDevelopmentProfile()
             ? kind is >= 0x0001 and <= 0x004B
-                || ((schema.SupportsNominalEnums()
-                        || schema.UsesGenericConstantMethods())
+                || (schema.SupportsNominalEnumDeclarations()
                     && (kind is 0x0053 or 0x0054 or 0x0064 or 0x0065))
                 || (schema.UsesGeneralPredicateGraphs()
                     && (kind is (>= 0x004D and <= 0x0052)
@@ -1107,8 +1337,7 @@ public readonly ref struct TrRmArtifactIndex
             0x0050 => schema.UsesGeneralPredicateGraphs() ? 8 : -1,
             0x0051 => schema.UsesGeneralPredicateGraphs() ? 12 : -1,
             0x0052 => schema.UsesGeneralPredicateGraphs() ? 0 : -1,
-            0x0053 or 0x0054 when schema.SupportsNominalEnums()
-                || schema.UsesGenericConstantMethods() => 20,
+            0x0053 or 0x0054 when schema.SupportsNominalEnumDeclarations() => 20,
             0x0055 or 0x0056 or 0x0057 when schema.UsesGeneralPredicateGraphs() => 20,
             0x0058 when schema.UsesGeneralPredicateGraphs() => 16,
             0x0059 when schema.UsesGeneralPredicateGraphs() => 8,

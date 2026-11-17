@@ -68,6 +68,24 @@ internal sealed class TrRmTypeSpecTableReaderTests
     }
 
     [Test]
+    public void StandardInitializationReferenceMayNamePointerTypeSpec()
+    {
+        ReadOnlyMemory<byte>[] rows = [
+            TrRmTypeSpecTableWriter.InlineFamily(0x8C, 8),
+            TrRmTypeSpecTableWriter.InitializationReference(1),
+        ];
+        var section = TrRmTypeSpecTableWriter.Encode(rows, 0, 0, 0, 0,
+            schema: TrRmArtifactSchema.Standard);
+        var typeSpecs = new TrRmTypeSpecTableReader(section, rows.Length,
+            0, 0, 0, nativeFunctionPointerSignatureCount: 0,
+            schema: TrRmArtifactSchema.Standard);
+
+        Assert.That(typeSpecs.GetRow(2).ToArray(),
+            Is.EqualTo(new byte[] { 0x0E, 0, 1, 0, 0, 0 }));
+        Assert.That(typeSpecs.AreEquivalentTypeSpecRefs(2, 2), Is.True);
+    }
+
+    [Test]
     public void A3FunctionPointerValueSearchChargesItsTraversalAtExactBoundary()
     {
         var section = CreateA3FunctionPointerChain(4);

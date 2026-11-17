@@ -4,6 +4,7 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
+using Terrum.CodeAnalysis.Semantics;
 
 namespace Terrum.CodeAnalysis.Modules;
 
@@ -17,6 +18,10 @@ public readonly record struct TrRmEnumMemberDefRow(
     int OwnerTypeDefRow, int Ordinal, int DeclarationKeyStringRow,
     int NameStringRow, int Value);
 
+internal readonly record struct TrRmTypedEnumMemberDefRow(
+    int OwnerTypeDefRow, int Ordinal, int DeclarationKeyStringRow,
+    int NameStringRow, uint ValueSourceRef);
+
 /// <summary>Validates enum member names, keys, owners and row framing.</summary>
 /// <remarks>The borrowed EnumMemberDef, TypeDef and String sections must remain unchanged.</remarks>
 public readonly ref struct TrRmEnumMemberDefTableReader
@@ -25,6 +30,7 @@ public readonly ref struct TrRmEnumMemberDefTableReader
     private readonly ReadOnlySpan<byte> _rows;
     private readonly TrRmStringTableReader _strings;
     private readonly int _recordCount;
+    private readonly TrRmArtifactSchema _schema;
 
     /// <summary>Gets the number of validated EnumMemberDef rows.</summary>
     public int Count => _recordCount;
@@ -32,10 +38,20 @@ public readonly ref struct TrRmEnumMemberDefTableReader
     /// <summary>Validates fixed EnumMemberDef rows against their enum TypeDefs.</summary>
     public TrRmEnumMemberDefTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmStringTableReader strings, TrRmTypeDefTableReader types)
+        : this(section, recordCount, strings, types, 0)
     {
-        if (!types.Schema.SupportsNominalEnums()
+    }
+
+    internal TrRmEnumMemberDefTableReader(ReadOnlySpan<byte> section,
+        int recordCount, TrRmStringTableReader strings,
+        TrRmTypeDefTableReader types, int constantSourceCount)
+    {
+        if (!types.Schema.SupportsNominalEnumDeclarations()
             || recordCount is < 0 or > 0xFF_FFFF
-            || (long)recordCount * RowSize != section.Length)
+            || (long)recordCount * RowSize != section.Length
+            || constantSourceCount is < 0 or > 0xFF_FFFF
+            || (!types.Schema.UsesTypedEnumMemberValues()
+                && constantSourceCount != 0))
         {
             throw InvalidMembers();
         }
@@ -43,6 +59,7 @@ public readonly ref struct TrRmEnumMemberDefTableReader
         _rows = section;
         _strings = strings;
         _recordCount = recordCount;
+        _schema = types.Schema;
         for (var row = 1; row <= recordCount; row++)
         {
             var data = GetRow(row);
@@ -55,7 +72,10 @@ public readonly ref struct TrRmEnumMemberDefTableReader
                 || (types.GetFlags((int)owner) & 3) != 2
                 || ordinal > 0xFF_FFFF
                 || declarationKey is 0 or > 0xFF_FFFF
-                || name is 0 or > 0xFF_FFFF)
+                || name is 0 or > 0xFF_FFFF
+                || (types.Schema.UsesTypedEnumMemberValues()
+                    && (Read(data, 16) is 0 or > 0xFF_FFFF
+                        || Read(data, 16) > (uint)constantSourceCount)))
             {
                 throw InvalidMembers();
             }
@@ -83,7 +103,26 @@ public readonly ref struct TrRmEnumMemberDefTableReader
 
     /// <summary>Gets the checked int32 member value.</summary>
     public int GetValue(int row)
-        => unchecked((int)Read(GetRow(row), 16));
+    {
+        if (_schema.UsesTypedEnumMemberValues())
+        {
+            throw new NotSupportedException(
+                "The selected enum schema stores member values as ConstantSource references.");
+        }
+
+        return unchecked((int)Read(GetRow(row), 16));
+    }
+
+    internal uint GetValueSourceRef(int row)
+    {
+        if (!_schema.UsesTypedEnumMemberValues())
+        {
+            throw new NotSupportedException(
+                "NominalEnumsDraft enum member values are inline int32 values.");
+        }
+
+        return Read(GetRow(row), 16);
+    }
 
     private ReadOnlySpan<byte> GetRow(int row)
     {
@@ -121,7 +160,7 @@ public readonly ref struct TrRmEnumDefTableReader
         TrRmLayoutTableReader layouts, TrRmTargetProfileTableReader targetProfiles,
         TrRmEnumMemberDefTableReader members)
     {
-        if (!types.Schema.SupportsNominalEnums()
+        if (!types.Schema.SupportsNominalEnumDeclarations()
             || (typeSpecs.Count != 0 && typeSpecs.Schema != types.Schema)
             || recordCount is < 0 or > 0xFF_FFFF
             || (long)recordCount * RowSize != section.Length)
@@ -161,7 +200,8 @@ public readonly ref struct TrRmEnumDefTableReader
                 || (types.GetFlags((int)owner) & 3) != 2
                 || enumByType[(int)owner] != 0
                 || flags > 1
-                || !IsInt32Type(typeSpecs, underlyingTypeSpecRef)
+                || !IsSupportedUnderlyingType(typeSpecs,
+                    underlyingTypeSpecRef, types.Schema)
                 || !ValidRange(memberFirst, memberCount, members.Count))
             {
                 throw InvalidEnums();
@@ -255,11 +295,31 @@ public readonly ref struct TrRmEnumDefTableReader
         return _rows.Slice((row - 1) * RowSize, RowSize);
     }
 
-    private static bool IsInt32Type(TrRmTypeSpecTableReader typeSpecs, uint typeSpecRef)
+    private static bool IsSupportedUnderlyingType(
+        TrRmTypeSpecTableReader typeSpecs, uint typeSpecRef,
+        TrRmArtifactSchema schema)
     {
         var type = typeSpecs.GetTypeSpecRef(typeSpecRef);
-        return type.Form == 0x01 && type.Qualifiers == 0
-            && type.TypeCode == 0x08 && type.ArgumentCode == 0;
+        if (type.Form != 0x01 || type.Qualifiers != 0)
+        {
+            return false;
+        }
+
+        if (type.ArgumentCode != 0
+            || !schema.SupportsEnumUnderlyingTypeCode(type.TypeCode))
+        {
+            return false;
+        }
+
+        if (schema.SupportsNominalEnums())
+        {
+            return true;
+        }
+
+        return schema.UsesTypedEnumMemberValues()
+            && TrRmConstantSourceValueValidator.TryGetBoundScalarType(
+                type.TypeCode, out var primitiveType)
+            && PrimitiveTypeFacts.IsIntegerOrWide(primitiveType);
     }
 
     private static void ValidateLayouts(int typeDefRow,
@@ -329,6 +389,36 @@ public static class TrRmEnumTablesWriter
         }
 
         _ = new TrRmEnumMemberDefTableReader(result, rows.Count, strings, types);
+        return result;
+    }
+
+    internal static byte[] EncodeTypedEnumMemberValues(
+        IReadOnlyList<TrRmTypedEnumMemberDefRow> rows,
+        TrRmStringTableReader strings, TrRmTypeDefTableReader types,
+        int constantSourceCount)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+        if (!types.Schema.UsesTypedEnumMemberValues()
+            || rows.Count > 0xFF_FFFF
+            || constantSourceCount is < 0 or > 0xFF_FFFF)
+        {
+            throw new ArgumentOutOfRangeException(nameof(rows));
+        }
+
+        var result = new byte[checked(rows.Count * EnumMemberDefRowSize)];
+        for (var index = 0; index < rows.Count; index++)
+        {
+            var row = rows[index];
+            var offset = index * EnumMemberDefRowSize;
+            Write(result, offset, row.OwnerTypeDefRow);
+            Write(result, offset + 4, row.Ordinal);
+            Write(result, offset + 8, row.DeclarationKeyStringRow);
+            Write(result, offset + 12, row.NameStringRow);
+            Write(result, offset + 16, row.ValueSourceRef);
+        }
+
+        _ = new TrRmEnumMemberDefTableReader(result, rows.Count, strings,
+            types, constantSourceCount);
         return result;
     }
 

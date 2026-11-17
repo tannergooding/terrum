@@ -61,6 +61,46 @@ internal sealed class TrRmTypeDefTableReaderTests
         Assert.That(enums.GetFlags(1), Is.EqualTo(0x12));
     }
 
+    [Test]
+    public void C1M1CarriesCompleteClassMutabilityWithoutInferringOldC1Values()
+    {
+        var names = new TrRmStringTableReader(Names(), 2);
+        var modules = new TrRmModuleTableReader(Module(), 1, names, 0, 1, 0, 0);
+        var mutableBytes = Type();
+        Write(mutableBytes, 8, 0x8A);
+        var mutable = new TrRmTypeDefTableReader(mutableBytes, 1, names,
+            modules, 1, 0, 0, 0, TrRmArtifactSchema.C1M1Draft);
+        Assert.That(mutable.GetKind(1), Is.EqualTo(2));
+        Assert.That(mutable.TryGetDeclaredClassMutability(1,
+            out var isMutable), Is.True);
+        Assert.That(isMutable, Is.True);
+
+        var immutableBytes = Type();
+        Write(immutableBytes, 8, 0x0A);
+        var immutable = new TrRmTypeDefTableReader(immutableBytes, 1, names,
+            modules, 1, 0, 0, 0, TrRmArtifactSchema.C1M1Draft);
+        Assert.That(immutable.TryGetDeclaredClassMutability(1,
+            out isMutable), Is.True);
+        Assert.That(isMutable, Is.False);
+
+        var oldC1 = new TrRmTypeDefTableReader(immutableBytes, 1, names,
+            modules, 1, 0, 0, 0, TrRmArtifactSchema.C1Draft);
+        Assert.That(oldC1.TryGetDeclaredClassMutability(1,
+            out isMutable), Is.False);
+
+        foreach (var (flags, schema) in new (uint, TrRmArtifactSchema)[] {
+            (0x8A, TrRmArtifactSchema.C1Draft),
+            (0x84, TrRmArtifactSchema.C1M1Draft),
+            (0x8C, TrRmArtifactSchema.C1M1Draft),
+        })
+        {
+            var invalidBytes = Type();
+            Write(invalidBytes, 8, flags);
+            _ = Assert.Throws<InvalidDataException>(() =>
+                CreateWithSchema(invalidBytes, schema));
+        }
+    }
+
     private static void CreateStandardEnumType(byte[] bytes)
     {
         var names = new TrRmStringTableReader(Names(), 2);
@@ -130,6 +170,15 @@ internal sealed class TrRmTypeDefTableReaderTests
         var names = new TrRmStringTableReader(Names(), 2);
         var modules = new TrRmModuleTableReader(Module(), 1, names, 0, 1, 0, 0);
         _ = new TrRmTypeDefTableReader(bytes, 1, names, modules, 1, 0, 1, 0);
+    }
+
+    private static void CreateWithSchema(byte[] bytes,
+        TrRmArtifactSchema schema)
+    {
+        var names = new TrRmStringTableReader(Names(), 2);
+        var modules = new TrRmModuleTableReader(Module(), 1, names, 0, 1, 0, 0);
+        _ = new TrRmTypeDefTableReader(bytes, 1, names, modules, 1, 0, 0, 0,
+            schema);
     }
 
     private static string GetName(byte[] bytes, int row)

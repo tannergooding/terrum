@@ -36,11 +36,106 @@ internal static class BoundTreeTraversal
                 if (argument.Kind == BoundGenericArgumentKind.Type)
                 {
                     visitor(argument.Type);
+                    if (argument.TypeArgumentTerm is
+                        BoundGenericMethodTypeTerm typeArgumentTerm
+                        && !BoundGenericMethodTypeTerms.TryRewrite(
+                            typeArgumentTerm, type => {
+                                visitor(type);
+                                return type;
+                            }, static ordinal => ordinal,
+                            static definition => definition,
+                            static identity => identity, out _))
+                    {
+                        return false;
+                    }
                 }
             }
         }
 
         return true;
+    }
+
+    internal static bool VisitStandardClassDeclarationTypeSpecs(
+        ImmutableArray<BoundStandardClassDeclaration> declarations,
+        Action<BoundSourceTypeProviderSnapshot, uint> visitor)
+    {
+        ArgumentNullException.ThrowIfNull(visitor);
+        if (declarations.IsDefault)
+        {
+            return false;
+        }
+
+        var remaining = SemanticVerifier.MaximumAnalysisVisits;
+        foreach (var declaration in declarations)
+        {
+            if (declaration is null || --remaining < 0
+                || declaration.Expectations.IsDefault
+                || !Visit(declaration.Declaration))
+            {
+                return false;
+            }
+
+            foreach (var expectation in declaration.Expectations)
+            {
+                if (expectation is null || --remaining < 0
+                    || !Visit(expectation.ExpectedDeclaration))
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+
+        bool Visit(BoundStandardClassTypeView view)
+        {
+            if (view is null || view.Provider is null
+                || view.Fields.IsDefault)
+            {
+                return false;
+            }
+
+            foreach (var field in view.Fields)
+            {
+                if (field is null || --remaining < 0)
+                {
+                    return false;
+                }
+
+                visitor(view.Provider, field.TypeSpecReference);
+            }
+
+            return true;
+        }
+    }
+
+    internal static ImmutableArray<BoundStandardClassDeclaration>
+        RewriteStandardClassDeclarations(
+            ImmutableArray<BoundStandardClassDeclaration> declarations,
+            Func<BoundStandardClassTypeView, BoundStandardClassTypeView>
+                    rewriteView,
+            Func<BoundSourceTypeExpectation, BoundSourceTypeExpectation>
+                rewriteExpectation)
+    {
+        ArgumentNullException.ThrowIfNull(rewriteView);
+            ArgumentNullException.ThrowIfNull(rewriteExpectation);
+        if (declarations.IsDefault)
+        {
+            throw new ArgumentException(
+                "Standard class declarations cannot be default.",
+                nameof(declarations));
+        }
+
+        return [.. declarations.Select(declaration =>
+            declaration with {
+                Declaration = rewriteView(declaration.Declaration),
+                Expectations = [.. declaration.Expectations.Select(
+                    expectation => expectation with {
+                        Binding = rewriteExpectation(expectation.Binding),
+                        ExpectedDeclaration = rewriteView(
+                            expectation.ExpectedDeclaration),
+                    })],
+            })];
     }
 
     internal static bool VisitSourceGenericTypeArguments(
@@ -54,7 +149,8 @@ internal static class BoundTreeTraversal
         var remaining = SemanticVerifier.MaximumAnalysisVisits;
         foreach (var instance in program.SourceGenericTypeInstances)
         {
-            if (instance is null || instance.TypeArguments.IsDefault)
+            if (instance is null || instance.TypeArguments.IsDefault
+                || instance.ConstantArguments.IsDefault)
             {
                 return false;
             }
@@ -66,10 +162,130 @@ internal static class BoundTreeTraversal
                 }
                 visitor(argument);
             }
+            foreach (var argument in instance.ConstantArguments)
+            {
+                if (argument is null || --remaining < 0)
+                {
+                    return false;
+                }
+
+                if (argument.Kind
+                    == BoundGenericMethodConstantArgumentKind.Value)
+                {
+                    if (remaining < 2)
+                    {
+                        return false;
+                    }
+                    remaining -= 2;
+                    visitor(argument.DomainType);
+                    visitor(argument.CarrierType);
+                }
+                else if (argument.Kind
+                    != BoundGenericMethodConstantArgumentKind.Formal)
+                {
+                    return false;
+                }
+            }
         }
 
         return true;
     }
+
+    internal static bool VisitGenericMethodFunctions(
+        BoundProgram program, Action<BoundFunction> visitor)
+    {
+        ArgumentNullException.ThrowIfNull(program);
+        ArgumentNullException.ThrowIfNull(visitor);
+        if (program.GenericMethodDefinitions.IsDefault)
+        {
+            return false;
+        }
+
+        var remaining = SemanticVerifier.MaximumAnalysisVisits;
+        foreach (var definition in program.GenericMethodDefinitions)
+        {
+            if (definition is null || definition.ProofProgram is not BoundProgram proofProgram
+                || proofProgram.Functions.IsDefault)
+            {
+                return false;
+            }
+            foreach (var function in proofProgram.Functions)
+            {
+                if (function is null || --remaining < 0)
+                {
+                    return false;
+                }
+
+                var complete = true;
+                if (!VisitExpressions(function.Body, _ =>
+                    {
+                        if (--remaining < 0)
+                        {
+                            complete = false;
+                        }
+                    }) || !complete
+                    || !VisitContractExpressions(function, _ =>
+                    {
+                        if (--remaining < 0)
+                        {
+                            complete = false;
+                        }
+                    }) || !complete)
+                {
+                    return false;
+                }
+                visitor(function);
+            }
+        }
+
+        return true;
+    }
+
+    internal static BoundProgram RewriteGenericMethodDefinitions(
+        BoundProgram program,
+        ImmutableArray<BoundGenericMethodDefinition> definitions)
+    {
+        ArgumentNullException.ThrowIfNull(program);
+        if (definitions.IsDefault)
+        {
+            throw new ArgumentException(
+                "Generic method definitions cannot be default.",
+                nameof(definitions));
+        }
+
+        return program with { GenericMethodDefinitions = definitions };
+    }
+
+    internal static bool TrySubstituteGenericMethodTypeDefault(
+        BoundGenericMethodTypeDefault typeDefault,
+        ImmutableArray<BoundGenericMethodTypeTerm> typeArguments,
+        out BoundGenericMethodTypeDefault substituted) =>
+        BoundGenericMethodTypeTerms.TrySubstitute(typeDefault,
+            typeArguments, out substituted);
+
+    internal static bool TryRewriteGenericMethodTypeDefault(
+        BoundGenericMethodTypeDefault typeDefault,
+        Func<PrimitiveType, PrimitiveType> rewriteType,
+        Func<int, int> rewriteFormalOrdinal,
+        Func<int, int> rewriteSourceGenericDefinition,
+        Func<BoundGenericNominalTypeIdentity,
+            BoundGenericNominalTypeIdentity> rewriteNominalIdentity,
+        out BoundGenericMethodTypeDefault rewritten) =>
+        BoundGenericMethodTypeTerms.TryRewrite(typeDefault, rewriteType,
+            rewriteFormalOrdinal, rewriteSourceGenericDefinition,
+            rewriteNominalIdentity, out rewritten);
+
+    internal static bool TryRewriteGenericMethodTypeTerm(
+        BoundGenericMethodTypeTerm typeTerm,
+        Func<PrimitiveType, PrimitiveType> rewriteType,
+        Func<int, int> rewriteFormalOrdinal,
+        Func<int, int> rewriteSourceGenericDefinition,
+        Func<BoundGenericNominalTypeIdentity,
+            BoundGenericNominalTypeIdentity> rewriteNominalIdentity,
+        out BoundGenericMethodTypeTerm rewritten) =>
+        BoundGenericMethodTypeTerms.TryRewrite(typeTerm, rewriteType,
+            rewriteFormalOrdinal, rewriteSourceGenericDefinition,
+            rewriteNominalIdentity, out rewritten);
 
     internal static bool VisitExpressions(BoundBlock body, Action<BoundExpression> visitor)
         => VisitExpressionsCore(body, visitor, requireComplete: false);
@@ -106,13 +322,15 @@ internal static class BoundTreeTraversal
     {
         ArgumentNullException.ThrowIfNull(function);
         ArgumentNullException.ThrowIfNull(visitor);
-        if (function.DeclarationContractClauses.IsDefault)
+        if (function.DeclarationContractClauses.IsDefault
+            || function.CheckedOutputStatePredicates.IsDefault)
         {
             return false;
         }
 
         var statements = ImmutableArray.CreateBuilder<BoundStatement>(
-            function.DeclarationContractClauses.Length);
+            function.DeclarationContractClauses.Length
+                + function.CheckedOutputStatePredicates.Length);
         foreach (var clause in function.DeclarationContractClauses)
         {
             if (clause is null || clause.Predicate is null)
@@ -121,6 +339,16 @@ internal static class BoundTreeTraversal
             }
             statements.Add(new BoundExpressionStatement(clause.Predicate,
                 clause.Span));
+        }
+        foreach (var predicate in function.CheckedOutputStatePredicates)
+        {
+            if (predicate is null || predicate.Predicate is null)
+            {
+                return false;
+            }
+
+            statements.Add(new BoundExpressionStatement(predicate.Predicate,
+                function.Span));
         }
 
         return VisitExpressionsCore(new BoundBlock(statements.ToImmutable(),
@@ -218,7 +446,8 @@ internal static class BoundTreeTraversal
                     pending.Push((local.Initializer, depth));
                     break;
                 case BoundVacantLocal or BoundLifetimeEnd or BoundOwnerDeclaration or BoundBreak or BoundContinue
-                    or BoundDrop or BoundDropSpan or BoundDropConstructedFields:
+                    or BoundDrop or BoundDropSpan or BoundDropConstructedFields
+                    or BoundSymbolicLifetimeEnd or BoundSymbolicDrop:
                     if (requireComplete)
                     {
                         return false;
@@ -387,18 +616,28 @@ internal static class BoundTreeTraversal
     internal static BoundFunction RewriteCalls(BoundFunction function, Func<BoundCall, BoundCall> rewrite) =>
         function with {
             Body = (BoundBlock)RewriteCalls(function.Body, rewrite),
+            IndexedBody = function.IndexedBody?.RewriteCalls(rewrite),
             DeclarationContractClauses = RewriteDeclarationContractClauses(
                 function.DeclarationContractClauses,
                 predicate => RewriteCalls(predicate, rewrite)),
+            CheckedOutputStatePredicates =
+                RewriteOutputStatePredicates(
+                    function.CheckedOutputStatePredicates,
+                    predicate => RewriteCalls(predicate, rewrite)),
         };
 
     internal static BoundFunction RewriteExpressions(BoundFunction function,
         Func<BoundExpression, BoundExpression> rewrite) =>
         function with {
             Body = (BoundBlock)RewriteExpressions(function.Body, rewrite),
+            IndexedBody = function.IndexedBody?.RewriteExpressions(rewrite),
             DeclarationContractClauses = RewriteDeclarationContractClauses(
                 function.DeclarationContractClauses,
                 predicate => RewriteExpressions(predicate, rewrite)),
+            CheckedOutputStatePredicates =
+                RewriteOutputStatePredicates(
+                    function.CheckedOutputStatePredicates,
+                    predicate => RewriteExpressions(predicate, rewrite)),
         };
 
     internal static BoundFunction RewriteVariables(BoundFunction function,
@@ -409,10 +648,18 @@ internal static class BoundTreeTraversal
             Variables = variables,
             Body = (BoundBlock)RewriteVariables(function.Body,
                 rewriteVariable),
+            IndexedBody = function.IndexedBody?.RewriteVariables(variables,
+                rewriteVariable),
             DeclarationContractClauses = RewriteDeclarationContractClauses(
                 function.DeclarationContractClauses,
                 predicate => RewriteVariables(predicate,
                     rewriteVariable)),
+            CheckedOutputStatePredicates =
+                RewriteOutputStatePredicates(
+                    function.CheckedOutputStatePredicates,
+                    predicate => RewriteVariables(predicate,
+                        rewriteVariable),
+                    rewriteVariable),
             ConstructionHomeIndex = RewriteVariable(
                 function.ConstructionHomeIndex, rewriteVariable),
         };
@@ -422,7 +669,7 @@ internal static class BoundTreeTraversal
         Func<int, int> rewriteVariable)
         => variable < 0 ? variable : rewriteVariable(variable);
 
-    private static BoundStatement RewriteVariables(BoundStatement statement,
+    internal static BoundStatement RewriteVariables(BoundStatement statement,
         Func<int, int> rewriteVariable)
     {
         int Variable(int variable)
@@ -452,6 +699,10 @@ internal static class BoundTreeTraversal
             BoundLifetimeEnd lifetimeEnd => lifetimeEnd with {
                 Variable = Variable(lifetimeEnd.Variable),
             },
+            BoundSymbolicLifetimeEnd lifetimeEnd =>
+                lifetimeEnd with {
+                    Variable = Variable(lifetimeEnd.Variable),
+                },
             BoundOwnerDeclaration owner => owner with {
                 Variable = Variable(owner.Variable),
             },
@@ -521,6 +772,9 @@ internal static class BoundTreeTraversal
                 Value = Expression(view.Value),
             },
             BoundDrop drop => drop with {
+                Variable = Variable(drop.Variable),
+            },
+            BoundSymbolicDrop drop => drop with {
                 Variable = Variable(drop.Variable),
             },
             BoundDropSpan drop => drop with {
@@ -686,6 +940,16 @@ internal static class BoundTreeTraversal
                                 PointeeType = rewriteType(
                                     pointerType.PointeeType),
                             }));
+            var additionalExpectedDeclarations
+                = origin.AdditionalExpectedDeclarations.IsDefault
+                    ? default
+                    : ImmutableArray.CreateRange(
+                        origin.AdditionalExpectedDeclarations.Select(
+                            declaration => RewriteTypes(declaration,
+                                rewriteType) with {
+                                    StandardTypeOrigin = null,
+                                    StandardLayoutOnly = false,
+                                }));
             origin = origin with {
                 ExpectedDeclaration = expectedDeclaration with {
                     Fields = RewriteFields(expectedDeclaration.Fields,
@@ -693,6 +957,8 @@ internal static class BoundTreeTraversal
                 },
                 ExpectedFixedArrayTypes = expectedFixedArrayTypes,
                 ExpectedNativePointerTypes = expectedNativePointerTypes,
+                AdditionalExpectedDeclarations
+                    = additionalExpectedDeclarations,
             };
         }
 
@@ -748,7 +1014,40 @@ internal static class BoundTreeTraversal
         Func<PrimitiveType, PrimitiveType> rewriteType)
         => [.. fields.Select(field => field with {
             Type = rewriteType(field.Type),
+            StandardFieldOrigin = RewriteStandardFieldOrigin(
+                field.StandardFieldOrigin, rewriteType),
         })];
+
+    private static BoundStandardFieldOrigin? RewriteStandardFieldOrigin(
+        BoundStandardFieldOrigin? origin,
+        Func<PrimitiveType, PrimitiveType> rewriteType)
+    {
+        if (origin is null)
+        {
+            return null;
+        }
+
+        var expectedDeclaration
+            = origin.ExpectedDeclaration is BoundStructField declaration
+                ? declaration with {
+                    Type = rewriteType(declaration.Type),
+                    StandardFieldOrigin = null,
+                } : null;
+        var additionalExpectedDeclarations
+            = origin.AdditionalExpectedDeclarations.IsDefault
+                ? default
+                : ImmutableArray.CreateRange(
+                    origin.AdditionalExpectedDeclarations.Select(
+                        declaration => declaration with {
+                            Type = rewriteType(declaration.Type),
+                            StandardFieldOrigin = null,
+                        }));
+        return origin with {
+            ExpectedDeclaration = expectedDeclaration,
+            AdditionalExpectedDeclarations
+                = additionalExpectedDeclarations,
+        };
+    }
 
     internal static BoundNativeFixedArrayType RewriteTypes(
         BoundNativeFixedArrayType fixedArray,
@@ -760,11 +1059,52 @@ internal static class BoundTreeTraversal
         Func<PrimitiveType, PrimitiveType> rewriteType) =>
         referenceType with { ReferentType = rewriteType(referenceType.ReferentType) };
 
+    internal static BoundSpanTypeDefinition RewriteTypes(
+        BoundSpanTypeDefinition spanType,
+        Func<PrimitiveType, PrimitiveType> rewriteType) =>
+        spanType with { ElementType = rewriteType(spanType.ElementType) };
+
+    internal static BoundGenericMethodOwner RewriteTypes(
+        BoundGenericMethodOwner owner,
+        Func<PrimitiveType, PrimitiveType> rewriteType) =>
+        owner with {
+            ClosedType = rewriteType(owner.ClosedType),
+            TypeArguments = [.. owner.TypeArguments.Select(rewriteType)],
+            ConstantArguments = [.. owner.ConstantArguments.Select(
+                argument => RewriteGenericMethodConstantArgument(argument,
+                    rewriteType))],
+        };
+
     internal static BoundSourceGenericTypeInstance RewriteTypes(
         BoundSourceGenericTypeInstance instance,
         Func<PrimitiveType, PrimitiveType> rewriteType) =>
         instance with {
             TypeArguments = [.. instance.TypeArguments.Select(rewriteType)],
+            ConstantArguments = [.. instance.ConstantArguments.Select(
+                argument => RewriteGenericMethodConstantArgument(argument,
+                    rewriteType))],
+        };
+
+    internal static BoundSourceGenericTypeDefinition RewriteTypes(
+        BoundSourceGenericTypeDefinition definition,
+        Func<PrimitiveType, PrimitiveType> rewriteType) =>
+        definition with {
+            Formals = [.. definition.Formals.Select(formal =>
+                formal with {
+                    ConstantDomain = formal.ConstantDomain is
+                        BoundGenericMethodTypeTerm domain
+                        ? RewriteGenericMethodTypeTerm(domain, rewriteType)
+                        : null,
+                })],
+            ConstantFormals = [.. definition.ConstantFormals.Select(formal =>
+                formal with {
+                    Domain = RewriteGenericMethodTypeTerm(formal.Domain,
+                        rewriteType),
+                })],
+            TransparentConstantCarrierType =
+                definition.TransparentConstantCarrierType is PrimitiveType
+                    carrierType
+                    ? rewriteType(carrierType) : null,
         };
 
     internal static BoundInterfaceType RewriteTypes(
@@ -786,7 +1126,7 @@ internal static class BoundTreeTraversal
             ConstantType = argument.ConstantType is BoundInterfaceType constantType
                 ? RewriteTypes(constantType, rewriteType) : null,
             ConstantValue = argument.ConstantValue is BoundConstant constant
-                ? new BoundConstant(constant.Bits, rewriteType(constant.Type), constant.Span)
+                ? RewriteConstantType(constant, rewriteType)
                 : null,
         };
 
@@ -799,7 +1139,7 @@ internal static class BoundTreeTraversal
             TypeDefault = formal.TypeDefault is BoundInterfaceType typeDefault
                 ? RewriteTypes(typeDefault, rewriteType) : null,
             ConstantDefault = formal.ConstantDefault is BoundConstant constant
-                ? new BoundConstant(constant.Bits, rewriteType(constant.Type), constant.Span) : null,
+                ? RewriteConstantType(constant, rewriteType) : null,
         };
 
     internal static BoundInterfaceConstraint RewriteTypes(
@@ -822,15 +1162,139 @@ internal static class BoundTreeTraversal
                 RewriteTypes(constraint, rewriteType))],
             Parameters = [.. member.Parameters.Select(parameter => parameter with {
                 Type = RewriteTypes(parameter.Type, rewriteType),
+                DefaultValue = parameter.DefaultValue is BoundConstant defaultValue
+                    ? RewriteConstantType(defaultValue, rewriteType) : null,
+                DefaultExpression =
+                    parameter.DefaultExpression is BoundExpression expression
+                        ? RewriteExpressionTypes(expression, rewriteType) : null,
             })],
             AssociatedDefaultType = member.AssociatedDefaultType is BoundInterfaceType associatedDefault
                 ? RewriteTypes(associatedDefault, rewriteType) : null,
             AssociatedConstantType = member.AssociatedConstantType is BoundInterfaceType associatedConstantType
                 ? RewriteTypes(associatedConstantType, rewriteType) : null,
             AssociatedConstantDefault = member.AssociatedConstantDefault is BoundConstant associatedConstant
-                ? new BoundConstant(associatedConstant.Bits, rewriteType(associatedConstant.Type),
-                    associatedConstant.Span) : null,
+                ? RewriteConstantType(associatedConstant, rewriteType) : null,
         };
+
+    internal static BoundInterfaceMemberIdentity RewriteTypes(
+        BoundInterfaceMemberIdentity identity,
+        Func<PrimitiveType, PrimitiveType> rewriteType) =>
+        identity with {
+            DeclaringInterface = RewriteTypes(identity.DeclaringInterface,
+                rewriteType),
+        };
+
+    internal static BoundInterfaceWitnessMember RewriteTypes(
+        BoundInterfaceWitnessMember member,
+        Func<PrimitiveType, PrimitiveType> rewriteType) =>
+        member with {
+            Requirement = RewriteTypes(member.Requirement, rewriteType),
+            DefaultTarget = member.DefaultTarget is
+                BoundInterfaceMemberIdentity defaultTarget
+                    ? RewriteTypes(defaultTarget, rewriteType) : null,
+        };
+
+    internal static BoundInterfaceAssociatedTypeBinding RewriteTypes(
+        BoundInterfaceAssociatedTypeBinding binding,
+        Func<PrimitiveType, PrimitiveType> rewriteType) =>
+        binding with {
+            Requirement = RewriteTypes(binding.Requirement, rewriteType),
+            Type = RewriteTypes(binding.Type, rewriteType),
+        };
+
+    internal static BoundInterfaceAssociatedConstantBinding RewriteTypes(
+        BoundInterfaceAssociatedConstantBinding binding,
+        Func<PrimitiveType, PrimitiveType> rewriteType) =>
+        binding with {
+            Requirement = RewriteTypes(binding.Requirement, rewriteType),
+            Type = RewriteTypes(binding.Type, rewriteType),
+            Value = RewriteConstantType(binding.Value, rewriteType),
+        };
+
+    internal static BoundInterfaceWitness RewriteTypes(
+        BoundInterfaceWitness witness,
+        Func<PrimitiveType, PrimitiveType> rewriteType) =>
+        witness with {
+            ImplementingType = rewriteType(witness.ImplementingType),
+            InterfaceType = RewriteTypes(witness.InterfaceType,
+                rewriteType),
+            Members = [.. witness.Members.Select(member =>
+                RewriteTypes(member, rewriteType))],
+            AssociatedTypes = [.. witness.AssociatedTypes.Select(binding =>
+                RewriteTypes(binding, rewriteType))],
+            AssociatedConstants = [.. witness.AssociatedConstants.Select(
+                binding => RewriteTypes(binding, rewriteType))],
+        };
+
+    internal static BoundInterfaceCallIdentity RewriteTypes(
+        BoundInterfaceCallIdentity identity,
+        Func<PrimitiveType, PrimitiveType> rewriteType) =>
+        identity with {
+            ImplementingType = rewriteType(identity.ImplementingType),
+            WitnessInterface = RewriteTypes(identity.WitnessInterface,
+                rewriteType),
+            RequestedInterface = RewriteTypes(identity.RequestedInterface,
+                rewriteType),
+            Requirement = RewriteTypes(identity.Requirement,
+                rewriteType),
+        };
+
+    internal static BoundGenericMethodFormal RewriteTypes(
+        BoundGenericMethodFormal formal,
+        Func<PrimitiveType, PrimitiveType> rewriteType) =>
+        formal with {
+            PlaceholderType = rewriteType(formal.PlaceholderType),
+            InterfaceConstraints = [.. formal.InterfaceConstraints.Select(
+                constraint => RewriteTypes(constraint, rewriteType))],
+        };
+
+    internal static BoundGenericMethodFormalSignature RewriteTypes(
+        BoundGenericMethodFormalSignature formal,
+        Func<PrimitiveType, PrimitiveType> rewriteType) =>
+        formal with {
+            InterfaceConstraints = [.. formal.InterfaceConstraints.Select(
+                constraint => RewriteTypes(constraint, rewriteType))],
+        };
+
+    internal static BoundProgram RewriteInterfaceWitnesses(
+        BoundProgram program,
+        ImmutableArray<BoundInterfaceWitness> witnesses,
+        Func<PrimitiveType, PrimitiveType> rewriteType)
+    {
+        ArgumentNullException.ThrowIfNull(program);
+        ArgumentNullException.ThrowIfNull(rewriteType);
+        if (witnesses.IsDefault)
+        {
+            throw new ArgumentException(
+                "Interface witness rows cannot be default.",
+                nameof(witnesses));
+        }
+        return program with {
+            InterfaceWitnesses = [.. witnesses.Select(witness =>
+                RewriteTypes(witness, rewriteType))],
+        };
+    }
+
+    internal static BoundConstant RewriteConstantType(
+        BoundConstant constant,
+        Func<PrimitiveType, PrimitiveType> rewriteType)
+    {
+        var type = rewriteType(constant.Type);
+        if (BoundEnumTypes.IsType(constant.Type)
+            != BoundEnumTypes.IsType(type))
+        {
+            throw new InvalidOperationException(
+                "Type rewriting cannot erase or invent enum value identity.");
+        }
+        var representationType = rewriteType(
+            constant.RepresentationType);
+        if (representationType == type)
+        {
+            return new BoundConstant(constant.Bits, type, constant.Span);
+        }
+        return new BoundConstant(constant.Bits, type,
+            representationType, constant.Span);
+    }
 
     internal static BoundInterfaceDefinition RewriteTypes(
         BoundInterfaceDefinition @interface,
@@ -854,14 +1318,29 @@ internal static class BoundTreeTraversal
     internal static BoundGenericNominalTypeDefault RewriteTypes(
         BoundGenericNominalTypeDefault defaultValue,
         Func<PrimitiveType, PrimitiveType> rewriteType) =>
-        defaultValue.DecodedType is PrimitiveType decodedType
-            ? defaultValue with { DecodedType = rewriteType(decodedType) }
-            : defaultValue;
+        defaultValue with {
+            DecodedType = defaultValue.DecodedType is PrimitiveType decodedType
+                ? rewriteType(decodedType) : null,
+            DecodedConstantArgument =
+                defaultValue.DecodedConstantArgument is
+                    BoundGenericNominalTypeArgument constantArgument
+                    ? RewriteTypes(constantArgument, rewriteType) : null,
+        };
 
     internal static BoundGenericNominalTypeFormal RewriteTypes(
         BoundGenericNominalTypeFormal formal,
         Func<PrimitiveType, PrimitiveType> rewriteType) =>
         formal with {
+            ConstantDomainType = formal.ConstantDomainType is
+                PrimitiveType domainType ? rewriteType(domainType) : null,
+            ConstantCarrierType = formal.ConstantCarrierType is
+                PrimitiveType carrierType
+                    ? rewriteType(carrierType) : null,
+            ConstantDomainTypeTerm =
+                formal.ConstantDomainTypeTerm is
+                    BoundGenericMethodTypeTerm domainTerm
+                    ? RewriteGenericMethodTypeTerm(domainTerm, rewriteType)
+                    : null,
             Default = formal.Default is BoundGenericNominalTypeDefault defaultValue
                 ? RewriteTypes(defaultValue, rewriteType) : null,
         };
@@ -872,14 +1351,50 @@ internal static class BoundTreeTraversal
         definition with {
             Formals = [.. definition.Formals.Select(formal =>
                 RewriteTypes(formal, rewriteType))],
+            TransparentConstantCarrierType =
+                definition.TransparentConstantCarrierType is
+                    PrimitiveType carrierType
+                    ? rewriteType(carrierType) : null,
         };
 
     internal static BoundGenericNominalTypeArgument RewriteTypes(
         BoundGenericNominalTypeArgument argument,
-        Func<PrimitiveType, PrimitiveType> rewriteType) =>
-        argument.Kind == BoundGenericArgumentKind.Type
-            ? argument with { Type = rewriteType(argument.Type) }
-            : argument;
+        Func<PrimitiveType, PrimitiveType> rewriteType)
+    {
+        if (argument.Kind == BoundGenericArgumentKind.Type)
+        {
+            return argument with {
+                Type = rewriteType(argument.Type),
+                TypeArgumentTerm = argument.TypeArgumentTerm is
+                    BoundGenericMethodTypeTerm typeArgumentTerm
+                    ? RewriteGenericMethodTypeTerm(typeArgumentTerm,
+                        rewriteType) : null,
+            };
+        }
+        if (argument.HasConstantFormalIdentity)
+        {
+            if (!BoundGenericMethodTypeTerms.TryRewrite(
+                argument.ConstantFormalDomain!, rewriteType,
+                static ordinal => ordinal,
+                static definition => definition,
+                static identity => identity, out var domain))
+            {
+                throw new InvalidOperationException(
+                    "A generic nominal constant formal has an invalid domain term.");
+            }
+
+            return argument with { ConstantFormalDomain = domain };
+        }
+
+        return argument with {
+            ConstantDomainType = argument.ConstantDomainType is
+                PrimitiveType domainType
+                    ? rewriteType(domainType) : null,
+            ConstantCarrierType = argument.ConstantCarrierType is
+                PrimitiveType carrierType
+                    ? rewriteType(carrierType) : null,
+        };
+    }
 
     internal static BoundGenericNominalTypeInstance RewriteTypes(
         BoundGenericNominalTypeInstance instance,
@@ -889,13 +1404,85 @@ internal static class BoundTreeTraversal
                 RewriteTypes(argument, rewriteType))],
         };
 
+    internal static BoundGenericMethodInstantiation RewriteTypes(
+        BoundGenericMethodInstantiation instantiation,
+        Func<PrimitiveType, PrimitiveType> rewriteType) =>
+        instantiation with {
+            TypeArguments = [.. instantiation.TypeArguments.Select(
+                rewriteType)],
+            ConstantArguments = [.. instantiation.ConstantArguments.Select(
+                argument => RewriteGenericMethodConstantArgument(
+                    argument, rewriteType))],
+        };
+
+    private static BoundGenericMethodConstantArgument
+        RewriteGenericMethodConstantArgument(
+            BoundGenericMethodConstantArgument argument,
+            Func<PrimitiveType, PrimitiveType> rewriteType)
+    {
+        return argument with {
+            Domain = RewriteGenericMethodTypeTerm(argument.Domain,
+                rewriteType),
+            DomainType = rewriteType(argument.DomainType),
+            CarrierType = rewriteType(argument.CarrierType),
+        };
+    }
+
+    private static BoundGenericMethodTypeTerm RewriteGenericMethodTypeTerm(
+        BoundGenericMethodTypeTerm typeTerm,
+        Func<PrimitiveType, PrimitiveType> rewriteType)
+    {
+        if (!TryRewriteGenericMethodTypeTerm(typeTerm, rewriteType,
+                static ordinal => ordinal,
+                static definition => definition,
+                static identity => identity, out var rewritten))
+        {
+            throw new InvalidOperationException(
+                "A generic constant type term is invalid.");
+        }
+
+        return rewritten;
+    }
+
     internal static BoundFunction RewriteTypes(BoundFunction function,
         Func<PrimitiveType, PrimitiveType> rewriteType)
     {
-        var remapped = RewriteExpressions(function,
+        var remapped = RewriteExpressions(function with {
+            IndexedBody = null,
+        },
             expression => RewriteExpressionTypes(expression, rewriteType));
         return remapped with {
+            Body = RewriteGenericUniquePropertyTypes(remapped.Body,
+                rewriteType),
+            IndexedBody = function.IndexedBody?.RewriteTypes(rewriteType),
             ReturnType = rewriteType(function.ReturnType),
+            GenericMethodInstantiation =
+                function.GenericMethodInstantiation is
+                    BoundGenericMethodInstantiation instantiation
+                    ? RewriteTypes(instantiation, rewriteType) : null,
+            GenericMethodProofCall =
+                function.GenericMethodProofCall is
+                    BoundGenericMethodInstantiation proofCall
+                    ? RewriteTypes(proofCall, rewriteType) : null,
+            ImportedGenericMethodTypeArguments =
+                [.. function.ImportedGenericMethodTypeArguments.Select(
+                    rewriteType)],
+            ExplicitInterfaceOwner =
+                function.ExplicitInterfaceOwner is
+                    BoundInterfaceType explicitInterfaceOwner
+                    ? RewriteTypes(explicitInterfaceOwner, rewriteType)
+                    : null,
+            InterfaceRequirement =
+                function.InterfaceRequirement is
+                    BoundInterfaceMemberIdentity interfaceRequirement
+                    ? RewriteTypes(interfaceRequirement, rewriteType)
+                    : null,
+            InterfaceRequirementTypeArguments =
+                [.. function.InterfaceRequirementTypeArguments.Select(
+                    rewriteType)],
+            GenericMethodProofTypeParameters =
+                [.. function.GenericMethodProofTypeParameters.Select(
+                    rewriteType)],
             FriendTargets = [.. function.FriendTargets.Select(target =>
                 RewriteTypes(target, rewriteType))],
             NativeFunctionPointerType = function.NativeFunctionPointerType is PrimitiveType functionPointerType
@@ -925,12 +1512,103 @@ internal static class BoundTreeTraversal
                 : null,
             Variables = [.. function.Variables.Select(variable => variable with {
                 Type = rewriteType(variable.Type),
+                GenericUniquePropertyWhenTrue =
+                    RewriteGenericUniquePropertyFacts(
+                        variable.GenericUniquePropertyWhenTrue,
+                        rewriteType),
+                GenericUniquePropertyWhenFalse =
+                    RewriteGenericUniquePropertyFacts(
+                        variable.GenericUniquePropertyWhenFalse,
+                        rewriteType),
             })],
             DeclarationContractClauses = RewriteDeclarationContractClauses(
                 function.DeclarationContractClauses, predicate =>
                     RewriteExpressionTypes(predicate, rewriteType),
                 failureType => rewriteType(failureType)),
+            CheckedOutputStatePredicates =
+                RewriteOutputStatePredicates(
+                    function.CheckedOutputStatePredicates,
+                    predicate => RewriteExpressionTypes(predicate,
+                        rewriteType)),
         };
+    }
+
+    private static BoundBlock RewriteGenericUniquePropertyTypes(
+        BoundBlock body, Func<PrimitiveType, PrimitiveType> rewriteType) =>
+        (BoundBlock)RewriteGenericUniquePropertyTypes(
+            (BoundStatement)body, rewriteType);
+
+    private static BoundStatement RewriteGenericUniquePropertyTypes(
+        BoundStatement statement,
+        Func<PrimitiveType, PrimitiveType> rewriteType) =>
+        statement switch {
+            BoundBlock block => block with {
+                Statements = [.. block.Statements.Select(child =>
+                    RewriteGenericUniquePropertyTypes(child, rewriteType))],
+            },
+            BoundIf branch => branch with {
+                Then = RewriteGenericUniquePropertyTypes(branch.Then,
+                    rewriteType),
+                Else = branch.Else is null ? null
+                    : RewriteGenericUniquePropertyTypes(branch.Else,
+                        rewriteType),
+                GenericUniquePropertyWhenTrue =
+                    RewriteGenericUniquePropertyFacts(
+                        branch.GenericUniquePropertyWhenTrue, rewriteType),
+                GenericUniquePropertyWhenFalse =
+                    RewriteGenericUniquePropertyFacts(
+                        branch.GenericUniquePropertyWhenFalse, rewriteType),
+            },
+            BoundWhile loop => loop with {
+                Body = RewriteGenericUniquePropertyTypes(loop.Body,
+                    rewriteType),
+                Iterator = loop.Iterator is null ? null
+                    : RewriteGenericUniquePropertyTypes(loop.Iterator,
+                        rewriteType),
+            },
+            BoundTryFinally cleanup => cleanup with {
+                Body = (BoundBlock)RewriteGenericUniquePropertyTypes(
+                    cleanup.Body, rewriteType),
+                Finally = (BoundBlock)RewriteGenericUniquePropertyTypes(
+                    cleanup.Finally, rewriteType),
+            },
+            BoundTryCatch recovery => recovery with {
+                Body = (BoundBlock)RewriteGenericUniquePropertyTypes(
+                    recovery.Body, rewriteType),
+                Catch = (BoundBlock)RewriteGenericUniquePropertyTypes(
+                    recovery.Catch, rewriteType),
+                Finally = recovery.Finally is null ? null
+                    : (BoundBlock)RewriteGenericUniquePropertyTypes(
+                        recovery.Finally, rewriteType),
+            },
+            BoundUnsafe unsafeBlock => unsafeBlock with {
+                Body = (BoundBlock)RewriteGenericUniquePropertyTypes(
+                    unsafeBlock.Body, rewriteType),
+            },
+            BoundViewScope view => view with {
+                Body = (BoundBlock)RewriteGenericUniquePropertyTypes(
+                    view.Body, rewriteType),
+            },
+            _ => statement,
+        };
+
+    private static ImmutableArray<BoundGenericUniquePropertyFact>
+        RewriteGenericUniquePropertyFacts(
+            ImmutableArray<BoundGenericUniquePropertyFact> facts,
+            Func<PrimitiveType, PrimitiveType> rewriteType) =>
+        [.. facts.Select(fact => fact with {
+            FormalType = rewriteType(fact.FormalType),
+        })];
+
+    internal static ImmutableArray<BoundDeclarationContractClause>
+        RewriteDeclarationContractClauses(
+            ImmutableArray<BoundDeclarationContractClause> clauses,
+            Func<PrimitiveType, PrimitiveType> rewriteType)
+    {
+        ArgumentNullException.ThrowIfNull(rewriteType);
+        return RewriteDeclarationContractClauses(clauses,
+            predicate => RewriteExpressionTypes(predicate, rewriteType),
+            rewriteType);
     }
 
     private static ImmutableArray<BoundDeclarationContractClause>
@@ -961,11 +1639,47 @@ internal static class BoundTreeTraversal
         ];
     }
 
-    private static BoundExpression RewriteExpressionTypes(BoundExpression expression,
+    private static ImmutableArray<BoundOutputStatePredicate>
+        RewriteOutputStatePredicates(
+            ImmutableArray<BoundOutputStatePredicate> predicates,
+            Func<BoundExpression, BoundExpression> rewritePredicate,
+            Func<int, int>? rewriteFormal = null)
+    {
+        ArgumentNullException.ThrowIfNull(rewritePredicate);
+        if (predicates.IsDefault)
+        {
+            return default;
+        }
+        if (predicates.Any(static predicate => predicate is null))
+        {
+            throw new ArgumentException(
+                "An OutputState predicate cannot be null.",
+                nameof(predicates));
+        }
+
+        return [
+            .. predicates.Select(predicate => predicate with {
+                FormalOrdinal = rewriteFormal?.Invoke(
+                    predicate.FormalOrdinal) ?? predicate.FormalOrdinal,
+                Predicate = rewritePredicate(predicate.Predicate),
+            }),
+        ];
+    }
+
+    internal static BoundExpression RewriteExpressionTypes(BoundExpression expression,
         Func<PrimitiveType, PrimitiveType> rewriteType)
     {
-        var type = rewriteType(expression.Type);
+        var type = expression.Type == PrimitiveType.TypeIdentity
+            ? PrimitiveType.TypeIdentity : rewriteType(expression.Type);
         return expression switch {
+            BoundTypeIdentityQuery identity => identity with {
+                Subject = RewriteQuerySubjectTypes(
+                    identity.Subject, rewriteType),
+            },
+            BoundLayoutQuery query => query with {
+                Subject = RewriteQuerySubjectTypes(
+                    query.Subject, rewriteType),
+            },
             BoundPrivateReferenceForm formation => formation with {
                 Place = RewritePrivatePlaceTypes(formation.Place,
                     rewriteType),
@@ -1025,7 +1739,75 @@ internal static class BoundTreeTraversal
                     .. pathWrite.LeafFields.Select(field =>
                         field with { OwnerType = rewriteType(field.OwnerType) })],
             },
+            BoundConstant constant => constant with {
+                Type = type,
+                GenericUniquePropertyWhenTrue =
+                    RewriteGenericUniquePropertyFacts(
+                        constant.GenericUniquePropertyWhenTrue, rewriteType),
+                GenericUniquePropertyWhenFalse =
+                    RewriteGenericUniquePropertyFacts(
+                        constant.GenericUniquePropertyWhenFalse, rewriteType),
+            },
+            BoundPendingInterfaceDefault pending => pending with {
+                Type = type,
+                Requirement = RewriteTypes(pending.Requirement,
+                    rewriteType),
+            },
+            BoundGenericTypePropertyTest propertyTest =>
+                propertyTest with {
+                    FormalType = rewriteType(propertyTest.FormalType),
+                },
+            BoundCall call => call with {
+                Type = type,
+                InterfaceCallIdentity =
+                    call.InterfaceCallIdentity is
+                        BoundInterfaceCallIdentity interfaceCall
+                        ? RewriteTypes(interfaceCall, rewriteType) : null,
+                GenericMethodCall = call.GenericMethodCall is
+                    BoundGenericMethodInstantiation instantiation
+                    ? RewriteTypes(instantiation, rewriteType) : null,
+                ImportedGenericMethodTypeArguments =
+                    [.. call.ImportedGenericMethodTypeArguments.Select(
+                        rewriteType)],
+            },
             _ => expression with { Type = type },
+        };
+    }
+
+    private static BoundQuerySubject RewriteQuerySubjectTypes(
+        BoundQuerySubject subject,
+        Func<PrimitiveType, PrimitiveType> rewriteType)
+    {
+        BoundGenericMethodTypeTerm? genericTypeTerm = null;
+        if (subject.TypeIdentityTerm is BoundGenericMethodTypeTerm term)
+        {
+            if (!TryRewriteGenericMethodTypeTerm(term, rewriteType,
+                    static ordinal => ordinal,
+                    static definition => definition,
+                    static identity => identity,
+                    out var rewrittenTerm))
+            {
+                throw new InvalidOperationException(
+                    "A query TypeIdentity term could not be remapped.");
+            }
+            genericTypeTerm = rewrittenTerm;
+        }
+
+        return subject with {
+            Type = rewriteType(subject.Type),
+            FieldPath = subject.FieldPath is BoundQueryFieldPath fieldPath
+                ? fieldPath with {
+                    RootType = rewriteType(fieldPath.RootType),
+                    Steps = [
+                        .. fieldPath.Steps.Select(step => step with {
+                            OwnerType = rewriteType(step.OwnerType),
+                            FieldType = rewriteType(step.FieldType),
+                            StandardFieldOrigin = RewriteStandardFieldOrigin(
+                                step.StandardFieldOrigin, rewriteType),
+                        }),
+                    ],
+                } : null,
+            TypeIdentityTerm = genericTypeTerm,
         };
     }
 
@@ -1081,7 +1863,7 @@ internal static class BoundTreeTraversal
                 Layout = RewriteLayout(projection.Layout, rewriteType),
             })];
 
-    private static BoundStatement RewriteExpressions(BoundStatement statement,
+    internal static BoundStatement RewriteExpressions(BoundStatement statement,
         Func<BoundExpression, BoundExpression> rewrite) =>
         statement switch {
             BoundBlock block => block with {
@@ -1144,11 +1926,11 @@ internal static class BoundTreeTraversal
             _ => statement,
         };
 
-    private static BoundExpression RewriteExpressions(BoundExpression expression,
+    internal static BoundExpression RewriteExpressions(BoundExpression expression,
         Func<BoundExpression, BoundExpression> rewrite) =>
         rewrite(expression.RewriteNestedExpressions(item => RewriteExpressions(item, rewrite)));
 
-    private static BoundStatement RewriteCalls(BoundStatement statement, Func<BoundCall, BoundCall> rewrite) =>
+    internal static BoundStatement RewriteCalls(BoundStatement statement, Func<BoundCall, BoundCall> rewrite) =>
         statement switch {
             BoundBlock block => block with {
                 Statements = [.. block.Statements.Select(item => RewriteCalls(item, rewrite))],
@@ -1210,7 +1992,7 @@ internal static class BoundTreeTraversal
             _ => statement,
         };
 
-    private static BoundExpression RewriteCalls(BoundExpression expression, Func<BoundCall, BoundCall> rewrite)
+    internal static BoundExpression RewriteCalls(BoundExpression expression, Func<BoundCall, BoundCall> rewrite)
     {
         var rewritten = expression.RewriteNestedExpressions(item => RewriteCalls(item, rewrite));
         return rewritten is BoundCall call ? rewrite(call) : rewritten;

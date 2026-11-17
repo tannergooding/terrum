@@ -39,6 +39,11 @@ internal sealed partial class Binder
     private StaticGenericOwnerCollection? _staticGenericOwnerCollection;
     private readonly List<NativeFunctionPointerSignatureDefinition> _nativeFunctionPointerSignatures = [];
     private readonly List<NativePointerTypeDefinition> _nativePointerTypes = [];
+    private readonly List<BoundSpanTypeDefinition> _spanTypes = [];
+    private Dictionary<(PrimitiveType ElementType,
+        int ElementFormalDefinitionOrdinal, int ElementFormalOrdinal,
+        bool IsElementWritable, bool IsWritable, bool IsInitialization),
+        int> _spanTypeIndexes = [];
     private readonly List<BoundNativeFixedArrayType> _nativeFixedArrayTypes = [];
     private Dictionary<(PrimitiveType ElementType, ulong ElementCount), int>
         _nativeFixedArrayTypeIndexes = [];
@@ -55,12 +60,26 @@ internal sealed partial class Binder
         _pendingNativeImportFunctionPointerTypeIndexes = [];
     private readonly List<BoundEnumDefinition> _enumDefinitions = [];
     private readonly Dictionary<string, PrimitiveType> _enumNames = new(StringComparer.Ordinal);
+    private readonly Dictionary<(SyntaxTree Tree, string Name), PrimitiveType>
+        _sourceEnumNames = [];
+    private readonly List<SourceEnumDeclaration> _sourceEnumDeclarations = [];
     private readonly HashSet<string> _ambiguousEnumNames = new(StringComparer.Ordinal);
     private readonly List<BoundGenericNominalTypeDefinition> _genericNominalTypeDefinitions = [];
     private readonly List<BoundGenericNominalTypeInstance> _genericNominalTypeInstances = [];
+    private readonly List<BoundStandardClassDeclaration>
+        _standardClassDeclarations = [];
     private readonly Dictionary<string, PrimitiveType> _genericNominalTypeUses = new(StringComparer.Ordinal);
     private readonly List<BoundSourceGenericTypeDefinition> _sourceGenericTypeDefinitions = [];
     private readonly List<BoundSourceGenericTypeInstance> _sourceGenericTypeInstances = [];
+    private readonly List<BoundGenericMethodDefinition>
+        _genericMethodDefinitions = [];
+    private readonly List<BoundGenericMethodSignature>
+        _genericMethodSignatures = [];
+    private readonly List<BoundGenericMethodOperatorProtocol>
+        _genericMethodOperatorProtocols = [];
+    private readonly List<BoundInterfaceWitness> _interfaceWitnesses = [];
+    private readonly Dictionary<string, int>
+        _genericMethodOperatorProtocolOrdinals = new(StringComparer.Ordinal);
     private readonly HashSet<BoundLocal> _constRequired = new(ReferenceEqualityComparer.Instance);
     private readonly List<BoundStruct> _structs = [];
     private readonly Dictionary<PrimitiveType, int> _structureAlignments = [];
@@ -69,12 +88,15 @@ internal sealed partial class Binder
     private readonly HashSet<int> _layingOut = [];
     private readonly HashSet<int> _laidOut = [];
     private readonly Dictionary<string, PrimitiveType> _structNames = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _ambiguousStructNames = new(StringComparer.Ordinal);
     private readonly Dictionary<string, GenericStructTemplate> _genericStructTemplates = new(StringComparer.Ordinal);
     private readonly Dictionary<string, PrimitiveType> _genericStructSpecializations = new(StringComparer.Ordinal);
     private readonly HashSet<PrimitiveType> _genericStructSpecializationTypes = [];
     private readonly Dictionary<string, AliasDefinition> _aliases = new(StringComparer.Ordinal);
     private readonly List<AliasDefinition> _aliasResolutionStack = [];
     private readonly List<IReadOnlyDictionary<string, PrimitiveType>> _aliasTypeArguments = [];
+    private readonly List<GenericMethodAliasTypeFormalScope>
+        _genericMethodAliasTypeFormals = [];
     private readonly ImmutableArray<HostBuffer> _buffers;
     private readonly Dictionary<string, int> _functions = new(StringComparer.Ordinal);
     private readonly HashSet<string> _usings = new(StringComparer.Ordinal);
@@ -88,6 +110,7 @@ internal sealed partial class Binder
     private readonly HashSet<int> _unresolvedVacantLocals = [];
     private readonly HashSet<int> _constLocals = [];
     private readonly Dictionary<int, BoundConstant> _constScalarValues = [];
+    private int _queryPlaceBindingDepth;
     private int _localStart;
     private readonly List<Dictionary<string, int>> _scopes = [];
     private readonly List<BoundBlockBinding> _statementScopes = [];
@@ -96,11 +119,16 @@ internal sealed partial class Binder
     private ImmutableDictionary<string, PrimitiveType>? _genericOwnerTypeArguments;
     private int _finallyLoopDepth;
     private GenericInstantiation? _genericContext;
+    private readonly Dictionary<PrimitiveType, bool>
+        _genericUniqueRefinements = [];
     private PrimitiveType _returnType;
     private BoundDeclarationContractPhase? _bindingContractPhase;
     private BoundStaticConstructorIdentity?
         _bindingStaticConstructorIdentity;
     private int _bindingStaticFieldInitializerIndex = -1;
+    private int _bindingPropertyBackingFieldIndex = -1;
+    private BoundPropertyAccessorKind _bindingPropertyAccessorKind;
+    private string? _bindingPropertyName;
     private string? _currentStruct;
     private bool _constructor;
     private int _unsafeDepth;
@@ -111,6 +139,9 @@ internal sealed partial class Binder
     private readonly HashSet<SyntaxNode> _acceptedPrimitiveDeclarations = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<string, string> _primitiveBackingFields = new(StringComparer.Ordinal);
     private readonly CompilationReference? _reference;
+    private readonly int _genericMethodFormalTypeOwnerBase;
+    private readonly ImmutableArray<BoundGenericTypeFormalOwner>
+        _referenceGenericMethodTypeFormalOwners;
     private readonly NativeCoreRegistrationSet? _nativeCoreRegistration;
     private readonly LayoutCoreRegistrationSet? _layoutCoreRegistration;
     private readonly StaticInitializationCoreRegistrationSet?
@@ -129,6 +160,12 @@ internal sealed partial class Binder
         _coreContractFailureIdentitySelections;
     private readonly CoreContractFailureIdentitySelection?
         _coreContractFailureIdentitySelection;
+    private readonly CoreEvaluationFormIdentitySelection?
+        _coreEvaluationFormIdentitySelection;
+    private readonly ImmutableArray<CoreEvaluationFormIdentitySelection>
+        _coreEvaluationFormIdentitySelections;
+    private readonly ImmutableArray<CoreEvaluationFormSchemaDeclarations>
+        _coreEvaluationFormSchemaProviders;
     private readonly string? _nativeLoweringAgreement;
     private readonly BoundRuntimePolicy _runtimePolicy;
     private readonly SourceArithmeticProfile _sourceArithmeticProfile;
@@ -169,6 +206,16 @@ internal sealed partial class Binder
     private readonly record struct BindingContext(
         SyntaxTree Tree, string Namespace, ImmutableArray<string> Usings);
 
+    private sealed record SourceEnumPartInput(
+        int SourceInputOrdinal, SyntaxTree Tree, SyntaxNode Declaration,
+        string QualifiedName,
+        bool IsPublic, bool IsFileLocal, bool IsPartial,
+        int VisibilityCount, SyntaxNode? UnderlyingType);
+
+    private sealed record SourceEnumDeclaration(
+        SyntaxTree Tree, SyntaxNode Declaration,
+        BoundSourceEnumDeclarationHandle Handle, PrimitiveType Type);
+
     private sealed class AliasDefinition(SyntaxTree tree, SyntaxNode declaration, SyntaxNode target,
         ImmutableArray<string> typeParameters, string qualifiedName, bool isPublic)
     {
@@ -190,7 +237,16 @@ internal sealed partial class Binder
             StaticInitializerAttributeSchema { get; set; }
         internal CoreLazyInitializationAttributeSchema?
             LazyInitializationAttributeSchema { get; set; }
+        internal CoreEvaluationFormSchemaDefinitionIdentity?
+            EvaluationFormSchemaDefinition { get; set; }
     }
+
+    private readonly record struct GenericMethodAliasTypeFormal(
+        int DefinitionOrdinal, int FormalOrdinal, bool IsWritable);
+    private readonly record struct GenericMethodAliasTypeFormalScope(
+        ImmutableHashSet<SyntaxNode> TargetTypeSyntaxNodes,
+        ImmutableHashSet<string> TypeParameterNames,
+        ImmutableDictionary<string, GenericMethodAliasTypeFormal> Formals);
 
     private sealed record GenericStructTemplate(int DefinitionIndex, string Name, string QualifiedName,
         ImmutableArray<string> TypeParameters,
@@ -198,6 +254,10 @@ internal sealed partial class Binder
         ImmutableArray<byte> OwnershipDomains,
         ImmutableArray<byte> NullabilityDomains,
         ImmutableArray<bool> BlittableRequirements,
+        ImmutableArray<GenericMethodFormalSyntax> FormalSyntax,
+        ImmutableArray<BoundGenericMethodFormalSlot> FormalOrder,
+        ImmutableArray<GenericMethodConstantFormal> ConstantFormals,
+        GenericTemplate FormalContext,
         SyntaxTree Tree, SyntaxNode Declaration);
 
     internal Binder(SyntaxTree tree, CancellationToken cancellationToken)
@@ -233,7 +293,13 @@ internal sealed partial class Binder
         LazyInitializationCoreRegistrationSet?
             lazyInitializationCoreRegistration = null,
         NativeOutputCoreRegistrationSet?
-            nativeOutputCoreRegistration = null)
+            nativeOutputCoreRegistration = null,
+        CoreEvaluationFormIdentitySelection?
+            coreEvaluationFormIdentitySelection = null,
+        ImmutableArray<CoreEvaluationFormIdentitySelection>
+            coreEvaluationFormIdentitySelections = default,
+        ImmutableArray<CoreEvaluationFormSchemaDeclarations>
+            coreEvaluationFormSchemaProviders = default)
     {
         if (coreLibrary && (!isLibrary || reference is not null))
         {
@@ -246,11 +312,23 @@ internal sealed partial class Binder
         _isLibrary = isLibrary;
         _coreLibrary = coreLibrary;
         _reference = reference;
+        _referenceGenericMethodTypeFormalOwners
+            = CreateGenericMethodTypeFormalOwners(reference);
+        var maximumFormalOwner = _referenceGenericMethodTypeFormalOwners
+            .Where(static owner => owner.Ordinal >= 0)
+            .Select(static owner => owner.Ordinal)
+            .DefaultIfEmpty(-1)
+            .Max();
+        _genericMethodFormalTypeOwnerBase
+            = checked(maximumFormalOwner + 1);
         if (reference is not null)
         {
+            AddReferenceGenericMethodImports(reference);
             _interfaces.AddRange(reference.Interfaces);
             _genericNominalTypeDefinitions.AddRange(reference.GenericNominalTypeDefinitions);
             _genericNominalTypeInstances.AddRange(reference.GenericNominalTypeInstances);
+            _standardClassDeclarations.AddRange(
+                reference.StandardClassDeclarations);
             for (var index = 0; index < reference.GenericNominalTypeInstances.Length; index++)
             {
                 var instance = reference.GenericNominalTypeInstances[index];
@@ -279,6 +357,14 @@ internal sealed partial class Binder
                 : coreContractFailureIdentitySelections;
         _coreContractFailureIdentitySelection
             = coreContractFailureIdentitySelection;
+        _coreEvaluationFormIdentitySelection
+            = coreEvaluationFormIdentitySelection;
+        _coreEvaluationFormIdentitySelections
+            = coreEvaluationFormIdentitySelections.IsDefault
+                ? [] : coreEvaluationFormIdentitySelections;
+        _coreEvaluationFormSchemaProviders
+            = coreEvaluationFormSchemaProviders.IsDefault
+                ? [] : coreEvaluationFormSchemaProviders;
         _nativeLoweringAgreement = nativeLoweringAgreement;
         _runtimePolicy = runtimePolicy;
         _sourceArithmeticProfile = sourceArithmeticProfile;
@@ -302,7 +388,10 @@ internal sealed partial class Binder
             return false;
         }
 
-        if (_enumNames.Remove(definition.Name))
+        var isLookupRoot = definition.Identity
+            is not BoundEnumDeclarationIdentity.Standard standard
+            || !standard.Value.SelectedExportKeys.IsEmpty;
+        if (isLookupRoot && _enumNames.Remove(definition.Name))
         {
             _ = _ambiguousEnumNames.Add(definition.Name);
         }
@@ -313,7 +402,8 @@ internal sealed partial class Binder
             return false;
         }
 
-        if (!_ambiguousEnumNames.Contains(definition.Name))
+        if (isLookupRoot
+            && !_ambiguousEnumNames.Contains(definition.Name))
         {
             _enumNames.Add(definition.Name,
                 BoundEnumTypes.Type(_enumDefinitions.Count));
@@ -498,6 +588,15 @@ internal sealed partial class Binder
         {
             _nativeFunctionPointerSignatures.AddRange(_reference.NativeFunctionPointerSignatures);
             _nativePointerTypes.AddRange(_reference.NativePointerTypes);
+            _spanTypes.AddRange(_reference.SpanTypes);
+            if (!BoundSpanTypeContract.TryCreateTypeIdentityIndex(
+                _spanTypes, out _spanTypeIndexes))
+            {
+                Report("TRM3005",
+                    "The referenced Span type table is not canonical.",
+                    _trees[0].Root.Span);
+                return null;
+            }
             _nativeFixedArrayTypes.AddRange(_reference.NativeFixedArrayTypes);
             if (!NativeFixedArrayContract.TryCreateTypeIdentityIndex(
                 _nativeFixedArrayTypes,
@@ -516,8 +615,11 @@ internal sealed partial class Binder
                 if (!structure.IsPrivate && !structure.IsInternal
                     && structure.StandardTypeOrigin?.IsLookupRoot != false)
                 {
-                    _structNames.Add(structure.Name,
-                        (PrimitiveType)(100 + _structs.Count));
+                    if (!_structNames.TryAdd(structure.Name,
+                            (PrimitiveType)(100 + _structs.Count)))
+                    {
+                        _ = _ambiguousStructNames.Add(structure.Name);
+                    }
                 }
                 _structs.Add(structure);
                 _ = _laidOut.Add(_structs.Count - 1);
@@ -572,6 +674,16 @@ internal sealed partial class Binder
                     DeclaredRequiresUnsafeCaller = function.DeclaredRequiresUnsafeCaller,
                     NativeFunctionPointerType = function.NativeFunctionPointerType,
                     DependencyContracts = importedFunction.DependencyContracts,
+                    CheckedOutputSelectors =
+                        importedFunction.CheckedOutputSelectors,
+                    CheckedOutputStates =
+                        importedFunction.CheckedOutputStates,
+                    CheckedOutputStatePredicates =
+                        importedFunction.CheckedOutputStatePredicates,
+                    HasPrivateCheckedOutputStateMetadata =
+                        importedFunction.HasPrivateCheckedOutputStateMetadata,
+                    HasStandardCheckedOutputStateMetadata =
+                        importedFunction.HasStandardCheckedOutputStateMetadata,
                 });
             }
         }
@@ -733,6 +845,7 @@ internal sealed partial class Binder
                     ? qualified : qualified[(separator + 1)..]));
             }
         }
+        FinalizeClassDeclarationGroups();
 
         if (_usesNativeBuffer)
         {
@@ -744,9 +857,12 @@ internal sealed partial class Binder
         {
             _ = _structNames.TryAdd(NativeManagedNodeIntrinsics.TypeName, PrimitiveType.ManagedNode);
         }
+        DeclareSourceEnumNames();
         DeclareAliases();
         WithConstEvalTypeContext(() => {
             ResolveAliasesWithConstEvalTypeContext();
+            BindSourceEnumDefinitions();
+            BindGenericStructConstantDomains();
             foreach (var index in _structDeclarations.Keys.ToArray())
             {
                 DeclareStruct(index);
@@ -755,6 +871,7 @@ internal sealed partial class Binder
             {
                 DeclareClass(index);
             }
+            ValidateGenericStructConstantDomains();
         });
         DeclareInterfaces();
         DeclareConformances();
@@ -763,7 +880,8 @@ internal sealed partial class Binder
             SetContext(tree, node);
             if (node.Kind is SyntaxKind.UsingDirective
                 or SyntaxKind.NamespaceDeclaration
-                or SyntaxKind.NamespaceBlockDeclaration)
+                or SyntaxKind.NamespaceBlockDeclaration
+                or SyntaxKind.EnumDeclaration)
             {
                 continue;
             }
@@ -787,7 +905,8 @@ internal sealed partial class Binder
                         && declaration.Kind is SyntaxKind.FunctionDeclaration
                             or SyntaxKind.ConstructorDeclaration
                             or SyntaxKind.OperatorDeclaration
-                            or SyntaxKind.PropertyDeclaration)
+                        or SyntaxKind.PropertyDeclaration
+                        or SyntaxKind.IndexerDeclaration)
                     {
                         if (TryPrimitiveType(structName, out _)
                             && declaration.Kind
@@ -830,10 +949,20 @@ internal sealed partial class Binder
         }
 
         ValidatePartialStaticConstructors();
+        ValidatePartialConstructors();
 
         if (_usesNativeBuffer)
         {
-            foreach (var intrinsic in NativeBufferIntrinsics.Functions)
+            var initializationOutputType = GetCheckedReferenceType(
+                new CheckedReferenceTypeDefinition(
+                    PrimitiveType.OwnedInt32Buffer,
+                    IsWritable: false,
+                    IsGarbageCollected: false,
+                    IsInitialization: true,
+                    IsOptional: false),
+                _trees[0].Root.Span);
+            foreach (var intrinsic in NativeBufferIntrinsics.CreateFunctions(
+                initializationOutputType))
             {
                 if (!_functions.TryAdd(intrinsic.Name, _signatures.Count))
                 {
@@ -842,7 +971,9 @@ internal sealed partial class Binder
                 }
                 var offset = intrinsic.IsStatic ? 0 : 1;
                 var parameters = intrinsic.Variables.Skip(offset)
-                    .Select(static variable => new Parameter(variable.Name, variable.Type, default, variable.IsOut));
+                    .Select(static variable => new Parameter(variable.Name,
+                        variable.Type, default, variable.IsOut,
+                        variable.IsInit));
                 _signatures.Add(new Signature(intrinsic.Name, intrinsic.ReturnType, [.. parameters],
                     null, null, _trees[0], NativeBufferIntrinsics.TypeName, false,
                     false, true, intrinsic.Variables[0].IsMutable && !intrinsic.IsStatic,
@@ -878,7 +1009,16 @@ internal sealed partial class Binder
             }
         }
         ValidateConformances();
+        if (DiagnosticCount == 0)
+        {
+            BindGenericMethodParameterDefaultExpressions();
+        }
         if (DiagnosticCount == 0 && !ValidateGenericTemplates())
+        {
+            return null;
+        }
+        if (DiagnosticCount == 0
+            && !ResolvePendingGenericInterfaceWitnessTargets())
         {
             return null;
         }
@@ -915,7 +1055,10 @@ internal sealed partial class Binder
             Report("TRM3002", "A parameterless int32 or void Main function is required.", _tree.Root.Span);
         }
 
+        BindParameterDefaultExpressions();
         BindConstEvalFunctions();
+        BindParameterDefaultValues();
+        SynchronizeGenericMethodOrdinaryParameterDefaults();
         var boundFunctions = new List<BoundFunction?>(_signatures.Count);
         for (var signatureIndex = 0;
             signatureIndex < _signatures.Count;
@@ -952,6 +1095,7 @@ internal sealed partial class Binder
                 "Function body binding did not produce a bound function."));
         }
 
+        RejectStandardLayoutOnlyValueUse(bound);
         if (DiagnosticCount != 0)
         {
             return null;
@@ -982,11 +1126,78 @@ internal sealed partial class Binder
             }
         }
 
+        var sourceClassDeclarations = ImmutableArray.CreateBuilder<
+            BoundSourceClassDeclaration>(_classDeclarations.Count);
+        foreach (var (classIndex, declaration) in _classDeclarations
+            .OrderBy(static pair => pair.Key))
+        {
+            var (tree, syntax) = declaration;
+            sourceClassDeclarations.Add(new BoundSourceClassDeclaration(
+                classIndex, _trees.IndexOf(tree), syntax.Span, tree, syntax,
+                _classes[classIndex]) {
+                Parts = [.. _classDeclarationParts[classIndex].Select(part =>
+                    new BoundSourceClassPart(_trees.IndexOf(part.Tree),
+                        part.Declaration.Span, part.Tree,
+                        part.Declaration,
+                        ReferenceEquals(part.Declaration, syntax)))],
+            });
+        }
+
+        var sourceClassProgramAssociation
+            = new BoundSourceClassProgramAssociation(
+                sourceClassDeclarations.MoveToImmutable());
+        var programEnumDefinitions = GetProgramEnumDefinitions();
+        var sourceEnumDeclarations
+            = ImmutableArray.CreateBuilder<
+                BoundSourceEnumDeclarationAssociation>(
+                _sourceEnumDeclarations.Count);
+        foreach (var sourceEnum in _sourceEnumDeclarations)
+        {
+            var enumIndex = BoundEnumTypes.Index(sourceEnum.Type);
+            var primaryPart = sourceEnum.Handle.Parts.Single(
+                static part => part.IsPrimary);
+            if ((uint)primaryPart.SourceInputOrdinal >= (uint)_trees.Length
+                || (uint)enumIndex >= (uint)programEnumDefinitions.Length
+                || programEnumDefinitions[enumIndex].Identity
+                    is not BoundEnumDeclarationIdentity.Source identity
+                || !ReferenceEquals(identity.Value, sourceEnum.Handle))
+            {
+                throw new InvalidOperationException(
+                    "A source enum declaration has no exact checked-program association.");
+            }
+
+            sourceEnumDeclarations.Add(
+                new BoundSourceEnumDeclarationAssociation(enumIndex,
+                    primaryPart.SourceInputOrdinal,
+                    primaryPart.Declaration.Span, primaryPart.Tree,
+                    primaryPart.Declaration,
+                    programEnumDefinitions[enumIndex]));
+        }
+        var sourceEnumProgramAssociation
+            = new BoundSourceEnumProgramAssociation(
+                sourceEnumDeclarations.MoveToImmutable());
+        var genericMethodTypeFormalOwners =
+            ImmutableArray.CreateBuilder<BoundGenericTypeFormalOwner>(
+                _referenceGenericMethodTypeFormalOwners.Length
+                    + _genericMethodDefinitions.Count);
+        genericMethodTypeFormalOwners.AddRange(
+            _referenceGenericMethodTypeFormalOwners);
+        foreach (var definition in _genericMethodDefinitions)
+        {
+            genericMethodTypeFormalOwners.Add(
+                CreateGenericMethodTypeFormalOwner(
+                    definition.FormalTypeOwnerOrdinal,
+                    definition.Formals));
+        }
         var program = new BoundProgram(bound.ToImmutable(), entryPoint) {
             SourceInputCount = _trees.Length,
             Structures = [.. _structs],
             SourceTypeDeclarations = sourceTypeDeclarations.MoveToImmutable(),
-            EnumDefinitions = GetProgramEnumDefinitions(),
+            SourceClassProgramAssociation = sourceClassProgramAssociation,
+            SourceEnumProgramAssociation = sourceEnumProgramAssociation,
+            StandardQuerySourceAssociation
+                = _reference?.StandardQuerySourceAssociation,
+            EnumDefinitions = programEnumDefinitions,
             NativeCoreRegistration = _nativeCoreRegistration,
             NativeOutputCoreRegistration = _nativeOutputCoreRegistration,
             LayoutCoreRegistration = _layoutCoreRegistration,
@@ -1001,15 +1212,26 @@ internal sealed partial class Binder
                 _coreContractFailureIdentitySelections,
             CoreContractFailureIdentitySelection =
                 _coreContractFailureIdentitySelection,
+            CoreEvaluationFormIdentitySelection
+                = _coreEvaluationFormIdentitySelection,
+            CoreEvaluationFormIdentitySelections
+                = _coreEvaluationFormIdentitySelections,
+            CoreEvaluationFormSchemaProviders
+                = _coreEvaluationFormSchemaProviders,
             NativeFunctionPointerSignatures = [.. _nativeFunctionPointerSignatures],
             NativePointerTypes = [.. _nativePointerTypes],
+            SpanTypes = [.. _spanTypes],
             NativeFixedArrayTypes = [.. _nativeFixedArrayTypes],
             CheckedReferenceTypes = [.. _checkedReferenceTypes],
             PrivateNominalTypeOrigins = [.. _privateNominalTypeOrigins],
             PrivateClassReferences = [.. _privateClassReferences],
             Interfaces = [.. _interfaces],
+            InterfaceWitnesses = [.. _interfaceWitnesses],
             GenericNominalTypeDefinitions = [.. _genericNominalTypeDefinitions],
             GenericNominalTypeInstances = [.. _genericNominalTypeInstances],
+            GenericMethodTypeFormalOwners =
+                genericMethodTypeFormalOwners.MoveToImmutable(),
+            StandardClassDeclarations = [.. _standardClassDeclarations],
             CoreTaskType = _reference?.CoreTaskType,
             NativeLoweringAgreement = _nativeLoweringAgreement,
             Classes = [.. _classes],
@@ -1023,12 +1245,36 @@ internal sealed partial class Binder
             RuntimePolicy = _runtimePolicy,
             SourceGenericTypeDefinitions = [.. _sourceGenericTypeDefinitions],
             SourceGenericTypeInstances = [.. _sourceGenericTypeInstances],
+            GenericMethodDefinitions = [.. _genericMethodDefinitions],
+            GenericMethodSignatures = [.. _genericMethodSignatures],
+            GenericMethodOperatorProtocols =
+                [.. _genericMethodOperatorProtocols],
         };
+        if (!CoreEvaluationFormIdentitySelectionContract
+            .AreSelectedRolesUsed(_coreEvaluationFormIdentitySelection,
+                program))
+        {
+            throw new ArgumentException(
+                "Every selected evaluation-form schema role must be used by the source.",
+                "coreEvaluationFormIdentitySelection");
+        }
+
         if (!SemanticVerifier.TryVerifySourceWithCopyOriginSummaries(program,
             out var verifiedProgram, out var functionIndex, out var span,
             out var exceededWorkLimit, out var invalidEffect))
         {
-            _tree = _signatures.Count == 0 ? _trees[0] : _signatures[functionIndex].Tree;
+            var genericMethodIndex = functionIndex - _signatures.Count;
+            var genericMethod = genericMethodIndex is >= 0
+                && genericMethodIndex < _genericMethodDefinitions.Count
+                ? _genericMethodDefinitions[genericMethodIndex] : null;
+            _tree = genericMethod is not null
+                ? _trees[genericMethod.SourceInputOrdinal]
+                : _signatures.Count == 0 ? _trees[0]
+                : _signatures[functionIndex].Tree;
+            var functionName = genericMethod?.Name
+                ?? (_signatures.Count == 0
+                    ? ""
+                    : _signatures[functionIndex].Name);
             var (code, message) = invalidEffect switch {
                 "NoThrow" => ("TRM3017", "NoThrow declarations cannot perform potentially throwing operations or call functions without a NoThrow contract."),
                 "NativeCallable" => ("TRM3030", "NativeCallable bodies must not allow Terrum failures to propagate across a native boundary."),
@@ -1040,9 +1286,12 @@ internal sealed partial class Binder
                 "UnsafeRecovery" => ("TRM3021", "Checked failure recovery requires an unsafe block."),
                 "CheckedPolicy" => ("TRM3022", "Recovery requires the checked-exceptions runtime policy."),
                 "Ownership" => ("TRM3023", "A unique value must be moved from a live named owner; copies, vacant reads, and escaping receiver loans are not allowed."),
-                "CheckedReference" => ("TRM3030", "Checked reference formation or use violates its type or access contract."),
+                "PureEvaluation" => ("TRM3029",
+                    $"Pure form for '{functionName}' cannot perform observable effects, allow escaping language failures, or depend on an unverified call."),
+                "CheckedReference" => ("TRM3030",
+                    "Checked reference formation or use violates its type or access contract."),
                 "NativeImport" => ("TRM3030",
-                    $"The source native import does not match its selected compiler-owned catalog in '{_signatures[functionIndex].Name}'."),
+                    $"The source native import does not match its selected compiler-owned catalog in '{functionName}'."),
                 "SemanticResourceLimit:Work" => ("TRM3016",
                     "Source exceeds the semantic verification work limit."),
                 "SemanticResourceLimit:Depth" => ("TRM3016",
@@ -1056,6 +1305,8 @@ internal sealed partial class Binder
             Report(code, message, span);
             return null;
         }
+        sourceClassProgramAssociation.Attach(verifiedProgram);
+        sourceEnumProgramAssociation.Attach(verifiedProgram);
         return verifiedProgram;
     }
 
@@ -1071,9 +1322,11 @@ internal sealed partial class Binder
 
         var constEvalDeclarations = _scopedDeclarations
             .Where(item => item.Declaration.Kind
-                    == SyntaxKind.FunctionDeclaration
+                    is SyntaxKind.FunctionDeclaration
+                        or SyntaxKind.PropertyDeclaration
                 && !HasGenericTypeParameters(item.Declaration)
-                && HasConstEvalAttribute(item.Declaration))
+                && HasConstEvalAttribute(item.Tree,
+                    item.Declaration))
             .ToArray();
         if (constEvalDeclarations.Length == 0)
         {
@@ -1239,10 +1492,44 @@ internal sealed partial class Binder
         return false;
     }
 
-    private static bool HasConstEvalAttribute(SyntaxNode declaration)
-        => declaration.Children.OfType<SyntaxNode>().Any(static child =>
-            child.Kind == SyntaxKind.Attribute
-            && AttributeName(child) == "ConstEval");
+    private bool HasConstEvalAttribute(SyntaxTree tree,
+        SyntaxNode declaration)
+    {
+        var previousContext = CaptureContext();
+        try
+        {
+            SetContext(tree, declaration);
+            var property = declaration.Kind
+                == SyntaxKind.PropertyDeclaration;
+            if (declaration.Children.OfType<SyntaxNode>().Any(child =>
+                child.Kind == SyntaxKind.Attribute
+                && TryGetSelectedEvaluationFormSchema(
+                    AttributeName(child), constEval: true, out _)
+                && HasNoAttributeArguments(child)
+                && (property
+                    ? IsGetterTargetAttribute(child)
+                    : !IsGetterTargetAttribute(child))))
+            {
+                return true;
+            }
+
+            var getter = property
+                ? declaration.Children.OfType<SyntaxNode>()
+                    .FirstOrDefault(static child =>
+                        child.Kind == SyntaxKind.GetAccessor)
+                : null;
+            return getter is not null
+                && getter.Children.OfType<SyntaxNode>().Any(child =>
+                    child.Kind == SyntaxKind.Attribute
+                    && TryGetSelectedEvaluationFormSchema(
+                        AttributeName(child), constEval: true, out _)
+                    && HasNoAttributeArguments(child));
+        }
+        finally
+        {
+            RestoreContext(previousContext);
+        }
+    }
 
     private void ResetFunctionBindingState()
     {
@@ -1260,28 +1547,9 @@ internal sealed partial class Binder
 
     private void BindConstEvalFunctions()
     {
-        var functions = new BoundFunction?[_signatures.Count];
-        _boundConstEvalFunctions = functions;
-        for (var signatureIndex = 0;
-            signatureIndex < _signatures.Count;
-            signatureIndex++)
-        {
-            var signature = _signatures[signatureIndex];
-            if (!signature.IsConstEval)
-            {
-                continue;
-            }
-
-            _isBindingConstEvalBody = true;
-            try
-            {
-                functions[signatureIndex] = BindSignatureBody(signature);
-            }
-            finally
-            {
-                _isBindingConstEvalBody = false;
-            }
-        }
+        _boundConstEvalFunctions = new BoundFunction?[_signatures.Count];
+        _constEvalFunctionsBeingBound.Clear();
+        BindConstEvalFunctionsFrom(0);
 
         _variables.Clear();
         _scopes.Clear();
@@ -1293,6 +1561,1909 @@ internal sealed partial class Binder
         _currentStruct = null;
         _constructor = false;
         _hasReceiver = false;
+    }
+
+    private void BindParameterDefaultExpressions()
+    {
+        var boundDefaults
+            = new Dictionary<ParameterDefaultBindingKey,
+                BoundExpression?>();
+        var previousContext = CaptureContext();
+        var previousGenericContext = _genericContext;
+        var previousGenericOwnerTypeArguments
+            = _genericOwnerTypeArguments;
+        var previousAliasTypeArguments = _aliasTypeArguments.ToArray();
+        var previousUnsafeDepth = _unsafeDepth;
+        var previousConstEvalBody = _isBindingConstEvalBody;
+        try
+        {
+            for (var signatureIndex = 0;
+                signatureIndex < _signatures.Count; signatureIndex++)
+            {
+                var signature = _signatures[signatureIndex];
+                if (signature.Generic is not null
+                    || signature.Declaration is not SyntaxNode declaration)
+                {
+                    continue;
+                }
+
+                var parameters = signature.Parameters.ToBuilder();
+                var changed = false;
+                for (var parameterIndex = 0;
+                    parameterIndex < parameters.Count; parameterIndex++)
+                {
+                    var parameter = parameters[parameterIndex];
+                    if (parameter.DefaultSyntax is not SyntaxNode syntax)
+                    {
+                        continue;
+                    }
+
+                    var key = new ParameterDefaultBindingKey(
+                        syntax, parameter.Type, signature.StructName,
+                        signature.GenericOwnerTypeArguments,
+                        signature.GenericOwnerContext);
+                    if (!boundDefaults.TryGetValue(key,
+                            out var defaultExpression))
+                    {
+                        defaultExpression =
+                            BindParameterDefaultExpression(signature,
+                                declaration, parameter, syntax);
+                        boundDefaults.Add(key, defaultExpression);
+                    }
+                    if (defaultExpression is not null)
+                    {
+                        parameters[parameterIndex] = parameter with {
+                            DefaultSyntax = null,
+                            DefaultExpression = defaultExpression,
+                        };
+                        changed = true;
+                    }
+                }
+
+                if (changed)
+                {
+                    _signatures[signatureIndex] = signature with {
+                        Parameters = parameters.ToImmutable(),
+                    };
+                }
+            }
+
+            foreach (var (templateName, template) in _templates.ToArray())
+            {
+                var parameters = template.Parameters.ToBuilder();
+                var changed = false;
+                for (var parameterIndex = 0;
+                    parameterIndex < parameters.Count; parameterIndex++)
+                {
+                    var parameter = parameters[parameterIndex];
+                    if (parameter.DefaultSyntax is not SyntaxNode syntax
+                        || parameter.ScalarType is not PrimitiveType type
+                        || ReferencesGenericMethodConstantFormal(syntax,
+                            template))
+                    {
+                        continue;
+                    }
+
+                    var key = new ParameterDefaultBindingKey(syntax, type,
+                        template.ContainingType,
+                        template.OwnerTypeArgumentMap, null);
+                    if (!boundDefaults.TryGetValue(key,
+                            out var defaultExpression))
+                    {
+                        var sourceParameter = new Parameter(
+                            parameter.Name, type,
+                            template.Declaration.Span, parameter.IsOut,
+                            parameter.IsInit);
+                        defaultExpression =
+                            BindParameterDefaultExpression(template.Tree,
+                                template.Declaration,
+                                template.ContainingType,
+                                template.OwnerTypeArgumentMap, null,
+                                sourceParameter, syntax);
+                        boundDefaults.Add(key, defaultExpression);
+                    }
+                    if (defaultExpression is BoundConstant constant)
+                    {
+                        parameters[parameterIndex] = parameter with {
+                            DefaultSyntax = null,
+                            DefaultExpression = null,
+                            DefaultValue = constant,
+                            DefaultFormalDependencies = [],
+                        };
+                        changed = true;
+                    }
+                    else if (defaultExpression is not null)
+                    {
+                        parameters[parameterIndex] = parameter with {
+                            DefaultSyntax = null,
+                            DefaultExpression = defaultExpression,
+                            DefaultFormalDependencies = [],
+                        };
+                        changed = true;
+                    }
+                }
+
+                if (changed)
+                {
+                    _templates[templateName] = template with {
+                        Parameters = parameters.ToImmutable(),
+                    };
+                }
+            }
+        }
+        finally
+        {
+            ResetFunctionBindingState();
+            _genericContext = previousGenericContext;
+            _genericOwnerTypeArguments =
+                previousGenericOwnerTypeArguments;
+            _aliasTypeArguments.Clear();
+            _aliasTypeArguments.AddRange(previousAliasTypeArguments);
+            _unsafeDepth = previousUnsafeDepth;
+            _isBindingConstEvalBody = previousConstEvalBody;
+            RestoreContext(previousContext);
+        }
+    }
+
+    private void BindGenericMethodParameterDefaultExpressions()
+    {
+        var previousContext = CaptureContext();
+        var previousGenericContext = _genericContext;
+        var previousGenericOwnerTypeArguments
+            = _genericOwnerTypeArguments;
+        var previousAliasTypeArguments = _aliasTypeArguments.ToArray();
+        var previousUnsafeDepth = _unsafeDepth;
+        var previousConstEvalBody = _isBindingConstEvalBody;
+        try
+        {
+            foreach (var (templateName, template) in _templates.ToArray())
+            {
+                var parameters = template.Parameters.ToBuilder();
+                var changed = false;
+                for (var parameterIndex = 0;
+                    parameterIndex < parameters.Count; parameterIndex++)
+                {
+                    var parameter = parameters[parameterIndex];
+                    if (parameter.DefaultSyntax
+                            is not SyntaxNode syntax
+                        || ContainsGenericDefaultCallSyntax(syntax))
+                    {
+                        continue;
+                    }
+
+                    if (parameter.ScalarType is not PrimitiveType
+                            && parameter.TypeTerm
+                                is not BoundGenericMethodTypeTerm)
+                    {
+                        continue;
+                    }
+
+                    var defaultExpression =
+                        BindGenericMethodParameterDefaultExpression(
+                            template, parameter, syntax,
+                            out var formalDependencies);
+                    var hasCall = false;
+                    if (defaultExpression is BoundExpression expression
+                            && (!BoundTreeTraversal.VisitExpressionTree(
+                                    expression, candidate =>
+                                    {
+                                        if (candidate is BoundCall)
+                                        {
+                                            hasCall = true;
+                                        }
+                                    })
+                                || hasCall))
+                    {
+                        continue;
+                    }
+                    if (defaultExpression is BoundConstant constant)
+                    {
+                        parameters[parameterIndex] = parameter with {
+                            DefaultSyntax = null,
+                            DefaultExpression = null,
+                            DefaultValue = constant,
+                            DefaultFormalDependencies = [],
+                        };
+                        changed = true;
+                    }
+                    else if (defaultExpression is not null)
+                    {
+                        parameters[parameterIndex] = parameter with {
+                            DefaultSyntax = null,
+                            DefaultExpression = defaultExpression,
+                            DefaultFormalDependencies =
+                                formalDependencies,
+                        };
+                        changed = true;
+                    }
+                }
+
+                if (changed)
+                {
+                    _templates[templateName] = template with {
+                        Parameters = parameters.ToImmutable(),
+                    };
+                }
+            }
+        }
+        finally
+        {
+            ResetFunctionBindingState();
+            _genericContext = previousGenericContext;
+            _genericOwnerTypeArguments =
+                previousGenericOwnerTypeArguments;
+            _aliasTypeArguments.Clear();
+            _aliasTypeArguments.AddRange(previousAliasTypeArguments);
+            _unsafeDepth = previousUnsafeDepth;
+            _isBindingConstEvalBody = previousConstEvalBody;
+            RestoreContext(previousContext);
+        }
+    }
+
+    private BoundExpression? BindParameterDefaultExpression(
+        Signature signature, SyntaxNode declaration, Parameter parameter,
+        SyntaxNode syntax)
+        => BindParameterDefaultExpression(signature.Tree, declaration,
+            signature.StructName, signature.GenericOwnerTypeArguments,
+            signature.GenericOwnerContext, parameter, syntax);
+
+    private BoundExpression? BindParameterDefaultExpression(
+        SyntaxTree tree, SyntaxNode declaration, string? structName,
+        ImmutableDictionary<string, PrimitiveType>? ownerTypeArguments,
+        GenericInstantiation? genericContext, Parameter parameter,
+        SyntaxNode syntax)
+    {
+        SetContext(tree, declaration);
+        ResetFunctionBindingState();
+        _genericContext = genericContext;
+        _genericOwnerTypeArguments = ownerTypeArguments;
+        _aliasTypeArguments.Clear();
+        if (ownerTypeArguments is not null)
+        {
+            _aliasTypeArguments.Add(ownerTypeArguments);
+        }
+        _currentStruct = structName;
+        _unsafeDepth = 0;
+        _isBindingConstEvalBody = false;
+        _scopes.Add(new Dictionary<string, int>(StringComparer.Ordinal));
+
+        if (parameter.IsOut || parameter.IsInit || parameter.IsImplicitRef
+            || CheckedReferenceTypeContract.IsValidType(parameter.Type,
+                [.. _checkedReferenceTypes]))
+        {
+            return null;
+        }
+        if (!IsConstEvalValueType(parameter.Type))
+        {
+            Report("TRM3005",
+                "A parameter default must be a supported compile-time Copy value.",
+                syntax.Span);
+            return null;
+        }
+
+        var diagnosticCount = DiagnosticCount;
+        var expression = BindExpression(syntax, parameter.Type);
+        if (DiagnosticCount != diagnosticCount
+            || expression.Type != parameter.Type)
+        {
+            Report("TRM3005",
+                "A parameter default must have the exact declared parameter type.",
+                syntax.Span);
+            return null;
+        }
+        if (!CheckConstExpression(expression, out _))
+        {
+            Report("TRM3005",
+                "A parameter default must be a checked compile-time expression.",
+                syntax.Span);
+            return null;
+        }
+
+        return expression;
+    }
+
+    private BoundExpression? BindGenericMethodParameterDefaultExpression(
+        GenericTemplate template, GenericParameter parameter,
+        SyntaxNode syntax,
+        out ImmutableArray<
+            BoundGenericMethodParameterDefaultFormalDependency>
+            formalDependencies)
+    {
+        formalDependencies = [];
+        if (parameter.IsOut || parameter.IsInit
+            || parameter.ReferenceTypePattern is not null)
+        {
+            Report("TRM3005",
+                "A generic method parameter default must be a supported compile-time Copy value.",
+                syntax.Span);
+            return null;
+        }
+
+        SetContext(template.Tree, template.Declaration);
+        ResetFunctionBindingState();
+        _genericOwnerTypeArguments = template.OwnerTypeArgumentMap;
+        _currentStruct = template.ContainingType;
+        _unsafeDepth = 0;
+        _isBindingConstEvalBody = false;
+        _scopes.Add(new Dictionary<string, int>(StringComparer.Ordinal));
+
+        var typeArguments = template.TypeParameters
+            .Select(static formal => formal.PlaceholderType)
+            .ToImmutableArray();
+        var constantArguments
+            = ImmutableArray.CreateBuilder<
+                BoundGenericMethodConstantArgument>(
+                    template.ConstantFormals.Length);
+        foreach (var formal in template.ConstantFormals)
+        {
+            constantArguments.Add(
+                new BoundGenericMethodConstantArgument(formal.Ordinal,
+                    formal.ConstantOrdinal,
+                    BoundGenericMethodConstantArgumentKind.Formal,
+                    formal.Domain, formal.Ordinal, PrimitiveType.Void,
+                    PrimitiveType.Void, default) {
+                    CallerDefinitionOrdinal = template.DefinitionOrdinal,
+                    CallerConstantFormalOrdinal = formal.ConstantOrdinal,
+                });
+        }
+        _genericContext = new GenericInstantiation(template, typeArguments) {
+            ConstantArguments = constantArguments.MoveToImmutable(),
+        };
+        if (!template.OwnerTypeArgumentMap.IsEmpty)
+        {
+            _aliasTypeArguments.Add(template.OwnerTypeArgumentMap);
+        }
+
+        var referencedNames = new HashSet<string>(StringComparer.Ordinal);
+        var pendingSyntax = new Stack<SyntaxNode>();
+        pendingSyntax.Push(syntax);
+        while (pendingSyntax.TryPop(out var currentSyntax))
+        {
+            foreach (var child in currentSyntax.Children)
+            {
+                if (currentSyntax.Kind == SyntaxKind.NameExpression
+                    && child is SyntaxTokenElement {
+                        Token.Kind: TokenKind.Identifier,
+                    } identifier)
+                {
+                    _ = referencedNames.Add(identifier.Token.Name);
+                }
+                else if (child is SyntaxNode nested)
+                {
+                    pendingSyntax.Push(nested);
+                }
+            }
+        }
+
+        var formalDependenciesByVariable = new List<
+            BoundGenericMethodParameterDefaultFormalDependency>();
+        if (template.OwnerGenericTypeDefinitionIndex >= 0)
+        {
+            var ownerDefinitionIndex
+                = template.OwnerGenericTypeDefinitionIndex;
+            if ((uint)ownerDefinitionIndex
+                    >= (uint)_sourceGenericTypeDefinitions.Count)
+            {
+                Report("TRM3005",
+                    "A generic method owner has no bound source-generic definition.",
+                    syntax.Span);
+                return null;
+            }
+
+            var ownerDefinition = _sourceGenericTypeDefinitions[
+                ownerDefinitionIndex];
+            var referencedOwnerFormals = ownerDefinition.ConstantFormals
+                .Where(formal => referencedNames.Contains(formal.Name)
+                    && !template.ConstantFormals.Any(methodFormal =>
+                        methodFormal.Name == formal.Name))
+                .ToArray();
+            if (referencedOwnerFormals.Length != 0
+                && (template.OwnerConstantArguments.IsDefault
+                    || template.OwnerConstantArguments.Length
+                        != ownerDefinition.ConstantFormals.Length))
+            {
+                Report("TRM3005",
+                    "A generic method owner has no complete constant-formal environment.",
+                    syntax.Span);
+                return null;
+            }
+
+            foreach (var ownerFormal in referencedOwnerFormals)
+            {
+                if ((uint)ownerFormal.ConstantOrdinal
+                        >= (uint)template.OwnerConstantArguments.Length)
+                {
+                    Report("TRM3005",
+                        "A generic method owner has an invalid constant-formal ordinal.",
+                        syntax.Span);
+                    return null;
+                }
+
+                var ownerArgument = template.OwnerConstantArguments[
+                    ownerFormal.ConstantOrdinal];
+                if (ownerArgument is null || ownerArgument.Domain is null)
+                {
+                    Report("TRM3005",
+                        "A generic method owner constant formal has no complete domain.",
+                        syntax.Span);
+                    return null;
+                }
+
+                PrimitiveType ownerFormalType;
+                if (ownerArgument.Kind
+                        == BoundGenericMethodConstantArgumentKind.Value
+                    && ownerArgument.DomainType != PrimitiveType.Void)
+                {
+                    ownerFormalType = ownerArgument.DomainType;
+                }
+                else if (ownerArgument.Kind
+                            == BoundGenericMethodConstantArgumentKind.Formal
+                        && TryResolveGenericMethodTypeTerm(
+                            ownerArgument.Domain, syntax.Span,
+                            out var resolvedOwnerFormalType))
+                {
+                    ownerFormalType = resolvedOwnerFormalType;
+                }
+                else
+                {
+                    Report("TRM3005",
+                        "A generic method owner constant formal has an unsupported domain.",
+                        syntax.Span);
+                    return null;
+                }
+
+                if (!IsConstEvalValueType(ownerFormalType))
+                {
+                    Report("TRM3005",
+                        "A generic method owner constant formal has an unsupported default domain.",
+                        syntax.Span);
+                    return null;
+                }
+
+                _ = AddVariable(ownerFormal.Name, ownerFormalType, false,
+                    syntax.Span);
+                formalDependenciesByVariable.Add(
+                    new BoundGenericMethodParameterDefaultFormalDependency(
+                        BoundGenericTypeFormalOwnerKind.SourceGenericType,
+                        ownerDefinitionIndex, ownerFormal.ConstantOrdinal,
+                        ownerArgument.Domain));
+            }
+        }
+
+        _scopes.Add(new Dictionary<string, int>(StringComparer.Ordinal));
+        foreach (var formal in template.ConstantFormals)
+        {
+            if (formal.PlaceholderType is PrimitiveType placeholderType)
+            {
+                _ = AddVariable(formal.Name, placeholderType, false,
+                    syntax.Span);
+                formalDependenciesByVariable.Add(
+                    new BoundGenericMethodParameterDefaultFormalDependency(
+                        BoundGenericTypeFormalOwnerKind.GenericMethod,
+                        template.DefinitionOrdinal,
+                        formal.ConstantOrdinal, formal.Domain));
+            }
+        }
+        PrimitiveType parameterType;
+        if (parameter.ScalarType is PrimitiveType scalarParameterType)
+        {
+            parameterType = scalarParameterType;
+        }
+        else if (parameter.TypeTerm
+                    is BoundGenericMethodTypeTerm typeTerm
+                && TryResolveGenericMethodTypeTerm(typeTerm, syntax.Span,
+                    out var resolvedParameterType))
+        {
+            parameterType = resolvedParameterType;
+        }
+        else
+        {
+            Report("TRM3005",
+                "A generic method parameter default has an unsupported dependent result type.",
+                syntax.Span);
+            return null;
+        }
+
+        if (!IsConstEvalValueType(parameterType))
+        {
+            Report("TRM3005",
+                "A generic method parameter default must be a supported compile-time Copy value.",
+                syntax.Span);
+            return null;
+        }
+        var diagnosticCount = DiagnosticCount;
+        var expression = BindExpression(syntax, parameterType);
+        if (DiagnosticCount != diagnosticCount
+            || expression.Type != parameterType
+            || !CheckConstExpression(expression, out _))
+        {
+            Report("TRM3005",
+                "A generic method parameter default must bind to its declared type as a checked compile-time expression.",
+                syntax.Span);
+            return null;
+        }
+
+        var usedVariables = new SortedSet<int>();
+        if (!BoundTreeTraversal.VisitExpressionTree(expression, candidate =>
+            {
+                if (candidate is BoundRead read)
+                {
+                    usedVariables.Add(read.Variable);
+                }
+            }))
+        {
+            Report("TRM3005",
+                "A generic method parameter default exceeds the checked-expression limit.",
+                syntax.Span);
+            return null;
+        }
+
+        var variableRemapping = new Dictionary<int, int>();
+        var dependencies = ImmutableArray.CreateBuilder<
+            BoundGenericMethodParameterDefaultFormalDependency>(
+            usedVariables.Count);
+        foreach (var variable in usedVariables)
+        {
+            if ((uint)variable >= (uint)formalDependenciesByVariable.Count)
+            {
+                Report("TRM3005",
+                    "A generic method parameter default may depend only on declared generic constant formals.",
+                    syntax.Span);
+                return null;
+            }
+
+            variableRemapping.Add(variable, dependencies.Count);
+            dependencies.Add(formalDependenciesByVariable[variable]);
+        }
+        formalDependencies = dependencies.ToImmutable();
+        return RemapGenericParameterDefaultReads(expression,
+            variableRemapping);
+    }
+
+    private static BoundExpression RemapGenericParameterDefaultReads(
+        BoundExpression expression,
+        IReadOnlyDictionary<int, int> variableRemapping)
+    {
+        if (expression is BoundRead read
+            && variableRemapping.TryGetValue(read.Variable,
+                out var parameterIndex))
+        {
+            return read with { Variable = parameterIndex };
+        }
+
+        return expression.RewriteNestedExpressions(child =>
+            RemapGenericParameterDefaultReads(child, variableRemapping));
+    }
+
+    private BoundExpression BindGenericMethodParameterDefaultForCall(
+        GenericInstantiation instantiation, BoundExpression expression,
+        ImmutableArray<
+            BoundGenericMethodParameterDefaultFormalDependency>
+            formalDependencies, PrimitiveType parameterType, TextSpan useSite)
+    {
+        var previousContext = CaptureContext();
+        try
+        {
+            SetContext(instantiation.Template.Tree,
+                instantiation.Template.Declaration);
+            var invalidFormalRead = false;
+            if (!BoundTreeTraversal.VisitExpressionTree(expression,
+                    candidate =>
+                    {
+                        if (candidate is BoundRead read
+                            && (uint)read.Variable
+                                >= (uint)formalDependencies.Length)
+                        {
+                            invalidFormalRead = true;
+                        }
+                    })
+                || invalidFormalRead)
+            {
+                Report("TRM3005",
+                    "A generic method parameter default has invalid formal-dependency coordinates.",
+                    expression.Span);
+                return ErrorExpression(useSite);
+            }
+
+            var substitutions = new Dictionary<int, BoundExpression>(
+                formalDependencies.Length);
+            var openFormalVariables = new HashSet<int>();
+            for (var dependencyIndex = 0;
+                dependencyIndex < formalDependencies.Length;
+                dependencyIndex++)
+            {
+                var dependency = formalDependencies[dependencyIndex];
+                if (!TryGetGenericMethodParameterDefaultActual(
+                    instantiation, dependency, out var actual))
+                {
+                    Report("TRM3005",
+                        "A generic method parameter default has an unsupported or unbound formal dependency.",
+                        expression.Span);
+                    return ErrorExpression(useSite);
+                }
+
+                PrimitiveType formalType;
+                if (actual.Kind
+                        == BoundGenericMethodConstantArgumentKind.Value
+                    && actual.DomainType != PrimitiveType.Void)
+                {
+                    formalType = actual.DomainType;
+                }
+                else if (actual.Kind
+                            == BoundGenericMethodConstantArgumentKind.Formal
+                        && TryResolveGenericMethodTypeTerm(actual.Domain,
+                            useSite, out var resolvedFormalType))
+                {
+                    formalType = resolvedFormalType;
+                }
+                else
+                {
+                    Report("TRM3005",
+                        "A generic method parameter default has an unsupported or unbound constant-formal domain.",
+                        expression.Span);
+                    return ErrorExpression(useSite);
+                }
+
+                if (!TryCreateGenericMethodParameterDefaultActual(actual,
+                    formalType, useSite, out var actualExpression))
+                {
+                    Report("TRM3005",
+                        "A generic method parameter default has an unsupported or unbound constant-formal dependency.",
+                        expression.Span);
+                    return ErrorExpression(useSite);
+                }
+
+                substitutions.Add(dependencyIndex, actualExpression);
+                if (actualExpression is BoundRead read)
+                {
+                    openFormalVariables.Add(read.Variable);
+                }
+            }
+
+            var substituted = SubstituteGenericMethodConstantDefault(
+                expression, substitutions);
+            if (substituted.Type != parameterType
+                || !CheckConstExpression(substituted, out _))
+            {
+                Report("TRM3005",
+                    "A substituted generic parameter default no longer satisfies its checked parameter contract.",
+                    expression.Span);
+                return ErrorExpression(useSite);
+            }
+
+            var hasUnboundRead = false;
+            if (!BoundTreeTraversal.VisitExpressionTree(substituted,
+                    candidate =>
+                    {
+                        if (candidate is BoundRead read
+                            && !openFormalVariables.Contains(read.Variable))
+                        {
+                            hasUnboundRead = true;
+                        }
+                    })
+                || hasUnboundRead)
+            {
+                Report("TRM3005",
+                    "A generic parameter default retains an unbound value dependency.",
+                    expression.Span);
+                return ErrorExpression(useSite);
+            }
+
+            if (openFormalVariables.Count != 0)
+            {
+                return substituted;
+            }
+
+            var value = FoldScalarConstant(substituted) as BoundConstant;
+            if (value is null)
+            {
+                try
+                {
+                    value = EvaluateConstExpression(substituted, [],
+                        GetConstEvalFunctionBodies(), 0,
+                        new ConstEvalState(_cancellationToken));
+                }
+                catch (ConstEvalFailure)
+                {
+                    Report("TRM3005",
+                        "A substituted generic parameter default failed checked constant evaluation.",
+                        expression.Span);
+                }
+            }
+            if (value is null || value.Type != parameterType
+                || !value.Bits.IsCanonicalFor(value.RepresentationType))
+            {
+                if (value is not null)
+                {
+                    Report("TRM3005",
+                        "A substituted generic parameter default did not produce its exact canonical type.",
+                        expression.Span);
+                }
+                return ErrorExpression(useSite);
+            }
+
+            return value with { Span = useSite };
+        }
+        finally
+        {
+            RestoreContext(previousContext);
+        }
+    }
+
+    private bool TryCreateGenericMethodParameterDefaultActual(
+        BoundGenericMethodConstantArgument actual,
+        PrimitiveType expectedType, TextSpan span,
+        out BoundExpression expression)
+    {
+        expression = ErrorExpression(span);
+        if (actual.Kind == BoundGenericMethodConstantArgumentKind.Value)
+        {
+            return TryCreateBoundGenericMethodConstantExpression(actual,
+                    span, out expression)
+                && expression.Type == expectedType;
+        }
+        if (actual.Kind != BoundGenericMethodConstantArgumentKind.Formal
+            || _genericContext is not GenericInstantiation caller)
+        {
+            return false;
+        }
+
+        if (actual.CallerFormalOwnerKind
+            == BoundGenericTypeFormalOwnerKind.SourceGenericType)
+        {
+            if (!TryGetGenericMethodOwnerConstantFormalVariableIndex(
+                    caller.Template, actual.CallerDefinitionOrdinal,
+                    actual.CallerConstantFormalOrdinal,
+                    out var ownerVariableIndex, out var ownerFormal)
+                || actual.CallerFormalOwnerKind
+                    != BoundGenericTypeFormalOwnerKind.SourceGenericType
+                || actual.CallerDefinitionOrdinal
+                    != caller.Template.OwnerGenericTypeDefinitionIndex
+                || actual.CallerFormalOrdinal != -1
+                || actual.CallerConstantFormalOrdinal
+                    != ownerFormal.ConstantOrdinal)
+            {
+                return false;
+            }
+
+            if ((uint)ownerVariableIndex >= (uint)_variables.Count
+                || _variables[ownerVariableIndex].Name != ownerFormal.Name
+                || _variables[ownerVariableIndex].Type != expectedType
+                || _variables[ownerVariableIndex].IsMutable)
+            {
+                return false;
+            }
+
+            expression = new BoundRead(ownerVariableIndex, expectedType,
+                span);
+            return true;
+        }
+
+        if (actual.CallerFormalOwnerKind
+                != BoundGenericTypeFormalOwnerKind.GenericMethod
+            || actual.CallerDefinitionOrdinal
+                != caller.Template.DefinitionOrdinal
+            || (uint)actual.CallerConstantFormalOrdinal
+                >= (uint)caller.Template.ConstantFormals.Length)
+        {
+            return false;
+        }
+
+        var callerFormal = caller.Template.ConstantFormals[
+            actual.CallerConstantFormalOrdinal];
+        if (callerFormal.ConstantOrdinal
+                != actual.CallerConstantFormalOrdinal
+            || callerFormal.PlaceholderType != expectedType)
+        {
+            return false;
+        }
+
+        var callerRuntimeParameterCount
+            = caller.Template.Parameters.Length
+                + (caller.Template.OwnerType is not null
+                    && !caller.Template.IsStatic ? 1 : 0);
+        var variable = callerRuntimeParameterCount
+            + callerFormal.ConstantOrdinal;
+        if ((uint)variable >= (uint)_variables.Count
+            || _variables[variable].Type != expectedType)
+        {
+            return false;
+        }
+
+        expression = new BoundRead(variable, expectedType, span);
+        return true;
+    }
+
+    private bool TryGetGenericMethodOwnerConstantFormalVariableIndex(
+        GenericTemplate template, int ownerDefinitionIndex,
+        int ownerConstantOrdinal, out int variableIndex,
+        out BoundGenericMethodConstantFormalSignature ownerFormal)
+    {
+        variableIndex = -1;
+        ownerFormal = null!;
+        if (template.OwnerGenericTypeDefinitionIndex
+                != ownerDefinitionIndex
+            || (uint)ownerDefinitionIndex
+                >= (uint)_sourceGenericTypeDefinitions.Count
+            || template.OwnerConstantArguments.IsDefault)
+        {
+            return false;
+        }
+
+        var ownerDefinition = _sourceGenericTypeDefinitions[
+            ownerDefinitionIndex];
+        if ((uint)ownerConstantOrdinal
+                >= (uint)ownerDefinition.ConstantFormals.Length
+            || ownerDefinition.ConstantFormals.Length
+                != template.OwnerConstantArguments.Length)
+        {
+            return false;
+        }
+
+        if (ownerDefinition.ConstantFormals.FirstOrDefault(candidate =>
+                candidate.ConstantOrdinal == ownerConstantOrdinal)
+            is not BoundGenericMethodConstantFormalSignature selectedFormal)
+        {
+            return false;
+        }
+        ownerFormal = selectedFormal;
+
+        var target = template.OwnerConstantArguments[ownerConstantOrdinal];
+        if (target.Kind != BoundGenericMethodConstantArgumentKind.Formal
+            || !IsValidGenericMethodConstantFormalOwnerIdentity(target))
+        {
+            return false;
+        }
+
+        var precedingOwnerFormals = 0;
+        for (var ordinal = 0; ordinal < ownerConstantOrdinal; ordinal++)
+        {
+            var argument = template.OwnerConstantArguments[ordinal];
+            if (argument.Kind
+                == BoundGenericMethodConstantArgumentKind.Formal)
+            {
+                if (!IsValidGenericMethodConstantFormalOwnerIdentity(
+                    argument))
+                {
+                    return false;
+                }
+
+                precedingOwnerFormals++;
+            }
+        }
+
+        var receiverCount = template.OwnerType is not null
+            && !template.IsStatic ? 1 : 0;
+        variableIndex = template.Parameters.Length + receiverCount
+            + template.ConstantFormals.Length + precedingOwnerFormals;
+        return true;
+    }
+
+    private void BindParameterDefaultValues()
+    {
+        var evaluatedDefaults = new Dictionary<BoundExpression,
+            BoundConstant?>(ReferenceEqualityComparer.Instance);
+        var functions = GetConstEvalFunctionBodies();
+        var previousContext = CaptureContext();
+        var previousGenericContext = _genericContext;
+        var previousGenericOwnerTypeArguments
+            = _genericOwnerTypeArguments;
+        var previousAliasTypeArguments = _aliasTypeArguments.ToArray();
+        var previousUnsafeDepth = _unsafeDepth;
+        var previousConstEvalBody = _isBindingConstEvalBody;
+        try
+        {
+            _unsafeDepth = 0;
+            _isBindingConstEvalBody = false;
+            for (var signatureIndex = 0;
+                signatureIndex < _signatures.Count; signatureIndex++)
+            {
+                var signature = _signatures[signatureIndex];
+                if (signature.Generic is not null)
+                {
+                    continue;
+                }
+
+                var parameters = signature.Parameters.ToBuilder();
+                var changed = false;
+                for (var parameterIndex = 0;
+                    parameterIndex < parameters.Count; parameterIndex++)
+                {
+                    var parameter = parameters[parameterIndex];
+                    if (parameter.DefaultExpression
+                        is not BoundExpression expression)
+                    {
+                        continue;
+                    }
+                    SetContext(signature.Tree, signature.Declaration);
+                    var value = EvaluateParameterDefaultValue(expression,
+                        parameter.Type, functions, evaluatedDefaults);
+                    if (value is not null)
+                    {
+                        parameters[parameterIndex] = parameter with {
+                            DefaultExpression = null,
+                            DefaultValue = value,
+                        };
+                        changed = true;
+                    }
+                }
+
+                if (changed)
+                {
+                    _signatures[signatureIndex] = signature with {
+                        Parameters = parameters.ToImmutable(),
+                    };
+                }
+            }
+
+            foreach (var (templateName, template) in _templates.ToArray())
+            {
+                var parameters = template.Parameters.ToBuilder();
+                var changed = false;
+                for (var parameterIndex = 0;
+                    parameterIndex < parameters.Count; parameterIndex++)
+                {
+                    var parameter = parameters[parameterIndex];
+                    if (parameter.DefaultExpression
+                            is not BoundExpression expression
+                        || parameter.ScalarType is not PrimitiveType type)
+                    {
+                        continue;
+                    }
+                    if (!parameter.DefaultFormalDependencies.IsEmpty)
+                    {
+                        continue;
+                    }
+
+                    SetContext(template.Tree, template.Declaration);
+                    var value = EvaluateParameterDefaultValue(expression,
+                        type, functions, evaluatedDefaults);
+                    if (value is not null)
+                    {
+                        parameters[parameterIndex] = parameter with {
+                            DefaultExpression = null,
+                            DefaultValue = value,
+                        };
+                        changed = true;
+                    }
+                }
+
+                if (changed)
+                {
+                    _templates[templateName] = template with {
+                        Parameters = parameters.ToImmutable(),
+                    };
+                }
+            }
+            SynchronizeGenericParameterDefaultValues();
+            MaterializeInterfaceParameterDefaults(functions,
+                evaluatedDefaults);
+            SynchronizeGenericProofInterfaceDefaults();
+            MaterializeConstEvalDefaultArguments();
+        }
+        finally
+        {
+            ResetFunctionBindingState();
+            _genericContext = previousGenericContext;
+            _genericOwnerTypeArguments =
+                previousGenericOwnerTypeArguments;
+            _aliasTypeArguments.Clear();
+            _aliasTypeArguments.AddRange(previousAliasTypeArguments);
+            _unsafeDepth = previousUnsafeDepth;
+            _isBindingConstEvalBody = previousConstEvalBody;
+            RestoreContext(previousContext);
+        }
+    }
+
+    private BoundConstant? EvaluateParameterDefaultValue(
+        BoundExpression expression, PrimitiveType expectedType,
+        IReadOnlyList<BoundFunction?> functions,
+        Dictionary<BoundExpression, BoundConstant?> evaluatedDefaults)
+    {
+        if (!evaluatedDefaults.TryGetValue(expression, out var value))
+        {
+            var hasUnboundRead = false;
+            var expressionIsValid
+                = BoundTreeTraversal.VisitExpressionTree(expression,
+                    candidate =>
+                    {
+                        if (candidate is BoundRead)
+                        {
+                            hasUnboundRead = true;
+                        }
+                    });
+            if (!expressionIsValid)
+            {
+                Report("TRM3005",
+                    "A parameter default contains an invalid or over-limit expression.",
+                    expression.Span);
+                value = null;
+            }
+            else if (hasUnboundRead)
+            {
+                Report("TRM3005",
+                    "A generic-dependent parameter default requires the separate default-term implementation.",
+                    expression.Span);
+                value = null;
+            }
+            else if (expression is BoundConstant constant)
+            {
+                value = constant;
+            }
+            else
+            {
+                try
+                {
+                    value = EvaluateConstExpression(expression, [], functions,
+                        0, new ConstEvalState(_cancellationToken));
+                }
+                catch (ConstEvalFailure)
+                {
+                    Report("TRM3005",
+                        "A parameter default failed checked constant evaluation.",
+                        expression.Span);
+                    value = null;
+                }
+            }
+
+            if (value is not null
+                && (value.Type != expectedType
+                    || !value.Bits.IsCanonicalFor(
+                        value.RepresentationType)))
+            {
+                Report("TRM3005",
+                    "A parameter default did not produce its exact canonical value.",
+                    expression.Span);
+                value = null;
+            }
+            evaluatedDefaults.Add(expression, value);
+        }
+
+        return value;
+    }
+
+    private static bool ReferencesGenericMethodConstantFormal(
+        SyntaxNode syntax, GenericTemplate template)
+    {
+        if (template.ConstantFormals.IsEmpty)
+        {
+            return false;
+        }
+
+        var names = template.ConstantFormals.Select(
+            static formal => formal.Name).ToHashSet(StringComparer.Ordinal);
+        var pending = new Stack<SyntaxNode>();
+        pending.Push(syntax);
+        while (pending.TryPop(out var current))
+        {
+            foreach (var child in current.Children)
+            {
+                if (child is SyntaxTokenElement {
+                        Token.Kind: TokenKind.Identifier,
+                    } identifier
+                    && names.Contains(identifier.Token.Name))
+                {
+                    return true;
+                }
+                if (child is SyntaxNode nested)
+                {
+                    pending.Push(nested);
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool ContainsGenericDefaultCallSyntax(SyntaxNode syntax)
+    {
+        var pending = new Stack<SyntaxNode>();
+        pending.Push(syntax);
+        while (pending.TryPop(out var current))
+        {
+            if (current.Kind is SyntaxKind.InvocationExpression
+                or SyntaxKind.IndexExpression
+                or SyntaxKind.MemberAccessExpression)
+            {
+                return true;
+            }
+
+            foreach (var child in current.Children.OfType<SyntaxNode>())
+            {
+                pending.Push(child);
+            }
+        }
+
+        return false;
+    }
+
+    private void MaterializeInterfaceParameterDefaults(
+        IReadOnlyList<BoundFunction?> functions,
+        Dictionary<BoundExpression, BoundConstant?> evaluatedDefaults)
+    {
+        foreach (var pending in _pendingInterfaceParameterDefaults)
+        {
+            if ((uint)pending.InterfaceIndex >= (uint)_interfaces.Count
+                || (uint)pending.MemberOrdinal
+                    >= (uint)_interfaces[pending.InterfaceIndex]
+                        .Members.Length
+                || (uint)pending.ParameterOrdinal
+                    >= (uint)_interfaces[pending.InterfaceIndex]
+                        .Members[pending.MemberOrdinal].Parameters.Length)
+            {
+                Report("TRM3005",
+                    "An interface parameter default has no selected declaration owner.",
+                    pending.Expression.Span);
+                continue;
+            }
+
+            SetContext(pending.Tree, pending.Expression);
+            ResetFunctionBindingState();
+            _genericOwnerTypeArguments = null;
+            _genericContext = null;
+            _currentStruct = null;
+            _unsafeDepth = 0;
+            _isBindingConstEvalBody = false;
+            _aliasTypeArguments.Clear();
+            var boundDefault = BindInterfaceParameterDefaultExpression(
+                pending.Expression, pending.Type);
+            if (boundDefault is null)
+            {
+                continue;
+            }
+
+            var definition = _interfaces[pending.InterfaceIndex];
+            var members = definition.Members.ToBuilder();
+            var member = members[pending.MemberOrdinal];
+            var parameters = member.Parameters.ToBuilder();
+            var parameter = parameters[pending.ParameterOrdinal];
+            parameters[pending.ParameterOrdinal] = parameter with {
+                DefaultValue = boundDefault as BoundConstant,
+                DefaultExpression = boundDefault is BoundConstant
+                    ? null : boundDefault,
+                DefaultExpressionSourceInputOrdinal
+                    = boundDefault is BoundConstant ? -1
+                        : _trees.IndexOf(pending.Tree),
+                HasPendingDefault = false,
+                DefaultSyntaxSpan = default,
+            };
+            members[pending.MemberOrdinal] = member with {
+                Parameters = parameters.ToImmutable(),
+            };
+            _interfaces[pending.InterfaceIndex] = definition with {
+                Members = members.ToImmutable(),
+            };
+        }
+        _pendingInterfaceParameterDefaults.Clear();
+
+        for (var interfaceIndex = 0;
+            interfaceIndex < _interfaces.Count; interfaceIndex++)
+        {
+            var definition = _interfaces[interfaceIndex];
+            var members = definition.Members.ToBuilder();
+            var definitionChanged = false;
+            for (var memberIndex = 0;
+                memberIndex < members.Count; memberIndex++)
+            {
+                var member = members[memberIndex];
+                var parameters = member.Parameters.ToBuilder();
+                var memberChanged = false;
+                for (var parameterIndex = 0;
+                    parameterIndex < parameters.Count; parameterIndex++)
+                {
+                    var parameter = parameters[parameterIndex];
+                    if (parameter.DefaultExpression
+                            is not BoundExpression expression)
+                    {
+                        continue;
+                    }
+
+                    if ((uint)parameter.DefaultExpressionSourceInputOrdinal
+                        < (uint)_trees.Length)
+                    {
+                        SetContext(_trees[
+                            parameter.DefaultExpressionSourceInputOrdinal],
+                            null);
+                    }
+                    var value = parameter.Type.Kind
+                            == BoundInterfaceTypeKind.Primitive
+                        ? EvaluateParameterDefaultValue(expression,
+                            parameter.Type.PrimitiveType, functions,
+                            evaluatedDefaults)
+                        : null;
+                    if (parameter.Type.Kind
+                        != BoundInterfaceTypeKind.Primitive)
+                    {
+                        Report("TRM3005",
+                            "An interface parameter default requires a primitive scalar type.",
+                            expression.Span);
+                    }
+
+                    parameters[parameterIndex] = parameter with {
+                        DefaultValue = value,
+                        DefaultExpression = null,
+                        DefaultExpressionSourceInputOrdinal = -1,
+                    };
+                    memberChanged = true;
+                }
+
+                if (memberChanged)
+                {
+                    members[memberIndex] = member with {
+                        Parameters = parameters.ToImmutable(),
+                    };
+                    definitionChanged = true;
+                }
+            }
+
+            if (definitionChanged)
+            {
+                _interfaces[interfaceIndex] = definition with {
+                    Members = members.ToImmutable(),
+                };
+            }
+        }
+    }
+
+    private void SynchronizeGenericProofInterfaceDefaults()
+    {
+        var sourceInterfaces = new Dictionary<
+            (string Name, int Arity, BoundModuleImport? ModuleImport),
+            BoundInterfaceDefinition>();
+        foreach (var sourceInterface in _interfaces)
+        {
+            var key = (sourceInterface.QualifiedName,
+                sourceInterface.Formals.Length,
+                sourceInterface.ModuleImport);
+            if (!sourceInterfaces.TryAdd(key, sourceInterface))
+            {
+                if ((uint)sourceInterface.SourceInputOrdinal
+                    < (uint)_trees.Length)
+                {
+                    SetContext(_trees[
+                        sourceInterface.SourceInputOrdinal], null);
+                }
+                var span = sourceInterface.Members.IsEmpty
+                    ? default : sourceInterface.Members[0]
+                        .SourceDeclarationSpan;
+                Report("TRM3005",
+                    "A generic proof interface default has an ambiguous source owner.",
+                    span);
+            }
+        }
+
+        for (var definitionIndex = 0;
+            definitionIndex < _genericMethodDefinitions.Count;
+            definitionIndex++)
+        {
+            var definition = _genericMethodDefinitions[definitionIndex];
+            var proofProgram = definition.ProofProgram;
+            var interfaces = proofProgram.Interfaces.ToBuilder();
+            var programChanged = false;
+            for (var interfaceIndex = 0;
+                interfaceIndex < interfaces.Count; interfaceIndex++)
+            {
+                var proofInterface = interfaces[interfaceIndex];
+                if (!sourceInterfaces.TryGetValue(
+                        (proofInterface.QualifiedName,
+                            proofInterface.Formals.Length,
+                            proofInterface.ModuleImport),
+                        out var sourceInterface)
+                    || sourceInterface.Members.Length
+                        != proofInterface.Members.Length)
+                {
+                    continue;
+                }
+
+                var members = proofInterface.Members.ToBuilder();
+                var interfaceChanged = false;
+                for (var memberIndex = 0;
+                    memberIndex < members.Count; memberIndex++)
+                {
+                    var sourceMember = sourceInterface.Members[memberIndex];
+                    var proofMember = members[memberIndex];
+                    if (sourceMember.Ordinal != proofMember.Ordinal
+                        || sourceMember.DeclarationKey
+                            != proofMember.DeclarationKey
+                        || sourceMember.Parameters.Length
+                            != proofMember.Parameters.Length)
+                    {
+                        continue;
+                    }
+
+                    var parameters = proofMember.Parameters.ToBuilder();
+                    var memberChanged = false;
+                    for (var parameterIndex = 0;
+                        parameterIndex < parameters.Count;
+                        parameterIndex++)
+                    {
+                        var sourceParameter
+                            = sourceMember.Parameters[parameterIndex];
+                        var proofParameter = parameters[parameterIndex];
+                        var defaultValue = sourceParameter.DefaultValue;
+                        if (defaultValue is BoundConstant constant
+                            && sourceParameter.Type.Kind
+                                == BoundInterfaceTypeKind.Primitive
+                            && proofParameter.Type.Kind
+                                == BoundInterfaceTypeKind.Primitive)
+                        {
+                            var sourceType
+                                = sourceParameter.Type.PrimitiveType;
+                            var proofType
+                                = proofParameter.Type.PrimitiveType;
+                            defaultValue =
+                                BoundTreeTraversal.RewriteConstantType(
+                                    constant, type => type == sourceType
+                                        ? proofType : type);
+                        }
+
+                        if (proofParameter.DefaultValue != defaultValue
+                            || proofParameter.DefaultExpression is not null
+                            || proofParameter
+                                .DefaultExpressionSourceInputOrdinal != -1
+                            || proofParameter.HasPendingDefault
+                                != sourceParameter.HasPendingDefault
+                            || proofParameter.DefaultSyntaxSpan
+                                != sourceParameter.DefaultSyntaxSpan)
+                        {
+                            parameters[parameterIndex]
+                                = proofParameter with {
+                                    DefaultValue = defaultValue,
+                                    DefaultExpression = null,
+                                    DefaultExpressionSourceInputOrdinal = -1,
+                                    HasPendingDefault =
+                                        sourceParameter.HasPendingDefault,
+                                    DefaultSyntaxSpan =
+                                        sourceParameter.DefaultSyntaxSpan,
+                                };
+                            memberChanged = true;
+                        }
+                    }
+
+                    if (memberChanged)
+                    {
+                        members[memberIndex] = proofMember with {
+                            Parameters = parameters.ToImmutable(),
+                        };
+                        interfaceChanged = true;
+                    }
+                }
+
+                if (interfaceChanged)
+                {
+                    interfaces[interfaceIndex] = proofInterface with {
+                        Members = members.ToImmutable(),
+                    };
+                    programChanged = true;
+                }
+            }
+
+            if (programChanged)
+            {
+                proofProgram = proofProgram with {
+                    Interfaces = interfaces.ToImmutable(),
+                };
+            }
+
+            var proofFunctions = proofProgram.Functions.ToBuilder();
+            var functionsChanged = false;
+            for (var functionIndex = 0;
+                functionIndex < proofFunctions.Count; functionIndex++)
+            {
+                var functionChanged = false;
+                var rewritten = BoundTreeTraversal.RewriteExpressions(
+                    proofFunctions[functionIndex], expression =>
+                    {
+                        if (expression
+                            is not BoundPendingInterfaceDefault pending)
+                        {
+                            return expression;
+                        }
+
+                        functionChanged = true;
+                        return MaterializeGenericProofInterfaceDefault(
+                            pending, proofProgram);
+                    });
+                if (functionChanged)
+                {
+                    proofFunctions[functionIndex] = rewritten;
+                    functionsChanged = true;
+                }
+            }
+
+            if (functionsChanged)
+            {
+                proofProgram = proofProgram with {
+                    Functions = proofFunctions.ToImmutable(),
+                };
+            }
+
+            if (proofProgram.AllowUnmaterializedInterfaceDefaults)
+            {
+                proofProgram = proofProgram with {
+                    AllowUnmaterializedInterfaceDefaults = false,
+                };
+                programChanged = true;
+            }
+
+            if (programChanged || functionsChanged)
+            {
+                _genericMethodDefinitions[definitionIndex] = definition with {
+                    ProofProgram = proofProgram,
+                };
+            }
+        }
+    }
+
+    private BoundExpression MaterializeGenericProofInterfaceDefault(
+        BoundPendingInterfaceDefault pending, BoundProgram proofProgram)
+    {
+        var hasMember = BoundInterfaceContract
+            .TryGetInterfaceMemberDefinition(pending.Requirement,
+                proofProgram.Interfaces, static _ => true,
+                out var member, allowOpenFormals: true,
+                genericNominalTypeDefinitions:
+                    proofProgram.GenericNominalTypeDefinitions,
+                sourceGenericTypeDefinitions:
+                    proofProgram.SourceGenericTypeDefinitions);
+        if (member is not null
+            && (uint)member.SourceInputOrdinal < (uint)_trees.Length)
+        {
+            SetContext(_trees[member.SourceInputOrdinal], null);
+        }
+
+        if (!hasMember || member is null
+            || (uint)pending.ParameterOrdinal
+                >= (uint)member.Parameters.Length
+            || member.Parameters[pending.ParameterOrdinal].Mode
+                != BoundInterfaceParameterMode.Value
+            || member.Parameters[pending.ParameterOrdinal].Type.Kind
+                != BoundInterfaceTypeKind.Primitive
+            || member.Parameters[pending.ParameterOrdinal].Type.PrimitiveType
+                != pending.Type
+            || member.Parameters[pending.ParameterOrdinal].DefaultValue
+                is not BoundConstant constant
+            || constant.Type != pending.Type)
+        {
+            Report("TRM3005",
+                "A generic proof interface default did not materialize from its selected requirement.",
+                pending.Span);
+            return ErrorExpression(pending.Span);
+        }
+
+        return constant with { Span = pending.Span };
+    }
+
+    private void SynchronizeGenericParameterDefaultValues()
+    {
+        for (var signatureIndex = 0;
+            signatureIndex < _signatures.Count; signatureIndex++)
+        {
+            var signature = _signatures[signatureIndex];
+            if (signature.Generic is not GenericInstantiation
+                    genericInstantiation
+                || genericInstantiation.Template.ImportedMethod is not null
+                || !_templates.TryGetValue(
+                    genericInstantiation.Template.Name,
+                    out var template))
+            {
+                continue;
+            }
+            if (signature.Parameters.Length
+                != template.Parameters.Length)
+            {
+                SetContext(template.Tree, template.Declaration);
+                Report("TRM3005",
+                    "A generic method specialization changed its parameter count.",
+                    template.Declaration.Span);
+                continue;
+            }
+
+            var parameters = signature.Parameters.ToBuilder();
+            var changed = false;
+            for (var parameterIndex = 0;
+                parameterIndex < parameters.Count; parameterIndex++)
+            {
+                var templateParameter
+                    = template.Parameters[parameterIndex];
+                var parameter = parameters[parameterIndex];
+                if (templateParameter.DefaultValue is BoundConstant value)
+                {
+                    if (value.Type != parameter.Type)
+                    {
+                        SetContext(template.Tree, template.Declaration);
+                        Report("TRM3005",
+                            "A generic method parameter default does not match its closed formal type.",
+                            value.Span);
+                        continue;
+                    }
+                    parameters[parameterIndex] = parameter with {
+                        DefaultSyntax = null,
+                        DefaultExpression = null,
+                        DefaultValue = value,
+                        DefaultFormalDependencies =
+                            templateParameter.DefaultFormalDependencies,
+                    };
+                    changed = true;
+                }
+                else if (templateParameter.DefaultExpression
+                    is BoundExpression expression
+                    && expression.Type == parameter.Type)
+                {
+                    parameters[parameterIndex] = parameter with {
+                        DefaultSyntax = null,
+                        DefaultExpression = expression,
+                        DefaultValue = null,
+                        DefaultFormalDependencies =
+                            templateParameter.DefaultFormalDependencies,
+                    };
+                    changed = true;
+                }
+            }
+
+            if (changed)
+            {
+                _signatures[signatureIndex] = signature with {
+                    Generic = genericInstantiation with {
+                        Template = template,
+                    },
+                    Parameters = parameters.ToImmutable(),
+                };
+            }
+        }
+    }
+
+    private void SynchronizeGenericMethodOrdinaryParameterDefaults()
+    {
+        var templatesByOrdinal
+            = new Dictionary<int, GenericTemplate>();
+        foreach (var template in _templates.Values)
+        {
+            if (template.DefinitionOrdinal >= 0)
+            {
+                templatesByOrdinal.TryAdd(template.DefinitionOrdinal,
+                    template);
+            }
+        }
+
+        for (var definitionIndex = 0;
+            definitionIndex < _genericMethodDefinitions.Count;
+            definitionIndex++)
+        {
+            var definition = _genericMethodDefinitions[definitionIndex];
+            if (!templatesByOrdinal.TryGetValue(definition.DefinitionOrdinal,
+                    out var template)
+                || (uint)definition.FunctionIndex
+                    >= (uint)definition.ProofProgram.Functions.Length)
+            {
+                Report("TRM3005",
+                    "A generic method default surface has no selected source definition.",
+                    definition.Span);
+                continue;
+            }
+
+            var proofFunction = definition.ProofProgram.Functions[
+                definition.FunctionIndex];
+            var receiverCount = definition.Owner is not null
+                && !definition.IsStatic ? 1 : 0;
+            if (definition.RuntimeParameterCount
+                    != template.Parameters.Length + receiverCount
+                || proofFunction.Variables.Length
+                    < definition.RuntimeParameterCount)
+            {
+                Report("TRM3005",
+                    "A generic method default surface does not match its runtime parameter layout.",
+                    definition.Span);
+                continue;
+            }
+
+            var defaults = ImmutableArray.CreateBuilder<
+                BoundGenericMethodParameterDefault?>(
+                    template.Parameters.Length);
+            for (var parameterIndex = 0;
+                parameterIndex < template.Parameters.Length;
+                parameterIndex++)
+            {
+                var parameter = template.Parameters[parameterIndex];
+                var value = (BoundExpression?)parameter.DefaultValue
+                    ?? parameter.DefaultExpression;
+                if (parameter.DefaultSyntax is not null)
+                {
+                    if ((uint)definition.SourceInputOrdinal
+                        < (uint)_trees.Length)
+                    {
+                        SetContext(_trees[definition.SourceInputOrdinal],
+                            template.Declaration);
+                    }
+                    Report("TRM3005",
+                        "A generic method ordinary default has no checked syntax-free value or term.",
+                        parameter.DefaultSyntax.Span);
+                    defaults.Add(null);
+                    continue;
+                }
+
+                if (value is null)
+                {
+                    defaults.Add(null);
+                    continue;
+                }
+
+                var parameterType = proofFunction.Variables[
+                    receiverCount + parameterIndex].Type;
+                var dependencies = parameter.DefaultFormalDependencies;
+                var validDependencies = !dependencies.IsDefault
+                    && dependencies.All(dependency => dependency is not null
+                        && IsValidGenericMethodParameterDefaultDependency(
+                            template, dependency))
+                    && dependencies.Distinct().Count()
+                        == dependencies.Length;
+                var validReads
+                    = BoundTreeTraversal.VisitExpressionTree(value,
+                        expression =>
+                        {
+                            if (expression is BoundRead read
+                                && (uint)read.Variable
+                                    >= (uint)dependencies.Length)
+                            {
+                                validDependencies = false;
+                            }
+                        });
+                if (validDependencies && value is BoundRead read
+                    && (uint)read.Variable < (uint)dependencies.Length
+                    && parameter.TypeTerm
+                        is BoundGenericMethodTypeTerm parameterTypeTerm
+                    && AreGenericMethodTypeTermsEquivalent(
+                        parameterTypeTerm, dependencies[read.Variable].Domain))
+                {
+                    value = read with { Type = parameterType };
+                }
+                if (!validReads || !validDependencies
+                    || value.Type != parameterType
+                    || (value is BoundConstant
+                        && !dependencies.IsEmpty))
+                {
+                    if ((uint)definition.SourceInputOrdinal
+                        < (uint)_trees.Length)
+                    {
+                        SetContext(_trees[definition.SourceInputOrdinal],
+                            template.Declaration);
+                    }
+                    Report("TRM3005",
+                        "A generic method ordinary default does not match its checked parameter/formal dependency surface.",
+                        value.Span);
+                    defaults.Add(null);
+                    continue;
+                }
+
+                defaults.Add(new BoundGenericMethodParameterDefault(
+                    parameterIndex, parameter.Name, parameterType, value,
+                    dependencies));
+            }
+
+            _genericMethodDefinitions[definitionIndex] = definition with {
+                OrdinaryParameterDefaults = defaults.MoveToImmutable(),
+            };
+        }
+    }
+
+    private bool IsValidGenericMethodParameterDefaultDependency(
+        GenericTemplate template,
+        BoundGenericMethodParameterDefaultFormalDependency dependency)
+    {
+        if (dependency.Domain is null)
+        {
+            return false;
+        }
+
+        if (dependency.OwnerKind
+            == BoundGenericTypeFormalOwnerKind.GenericMethod)
+        {
+            var formal = template.ConstantFormals.FirstOrDefault(candidate =>
+                candidate.ConstantOrdinal
+                    == dependency.ConstantFormalOrdinal);
+            return template.DefinitionOrdinal >= 0
+                && dependency.DefinitionOrdinal == template.DefinitionOrdinal
+                && formal is not null
+                && formal.Domain is not null
+                && AreGenericMethodTypeTermsEquivalent(formal.Domain,
+                    dependency.Domain);
+        }
+
+        if (dependency.OwnerKind
+                != BoundGenericTypeFormalOwnerKind.SourceGenericType
+            || template.OwnerGenericTypeDefinitionIndex
+                != dependency.DefinitionOrdinal
+            || (uint)dependency.DefinitionOrdinal
+                >= (uint)_sourceGenericTypeDefinitions.Count
+            || template.OwnerConstantArguments.IsDefault
+            || (uint)dependency.ConstantFormalOrdinal
+                >= (uint)template.OwnerConstantArguments.Length)
+        {
+            return false;
+        }
+
+        var ownerDefinition = _sourceGenericTypeDefinitions[
+            dependency.DefinitionOrdinal];
+        if (ownerDefinition.ConstantFormals.IsDefault)
+        {
+            return false;
+        }
+        var ownerFormal = ownerDefinition.ConstantFormals.FirstOrDefault(
+            candidate => candidate.ConstantOrdinal
+                == dependency.ConstantFormalOrdinal);
+        var ownerArgument = template.OwnerConstantArguments[
+            dependency.ConstantFormalOrdinal];
+        return ownerFormal is not null
+            && ownerArgument is not null
+            && (ownerArgument.Kind is
+                BoundGenericMethodConstantArgumentKind.Value
+                    or BoundGenericMethodConstantArgumentKind.Formal)
+            && ownerArgument.Domain is not null
+            && ownerArgument.ConstantOrdinal
+                == dependency.ConstantFormalOrdinal
+            && (ownerArgument.Kind
+                    != BoundGenericMethodConstantArgumentKind.Formal
+                || IsValidGenericMethodConstantFormalOwnerIdentity(
+                    ownerArgument))
+            && AreGenericMethodTypeTermsEquivalent(ownerArgument.Domain,
+                dependency.Domain);
+    }
+
+    private bool TryGetGenericMethodParameterDefaultActual(
+        GenericInstantiation instantiation,
+        BoundGenericMethodParameterDefaultFormalDependency dependency,
+        out BoundGenericMethodConstantArgument actual)
+    {
+        actual = null!;
+        if (!IsValidGenericMethodParameterDefaultDependency(
+                instantiation.Template, dependency))
+        {
+            return false;
+        }
+
+        var ordinal = dependency.ConstantFormalOrdinal;
+        if (dependency.OwnerKind
+            == BoundGenericTypeFormalOwnerKind.GenericMethod)
+        {
+            if ((uint)ordinal >= (uint)instantiation.ConstantArguments.Length)
+            {
+                return false;
+            }
+            actual = instantiation.ConstantArguments[ordinal];
+        }
+        else
+        {
+            actual = instantiation.Template.OwnerConstantArguments[ordinal];
+        }
+
+        return actual is not null
+            && actual.ConstantOrdinal == ordinal
+            && AreGenericMethodTypeTermsEquivalent(actual.Domain,
+                dependency.Domain);
+    }
+
+    private void MaterializeConstEvalDefaultArguments()
+    {
+        if (_boundConstEvalFunctions is not { } functions)
+        {
+            return;
+        }
+
+        for (var functionIndex = 0;
+            functionIndex < functions.Length; functionIndex++)
+        {
+            if (functions[functionIndex] is not BoundFunction function)
+            {
+                continue;
+            }
+            if ((uint)function.SourceInputOrdinal < (uint)_trees.Length)
+            {
+                SetContext(_trees[function.SourceInputOrdinal], null);
+            }
+            functions[functionIndex] = BoundTreeTraversal.RewriteCalls(
+                function, call => MaterializeDefaultedCallArguments(call,
+                    functions, allowTargetSignatureDefault: true));
+        }
+    }
+
+    private BoundCall MaterializeDefaultedCallArguments(
+        BoundCall call, IReadOnlyList<BoundFunction?> functions,
+        bool allowTargetSignatureDefault)
+    {
+        if (call.DefaultedArguments.IsDefaultOrEmpty)
+        {
+            return call;
+        }
+
+        var arguments = call.Arguments.ToBuilder();
+        foreach (var defaulted in call.DefaultedArguments)
+        {
+            var argumentIndex = defaulted.ArgumentIndex;
+            if ((uint)argumentIndex >= (uint)arguments.Count)
+            {
+                Report("TRM3005",
+                    "A compile-time call has invalid default-argument metadata.",
+                    call.Span);
+                continue;
+            }
+
+            if ((uint)defaulted.SourceInputOrdinal < (uint)_trees.Length)
+            {
+                SetContext(_trees[defaulted.SourceInputOrdinal], null);
+            }
+
+            BoundConstant? value = defaulted.FrozenValue;
+            if (value is null && allowTargetSignatureDefault
+                && call.InterfaceCallIdentity is null
+                && (uint)call.Function < (uint)_signatures.Count
+                && (uint)defaulted.ParameterIndex
+                    < (uint)_signatures[call.Function].Parameters.Length)
+            {
+                value = _signatures[call.Function]
+                    .Parameters[defaulted.ParameterIndex].DefaultValue;
+            }
+            value ??= defaulted.Value as BoundConstant;
+            if (value is null)
+            {
+                var hasUnboundRead = false;
+                if (!BoundTreeTraversal.VisitExpressionTree(
+                        defaulted.Value, candidate =>
+                        {
+                            if (candidate is BoundRead)
+                            {
+                                hasUnboundRead = true;
+                            }
+                        })
+                    || hasUnboundRead)
+                {
+                    Report("TRM3005",
+                        "A generic-dependent call default requires its term and formation implementation.",
+                        defaulted.Value.Span);
+                    arguments[argumentIndex] = ErrorExpression(
+                        call.Arguments[argumentIndex].Span);
+                    continue;
+                }
+
+                try
+                {
+                    value = EvaluateConstExpression(defaulted.Value, [],
+                        functions, 0,
+                        new ConstEvalState(_cancellationToken));
+                }
+                catch (ConstEvalFailure)
+                {
+                    Report("TRM3005",
+                        "A compile-time call default failed checked constant evaluation.",
+                        defaulted.Value.Span);
+                }
+            }
+            if (value is null)
+            {
+                arguments[argumentIndex] = ErrorExpression(
+                    call.Arguments[argumentIndex].Span);
+                continue;
+            }
+            if (value is BoundConstant constant
+                && constant.Type == arguments[argumentIndex].Type)
+            {
+                arguments[argumentIndex] = constant with {
+                    Span = arguments[argumentIndex].Span,
+                };
+            }
+            else
+            {
+                Report("TRM3005",
+                    "A compile-time call default did not produce its exact argument type.",
+                    call.Arguments[argumentIndex].Span);
+                arguments[argumentIndex] = ErrorExpression(
+                    call.Arguments[argumentIndex].Span);
+            }
+        }
+
+        return call with {
+            Arguments = arguments.ToImmutable(),
+            DefaultedArguments = default,
+        };
     }
 
     private BoundFunction BindSignatureBody(Signature signature)
@@ -1320,6 +3491,16 @@ internal sealed partial class Binder
                         staticPropertyName),
                     out var backingFieldIndex)
                 ? backingFieldIndex : -1;
+        var instancePropertyBackingFieldIndex
+            = signature.StructName is string instancePropertyOwner
+                && signature.PropertyName is string instancePropertyName
+                && !signature.IsStatic
+                && signature.Declaration is SyntaxNode propertyDeclaration
+                && HasPropertyBacking(propertyDeclaration)
+                ? FindClassPropertyBackingField(
+                    ResolveDeclaredType(instancePropertyOwner),
+                    instancePropertyName)
+                : -1;
         var syntaxBody = signature.Body
             ?? (staticPropertyBackingFieldIndex >= 0
                 ? declaration
@@ -1333,6 +3514,11 @@ internal sealed partial class Binder
                 syntaxBody.Span.Start);
         }
         SetContext(signature.Tree, declaration);
+        var previousGenericContext = _genericContext;
+        if (signature.Generic is null)
+        {
+            _genericContext = signature.GenericOwnerContext;
+        }
         _variables.Clear();
         _scopes.Clear();
         _unresolvedVacantLocals.Clear();
@@ -1344,6 +3530,10 @@ internal sealed partial class Binder
         _bindingStaticConstructorIdentity =
             signature.StaticConstructorIdentity;
         _bindingStaticFieldInitializerIndex = -1;
+        _bindingPropertyBackingFieldIndex
+            = instancePropertyBackingFieldIndex;
+        _bindingPropertyAccessorKind = signature.PropertyAccessorKind;
+        _bindingPropertyName = signature.PropertyName;
         _constructor = signature.IsConstructor || signature.IsClassConstructor;
         _hasReceiver = signature.StructName is not null && !signature.IsStatic;
 
@@ -1366,7 +3556,8 @@ internal sealed partial class Binder
         {
             var slot = AddVariable(parameter.Name, parameter.Type,
                 parameter.IsOut, parameter.Span, parameter.IsEscapedThis);
-            if (parameter.IsOut || parameter.IsImplicitRef)
+            if (parameter.IsOut || parameter.IsInit
+                || parameter.IsImplicitRef)
             {
                 _variables[slot] = _variables[slot] with {
                     IsOut = parameter.IsOut,
@@ -1405,18 +3596,49 @@ internal sealed partial class Binder
                         signature.ReturnType, declaration.Span),
                         declaration.Span),
                 ], declaration.Span)
+                : instancePropertyBackingFieldIndex >= 0
+                    && signature.IsAutoPropertyAccessor
+                    && signature.PropertyAccessorKind
+                        == BoundPropertyAccessorKind.Getter
+                ? new BoundBlock([
+                    new BoundReturn(new BoundFieldRead(
+                        new BoundRead(0, _variables[0].Type,
+                            declaration.Span),
+                        instancePropertyBackingFieldIndex,
+                        signature.ReturnType, declaration.Span),
+                        declaration.Span),
+                ], declaration.Span)
+                : instancePropertyBackingFieldIndex >= 0
+                    && signature.IsAutoPropertyAccessor
+                    && signature.PropertyAccessorKind is
+                        BoundPropertyAccessorKind.Setter
+                        or BoundPropertyAccessorKind.Initializer
+                ? new BoundBlock([
+                    new BoundFieldAssignment(0,
+                        instancePropertyBackingFieldIndex,
+                        new BoundRead(1, signature.Parameters[0].Type,
+                            declaration.Span), declaration.Span) {
+                        IsInitializationAuthority = signature
+                            .PropertyAccessorKind
+                            == BoundPropertyAccessorKind.Initializer,
+                    },
+                ], declaration.Span)
                 : signature.Generic is GenericInstantiation generic
                     ? BindGenericBody(generic)
                     : BindCallableBody(syntaxBody);
         }
         finally
         {
+            _genericContext = previousGenericContext;
             if (signature.GenericOwnerTypeArguments is not null)
             {
                 _aliasTypeArguments.RemoveAt(_aliasTypeArguments.Count - 1);
             }
             _bindingStaticConstructorIdentity = null;
             _bindingStaticFieldInitializerIndex = -1;
+            _bindingPropertyBackingFieldIndex = -1;
+            _bindingPropertyAccessorKind = BoundPropertyAccessorKind.None;
+            _bindingPropertyName = null;
         }
         if (signature.IsConstructor && !signature.DoesNotReturn)
         {
@@ -1463,13 +3685,36 @@ internal sealed partial class Binder
                 }], syntaxBody.Span), syntaxBody.Span)], syntaxBody.Span);
         }
 
-        return new BoundFunction(signature.Name, signature.ReturnType,
+        var boundFunction = new BoundFunction(signature.Name,
+            signature.ReturnType,
             [.. _variables],
             signature.Parameters.Length
                 + (signature.StructName is not null && !signature.IsStatic
                     && !signature.IsConstructor ? 1 : 0),
             body, declaration.Span) {
-            SourceInputOrdinal = _trees.IndexOf(signature.Tree),
+            SourceInputOrdinal = signature.Generic?.Template.ImportedMethod
+                is null ? _trees.IndexOf(signature.Tree) : -1,
+            SourceDeclarationInputOrdinal =
+                signature.SourceDeclarationInputOrdinal,
+            SourceDeclarationSpan = signature.SourceDeclarationSpan,
+            IsPartialConstructor = signature.IsPartialConstructor,
+            GenericMethodInstantiation = signature.Generic is
+                GenericInstantiation methodInstantiation
+                    && methodInstantiation.Template.ImportedMethod is null
+                        ? new BoundGenericMethodInstantiation(
+                            methodInstantiation.Template.DefinitionOrdinal,
+                            methodInstantiation.Types) {
+                            ConstantArguments =
+                                methodInstantiation.ConstantArguments,
+                        }
+                        : null,
+            ImportedGenericMethod = signature.Generic?.Template
+                .ImportedMethod,
+            ImportedGenericMethodTypeArguments =
+                signature.Generic is GenericInstantiation importedInstantiation
+                    && importedInstantiation.Template.ImportedMethod is not null
+                        ? importedInstantiation.Types : [],
+            ExplicitInterfaceOwner = signature.ExplicitInterfaceOwner,
             FriendTargets = signature.FriendTargets,
             IsConstructor = signature.IsConstructor,
             IsPrivate = signature.IsPrivate,
@@ -1492,20 +3737,34 @@ internal sealed partial class Binder
                 signature.StaticInitializationTrigger,
             StaticConstructorOwnerTypeArguments =
                 signature.StaticConstructorOwnerTypeArguments,
+            PureEvaluationFormSchema =
+                signature.PureEvaluationFormSchema,
+            ConstEvalSchema = signature.ConstEvalSchema,
             IsCleanup = signature.IsCleanup,
             DoesNotReturn = signature.DoesNotReturn,
             DeclaringStruct = signature.StructName is null ? null
                 : (string.IsNullOrEmpty(_namespace) ? "" : _namespace + ".")
                     + signature.StructName,
             PropertyName = signature.PropertyName,
+            PropertyAccessorKind = signature.PropertyAccessorKind,
             CapturedParameters = signature.CapturedParameters,
             ReturnsForwardedBacking = signature.ReturnsForwardedBacking,
             ResultDependencyParameters = signature.ResultDependencyParameters,
             ResultDependencyIncludesReceiver =
                 signature.ResultDependencyIncludesReceiver,
             DependencyContracts = signature.DependencyContracts,
+            CheckedOutputSelectors = signature.CheckedOutputSelectors,
+            CheckedOutputStates = signature.CheckedOutputStates,
+            CheckedOutputStatePredicates =
+                signature.CheckedOutputStatePredicates,
+            HasPrivateCheckedOutputStateMetadata =
+                signature.HasPrivateCheckedOutputStateMetadata,
+            HasStandardCheckedOutputStateMetadata =
+                signature.HasStandardCheckedOutputStateMetadata,
             DeclarationContractClauses = declarationContractClauses,
         };
+        return CheckedOutputStateProjection.Apply(boundFunction,
+            _checkedReferenceTypes);
     }
 
     private ImmutableArray<BoundDeclarationContractClause>
@@ -1747,6 +4006,16 @@ internal sealed partial class Binder
         }
         if (attribute.Children is [
             SyntaxTokenElement { Token.Kind: TokenKind.OpenBracket },
+            SyntaxTokenElement { Token.Kind: TokenKind.Identifier,
+                Token.Text: "get" },
+            SyntaxTokenElement { Token.Kind: TokenKind.Colon },
+            ..
+        ])
+        {
+            return 3;
+        }
+        if (attribute.Children is [
+            SyntaxTokenElement { Token.Kind: TokenKind.OpenBracket },
             (SyntaxTokenElement { Token.Kind: TokenKind.Identifier, Token.Text: "this" }
                 or SyntaxTokenElement { Token.Name: "method" }),
             SyntaxTokenElement { Token.Kind: TokenKind.Colon },
@@ -1791,6 +4060,16 @@ internal sealed partial class Binder
         return 1;
     }
 
+    private static bool IsGetterTargetAttribute(SyntaxNode attribute)
+        => attribute.Children.Length >= 3
+            && attribute.Children[0] is SyntaxTokenElement openBracket
+            && openBracket.Token.Kind == TokenKind.OpenBracket
+            && attribute.Children[1] is SyntaxTokenElement target
+            && target.Token.Kind == TokenKind.Identifier
+            && target.Token.Text == "get"
+            && attribute.Children[2] is SyntaxTokenElement colon
+            && colon.Token.Kind == TokenKind.Colon;
+
     private static bool IsCallablePrefixElement(SyntaxElement element)
     {
         if (element is SyntaxNode {
@@ -1822,7 +4101,8 @@ internal sealed partial class Binder
         for (var index = 0; index < declaration.Children.Length; index++)
         {
             if (declaration.Children[index] is SyntaxNode {
-                    Kind: SyntaxKind.ParameterList,
+                    Kind: SyntaxKind.ParameterList
+                        or SyntaxKind.IndexerParameterList,
                 })
             {
                 return index;
@@ -2202,6 +4482,8 @@ internal sealed partial class Binder
             "uint16" => PrimitiveType.UInt16,
             "int64" => PrimitiveType.Int64,
             "uint64" => PrimitiveType.UInt64,
+            "nint" => PrimitiveType.NativeInt,
+            "nuint" => PrimitiveType.NativeUInt,
             "int128" => PrimitiveType.Int128,
             "uint128" => PrimitiveType.UInt128,
             "float16" => PrimitiveType.Float16,
@@ -3232,7 +5514,7 @@ internal sealed partial class Binder
                 isUnique |= modifier.Token.Kind == TokenKind.UniqueKeyword;
                 visibilityCount += modifier.Token.Kind is TokenKind.PublicKeyword or TokenKind.InternalKeyword or TokenKind.PrivateKeyword ? 1 : 0;
                 if (modifier.Token.Kind is TokenKind.PrivateKeyword or TokenKind.StaticKeyword
-                    or TokenKind.MutKeyword or TokenKind.UnsafeKeyword or TokenKind.ExternKeyword)
+                    or TokenKind.UnsafeKeyword or TokenKind.ExternKeyword)
                 {
                     Report("TRM3001", "Top-level structs support only public or internal visibility.", modifier.Span);
                 }
@@ -3317,7 +5599,7 @@ internal sealed partial class Binder
                 if (!NativeFixedArrayContract.TryGetLayout(type,
                         array.ElementType, array.ElementCount, _structs,
                         _nativeFixedArrayTypes, out var arrayLayout,
-                        _checkedReferenceTypes)
+                        _checkedReferenceTypes, _enumDefinitions)
                     || arrayLayout.Alignment > int.MaxValue
                     || arrayLayout.RequiredAlignment > int.MaxValue)
                 {
@@ -3335,7 +5617,7 @@ internal sealed partial class Binder
             {
                 width = ValueLayout.Size(type, _structs,
                     [.. _checkedReferenceTypes], _nativeLoweringAgreement,
-                    _nativeFixedArrayTypes);
+                    _nativeFixedArrayTypes, _enumDefinitions);
                 fieldAlignment = width == 0 ? 0 : ValueAlignment(type);
                 fieldRequiredAlignment = ValueRequiredAlignment(type);
             }
@@ -3450,7 +5732,8 @@ internal sealed partial class Binder
         if (isTransparent && (isUnique || fields.Count != 1
             || (isBlittable
                 ? !IsBlittableLayoutFieldType(fields[0].Type)
-                : PrimitiveTypeFacts.ScalarWidth(fields[0].Type) <= 0)))
+                : PrimitiveTypeFacts.ScalarWidth(fields[0].Type,
+                    _enumDefinitions) <= 0)))
         {
             Report("TRM3005", "Transparent Copy structs require exactly one scalar value field.", declaration.Span);
         }
@@ -3901,9 +6184,9 @@ internal sealed partial class Binder
         return true;
     }
 
-    private static bool IsBlittableLayoutFieldType(PrimitiveType type)
+    private bool IsBlittableLayoutFieldType(PrimitiveType type)
     {
-        if (PrimitiveTypeFacts.ScalarWidth(type) > 0
+        if (PrimitiveTypeFacts.ScalarWidth(type, _enumDefinitions) > 0
             || type is PrimitiveType.NativeRawPointer
             || NativePointerTypes.IsType(type) || NativeFunctionPointerTypes.IsType(type))
         {
@@ -3919,7 +6202,7 @@ internal sealed partial class Binder
         {
             return ValueLayout.Alignment(type, _structs,
                 [.. _checkedReferenceTypes], _nativeLoweringAgreement,
-                _nativeFixedArrayTypes);
+                _nativeFixedArrayTypes, _enumDefinitions);
         }
         if (_structureAlignments.TryGetValue(type, out var alignment))
         {
@@ -3927,7 +6210,7 @@ internal sealed partial class Binder
         }
         alignment = ValueLayout.Alignment(type, _structs,
             [.. _checkedReferenceTypes], _nativeLoweringAgreement,
-            _nativeFixedArrayTypes);
+            _nativeFixedArrayTypes, _enumDefinitions);
         if (_laidOut.Contains((int)type - 100))
         {
             _structureAlignments.Add(type, alignment);
@@ -3937,7 +6220,8 @@ internal sealed partial class Binder
 
     private int ValueRequiredAlignment(PrimitiveType type) =>
         ValueLayout.RequiredAlignment(type, _structs,
-            _nativeFixedArrayTypes, [.. _checkedReferenceTypes]);
+            _nativeFixedArrayTypes, [.. _checkedReferenceTypes],
+            _enumDefinitions);
 
     private static bool TryAlign(ulong size, int alignment,
         out ulong aligned)
@@ -4013,95 +6297,39 @@ internal sealed partial class Binder
 
         var parameterList = declaration.Children.OfType<SyntaxNode>()
             .First(static child => child.Kind == SyntaxKind.TypeParameterList);
-        var typeParametersBuilder = ImmutableArray.CreateBuilder<string>();
-        var typeDefaultsBuilder = ImmutableArray.CreateBuilder<SyntaxNode?>();
-        var formalElements = new List<SyntaxElement>();
-        var hasInvalidFormal = false;
-        void AddGenericStructFormal()
+        if (parameterList.Children.OfType<SyntaxNode>().Any(
+                static child => child.Kind == SyntaxKind.Attribute))
         {
-            var formalTokens = formalElements
-                .OfType<SyntaxTokenElement>().ToArray();
-            if (formalTokens.Any(static token =>
-                    token.Token.Text == "const"))
-            {
-                Report("TRM3005",
-                    "Generic struct specialization supports only type formals.",
-                    parameterList.Span);
-                hasInvalidFormal = true;
-                return;
-            }
-            if (formalElements.OfType<SyntaxNode>().Any(
-                    static child => child.Kind == SyntaxKind.Attribute))
-            {
-                Report("TRM3005",
-                    "Generic struct formal attributes are not supported.",
-                    parameterList.Span);
-                hasInvalidFormal = true;
-                return;
-            }
-
-            var formalName = formalTokens.FirstOrDefault(static token =>
-                token.Token.Kind == TokenKind.Identifier);
-            if (formalName is null)
-            {
-                Report("TRM3005",
-                    "Generic struct formals require a type parameter name.",
-                    parameterList.Span);
-                hasInvalidFormal = true;
-                return;
-            }
-
-            var equalsIndex = formalElements.FindIndex(
-                static element => element is SyntaxTokenElement {
-                    Token.Kind: TokenKind.Equals,
-                });
-            var defaultType = equalsIndex < 0
-                ? null
-                : formalElements.Skip(equalsIndex + 1)
-                    .OfType<SyntaxNode>().FirstOrDefault();
-            if (equalsIndex >= 0 && defaultType is null)
-            {
-                Report("TRM3005",
-                    "Generic struct type defaults require a type.",
-                    parameterList.Span);
-                hasInvalidFormal = true;
-                return;
-            }
-
-            typeParametersBuilder.Add(formalName.Token.Name);
-            typeDefaultsBuilder.Add(defaultType);
+            Report("TRM3005",
+                "Generic struct formal attributes are not supported.",
+                parameterList.Span);
+            return;
         }
-
-        foreach (var element in parameterList.Children.Skip(1)
-            .Take(parameterList.Children.Length - 2))
+        var formalSyntax = ParseGenericMethodFormals(parameterList,
+            out var validFormalSyntax);
+        if (!validFormalSyntax || formalSyntax.IsEmpty)
         {
-            if (element is SyntaxTokenElement {
-                    Token.Kind: TokenKind.Comma,
-                })
-            {
-                AddGenericStructFormal();
-                formalElements.Clear();
-            }
-            else
-            {
-                formalElements.Add(element);
-            }
-        }
-        AddGenericStructFormal();
-        if (hasInvalidFormal)
-        {
+            Report("TRM3005",
+                "Generic struct formals require valid type or constant declarations.",
+                parameterList.Span);
             return;
         }
 
-        var typeParameters = typeParametersBuilder.ToImmutable();
-        var typeDefaults = typeDefaultsBuilder.ToImmutable();
-        if (typeParameters.IsEmpty
-            || typeParameters.Distinct(StringComparer.Ordinal).Count() != typeParameters.Length)
+        if (formalSyntax.Select(static formal => formal.Name)
+            .Distinct(StringComparer.Ordinal).Count() != formalSyntax.Length)
         {
-            Report("TRM3005", "Generic structs require distinct type parameters.", parameterList.Span);
+            Report("TRM3005",
+                "Generic struct type and constant formals must have distinct names.",
+                parameterList.Span);
             return;
         }
 
+        var typeFormals = formalSyntax.Where(static formal =>
+            formal.Kind == BoundGenericMethodFormalKind.Type).ToImmutableArray();
+        var typeParameters = typeFormals.Select(static formal => formal.Name)
+            .ToImmutableArray();
+        var typeDefaults = typeFormals.Select(static formal => formal.TypeDefault)
+            .ToImmutableArray();
         if (declaration.Children.OfType<SyntaxTokenElement>()
             .Any(static child => child.Token.Kind == TokenKind.PublicKeyword))
         {
@@ -4238,19 +6466,19 @@ internal sealed partial class Binder
                         static token => token.Token.Kind
                             == TokenKind.StaticKeyword)
                     || !IsAutoGetterProperty(child)))
-            || ((child.Kind is SyntaxKind.FunctionDeclaration or SyntaxKind.ConstructorDeclaration)
+            || (child.Kind == SyntaxKind.ConstructorDeclaration
                 && HasGenericTypeParameters(child)));
         if (unsupportedMember is not null)
         {
             Report("TRM3005",
-                "Generic struct specializations do not support operators, instance or computed properties, or generic methods.",
+                "Generic struct specializations do not support operators, instance or computed properties, or generic constructors.",
                 unsupportedMember.Span);
             return;
         }
 
         if (declaration.Children.OfType<SyntaxTokenElement>().Any(static child =>
                 child.Token.Kind is TokenKind.PrivateKeyword or TokenKind.StaticKeyword
-                    or TokenKind.MutKeyword or TokenKind.UnsafeKeyword or TokenKind.ExternKeyword))
+                    or TokenKind.UnsafeKeyword or TokenKind.ExternKeyword))
         {
             Report("TRM3001", "Top-level structs support only public or internal visibility.", declaration.Span);
             return;
@@ -4266,23 +6494,1243 @@ internal sealed partial class Binder
 
         var definitionIndex = _sourceGenericTypeDefinitions.Count;
         var formals = ImmutableArray.CreateBuilder<BoundSourceGenericTypeFormal>(
-            typeParameters.Length);
-        for (var ordinal = 0; ordinal < typeParameters.Length; ordinal++)
+            formalSyntax.Length);
+        var typeNames = typeParameters.ToArray();
+        var defaultTypeDependencies
+            = new ImmutableArray<int>[formalSyntax.Length];
+        var defaultConstantDependencies
+            = new ImmutableArray<int>[formalSyntax.Length];
+        var defaultFormalDependencies
+            = new ImmutableArray<int>[formalSyntax.Length];
+        foreach (var formal in formalSyntax)
         {
-            formals.Add(new BoundSourceGenericTypeFormal(ordinal,
-                typeParameters[ordinal], ownershipDomains[ordinal],
-                nullabilityDomains[ordinal], blittableRequirements[ordinal],
-                typeDefaults[ordinal] is not null));
+            var defaultSyntax = formal.Kind
+                    == BoundGenericMethodFormalKind.Type
+                ? formal.TypeDefault : formal.ConstantDefault;
+            var typeDependencies = GenericTypeDefaultDependencies(
+                defaultSyntax, typeNames);
+            if (typeDependencies.Any(dependency =>
+                    (uint)dependency >= (uint)typeFormals.Length
+                    || typeFormals[dependency].Ordinal >= formal.Ordinal))
+            {
+                Report("TRM3005",
+                    "A generic struct default may depend only on earlier type formals.",
+                    defaultSyntax?.Span ?? parameterList.Span);
+                return;
+            }
+
+            var constantDependencies
+                = GenericStructConstantDefaultDependencies(defaultSyntax,
+                    formalSyntax, formal.Ordinal,
+                    out var dependenciesValid);
+            if (!dependenciesValid)
+            {
+                Report("TRM3005",
+                    "A generic struct default may depend only on earlier constant formals.",
+                    defaultSyntax?.Span ?? parameterList.Span);
+                return;
+            }
+
+            defaultTypeDependencies[formal.Ordinal] = typeDependencies;
+            defaultConstantDependencies[formal.Ordinal]
+                = constantDependencies;
+            defaultFormalDependencies[formal.Ordinal]
+                = formal.Kind == BoundGenericMethodFormalKind.Type
+                    ? [.. typeDependencies.Select(dependency =>
+                        typeFormals[dependency].Ordinal)
+                        .Concat(constantDependencies).Distinct()
+                        .Order()]
+                    : constantDependencies;
         }
+
+        var genericTypeParameters
+            = ImmutableArray.CreateBuilder<GenericTypeParameter>(
+                typeParameters.Length);
+        for (var ordinal = 0; ordinal < typeFormals.Length; ordinal++)
+        {
+            var formal = typeFormals[ordinal];
+            genericTypeParameters.Add(new GenericTypeParameter(formal.Name,
+                []) {
+                PlaceholderType
+                    = (PrimitiveType)(100 + formal.TypeFormalOrdinal),
+                OwnershipDomain = ownershipDomains[ordinal],
+                NullabilityDomain = nullabilityDomains[ordinal],
+                RequiresBlittable = blittableRequirements[ordinal],
+                TypeDefaultSyntax = typeDefaults[ordinal],
+                DefaultTypeParameterDependencies =
+                    defaultTypeDependencies[formal.Ordinal],
+            });
+        }
+
+        var formalOrder = ImmutableArray.CreateBuilder<
+            BoundGenericMethodFormalSlot>(formalSyntax.Length);
+        foreach (var formal in formalSyntax)
+        {
+            formalOrder.Add(new BoundGenericMethodFormalSlot(
+                formal.Ordinal, formal.Kind, formal.TypeFormalOrdinal,
+                formal.ConstantFormalOrdinal));
+        }
+        var immutableFormalOrder = formalOrder.MoveToImmutable();
+        var formalContext = new GenericTemplate(qualifiedName,
+            genericTypeParameters.MoveToImmutable(), null, -1, [],
+            declaration, declaration, tree) {
+            DefinitionOrdinal = -1,
+            SourceGenericTypeDefinitionIndex = definitionIndex,
+            FormalOrder = immutableFormalOrder,
+        };
+        var constantFormals = ImmutableArray.CreateBuilder<
+            GenericMethodConstantFormal>(
+                formalSyntax.Count(static formal =>
+                    formal.Kind == BoundGenericMethodFormalKind.Constant));
+        var placeholderDomain = new BoundGenericMethodTypeTerm(
+            BoundGenericMethodTypeTermKind.Concrete, PrimitiveType.Void,
+            -1, -1, [], false, false, false, false);
+        foreach (var formal in formalSyntax.Where(static formal =>
+            formal.Kind == BoundGenericMethodFormalKind.Constant))
+        {
+            var constantFormal = new GenericMethodConstantFormal(
+                formal.Ordinal, formal.ConstantFormalOrdinal, formal.Name,
+                placeholderDomain, null, formal.ConstantDefault,
+                defaultConstantDependencies[formal.Ordinal]) {
+                DefaultTypeFormalDependencies =
+                    defaultTypeDependencies[formal.Ordinal],
+            };
+            constantFormals.Add(constantFormal);
+            formalContext = formalContext with {
+                ConstantFormals = constantFormals.ToImmutable(),
+            };
+        }
+
+        foreach (var formal in formalSyntax)
+        {
+            if (formal.Kind == BoundGenericMethodFormalKind.Type)
+            {
+                var typeOrdinal = formal.TypeFormalOrdinal;
+                formals.Add(new BoundSourceGenericTypeFormal(
+                    formal.Ordinal, formal.Name,
+                    ownershipDomains[typeOrdinal],
+                    nullabilityDomains[typeOrdinal],
+                    blittableRequirements[typeOrdinal],
+                    typeDefaults[typeOrdinal] is not null) {
+                    Kind = BoundGenericMethodFormalKind.Type,
+                    TypeFormalOrdinal = typeOrdinal,
+                    DefaultFormalDependencies =
+                        defaultFormalDependencies[formal.Ordinal],
+                    DefaultTypeFormalDependencies =
+                        defaultTypeDependencies[formal.Ordinal],
+                });
+            }
+            else
+            {
+                var constantFormal = constantFormals.Single(candidate =>
+                    candidate.Ordinal == formal.Ordinal);
+                formals.Add(new BoundSourceGenericTypeFormal(
+                    formal.Ordinal, formal.Name, 0, 0, false, false) {
+                    Kind = BoundGenericMethodFormalKind.Constant,
+                    ConstantFormalOrdinal =
+                        formal.ConstantFormalOrdinal,
+                    ConstantDomain = constantFormal.Domain,
+                    HasConstantDefault =
+                        constantFormal.DefaultSyntax is not null,
+                    DefaultFormalDependencies =
+                        defaultConstantDependencies[formal.Ordinal],
+                    DefaultTypeFormalDependencies =
+                        defaultTypeDependencies[formal.Ordinal],
+                });
+            }
+        }
+
+        var constantFormalSignatures = constantFormals
+            .Select(static formal =>
+                new BoundGenericMethodConstantFormalSignature(
+                    formal.Ordinal, formal.ConstantOrdinal, formal.Name,
+                    formal.Domain, formal.DefaultSyntax is not null,
+                    formal.DefaultFormalDependencies) {
+                    DefaultTypeFormalDependencies =
+                        formal.DefaultTypeFormalDependencies,
+                })
+            .ToImmutableArray();
         var isUnique = declaration.Children.OfType<SyntaxTokenElement>()
             .Any(static child => child.Token.Kind == TokenKind.UniqueKeyword);
+        var transparentConstantCarrierType =
+            TryGetGenericSourceTransparentConstantCarrier(tree,
+                declaration);
         _sourceGenericTypeDefinitions.Add(new BoundSourceGenericTypeDefinition(
             definitionIndex, _namespace, name.Name, qualifiedName, false,
-            isUnique, formals.MoveToImmutable()));
+            isUnique, formals.MoveToImmutable()) {
+            FormalOrder = immutableFormalOrder,
+            ConstantFormals = constantFormalSignatures,
+            TransparentConstantCarrierType =
+                transparentConstantCarrierType,
+        });
         _genericStructTemplates.Add(qualifiedName,
             new GenericStructTemplate(definitionIndex, name.Name, qualifiedName, typeParameters,
                 typeDefaults, [.. ownershipDomains], [.. nullabilityDomains],
-                [.. blittableRequirements], tree, declaration));
+                [.. blittableRequirements], formalSyntax,
+                immutableFormalOrder, constantFormals.ToImmutable(),
+                formalContext, tree, declaration));
+    }
+
+    private void BindGenericStructConstantDomains()
+    {
+        foreach (var template in _genericStructTemplates.Values.ToArray())
+        {
+            var formalCount = template.FormalSyntax.Length;
+            var typeDependencies = new ImmutableArray<int>[formalCount];
+            var constantDependencies = new ImmutableArray<int>[formalCount];
+            var formalDependencies = new ImmutableArray<int>[formalCount];
+            var sourceDefinition = _sourceGenericTypeDefinitions[
+                template.DefinitionIndex];
+            foreach (var formal in template.FormalSyntax)
+            {
+                var defaultSyntax = formal.Kind
+                        == BoundGenericMethodFormalKind.Type
+                    ? formal.TypeDefault : formal.ConstantDefault;
+                var typeDependenciesForFormal
+                    = GenericTypeDefaultDependencies(defaultSyntax,
+                        [.. template.TypeParameters]);
+                foreach (var typeDependency in typeDependenciesForFormal)
+                {
+                    if ((uint)typeDependency
+                            >= (uint)template.TypeParameters.Length
+                        || template.FormalOrder.Single(slot =>
+                                slot.Kind
+                                    == BoundGenericMethodFormalKind.Type
+                                && slot.TypeFormalOrdinal
+                                    == typeDependency).Ordinal
+                            >= formal.Ordinal)
+                    {
+                        Report("TRM3005",
+                            "A generic struct default may depend only on earlier type formals.",
+                            defaultSyntax?.Span
+                                ?? template.Declaration.Span);
+                        return;
+                    }
+                }
+
+                var constantDependenciesForFormal
+                    = GenericStructConstantDefaultDependencies(
+                        defaultSyntax, template.FormalSyntax,
+                        formal.Ordinal, out var dependenciesValid);
+                if (!dependenciesValid
+                    || constantDependenciesForFormal.Any(dependency =>
+                        (uint)dependency >= (uint)formalCount
+                        || template.FormalOrder[dependency].Ordinal
+                            >= formal.Ordinal))
+                {
+                    Report("TRM3005",
+                        "A generic struct default may depend only on earlier constant formals.",
+                        defaultSyntax?.Span
+                            ?? template.Declaration.Span);
+                    return;
+                }
+
+                typeDependencies[formal.Ordinal]
+                    = typeDependenciesForFormal;
+                constantDependencies[formal.Ordinal]
+                    = constantDependenciesForFormal;
+                formalDependencies[formal.Ordinal] =
+                    formal.Kind == BoundGenericMethodFormalKind.Type
+                        ? [.. typeDependenciesForFormal.Select(
+                                typeDependency =>
+                                template.FormalOrder.Single(slot =>
+                                    slot.Kind
+                                        == BoundGenericMethodFormalKind.Type
+                                    && slot.TypeFormalOrdinal
+                                        == typeDependency).Ordinal)
+                            .Concat(constantDependenciesForFormal)
+                            .Distinct().Order()]
+                        : constantDependenciesForFormal;
+            }
+
+            var typeParameters = template.FormalContext.TypeParameters
+                .ToBuilder();
+            foreach (var formal in template.FormalSyntax.Where(
+                static formal => formal.Kind
+                    == BoundGenericMethodFormalKind.Type))
+            {
+                var typeFormal = typeParameters[
+                    formal.TypeFormalOrdinal];
+                typeParameters[formal.TypeFormalOrdinal] = typeFormal with {
+                    DefaultTypeParameterDependencies =
+                        typeDependencies[formal.Ordinal],
+                };
+            }
+
+            var resolvedConstantFormals = template.ConstantFormals
+                .Select(formal => formal with {
+                    DefaultFormalDependencies =
+                        constantDependencies[formal.Ordinal],
+                    DefaultTypeFormalDependencies =
+                        typeDependencies[formal.Ordinal],
+                })
+                .ToImmutableArray();
+            var formalContext = template.FormalContext with {
+                TypeParameters = typeParameters.ToImmutable(),
+                ConstantFormals = resolvedConstantFormals,
+            };
+            _genericStructTemplates[template.QualifiedName] =
+                template with {
+                    ConstantFormals = resolvedConstantFormals,
+                    FormalContext = formalContext,
+                };
+
+            var boundFormals = sourceDefinition.Formals.ToBuilder();
+            foreach (var formal in template.FormalSyntax)
+            {
+                boundFormals[formal.Ordinal] = boundFormals[
+                    formal.Ordinal] with {
+                    DefaultFormalDependencies =
+                        formalDependencies[formal.Ordinal],
+                    DefaultTypeFormalDependencies =
+                        typeDependencies[formal.Ordinal],
+                };
+            }
+            var boundConstantFormals =
+                sourceDefinition.ConstantFormals.Select(formal =>
+                    formal with {
+                        DefaultFormalDependencies =
+                            constantDependencies[formal.Ordinal],
+                        DefaultTypeFormalDependencies =
+                            typeDependencies[formal.Ordinal],
+                    }).ToImmutableArray();
+            _sourceGenericTypeDefinitions[template.DefinitionIndex]
+                = sourceDefinition with {
+                Formals = boundFormals.ToImmutable(),
+                ConstantFormals = boundConstantFormals,
+            };
+        }
+
+        foreach (var template in _genericStructTemplates.Values.ToArray())
+        {
+            if (template.ConstantFormals.IsEmpty)
+            {
+                continue;
+            }
+
+            var constantFormals = ImmutableArray.CreateBuilder<
+                GenericMethodConstantFormal>(
+                    template.ConstantFormals.Length);
+            var formalContext = template.FormalContext;
+            foreach (var formalSyntax in template.FormalSyntax.Where(
+                static formal => formal.Kind
+                    == BoundGenericMethodFormalKind.Constant))
+            {
+                var previousContext = CaptureContext();
+                var previousGenericContext = _genericContext;
+                var previousGenericOwnerTypeArguments
+                    = _genericOwnerTypeArguments;
+                var previousAliasTypeArguments
+                    = _aliasTypeArguments.ToArray();
+                _genericContext = null;
+                _genericOwnerTypeArguments = null;
+                _aliasTypeArguments.Clear();
+                BoundGenericMethodTypeTerm? domain;
+                try
+                {
+                    if (formalSyntax.ConstantDomain
+                        is not SyntaxNode domainSyntax)
+                    {
+                        domain = null;
+                    }
+                    else
+                    {
+                        SetContext(template.Tree, domainSyntax);
+                        domain = BindGenericMethodTypeTerm(domainSyntax,
+                            formalContext);
+                    }
+                }
+                finally
+                {
+                    _aliasTypeArguments.AddRange(
+                        previousAliasTypeArguments);
+                    _genericContext = previousGenericContext;
+                    _genericOwnerTypeArguments
+                        = previousGenericOwnerTypeArguments;
+                    RestoreContext(previousContext);
+                }
+
+                if (domain is not BoundGenericMethodTypeTerm domainTerm)
+                {
+                    Report("TRM3005",
+                        $"Constant formal '{formalSyntax.Name}' has no bound domain type.",
+                        formalSyntax.ConstantDomain?.Span
+                            ?? template.Declaration.Span);
+                    domainTerm = new BoundGenericMethodTypeTerm(
+                        BoundGenericMethodTypeTermKind.Concrete,
+                        PrimitiveType.Void, -1, -1, [],
+                        false, false, false, false);
+                }
+
+                var formal = template.ConstantFormals.Single(candidate =>
+                    candidate.Ordinal == formalSyntax.Ordinal) with {
+                    Domain = domainTerm,
+                    PlaceholderType = domainTerm.Kind
+                            == BoundGenericMethodTypeTermKind.Concrete
+                        ? domainTerm.ConcreteType : null,
+                };
+                constantFormals.Add(formal);
+                formalContext = formalContext with {
+                    ConstantFormals = constantFormals.ToImmutable(),
+                };
+            }
+
+            var resolvedConstantFormals = constantFormals.ToImmutable();
+            var updatedTemplate = template with {
+                ConstantFormals = resolvedConstantFormals,
+                FormalContext = formalContext with {
+                    ConstantFormals = resolvedConstantFormals,
+                },
+            };
+            _genericStructTemplates[template.QualifiedName]
+                = updatedTemplate;
+
+            var definition = _sourceGenericTypeDefinitions[
+                template.DefinitionIndex];
+            var formals = definition.Formals.ToBuilder();
+            foreach (var formal in resolvedConstantFormals)
+            {
+                formals[formal.Ordinal] = formals[formal.Ordinal] with {
+                    ConstantDomain = formal.Domain,
+                };
+            }
+            var signatures = resolvedConstantFormals.Select(
+                static formal =>
+                    new BoundGenericMethodConstantFormalSignature(
+                        formal.Ordinal, formal.ConstantOrdinal,
+                        formal.Name, formal.Domain,
+                        formal.DefaultSyntax is not null,
+                        formal.DefaultFormalDependencies) {
+                        DefaultTypeFormalDependencies =
+                            formal.DefaultTypeFormalDependencies,
+                    }).ToImmutableArray();
+            _sourceGenericTypeDefinitions[template.DefinitionIndex]
+                = definition with {
+                Formals = formals.MoveToImmutable(),
+                ConstantFormals = signatures,
+            };
+        }
+    }
+
+    private void ValidateGenericStructConstantDomains()
+    {
+        foreach (var template in _genericStructTemplates.Values)
+        {
+            foreach (var formal in template.ConstantFormals)
+            {
+                if (!IsGenericMethodConstantDomain(formal.Domain,
+                    template.FormalContext))
+                {
+                    var syntax = template.FormalSyntax.Single(candidate =>
+                        candidate.Ordinal == formal.Ordinal);
+                    Report("TRM3005",
+                        $"Constant formal '{formal.Name}' requires an eligible exact domain.",
+                        syntax.ConstantDomain?.Span
+                            ?? template.Declaration.Span);
+                }
+            }
+        }
+    }
+
+    private PrimitiveType? TryGetGenericSourceTransparentConstantCarrier(
+        SyntaxTree tree, SyntaxNode declaration)
+    {
+        if (_layoutCoreRegistration
+            is not LayoutCoreRegistrationSet registration)
+        {
+            return null;
+        }
+
+        var previousContext = CaptureContext();
+        try
+        {
+            SetContext(tree, declaration);
+            var attributes = declaration.Children.OfType<SyntaxNode>()
+                .Where(static child => child.Kind == SyntaxKind.Attribute)
+                .ToArray();
+            var layoutAttributes = attributes.Where(attribute =>
+                IsRegisteredLayoutAttribute(attribute, registration.Layout))
+                .ToArray();
+            var blittableAttributes = attributes.Where(attribute =>
+                IsRegisteredLayoutAttribute(attribute,
+                    registration.Blittable)).ToArray();
+            if (layoutAttributes.Length != 1
+                || blittableAttributes.Length != 1
+                || !HasNoAttributeArguments(blittableAttributes[0]))
+            {
+                return null;
+            }
+
+            if (!TryDecodeLayoutAttribute(layoutAttributes[0], registration,
+                out var layoutKind, out _, out _, out var hasControls)
+                || hasControls || layoutKind.Name != "Transparent")
+            {
+                return null;
+            }
+
+            var instanceFields = declaration.Children
+                .OfType<SyntaxNode>()
+                .Where(static member =>
+                    member.Kind == SyntaxKind.FieldDeclaration
+                    && !member.Children.OfType<SyntaxTokenElement>()
+                        .Any(static token =>
+                            token.Token.Kind == TokenKind.StaticKeyword))
+                .ToArray();
+            if (instanceFields is not [{ } field])
+            {
+                return null;
+            }
+
+            var fieldType = field.Children.OfType<SyntaxNode>()
+                .FirstOrDefault(IsTypeSyntax);
+            if (fieldType is not {
+                    Kind: SyntaxKind.TypeName,
+                } || fieldType.Children.OfType<SyntaxNode>().Any()
+                || !TryPrimitiveType(TypeNameIdentifier(fieldType),
+                    out var carrierType)
+                || (!PrimitiveTypeFacts.IsIntegerOrWide(carrierType)
+                    && carrierType != PrimitiveType.Bool))
+            {
+                return null;
+            }
+
+            return carrierType;
+        }
+        finally
+        {
+            RestoreContext(previousContext);
+        }
+    }
+
+    private bool TryInstantiateGenericStruct(
+        GenericStructTemplate template,
+        ImmutableArray<SyntaxNode> suppliedArguments,
+        TextSpan useSite, out PrimitiveType type)
+    {
+        var initialDiagnosticCount = DiagnosticCount;
+        type = default;
+        if (suppliedArguments.Length > template.FormalOrder.Length)
+        {
+            Report("TRM3005", template.ConstantFormals.IsEmpty
+                ? $"Generic type '{template.Name}' requires its declared type argument count."
+                : $"Generic struct '{template.Name}' has too many type/constant arguments.",
+                useSite);
+            return false;
+        }
+
+        var typeArguments = new PrimitiveType?[
+            template.TypeParameters.Length];
+        var useTypeDefaults = new bool[template.TypeParameters.Length];
+        var constantArgumentSyntax = new SyntaxNode?[
+            template.ConstantFormals.Length];
+        var useConstantDefaults = new bool[
+            template.ConstantFormals.Length];
+        for (var ordinal = 0; ordinal < suppliedArguments.Length; ordinal++)
+        {
+            var argument = suppliedArguments[ordinal];
+            var formal = template.FormalOrder[ordinal];
+            if (formal.Ordinal != ordinal)
+            {
+                return false;
+            }
+
+            if (formal.Kind == BoundGenericMethodFormalKind.Type)
+            {
+                if ((uint)formal.TypeFormalOrdinal
+                    >= (uint)typeArguments.Length)
+                {
+                    return false;
+                }
+
+                if (argument.Kind == SyntaxKind.GenericDefaultArgument)
+                {
+                    useTypeDefaults[formal.TypeFormalOrdinal] = true;
+                }
+                else if (argument.Kind
+                    == SyntaxKind.GenericInferenceArgument)
+                {
+                    Report("TRM3011",
+                        $"Type formal '{template.FormalContext.TypeParameters[formal.TypeFormalOrdinal].Name}' requires type evidence.",
+                        argument.Span);
+                    return false;
+                }
+                else if (argument.Kind
+                    == SyntaxKind.ConstantGenericArgument)
+                {
+                    Report("TRM3005",
+                        "A constant actual cannot satisfy a generic struct type formal.",
+                        argument.Span);
+                    return false;
+                }
+                else
+                {
+                    var diagnosticCount = DiagnosticCount;
+                    var typeArgument = BindType(argument,
+                        allowVoid: false);
+                    if (DiagnosticCount != diagnosticCount)
+                    {
+                        return false;
+                    }
+                    typeArguments[formal.TypeFormalOrdinal] = typeArgument;
+                }
+            }
+            else if (formal.Kind
+                == BoundGenericMethodFormalKind.Constant
+                && (uint)formal.ConstantFormalOrdinal
+                    < (uint)constantArgumentSyntax.Length)
+            {
+                if (argument.Kind == SyntaxKind.GenericDefaultArgument)
+                {
+                    useConstantDefaults[formal.ConstantFormalOrdinal] = true;
+                }
+                else if (argument.Kind
+                    == SyntaxKind.GenericInferenceArgument)
+                {
+                    Report("TRM3011",
+                        $"Constant formal '{template.ConstantFormals[formal.ConstantFormalOrdinal].Name}' requires constant evidence.",
+                        argument.Span);
+                    return false;
+                }
+                else if (argument.Kind is SyntaxKind.ConstantGenericArgument
+                    or SyntaxKind.TypeName)
+                {
+                    constantArgumentSyntax[formal.ConstantFormalOrdinal]
+                        = argument;
+                }
+                else
+                {
+                    Report("TRM3005",
+                        "A generic struct constant actual must be a typed constant argument.",
+                        argument.Span);
+                    return false;
+                }
+            }
+            else
+            {
+                return false;
+            }
+        }
+
+        var constantArgumentValues = new BoundGenericMethodConstantArgument?[
+            template.ConstantFormals.Length];
+        var maximumDependencyPasses = template.FormalOrder.Length + 1;
+        for (var pass = 0; pass < maximumDependencyPasses; pass++)
+        {
+            var madeProgress = false;
+            if (!TryBindAvailableGenericStructConstants(template,
+                typeArguments, constantArgumentSyntax,
+                useConstantDefaults, constantArgumentValues, useSite,
+                out var constantsProgress))
+            {
+                return false;
+            }
+            madeProgress |= constantsProgress;
+
+            for (var ordinal = 0;
+                ordinal < template.TypeParameters.Length; ordinal++)
+            {
+                if (typeArguments[ordinal] is PrimitiveType
+                    || template.TypeDefaults[ordinal]
+                        is not SyntaxNode defaultType)
+                {
+                    continue;
+                }
+
+                var typeSlot = template.FormalOrder.Single(formal =>
+                    formal.Kind == BoundGenericMethodFormalKind.Type
+                    && formal.TypeFormalOrdinal == ordinal);
+                var typeFormal = _sourceGenericTypeDefinitions[
+                    template.DefinitionIndex].Formals[typeSlot.Ordinal];
+                if (!AreGenericStructDefaultDependenciesBound(template,
+                        typeFormal.DefaultFormalDependencies,
+                        typeArguments, constantArgumentValues)
+                    || !TryGetPriorGenericStructConstants(template,
+                        constantArgumentValues, typeSlot.Ordinal,
+                        typeFormal.DefaultFormalDependencies,
+                        out var priorConstants))
+                {
+                    continue;
+                }
+
+                var earlierArguments = ImmutableDictionary
+                    .CreateBuilder<string, PrimitiveType>(
+                        StringComparer.Ordinal);
+                for (var earlier = 0; earlier < ordinal; earlier++)
+                {
+                    if (typeArguments[earlier]
+                        is PrimitiveType earlierType)
+                    {
+                        earlierArguments.Add(
+                            template.TypeParameters[earlier],
+                            earlierType);
+                    }
+                }
+
+                var contextTypeArguments = typeArguments
+                    .Select(static argument => argument
+                        ?? PrimitiveType.Int32)
+                    .ToImmutableArray();
+                var previousContext = CaptureContext();
+                var previousGenericContext = _genericContext;
+                _genericContext = new GenericInstantiation(
+                    template.FormalContext, contextTypeArguments) {
+                    ConstantArguments = priorConstants,
+                };
+                _aliasTypeArguments.Add(earlierArguments.ToImmutable());
+                PrimitiveType defaultArgument;
+                try
+                {
+                    SetContext(template.Tree, defaultType);
+                    var diagnosticCount = DiagnosticCount;
+                    defaultArgument = BindType(defaultType,
+                        allowVoid: false);
+                    if (DiagnosticCount != diagnosticCount)
+                    {
+                        return false;
+                    }
+                }
+                finally
+                {
+                    _aliasTypeArguments.RemoveAt(
+                        _aliasTypeArguments.Count - 1);
+                    _genericContext = previousGenericContext;
+                    RestoreContext(previousContext);
+                }
+
+                typeArguments[ordinal] = defaultArgument;
+                madeProgress = true;
+            }
+
+            if (!TryBindAvailableGenericStructConstants(template,
+                typeArguments, constantArgumentSyntax,
+                useConstantDefaults, constantArgumentValues, useSite,
+                out constantsProgress))
+            {
+                return false;
+            }
+            madeProgress |= constantsProgress;
+            if (!madeProgress)
+            {
+                break;
+            }
+        }
+
+        var completedTypeArguments = ImmutableArray.CreateBuilder<
+            PrimitiveType>(template.TypeParameters.Length);
+        for (var ordinal = 0; ordinal < typeArguments.Length; ordinal++)
+        {
+            if (typeArguments[ordinal] is not PrimitiveType typeArgument)
+            {
+                Report("TRM3005", template.TypeDefaults[ordinal] is null
+                    ? (useTypeDefaults[ordinal]
+                        ? $"Generic struct type formal '{template.TypeParameters[ordinal]}' has no selected default."
+                        : $"Generic type '{template.Name}' requires its declared type argument count.")
+                    : $"Type default for '{template.TypeParameters[ordinal]}' depends on unresolved earlier formals.",
+                    useSite);
+                return false;
+            }
+            completedTypeArguments.Add(typeArgument);
+        }
+
+        var completedTypes = completedTypeArguments.MoveToImmutable();
+        if (!ValidateGenericStructFormalArguments(template, completedTypes,
+            useSite))
+        {
+            return false;
+        }
+
+        if (!TryBindAvailableGenericStructConstants(template,
+            typeArguments, constantArgumentSyntax, useConstantDefaults,
+            constantArgumentValues, useSite, out _))
+        {
+            return false;
+        }
+
+        var completedConstantArguments = ImmutableArray.CreateBuilder<
+            BoundGenericMethodConstantArgument>(
+                template.ConstantFormals.Length);
+        foreach (var formal in template.ConstantFormals)
+        {
+            if (!TryResolveGenericMethodConstantDomain(template.FormalContext,
+                formal, completedTypes, useSite, out var domainTerm,
+                out var domainType, out var carrierType,
+                [.. completedConstantArguments.Select(static argument =>
+                    (BoundGenericMethodConstantArgument?)argument)]))
+            {
+                Report("TRM3005",
+                    $"Constant formal '{formal.Name}' has no supported closed domain for this generic struct application.",
+                    useSite);
+                return false;
+            }
+
+            BoundGenericMethodConstantArgument argument;
+            if (constantArgumentValues[formal.ConstantOrdinal]
+                is BoundGenericMethodConstantArgument completed)
+            {
+                if (completed.Ordinal != formal.Ordinal
+                    || completed.ConstantOrdinal != formal.ConstantOrdinal
+                    || !AreGenericMethodTypeTermsEquivalent(
+                        completed.Domain, domainTerm)
+                    || (completed.Kind
+                            == BoundGenericMethodConstantArgumentKind.Value
+                        ? completed.DomainType != domainType
+                            || completed.CarrierType != carrierType
+                            || !completed.Bits.IsCanonicalFor(carrierType)
+                            || completed.CallerDefinitionOrdinal != -1
+                            || completed.CallerFormalOrdinal != -1
+                            || completed.CallerConstantFormalOrdinal != -1
+                        : completed.Kind
+                                != BoundGenericMethodConstantArgumentKind.Formal
+                            || completed.DomainType != PrimitiveType.Void
+                            || completed.CarrierType != PrimitiveType.Void
+                            || completed.Bits != default
+                            || !IsValidGenericMethodConstantFormalOwnerIdentity(
+                                completed)))
+                {
+                    Report("TRM3005",
+                        $"A completed constant actual for '{formal.Name}' does not match its resolved domain.",
+                        useSite);
+                    return false;
+                }
+                argument = completed;
+            }
+            else if (constantArgumentSyntax[formal.ConstantOrdinal]
+                is SyntaxNode syntax)
+            {
+                if (!TryBindGenericMethodConstantArgument(formal,
+                    domainTerm, domainType, carrierType, syntax,
+                    out argument))
+                {
+                    return false;
+                }
+            }
+            else
+            {
+                if (!useConstantDefaults[formal.ConstantOrdinal]
+                    && formal.DefaultSyntax is null)
+                {
+                    Report("TRM3011",
+                        $"Constant formal '{formal.Name}' requires an explicit value or a declared default.",
+                        useSite);
+                    return false;
+                }
+                if (formal.DefaultSyntax is not SyntaxNode defaultSyntax)
+                {
+                    Report("TRM3011",
+                        $"Constant formal '{formal.Name}' has no declared default.",
+                        useSite);
+                    return false;
+                }
+
+                var previousContext = CaptureContext();
+                if (!TryBindGenericStructConstantDefault(template, formal,
+                    domainTerm, domainType, carrierType, completedTypes,
+                    completedConstantArguments.ToImmutable(), defaultSyntax,
+                    previousContext, out argument))
+                {
+                    return false;
+                }
+            }
+
+            if (argument.Kind
+                    != BoundGenericMethodConstantArgumentKind.Value
+                && (argument.Kind
+                        != BoundGenericMethodConstantArgumentKind.Formal
+                    || !IsValidGenericMethodConstantFormalOwnerIdentity(
+                        argument)))
+            {
+                Report("TRM3005",
+                    $"Constant actual for '{formal.Name}' has no stable formal identity.",
+                    useSite);
+                return false;
+            }
+            completedConstantArguments.Add(argument);
+        }
+
+        type = InstantiateGenericStruct(template, completedTypes,
+            completedConstantArguments.MoveToImmutable(), useSite);
+        return type != PrimitiveType.Int32
+            && DiagnosticCount == initialDiagnosticCount;
+    }
+
+    private bool TryBindAvailableGenericStructConstants(
+        GenericStructTemplate template,
+        PrimitiveType?[] typeArguments,
+        SyntaxNode?[] constantArgumentSyntax,
+        bool[] useConstantDefaults,
+        BoundGenericMethodConstantArgument?[] constantArguments,
+        TextSpan useSite, out bool madeProgress)
+    {
+        madeProgress = false;
+        if (typeArguments.Length != template.TypeParameters.Length
+            || constantArgumentSyntax.Length
+                != template.ConstantFormals.Length
+            || useConstantDefaults.Length
+                != template.ConstantFormals.Length
+            || constantArguments.Length
+                != template.ConstantFormals.Length)
+        {
+            return false;
+        }
+
+        var typeContext = typeArguments
+            .Select(static argument => argument ?? PrimitiveType.Int32)
+            .ToImmutableArray();
+        foreach (var formal in template.ConstantFormals)
+        {
+            var ordinal = formal.ConstantOrdinal;
+            if ((uint)ordinal >= (uint)constantArguments.Length
+                || constantArguments[ordinal] is not null)
+            {
+                continue;
+            }
+
+            if (!BoundGenericMethodTypeTerms.TryGetFormalDependencies(
+                    formal.Domain, out var typeDependencies)
+                || !BoundGenericMethodTypeTerms
+                    .TryGetConstantFormalDependencies(formal.Domain,
+                        out var constantDependencies))
+            {
+                return false;
+            }
+            if (typeDependencies.Any(dependency =>
+                    (uint)dependency >= (uint)typeArguments.Length
+                    || typeArguments[dependency] is null)
+                || constantDependencies.Any(dependency =>
+                    (uint)dependency >= (uint)ordinal
+                    || constantArguments[dependency] is null))
+            {
+                continue;
+            }
+
+            var syntax = constantArgumentSyntax[ordinal];
+            var defaultSyntax = formal.DefaultSyntax;
+            if (syntax is null
+                && defaultSyntax is null
+                && !useConstantDefaults[ordinal])
+            {
+                continue;
+            }
+            if (syntax is null
+                && _sourceGenericTypeDefinitions[
+                    template.DefinitionIndex].Formals[formal.Ordinal]
+                    .DefaultTypeFormalDependencies.Any(dependency =>
+                        (uint)dependency >= (uint)typeArguments.Length
+                        || typeArguments[dependency] is null))
+            {
+                continue;
+            }
+
+            if (!TryResolveGenericMethodConstantDomain(
+                    template.FormalContext, formal, typeContext, useSite,
+                    out var domainTerm, out var domainType,
+                    out var carrierType,
+                    [.. constantArguments.Take(ordinal)]))
+            {
+                continue;
+            }
+
+            var priorConstants = ImmutableArray<
+                BoundGenericMethodConstantArgument>.Empty;
+            BoundGenericMethodConstantArgument argument;
+            if (syntax is not null)
+            {
+                if (!TryBindGenericMethodConstantFormalForward(formal,
+                    domainTerm, domainType, carrierType, syntax,
+                    out argument)
+                    && !(TryGetGenericConstantArgumentName(syntax,
+                            out var name)
+                        && template.ConstantFormals.FirstOrDefault(
+                            candidate => candidate.Name == name)
+                            is GenericMethodConstantFormal previousFormal
+                        && (uint)previousFormal.ConstantOrdinal
+                            < (uint)ordinal
+                        && constantArguments[
+                            previousFormal.ConstantOrdinal]
+                            is BoundGenericMethodConstantArgument
+                                previousArgument
+                        && previousArgument.Kind
+                            == BoundGenericMethodConstantArgumentKind.Value
+                        && AreGenericMethodTypeTermsEquivalent(
+                            previousArgument.Domain, domainTerm)
+                        && previousArgument.DomainType == domainType
+                        && previousArgument.CarrierType == carrierType
+                        && AssignForwardedSourceConstant(previousArgument,
+                            formal, domainTerm, out argument))
+                    && !TryBindGenericMethodConstantArgument(formal,
+                        domainTerm, domainType, carrierType, syntax,
+                        out argument))
+                {
+                    return false;
+                }
+            }
+            else
+            {
+                if (domainType == PrimitiveType.Void
+                    || carrierType == PrimitiveType.Void)
+                {
+                    continue;
+                }
+
+                if (defaultSyntax is not SyntaxNode selectedDefault)
+                {
+                    continue;
+                }
+                if (!TryGetPriorGenericStructConstants(template,
+                    constantArguments, formal.Ordinal,
+                    formal.DefaultFormalDependencies,
+                    out priorConstants))
+                {
+                    continue;
+                }
+
+                var previousContext = CaptureContext();
+                if (!TryBindGenericStructConstantDefault(template, formal,
+                    domainTerm, domainType, carrierType, typeContext,
+                    priorConstants, selectedDefault, previousContext,
+                    out argument))
+                {
+                    return false;
+                }
+            }
+
+            constantArguments[ordinal] = argument;
+            madeProgress = true;
+        }
+
+        return true;
+    }
+
+    private static bool AssignForwardedSourceConstant(
+        BoundGenericMethodConstantArgument source,
+        GenericMethodConstantFormal formal,
+        BoundGenericMethodTypeTerm domain,
+        out BoundGenericMethodConstantArgument argument)
+    {
+        argument = source with {
+            Ordinal = formal.Ordinal,
+            ConstantOrdinal = formal.ConstantOrdinal,
+            Domain = domain,
+        };
+        return true;
+    }
+
+    private static bool TryGetPriorGenericStructConstants(
+        GenericStructTemplate template,
+        BoundGenericMethodConstantArgument?[] constantArguments,
+        int formalOrdinal,
+        ImmutableArray<int> dependencies,
+        out ImmutableArray<BoundGenericMethodConstantArgument> priorConstants)
+    {
+        priorConstants = [];
+        if (dependencies.IsDefault)
+        {
+            return false;
+        }
+
+        var requiredOrdinals = template.ConstantFormals
+            .Where(formal => formal.Ordinal < formalOrdinal
+                && dependencies.Contains(formal.Ordinal))
+            .Select(static formal => formal.ConstantOrdinal)
+            .ToArray();
+        if (requiredOrdinals.Length == 0)
+        {
+            return true;
+        }
+
+        var lastOrdinal = requiredOrdinals.Max();
+        var result = ImmutableArray.CreateBuilder<
+            BoundGenericMethodConstantArgument>(lastOrdinal + 1);
+        for (var ordinal = 0; ordinal <= lastOrdinal; ordinal++)
+        {
+            if ((uint)ordinal >= (uint)constantArguments.Length)
+            {
+                return false;
+            }
+
+            if (constantArguments[ordinal]
+                is BoundGenericMethodConstantArgument argument)
+            {
+                if (requiredOrdinals.Contains(ordinal)
+                    && argument.Kind
+                        != BoundGenericMethodConstantArgumentKind.Value)
+                {
+                    return false;
+                }
+                result.Add(argument);
+                continue;
+            }
+
+            if (requiredOrdinals.Contains(ordinal))
+            {
+                return false;
+            }
+
+            var formal = template.ConstantFormals[ordinal];
+            result.Add(new BoundGenericMethodConstantArgument(
+                formal.Ordinal, formal.ConstantOrdinal,
+                BoundGenericMethodConstantArgumentKind.Formal,
+                formal.Domain, -1, PrimitiveType.Void,
+                PrimitiveType.Void, default) {
+                CallerDefinitionOrdinal = template.DefinitionIndex,
+                CallerConstantFormalOrdinal = formal.ConstantOrdinal,
+                CallerFormalOwnerKind =
+                    BoundGenericTypeFormalOwnerKind.SourceGenericType,
+            });
+        }
+
+        priorConstants = result.MoveToImmutable();
+        return true;
+    }
+
+    private static bool AreGenericStructDefaultDependenciesBound(
+        GenericStructTemplate template,
+        ImmutableArray<int> dependencies,
+        PrimitiveType?[] typeArguments,
+        BoundGenericMethodConstantArgument?[] constantArguments)
+    {
+        if (dependencies.IsDefault)
+        {
+            return false;
+        }
+
+        foreach (var dependency in dependencies)
+        {
+            if ((uint)dependency >= (uint)template.FormalOrder.Length)
+            {
+                return false;
+            }
+
+            var formal = template.FormalOrder[dependency];
+            if (formal.Kind == BoundGenericMethodFormalKind.Type)
+            {
+                if ((uint)formal.TypeFormalOrdinal
+                        >= (uint)typeArguments.Length
+                    || typeArguments[formal.TypeFormalOrdinal] is null)
+                {
+                    return false;
+                }
+                continue;
+            }
+
+            if (formal.Kind
+                    != BoundGenericMethodFormalKind.Constant
+                || (uint)formal.ConstantFormalOrdinal
+                    >= (uint)constantArguments.Length
+                || constantArguments[formal.ConstantFormalOrdinal] is not
+                    BoundGenericMethodConstantArgument {
+                        Kind: BoundGenericMethodConstantArgumentKind.Value,
+                    })
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private bool TryBindGenericStructConstantDefault(
+        GenericStructTemplate template,
+        GenericMethodConstantFormal formal,
+        BoundGenericMethodTypeTerm domainTerm, PrimitiveType domainType,
+        PrimitiveType carrierType,
+        ImmutableArray<PrimitiveType> typeArguments,
+        ImmutableArray<BoundGenericMethodConstantArgument> priorConstants,
+        SyntaxNode defaultSyntax, BindingContext previousContext,
+        out BoundGenericMethodConstantArgument argument)
+    {
+        argument = null!;
+        var savedVariables = _variables.ToArray();
+        var savedScopes = _scopes.ToArray();
+        var savedConstLocals = _constLocals.ToArray();
+        var savedConstValues = _constScalarValues.ToArray();
+        var savedAliasTypeArguments = _aliasTypeArguments.ToArray();
+        var savedGenericContext = _genericContext;
+        var savedGenericOwnerTypeArguments = _genericOwnerTypeArguments;
+        var savedLocalStart = _localStart;
+        _variables.Clear();
+        _scopes.Clear();
+        _scopes.Add(new Dictionary<string, int>(StringComparer.Ordinal));
+        _constLocals.Clear();
+        _constScalarValues.Clear();
+        _aliasTypeArguments.Clear();
+        var typeMap = ImmutableDictionary.CreateBuilder<string,
+            PrimitiveType>(StringComparer.Ordinal);
+        for (var ordinal = 0; ordinal < template.TypeParameters.Length;
+            ordinal++)
+        {
+            typeMap.Add(template.TypeParameters[ordinal],
+                typeArguments[ordinal]);
+        }
+        _aliasTypeArguments.Add(typeMap.ToImmutable());
+        _genericOwnerTypeArguments = null;
+        _genericContext = new GenericInstantiation(template.FormalContext,
+            typeArguments) {
+            ConstantArguments = priorConstants,
+        };
+        _localStart = 0;
+        try
+        {
+            SetContext(template.Tree, defaultSyntax);
+            var diagnosticCount = DiagnosticCount;
+            var expression = BindExpression(defaultSyntax, domainType);
+            if (DiagnosticCount != diagnosticCount
+                || expression.Type != domainType)
+            {
+                return false;
+            }
+
+            var constant = FoldScalarConstant(expression) as BoundConstant;
+            if (constant is null
+                && CheckConstExpression(expression, out _))
+            {
+                var functions = GetConstEvalFunctionBodies();
+                try
+                {
+                    constant = EvaluateConstExpression(expression,
+                        ConstSlots(_constScalarValues, _variables.Count),
+                        functions, 0,
+                        new ConstEvalState(_cancellationToken));
+                }
+                catch (ConstEvalFailure)
+                {
+                    return false;
+                }
+            }
+
+            if (constant is null || constant.Type != domainType
+                || constant.RepresentationType != carrierType
+                || !constant.Bits.IsCanonicalFor(carrierType))
+            {
+                return false;
+            }
+
+            argument = new BoundGenericMethodConstantArgument(
+                formal.Ordinal, formal.ConstantOrdinal,
+                BoundGenericMethodConstantArgumentKind.Value, domainTerm,
+                -1, domainType, carrierType, constant.Bits);
+            return true;
+        }
+        finally
+        {
+            _variables.Clear();
+            _variables.AddRange(savedVariables);
+            _scopes.Clear();
+            _scopes.AddRange(savedScopes);
+            _constLocals.Clear();
+            _constLocals.UnionWith(savedConstLocals);
+            _constScalarValues.Clear();
+            foreach (var (slot, constant) in savedConstValues)
+            {
+                _constScalarValues.Add(slot, constant);
+            }
+            _aliasTypeArguments.Clear();
+            _aliasTypeArguments.AddRange(savedAliasTypeArguments);
+            _genericContext = savedGenericContext;
+            _genericOwnerTypeArguments = savedGenericOwnerTypeArguments;
+            _localStart = savedLocalStart;
+            RestoreContext(previousContext);
+        }
     }
 
     private bool TryCompleteGenericStructTypeArguments(
@@ -4292,6 +7740,13 @@ internal sealed partial class Binder
         out ImmutableArray<PrimitiveType> completedArguments)
     {
         completedArguments = [];
+        if (!template.ConstantFormals.IsEmpty)
+        {
+            Report("TRM3005",
+                "A mixed generic struct application requires its declared constant arguments.",
+                useSite);
+            return false;
+        }
         if (suppliedArguments.Length > template.TypeParameters.Length)
         {
             return false;
@@ -4372,7 +7827,7 @@ internal sealed partial class Binder
                 && IsSupportedOptionalType(argument))
             {
                 Report("TRM3005",
-                    $"Type argument '{TypeName(argument)}' does not satisfy the nullability domain of formal '{template.TypeParameters[ordinal]}'.",
+                    $"Type argument '{GenericTypeArgumentDisplayName(argument)}' does not satisfy the nullability domain of formal '{template.TypeParameters[ordinal]}'.",
                     useSite);
                 return false;
             }
@@ -4385,7 +7840,7 @@ internal sealed partial class Binder
                 || (ownershipDomain == 3 && !isCopy && !isUnique))
             {
                 Report("TRM3005",
-                    $"Type argument '{TypeName(argument)}' does not satisfy the ownership domain of formal '{template.TypeParameters[ordinal]}'.",
+                    $"Type argument '{GenericTypeArgumentDisplayName(argument)}' does not satisfy the ownership domain of formal '{template.TypeParameters[ordinal]}'.",
                     useSite);
                 return false;
             }
@@ -4394,13 +7849,30 @@ internal sealed partial class Binder
                 && !IsBlittableGenericArgumentType(argument, []))
             {
                 Report("TRM3005",
-                    $"Type argument '{TypeName(argument)}' does not satisfy the Blittable constraint of formal '{template.TypeParameters[ordinal]}'.",
+                    $"Type argument '{GenericTypeArgumentDisplayName(argument)}' does not satisfy the Blittable constraint of formal '{template.TypeParameters[ordinal]}'.",
                     useSite);
                 return false;
             }
         }
 
         return true;
+    }
+
+    private string GenericTypeArgumentDisplayName(PrimitiveType type)
+    {
+        if (_genericProofFunctions is not null
+            && _genericContext is GenericInstantiation context
+            && TryGetGenericMethodTypeArgumentTerm(type,
+                out var typeTerm)
+            && typeTerm.Kind == BoundGenericMethodTypeTermKind.Formal
+            && (uint)typeTerm.FormalOrdinal
+                < (uint)context.Template.TypeParameters.Length)
+        {
+            return context.Template.TypeParameters[
+                typeTerm.FormalOrdinal].Name;
+        }
+
+        return TypeName(type);
     }
 
     private bool IsUniqueGenericArgumentType(PrimitiveType type) =>
@@ -4446,7 +7918,8 @@ internal sealed partial class Binder
             var array = _nativeFixedArrayTypes[arrayIndex];
             return NativeFixedArrayContract.TryGetLayout(type,
                     array.ElementType, array.ElementCount, _structs,
-                    _nativeFixedArrayTypes, out _, _checkedReferenceTypes)
+                    _nativeFixedArrayTypes, out _, _checkedReferenceTypes,
+                    _enumDefinitions)
                 && IsBlittableGenericArgumentType(array.ElementType,
                     activeFixedArrays);
         }
@@ -4457,17 +7930,103 @@ internal sealed partial class Binder
     }
 
     private PrimitiveType InstantiateGenericStruct(GenericStructTemplate template,
-        ImmutableArray<PrimitiveType> typeArguments, TextSpan useSite)
+        ImmutableArray<PrimitiveType> suppliedTypeArguments,
+        TextSpan useSite)
     {
-        if (!TryCompleteGenericStructTypeArguments(template, typeArguments,
+        if (!TryCompleteGenericStructTypeArguments(template,
+                suppliedTypeArguments,
                 useSite, out var completedArguments))
         {
             return PrimitiveType.Int32;
         }
-        typeArguments = completedArguments;
-        var key = template.QualifiedName + "\u001F" + string.Join(",",
-            typeArguments.Select(static type => ((int)type).ToString(
-                System.Globalization.CultureInfo.InvariantCulture)));
+        return InstantiateGenericStruct(template, completedArguments, [],
+            useSite);
+    }
+
+    private static string GenericStructConstantArgumentKey(
+        BoundGenericMethodConstantArgument argument)
+    {
+        if (argument.Kind
+            == BoundGenericMethodConstantArgumentKind.Formal)
+        {
+            return string.Join(":",
+                "formal",
+                ((byte)argument.CallerFormalOwnerKind).ToString(
+                    System.Globalization.CultureInfo.InvariantCulture),
+                argument.CallerDefinitionOrdinal.ToString(
+                    System.Globalization.CultureInfo.InvariantCulture),
+                argument.CallerFormalOrdinal.ToString(
+                    System.Globalization.CultureInfo.InvariantCulture),
+                argument.CallerConstantFormalOrdinal.ToString(
+                    System.Globalization.CultureInfo.InvariantCulture));
+        }
+
+        if (argument.Kind != BoundGenericMethodConstantArgumentKind.Value)
+        {
+            throw new InvalidOperationException(
+                "A source generic struct specialization has an invalid constant argument.");
+        }
+
+        return string.Join(":",
+            "value",
+            ((int)argument.DomainType).ToString(
+                System.Globalization.CultureInfo.InvariantCulture),
+            ((int)argument.CarrierType).ToString(
+                System.Globalization.CultureInfo.InvariantCulture),
+            argument.Bits.High.ToString("X16",
+                System.Globalization.CultureInfo.InvariantCulture),
+            argument.Bits.Low.ToString("X16",
+                System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    private string GenericStructConstantArgumentDisplayName(
+        BoundGenericMethodConstantArgument argument)
+    {
+        if (argument.Kind
+            == BoundGenericMethodConstantArgumentKind.Formal)
+        {
+            return "$formal"
+                + ((byte)argument.CallerFormalOwnerKind).ToString(
+                    System.Globalization.CultureInfo.InvariantCulture)
+                + "."
+                + argument.CallerDefinitionOrdinal.ToString(
+                    System.Globalization.CultureInfo.InvariantCulture)
+                + "."
+                + argument.CallerFormalOrdinal.ToString(
+                    System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        var typeName = TypeName(argument.DomainType);
+        var bits = string.Concat(
+            argument.Bits.High.ToString("X16",
+                System.Globalization.CultureInfo.InvariantCulture),
+            argument.Bits.Low.ToString("X16",
+                System.Globalization.CultureInfo.InvariantCulture));
+        return typeName + "#" + bits;
+    }
+
+    private PrimitiveType InstantiateGenericStruct(
+        GenericStructTemplate template,
+        ImmutableArray<PrimitiveType> typeArguments,
+        ImmutableArray<BoundGenericMethodConstantArgument>
+            constantArguments,
+        TextSpan useSite)
+    {
+        if (typeArguments.Length != template.TypeParameters.Length
+            || constantArguments.Length != template.ConstantFormals.Length
+            || !ValidateGenericStructFormalArguments(template,
+                typeArguments, useSite))
+        {
+            return PrimitiveType.Int32;
+        }
+
+        var key = template.QualifiedName + "\u001F"
+            + string.Join(",", typeArguments.Select(static type =>
+                ((int)type).ToString(
+                    System.Globalization.CultureInfo.InvariantCulture)))
+            + "\u001E"
+            + string.Join(",", constantArguments.Select(
+                GenericStructConstantArgumentKey));
         if (_genericStructSpecializations.TryGetValue(key, out var existing))
         {
             return existing;
@@ -4478,7 +8037,13 @@ internal sealed partial class Binder
             return PrimitiveType.Int32;
         }
 
-        var displayArguments = string.Join(", ", typeArguments.Select(TypeName));
+        var displayArguments = string.Join(", ",
+            template.FormalOrder.Select(formal =>
+                formal.Kind == BoundGenericMethodFormalKind.Type
+                    ? TypeName(typeArguments[formal.TypeFormalOrdinal])
+                    : GenericStructConstantArgumentDisplayName(
+                        constantArguments[
+                            formal.ConstantFormalOrdinal])));
         var specializationName = template.Name + "<" + displayArguments + ">";
         var qualifiedName = template.QualifiedName + "<" + displayArguments + ">";
         var index = _structs.Count;
@@ -4498,14 +8063,22 @@ internal sealed partial class Binder
             SourceGenericTypeDefinitionIndex = template.DefinitionIndex,
         });
         _sourceGenericTypeInstances.Add(new BoundSourceGenericTypeInstance(
-            index, template.DefinitionIndex, typeArguments));
+            index, template.DefinitionIndex, typeArguments) {
+            ConstantArguments = constantArguments,
+        });
         _structDeclarations.Add(index, (template.Tree, template.Declaration));
 
         var previousContext = CaptureContext();
         var previousGenericOwnerTypeArguments = _genericOwnerTypeArguments;
+        var previousGenericContext = _genericContext;
         SetContext(template.Tree, template.Declaration);
         _aliasTypeArguments.Add(typeMap);
         _genericOwnerTypeArguments = typeMap;
+        _genericContext = new GenericInstantiation(
+            template.FormalContext, typeArguments) {
+            ConstantArguments = constantArguments,
+        };
+        var constEvalSignatureStart = _signatures.Count;
         try
         {
             DeclareStruct(index);
@@ -4513,7 +8086,8 @@ internal sealed partial class Binder
             {
                 if (member.Kind is SyntaxKind.FunctionDeclaration
                     or SyntaxKind.ConstructorDeclaration
-                    or SyntaxKind.PropertyDeclaration)
+                    or SyntaxKind.PropertyDeclaration
+                    or SyntaxKind.IndexerDeclaration)
                 {
                     Declare(member, specializationName);
                 }
@@ -4521,13 +8095,417 @@ internal sealed partial class Binder
         }
         finally
         {
+            _genericContext = previousGenericContext;
             _genericOwnerTypeArguments = previousGenericOwnerTypeArguments;
             _aliasTypeArguments.RemoveAt(_aliasTypeArguments.Count - 1);
             RestoreContext(previousContext);
         }
+        BindConstEvalFunctionsFrom(constEvalSignatureStart);
         CollectStaticFieldsForGenericOwner(template, type,
             qualifiedName, specializationName, typeMap);
+        if (_hasValidatedGenericTemplates
+            && !_isValidatingGenericTemplates
+            && _templates.Values.Any(static method =>
+                method.DefinitionOrdinal < 0))
+        {
+            _ = ValidateGenericTemplates();
+        }
         return type;
+    }
+
+    private void DeclareSourceEnumNames()
+    {
+        var sourceParts = new List<SourceEnumPartInput>();
+        foreach (var (tree, declaration) in _scopedDeclarations)
+        {
+            if (declaration.Kind != SyntaxKind.EnumDeclaration)
+            {
+                continue;
+            }
+
+            SetContext(tree, declaration);
+            var name = EnumName(declaration).Name;
+            var qualifiedName = Qualify(name);
+            var enumKeywordIndex = -1;
+            for (var index = 0; index < declaration.Children.Length; index++)
+            {
+                if (declaration.Children[index] is SyntaxTokenElement {
+                        Token.Kind: TokenKind.EnumKeyword,
+                    })
+                {
+                    enumKeywordIndex = index;
+                    break;
+                }
+            }
+            if (enumKeywordIndex < 0)
+            {
+                throw new InvalidOperationException(
+                    "An EnumDeclaration has no enum keyword.");
+            }
+
+            var visibilityCount = 0;
+            var isPublic = false;
+            var isFileLocal = false;
+            var isPartial = false;
+            var invalidModifier = false;
+            for (var index = 0; index < enumKeywordIndex; index++)
+            {
+                var child = declaration.Children[index];
+                if (child is SyntaxNode { Kind: SyntaxKind.Attribute } attribute)
+                {
+                    Report("TRM3001",
+                        "Enum attributes require an exact selected schema.",
+                        attribute.Span);
+                    continue;
+                }
+                if (child is SyntaxNode { Kind: SyntaxKind.FriendVisibility })
+                {
+                    invalidModifier = true;
+                    continue;
+                }
+                if (child is not SyntaxTokenElement element)
+                {
+                    continue;
+                }
+
+                var token = element.Token;
+                if ((token.Kind is TokenKind.PublicKeyword
+                        or TokenKind.InternalKeyword
+                        or TokenKind.PrivateKeyword)
+                    || (token.Kind == TokenKind.Identifier
+                        && token.Text == "file"))
+                {
+                    visibilityCount++;
+                    isPublic |= token.Kind == TokenKind.PublicKeyword;
+                    isFileLocal |= token.Kind == TokenKind.Identifier
+                        && token.Text == "file";
+                    invalidModifier |= token.Kind == TokenKind.PrivateKeyword;
+                }
+                else if (token.Kind == TokenKind.Identifier
+                    && token.Text == "partial")
+                {
+                    isPartial = true;
+                }
+                else if (token.Kind is TokenKind.StaticKeyword
+                    or TokenKind.MutKeyword or TokenKind.UniqueKeyword
+                    or TokenKind.UnsafeKeyword or TokenKind.ExternKeyword
+                    or TokenKind.AsyncKeyword)
+                {
+                    invalidModifier = true;
+                }
+            }
+            if (invalidModifier || visibilityCount > 1)
+            {
+                Report("TRM3001",
+                    "Enums permit only one public, internal or file visibility and no other type modifiers.",
+                    declaration.Span);
+                continue;
+            }
+
+            var underlyingType = declaration.Children
+                .OfType<SyntaxNode>().FirstOrDefault(static child =>
+                    child.Kind is SyntaxKind.TypeName
+                        or SyntaxKind.AttributedTypeName);
+            sourceParts.Add(new SourceEnumPartInput(
+                _trees.IndexOf(tree), tree, declaration, qualifiedName,
+                isPublic, isFileLocal, isPartial, visibilityCount,
+                underlyingType));
+        }
+
+        foreach (var namedParts in sourceParts.GroupBy(
+            static part => part.QualifiedName, StringComparer.Ordinal))
+        {
+            var allParts = namedParts.ToArray();
+            var modulePrimaries = allParts.Where(static part =>
+                    part.VisibilityCount == 1 && !part.IsFileLocal)
+                .ToArray();
+            var filePrimaries = allParts.Where(static part =>
+                    part.VisibilityCount == 1 && part.IsFileLocal)
+                .GroupBy(static part => part.Tree)
+                .ToArray();
+            if ((modulePrimaries.Length != 0 && filePrimaries.Length != 0)
+                || modulePrimaries.Length > 1
+                || filePrimaries.Any(static group => group.Count() > 1))
+            {
+                foreach (var part in allParts)
+                {
+                    Report("TRM3003",
+                        $"Duplicate enum declaration '{part.QualifiedName}'.",
+                        part.Declaration.Span);
+                }
+                continue;
+            }
+
+            var primaryParts = modulePrimaries.Length == 1
+                ? modulePrimaries
+                : [.. filePrimaries.SelectMany(static group => group)];
+            if (primaryParts.Length == 0)
+            {
+                foreach (var part in allParts)
+                {
+                    Report("TRM3001",
+                        "A primary enum declaration requires public, internal or file visibility.",
+                        part.Declaration.Span);
+                }
+                continue;
+            }
+
+            var assignedParts = new HashSet<SyntaxNode>(
+                ReferenceEqualityComparer.Instance);
+            foreach (var primary in primaryParts)
+            {
+                var parts = allParts.Where(part =>
+                        ReferenceEquals(part, primary)
+                        || (part.VisibilityCount == 0
+                            && part.IsPartial
+                            && (primary.IsFileLocal
+                                ? ReferenceEquals(part.Tree, primary.Tree)
+                                : !part.IsFileLocal)))
+                    .ToArray();
+                foreach (var part in parts)
+                {
+                    _ = assignedParts.Add(part.Declaration);
+                }
+                if ((parts.Length > 1 && parts.Any(
+                        static part => !part.IsPartial))
+                    || primary.UnderlyingType is null
+                    || parts.Any(part => !ReferenceEquals(part, primary)
+                        && part.UnderlyingType is not null))
+                {
+                    foreach (var part in parts)
+                    {
+                        Report("TRM3001",
+                            "Enum partial parts require one primary with the integral base and secondary parts without visibility or a repeated base.",
+                            part.Declaration.Span);
+                    }
+                    continue;
+                }
+
+                var qualifiedName = primary.QualifiedName;
+                if (TryPrimitiveType(EnumName(primary.Declaration).Name,
+                        out _)
+                    || _structNames.ContainsKey(qualifiedName)
+                    || _classNames.ContainsKey(qualifiedName)
+                    || _protocols.ContainsKey(qualifiedName)
+                    || _genericNominalTypeDefinitions.Any(definition =>
+                        definition.Formals.IsEmpty
+                        && definition.Namespace + "." + definition.Name
+                            == qualifiedName)
+                    || _enumNames.ContainsKey(qualifiedName)
+                    || _ambiguousEnumNames.Contains(qualifiedName)
+                    || (primary.IsFileLocal
+                        ? _sourceEnumNames.ContainsKey((primary.Tree,
+                            qualifiedName))
+                        : _sourceEnumNames.Keys.Any(key =>
+                            key.Name == qualifiedName)))
+                {
+                    Report("TRM3003",
+                        $"Duplicate or reserved enum '{qualifiedName}'.",
+                        primary.Declaration.Span);
+                    continue;
+                }
+                if (_enumDefinitions.Count >= BoundEnumTypes.MaximumCount)
+                {
+                    Report("TRM3016",
+                        "The selected enum declarations exceed the supported type count.",
+                        primary.Declaration.Span);
+                    continue;
+                }
+
+                var isPublic = primary.IsPublic;
+                var handle = new BoundSourceEnumDeclarationHandle(
+                    qualifiedName, [
+                        .. parts.Select(part =>
+                            new BoundSourceEnumPart(part.SourceInputOrdinal,
+                                part.Tree,
+                                part.Declaration,
+                                ReferenceEquals(part, primary))),
+                    ], isPublic, primary.IsFileLocal);
+                var enumType = BoundEnumTypes.Type(_enumDefinitions.Count);
+                _enumDefinitions.Add(new BoundEnumDefinition(
+                    new BoundEnumDeclarationIdentity.Source(handle),
+                    qualifiedName, PrimitiveType.Int32, [], isPublic,
+                    IsPrimary: true, IsFlags: false));
+                if (primary.IsFileLocal)
+                {
+                    _sourceEnumNames.Add((primary.Tree, qualifiedName),
+                        enumType);
+                }
+                else
+                {
+                    _enumNames.Add(qualifiedName, enumType);
+                }
+                _sourceEnumDeclarations.Add(new SourceEnumDeclaration(
+                    primary.Tree, primary.Declaration, handle, enumType));
+            }
+
+            foreach (var unmatched in allParts.Where(part =>
+                !assignedParts.Contains(part.Declaration)))
+            {
+                Report("TRM3003",
+                    $"Enum declaration '{unmatched.QualifiedName}' has no matching primary part.",
+                    unmatched.Declaration.Span);
+            }
+        }
+    }
+
+    private void BindSourceEnumDefinitions()
+    {
+        foreach (var sourceEnum in _sourceEnumDeclarations)
+        {
+            var primaryPart = sourceEnum.Handle.Parts.Single(
+                static part => part.IsPrimary);
+            SetContext(primaryPart.Tree, primaryPart.Declaration);
+            var underlyingTypeSyntax = primaryPart.Declaration.Children
+                .OfType<SyntaxNode>()
+                .FirstOrDefault(static child =>
+                    child.Kind is SyntaxKind.TypeName
+                        or SyntaxKind.AttributedTypeName);
+            if (underlyingTypeSyntax is null)
+            {
+                Report("TRM3005",
+                    "An enum primary requires one integral underlying type.",
+                    primaryPart.Declaration.Span);
+                continue;
+            }
+            var underlyingTypeName = NameText(underlyingTypeSyntax);
+            if ((!TryPrimitiveType(underlyingTypeName,
+                    out var underlyingType)
+                && ResolveTypeName(underlyingTypeName, null,
+                    underlyingTypeSyntax.Span, out underlyingType)
+                    != DeclaredTypeResolution.Unique)
+                || !PrimitiveTypeFacts.IsIntegerOrWide(underlyingType))
+            {
+                Report("TRM3005",
+                    "An enum primary requires one integral underlying type.",
+                    primaryPart.Declaration.Span);
+                continue;
+            }
+
+            var enumIndex = BoundEnumTypes.Index(sourceEnum.Type);
+            var definition = _enumDefinitions[enumIndex] with {
+                UnderlyingType = underlyingType,
+            };
+            _enumDefinitions[enumIndex] = definition;
+            var members = ImmutableArray.CreateBuilder<
+                BoundEnumMemberDefinition>();
+            var memberNames = new HashSet<string>(StringComparer.Ordinal);
+            var previousValue = BigInteger.MinusOne;
+
+            foreach (var part in sourceEnum.Handle.Parts)
+            {
+                SetContext(part.Tree, part.Declaration);
+                foreach (var memberSyntax in part.Declaration.Children
+                    .OfType<SyntaxNode>()
+                    .Where(static child => child.Kind
+                        == SyntaxKind.EnumMemberDeclaration))
+                {
+                    var memberNameToken = memberSyntax.Children
+                        .OfType<SyntaxTokenElement>()
+                        .FirstOrDefault(static token =>
+                            token.Token.Kind == TokenKind.Identifier);
+                    if (memberNameToken is null)
+                    {
+                        Report("TRM3001",
+                            "An enum member requires a name.",
+                            memberSyntax.Span);
+                        continue;
+                    }
+                    var memberName = memberNameToken.Token.Name;
+                    if (!memberNames.Add(memberName))
+                    {
+                        Report("TRM3003",
+                            $"Duplicate enum member '{memberName}'.",
+                            memberSyntax.Span);
+                        continue;
+                    }
+
+                    var initializer = memberSyntax.Children
+                        .OfType<SyntaxNode>().FirstOrDefault();
+                    BigInteger value;
+                    if (initializer is null)
+                    {
+                        value = previousValue + BigInteger.One;
+                    }
+                    else
+                    {
+                        var expression = BindExpression(initializer,
+                            underlyingType);
+                        expression = ForceCheckedEnumConstantArithmetic(
+                            expression);
+                        if (FoldScalarConstant(expression)
+                                is not BoundConstant constant
+                            || (constant.Type != underlyingType
+                                && constant.Type != sourceEnum.Type)
+                            || !TryScalarValue(constant, out value))
+                        {
+                            Report("TRM3024",
+                                "An enum member initializer must be an exact constant of its underlying type.",
+                                initializer.Span);
+                            continue;
+                        }
+                    }
+                    if (!ScalarBits.TryFromIntegerValue(value,
+                            underlyingType, out _))
+                    {
+                        Report("TRM3013",
+                            "An enum member value is outside its underlying type.",
+                            memberSyntax.Span);
+                        continue;
+                    }
+
+                    previousValue = value;
+                    var memberHandle
+                        = new BoundSourceEnumMemberHandle(
+                            sourceEnum.Handle, part.Tree, memberSyntax);
+                    members.Add(new BoundEnumMemberDefinition(
+                        new BoundEnumMemberIdentity.Source(memberHandle),
+                        definition.Identity, memberName, value,
+                        definition.IsPublic, null));
+                    definition = definition with {
+                        Members = members.ToImmutable(),
+                    };
+                    _enumDefinitions[enumIndex] = definition;
+                }
+            }
+        }
+
+        static BoundExpression ForceCheckedEnumConstantArithmetic(
+            BoundExpression expression)
+        {
+            return expression switch {
+                BoundUnary unary => unary with {
+                    Operand = ForceCheckedEnumConstantArithmetic(
+                        unary.Operand),
+                    OverflowBehavior
+                        = BoundIntegerOverflowBehavior.Checked,
+                },
+                BoundBinary binary => binary with {
+                    Left = ForceCheckedEnumConstantArithmetic(binary.Left),
+                    Right = ForceCheckedEnumConstantArithmetic(binary.Right),
+                    OverflowBehavior
+                        = BoundIntegerOverflowBehavior.Checked,
+                },
+                _ => expression.RewriteNestedExpressions(
+                    ForceCheckedEnumConstantArithmetic),
+            };
+        }
+    }
+
+    private static SyntaxToken EnumName(SyntaxNode declaration)
+    {
+        for (var index = 0; index + 1 < declaration.Children.Length;
+            index++)
+        {
+            if (declaration.Children[index] is SyntaxTokenElement token
+                && token.Token.Kind == TokenKind.EnumKeyword)
+            {
+                return ((SyntaxTokenElement)declaration.Children[index + 1])
+                    .Token;
+            }
+        }
+        throw new InvalidOperationException(
+            "An EnumDeclaration has no name.");
     }
 
     private void DeclareAliases()
@@ -4630,6 +8608,8 @@ internal sealed partial class Binder
                         or "ReadonlyInt32BufferView" or "MutableInt32BufferView"
                     || name.Name is NativeManagedNodeIntrinsics.TypeName or NativeManagedNodeIntrinsics.HeapName
                     || _structNames.ContainsKey(qualifiedName)
+                    || _enumNames.ContainsKey(qualifiedName)
+                    || _sourceEnumNames.ContainsKey((_tree, qualifiedName))
                     || _genericStructTemplates.ContainsKey(qualifiedName)
                     || _classNames.ContainsKey(qualifiedName)
                     || _protocols.ContainsKey(qualifiedName)
@@ -4648,7 +8628,8 @@ internal sealed partial class Binder
             if (alias.TypeParameters.IsEmpty
                 && !alias.RequiresConstEvalTypeContext)
             {
-                if (TryResolveLazyInitializationAttributeSchemaAlias(alias)
+                if (TryResolveCoreEvaluationFormSchemaAlias(alias)
+                    || TryResolveLazyInitializationAttributeSchemaAlias(alias)
                     || TryResolveStaticInitializerAttributeSchemaAlias(alias)
                     || TryResolveNativeAttributeSchemaAlias(alias)
                     || TryResolveNativeOutputAttributeSchemaAlias(alias))
@@ -4832,6 +8813,293 @@ internal sealed partial class Binder
             }
         }
         return candidate;
+    }
+
+    private bool TryGetSelectedEvaluationFormSchema(
+        string sourceName, bool constEval,
+        out CoreEvaluationFormSchemaDeclaration schema)
+    {
+        schema = null!;
+        if (!TryGetSelectedEvaluationFormSchemaBinding(sourceName,
+                constEval, out var binding))
+        {
+            return false;
+        }
+
+        schema = binding.Definition.Declaration;
+        return true;
+    }
+
+    private bool TryGetSelectedEvaluationFormSchemaBinding(
+        string sourceName, bool constEval,
+        out BoundEvaluationFormSchemaBinding binding)
+    {
+        binding = null!;
+        if (_coreEvaluationFormIdentitySelection
+                is not CoreEvaluationFormIdentitySelection selection
+            || !TryGetSelectedEvaluationFormSchemaDeclaration(constEval,
+                out var selectedDefinition))
+        {
+            return false;
+        }
+
+        var selector = constEval
+            ? selection.ConstEvalSchema : selection.PureSchema;
+        if (selector is not CoreEvaluationFormSchemaSelector selected)
+        {
+            return false;
+        }
+
+        if (FindAliasDefinition(sourceName) is AliasDefinition alias)
+        {
+            if (alias.EvaluationFormSchemaDefinition
+                    is CoreEvaluationFormSchemaDefinitionIdentity
+                        aliasDefinition
+                && SameEvaluationFormDefinition(aliasDefinition,
+                    selectedDefinition))
+            {
+                binding = new(selection.UsingModuleIdentity, selected,
+                    selectedDefinition);
+                return true;
+            }
+
+            return false;
+        }
+
+        if (HasLocalCoreTypeShadow(sourceName,
+                selectedDefinition.Declaration.QualifiedName)
+            || !EvaluationFormNameResolvesTo(sourceName,
+                selectedDefinition.Declaration.QualifiedName)
+            || HasAmbiguousEvaluationFormSchemaName(sourceName,
+                selectedDefinition))
+        {
+            return false;
+        }
+
+        binding = new(selection.UsingModuleIdentity, selected,
+            selectedDefinition);
+        return true;
+    }
+
+    private static bool SameEvaluationFormDefinition(
+        CoreEvaluationFormSchemaDefinitionIdentity left,
+        CoreEvaluationFormSchemaDefinitionIdentity right)
+        => ReferenceEquals(left.Catalog, right.Catalog)
+            && ReferenceEquals(left.Declaration, right.Declaration);
+
+    private bool HasAmbiguousEvaluationFormSchemaName(string sourceName,
+        CoreEvaluationFormSchemaDefinitionIdentity selected)
+    {
+        var localCatalog = _coreEvaluationFormIdentitySelection?
+            .LocalSchemaDeclarations;
+        if (localCatalog is not null
+            && HasDifferentVisibleDefinition(localCatalog))
+        {
+            return true;
+        }
+
+        foreach (var provider in _coreEvaluationFormSchemaProviders)
+        {
+            if (HasDifferentVisibleDefinition(provider))
+            {
+                return true;
+            }
+        }
+
+        return false;
+
+        bool HasDifferentVisibleDefinition(
+            CoreEvaluationFormSchemaDeclarations catalog)
+        {
+            foreach (var declaration in catalog.Declarations)
+            {
+                var candidate = new CoreEvaluationFormSchemaDefinitionIdentity(
+                    catalog, declaration);
+                if (!SameEvaluationFormDefinition(candidate, selected)
+                    && EvaluationFormNameResolvesTo(sourceName,
+                        declaration.QualifiedName))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    }
+
+    private bool EvaluationFormNameResolvesTo(string sourceName,
+        string qualifiedName)
+    {
+        if (sourceName == qualifiedName)
+        {
+            return true;
+        }
+        if (sourceName.Contains('.', StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var namespaceName = _namespace;
+        while (true)
+        {
+            var candidateName = namespaceName.Length == 0
+                ? sourceName : namespaceName + "." + sourceName;
+            if (candidateName == qualifiedName)
+            {
+                return true;
+            }
+
+            var separator = namespaceName.LastIndexOf('.',
+                StringComparison.Ordinal);
+            if (separator < 0)
+            {
+                break;
+            }
+
+            namespaceName = namespaceName[..separator];
+        }
+
+        foreach (var imported in _usings)
+        {
+            if (imported + "." + sourceName == qualifiedName)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryGetSelectedEvaluationFormSchemaDeclaration(
+        bool constEval,
+        out CoreEvaluationFormSchemaDefinitionIdentity definition)
+    {
+        definition = default;
+        if (_coreEvaluationFormIdentitySelection
+                is not CoreEvaluationFormIdentitySelection selection)
+        {
+            return false;
+        }
+
+        var selector = constEval
+            ? selection.ConstEvalSchema
+            : selection.PureSchema;
+        if (selector is not CoreEvaluationFormSchemaSelector selected)
+        {
+            return false;
+        }
+
+        CoreEvaluationFormSchemaDeclarations? catalog = null;
+        if (StringComparer.Ordinal.Equals(selected.ProviderIdentity,
+                selection.UsingModuleIdentity))
+        {
+            catalog = selection.LocalSchemaDeclarations;
+        }
+        else
+        {
+            foreach (var provider in _coreEvaluationFormSchemaProviders)
+            {
+                if (StringComparer.Ordinal.Equals(
+                    provider.Origin.ModuleIdentity,
+                    selected.ProviderIdentity))
+                {
+                    catalog = provider;
+                    break;
+                }
+            }
+        }
+
+        if (catalog is null
+            || !catalog.TryGetDeclaration(selected.ExportKey,
+                out var declaration))
+        {
+            return false;
+        }
+
+        definition = new(catalog, declaration);
+        return true;
+    }
+
+    private bool TryResolveCoreEvaluationFormSchemaAlias(
+        AliasDefinition alias)
+        => TryResolveCoreEvaluationFormSchemaAlias(alias,
+            new HashSet<AliasDefinition>(), out _);
+
+    private bool TryResolveCoreEvaluationFormSchemaAlias(
+        AliasDefinition alias, HashSet<AliasDefinition> visited,
+        out CoreEvaluationFormSchemaDefinitionIdentity definition)
+    {
+        definition = default;
+        if (alias.IsInvalid || !alias.TypeParameters.IsEmpty
+            || !visited.Add(alias))
+        {
+            return false;
+        }
+
+        var previousContext = CaptureContext();
+        try
+        {
+            SetContext(alias.Tree, alias.Target);
+            var targetName = NameText(alias.Target);
+            if (FindAliasDefinition(targetName)
+                is AliasDefinition targetAlias)
+            {
+                if (!TryResolveCoreEvaluationFormSchemaAlias(
+                    targetAlias, visited, out var targetDefinition))
+                {
+                    return false;
+                }
+
+                alias.EvaluationFormSchemaDefinition = targetDefinition;
+                definition = targetDefinition;
+                return true;
+            }
+
+            CoreEvaluationFormSchemaDefinitionIdentity? selected = null;
+            if (!TrySelect(constEval: false)
+                || !TrySelect(constEval: true)
+                || selected
+                    is not CoreEvaluationFormSchemaDefinitionIdentity
+                        resolved
+                || HasAmbiguousEvaluationFormSchemaName(targetName,
+                    resolved))
+            {
+                return false;
+            }
+
+            alias.EvaluationFormSchemaDefinition = resolved;
+            definition = resolved;
+            return true;
+
+            bool TrySelect(bool constEval)
+            {
+                if (!TryGetSelectedEvaluationFormSchemaDeclaration(
+                        constEval, out var candidate)
+                    || HasLocalCoreTypeShadow(targetName,
+                        candidate.Declaration.QualifiedName)
+                    || !EvaluationFormNameResolvesTo(targetName,
+                        candidate.Declaration.QualifiedName))
+                {
+                    return true;
+                }
+
+                if (selected
+                        is CoreEvaluationFormSchemaDefinitionIdentity
+                            selectedDefinition
+                    && !SameEvaluationFormDefinition(selectedDefinition,
+                        candidate))
+                {
+                    return false;
+                }
+
+                selected = candidate;
+                return true;
+            }
+        }
+        finally
+        {
+            RestoreContext(previousContext);
+        }
     }
 
     private bool TryResolveNativeAttributeSchemaAlias(AliasDefinition alias)
@@ -5328,7 +9596,9 @@ internal sealed partial class Binder
         ResolveAlias(alias, null, alias.Declaration.Span, out type);
 
     private DeclaredTypeResolution ResolveAlias(AliasDefinition alias,
-        ImmutableArray<PrimitiveType>? typeArguments, TextSpan useSite, out PrimitiveType type)
+        ImmutableArray<PrimitiveType>? typeArguments, TextSpan useSite,
+        out PrimitiveType type,
+        ImmutableArray<SyntaxNode> typeArgumentSyntaxes = default)
     {
         if (alias.NativeAttributeSchema is not null
             || alias.NativeOutputAttributeSchema is not null)
@@ -5391,6 +9661,34 @@ internal sealed partial class Binder
                 parameters.Add(alias.TypeParameters[index], resolvedArguments[index]);
             }
             _aliasTypeArguments.Add(parameters);
+
+            var genericFormals = ImmutableDictionary.CreateBuilder<string,
+                GenericMethodAliasTypeFormal>(StringComparer.Ordinal);
+            if (typeArgumentSyntaxes.Length == alias.TypeParameters.Length)
+            {
+                for (var index = 0; index < typeArgumentSyntaxes.Length;
+                    index++)
+                {
+                    if (TryGetGenericMethodTypeFormal(
+                            typeArgumentSyntaxes[index],
+                            out var definitionOrdinal,
+                            out var formalOrdinal,
+                            out var isWritable))
+                    {
+                        genericFormals.Add(alias.TypeParameters[index],
+                            new GenericMethodAliasTypeFormal(
+                                definitionOrdinal, formalOrdinal,
+                                isWritable));
+                    }
+                }
+            }
+            _genericMethodAliasTypeFormals.Add(
+                new GenericMethodAliasTypeFormalScope(
+                    DescendantTypeNames(alias.Target).ToImmutableHashSet(
+                        ReferenceEqualityComparer.Instance),
+                    alias.TypeParameters.ToImmutableHashSet(
+                        StringComparer.Ordinal),
+                    genericFormals.ToImmutable()));
         }
         alias.IsResolving = true;
         _aliasResolutionStack.Add(alias);
@@ -5432,6 +9730,8 @@ internal sealed partial class Binder
             if (typeArguments is not null)
             {
                 _aliasTypeArguments.RemoveAt(_aliasTypeArguments.Count - 1);
+                _genericMethodAliasTypeFormals.RemoveAt(
+                    _genericMethodAliasTypeFormals.Count - 1);
             }
             RestoreContext(previousContext);
         }
@@ -5454,10 +9754,53 @@ internal sealed partial class Binder
 
     private void Declare(SyntaxNode declaration, string? containingType)
     {
+        var hasExplicitInterfaceMember
+            = declaration.Children.OfType<SyntaxNode>().Any(
+                static child => child.Kind
+                    == SyntaxKind.ExplicitInterfaceMemberName);
+        if (hasExplicitInterfaceMember
+            && declaration.Kind == SyntaxKind.FunctionDeclaration
+            && declaration.Children.OfType<SyntaxNode>().Any(
+                static child => child.Kind == SyntaxKind.TypeParameterList))
+        {
+            Report("TRM3005",
+                "Generic explicit interface implementations are not supported by the current source witness binder.",
+                declaration.Span);
+            return;
+        }
+        if (containingType is not null
+            && declaration.Kind == SyntaxKind.FunctionDeclaration
+            && declaration.Children.OfType<SyntaxNode>()
+                .FirstOrDefault(static child =>
+                    child.Kind == SyntaxKind.TypeParameterList)
+                is SyntaxNode methodTypeParameters)
+        {
+            var previousContext = CaptureContext();
+            try
+            {
+                SetContext(_tree, declaration);
+                DeclareGeneric(declaration, methodTypeParameters,
+                    containingType);
+            }
+            finally
+            {
+                RestoreContext(previousContext);
+            }
+            return;
+        }
+
         var constructor = declaration.Kind == SyntaxKind.ConstructorDeclaration;
         var operatorDeclaration = declaration.Kind == SyntaxKind.OperatorDeclaration;
-        var property = declaration.Kind == SyntaxKind.PropertyDeclaration;
-        var directGetter = property && declaration.Children[^1] is SyntaxNode { Kind: SyntaxKind.ExpressionBody };
+        var isIndexer = declaration.Kind == SyntaxKind.IndexerDeclaration;
+        var property = declaration.Kind is SyntaxKind.PropertyDeclaration
+            or SyntaxKind.IndexerDeclaration;
+        var explicitInterfaceMemberNode = declaration.Children
+            .OfType<SyntaxNode>().FirstOrDefault(static child =>
+                child.Kind == SyntaxKind.ExplicitInterfaceMemberName);
+        var directGetter = property
+            && declaration.Children[^1] is SyntaxNode {
+                Kind: SyntaxKind.ExpressionBody,
+            };
         var modifierCount = 0;
         while (modifierCount < declaration.Children.Length
             && IsCallablePrefixElement(declaration.Children[modifierCount]))
@@ -5465,6 +9808,7 @@ internal sealed partial class Binder
             modifierCount++;
         }
         var isMutable = false;
+        var isMutableAccessor = false;
         var isPrivate = false;
         var isInternal = false;
         var isStatic = false;
@@ -5480,7 +9824,10 @@ internal sealed partial class Binder
         SyntaxNode? nativeExportAttribute = null;
         var isNativeVTableMethod = false;
         var isCleanup = false;
+        var isPure = false;
+        BoundEvaluationFormSchemaBinding? pureSchemaBinding = null;
         var isConstEval = false;
+        BoundEvaluationFormSchemaBinding? constEvalSchemaBinding = null;
         var doesNotReturn = false;
         SyntaxNode? staticInitializerAttribute = null;
         SyntaxNode? nativeImportAttribute = null;
@@ -5529,6 +9876,14 @@ internal sealed partial class Binder
                     && attribute.Children[1] is SyntaxTokenElement { Token.Kind: TokenKind.ReturnKeyword }
                     && attribute.Children[2] is SyntaxTokenElement { Token.Kind: TokenKind.Colon };
                 var attributeName = AttributeName(attribute);
+                var getterTarget = IsGetterTargetAttribute(attribute);
+                if (getterTarget && !property)
+                {
+                    Report("TRM3001",
+                        "A get-targeted contract requires a property declaration.",
+                        attribute.Span);
+                    continue;
+                }
                 if (attributeName.Contains('.', StringComparison.Ordinal)
                     && attributeName != DirectNativeImportContract.AttributeFullyQualifiedName
                     && !IsNativeOutputAttribute(attributeName)
@@ -5536,6 +9891,10 @@ internal sealed partial class Binder
                     && attributeName != "Terrum.Interop.NativeCallable"
                     && attributeName != "Terrum.Interop.NativeExport"
                     && attributeName != "Terrum.Interop.NativeVTableMethod"
+                    && !TryGetSelectedEvaluationFormSchema(
+                        attributeName, constEval: false, out _)
+                    && !TryGetSelectedEvaluationFormSchema(
+                        attributeName, constEval: true, out _)
                     && !TryGetRegisteredStaticInitializerAttributeSchema(
                         attributeName, out _)
                     && !TryGetDependencyRelation(attributeName, out _))
@@ -5713,7 +10072,7 @@ internal sealed partial class Binder
                         dependencyAttributes.Add((attribute, null));
                     }
                 }
-                else if (property)
+                else if (property && !getterTarget)
                 {
                     Report("TRM3001", "Getter effects belong on the get accessor.", attribute.Span);
                 }
@@ -5729,14 +10088,27 @@ internal sealed partial class Binder
                 {
                     isCleanup = true;
                 }
-                else if (!returnTarget && attribute.Children is [
-                    _, SyntaxTokenElement { Token.Text: "ConstEval" }, _] && !isConstEval)
+                else if (!returnTarget && !isConstEval
+                    && TryGetSelectedEvaluationFormSchemaBinding(
+                        attributeName, constEval: true,
+                        out var selectedConstEvalSchema)
+                    && HasNoAttributeArguments(attribute))
                 {
                     isConstEval = true;
+                    constEvalSchemaBinding = selectedConstEvalSchema;
+                }
+                else if (!returnTarget && !isPure
+                    && TryGetSelectedEvaluationFormSchemaBinding(
+                        attributeName, constEval: false,
+                        out var selectedPureSchema)
+                    && HasNoAttributeArguments(attribute))
+                {
+                    isPure = true;
+                    pureSchemaBinding = selectedPureSchema;
                 }
                 else
                 {
-                    Report("TRM3001", "Only distinct parameterless DoesNotReturn, Cleanup, and ConstEval contracts are supported.", attribute.Span);
+                    Report("TRM3001", "Only distinct parameterless DoesNotReturn, Cleanup, Pure, and ConstEval contracts are supported.", attribute.Span);
                 }
                 continue;
             }
@@ -5785,7 +10157,11 @@ internal sealed partial class Binder
                         "A callable can declare only one partial modifier.",
                         declaration.Children[index].Span);
                 }
-                if (!isStatic)
+                if (constructor
+                    && declaration.Children.Skip(index + 1)
+                        .OfType<SyntaxTokenElement>()
+                        .Any(static token =>
+                            token.Token.Kind == TokenKind.StaticKeyword))
                 {
                     Report("TRM3011",
                         "The static-constructor partial modifier must follow static.",
@@ -5798,10 +10174,12 @@ internal sealed partial class Binder
         }
         var isStaticConstructor = constructor && isStatic;
         var isPartialStaticConstructor = isStaticConstructor && isPartial;
-        if (isPartial && !isStaticConstructor)
+        var isPartialConstructor = constructor && !isStaticConstructor
+            && isPartial;
+        if (isPartial && !constructor)
         {
             Report("TRM3001",
-                "The partial callable form is currently supported only for static constructors.",
+                "The partial callable form is supported only for constructors.",
                 declaration.Span);
         }
         if ((constructor && isMutable) || ((containingType is null) && isPrivate))
@@ -5823,6 +10201,17 @@ internal sealed partial class Binder
             isPrivate = containingType is not null;
             isInternal = containingType is null;
         }
+        if (explicitInterfaceMemberNode is not null)
+        {
+            if (accessModifiers != 0)
+            {
+                Report("TRM3005",
+                    "An explicit interface implementation cannot declare separate visibility.",
+                    explicitInterfaceMemberNode.Span);
+            }
+            isPrivate = true;
+            isInternal = false;
+        }
         if (isStaticConstructor)
         {
             isPrivate = true;
@@ -5835,16 +10224,50 @@ internal sealed partial class Binder
             Report("TRM3001", "A mut method requires a writable class or struct receiver.", declaration.Span);
         }
 
-        var parameterListIndex = property
+        var parameterListIndex = property && !isIndexer
             ? -1 : FindParameterListIndex(declaration);
         var returnNode = constructor ? null
             : (SyntaxNode)declaration.Children[modifierCount];
-        var parameters = property ? null
+        var parameters = property && !isIndexer ? null
             : (SyntaxNode)declaration.Children[parameterListIndex];
+        var explicitMemberNameToken = explicitInterfaceMemberNode?
+            .Children.OfType<SyntaxTokenElement>()
+            .LastOrDefault(static token =>
+                token.Token.Kind == TokenKind.Identifier)?.Token;
         var nameTokenIndex = constructor || operatorDeclaration
             ? parameterListIndex - 1 : modifierCount + 1;
-        var nameToken = ((SyntaxTokenElement)declaration.Children[
-            nameTokenIndex]).Token;
+        var nameToken = explicitMemberNameToken
+            ?? ((SyntaxTokenElement)declaration.Children[
+                nameTokenIndex]).Token;
+        BoundInterfaceType? explicitInterfaceOwner = null;
+        if (explicitInterfaceMemberNode is not null)
+        {
+            var ownerTypeSyntax = explicitInterfaceMemberNode.Children
+                .OfType<SyntaxNode>().SingleOrDefault();
+            var resolvedOwnerType = containingType is not null
+                && _structNames.TryGetValue(Qualify(containingType),
+                    out var explicitStructType)
+                    ? explicitStructType
+                    : containingType is not null
+                        && _classNames.TryGetValue(Qualify(containingType),
+                            out var explicitClassType)
+                            ? explicitClassType : (PrimitiveType?)null;
+            if (ownerTypeSyntax is null
+                || resolvedOwnerType is not PrimitiveType implementingType
+                || !TryBindInterfaceConformanceType(ownerTypeSyntax,
+                    implementingType, out explicitInterfaceOwner))
+            {
+                Report("TRM3005",
+                    "An explicit implementation must name a complete declared interface instance.",
+                    explicitInterfaceMemberNode.Span);
+            }
+            if (isExternal || isNativeExport || isNativeVTableMethod)
+            {
+                Report("TRM3005",
+                    "An explicit interface implementation cannot be external or exported as a native entry point.",
+                    explicitInterfaceMemberNode.Span);
+            }
+        }
         var operatorKey = new StaticOperatorKey(nameToken.Kind, parameters?.Children.OfType<SyntaxNode>().Count() ?? 0);
         var validOperator = (operatorKey.Arity == 1 && IsStaticUnaryOperator(nameToken.Kind))
             || (operatorKey.Arity == 2 && IsStaticBinaryOperator(nameToken.Kind));
@@ -5858,7 +10281,41 @@ internal sealed partial class Binder
                 .FirstOrDefault(static child =>
                     child.Kind == SyntaxKind.GetAccessor)
             : null;
-        var isAutoGetter = property && IsAutoGetterProperty(declaration);
+        var indexerSetter = isIndexer
+            ? declaration.Children.OfType<SyntaxNode>()
+                .FirstOrDefault(static child =>
+                    child.Kind == SyntaxKind.SetAccessor)
+            : null;
+        var indexerInit = isIndexer
+            ? declaration.Children.OfType<SyntaxNode>()
+                .FirstOrDefault(static child =>
+                    child.Kind == SyntaxKind.InitAccessor)
+            : null;
+        var namedPropertySetter = property && !isIndexer
+            ? declaration.Children.OfType<SyntaxNode>()
+                .FirstOrDefault(static child =>
+                    child.Kind == SyntaxKind.SetAccessor)
+            : null;
+        var namedPropertyInitializer = property && !isIndexer
+            ? declaration.Children.OfType<SyntaxNode>()
+                .FirstOrDefault(static child =>
+                    child.Kind == SyntaxKind.InitAccessor)
+            : null;
+        var isAutoGetter = property && !isIndexer
+            && IsAutoGetterProperty(declaration);
+        if (namedPropertySetter is not null
+            && namedPropertyInitializer is not null)
+        {
+            Report("TRM3001",
+                "A property cannot declare both set and init accessors.",
+                declaration.Span);
+        }
+        if (indexerInit is not null)
+        {
+            Report("TRM3005",
+                "Indexer init accessors are not bound by the current source indexer path.",
+                indexerInit.Span);
+        }
         var body = isAutoGetter && isStatic ? null
             : isAutoGetter
                 ? new SyntaxNode(SyntaxKind.Block, [],
@@ -5871,7 +10328,8 @@ internal sealed partial class Binder
             .OfType<SyntaxNode>()
             .Any(static child => child.Kind == SyntaxKind.ContractClause);
         if (isExternal != hasExternalBody
-            && !(isPartialStaticConstructor && hasExternalBody))
+            && !(isPartialStaticConstructor && hasExternalBody)
+            && !(isPartialConstructor && hasExternalBody))
         {
             Report("TRM3030", "Only an extern callable may omit its body, and extern callables must end with ';'.",
                 declaration.Span);
@@ -5961,6 +10419,11 @@ internal sealed partial class Binder
         }
         if (property)
         {
+            if (isIndexer && isStatic)
+            {
+                Report("TRM3001", "An indexer cannot be static.",
+                    declaration.Span);
+            }
             if (isAutoGetter && !isStatic)
             {
                 Report("TRM3001",
@@ -5973,13 +10436,44 @@ internal sealed partial class Binder
                 {
                     if (child is SyntaxNode { Kind: SyntaxKind.Attribute } attribute)
                     {
+                        var attributeName = AttributeName(attribute);
                         if (TryGetDependencyRelation(AttributeName(attribute), out _))
                         {
                             dependencyAttributes.Add((attribute, null));
                         }
-                        else if (attribute.Children[1] is SyntaxTokenElement { Token.Text: "NoThrow" })
+                        else if (attributeName == "NoThrow")
                         {
                             Report("TRM3017", "The general NoThrow source contract is retired.", attribute.Span);
+                        }
+                        else if (attribute.Children.Length > 2
+                            && attribute.Children[2]
+                                is SyntaxTokenElement {
+                                    Token.Kind: TokenKind.Colon,
+                                }
+                            && !IsGetterTargetAttribute(attribute))
+                        {
+                            Report("TRM3001",
+                                "A getter-local contract must target that getter.",
+                                attribute.Span);
+                        }
+                        else if (!isConstEval
+                            && TryGetSelectedEvaluationFormSchemaBinding(
+                                attributeName, constEval: true,
+                                out var selectedConstEvalSchema)
+                            && HasNoAttributeArguments(attribute))
+                        {
+                            isConstEval = true;
+                            constEvalSchemaBinding
+                                = selectedConstEvalSchema;
+                        }
+                        else if (!isPure
+                            && TryGetSelectedEvaluationFormSchemaBinding(
+                                attributeName, constEval: false,
+                                out var selectedPureSchema)
+                            && HasNoAttributeArguments(attribute))
+                        {
+                            isPure = true;
+                            pureSchemaBinding = selectedPureSchema;
                         }
                         else
                         {
@@ -5994,15 +10488,24 @@ internal sealed partial class Binder
                         }
                         requiresUnsafeCaller = true;
                     }
+                    else if (child is SyntaxTokenElement {
+                            Token.Kind: TokenKind.MutKeyword,
+                        })
+                    {
+                        isMutableAccessor = true;
+                    }
                     else if (child is SyntaxTokenElement modifier
                         && modifier.Token.Kind != TokenKind.Semicolon
                         && modifier.Token.Text != "get")
                     {
-                        Report("TRM3001", "Getter-local visibility and mut modifiers are not supported.", modifier.Span);
+                        Report("TRM3001",
+                            "Getter-local visibility modifiers are not supported.",
+                            modifier.Span);
                     }
                 }
             }
-            if (containingType is null || isMutable || isCleanup || doesNotReturn
+            if (containingType is null || (isMutable && !isMutableAccessor)
+                || isCleanup || doesNotReturn
                 || (isStatic
                     && ((!TryResolveStruct(Qualify(containingType),
                             out var staticOwner)
@@ -6021,6 +10524,21 @@ internal sealed partial class Binder
                 Report("TRM3001", "Getter-only properties require a distinct member on a Copy struct, source class or Core primitive with a readonly receiver.",
                     declaration.Span);
             }
+        }
+        isMutable |= isMutableAccessor;
+        if (isStatic && isMutableAccessor)
+        {
+            Report("TRM3001", "A static getter cannot require a mutable receiver.",
+                getter?.Span ?? declaration.Span);
+        }
+        if (isMutableAccessor && containingType is not null
+            && TryResolveClass(Qualify(containingType), out var accessorOwner)
+            && !_classes[ManagedClassTypes.ClassIndex(accessorOwner)]
+                .IsMutable)
+        {
+            Report("TRM3001",
+                "A mutating getter requires a mutable class declaration.",
+                getter?.Span ?? declaration.Span);
         }
         if (operatorDeclaration && (containingType is null || !isStatic
             || body?.Kind is not (SyntaxKind.Block or SyntaxKind.ExpressionBody)
@@ -6065,12 +10583,12 @@ internal sealed partial class Binder
             && (containingType is null || accessModifiers != 0
                 || isMutable || isExternal || requiresUnsafeCaller
                 || parameters?.Children.OfType<SyntaxNode>().Any() == true
-                || isCleanup || isConstEval
+                || isCleanup || isPure || isConstEval
                 || doesNotReturn || isNativeCallable || isNativeExport
                 || isNativeVTableMethod || nativeImportAttribute is not null))
         {
             Report("TRM3011",
-                "A static constructor has no visibility, parameters, caller-unsafe, extern, mutable, cleanup, no-return, native, or ConstEval contract.",
+                "A static constructor has no visibility, parameters, caller-unsafe, extern, mutable, cleanup, no-return, native, Pure, or ConstEval contract.",
                 declaration.Span);
         }
 
@@ -6107,23 +10625,73 @@ internal sealed partial class Binder
                 && _structNames.TryGetValue(Qualify(containingType), out var structType)
                 && IsStruct(structType) ? (int)structType - 100 : -1;
             var structure = structureIndex < 0 ? null : _structs[structureIndex];
-            if (structure is null || !structure.IsUnique || isStatic || constructor || isMutable
-                || requiresUnsafeCaller || returnType != PrimitiveType.Void || parameters?.Children.Length != 2
-                || structure.CleanupMethod is not null || isPrivate || isInternal)
+            var classIndex = containingType is not null && !classConstructor
+                && _classNames.TryGetValue(Qualify(containingType),
+                    out var cleanupClassType)
+                && IsClass(cleanupClassType)
+                    ? ManagedClassTypes.ClassIndex(cleanupClassType) : -1;
+            var cleanupShapeIsValid = !isStatic && !constructor && !isMutable
+                && !property && !operatorDeclaration
+                && !requiresUnsafeCaller && !isExternal
+                && !isNativeCallable && !isNativeExport
+                && !isNativeVTableMethod && nativeImportAttribute is null
+                && !doesNotReturn && returnType == PrimitiveType.Void
+                && parameters?.Children.Length == 2;
+            if (structure is not null)
             {
-                Report("TRM3023", "Cleanup requires one public, nonmutating, parameterless instance method on a unique struct.", declaration.Span);
+                if (!_structDeclarations.ContainsKey(structureIndex)
+                    || !structure.IsUnique || !cleanupShapeIsValid
+                    || structure.CleanupMethod is not null)
+                {
+                    Report("TRM3023",
+                        "A unique struct Cleanup requires one nonmutating, parameterless instance method.",
+                        declaration.Span);
+                }
+                else
+                {
+                    _structs[structureIndex] = structure with {
+                        CleanupMethod = structure.Name + "." + nameText,
+                    };
+                }
+            }
+            else if ((uint)classIndex < (uint)_classes.Count)
+            {
+                var cleanupClass = _classes[classIndex];
+                if (!_classDeclarations.ContainsKey(classIndex)
+                    || !cleanupShapeIsValid
+                    || cleanupClass.CleanupMethod is not null)
+                {
+                    Report("TRM3023",
+                        "A class Cleanup requires one nonmutating, parameterless instance method.",
+                        declaration.Span);
+                }
+                else
+                {
+                    _classes[classIndex] = cleanupClass with {
+                        HasCleanup = true,
+                        CleanupMethod = cleanupClass.Name + "." + nameText,
+                    };
+                }
             }
             else
             {
-                _structs[structureIndex] = structure with {
-                    CleanupMethod = structure.Name + "." + nameText,
-                };
+                Report("TRM3023",
+                    "Cleanup requires an eligible managed class or unique struct instance method.",
+                    declaration.Span);
             }
         }
-        if (isConstEval && (containingType is not null || !isInternal || constructor || isCleanup
-            || doesNotReturn || !ConstEvalScalar(returnType)))
+        var constEvalOwnerType = containingType is string constEvalOwner
+            ? ResolveDeclaredType(constEvalOwner) : PrimitiveType.Void;
+        var constEvalReturnType = constructor
+            ? constEvalOwnerType : returnType;
+        if (isConstEval && (isCleanup || isStaticConstructor
+            || doesNotReturn || !IsConstEvalValueType(constEvalReturnType)
+            || (containingType is not null && !isStatic
+                && !IsConstEvalValueType(constEvalOwnerType))))
         {
-            Report("TRM3024", "ConstEval requires an internal scalar-returning top-level function.", declaration.Span);
+            Report("TRM3024",
+                "ConstEval requires a supported typed value callable or eligible initialization-only constructor.",
+                declaration.Span);
         }
         var declared = ImmutableArray.CreateBuilder<Parameter>();
         var names = new HashSet<string>(StringComparer.Ordinal);
@@ -6141,8 +10709,19 @@ internal sealed partial class Binder
             var sourceChildren = parameter.Children
                 .Where(static element => element is not SyntaxNode { Kind: SyntaxKind.Attribute })
                 .ToArray();
-            var typeNode = sourceChildren.OfType<SyntaxNode>().Single();
-            var token = ((SyntaxTokenElement)sourceChildren[^1]).Token;
+            var defaultSyntax = sourceChildren.Length >= 4
+                && sourceChildren[^2] is SyntaxTokenElement {
+                    Token.Kind: TokenKind.Equals,
+                }
+                ? sourceChildren[^1] as SyntaxNode : null;
+            var parameterFormChildren = defaultSyntax is null
+                ? sourceChildren : sourceChildren[..^2];
+            var typeNode = parameterFormChildren.OfType<SyntaxNode>()
+                .Single();
+            var token = parameterFormChildren
+                .OfType<SyntaxTokenElement>()
+                .Last(static element =>
+                    element.Token.Kind == TokenKind.Identifier).Token;
             var parameterIndex = declared.Count;
             SyntaxNode? nativeOutputConditionExpression = null;
             if (nativeOutputConditionsByName.Remove(token.Name,
@@ -6215,20 +10794,38 @@ internal sealed partial class Binder
                 Report("TRM3023", "A native buffer view cannot be a parameter.", parameter.Span);
             }
 
-            var isInit = sourceChildren is [SyntaxTokenElement { Token.Text: "init" },
+            var isLegacyInitParameter = parameterFormChildren is [
+                SyntaxTokenElement { Token.Text: "init" },
                 SyntaxTokenElement { Token.Kind: TokenKind.RefKeyword },
                 SyntaxTokenElement { Token.Kind: TokenKind.Less }, SyntaxNode,
                 SyntaxTokenElement { Token.Kind: TokenKind.Greater }, SyntaxTokenElement];
-            var isImplicitRef = sourceChildren is [SyntaxTokenElement { Token.Text: "implicit" },
+            var isInit = CheckedReferenceTypeContract.IsValidType(type,
+                    [.. _checkedReferenceTypes])
+                && _checkedReferenceTypes[
+                    CheckedReferenceTypes.Index(type)].IsInitialization;
+            var isImplicitRef = parameterFormChildren is [SyntaxTokenElement { Token.Text: "implicit" },
                 SyntaxTokenElement { Token.Kind: TokenKind.RefKeyword },
                 SyntaxTokenElement { Token.Kind: TokenKind.Less }, SyntaxNode,
                 SyntaxTokenElement { Token.Kind: TokenKind.Greater }, SyntaxTokenElement];
-            var isOut = sourceChildren.Length == 3
-                && sourceChildren[0] is SyntaxTokenElement passing
+            var isOut = parameterFormChildren.Length == 3
+                && parameterFormChildren[0] is SyntaxTokenElement passing
                 && passing.Token.Kind == TokenKind.OutKeyword;
-            if (sourceChildren.Length != 2 && !isOut && !isInit && !isImplicitRef)
+            if (parameterFormChildren.Length != 2
+                && !isOut && !isInit && !isImplicitRef)
             {
-                Report("TRM3001", "Passing modes are not supported.", parameter.Span);
+                Report("TRM3001", isLegacyInitParameter
+                        ? "Parameter-only init ref<T> is not admitted; use ref<init T>."
+                        : "Passing modes are not supported.",
+                    parameter.Span);
+            }
+            if (defaultSyntax is not null
+                && (isOut || isInit || isImplicitRef
+                    || CheckedReferenceTypeContract.IsValidType(type,
+                        [.. _checkedReferenceTypes])))
+            {
+                Report("TRM3005",
+                    "Reference and output parameters cannot declare defaults.",
+                    defaultSyntax.Span);
             }
             if (isImplicitRef && (!IsSupportedImplicitReferenceType(type) || isExternal || isConstEval))
             {
@@ -6239,6 +10836,7 @@ internal sealed partial class Binder
             if (isOut && returnType != PrimitiveType.Bool
                 && type is not (PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32
                     or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
+                   or PrimitiveType.NativeInt or PrimitiveType.NativeUInt
                     or PrimitiveType.Float32 or PrimitiveType.Float64)
                 && (!IsStruct(type) || IsUnique(type))
                 && !(isNativeVTableMethod && NativeVTableCallContract.IsNativeValueType(type,
@@ -6247,25 +10845,38 @@ internal sealed partial class Binder
                 Report("TRM3011",
                     "A non-boolean output parameter requires a scalar or Copy struct type.", parameter.Span);
             }
-            if (isInit && type is not (PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32
+            var initializationType = isInit
+                ? _checkedReferenceTypes[
+                    CheckedReferenceTypes.Index(type)].ReferentType : type;
+            if (isInit && initializationType is not (PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32
                 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
+                or PrimitiveType.NativeInt or PrimitiveType.NativeUInt
                 or PrimitiveType.Float32 or PrimitiveType.Float64)
-                && !IsStruct(type) && !IsUnique(type) && !ManagedClassTypes.IsManaged(type))
+                && !IsStruct(initializationType) && !IsUnique(initializationType)
+                && !ManagedClassTypes.IsManaged(initializationType)
+                && !(NativePointerTypes.IsType(initializationType)
+                    && (uint)NativePointerTypes.Index(initializationType)
+                        < (uint)_nativePointerTypes.Count))
             {
-                Report("TRM3011", "Init ref parameters require supported scalar, Copy-struct, unique, or managed-handle outputs.",
+                Report("TRM3011", "ref<init T> parameters require supported scalar, Copy-struct, unique, or managed-handle destinations.",
                     parameter.Span);
             }
-            if (isInit && ManagedClassTypes.IsManaged(type) && !isPrivate && !isInternal)
+            if (isInit && ManagedClassTypes.IsManaged(initializationType)
+                && !isPrivate && !isInternal)
             {
-                Report("TRM3011", "Managed-handle init ref parameters are compilation-private.", parameter.Span);
+                Report("TRM3011", "Managed-handle ref<init T> parameters are compilation-private.", parameter.Span);
             }
-            if ((isInit || isOut) && TokenSpanContract.IsDependent(type, _structs))
+            if ((isInit || isOut) && TokenSpanContract.IsDependent(
+                initializationType, _structs))
             {
                 Report("TRM3023", "Dependency-bearing span and cursor outputs are compilation-local and unsupported.", parameter.Span);
             }
-            if (isConstEval && (isOut || isInit || !ConstEvalScalar(type)))
+            if (isConstEval && (isOut || isInit
+                || !IsConstEvalValueType(type)))
             {
-                Report("TRM3024", "ConstEval parameters must be non-output scalar values.", parameter.Span);
+                Report("TRM3024",
+                    "ConstEval parameters must be non-output constant-evaluable values.",
+                    parameter.Span);
             }
 
             if (!names.Add(token.Name))
@@ -6274,8 +10885,10 @@ internal sealed partial class Binder
             }
 
             declared.Add(new Parameter(token.Name, type, token.Span,
-                isOut || isInit, isInit, isImplicitRef, nativePointeeType,
-                isWritableNativePointer, token.Text == "@this"));
+                isOut, isInit, isImplicitRef, nativePointeeType,
+                isWritableNativePointer, token.Text == "@this") {
+                DefaultSyntax = defaultSyntax,
+            });
         }
         var dependencyContracts = BindDependencyContracts(
             dependencyAttributes, declared.ToImmutable(), returnType,
@@ -6363,7 +10976,8 @@ internal sealed partial class Binder
                 if (outputIndex >= declared.Count
                     || !declared[outputIndex].IsWritableNativePointer
                     || declared[outputIndex].NativePointeeType is not PrimitiveType outputType
-                    || !DirectNativeImportContract.IsNativeOutputCellType(outputType, _structs))
+                    || !DirectNativeImportContract.IsNativeOutputCellType(
+                        outputType, _structs, _enumDefinitions))
                 {
                     Report("TRM3030",
                         "NativeOutput requires a write ptr<T> parameter in the direct native signature.",
@@ -6558,10 +11172,26 @@ internal sealed partial class Binder
                 declaration.Span);
         }
 
+        var sourceContractClauses = declaration.Children.OfType<SyntaxNode>()
+            .Where(static child => child.Kind == SyntaxKind.ContractClause);
+        if (getter is not null)
+        {
+            sourceContractClauses = sourceContractClauses.Concat(
+                getter.Children.OfType<SyntaxNode>()
+                    .Where(static child =>
+                        child.Kind == SyntaxKind.ContractClause));
+        }
+
+        var implementationName = explicitInterfaceOwner is null
+            ? nameText
+            : "$explicit:"
+                + (NormalizeSyntax(explicitInterfaceMemberNode!)
+                    ?? throw new InvalidOperationException())
+                + ":" + nameText;
         var qualifiedName = (string.IsNullOrEmpty(_namespace) ? "" : _namespace + ".")
             + (containingType is null ? "" : containingType + ".")
             + (isStaticConstructor ? "#static-ctor"
-                : constructor ? "#ctor" : property ? "#get:" + nameText : nameText);
+                : constructor ? "#ctor" : property ? "#get:" + implementationName : implementationName);
         var declaringType = containingType is null ? null
             : (string.IsNullOrEmpty(_namespace) ? "" : _namespace + ".")
                 + containingType;
@@ -6644,10 +11274,17 @@ internal sealed partial class Binder
                 && !isStaticConstructor, isPrivate, isInternal, isMutable, isStatic,
             false, doesNotReturn, externalFunction) {
             GenericOwnerTypeArguments = _genericOwnerTypeArguments,
+            GenericOwnerContext = _genericOwnerTypeArguments is not null
+                ? _genericContext : null,
+            SourceDeclarationInputOrdinal = _trees.IndexOf(_tree),
+            SourceDeclarationSpan = declaration.Span,
+            HasExplicitVisibility = accessModifiers != 0,
+            IsPartialConstructor = isPartialConstructor,
             IsInternal = isInternal
                 || (_genericOwnerTypeArguments is not null
                     && !isPrivate
                     && !isStaticConstructor),
+            ExplicitInterfaceOwner = explicitInterfaceOwner,
             IsCleanup = isCleanup,
             IsOperator = operatorDeclaration,
             IsClassConstructor = classConstructor,
@@ -6659,7 +11296,17 @@ internal sealed partial class Binder
                     : [],
             FriendTargets = friendTargets,
             PropertyName = property ? nameText : null,
-            IsConstEval = isConstEval,
+            PropertyAccessorKind = property
+                ? BoundPropertyAccessorKind.Getter
+                : BoundPropertyAccessorKind.None,
+            IsAutoPropertyAccessor = property && isAutoGetter,
+            IsConstEval = externalFunction?.IsConstEval
+                ?? isConstEval,
+            PureEvaluationFormSchema =
+                externalFunction?.PureEvaluationFormSchema
+                    ?? pureSchemaBinding,
+            ConstEvalSchema = externalFunction?.ConstEvalSchema
+                ?? constEvalSchemaBinding,
             RequiresUnsafeCaller = requiresUnsafeCaller,
             DeclaredRequiresUnsafeCaller = declaredRequiresUnsafeCaller,
             NativeFunctionPointerType = nativeFunctionPointerType,
@@ -6680,12 +11327,9 @@ internal sealed partial class Binder
             ResultDependencyParameters = resultDependencyParameters,
             ResultDependencyIncludesReceiver = resultDependencyIncludesReceiver,
             DependencyContracts = dependencyContracts,
-            DeclarationContractClauses = [.. declaration.Children
-                .OfType<SyntaxNode>()
-                .Where(static child =>
-                    child.Kind == SyntaxKind.ContractClause)
-                .Select(clause =>
-                    new SourceDeclarationContractClause(_tree, clause))],
+            DeclarationContractClauses = [.. sourceContractClauses.Select(
+                clause => new SourceDeclarationContractClause(_tree,
+                    clause))],
             IsPartialStaticConstructor = isPartialStaticConstructor,
             IsStaticAutoProperty = property && isStatic
                 && isAutoGetter,
@@ -6700,6 +11344,14 @@ internal sealed partial class Binder
             {
                 return;
             }
+            if (isPartialConstructor
+                || _signatures[existingIndex].IsPartialConstructor)
+            {
+                if (TryComposePartialConstructor(existingIndex, signature))
+                {
+                    return;
+                }
+            }
             Report("TRM3003",
                 $"Duplicate function '{nameToken.Text}'; overloads are not supported.",
                 nameToken.Span);
@@ -6709,6 +11361,319 @@ internal sealed partial class Binder
             _functions.Add(qualifiedName, _signatures.Count);
         }
         _signatures.Add(signature);
+
+        if (property && !isIndexer && !isStatic
+            && !(namedPropertySetter is not null
+                && namedPropertyInitializer is not null))
+        {
+            if (namedPropertySetter is not null)
+            {
+                AddNamedPropertyAccessorSignature(signature,
+                    namedPropertySetter, BoundPropertyAccessorKind.Setter);
+            }
+            if (namedPropertyInitializer is not null)
+            {
+                AddNamedPropertyAccessorSignature(signature,
+                    namedPropertyInitializer,
+                    BoundPropertyAccessorKind.Initializer);
+            }
+        }
+
+        if (indexerSetter is not null)
+        {
+            var setterBody = indexerSetter.Children.OfType<SyntaxNode>()
+                .LastOrDefault(static child => child.Kind is
+                    SyntaxKind.Block or SyntaxKind.ExpressionBody
+                        or SyntaxKind.ExternalBody);
+            if (setterBody is null
+                || setterBody.Kind == SyntaxKind.ExternalBody)
+            {
+                Report("TRM3005",
+                    "A concrete indexer setter requires an accessor body.",
+                    indexerSetter.Span);
+            }
+            else
+            {
+                var setterTokens = indexerSetter.Children
+                    .OfType<SyntaxTokenElement>().ToArray();
+                var setterVisibility = setterTokens
+                    .Where(static token => token.Token.Kind is
+                        TokenKind.PublicKeyword or TokenKind.InternalKeyword
+                            or TokenKind.PrivateKeyword)
+                    .ToArray();
+                if (setterVisibility.Length > 1)
+                {
+                    Report("TRM3001",
+                        "A setter can declare only one visibility modifier.",
+                        indexerSetter.Span);
+                }
+                if (setterVisibility.Any(static token =>
+                        token.Token.Kind == TokenKind.PublicKeyword)
+                    && (signature.IsPrivate || signature.IsInternal))
+                {
+                    Report("TRM3001",
+                        "A setter cannot broaden its indexer's visibility.",
+                        indexerSetter.Span);
+                }
+
+                var setterIsPrivate = signature.IsPrivate
+                    || setterVisibility.Any(static token =>
+                        token.Token.Kind == TokenKind.PrivateKeyword);
+                var setterIsInternal = !setterIsPrivate
+                    && (signature.IsInternal
+                        || setterVisibility.Any(static token =>
+                            token.Token.Kind
+                                == TokenKind.InternalKeyword));
+                var setterIsMutable = setterTokens.Any(static token =>
+                    token.Token.Kind == TokenKind.MutKeyword);
+                if (setterIsMutable
+                    && (containingType is null
+                        || isStatic
+                        || (TryResolveClass(Qualify(containingType),
+                                out var setterClass)
+                            && !_classes[ManagedClassTypes.ClassIndex(
+                                setterClass)].IsMutable)))
+                {
+                    Report("TRM3001",
+                        "A mutating indexer setter requires a writable class or struct receiver.",
+                        indexerSetter.Span);
+                }
+                if (indexerSetter.Children.OfType<SyntaxNode>().Any(
+                        static child => child.Kind == SyntaxKind.Attribute))
+                {
+                    Report("TRM3001",
+                        "Setter-local attributes are not supported.",
+                        indexerSetter.Span);
+                }
+                if (declared.Any(static parameter =>
+                        parameter.Name == "value"))
+                {
+                    Report("TRM3004",
+                        "An indexer parameter cannot use the setter value name.",
+                        indexerSetter.Span);
+                }
+
+                var setterParameters = declared.ToImmutable().Add(
+                    new Parameter("value", returnType,
+                        indexerSetter.Span, false));
+                var setterContractClauses = indexerSetter.Children
+                    .OfType<SyntaxNode>()
+                    .Where(static child =>
+                        child.Kind == SyntaxKind.ContractClause)
+                    .Select(clause =>
+                        new SourceDeclarationContractClause(_tree,
+                            clause))
+                    .ToImmutableArray();
+                var getterAccessorStart = qualifiedName.LastIndexOf(
+                    "#get:", StringComparison.Ordinal);
+                if (getterAccessorStart < 0)
+                {
+                    throw new InvalidOperationException(
+                        "An indexer getter must use the property accessor name.");
+                }
+                var setterQualifiedName = qualifiedName[
+                    ..getterAccessorStart] + "#set:"
+                    + implementationName;
+                var setterSignature = signature with {
+                    Name = setterQualifiedName,
+                    ReturnType = PrimitiveType.Void,
+                    Parameters = setterParameters,
+                    Body = setterBody,
+                    IsMutable = setterIsMutable,
+                    IsPrivate = setterIsPrivate,
+                    IsInternal = setterIsInternal,
+                    RequiresUnsafeCaller = setterTokens.Any(
+                        static token => token.Token.Kind
+                            == TokenKind.UnsafeKeyword),
+                    DeclaredRequiresUnsafeCaller = setterTokens.Any(
+                        static token => token.Token.Kind
+                            == TokenKind.UnsafeKeyword),
+                    DeclarationContractClauses =
+                        setterContractClauses,
+                };
+                if (_functions.ContainsKey(setterQualifiedName))
+                {
+                    Report("TRM3003",
+                        $"Duplicate indexer setter '{nameToken.Text}'.",
+                        indexerSetter.Span);
+                }
+                else
+                {
+                    _functions.Add(setterQualifiedName,
+                        _signatures.Count);
+                    _signatures.Add(setterSignature);
+                }
+            }
+        }
+    }
+
+    private void AddNamedPropertyAccessorSignature(
+        Signature propertySignature, SyntaxNode accessor,
+        BoundPropertyAccessorKind accessorKind)
+    {
+        var declaration = propertySignature.Declaration
+            ?? throw new InvalidOperationException(
+                "A property accessor is missing its declaration.");
+        var propertyName = propertySignature.PropertyName
+            ?? throw new InvalidOperationException(
+                "A property accessor is missing its property name.");
+        var marker = propertySignature.Name.LastIndexOf("#get:",
+            StringComparison.Ordinal);
+        if (marker < 0)
+        {
+            throw new InvalidOperationException(
+                "A named property getter has no accessor identity.");
+        }
+
+        var accessorText = accessorKind
+            == BoundPropertyAccessorKind.Setter ? "#set:" : "#init:";
+        var accessorName = propertySignature.Name[..marker]
+            + accessorText + propertySignature.Name[(marker + 5)..];
+        var body = accessor.Children.OfType<SyntaxNode>()
+            .LastOrDefault(static child => child.Kind is SyntaxKind.Block
+                or SyntaxKind.ExpressionBody
+                or SyntaxKind.ExternalBody);
+        var isAuto = body is null
+            && accessor.Children.LastOrDefault() is SyntaxTokenElement {
+                Token.Kind: TokenKind.Semicolon,
+            };
+        if (body is null && isAuto)
+        {
+            body = new SyntaxNode(SyntaxKind.Block, [],
+                accessor.Span.Start);
+        }
+        if (body is null || body.Kind == SyntaxKind.ExternalBody)
+        {
+            Report("TRM3005",
+                "A property setter or init accessor requires a supported body.",
+                accessor.Span);
+            return;
+        }
+
+        var accessorTokens = accessor.Children
+            .OfType<SyntaxTokenElement>().ToArray();
+        var accessorVisibility = accessorTokens
+            .Where(static token => token.Token.Kind is
+                TokenKind.PublicKeyword or TokenKind.InternalKeyword
+                    or TokenKind.PrivateKeyword)
+            .ToArray();
+        if (accessorVisibility.Length > 1)
+        {
+            Report("TRM3001",
+                "A property accessor can declare only one visibility modifier.",
+                accessor.Span);
+        }
+        if (accessorVisibility.Any(static token =>
+                token.Token.Kind == TokenKind.PublicKeyword)
+            && (propertySignature.IsPrivate
+                || propertySignature.IsInternal))
+        {
+            Report("TRM3001",
+                "A property accessor cannot broaden its property's visibility.",
+                accessor.Span);
+        }
+
+        var isPrivate = propertySignature.IsPrivate
+            || accessorVisibility.Any(static token =>
+                token.Token.Kind == TokenKind.PrivateKeyword);
+        var isInternal = !isPrivate
+            && (propertySignature.IsInternal
+                || accessorVisibility.Any(static token =>
+                    token.Token.Kind == TokenKind.InternalKeyword));
+        var requiresMutableReceiver = accessorKind
+                == BoundPropertyAccessorKind.Setter
+            && accessorTokens.Any(static token =>
+                token.Token.Kind == TokenKind.MutKeyword);
+        var declaresMutableReceiver
+            = accessorTokens.Any(static token =>
+                token.Token.Kind == TokenKind.MutKeyword);
+        if (accessorKind == BoundPropertyAccessorKind.Initializer
+            && declaresMutableReceiver)
+        {
+            Report("TRM3001",
+                "An init accessor receives phase-owned initialization authority, not a mut receiver.",
+                accessor.Span);
+        }
+        if (requiresMutableReceiver
+            && (propertySignature.StructName is not string owner
+                || propertySignature.IsStatic
+                || TryResolveClass(Qualify(owner), out var classType)
+                    && !_classes[ManagedClassTypes.ClassIndex(classType)]
+                        .IsMutable))
+        {
+            Report("TRM3001",
+                "A mutating property setter requires a writable class or struct receiver.",
+                accessor.Span);
+        }
+        if (accessorKind == BoundPropertyAccessorKind.Setter && isAuto
+            && !requiresMutableReceiver)
+        {
+            Report("TRM3008",
+                "An auto setter that writes backing storage requires a mut setter receiver.",
+                accessor.Span);
+        }
+        foreach (var attribute in accessor.Children.OfType<SyntaxNode>()
+            .Where(static child => child.Kind == SyntaxKind.Attribute))
+        {
+            Report("TRM3001",
+                "Property setter-local attributes are not supported by this source route.",
+                attribute.Span);
+        }
+
+        var unsafeModifierCount = accessorTokens.Count(static token =>
+            token.Token.Kind == TokenKind.UnsafeKeyword);
+        if (unsafeModifierCount > 1)
+        {
+            Report("TRM3001",
+                "A property accessor can declare only one unsafe modifier.",
+                accessor.Span);
+        }
+        var accessorIsUnsafe = unsafeModifierCount != 0;
+        var accessorContracts = declaration.Children
+            .OfType<SyntaxNode>()
+            .Where(static child => child.Kind == SyntaxKind.ContractClause)
+            .Concat(accessor.Children.OfType<SyntaxNode>()
+                .Where(static child =>
+                    child.Kind == SyntaxKind.ContractClause))
+            .Select(clause => new SourceDeclarationContractClause(_tree,
+                clause))
+            .ToImmutableArray();
+        var accessorSignature = propertySignature with {
+            Name = accessorName,
+            ReturnType = PrimitiveType.Void,
+            Parameters = [
+                new Parameter("value", propertySignature.ReturnType,
+                    accessor.Span, false),
+            ],
+            Body = body,
+            IsMutable = requiresMutableReceiver,
+            IsPrivate = isPrivate,
+            IsInternal = isInternal,
+            External = null,
+            PropertyAccessorKind = accessorKind,
+            IsAutoPropertyAccessor = isAuto,
+            IsStaticAutoProperty = false,
+            IsConstEval = false,
+            PureEvaluationFormSchema = null,
+            ConstEvalSchema = null,
+            RequiresUnsafeCaller =
+                propertySignature.DeclaredRequiresUnsafeCaller
+                || accessorIsUnsafe,
+            DeclaredRequiresUnsafeCaller =
+                propertySignature.DeclaredRequiresUnsafeCaller
+                || accessorIsUnsafe,
+            DeclarationContractClauses = accessorContracts,
+        };
+        if (_functions.ContainsKey(accessorName))
+        {
+            Report("TRM3003",
+                $"Duplicate property accessor '{propertyName}'.",
+                accessor.Span);
+            return;
+        }
+
+        _functions.Add(accessorName, _signatures.Count);
+        _signatures.Add(accessorSignature);
     }
 
     private void ValidatePartialStaticConstructors()
@@ -6784,6 +11749,103 @@ internal sealed partial class Binder
             Tree = implementation.Tree,
             External = null,
             IsStaticConstructorComposed = true,
+        };
+        return true;
+    }
+
+    private void ValidatePartialConstructors()
+    {
+        foreach (var signature in _signatures)
+        {
+            if (!signature.IsPartialConstructor
+                || signature.IsPartialConstructorComposed)
+            {
+                continue;
+            }
+
+            if (signature.Declaration is SyntaxNode declaration)
+            {
+                SetContext(signature.Tree, declaration);
+                Report("TRM3011",
+                    "A partial constructor requires exactly one bodyless primary and one implementing secondary.",
+                    declaration.Span);
+            }
+        }
+    }
+
+    private bool TryComposePartialConstructor(int existingIndex,
+        Signature candidate)
+    {
+        var existing = _signatures[existingIndex];
+        if (!existing.IsPartialConstructor
+            || !candidate.IsPartialConstructor
+            || existing.IsPartialConstructorComposed)
+        {
+            Report("TRM3011",
+                "A partial constructor requires exactly one bodyless primary and one implementing secondary.",
+                candidate.Declaration?.Span
+                    ?? candidate.Body?.Span ?? _tree.Root.Span);
+            return true;
+        }
+
+        var existingIsPrimary
+            = existing.Body?.Kind == SyntaxKind.ExternalBody;
+        var candidateIsPrimary
+            = candidate.Body?.Kind == SyntaxKind.ExternalBody;
+        if (existingIsPrimary == candidateIsPrimary)
+        {
+            Report("TRM3011",
+                "A partial constructor requires one bodyless primary and one body-bearing implementation.",
+                candidate.Declaration?.Span ?? _tree.Root.Span);
+            return true;
+        }
+
+        var primary = existingIsPrimary ? existing : candidate;
+        var implementation = existingIsPrimary ? candidate : existing;
+        if (!primary.HasExplicitVisibility
+            || !StringComparer.Ordinal.Equals(primary.StructName,
+                implementation.StructName)
+            || primary.ReturnType != implementation.ReturnType
+            || primary.IsClassConstructor != implementation.IsClassConstructor
+            || primary.IsStatic != implementation.IsStatic
+            || primary.Parameters.Length != implementation.Parameters.Length
+            || !primary.Parameters.Zip(implementation.Parameters)
+                .All(static pair =>
+                    StringComparer.Ordinal.Equals(pair.First.Name,
+                        pair.Second.Name)
+                    && pair.First.Type == pair.Second.Type
+                    && pair.First.IsOut == pair.Second.IsOut
+                    && pair.First.IsInit == pair.Second.IsInit
+                    && pair.First.IsImplicitRef
+                        == pair.Second.IsImplicitRef
+                    && pair.First.IsCanonicalImplicitReference
+                        == pair.Second.IsCanonicalImplicitReference
+                    && pair.First.NativePointeeType
+                        == pair.Second.NativePointeeType
+                    && pair.First.IsWritableNativePointer
+                        == pair.Second.IsWritableNativePointer)
+            || implementation.HasExplicitVisibility
+            || implementation.RequiresUnsafeCaller
+            || implementation.DeclaredRequiresUnsafeCaller
+            || !implementation.DeclarationContractClauses.IsDefaultOrEmpty
+            || implementation.NoFailureProof
+            || implementation.DoesNotReturn
+            || implementation.IsCleanup
+            || !implementation.DependencyContracts.IsDefaultOrEmpty)
+        {
+            Report("TRM3011",
+                "A partial constructor secondary must repeat the primary signature without changing its visibility, safety, conditions, completion, or dependency contracts.",
+                implementation.Declaration?.Span
+                    ?? implementation.Body?.Span ?? _tree.Root.Span);
+            return true;
+        }
+
+        _signatures[existingIndex] = primary with {
+            Body = implementation.Body,
+            Declaration = implementation.Declaration,
+            Tree = implementation.Tree,
+            External = null,
+            IsPartialConstructorComposed = true,
         };
         return true;
     }
@@ -7098,7 +12160,7 @@ internal sealed partial class Binder
                 || (isLiveCheckedReference
                     && CheckedReferenceTypeContract.IsSupportedReferenceStoreValueType(
                         current, _structs, _classes, _enumDefinitions.Count,
-                        checkedReferenceTypes)))
+                        checkedReferenceTypes, _nativePointerTypes)))
             {
                 return true;
             }
@@ -7623,7 +12685,8 @@ internal sealed partial class Binder
         return (capturedParameters, parameters, receiver, forwards);
     }
 
-    private PrimitiveType BindType(SyntaxNode node, bool allowVoid)
+    private PrimitiveType BindType(SyntaxNode node, bool allowVoid,
+        bool allowGenericWriteFormal = false)
     {
         if (node.Kind == SyntaxKind.AttributedTypeName)
         {
@@ -7772,27 +12835,58 @@ internal sealed partial class Binder
         }
         if (name is "Span" or "Terrum.Span")
         {
-            if (typeArgumentNodes.Length != 1 || writable || optional
+            if (typeArgumentNodes.Length != 1 || optional
                 || node.Children[^1] is SyntaxTokenElement { Token.Kind: TokenKind.QuestionQuestion })
             {
-                Report("TRM3005", "The compilation-local span profile requires readonly Span<Token>.", node.Span);
-                return PrimitiveType.Int32;
-            }
-            var element = BindType(typeArgumentNodes[0], allowVoid: false);
-            if (!IsStruct(element) || _structs[(int)element - 100].Name != TokenSpanContract.TokenName)
-            {
-                Report("TRM3005", "Only the closed Copy Token span is available in this provisional profile.", node.Span);
-                return PrimitiveType.Int32;
-            }
-            var context = CaptureContext();
-            DeclareStruct((int)element - 100);
-            RestoreContext(context);
-            if (!TokenSpanContract.ValidTokenLayout(_structs))
-            {
-                Report("TRM3005", "Token spans require the verified 0/4/8 field offsets, 12-byte stride and four-byte alignment.",
+                Report("TRM3005",
+                    "A Span type requires one element type and no optional or double-optional suffix.",
                     node.Span);
+                return PrimitiveType.Int32;
             }
-            return PrimitiveType.TokenSpan;
+
+            var elementTypeNode = typeArgumentNodes[0];
+            var isInitialization = elementTypeNode.Kind
+                == SyntaxKind.SpanInitializationTypeArgument;
+            if (isInitialization)
+            {
+                elementTypeNode = elementTypeNode.Children
+                    .OfType<SyntaxNode>().SingleOrDefault()
+                    ?? throw new InvalidOperationException(
+                        "A Span initialization type argument has no element type.");
+            }
+
+            var hasGenericElementFormal = TryGetGenericMethodTypeFormal(
+                elementTypeNode, out var elementFormalDefinitionOrdinal,
+                out var elementFormalOrdinal, out var isElementWritable);
+            var diagnosticCount = DiagnosticCount;
+            var elementType = BindType(elementTypeNode,
+                allowVoid: false,
+                allowGenericWriteFormal: isElementWritable);
+            if (DiagnosticCount != diagnosticCount)
+            {
+                return PrimitiveType.Int32;
+            }
+
+            if (!writable && !isInitialization && !isElementWritable
+                && IsTokenSpanElementType(elementType))
+            {
+                var context = CaptureContext();
+                DeclareStruct((int)elementType - 100);
+                RestoreContext(context);
+                if (!TokenSpanContract.ValidTokenLayout(_structs))
+                {
+                    Report("TRM3005",
+                        "Token spans require the verified 0/4/8 field offsets, 12-byte stride and four-byte alignment.",
+                        node.Span);
+                }
+                return PrimitiveType.TokenSpan;
+            }
+
+            return GetSpanType(elementType,
+                hasGenericElementFormal
+                    ? elementFormalDefinitionOrdinal : -1,
+                hasGenericElementFormal ? elementFormalOrdinal : -1,
+                isElementWritable, writable, isInitialization, node.Span);
         }
         PrimitiveType? type = null;
         var resolution = DeclaredTypeResolution.Missing;
@@ -7840,30 +12934,54 @@ internal sealed partial class Binder
         }
         else
         {
-            ImmutableArray<PrimitiveType>? typeArguments = null;
-            if (typeArgumentNodes.Length != 0)
+            if (typeArgumentNodes.Length != 0
+                || HasImportedGenericNominalTypeCandidate(name)
+                || TryFindGenericStructTemplateForTypeTerm(name, out _))
             {
-                var diagnosticCount = DiagnosticCount;
-                var arguments = ImmutableArray.CreateBuilder<PrimitiveType>(typeArgumentNodes.Length);
-                var allowsVoidArgument = HasImportedGenericNominalTypeCandidate(name);
-                foreach (var argumentNode in typeArgumentNodes)
-                {
-                    arguments.Add(BindType(argumentNode, allowVoid: allowsVoidArgument));
-                }
-                if (DiagnosticCount != diagnosticCount)
-                {
-                    return PrimitiveType.Int32;
-                }
-                typeArguments = arguments.MoveToImmutable();
+                resolution = ResolveTypeName(name,
+                    [.. typeArgumentNodes], node.Span, out var resolved);
+                type = resolution == DeclaredTypeResolution.Unique
+                    ? resolved : null;
             }
-            resolution = ResolveTypeName(name, typeArguments, node.Span, out var resolved);
-            type = typeArguments is null && TryPrimitiveType(name, out var primitive) ? primitive : name switch {
-                "ReadonlyInt32BufferView" when typeArguments is null => PrimitiveType.ReadonlyInt32BufferView,
-                "MutableInt32BufferView" when typeArguments is null => PrimitiveType.MutableInt32BufferView,
-                "ManagedNode" when typeArguments is null => PrimitiveType.ManagedNode,
-                "void" when allowVoid && typeArguments is null => PrimitiveType.Void,
-                _ => resolution == DeclaredTypeResolution.Unique ? resolved : (PrimitiveType?)null,
-            };
+            else
+            {
+                ImmutableArray<PrimitiveType>? typeArguments = null;
+                if (typeArgumentNodes.Length != 0)
+                {
+                    var diagnosticCount = DiagnosticCount;
+                    var arguments = ImmutableArray.CreateBuilder<
+                        PrimitiveType>(typeArgumentNodes.Length);
+                    foreach (var argumentNode in typeArgumentNodes)
+                    {
+                        arguments.Add(BindType(argumentNode,
+                            allowVoid: false));
+                    }
+                    if (DiagnosticCount != diagnosticCount)
+                    {
+                        return PrimitiveType.Int32;
+                    }
+                    typeArguments = arguments.MoveToImmutable();
+                }
+                resolution = ResolveTypeName(name, typeArguments,
+                    node.Span, out var resolved, [.. typeArgumentNodes]);
+                type = typeArguments is null
+                        && TryPrimitiveType(name, out var primitive)
+                    ? primitive : name switch {
+                        "ReadonlyInt32BufferView"
+                            when typeArguments is null
+                                => PrimitiveType.ReadonlyInt32BufferView,
+                        "MutableInt32BufferView"
+                            when typeArguments is null
+                                => PrimitiveType.MutableInt32BufferView,
+                        "ManagedNode" when typeArguments is null
+                            => PrimitiveType.ManagedNode,
+                        "void" when allowVoid && typeArguments is null
+                            => PrimitiveType.Void,
+                        _ => resolution
+                                == DeclaredTypeResolution.Unique
+                            ? resolved : (PrimitiveType?)null,
+                    };
+            }
         }
 
         if (type is null && resolution != DeclaredTypeResolution.Invalid)
@@ -7921,6 +13039,16 @@ internal sealed partial class Binder
                         resolvedType)].PointeeType,
                     isWritable: true, span: node.Span);
             }
+            else if (allowGenericWriteFormal
+                && _genericContext is GenericInstantiation generic
+                && generic.Template.ParameterIndex(name)
+                    is var parameterIndex
+                && parameterIndex >= 0
+                && generic.Template.TypeParameters[parameterIndex]
+                    .RequiresWritable)
+            {
+                type = resolvedType;
+            }
             else
             {
                 Report("TRM3005",
@@ -7944,6 +13072,139 @@ internal sealed partial class Binder
         var result = type ?? PrimitiveType.Int32;
         RecordLayoutKindsUse(result);
         return result;
+    }
+
+    private PrimitiveType GetSpanType(PrimitiveType elementType,
+        int elementFormalDefinitionOrdinal, int elementFormalOrdinal,
+        bool isElementWritable, bool isWritable, bool isInitialization,
+        TextSpan span)
+    {
+        var key = (elementType, elementFormalDefinitionOrdinal,
+            elementFormalOrdinal, isElementWritable, isWritable,
+            isInitialization);
+        if (_spanTypeIndexes.TryGetValue(key, out var existingIndex))
+        {
+            return BoundSpanTypeTypes.Type(existingIndex);
+        }
+        if (_spanTypes.Count >= BoundSpanTypeTypes.MaximumCount)
+        {
+            Report("TRM3016",
+                "The selected Span type instances exceed the supported count.",
+                span);
+            return PrimitiveType.Int32;
+        }
+
+        var index = _spanTypes.Count;
+        _spanTypes.Add(new BoundSpanTypeDefinition(elementType,
+            elementFormalDefinitionOrdinal, elementFormalOrdinal,
+            isElementWritable, isWritable, isInitialization));
+        _spanTypeIndexes.Add(key, index);
+        return BoundSpanTypeTypes.Type(index);
+    }
+
+    private bool TryGetGenericMethodTypeFormal(SyntaxNode node,
+        out int definitionOrdinal, out int formalOrdinal,
+        out bool isWritable)
+    {
+        definitionOrdinal = -1;
+        formalOrdinal = -1;
+        isWritable = false;
+        if (node.Kind != SyntaxKind.TypeName)
+        {
+            return false;
+        }
+
+        var typeNameTokens = node.Children
+            .OfType<SyntaxTokenElement>()
+            .Select(static element => element.Token.Kind).ToArray();
+        if (node.Children.OfType<SyntaxNode>().Any()
+            || typeNameTokens.Count(static kind =>
+                kind == TokenKind.Identifier) != 1
+            || typeNameTokens.Any(static kind => kind is not (
+                TokenKind.Identifier or TokenKind.WriteKeyword)))
+        {
+            return false;
+        }
+
+        var name = TypeNameIdentifier(node);
+        var typeNameTokens = node.Children
+            .OfType<SyntaxTokenElement>()
+            .Select(static element => element.Token.Kind).ToArray();
+        var isFormalSyntax = !node.Children.OfType<SyntaxNode>().Any()
+            && typeNameTokens.Count(static kind =>
+                kind == TokenKind.Identifier) == 1
+            && typeNameTokens.All(static kind => kind is
+                TokenKind.Identifier or TokenKind.WriteKeyword
+                    or TokenKind.GcKeyword);
+        for (var index = _genericMethodAliasTypeFormals.Count - 1;
+            index >= 0; index--)
+        {
+            var aliasScope = _genericMethodAliasTypeFormals[index];
+            if (!aliasScope.TargetTypeSyntaxNodes.Contains(node))
+            {
+                continue;
+            }
+            if (!aliasScope.TypeParameterNames.Contains(name))
+            {
+                return false;
+            }
+            if (!isFormalSyntax
+                || !aliasScope.Formals.TryGetValue(name,
+                    out var aliasFormal))
+            {
+                return false;
+            }
+
+            definitionOrdinal = aliasFormal.DefinitionOrdinal;
+            formalOrdinal = aliasFormal.FormalOrdinal;
+            isWritable = aliasFormal.IsWritable
+                || node.Children[0] is SyntaxTokenElement {
+                    Token.Kind: TokenKind.WriteKeyword
+                };
+            return true;
+        }
+
+        if (!isFormalSyntax
+            || _genericContext is not GenericInstantiation generic)
+        {
+            return false;
+        }
+        formalOrdinal = generic.Template.ParameterIndex(name);
+        if (formalOrdinal < 0)
+        {
+            return false;
+        }
+
+        definitionOrdinal = generic.Template.DefinitionOrdinal;
+        if (definitionOrdinal < 0
+            && generic.Template.ImportedMethod
+                is BoundGenericMethodImport imported
+            && imported.FormalTypeOwnerOrdinal >= 0)
+        {
+            definitionOrdinal = checked(
+                BoundSpanTypeContract.ImportedFormalDefinitionOrdinal
+                - imported.FormalTypeOwnerOrdinal);
+        }
+        isWritable = node.Children[0] is SyntaxTokenElement {
+            Token.Kind: TokenKind.WriteKeyword
+        };
+        return true;
+    }
+
+    private bool IsTokenSpanElementType(PrimitiveType type)
+    {
+        if (!IsStruct(type))
+        {
+            return false;
+        }
+
+        var index = (int)type - 100;
+        if ((uint)index >= (uint)_structs.Count)
+        {
+            return false;
+        }
+
+        return _structs[index].Name == TokenSpanContract.TokenName;
     }
 
     private void RecordLayoutKindsUse(PrimitiveType type)
@@ -7991,8 +13252,12 @@ internal sealed partial class Binder
             }
         }
 
+        var hasGenericReferentFormal = TryGetGenericMethodTypeFormal(
+            typeArguments[0], out _, out _, out var isReferentWritable);
         var diagnosticCount = DiagnosticCount;
-        var referentType = BindType(typeArguments[0], allowVoid: false);
+        var referentType = BindType(typeArguments[0], allowVoid: false,
+            allowGenericWriteFormal: hasGenericReferentFormal
+                && isReferentWritable);
         if (DiagnosticCount != diagnosticCount)
         {
             return PrimitiveType.Int32;
@@ -8054,7 +13319,7 @@ internal sealed partial class Binder
             && !reference.IsOptional
             && CheckedReferenceTypeContract.IsSupportedReferenceStoreValueType(
                 requiredType, _structs, _classes, _enumDefinitions.Count,
-                [.. _checkedReferenceTypes]);
+                [.. _checkedReferenceTypes], _nativePointerTypes);
     }
 
     private PrimitiveType? TryGetOptionalType(PrimitiveType type, TextSpan span)
@@ -8083,7 +13348,7 @@ internal sealed partial class Binder
         }
 
         if (type != PrimitiveType.Void
-            && PrimitiveTypeFacts.ScalarWidth(type) == 0
+            && PrimitiveTypeFacts.ScalarWidth(type, _enumDefinitions) == 0
             && type != PrimitiveType.NativeRawPointer
             && !(BoundEnumTypes.IsType(type)
                 && (uint)BoundEnumTypes.Index(type)
@@ -8120,7 +13385,8 @@ internal sealed partial class Binder
         return !reference.IsGarbageCollected && !reference.IsInitialization
             && !reference.IsOptional
             && CheckedReferenceTypeContract.IsSupportedReferenceStoreValueType(
-                type, _structs, _classes, _enumDefinitions.Count, [.. _checkedReferenceTypes]);
+                type, _structs, _classes, _enumDefinitions.Count,
+                [.. _checkedReferenceTypes], _nativePointerTypes);
     }
 
     private BoundExpression BindCheckedReferenceExpression(SyntaxNode node, PrimitiveType? expected)
@@ -8155,11 +13421,21 @@ internal sealed partial class Binder
             expected = requiredType;
             expectedDefinition = _checkedReferenceTypes[CheckedReferenceTypes.Index(requiredType)];
         }
-        if (isInitialization || expectedDefinition is { IsInitialization: true }
-            or { IsGarbageCollected: true })
+        if ((isInitialization && expectedDefinition is { IsInitialization: false })
+            || (!isInitialization
+                && expectedDefinition is { IsInitialization: true }))
         {
             Report("TRM3030",
-                "Initialization and GC-backed reference formation require their dedicated runtime contracts.",
+                "Initialization authority requires explicit ref init place formation and cannot be inferred from an expected type.",
+                node.Span);
+            return ErrorExpression(node.Span);
+        }
+        if (expectedDefinition is { IsGarbageCollected: true }
+            || (isInitialization
+                && expectedDefinition is { IsOptional: true }))
+        {
+            Report("TRM3030",
+                "GC-backed or optional initialization-reference formation requires a separate selected contract.",
                 node.Span);
             return ErrorExpression(node.Span);
         }
@@ -8181,20 +13457,28 @@ internal sealed partial class Binder
 
             var sourceReference = _checkedReferenceTypes[
                 CheckedReferenceTypes.Index(descriptor.Type)];
-            if (sourceReference.IsGarbageCollected || sourceReference.IsInitialization
-                || sourceReference.IsOptional)
+            if (sourceReference.IsGarbageCollected
+                || sourceReference.IsOptional
+                || sourceReference.IsInitialization != isInitialization)
             {
                 Report("TRM3030",
-                    "Only an ordinary initialized reference can be reborrowed in this source profile.",
+                    sourceReference.IsInitialization
+                        ? "Forwarding an initialization reference requires explicit ref init place formation."
+                        : "Initialization authority cannot be introduced by reborrowing an ordinary reference.",
                     placeNodes[0].Span);
                 return ErrorExpression(node.Span);
             }
             if (expectedDefinition is not null
-                && (expectedDefinition.ReferentType != sourceReference.ReferentType
+                && (expectedDefinition.IsInitialization
+                        != sourceReference.IsInitialization
+                    || expectedDefinition.ReferentType
+                        != sourceReference.ReferentType
+                    || (expectedDefinition.IsReferentWritable
+                        && !sourceReference.IsReferentWritable)
                     || (expectedDefinition.IsWritable && !sourceReference.IsWritable)))
             {
                 Report("TRM3007",
-                    "A reference reborrow cannot change its referent or amplify write authority.",
+                    "A reference reborrow cannot change its referent, amplify write authority, or change initialization authority.",
                     node.Span);
                 return ErrorExpression(node.Span);
             }
@@ -8216,16 +13500,20 @@ internal sealed partial class Binder
 
         if (expectedDefinition is not null
             && (expectedDefinition.ReferentType != place.Type
-                || (expectedDefinition.IsWritable && !isWritable)))
+                || (expectedDefinition.IsWritable && !isWritable
+                    && !isInitialization)))
         {
             Report("TRM3007", "The place does not satisfy the checked-reference referent and access type.",
                 node.Span);
             return ErrorExpression(node.Span);
         }
 
-        var referenceType = expected ?? GetCheckedReferenceType(new CheckedReferenceTypeDefinition(
-            place.Type, isWritable, IsGarbageCollected: false,
-            IsInitialization: false, IsOptional: false), node.Span);
+        var referenceType = expected ?? GetCheckedReferenceType(
+            new CheckedReferenceTypeDefinition(place.Type,
+                IsWritable: !isInitialization && isWritable,
+                IsGarbageCollected: false,
+                IsInitialization: isInitialization, IsOptional: false),
+            node.Span);
         return new BoundReferenceFormation(place, referenceType, node.Span);
     }
 
@@ -8385,7 +13673,8 @@ internal sealed partial class Binder
                         element.FieldPlace?.Type
                             ?? _variables[element.Variable].Type,
                         element.Projections, _structs,
-                        _nativeFixedArrayTypes, out _, out var leafLayout)
+                        _nativeFixedArrayTypes, out _, out var leafLayout,
+                        enumDefinitions: _enumDefinitions)
                     || element.Type != leafLayout.ElementType)
                 {
                     rootVariable = -1;
@@ -8526,14 +13815,14 @@ internal sealed partial class Binder
     private bool IsSupportedCheckedReferenceStoreType(PrimitiveType type) =>
         CheckedReferenceTypeContract.IsSupportedReferenceStoreValueType(
             type, _structs, _classes, _enumDefinitions.Count,
-            [.. _checkedReferenceTypes]);
+            [.. _checkedReferenceTypes], _nativePointerTypes);
 
     private bool IsSupportedCheckedReferenceWriteValueType(
         PrimitiveType type) =>
         CheckedReferenceTypeContract.IsSupportedReferenceWriteValueType(type,
             _structs, _classes, _enumDefinitions.Count,
             [.. _checkedReferenceTypes], _nativeLoweringAgreement,
-            _nativeFixedArrayTypes);
+            _nativeFixedArrayTypes, _nativePointerTypes);
 
     private PrimitiveType BindNativeFunctionPointerType(SyntaxNode node,
         NativeCallingConvention callingConvention,
@@ -8829,11 +14118,33 @@ internal sealed partial class Binder
 
         member = new CoreEnumMemberDefinition(memberIdentity.Value,
             declaringEnum.Value,
-            enumMember.Name, enumMember.Value, enumMember.IsPublic)
+            enumMember.Name, checked((int)enumMember.Value),
+            enumMember.IsPublic)
         {
-            DeclarationKey = enumMember.DeclarationKey,
+            DeclarationKey = enumMember.DeclarationKey
+                ?? throw new InvalidOperationException(
+                    "A Core enum member has no declaration key."),
         };
         return true;
+    }
+
+    private BoundConstant BindEnumMemberConstant(
+        PrimitiveType enumType, BoundEnumMemberDefinition member,
+        TextSpan span)
+    {
+        var underlyingType
+            = _enumDefinitions[BoundEnumTypes.Index(enumType)]
+                .UnderlyingType;
+        if (!ScalarBits.TryFromIntegerValue(member.Value, underlyingType,
+                out var bits))
+        {
+            Report("TRM3005",
+                "The enum member value does not fit its underlying type.",
+                span);
+            return ErrorExpression(span);
+        }
+
+        return new BoundConstant(bits, enumType, underlyingType, span);
     }
 
     private bool TryBindStaticInitializerTrigger(SyntaxNode attribute,
@@ -9179,11 +14490,30 @@ internal sealed partial class Binder
         or SyntaxKind.ReferenceTypeName or SyntaxKind.AttributedTypeName or SyntaxKind.FixedArrayTypeName;
 
     private bool IsUnique(PrimitiveType type) =>
+        _genericUniqueRefinements.TryGetValue(type,
+            out var refinedUnique) ? refinedUnique
+        : IsUniqueWithoutGenericRefinement(type);
+
+    private bool IsUniqueWithoutGenericRefinement(PrimitiveType type) =>
         type == PrimitiveType.OwnedInt32Buffer
             || BoundGenericNominalTypeContract.IsCoreTaskType(type,
                 _genericNominalTypeInstances, _reference?.CoreTaskType)
             || ((int)type >= 100 && (int)type - 100 < _structs.Count
-                && _structs[(int)type - 100].IsUnique);
+                && _structs[(int)type - 100].IsUnique)
+            || IsUniqueClassHandle(type);
+
+    private bool IsUniqueClassHandle(PrimitiveType type)
+    {
+        if ((int)type < ManagedClassTypes.First
+            || !ManagedClassTypes.IsManaged(type))
+        {
+            return false;
+        }
+
+        var classIndex = ManagedClassTypes.ClassIndex(type);
+        return (uint)classIndex < (uint)_classes.Count
+            && _classes[classIndex].IsUnique == true;
+    }
 
     private bool IsManagedLifetimeValue(PrimitiveType type)
     {
@@ -9227,8 +14557,26 @@ internal sealed partial class Binder
         return contains;
     }
 
-    private string? CleanupMethod(PrimitiveType type) =>
-        type == PrimitiveType.OwnedInt32Buffer ? null : _structs[(int)type - 100].CleanupMethod;
+    private string? CleanupMethod(PrimitiveType type)
+    {
+        if (type == PrimitiveType.OwnedInt32Buffer)
+        {
+            return null;
+        }
+        if (ManagedClassTypes.IsManaged(type))
+        {
+            if ((int)type < ManagedClassTypes.First)
+            {
+                return null;
+            }
+
+            var classIndex = ManagedClassTypes.ClassIndex(type);
+            return (uint)classIndex < (uint)_classes.Count
+                ? _classes[classIndex].CleanupMethod : null;
+        }
+        return (int)type >= 100 && (int)type - 100 < _structs.Count
+            ? _structs[(int)type - 100].CleanupMethod : null;
+    }
 
     private BoundExpression BindReceiverLoan(SyntaxNode receiver, PrimitiveType type)
     {
@@ -9260,7 +14608,9 @@ internal sealed partial class Binder
         }
         if (receiver.Kind == SyntaxKind.NameExpression
             && TryFindVariable(((SyntaxTokenElement)receiver.Children[0]).Token, out var slot)
-            && _variables[slot].Type == type && _variables[slot].IsMutable)
+            && _variables[slot].Type == type
+            && (_variables[slot].IsMutable
+                || HasWritableGenericMethodTypeFormal(type)))
         {
             return new BoundMutableReceiverLoan(slot, type, span);
         }
@@ -9291,12 +14641,33 @@ internal sealed partial class Binder
         return ErrorExpression(span);
     }
 
+    private bool HasWritableGenericMethodTypeFormal(PrimitiveType type)
+    {
+        if (_genericContext is not GenericInstantiation context)
+        {
+            return false;
+        }
+
+        for (var ordinal = 0; ordinal < context.Types.Length; ordinal++)
+        {
+            if (context.Types[ordinal] == type
+                && context.Template.TypeParameters[ordinal]
+                    .RequiresWritable)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private BoundViewScope BindViewScope(SyntaxToken name, bool isMutable, SyntaxNode initializer, TextSpan span,
         PrimitiveType viewType)
     {
         var writable = viewType == PrimitiveType.MutableInt32BufferView;
         if (initializer.Kind == SyntaxKind.IndexExpression
-            && ((SyntaxNode)initializer.Children[2]).Kind == SyntaxKind.SliceRangeExpression)
+            && GetSingleIndexArgument(initializer) is
+                { Kind: SyntaxKind.SliceRangeExpression })
         {
             return BindRangeViewScope(name, isMutable, initializer, span, viewType);
         }
@@ -9395,7 +14766,9 @@ internal sealed partial class Binder
                 new BoundBlock([], span), span);
         }
 
-        var range = (SyntaxNode)initializer.Children[2];
+        var range = GetSingleIndexArgument(initializer)
+            ?? throw new InvalidOperationException(
+                "A range view requires one index argument.");
         var lower = (SyntaxNode)range.Children[0];
         var connector = ((SyntaxTokenElement)range.Children[1]).Token;
         var upper = (SyntaxNode)range.Children[2];
@@ -9720,6 +15093,13 @@ internal sealed partial class Binder
                         }
                     }
                     binding.Statements.Add(boundStatement);
+                    if (boundStatement is BoundIf {
+                            GenericUniquePropertyKnownResult: not null,
+                        } propertyIf
+                        && !CanCompleteGenericPropertyStatement(propertyIf))
+                    {
+                        break;
+                    }
                 }
             }
         }
@@ -9858,7 +15238,8 @@ internal sealed partial class Binder
             }
             if (selector.Type is not (PrimitiveType.Bool or PrimitiveType.Char16
                 or PrimitiveType.Int32 or PrimitiveType.UInt32
-                or PrimitiveType.Int64 or PrimitiveType.UInt64))
+                or PrimitiveType.Int64 or PrimitiveType.UInt64
+                or PrimitiveType.NativeInt or PrimitiveType.NativeUInt))
             {
                 Report("TRM3007", "Switch statements require a supported scalar selector.", selectorNode.Span);
                 return CompleteBlockScope(statements, outputOwners, node.Span);
@@ -10409,6 +15790,23 @@ internal sealed partial class Binder
 
                 // Locals enter scope only after their initializer, including in nested blocks.
                 var slot = AddVariable(name.Name, declaredType ?? initializer.Type, isMutable, name.Span);
+                if (!isMutable && initializer.Type == PrimitiveType.Bool)
+                {
+                    var propertyFlow
+                        = BoundGenericUniquePropertyFlowAnalysis.Analyze(
+                            initializer, _variables);
+                    if (propertyFlow.HasFacts)
+                    {
+                        _variables[slot] = _variables[slot] with {
+                            GenericUniquePropertyWhenTrue =
+                                propertyFlow.WhenTrue,
+                            GenericUniquePropertyWhenFalse =
+                                propertyFlow.WhenFalse,
+                            GenericUniquePropertyKnownResult =
+                                propertyFlow.KnownResult,
+                        };
+                    }
+                }
                 return new BoundLocal(slot, initializer, node.Span);
             }
 
@@ -10500,6 +15898,26 @@ internal sealed partial class Binder
 
                 if (TryFindInitReferenceProjection(target, out var destination))
                 {
+                    if (CheckedReferenceTypeContract.IsValidType(
+                            _variables[destination].Type,
+                            [.. _checkedReferenceTypes]))
+                    {
+                        var descriptorType
+                            = _checkedReferenceTypes[
+                                CheckedReferenceTypes.Index(
+                                    _variables[destination].Type)];
+                        if (descriptorType.IsInitialization)
+                        {
+                            var descriptor = new BoundRead(destination,
+                                _variables[destination].Type, node.Span);
+                            var initializedValue = BindExpression(valueNode,
+                                descriptorType.ReferentType);
+                            return new BoundExpressionStatement(
+                                new BoundReferenceWrite(descriptor, initializedValue,
+                                    node.Span), node.Span);
+                        }
+                    }
+
                     return new BoundAssignment(destination,
                         BindExpression(valueNode, _variables[destination].Type), node.Span);
                 }
@@ -10517,12 +15935,13 @@ internal sealed partial class Binder
                         var referenceType = _checkedReferenceTypes[
                             CheckedReferenceTypes.Index(descriptor.Type)];
                         var referenceValue = BindExpression(valueNode, referenceType.ReferentType);
-                        if (!referenceType.IsWritable)
+                        if (!referenceType.IsWritable
+                            && !referenceType.IsInitialization)
                         {
                             Report("TRM3008", "The checked reference does not grant writable referent access.",
                                 target.Span);
                         }
-                        if (referenceType.IsGarbageCollected || referenceType.IsInitialization
+                        if (referenceType.IsGarbageCollected
                             || referenceType.IsOptional
                             || !IsSupportedCheckedReferenceWriteValueType(
                                 referenceType.ReferentType))
@@ -10623,7 +16042,16 @@ internal sealed partial class Binder
                 if (target.Kind == SyntaxKind.IndexExpression
                     && TryFindBuffer((SyntaxNode)target.Children[0], out var buffer))
                 {
-                    if (((SyntaxNode)target.Children[2]).Kind == SyntaxKind.SliceRangeExpression)
+                    var targetIndex = GetSingleIndexArgument(target);
+                    if (targetIndex is null)
+                    {
+                        Report("TRM3008",
+                            "A host-buffer assignment requires one index argument.",
+                            target.Span);
+                        _ = BindExpression(valueNode, null);
+                        return new BoundBlock([], node.Span);
+                    }
+                    if (targetIndex.Kind == SyntaxKind.SliceRangeExpression)
                     {
                         Report("TRM3008", "A slice range is not an assignment destination.", target.Span);
                         _ = BindExpression(valueNode, null);
@@ -10633,7 +16061,7 @@ internal sealed partial class Binder
                     {
                         Report("TRM3008", "A read-only host buffer cannot be modified.", target.Span);
                     }
-                    var indexExpression = BindBufferIndex((SyntaxNode)target.Children[2], buffer,
+                    var indexExpression = BindBufferIndex(targetIndex, buffer,
                         out var isEndRelative);
                     return new BoundBufferAssignment(buffer, indexExpression,
                         BindExpression(valueNode, _buffers[buffer].ElementType), node.Span)
@@ -10641,8 +16069,56 @@ internal sealed partial class Binder
                         IsEndRelativeOffset = isEndRelative,
                     };
                 }
+                if (target.Kind == SyntaxKind.IndexExpression
+                    && ((SyntaxNode)target.Children[0]).Kind
+                        == SyntaxKind.InterfaceWitnessProjectionExpression)
+                {
+                    return new BoundExpressionStatement(
+                        BindInterfaceWitnessInvocation(target,
+                            (SyntaxNode)target.Children[0], "this",
+                            CreateIndexCallArgumentList(target, valueNode),
+                            BoundInterfaceAccessorKind.Set),
+                        node.Span);
+                }
+                if (target.Kind == SyntaxKind.IndexExpression
+                    && ((SyntaxNode)target.Children[0]).Kind
+                        != SyntaxKind.InterfaceWitnessProjectionExpression
+                    && KnownType((SyntaxNode)target.Children[0])
+                        is PrimitiveType indexerOwner
+                    && TryFindIndexerSetter(indexerOwner,
+                        out var indexerSetterFunction))
+                {
+                    var indexerReceiver
+                        = (SyntaxNode)target.Children[0];
+                    var indexParameterCount
+                        = _signatures[indexerSetterFunction]
+                            .Parameters.Length - 1;
+                    if (GetIndexArguments(target).Length
+                        < indexParameterCount)
+                    {
+                        return BindIndexerSetterAssignment(target,
+                            valueNode, indexerSetterFunction,
+                            indexerReceiver, node.Span);
+                    }
+                    return new BoundExpressionStatement(
+                        BindArguments(node,
+                            CreateIndexCallArgumentList(target, valueNode),
+                            indexerSetterFunction, indexerReceiver),
+                        node.Span);
+                }
                 if (target.Kind == SyntaxKind.MemberAccessExpression)
                 {
+                    if (target.Children.Length > 2
+                        && target.Children[0] is SyntaxNode propertyReceiver
+                        && target.Children[2]
+                            is SyntaxTokenElement propertyToken
+                        && TryBindPropertyAssignment(node,
+                            propertyReceiver,
+                            propertyToken.Token.Name, valueNode, node.Span)
+                            is BoundStatement propertyAssignment)
+                    {
+                        return propertyAssignment;
+                    }
                     return BindFieldAssignment(target, valueNode, node.Span);
                 }
                 if (target.Kind != SyntaxKind.NameExpression)
@@ -10653,6 +16129,40 @@ internal sealed partial class Binder
                 }
 
                 var token = ((SyntaxTokenElement)target.Children[0]).Token;
+                if (!TryFindVariable(token.Name, out _)
+                    && _hasReceiver && _currentStruct is not null
+                    && TryBindPropertyAssignment(node, null, token.Name,
+                        valueNode, node.Span)
+                        is BoundStatement implicitPropertyAssignment)
+                {
+                    return implicitPropertyAssignment;
+                }
+
+                if (token.Name == "field"
+                    && _bindingPropertyBackingFieldIndex >= 0
+                    && _hasReceiver && !_variables.IsEmpty)
+                {
+                    var ownerType = _variables[0].Type;
+                    var field = _bindingPropertyBackingFieldIndex;
+                    var fieldType = GetField(ownerType, field).Type;
+                    var initializationAuthority
+                        = _bindingPropertyAccessorKind
+                            == BoundPropertyAccessorKind.Initializer;
+                    var isUnsafeAuthorized = CheckFieldAccess(ownerType,
+                        field, target.Span);
+                    CheckFieldMutation(ownerType, field,
+                        initializationAuthority, target.Span);
+                    var assignment = BindFieldAssignmentValue(0, field, [],
+                        valueNode, fieldType, node.Span,
+                        isUnsafeAuthorized);
+                    return assignment is BoundFieldAssignment fieldAssignment
+                        ? fieldAssignment with {
+                            IsInitializationAuthority
+                                = initializationAuthority,
+                        }
+                        : assignment;
+                }
+
                 if (!TryFindVariable(token.Name, out var slot))
                 {
                     if (_hasReceiver && _currentStruct is not null
@@ -10710,7 +16220,8 @@ internal sealed partial class Binder
                     var arrayType = _variables[slot].Type;
                     if (!NativeFixedArrayContract.TryGetLayout(arrayType,
                             _structs, _nativeFixedArrayTypes,
-                            out var arrayLayout, _checkedReferenceTypes))
+                            out var arrayLayout, _checkedReferenceTypes,
+                            _enumDefinitions))
                     {
                         Report("TRM3030",
                             "The fixed-array assignment target has no valid layout.",
@@ -10883,6 +16394,12 @@ internal sealed partial class Binder
                         var value = BindExpression(valueNode, PrimitiveType.Void);
                         if (value.Type == PrimitiveType.Void)
                         {
+                            if (value is BoundConstant {
+                                Type: PrimitiveType.Void,
+                            })
+                            {
+                                return new BoundReturn(null, node.Span);
+                            }
                             return new BoundBlock(
                                 [new BoundExpressionStatement(value, valueNode.Span), new BoundReturn(null, node.Span)],
                                 node.Span);
@@ -10905,16 +16422,135 @@ internal sealed partial class Binder
             {
                 var conditionNode = (SyntaxNode)node.Children[2];
                 var condition = BindExpression(conditionNode, PrimitiveType.Bool);
-                var then = BindBlock((SyntaxNode)node.Children[4]);
+                var propertyFlow
+                    = BoundGenericUniquePropertyFlowAnalysis.Analyze(
+                        condition, _variables);
+                if (propertyFlow.HasFacts
+                    && _genericProofFunctions is null
+                    && propertyFlow.KnownResult is bool knownPropertyResult)
+                {
+                    var specializedCondition = new BoundConstant(
+                        knownPropertyResult ? 1 : 0, PrimitiveType.Bool,
+                        condition.Span) {
+                        GenericUniquePropertyWhenTrue =
+                            propertyFlow.WhenTrue,
+                        GenericUniquePropertyWhenFalse =
+                            propertyFlow.WhenFalse,
+                        GenericUniquePropertyKnownResult =
+                            knownPropertyResult,
+                    };
+                    if (knownPropertyResult)
+                    {
+                        var selected = BindWithGenericUniqueRefinements(
+                            propertyFlow.WhenTrue,
+                            () => BindBlock((SyntaxNode)node.Children[4]),
+                            out var refinements);
+                        SetGenericUniqueRefinements(refinements);
+                        var unselectedElse = node.Children.Length > 5
+                            ? new BoundBlock([], node.Span) : null;
+                        return new BoundIf(specializedCondition, selected,
+                            unselectedElse,
+                            node.Span) {
+                            GenericUniquePropertyWhenTrue =
+                                propertyFlow.WhenTrue,
+                            GenericUniquePropertyWhenFalse =
+                                propertyFlow.WhenFalse,
+                            GenericUniquePropertyKnownResult =
+                                propertyFlow.KnownResult,
+                        };
+                    }
+                    if (node.Children.Length > 5)
+                    {
+                        var clause = (SyntaxNode)node.Children[5];
+                        var selected = BindWithGenericUniqueRefinements(
+                            propertyFlow.WhenFalse,
+                            () => BindStatement(
+                                (SyntaxNode)clause.Children[1]),
+                            out var refinements);
+                        SetGenericUniqueRefinements(refinements);
+                        return new BoundIf(specializedCondition,
+                            new BoundBlock([], node.Span), selected,
+                            node.Span) {
+                            GenericUniquePropertyWhenTrue =
+                                propertyFlow.WhenTrue,
+                            GenericUniquePropertyWhenFalse =
+                                propertyFlow.WhenFalse,
+                            GenericUniquePropertyKnownResult =
+                                propertyFlow.KnownResult,
+                        };
+                    }
+                    _ = BindWithGenericUniqueRefinements(
+                        propertyFlow.WhenFalse, static () => true,
+                        out var falseRefinements);
+                    SetGenericUniqueRefinements(falseRefinements);
+                    return new BoundIf(specializedCondition,
+                        new BoundBlock([], node.Span), null, node.Span) {
+                        GenericUniquePropertyWhenTrue =
+                            propertyFlow.WhenTrue,
+                        GenericUniquePropertyWhenFalse =
+                            propertyFlow.WhenFalse,
+                        GenericUniquePropertyKnownResult =
+                            propertyFlow.KnownResult,
+                    };
+                }
+
+                var then = BindWithGenericUniqueRefinements(
+                    propertyFlow.WhenTrue,
+                    () => BindBlock((SyntaxNode)node.Children[4]),
+                    out var thenRefinements);
                 BoundStatement? otherwise = null;
+                Dictionary<PrimitiveType, bool> elseRefinements;
 
                 if (node.Children.Length > 5)
                 {
                     var clause = (SyntaxNode)node.Children[5];
-                    otherwise = BindStatement((SyntaxNode)clause.Children[1]);
+                    otherwise = BindWithGenericUniqueRefinements(
+                        propertyFlow.WhenFalse,
+                        () => BindStatement(
+                            (SyntaxNode)clause.Children[1]),
+                        out elseRefinements);
+                }
+                else
+                {
+                    _ = BindWithGenericUniqueRefinements(
+                        propertyFlow.WhenFalse, static () => true,
+                        out elseRefinements);
                 }
 
-                return new BoundIf(condition, then, otherwise, node.Span);
+                var result = new BoundIf(condition, then, otherwise,
+                    node.Span);
+                if (propertyFlow.HasFacts)
+                {
+                    result = result with {
+                        GenericUniquePropertyWhenTrue =
+                            propertyFlow.WhenTrue,
+                        GenericUniquePropertyWhenFalse =
+                            propertyFlow.WhenFalse,
+                        GenericUniquePropertyKnownResult =
+                            propertyFlow.KnownResult,
+                    };
+                }
+
+                var thenCompletes = propertyFlow.CanBeTrue
+                    && CanCompleteGenericPropertyStatement(then);
+                var elseCompletes = propertyFlow.CanBeFalse
+                    && (otherwise is null
+                        || CanCompleteGenericPropertyStatement(otherwise));
+                if (thenCompletes && elseCompletes)
+                {
+                    SetGenericUniqueRefinements(
+                        MergeGenericUniqueRefinements(thenRefinements,
+                            elseRefinements));
+                }
+                else if (thenCompletes)
+                {
+                    SetGenericUniqueRefinements(thenRefinements);
+                }
+                else if (elseCompletes)
+                {
+                    SetGenericUniqueRefinements(elseRefinements);
+                }
+                return result;
             }
 
             case SyntaxKind.SwitchStatement:
@@ -11064,6 +16700,76 @@ internal sealed partial class Binder
         }
     }
 
+    private BoundStatement BindIndexerSetterAssignment(
+        SyntaxNode indexExpression, SyntaxNode valueNode,
+        int setterFunction, SyntaxNode receiver, TextSpan span)
+    {
+        var originalSignature = _signatures[setterFunction];
+        var indexParameterCount = originalSignature.Parameters.Length - 1;
+        var suppliedIndexCount = GetIndexArguments(indexExpression).Length;
+        var signatureForIndices = originalSignature with {
+            Parameters = originalSignature.Parameters.Slice(0,
+                suppliedIndexCount),
+        };
+        _signatures[setterFunction] = signatureForIndices;
+        BoundCall call;
+        try
+        {
+            call = BindArguments(indexExpression,
+                CreateIndexCallArgumentList(indexExpression),
+                setterFunction, receiver);
+        }
+        finally
+        {
+            _signatures[setterFunction] = originalSignature;
+        }
+
+        var arguments = call.Arguments.ToBuilder();
+        var parameterIndices = call.ArgumentParameterIndices;
+        var parameterIndexBuilder = parameterIndices.IsDefault
+            ? null : parameterIndices.ToBuilder();
+
+        var implicitReferenceTemporaries
+            = call.ArgumentImplicitReferenceTemporaries.IsDefault
+                ? null
+                : call.ArgumentImplicitReferenceTemporaries.ToBuilder();
+        for (var parameterIndex = suppliedIndexCount;
+            parameterIndex < indexParameterCount; parameterIndex++)
+        {
+            var parameter = originalSignature.Parameters[
+                parameterIndex];
+            BoundExpression defaultValue;
+            if (parameter.DefaultValue is BoundConstant constant
+                && constant.Type == parameter.Type)
+            {
+                defaultValue = constant with { Span = span };
+            }
+            else
+            {
+                Report("TRM3011",
+                    $"Required indexer parameter '{parameter.Name}' was not supplied.",
+                    indexExpression.Span);
+                defaultValue = ErrorExpression(indexExpression.Span);
+            }
+            arguments.Add(defaultValue);
+            parameterIndexBuilder?.Add(parameterIndex + 1);
+            implicitReferenceTemporaries?.Add(-1);
+        }
+
+        var valueParameter
+            = originalSignature.Parameters[indexParameterCount];
+        arguments.Add(BindExpression(valueNode, valueParameter.Type));
+        parameterIndexBuilder?.Add(indexParameterCount + 1);
+        implicitReferenceTemporaries?.Add(-1);
+        return new BoundExpressionStatement(call with {
+            Arguments = arguments.ToImmutable(),
+            ArgumentParameterIndices = parameterIndexBuilder?.ToImmutable()
+                ?? parameterIndices,
+            ArgumentImplicitReferenceTemporaries =
+                implicitReferenceTemporaries?.ToImmutable() ?? default,
+        }, span);
+    }
+
     private BoundStatement BindOptionalAssignment(SyntaxNode target, SyntaxNode value, TextSpan span)
     {
         while (target.Kind == SyntaxKind.ParenthesizedExpression)
@@ -11132,6 +16838,13 @@ internal sealed partial class Binder
             }
             else
             {
+                if (root.Children.Length > 3)
+                {
+                    Report("TRM3005",
+                        "Generic member type arguments cannot form an assignment destination.",
+                        root.Span);
+                    return new BoundBlock([], span);
+                }
                 members.Push(((SyntaxTokenElement)root.Children[2]).Token);
                 root = (SyntaxNode)root.Children[0];
             }
@@ -11142,6 +16855,11 @@ internal sealed partial class Binder
         {
             return BindNativeFixedArrayPathFieldAssignment(arrayVariable,
                 arrayFieldPlace, arrayProjections, members, value, span);
+        }
+        if (root.Kind == SyntaxKind.UnaryExpression
+            && ((SyntaxTokenElement)root.Children[0]).Token.Kind == TokenKind.Star)
+        {
+            return BindReferenceFieldAssignment(target, value, span);
         }
         if (root.Kind == SyntaxKind.NameExpression && members.Count == 1
             && !TryFindVariable(
@@ -11237,6 +16955,48 @@ internal sealed partial class Binder
         }
         return BindFieldAssignmentValue(variable, path[0],
             path.RemoveAt(0), value, type, span, isUnsafeAuthorized);
+    }
+
+    private BoundStatement BindReferenceFieldAssignment(
+        SyntaxNode target, SyntaxNode value, TextSpan span)
+    {
+        var place = BindExpression(target, null);
+        if (place is not BoundFieldRead
+            || !TryGetCheckedReferencePlace(place, out _, out var isWritable))
+        {
+            Report("TRM3008",
+                "Field assignment requires an addressable checked-reference field place.",
+                target.Span);
+            _ = BindExpression(value, null);
+            return new BoundBlock([], span);
+        }
+        if (!isWritable)
+        {
+            Report("TRM3008",
+                "The checked-reference field place does not grant writable access.",
+                target.Span);
+            _ = BindExpression(value, place.Type);
+            return new BoundBlock([], span);
+        }
+        if (!IsSupportedCheckedReferenceWriteValueType(place.Type))
+        {
+            Report("TRM3030",
+                "This checked-reference field requires a separate store, ownership, or initialization contract.",
+                target.Span);
+            _ = BindExpression(value, place.Type);
+            return new BoundBlock([], span);
+        }
+
+        var descriptorType = GetCheckedReferenceType(
+            new CheckedReferenceTypeDefinition(place.Type,
+                IsWritable: true, IsGarbageCollected: false,
+                IsInitialization: false, IsOptional: false),
+            target.Span);
+        var descriptor = new BoundReferenceFormation(
+            place, descriptorType, target.Span);
+        var boundValue = BindExpression(value, place.Type);
+        return new BoundExpressionStatement(
+            new BoundReferenceWrite(descriptor, boundValue, span), span);
     }
 
     private BoundStaticFieldAssignment BindStaticFieldAssignment(int fieldIndex,
@@ -11674,6 +17434,638 @@ internal sealed partial class Binder
         && key.Arity == 1 && key.Operator == updateOperator
         && updateOperator is TokenKind.PlusPlus or TokenKind.MinusMinus;
 
+    private BoundQuerySubject BindQueryTypeOrPlace(
+        SyntaxNode subjectSyntax, bool allowVoid, bool requiresLayout,
+        bool requiresTypeIdentityTerm = false)
+    {
+        if (IsQueryTypeSyntax(subjectSyntax)
+            && !ShouldBindQuerySubjectAsPlace(subjectSyntax))
+        {
+            BoundGenericMethodTypeTerm? typeIdentityTerm = null;
+            PrimitiveType type;
+            var isVoidType = TypeNameIdentifier(subjectSyntax) == "void"
+                && !subjectSyntax.Children.OfType<SyntaxNode>().Any();
+            if (requiresTypeIdentityTerm && isVoidType
+                && _genericProofFunctions is not null
+                && _genericContext is not null)
+            {
+                type = PrimitiveType.Void;
+                typeIdentityTerm = new BoundGenericMethodTypeTerm(
+                    BoundGenericMethodTypeTermKind.Concrete,
+                    PrimitiveType.Void, -1, -1, [], false, false, false,
+                    false) {
+                    AllowsVoid = true,
+                };
+            }
+            else if (requiresTypeIdentityTerm
+                && _genericProofFunctions is not null
+                && _genericContext is GenericInstantiation context)
+            {
+                var diagnosticCount = DiagnosticCount;
+                typeIdentityTerm = BindGenericMethodTypeTerm(
+                    subjectSyntax, context.Template);
+                if (typeIdentityTerm is null
+                    || !TryResolveGenericMethodTypeTerm(typeIdentityTerm,
+                        subjectSyntax.Span, out type))
+                {
+                    if (DiagnosticCount == diagnosticCount)
+                    {
+                        Report("TRM3005",
+                            "Open-generic TypeIdentity requires exact type-substitution evidence.",
+                            subjectSyntax.Span);
+                    }
+                    return new BoundQuerySubject(PrimitiveType.Int32,
+                        BoundQuerySubjectKind.Type, null, null, false,
+                        _unsafeDepth != 0);
+                }
+            }
+            else
+            {
+                type = BindType(subjectSyntax, allowVoid);
+            }
+
+            var requiresUnsafe = requiresLayout
+                && type != PrimitiveType.Void
+                && !IsBlittableQueryType(type);
+            if (requiresUnsafe && _unsafeDepth == 0)
+            {
+                Report("TRM3028",
+                    "A non-Blittable layout query requires an explicit unsafe context.",
+                    subjectSyntax.Span);
+            }
+            var subject = new BoundQuerySubject(type,
+                BoundQuerySubjectKind.Type,
+                null, null, requiresUnsafe, _unsafeDepth != 0);
+            return requiresTypeIdentityTerm
+                ? RetainGenericTypeIdentityTerm(subject, subjectSyntax,
+                    typeIdentityTerm)
+                : subject;
+        }
+
+        var placeSyntax = IsQueryTypeSyntax(subjectSyntax)
+            ? CreateQueryPlaceSyntax(subjectSyntax) : subjectSyntax;
+        var place = BindQueryPlaceExpression(placeSyntax);
+        if (!IsQueryPlaceExpression(place))
+        {
+            Report("TRM3007",
+                "The query expression operand must bind as a Terrum Place.",
+                subjectSyntax.Span);
+        }
+        var requiresUnsafeForPlace = requiresLayout
+            && place.Type != PrimitiveType.Void
+            && !IsBlittableQueryType(place.Type);
+        if (requiresUnsafeForPlace && _unsafeDepth == 0)
+        {
+            Report("TRM3028",
+                "A non-Blittable layout query requires an explicit unsafe context.",
+                subjectSyntax.Span);
+        }
+        var placeSubject = new BoundQuerySubject(place.Type,
+            BoundQuerySubjectKind.Place,
+            place, null, requiresUnsafeForPlace, _unsafeDepth != 0);
+        return requiresTypeIdentityTerm
+            ? RetainGenericTypeIdentityTerm(placeSubject, null)
+            : placeSubject;
+    }
+
+    private BoundQuerySubject RetainGenericTypeIdentityTerm(
+        BoundQuerySubject subject, SyntaxNode? typeSyntax,
+        BoundGenericMethodTypeTerm? retainedTerm = null)
+    {
+        if (_genericProofFunctions is null
+            || _genericContext is not GenericInstantiation context)
+        {
+            return subject;
+        }
+
+        var term = retainedTerm;
+        if (term is null && typeSyntax is not null)
+        {
+            term = BindGenericMethodTypeTerm(typeSyntax,
+                context.Template);
+        }
+        if (term is null
+            && TryGetGenericQueryTypeIdentityTerm(subject.Type,
+                out var typeTerm))
+        {
+            term = typeTerm;
+        }
+        if (term is null)
+        {
+            Report("TRM3005",
+                "Open-generic TypeIdentity requires exact type-substitution evidence.",
+                typeSyntax?.Span ?? subject.PlaceExpression?.Span
+                    ?? default);
+            return subject;
+        }
+
+        if (subject.Type == PrimitiveType.Void)
+        {
+            term = term with { AllowsVoid = true };
+        }
+        return subject with { TypeIdentityTerm = term };
+    }
+
+    private BoundExpression BindQueryPlaceExpression(SyntaxNode syntax)
+    {
+        _queryPlaceBindingDepth++;
+        try
+        {
+            return BindExpression(syntax, expected: null);
+        }
+        finally
+        {
+            _queryPlaceBindingDepth--;
+        }
+    }
+
+    private BoundQueryFieldPath? BindQueryFieldPath(
+        PrimitiveType rootType, SyntaxNode fieldPathSyntax)
+    {
+        var fieldNames = fieldPathSyntax.Children
+            .OfType<SyntaxTokenElement>()
+            .Where(static element => element.Token.Kind == TokenKind.Identifier)
+            .ToArray();
+        if (fieldPathSyntax.Kind != SyntaxKind.FieldPath
+            || !IsStruct(rootType) || fieldNames.Length == 0
+            || fieldNames.Length > SemanticVerifier.MaximumAnalysisVisits
+            || fieldNames.Any(static element => element.Token.IsMissing))
+        {
+            Report("TRM3005",
+                "offsetof(Type, FieldPath) requires a nonempty inline path rooted in a value type.",
+                fieldPathSyntax.Span);
+            return null;
+        }
+
+        var steps = ImmutableArray.CreateBuilder<BoundQueryFieldStep>(
+            fieldNames.Length);
+        var ownerType = rootType;
+        foreach (var fieldName in fieldNames)
+        {
+            if (!IsStruct(ownerType)
+                || !TryFindField(ownerType, fieldName.Token.Name,
+                    out var field))
+            {
+                Report("TRM3006",
+                    $"Type '{TypeName(ownerType)}' has no inline field '{fieldName.Token.Text}'.",
+                    fieldName.Token.Span);
+                return null;
+            }
+
+            var definition = GetField(ownerType, field);
+            var ownerStructureIndex = (int)ownerType - 100;
+            if ((uint)ownerStructureIndex < (uint)_structs.Count
+                && _structs[ownerStructureIndex].StandardLayoutOnly
+                && definition.StandardFieldOrigin is null)
+            {
+                Report("TRM3006",
+                    $"Field '{fieldName.Token.Text}' has no selected Standard FieldDef ExportKey.",
+                    fieldName.Token.Span);
+                return null;
+            }
+
+            var isUnsafeAuthorized = CheckFieldAccess(
+                ownerType, field, fieldName.Token.Span);
+            steps.Add(new BoundQueryFieldStep(ownerType,
+                checked((uint)field), definition.Type,
+                isUnsafeAuthorized) {
+                StandardFieldOrigin = definition.StandardFieldOrigin,
+            });
+            ownerType = definition.Type;
+        }
+
+        return new BoundQueryFieldPath(rootType, steps.MoveToImmutable());
+    }
+
+    private bool IsStandardLayoutOnlyType(PrimitiveType type)
+    {
+        var pending = new Stack<PrimitiveType>();
+        var visited = new HashSet<PrimitiveType>();
+        pending.Push(type);
+        while (pending.TryPop(out var current))
+        {
+            if (!visited.Add(current))
+            {
+                continue;
+            }
+
+            var structureIndex = (int)current - 100;
+            if (structureIndex >= 0 && structureIndex < _structs.Count
+                && _structs[structureIndex].StandardLayoutOnly)
+            {
+                return true;
+            }
+
+            if (NativePointerTypes.IsType(current))
+            {
+                var pointerIndex = NativePointerTypes.Index(current);
+                if ((uint)pointerIndex < (uint)_nativePointerTypes.Count)
+                {
+                    pending.Push(_nativePointerTypes[pointerIndex].PointeeType);
+                }
+            }
+            else if (NativeFixedArrayTypes.IsType(current))
+            {
+                var arrayIndex = NativeFixedArrayTypes.Index(current);
+                if ((uint)arrayIndex < (uint)_nativeFixedArrayTypes.Count)
+                {
+                    pending.Push(_nativeFixedArrayTypes[arrayIndex].ElementType);
+                }
+            }
+            else if (NativeFunctionPointerTypes.IsType(current))
+            {
+                var signatureIndex = NativeFunctionPointerTypes.Index(current);
+                if ((uint)signatureIndex
+                    < (uint)_nativeFunctionPointerSignatures.Count)
+                {
+                    var signature
+                        = _nativeFunctionPointerSignatures[signatureIndex];
+                    pending.Push(signature.ReturnType);
+                    foreach (var parameterType in signature.ParameterTypes)
+                    {
+                        pending.Push(parameterType);
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private void RejectStandardLayoutOnlyValueUse(
+        ImmutableArray<BoundFunction>.Builder functions)
+    {
+        if (!_structs.Any(static structure => structure.StandardLayoutOnly))
+        {
+            return;
+        }
+
+        foreach (var function in functions)
+        {
+            if (IsStandardLayoutOnlyType(function.ReturnType))
+            {
+                Report("TRM3005",
+                    "A Standard LayoutQueries source reference is available only to registered queries.",
+                    function.Span);
+            }
+
+            foreach (var variable in function.Variables)
+            {
+                if (IsStandardLayoutOnlyType(variable.Type))
+                {
+                    Report("TRM3005",
+                        "A Standard LayoutQueries source reference cannot be used as a value.",
+                        variable.Span);
+                }
+            }
+
+            if (!BoundTreeTraversal.VisitExpressions(function.Body,
+                expression =>
+                {
+                    if (expression is BoundTypeIdentityQuery
+                        or BoundLayoutQuery)
+                    {
+                        return;
+                    }
+
+                    if (IsStandardLayoutOnlyType(expression.Type)
+                        || (expression is BoundFieldRead field
+                            && IsStandardLayoutOnlyType(
+                                field.Receiver.Type)))
+                    {
+                        Report("TRM3005",
+                            "A Standard LayoutQueries source reference cannot be used as a value.",
+                            expression.Span);
+                    }
+                }))
+            {
+                Report("TRM3005",
+                    "A Standard LayoutQueries source reference has an unsupported value use.",
+                    function.Span);
+            }
+        }
+    }
+
+    private BoundConstant BindCountOfQuery(SyntaxNode node)
+    {
+        var subjectSyntax = (SyntaxNode)node.Children[2];
+        if (IsQueryTypeSyntax(subjectSyntax)
+            && !ShouldBindQuerySubjectAsPlace(subjectSyntax))
+        {
+            var type = BindType(subjectSyntax, allowVoid: false);
+            if (TryGetNativeFixedArrayLayout(type, out var layout))
+            {
+                return CreateCountConstant(layout.ElementCount, node.Span);
+            }
+
+            Report("TRM3005",
+                "countof(Type) requires explicit fixed-cardinality type evidence.",
+                subjectSyntax.Span);
+            return ErrorExpression(node.Span);
+        }
+
+        if (subjectSyntax.Kind is SyntaxKind.ArrayInitializerExpression
+            or SyntaxKind.FixedArrayRepeatExpression)
+        {
+            if (TryGetKnownQueryShapeCount(subjectSyntax, out var count))
+            {
+                return CreateCountConstant(count, node.Span);
+            }
+
+            Report("TRM3005",
+                "countof(Expression) requires statically known logical shape.",
+                subjectSyntax.Span);
+            return ErrorExpression(node.Span);
+        }
+
+        if (subjectSyntax.Kind == SyntaxKind.LiteralExpression
+            && subjectSyntax.Children is [
+                SyntaxTokenElement { Token.Kind: TokenKind.StringLiteral }
+            ])
+        {
+            if (TryGetKnownQueryShapeCount(subjectSyntax,
+                out var literalCount))
+            {
+                return CreateCountConstant(literalCount, node.Span);
+            }
+            Report("TRM3005",
+                "countof(Expression) requires statically known logical shape.",
+                subjectSyntax.Span);
+            return ErrorExpression(node.Span);
+        }
+
+        var subject = BindQueryTypeOrPlace(subjectSyntax,
+            allowVoid: false, requiresLayout: false);
+        if (subject.Kind == BoundQuerySubjectKind.Type)
+        {
+            Report("TRM3005",
+                "countof(Type) requires explicit fixed-cardinality type evidence.",
+                subjectSyntax.Span);
+        }
+        else
+        {
+            Report("TRM3005",
+                "countof(Place) requires the selected Core ICountable.Count : nint witness.",
+                subjectSyntax.Span);
+        }
+        return ErrorExpression(node.Span);
+    }
+
+    private bool TryGetKnownQueryShapeCount(SyntaxNode shape,
+        out ulong count)
+    {
+        while (shape.Kind == SyntaxKind.ParenthesizedExpression)
+        {
+            shape = (SyntaxNode)shape.Children[1];
+        }
+
+        if (shape.Kind == SyntaxKind.FixedArrayRepeatExpression)
+        {
+            var countSyntax = (SyntaxNode)shape.Children[3];
+            if (CanBeConstantQueryCount(countSyntax))
+            {
+                var countExpression = BindExpression(countSyntax,
+                    KnownType(countSyntax) ?? PrimitiveType.NativeInt);
+                if (countExpression is BoundConstant constant
+                    && constant.Bits.TryGetIntegerValue(constant.Type,
+                        out var integerCount)
+                    && integerCount.Sign >= 0
+                    && integerCount <= ulong.MaxValue)
+                {
+                    count = (ulong)integerCount;
+                    return true;
+                }
+            }
+            count = 0;
+            return false;
+        }
+
+        if (shape.Kind == SyntaxKind.ArrayInitializerExpression)
+        {
+            count = 0;
+            foreach (var element in shape.Children.OfType<SyntaxNode>())
+            {
+                ulong elementCount;
+                if (element.Kind == SyntaxKind.CollectionSpreadElement)
+                {
+                    if (!TryGetKnownQuerySpreadCount(
+                        (SyntaxNode)element.Children[1],
+                        out elementCount))
+                    {
+                        count = 0;
+                        return false;
+                    }
+                }
+                else
+                {
+                    elementCount = 1;
+                }
+                if (ulong.MaxValue - count < elementCount)
+                {
+                    count = 0;
+                    return false;
+                }
+                count += elementCount;
+            }
+            return true;
+        }
+
+        if (shape.Kind == SyntaxKind.LiteralExpression
+            && shape.Children is [
+                SyntaxTokenElement {
+                    Token.Kind: TokenKind.StringLiteral
+                } literal
+            ]
+            && StringLiteralDecoder.TryDecode(
+                literal.Token.Text.AsSpan(), out var decoded))
+        {
+            // The literal input is UTF-16; Length counts code units, not scalars.
+            count = (ulong)decoded.Length;
+            return true;
+        }
+
+        count = 0;
+        return false;
+    }
+
+    private bool TryGetKnownQuerySpreadCount(SyntaxNode expression,
+        out ulong count)
+    {
+        if (TryGetKnownQueryShapeCount(expression, out count))
+        {
+            return true;
+        }
+        var type = KnownType(expression);
+        if (type is PrimitiveType arrayType
+            && TryGetNativeFixedArrayLayout(arrayType, out var layout))
+        {
+            count = layout.ElementCount;
+            return true;
+        }
+        count = 0;
+        return false;
+    }
+
+    private static bool CanBeConstantQueryCount(SyntaxNode expression)
+    {
+        while (expression.Kind == SyntaxKind.ParenthesizedExpression)
+        {
+            expression = (SyntaxNode)expression.Children[1];
+        }
+        return (expression.Kind is SyntaxKind.LiteralExpression
+                or SyntaxKind.NameExpression)
+            || (expression.Kind == SyntaxKind.UnaryExpression
+                && expression.Children[0] is SyntaxTokenElement {
+                    Token.Kind: TokenKind.Plus or TokenKind.Minus
+                }
+                && CanBeConstantQueryCount(
+                    (SyntaxNode)expression.Children[1]))
+            || (expression.Kind == SyntaxKind.MemberAccessExpression
+                && (NameText(expression) is
+                    "int32.MinValue" or "int32.MaxValue"
+                    or "uint32.MinValue" or "uint32.MaxValue"
+                    or "int64.MinValue" or "int64.MaxValue"
+                    or "uint64.MinValue" or "uint64.MaxValue"
+                    or "nint.MinValue" or "nint.MaxValue"
+                    or "nuint.MinValue" or "nuint.MaxValue"));
+    }
+
+    private BoundConstant CreateCountConstant(ulong count, TextSpan span)
+    {
+        if (!ScalarBits.TryFromIntegerValue(new BigInteger(count),
+            PrimitiveType.NativeInt, out var bits))
+        {
+            Report("TRM3005",
+                "The fixed cardinality does not fit the selected nint target.",
+                span);
+            return ErrorExpression(span);
+        }
+        return new BoundConstant(bits, PrimitiveType.NativeInt, span);
+    }
+
+    private bool ShouldBindQuerySubjectAsPlace(SyntaxNode syntax)
+    {
+        if (!TryGetQueryNamePath(syntax, out var firstName)
+            || firstName is null)
+        {
+            return false;
+        }
+
+        var typeName = TypeNameIdentifier(syntax);
+        if (TryPrimitiveType(typeName, out _)
+            || typeName == "void"
+            || TryGetAliasTypeArgument(typeName, out _)
+            || (_genericContext is GenericInstantiation generic
+                && generic.Template.ParameterIndex(typeName) >= 0)
+            || ResolveTypeName(typeName, out _)
+                != DeclaredTypeResolution.Missing)
+        {
+            return false;
+        }
+        if (TryFindVariable(firstName, out _))
+        {
+            return true;
+        }
+        if (_hasReceiver && _currentStruct is not null
+            && TryFindField(ResolveDeclaredType(_currentStruct),
+                firstName.Name, out _))
+        {
+            return true;
+        }
+        return (_currentStruct is not null
+                && TryFindStaticField(
+                    ResolveDeclaredType(_currentStruct),
+                    firstName.Name, out _))
+            || TryFindStaticField(typeName, out _);
+    }
+
+    private static bool TryGetQueryNamePath(
+        SyntaxNode syntax, out SyntaxToken? firstName)
+    {
+        firstName = null;
+        if (syntax.Kind != SyntaxKind.TypeName
+            || syntax.Children.IsEmpty
+            || syntax.Children.Any(static child =>
+                child is not SyntaxTokenElement))
+        {
+            return false;
+        }
+
+        var tokens = syntax.Children
+            .Cast<SyntaxTokenElement>()
+            .ToArray();
+        if (tokens.Length % 2 == 0
+            || tokens[0].Token.Kind != TokenKind.Identifier)
+        {
+            return false;
+        }
+        for (var index = 1; index < tokens.Length; index += 2)
+        {
+            if (tokens[index].Token.Kind != TokenKind.Dot
+                || tokens[index + 1].Token.Kind
+                    != TokenKind.Identifier)
+            {
+                return false;
+            }
+        }
+
+        firstName = tokens[0].Token;
+        return true;
+    }
+
+    private static SyntaxNode CreateQueryPlaceSyntax(SyntaxNode syntax)
+    {
+        if (!TryGetQueryNamePath(syntax, out _))
+        {
+            return syntax;
+        }
+
+        var tokens = syntax.Children
+            .Cast<SyntaxTokenElement>()
+            .ToArray();
+        var expression = new SyntaxNode(SyntaxKind.NameExpression,
+            [tokens[0]], tokens[0].Span.Start);
+        for (var index = 1; index < tokens.Length; index += 2)
+        {
+            expression = new SyntaxNode(
+                SyntaxKind.MemberAccessExpression,
+                [expression, tokens[index], tokens[index + 1]],
+                expression.Span.Start);
+        }
+        return expression;
+    }
+
+    private static bool IsQueryTypeSyntax(SyntaxNode syntax) =>
+        syntax.Kind is SyntaxKind.TypeName
+            or SyntaxKind.AttributedTypeName
+            or SyntaxKind.ReferenceTypeName
+            or SyntaxKind.FixedArrayTypeName;
+
+    private static bool IsQueryPlaceExpression(BoundExpression expression) =>
+        expression switch {
+            BoundRead or BoundStaticFieldRead => true,
+            BoundFieldRead field => IsQueryPlaceExpression(field.Receiver),
+            BoundNativePointerRead pointer => IsQueryPlaceExpression(
+                pointer.Address),
+            BoundReferenceRead reference => IsQueryPlaceExpression(
+                reference.Descriptor),
+            BoundNativeFixedArrayElement element =>
+                element.FieldPlace is null
+                    || IsQueryPlaceExpression(element.FieldPlace),
+            BoundNativeFixedArrayPathElement element =>
+                element.FieldPlace is null
+                    || IsQueryPlaceExpression(element.FieldPlace),
+            BoundBufferRead or BoundViewRead or BoundSpanRead => true,
+            BoundReadonlyProjection projection =>
+                IsQueryPlaceExpression(projection.Value),
+            BoundUnsafeExpression unsafeExpression =>
+                IsQueryPlaceExpression(unsafeExpression.Expression),
+            _ => false,
+        };
+
+    private bool IsBlittableQueryType(PrimitiveType type) =>
+        IsBlittableGenericArgumentType(type, []);
+
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "Unsupported syntax kinds are rejected by the default branch.")]
     [SuppressMessage("Style", "IDE0072:Populate switch", Justification = "Runtime struct IDs are represented by enum values outside the declared primitive range.")]
     private BoundExpression BindExpression(SyntaxNode node, PrimitiveType? expected)
@@ -11684,6 +18076,112 @@ internal sealed partial class Binder
 
         switch (node.Kind)
         {
+            case SyntaxKind.TypeOfQueryExpression:
+            {
+                var queryDiagnosticCount = DiagnosticCount;
+                var subject = BindQueryTypeOrPlace(
+                    (SyntaxNode)node.Children[2],
+                    allowVoid: true, requiresLayout: false,
+                    requiresTypeIdentityTerm: true);
+                expression = DiagnosticCount == queryDiagnosticCount
+                    ? new BoundTypeIdentityQuery(subject, node.Span)
+                    : ErrorExpression(node.Span);
+                break;
+            }
+
+            case SyntaxKind.SizeOfQueryExpression:
+            case SyntaxKind.AlignOfQueryExpression:
+            {
+                var queryDiagnosticCount = DiagnosticCount;
+                var subject = BindQueryTypeOrPlace(
+                    (SyntaxNode)node.Children[2],
+                    allowVoid: true, requiresLayout: true);
+                expression = DiagnosticCount == queryDiagnosticCount
+                    ? new BoundLayoutQuery(
+                        node.Kind == SyntaxKind.SizeOfQueryExpression
+                        ? BoundLayoutQueryKind.SizeOf
+                        : BoundLayoutQueryKind.AlignOf,
+                        subject, node.Span)
+                    : ErrorExpression(node.Span);
+                break;
+            }
+
+            case SyntaxKind.OffsetOfTypeQueryExpression:
+            {
+                var queryDiagnosticCount = DiagnosticCount;
+                var type = BindType((SyntaxNode)node.Children[2],
+                    allowVoid: false);
+                var fieldPath = BindQueryFieldPath(type,
+                    (SyntaxNode)node.Children[4]);
+                if (fieldPath is null)
+                {
+                    expression = ErrorExpression(node.Span);
+                    break;
+                }
+                var requiresUnsafe = !IsBlittableQueryType(type);
+                if (requiresUnsafe && _unsafeDepth == 0)
+                {
+                    Report("TRM3028",
+                        "A non-Blittable layout query requires an explicit unsafe context.",
+                        node.Span);
+                }
+                expression = DiagnosticCount == queryDiagnosticCount
+                    ? new BoundLayoutQuery(
+                        BoundLayoutQueryKind.OffsetOfType,
+                        new BoundQuerySubject(type,
+                            BoundQuerySubjectKind.Type, null, fieldPath,
+                            requiresUnsafe, _unsafeDepth != 0),
+                        node.Span)
+                    : ErrorExpression(node.Span);
+                break;
+            }
+
+            case SyntaxKind.OffsetOfPlaceQueryExpression:
+            {
+                var queryDiagnosticCount = DiagnosticCount;
+                var place = BindQueryPlaceExpression(
+                    (SyntaxNode)node.Children[2]);
+                if (place is not BoundFieldRead field
+                    || !IsQueryPlaceExpression(place))
+                {
+                    Report("TRM3007",
+                        "offsetof(Place) requires a bound instance-field Place.",
+                        node.Span);
+                    expression = ErrorExpression(node.Span);
+                    break;
+                }
+                var fieldPath = new BoundQueryFieldPath(
+                    field.Receiver.Type,
+                    [new BoundQueryFieldStep(field.Receiver.Type,
+                        checked((uint)field.Field), field.Type,
+                        field.IsUnsafeAuthorized) {
+                        StandardFieldOrigin = GetField(
+                            field.Receiver.Type, field.Field)
+                            .StandardFieldOrigin,
+                    }]);
+                var requiresUnsafe = !IsBlittableQueryType(
+                    field.Receiver.Type);
+                if (requiresUnsafe && _unsafeDepth == 0)
+                {
+                    Report("TRM3028",
+                        "A non-Blittable layout query requires an explicit unsafe context.",
+                        node.Span);
+                }
+                expression = DiagnosticCount == queryDiagnosticCount
+                    ? new BoundLayoutQuery(
+                        BoundLayoutQueryKind.OffsetOfPlace,
+                        new BoundQuerySubject(field.Type,
+                            BoundQuerySubjectKind.Place, place, fieldPath,
+                            requiresUnsafe, _unsafeDepth != 0),
+                        node.Span)
+                    : ErrorExpression(node.Span);
+                break;
+            }
+
+            case SyntaxKind.CountOfQueryExpression:
+                expression = BindCountOfQuery(node);
+                break;
+
             case SyntaxKind.ParenthesizedExpression:
                 expression = BindExpression((SyntaxNode)node.Children[1], expected);
                 break;
@@ -11791,12 +18289,28 @@ internal sealed partial class Binder
                 }
                 else if (TryFindInitReferenceProjection(initializedSourceNode, out var initializedDestination))
                 {
-                    expression = new BoundIsInitialized(initializedDestination, node.Span);
+                    var descriptorType
+                        = _variables[initializedDestination].Type;
+                    expression = new BoundReferenceInitializationTest(
+                        new BoundRead(initializedDestination,
+                            descriptorType, node.Span), node.Span);
                 }
                 else
                 {
                     var initializedSource = BindExpression(initializedSourceNode, null);
-                    if (initializedSource is not BoundRead initializedRead)
+                    if (initializedSource is BoundReferenceRead referenceRead
+                        && CheckedReferenceTypeContract.IsValidType(
+                            referenceRead.Descriptor.Type,
+                            [.. _checkedReferenceTypes])
+                        && _checkedReferenceTypes[
+                            CheckedReferenceTypes.Index(
+                                referenceRead.Descriptor.Type)]
+                            .IsInitialization)
+                    {
+                        expression = new BoundReferenceInitializationTest(
+                            referenceRead.Descriptor, node.Span);
+                    }
+                    else if (initializedSource is not BoundRead initializedRead)
                     {
                         Report("TRM3007", "'is init' requires a named local or parameter.", node.Span);
                         expression = new BoundConstant(0, PrimitiveType.Bool, node.Span);
@@ -11806,6 +18320,41 @@ internal sealed partial class Binder
                         expression = new BoundIsInitialized(initializedRead.Variable, node.Span);
                     }
                 }
+                break;
+
+            case SyntaxKind.IsPatternExpression:
+                if (!TryGetGenericUniqueProperty(node,
+                    out var uniqueFormalOrdinal, out var uniqueFormalType))
+                {
+                    Report("TRM3007",
+                        "'is unique' requires a generic method type formal.",
+                        node.Span);
+                    expression = ErrorExpression(node.Span);
+                    break;
+                }
+                var uniqueFormal = _genericContext!.Template
+                    .TypeParameters[uniqueFormalOrdinal];
+                bool? knownUniqueResult = _genericProofFunctions is not null
+                    && uniqueFormal.OwnershipDomain == 3
+                        ? null
+                        : IsUniqueGenericArgumentType(uniqueFormalType);
+                var uniqueProperty = new BoundGenericUniquePropertyFact(
+                    uniqueFormalOrdinal, uniqueFormalType, true);
+                var copyProperty = uniqueProperty with {
+                    IsUnique = false,
+                };
+                expression = _genericProofFunctions is not null
+                    ? new BoundGenericTypePropertyTest(
+                        uniqueFormalOrdinal, uniqueFormalType,
+                        knownUniqueResult, node.Span)
+                    : new BoundConstant(
+                        knownUniqueResult == true ? 1 : 0,
+                        PrimitiveType.Bool, node.Span) {
+                        GenericUniquePropertyWhenTrue = [uniqueProperty],
+                        GenericUniquePropertyWhenFalse = [copyProperty],
+                        GenericUniquePropertyKnownResult =
+                            knownUniqueResult,
+                    };
                 break;
 
             case SyntaxKind.IsVarNullableExpression:
@@ -11827,15 +18376,54 @@ internal sealed partial class Binder
                 if (TryFindVariable(token, out var slot))
                 {
                     if (NativeFixedArrayContract.IsCarrier(_variables[slot].Type)
-                        && !_isBindingNativeFixedArrayValue)
+                        && !_isBindingNativeFixedArrayValue
+                        && _queryPlaceBindingDepth == 0)
                     {
                         Report("TRM3030", "Whole sample arrays are local-only and cannot be read as values.", node.Span);
                         expression = ErrorExpression(node.Span);
                     }
                     else
                     {
-                        expression = new BoundRead(slot, _variables[slot].Type, node.Span);
+                        var type = _variables[slot].Type;
+                        expression = new BoundRead(slot, type, node.Span) {
+                            GenericCopyRefinementOrdinal =
+                                GenericCopyRefinementOrdinal(type),
+                        };
                     }
+                }
+                else if (TryGetGenericMethodConstantValue(token.Name,
+                    out var genericConstant))
+                {
+                    if (TryCreateBoundGenericMethodConstantExpression(
+                        genericConstant, node.Span,
+                        out var constantExpression))
+                    {
+                        expression = constantExpression;
+                    }
+                    else
+                    {
+                        Report("TRM3005",
+                            "This generic constant value representation is not supported in a method body.",
+                            node.Span);
+                        expression = ErrorExpression(node.Span);
+                    }
+                }
+                else if (token.Name == "field"
+                    && _bindingPropertyBackingFieldIndex >= 0
+                    && _hasReceiver && !_variables.IsEmpty)
+                {
+                    var receiver = new BoundRead(0,
+                        _variables[0].Type, node.Span);
+                    var isUnsafeAuthorized = CheckFieldAccess(
+                        _variables[0].Type,
+                        _bindingPropertyBackingFieldIndex, node.Span);
+                    expression = new BoundFieldRead(receiver,
+                        _bindingPropertyBackingFieldIndex,
+                        GetField(_variables[0].Type,
+                            _bindingPropertyBackingFieldIndex).Type,
+                        node.Span) {
+                        IsUnsafeAuthorized = isUnsafeAuthorized,
+                    };
                 }
                 else if (_hasReceiver && _currentStruct is not null
                     && _primitiveBackingFields.TryGetValue(_currentStruct, out var backing)
@@ -11910,6 +18498,15 @@ internal sealed partial class Binder
 
             case SyntaxKind.MemberAccessExpression:
             {
+                if (node.Children.Length > 3)
+                {
+                    Report("TRM3005",
+                        "Generic member type arguments require a call context.",
+                        node.Span);
+                    expression = ErrorExpression(node.Span);
+                    break;
+                }
+
                 if (((SyntaxTokenElement)node.Children[2]).Token.Text == "Length"
                     && TryFindBuffer((SyntaxNode)node.Children[0], out var buffer))
                 {
@@ -11920,6 +18517,15 @@ internal sealed partial class Binder
                 }
                 var member = ((SyntaxTokenElement)node.Children[2]).Token.Name;
                 var receiverNode = (SyntaxNode)node.Children[0];
+                if (receiverNode.Kind
+                    == SyntaxKind.InterfaceWitnessProjectionExpression)
+                {
+                    expression = BindInterfaceWitnessInvocation(node,
+                        receiverNode, member,
+                        new SyntaxNode(SyntaxKind.ArgumentList, [],
+                            node.Span.End));
+                    break;
+                }
                 var receiverType = KnownType(receiverNode);
                 BoundExpression? boundReceiver = null;
                 var parenthesizedReceiverExpression =
@@ -11937,7 +18543,8 @@ internal sealed partial class Binder
                     && TryResolveEnumMember(receiverNode, member, out var enumType, out var enumMember))
                 {
                     RecordLayoutKindsUse(enumType);
-                    expression = new BoundConstant(enumMember.Value, enumType, node.Span);
+                    expression = BindEnumMemberConstant(enumType,
+                        enumMember, node.Span);
                     break;
                 }
                 if (receiverType == PrimitiveType.TokenSpan && member == "Length")
@@ -11977,10 +18584,31 @@ internal sealed partial class Binder
                 }
                 if (receiverType is PrimitiveType fieldType && TryFindField(fieldType, member, out var field))
                 {
+                    var definition = GetField(fieldType, field);
+                    if (IsStandardLayoutOnlyType(fieldType))
+                    {
+                        if (_queryPlaceBindingDepth == 0)
+                        {
+                            Report("TRM3005",
+                                "A Standard LayoutQueries source field is available only to registered query Places.",
+                                node.Span);
+                            expression = ErrorExpression(node.Span);
+                            break;
+                        }
+                        if (definition.StandardFieldOrigin is null)
+                        {
+                            Report("TRM3006",
+                                $"Field '{member}' has no selected Standard FieldDef ExportKey.",
+                                node.Span);
+                            expression = ErrorExpression(node.Span);
+                            break;
+                        }
+                    }
+
                     var isUnsafeAuthorized = CheckFieldAccess(fieldType, field, node.Span);
                     expression = new BoundFieldRead(
                         boundReceiver ?? BindExpression(receiverNode, fieldType), field,
-                        GetField(fieldType, field).Type, node.Span) {
+                        definition.Type, node.Span) {
                         IsUnsafeAuthorized = isUnsafeAuthorized,
                     };
                     break;
@@ -12034,13 +18662,17 @@ internal sealed partial class Binder
                     }
                 }
                 var typeName = NameText(receiverNode);
-                if (member is "MinValue" or "MaxValue" && typeName is "int32" or "uint32" or "int64" or "uint64" or "char16")
+                if (member is "MinValue" or "MaxValue"
+                    && typeName is "int32" or "uint32" or "int64"
+                        or "uint64" or "nint" or "nuint" or "char16")
                 {
                     var type = typeName switch {
                         "int32" => PrimitiveType.Int32,
                         "uint32" => PrimitiveType.UInt32,
                         "int64" => PrimitiveType.Int64,
                         "uint64" => PrimitiveType.UInt64,
+                        "nint" => PrimitiveType.NativeInt,
+                        "nuint" => PrimitiveType.NativeUInt,
                         "int128" => PrimitiveType.Int128,
                         "uint128" => PrimitiveType.UInt128,
                         "char16" => PrimitiveType.Char16,
@@ -12051,6 +18683,9 @@ internal sealed partial class Binder
                         PrimitiveType.UInt32 => member == "MinValue" ? 0 : -1,
                         PrimitiveType.Int64 => member == "MinValue" ? long.MinValue : long.MaxValue,
                         PrimitiveType.UInt64 => member == "MinValue" ? 0L : -1L,
+                        PrimitiveType.NativeInt => member == "MinValue"
+                            ? long.MinValue : long.MaxValue,
+                        PrimitiveType.NativeUInt => member == "MinValue" ? 0L : -1L,
                         PrimitiveType.Char16 => member == "MinValue" ? 0 : ushort.MaxValue,
                         _ => throw new InvalidOperationException(),
                     };
@@ -12072,18 +18707,41 @@ internal sealed partial class Binder
                 {
                     if (TryFindInitReferenceProjection(node, out var destination))
                     {
-                        expression = new BoundRead(destination, _variables[destination].Type, node.Span);
+                        var descriptorType
+                            = _variables[destination].Type;
+                        if (CheckedReferenceTypeContract.IsValidType(
+                                descriptorType,
+                                [.. _checkedReferenceTypes])
+                            && _checkedReferenceTypes[
+                                CheckedReferenceTypes.Index(
+                                    descriptorType)].IsInitialization)
+                        {
+                            var reference
+                                = _checkedReferenceTypes[
+                                    CheckedReferenceTypes.Index(
+                                        descriptorType)];
+                            expression = new BoundReferenceRead(
+                                new BoundRead(destination, descriptorType,
+                                    node.Span),
+                                reference.ReferentType, node.Span);
+                        }
+                        else
+                        {
+                            expression = new BoundRead(destination,
+                                descriptorType, node.Span);
+                        }
                     }
                     else
                     {
-                        var knownOperandType = KnownType(operandNode);
+                        var knownDereferenceType = KnownType(operandNode);
                         var boundOperand = BindExpression(operandNode,
-                            operandNode.Kind == SyntaxKind.NameExpression ? knownOperandType : null);
+                            operandNode.Kind == SyntaxKind.NameExpression
+                                ? knownDereferenceType : null);
                         if (CheckedReferenceTypeContract.IsValidType(
                                 boundOperand.Type, [.. _checkedReferenceTypes]))
                         {
                             var referenceType = _checkedReferenceTypes[CheckedReferenceTypes.Index(boundOperand.Type)];
-                            if (referenceType.IsGarbageCollected || referenceType.IsInitialization
+                            if (referenceType.IsGarbageCollected
                                 || referenceType.IsOptional)
                             {
                                 Report("TRM3030",
@@ -12265,7 +18923,14 @@ internal sealed partial class Binder
                         && TryFindVariable(((SyntaxTokenElement)operandNode.Children[0]).Token.Name, out var owner)
                         && IsUnique(_variables[owner].Type) && (!_constructor || owner != 0))
                     {
-                        expression = new BoundMove(owner, _variables[owner].Type, node.Span);
+                        var ownerType = _variables[owner].Type;
+                        var genericUniqueRefinementOrdinal
+                            = GenericUniqueRefinementOrdinal(ownerType);
+                        expression = new BoundMove(owner, ownerType,
+                            node.Span) {
+                            GenericUniqueRefinementOrdinal =
+                                genericUniqueRefinementOrdinal,
+                        };
                     }
                     else if (BindExpression(operandNode, expected: null) is BoundFieldRead field
                         && IsEligibleUniqueFieldMove(field, out _))
@@ -12306,14 +18971,29 @@ internal sealed partial class Binder
                     };
                     break;
                 }
-                var operandType = op.Kind == TokenKind.Bang ? PrimitiveType.Bool
-                    : KnownType(operandNode) ?? expected ?? PrimitiveType.Int32;
+                var knownOperandType = KnownType(operandNode);
+                var operandType = op.Kind == TokenKind.Bang
+                    ? PrimitiveType.Bool
+                    : knownOperandType ?? expected;
+                if (operandType is not PrimitiveType selectedOperandType)
+                {
+                    var operandDiagnosticCount = DiagnosticCount;
+                    _ = BindExpression(operandNode, null);
+                    if (DiagnosticCount == operandDiagnosticCount)
+                    {
+                        Report("TRM3007",
+                            "A unary operator requires an established operand type.",
+                            op.Span);
+                    }
+                    expression = ErrorExpression(node.Span);
+                    break;
+                }
 
                 if (op.Kind is TokenKind.Plus or TokenKind.Minus
                     && operandNode.Kind == SyntaxKind.LiteralExpression
                     && TryBindSignedIntegerLiteral(
                         ((SyntaxTokenElement)operandNode.Children[0]).Token,
-                        operandType, op.Kind == TokenKind.Minus, node.Span,
+                        selectedOperandType, op.Kind == TokenKind.Minus, node.Span,
                         out var signedLiteral))
                 {
                     expression = signedLiteral;
@@ -12321,12 +19001,12 @@ internal sealed partial class Binder
                 }
                 if (op.Kind is TokenKind.Plus or TokenKind.Minus
                     && operandNode.Kind == SyntaxKind.LiteralExpression
-                    && operandType is PrimitiveType.Float16 or PrimitiveType.BFloat16
+                    && selectedOperandType is PrimitiveType.Float16 or PrimitiveType.BFloat16
                         or PrimitiveType.Float128 or PrimitiveType.Decimal32
                         or PrimitiveType.Decimal64 or PrimitiveType.Decimal128
                     && TryBindSignedWideFloatingLiteral(
                         ((SyntaxTokenElement)operandNode.Children[0]).Token,
-                        operandType, op.Kind == TokenKind.Minus, node.Span,
+                        selectedOperandType, op.Kind == TokenKind.Minus, node.Span,
                         out var signedFloatingLiteral))
                 {
                     expression = signedFloatingLiteral;
@@ -12336,28 +19016,37 @@ internal sealed partial class Binder
                 var expectedNumeric = expected is PrimitiveType expectedType
                     && (PrimitiveTypeFacts.IsIntegerOrWide(expectedType)
                         || PrimitiveTypeFacts.IsFloating(expectedType));
-                var knownNumeric = KnownType(operandNode) is PrimitiveType knownType
+                var knownNumeric = knownOperandType is PrimitiveType knownType
                     && (PrimitiveTypeFacts.IsIntegerOrWide(knownType)
                         || PrimitiveTypeFacts.IsFloating(knownType));
-                var operandContext = operandType == PrimitiveType.Bool ? operandType
-                    : expectedNumeric || knownNumeric ? operandType : (PrimitiveType?)null;
+                var operandContext = selectedOperandType == PrimitiveType.Bool
+                    ? selectedOperandType
+                    : expectedNumeric || knownNumeric
+                        ? selectedOperandType : (PrimitiveType?)null;
                 var operand = BindExpression(operandNode, operandContext);
-                if (operand.Type != operandType)
+                if (operand.Type != selectedOperandType)
                 {
-                    Report("TRM3007", $"Unary operator requires {TypeName(operandType)}.", op.Span);
+                    Report("TRM3007",
+                        $"Unary operator requires {TypeName(selectedOperandType)}.",
+                        op.Span);
                 }
                 if (op.Kind is not (TokenKind.Plus or TokenKind.Minus or TokenKind.Tilde or TokenKind.Bang)
-                    || (op.Kind == TokenKind.Minus && !PrimitiveTypeFacts.IsIntegerOrWide(operandType)
-                        && !PrimitiveTypeFacts.IsFloating(operandType))
-                    || (op.Kind == TokenKind.Plus && !PrimitiveTypeFacts.IsIntegerOrWide(operandType)
-                        && !PrimitiveTypeFacts.IsFloating(operandType))
-                    || (op.Kind == TokenKind.Tilde && !PrimitiveTypeFacts.IsIntegerOrWide(operandType)))
+                    || (op.Kind == TokenKind.Minus
+                        && !PrimitiveTypeFacts.IsIntegerOrWide(selectedOperandType)
+                        && !PrimitiveTypeFacts.IsFloating(selectedOperandType))
+                    || (op.Kind == TokenKind.Plus
+                        && !PrimitiveTypeFacts.IsIntegerOrWide(selectedOperandType)
+                        && !PrimitiveTypeFacts.IsFloating(selectedOperandType))
+                    || (op.Kind == TokenKind.Tilde
+                        && !PrimitiveTypeFacts.IsIntegerOrWide(selectedOperandType)))
                 {
                     Report("TRM3001", "Unsupported unary operator.", op.Span);
                 }
 
-                expression = new BoundUnary(op.Kind, operand, operandType, node.Span) {
-                    OverflowBehavior = SourceOverflowBehavior(op.Kind, operandType, unary: true),
+                expression = new BoundUnary(op.Kind, operand,
+                    selectedOperandType, node.Span) {
+                    OverflowBehavior = SourceOverflowBehavior(op.Kind,
+                        selectedOperandType, unary: true),
                 };
                 break;
             }
@@ -12442,22 +19131,25 @@ internal sealed partial class Binder
 
             case SyntaxKind.ObjectCreationExpression:
             {
-                var typeName = NameText((SyntaxNode)node.Children[1]);
-                if (ResolveTypeName(typeName, out _) == DeclaredTypeResolution.Ambiguous)
+                var typeNode = (SyntaxNode)node.Children[1];
+                var typeName = NameText(typeNode);
+                var typeDiagnosticCount = DiagnosticCount;
+                var constructedType = BindType(typeNode,
+                    allowVoid: false);
+                if (DiagnosticCount != typeDiagnosticCount)
                 {
-                    Report("TRM3005", $"Type '{typeName}' is ambiguous across declared and imported types.",
-                        ((SyntaxNode)node.Children[1]).Span);
                     expression = ErrorExpression(node.Span);
                     break;
                 }
-                if (!TryResolveStruct(typeName, out var structure))
+                if (!IsStruct(constructedType))
                 {
                     Report("TRM3005", $"A class requires its conditional TryCreate factory; unknown struct '{typeName}'.", node.Span);
                     expression = ErrorExpression(node.Span);
                     break;
                 }
 
-                var constructor = _structs[(int)structure - 100].Name + ".#ctor";
+                var constructor = _structs[(int)constructedType - 100].Name
+                    + ".#ctor";
                 if (!TryFindFunction(constructor, out var index))
                 {
                     Report("TRM3011", $"Struct '{typeName}' has no explicit constructor.", node.Span);
@@ -12469,6 +19161,15 @@ internal sealed partial class Binder
             }
 
             case SyntaxKind.IndexExpression:
+                if (node.Children[0] is SyntaxNode {
+                        Kind: SyntaxKind.InterfaceWitnessProjectionExpression,
+                    } interfaceProjection)
+                {
+                    expression = BindInterfaceWitnessInvocation(node,
+                        interfaceProjection, "this",
+                        CreateIndexCallArgumentList(node));
+                    break;
+                }
                 if (KnownType((SyntaxNode)node.Children[0]) is PrimitiveType carrierType
                     && NativeFixedArrayContract.IsCarrier(carrierType))
                 {
@@ -12477,35 +19178,66 @@ internal sealed partial class Binder
                 }
                 if (KnownType((SyntaxNode)node.Children[0]) == PrimitiveType.TokenSpan)
                 {
+                    if (GetSingleIndexArgument(node) is not SyntaxNode spanIndex)
+                    {
+                        Report("TRM3006",
+                            "TokenSpan indexing requires one index argument.",
+                            node.Span);
+                        expression = ErrorExpression(node.Span);
+                        break;
+                    }
                     expression = new BoundSpanRead(
                         BindExpression((SyntaxNode)node.Children[0], PrimitiveType.TokenSpan),
-                        BindExpression((SyntaxNode)node.Children[2], TokenSpanContract.IndexCarrier),
+                        BindExpression(spanIndex, TokenSpanContract.IndexCarrier),
                         (PrimitiveType)(100 + TokenSpanContract.Find(_structs, TokenSpanContract.TokenName)), node.Span);
                     break;
                 }
             {
-                if (((SyntaxNode)node.Children[2]).Kind == SyntaxKind.SliceRangeExpression)
+                var receiver = (SyntaxNode)node.Children[0];
+                if (TryFindBuffer(receiver, out var buffer))
                 {
-                    Report("TRM3023", "A native buffer slice range must initialize a readonly lexical view local.",
-                        node.Span);
-                    expression = ErrorExpression(node.Span);
-                    break;
-                }
-                if (TryFindBuffer((SyntaxNode)node.Children[0], out var buffer))
-                {
-                    var indexExpression = BindBufferIndex((SyntaxNode)node.Children[2], buffer,
-                        out var isEndRelative);
+                    if (GetSingleIndexArgument(node)
+                        is not SyntaxNode indexArgument)
+                    {
+                        Report("TRM3006",
+                            "A native buffer access requires one index argument.",
+                            node.Span);
+                        expression = ErrorExpression(node.Span);
+                        break;
+                    }
+                    if (indexArgument.Kind == SyntaxKind.SliceRangeExpression)
+                    {
+                        Report("TRM3023",
+                            "A native buffer slice range must initialize a readonly lexical view local.",
+                            node.Span);
+                        expression = ErrorExpression(node.Span);
+                        break;
+                    }
+
+                    var indexExpression = BindBufferIndex(indexArgument,
+                        buffer, out var isEndRelative);
                     expression = new BoundBufferRead(buffer, indexExpression,
                         _buffers[buffer].ElementType, node.Span)
                     {
                         IsEndRelativeOffset = isEndRelative,
                     };
+                    break;
                 }
-                else
+
+                if (KnownType(receiver) is PrimitiveType indexerOwner
+                    && TryFindGetter(indexerOwner, "this",
+                        out var indexerGetter))
                 {
-                    Report("TRM3006", "Only compiler-supplied host buffers can be indexed.", node.Span);
-                    expression = ErrorExpression(node.Span);
+                    expression = BindArguments(node,
+                        CreateIndexCallArgumentList(node), indexerGetter,
+                        receiver);
+                    break;
                 }
+
+                Report("TRM3006",
+                    "Only compiler-supplied host buffers or declared indexers can be indexed.",
+                    node.Span);
+                expression = ErrorExpression(node.Span);
                 break;
             }
 
@@ -12515,12 +19247,23 @@ internal sealed partial class Binder
                 break;
         }
 
-        if (expected is PrimitiveType target && expression.Type != target
-            && CanImplicitlyConvert(expression.Type, target, node.Span))
+        if (expected is PrimitiveType target
+            && expression.Type != target
+            && CanInitializationReferenceAttenuate(
+                expression.Type, target))
         {
-            if (IsSupportedOptionalType(target) && !IsSupportedOptionalType(expression.Type))
+            expression = new BoundInitializationAttenuation(
+                expression, target, node.Span);
+        }
+        else if (expected is PrimitiveType optionalTarget
+            && expression.Type != optionalTarget
+            && CanImplicitlyConvert(expression.Type, optionalTarget,
+                node.Span))
+        {
+            if (IsSupportedOptionalType(optionalTarget)
+                && !IsSupportedOptionalType(expression.Type))
             {
-                if (!TryGetRequiredOptionalType(target, out var requiredType))
+                if (!TryGetRequiredOptionalType(optionalTarget, out var requiredType))
                 {
                     Report("TRM3007", "The optional target has no supported payload type.", node.Span);
                     expression = ErrorExpression(node.Span);
@@ -12532,12 +19275,14 @@ internal sealed partial class Binder
                         expression = new BoundReadonlyProjection(expression,
                             requiredType, node.Span);
                     }
-                    expression = new BoundOptionalLift(expression, target, node.Span);
+                    expression = new BoundOptionalLift(expression,
+                        optionalTarget, node.Span);
                 }
             }
             else
             {
-                expression = new BoundReadonlyProjection(expression, target, node.Span);
+                expression = new BoundReadonlyProjection(expression,
+                    optionalTarget, node.Span);
             }
         }
         if (expected is not null && expression.Type != expected)
@@ -12545,12 +19290,42 @@ internal sealed partial class Binder
             Report("TRM3007", $"Expected {TypeName(expected.Value)}, got {TypeName(expression.Type)}.", node.Span);
         }
 
-        return DiagnosticCount == diagnosticCount ? FoldScalarConstant(expression) : expression;
+        if (DiagnosticCount != diagnosticCount)
+        {
+            return expression;
+        }
+
+        var folded = FoldScalarConstant(expression);
+        if (_genericContext is not null
+            && expression.Type == PrimitiveType.Bool
+            && folded is BoundConstant { Type: PrimitiveType.Bool } constant)
+        {
+            var propertyFlow
+                = BoundGenericUniquePropertyFlowAnalysis.Analyze(
+                    expression, _variables);
+            if (propertyFlow.HasFacts)
+            {
+                return constant with {
+                    GenericUniquePropertyWhenTrue =
+                        propertyFlow.WhenTrue,
+                    GenericUniquePropertyWhenFalse =
+                        propertyFlow.WhenFalse,
+                    GenericUniquePropertyKnownResult =
+                        propertyFlow.KnownResult,
+                };
+            }
+        }
+
+        return folded;
     }
 
     private bool CanImplicitlyConvert(PrimitiveType source, PrimitiveType target, TextSpan span)
     {
         if (source == target)
+        {
+            return true;
+        }
+        if (CanInitializationReferenceAttenuate(source, target))
         {
             return true;
         }
@@ -12572,6 +19347,32 @@ internal sealed partial class Binder
             || (IsSupportedOptionalType(target)
                 && TryGetRequiredOptionalType(target, out var requiredType)
                 && (source == requiredType || readonlySource == requiredType));
+    }
+
+    private bool CanInitializationReferenceAttenuate(
+        PrimitiveType source, PrimitiveType target)
+    {
+        if (!CheckedReferenceTypeContract.IsValidType(source,
+                [.. _checkedReferenceTypes])
+            || !CheckedReferenceTypeContract.IsValidType(target,
+                [.. _checkedReferenceTypes]))
+        {
+            return false;
+        }
+        var sourceReference = _checkedReferenceTypes[
+            CheckedReferenceTypes.Index(source)];
+        var targetReference = _checkedReferenceTypes[
+            CheckedReferenceTypes.Index(target)];
+        return sourceReference.IsInitialization
+            && !sourceReference.IsGarbageCollected
+            && !sourceReference.IsOptional
+            && !targetReference.IsInitialization
+            && !targetReference.IsGarbageCollected
+            && !targetReference.IsOptional
+            && sourceReference.ReferentType
+                == targetReference.ReferentType
+            && (!targetReference.IsWritable
+                || sourceReference.IsWritable);
     }
 
     private static bool IsNullExpression(SyntaxNode node)
@@ -12740,12 +19541,15 @@ internal sealed partial class Binder
                 operandType = leftKnown ?? rightKnown;
                 resultType = PrimitiveType.Bool;
                 if (!(operandType == PrimitiveType.Bool
+                    || operandType == PrimitiveType.TypeIdentity
                     || (operandType is PrimitiveType equalityType
                         && (PrimitiveTypeFacts.IsIntegerOrWide(equalityType)
                             || PrimitiveTypeFacts.IsCodeUnitOrRune(equalityType)
                             || PrimitiveTypeFacts.IsFloating(equalityType)))))
                 {
-                    Report("TRM3007", "Equality requires operands of the same supported numeric, bool or char16 type.", op.Span);
+                    Report("TRM3007",
+                        "Equality requires operands of the same supported scalar or internal type-identity type.",
+                        op.Span);
                 }
                 break;
 
@@ -12823,7 +19627,19 @@ internal sealed partial class Binder
         {
             var left = (SyntaxNode)callee.Children[0];
             var member = ((SyntaxTokenElement)callee.Children[2]).Token.Name;
+            if (left.Kind
+                == SyntaxKind.InterfaceWitnessProjectionExpression)
+            {
+                return BindInterfaceWitnessInvocation(node, left, member,
+                    (SyntaxNode)node.Children[1]);
+            }
             var type = KnownType(left);
+            string? genericMethodName;
+            GenericTemplate? genericMethodTemplate = null;
+            var isTypeReceiver = !HasVariableReceiverName(left)
+                && (left.Kind is SyntaxKind.NameExpression
+                    or SyntaxKind.GenericNameExpression
+                    or SyntaxKind.MemberAccessExpression);
             if (member == "AsSpan" && type is PrimitiveType snapshot && IsStruct(snapshot)
                 && _structs[(int)snapshot - 100].Name == TokenSpanContract.SnapshotName)
             {
@@ -12885,30 +19701,44 @@ internal sealed partial class Binder
             if (type == PrimitiveType.OwnedInt32Buffer)
             {
                 receiver = left;
-                _ = TryFindFunction(NativeBufferIntrinsics.TypeName + "." + member, out function);
+                genericMethodName = NativeBufferIntrinsics.TypeName
+                    + "." + member;
+                _ = TryFindFunction(genericMethodName, out function);
             }
             else if (ManagedClassTypes.Readonly(type ?? PrimitiveType.Void) == PrimitiveType.ManagedNode)
             {
                 receiver = left;
-                _ = TryFindFunction(NativeManagedNodeIntrinsics.TypeName + "." + member, out function);
+                genericMethodName = NativeManagedNodeIntrinsics.TypeName
+                    + "." + member;
+                _ = TryFindFunction(genericMethodName, out function);
             }
             else if (type is PrimitiveType classType && IsClass(classType))
             {
                 receiver = left;
-                _ = TryFindFunction(_classes[ManagedClassTypes.ClassIndex(classType)].Name + "." + member,
-                    out function);
+                genericMethodName = _classes[
+                    ManagedClassTypes.ClassIndex(classType)].Name
+                    + "." + member;
+                genericMethodTemplate = FindGenericMemberTemplate(
+                    classType, member);
+                _ = TryFindFunction(genericMethodName, out function);
             }
             else if (type is PrimitiveType structType && IsStruct(structType))
             {
                 receiver = left;
-                _ = TryFindFunction(_structs[(int)structType - 100].Name + "." + member, out function);
+                genericMethodName = _structs[
+                    (int)structType - 100].Name + "." + member;
+                genericMethodTemplate = FindGenericMemberTemplate(
+                    structType, member);
+                _ = TryFindFunction(genericMethodName, out function);
             }
             else if (type is PrimitiveType primitiveType
                 && TryPrimitiveType(TypeName(primitiveType), out var intrinsicType)
                 && intrinsicType == primitiveType)
             {
                 receiver = left;
-                _ = TryFindFunction(TypeName(primitiveType) + "." + member, out function);
+                genericMethodName = TypeName(primitiveType)
+                    + "." + member;
+                _ = TryFindFunction(genericMethodName, out function);
             }
             else
             {
@@ -12919,10 +19749,30 @@ internal sealed partial class Binder
                     return ErrorExpression(node.Span);
                 }
                 _ = TryFindFunction(staticMember, out function);
+                genericMethodName = staticMember;
             }
             if (function < 0)
             {
-                Report("TRM3011", $"Unknown method '{member}'.", callee.Span);
+                genericMethodTemplate
+                    ??= genericMethodName is not null
+                        && _templates.TryGetValue(genericMethodName,
+                            out var selectedGenericMethod)
+                            ? selectedGenericMethod : null;
+                if (genericMethodTemplate is not null)
+                {
+                    if (isTypeReceiver)
+                    {
+                        receiver = null;
+                    }
+                    function = InstantiateGeneric(callee,
+                        (SyntaxNode)node.Children[1], expected,
+                        genericMethodTemplate);
+                }
+                else if (function < 0)
+                {
+                    Report("TRM3011", $"Unknown method '{member}'.",
+                        callee.Span);
+                }
             }
         }
         else
@@ -13128,6 +19978,8 @@ internal sealed partial class Binder
             "uint32" => PrimitiveType.UInt32,
             "int64" => PrimitiveType.Int64,
             "uint64" => PrimitiveType.UInt64,
+            "nint" => PrimitiveType.NativeInt,
+            "nuint" => PrimitiveType.NativeUInt,
             "int128" => PrimitiveType.Int128,
             "uint128" => PrimitiveType.UInt128,
             "char16" => PrimitiveType.Char16,
@@ -13144,6 +19996,7 @@ internal sealed partial class Binder
         return name is "char8" or "char16" or "char32" or "rune"
             or "int8" or "int16" or "int32" or "int64" or "int128"
             or "uint8" or "uint16" or "uint32" or "uint64" or "uint128"
+            or "nint" or "nuint"
             or "float16" or "bfloat16" or "float32" or "float64" or "float128"
             or "decimal32" or "decimal64" or "decimal128";
     }
@@ -13175,7 +20028,9 @@ internal sealed partial class Binder
         }
         if (operand.Type is PrimitiveType.Float32 or PrimitiveType.Float64)
         {
-            if (target is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64)
+            if (target is PrimitiveType.Int32 or PrimitiveType.UInt32
+                or PrimitiveType.Int64 or PrimitiveType.UInt64
+                or PrimitiveType.NativeInt or PrimitiveType.NativeUInt)
             {
                 return new BoundCast(operand, target, node.Span);
             }
@@ -13205,7 +20060,9 @@ internal sealed partial class Binder
         return new BoundCast(operand, target, node.Span);
     }
 
-    private BoundCall BindArguments(SyntaxNode node, SyntaxNode arguments, int function, SyntaxNode? receiver)
+    private BoundCall BindArguments(SyntaxNode node, SyntaxNode arguments,
+        int function, SyntaxNode? receiver,
+        bool allowInterfaceWitnessAccess = false)
     {
         var signature = function < 0 ? null : _signatures[function];
         var hasNamedArguments = HasNamedArguments(arguments);
@@ -13216,9 +20073,9 @@ internal sealed partial class Binder
         {
             Report("TRM3011", "Named arguments are supported only for uniquely resolved non-intrinsic calls.", arguments.Span);
         }
-        var ownerName = signature?.StructName is null ? null
-            : signature.Name[..signature.Name.LastIndexOf('.', StringComparison.Ordinal)];
+        var ownerName = GetSignatureOwnerName(signature);
         if (signature is not null && signature.IsPrivate
+            && !allowInterfaceWitnessAccess
             && !CanAccessSignature(signature))
         {
             Report("TRM3011", $"'{signature.Name}' is private.", node.Span);
@@ -13230,6 +20087,8 @@ internal sealed partial class Binder
         var bound = ImmutableArray.CreateBuilder<BoundExpression>();
         var argumentParameterIndices = hasNamedArguments
             ? ImmutableArray.CreateBuilder<int>() : null;
+        ImmutableArray<BoundCallDefaultArgument>.Builder?
+            defaultedArguments = null;
         ImmutableArray<int>.Builder? implicitReferenceTemporaries = null;
         var receiverCount = 0;
         if (receiver is not null && signature is not null)
@@ -13238,10 +20097,19 @@ internal sealed partial class Binder
                 ?? (signature.IsMutable && IsClass(ResolveDeclaredType(ownerName!))
                     ? ManagedClassTypes.Writable(ResolveDeclaredType(ownerName!))
                     : ResolveDeclaredType(ownerName!));
+            var isGenericInterfaceReceiver
+                = signature.External?.InterfaceRequirement is not null
+                    && _genericProofFunctions is not null
+                    && TryGetGenericInterfaceFormal(receiverType,
+                        out var receiverFormalScope, out _)
+                    && receiverFormalScope
+                        == BoundInterfaceTypeParameterScope.Member;
             bound.Add(signature.External?.Intrinsic is BoundIntrinsic.BufferSet or BoundIntrinsic.BufferTryAppend or BoundIntrinsic.BufferClear
                 ? BindMutableReceiverLoan(receiver, PrimitiveType.OwnedInt32Buffer, receiver.Span,
                     allowBufferField: true)
-                : signature.IsMutable && IsStruct(receiverType)
+                : signature.IsMutable
+                    && (IsStruct(receiverType)
+                        || isGenericInterfaceReceiver)
                     ? BindMutableReceiverLoan(receiver, receiverType, receiver.Span)
                 : (signature.ResultDependencyIncludesReceiver && IsStruct(receiverType))
                     || (IsUnique(receiverType) && !signature.IsCleanup)
@@ -13275,7 +20143,7 @@ internal sealed partial class Binder
                 Report("TRM3011", "Instance methods require a receiver.", node.Span);
             }
         }
-        var assignedParameters = signature is not null && namedArgumentsSupported
+        var assignedParameters = signature is not null
             ? new bool[signature.Parameters.Length] : null;
         var nextPositionalParameter = 0;
         var hasOutOfPositionNamedArgument = false;
@@ -13591,6 +20459,77 @@ internal sealed partial class Binder
             argumentParameterIndices?.Add(position + receiverCount);
         }
 
+        var selectedSignature = signature;
+        if (selectedSignature is not null
+            && assignedParameters is { } assigned)
+        {
+            for (var index = 0; index < assigned.Length; index++)
+            {
+                if (assigned[index])
+                {
+                    continue;
+                }
+
+                var parameter = selectedSignature.Parameters[index];
+                BoundExpression? defaultArgument
+                    = parameter.DefaultValue;
+                defaultArgument ??= parameter.DefaultExpression;
+                if (defaultArgument is null)
+                {
+                    continue;
+                }
+                if (!parameter.DefaultFormalDependencies.IsEmpty)
+                {
+                    if (defaultArgument is not BoundExpression expression
+                        || signature?.Generic
+                            is not GenericInstantiation instantiation)
+                    {
+                        Report("TRM3005",
+                            "A generic-dependent parameter default has no selected generic actuals.",
+                            arguments.Span);
+                        defaultArgument = ErrorExpression(arguments.Span);
+                    }
+                    else
+                    {
+                        defaultArgument =
+                            BindGenericMethodParameterDefaultForCall(
+                                instantiation, expression,
+                                parameter.DefaultFormalDependencies,
+                                parameter.Type, arguments.Span);
+                    }
+                }
+                if (defaultArgument.Type != parameter.Type)
+                {
+                    Report("TRM3005",
+                        "A parameter default does not match the selected formal type.",
+                        arguments.Span);
+                    defaultArgument = ErrorExpression(arguments.Span);
+                }
+                else if (defaultArgument is BoundConstant constant)
+                {
+                    defaultArgument = constant with {
+                        Span = arguments.Span,
+                    };
+                }
+                if (_isBindingConstEvalBody)
+                {
+                    defaultedArguments
+                        ??= ImmutableArray.CreateBuilder<
+                            BoundCallDefaultArgument>();
+                    defaultedArguments.Add(
+                        new BoundCallDefaultArgument(bound.Count, index,
+                            defaultArgument,
+                            parameter.DefaultValue
+                                ?? defaultArgument as BoundConstant,
+                            _trees.IndexOf(selectedSignature.Tree)));
+                }
+                bound.Add(defaultArgument);
+                implicitReferenceTemporaries?.Add(-1);
+                argumentParameterIndices?.Add(index + receiverCount);
+                assigned[index] = true;
+            }
+        }
+
         if (signature is not null)
         {
             _ = CheckUnsafeCaller(signature, node.Span);
@@ -13619,11 +20558,70 @@ internal sealed partial class Binder
 
         return new BoundCall(Math.Max(0, function), bound.ToImmutable(),
             signature?.ReturnType ?? PrimitiveType.Int32, node.Span) {
+            GenericMethodCall = signature?.Generic is
+                GenericInstantiation callInstantiation
+                    && callInstantiation.Template.ImportedMethod is null
+                    ? new BoundGenericMethodInstantiation(
+                        callInstantiation.Template.DefinitionOrdinal,
+                        callInstantiation.Types) {
+                        ConstantArguments =
+                            callInstantiation.ConstantArguments,
+                    }
+                    : null,
+            ImportedGenericMethodCall = signature?.Generic is
+                GenericInstantiation importedCallInstantiation
+                    ? importedCallInstantiation.Template.ImportedMethod
+                    : null,
+            ImportedGenericMethodTypeArguments =
+                signature?.Generic is GenericInstantiation importedInstantiation
+                    && importedInstantiation.Template.ImportedMethod is not null
+                        ? importedInstantiation.Types : [],
             ArgumentParameterIndices = validNamedBinding && argumentParameterIndices is { } parameterIndices
                 ? parameterIndices.ToImmutable() : default,
+            DefaultedArguments = defaultedArguments?.ToImmutable()
+                ?? default,
             ArgumentImplicitReferenceTemporaries = implicitReferenceTemporaries?.ToImmutable() ?? default,
             IsUnsafeAuthorized = signature is { RequiresUnsafeCaller: true } && _unsafeDepth != 0,
         };
+    }
+
+    private static string? GetSignatureOwnerName(Signature? signature)
+    {
+        if (signature?.StructName is not string structName)
+        {
+            return null;
+        }
+
+        if (signature.ExplicitInterfaceOwner is not null)
+        {
+            var separator = signature.Name.IndexOf(".$explicit:",
+                StringComparison.Ordinal);
+            if (separator < 0)
+            {
+                separator = signature.Name.IndexOf(".#get:",
+                    StringComparison.Ordinal);
+            }
+            if (separator < 0)
+            {
+                separator = signature.Name.IndexOf(".#set:",
+                    StringComparison.Ordinal);
+            }
+            if (separator < 0)
+            {
+                separator = signature.Name.IndexOf(".#init:",
+                    StringComparison.Ordinal);
+            }
+            if (separator >= 0)
+            {
+                return signature.Name[..separator];
+            }
+        }
+
+        var lastSeparator = signature.Name.LastIndexOf('.',
+            StringComparison.Ordinal);
+        return lastSeparator >= 0
+            ? signature.Name[..lastSeparator]
+            : structName;
     }
 
     private static bool HasArgumentName(SyntaxNode argument) =>
@@ -13987,6 +20985,143 @@ internal sealed partial class Binder
         return initializationAuthority;
     }
 
+    private BoundStatement? TryBindPropertyAssignment(
+        SyntaxNode assignment, SyntaxNode? receiver, string propertyName,
+        SyntaxNode value, TextSpan span)
+    {
+        PrimitiveType receiverType;
+        if (receiver is null)
+        {
+            if (!_hasReceiver || _currentStruct is null
+                || _variables.IsEmpty)
+            {
+                return null;
+            }
+            receiverType = _variables[0].Type;
+        }
+        else if (KnownType(receiver) is PrimitiveType knownReceiverType)
+        {
+            receiverType = knownReceiverType;
+        }
+        else
+        {
+            return null;
+        }
+
+        var isCurrentReceiver = receiver is null
+            || receiver.Kind == SyntaxKind.NameExpression
+                && receiver.Children[0] is SyntaxTokenElement token
+                && token.Token.Name == "this";
+        var callerIsInitializer = _bindingPropertyAccessorKind
+                == BoundPropertyAccessorKind.Initializer
+            && isCurrentReceiver;
+        if (callerIsInitializer
+            && !StringComparer.Ordinal.Equals(_bindingPropertyName,
+                propertyName))
+        {
+            Report("TRM3008",
+                "A property init accessor cannot amplify its backing authority to another property.",
+                assignment.Span);
+            return new BoundBlock([], span);
+        }
+
+        var mayInitialize = isCurrentReceiver
+            && (_constructor
+                || callerIsInitializer
+                    && StringComparer.Ordinal.Equals(
+                        _bindingPropertyName, propertyName));
+        var accessorKind = mayInitialize
+            ? BoundPropertyAccessorKind.Initializer
+            : BoundPropertyAccessorKind.Setter;
+        if (!TryFindPropertyAccessor(receiverType, propertyName,
+                accessorKind, out var accessor))
+        {
+            if (mayInitialize
+                && TryFindPropertyAccessor(receiverType, propertyName,
+                    BoundPropertyAccessorKind.Setter, out _))
+            {
+                Report("TRM3008",
+                    "A constructor cannot invoke an ordinary property setter on its unpublished receiver.",
+                    assignment.Span);
+                return new BoundBlock([], span);
+            }
+
+            if (!mayInitialize
+                && TryFindPropertyAccessor(receiverType, propertyName,
+                    BoundPropertyAccessorKind.Initializer, out _))
+            {
+                Report("TRM3008",
+                    "A property init accessor can only be invoked through an unpublished construction receiver.",
+                    assignment.Span);
+                return new BoundBlock([], span);
+            }
+
+            if (mayInitialize && _constructor && !callerIsInitializer
+                && isCurrentReceiver
+                && ManagedClassTypes.IsClass(receiverType)
+                && !TryFindPropertyAccessor(receiverType, propertyName,
+                    BoundPropertyAccessorKind.Setter, out _)
+                && !TryFindPropertyAccessor(receiverType, propertyName,
+                    BoundPropertyAccessorKind.Initializer, out _)
+                && TryFindGetter(receiverType, propertyName, out _))
+            {
+                var backingField = FindClassPropertyBackingField(
+                    receiverType, propertyName);
+                if (backingField >= 0)
+                {
+                    var isUnsafeAuthorized = CheckFieldAccess(receiverType,
+                        backingField, assignment.Span);
+                    CheckFieldMutation(receiverType, backingField,
+                        constructingReceiver: true,
+                        span: assignment.Span);
+                    return BindFieldAssignmentValue(0, backingField, [],
+                        value, GetField(receiverType, backingField).Type,
+                        span, isUnsafeAuthorized);
+                }
+            }
+
+            return null;
+        }
+
+        var argument = new SyntaxNode(SyntaxKind.Argument,
+            [value], value.Span);
+        var arguments = new SyntaxNode(SyntaxKind.ArgumentList,
+            [argument], value.Span);
+        var call = BindArguments(assignment, arguments, accessor,
+            receiver);
+        return new BoundExpressionStatement(call, span);
+    }
+
+    private bool TryFindPropertyAccessor(PrimitiveType type, string name,
+        BoundPropertyAccessorKind accessorKind, out int accessor)
+    {
+        accessor = -1;
+        var owner = ManagedClassTypes.IsClass(type)
+            ? _classes[ManagedClassTypes.ClassIndex(type)].Name
+            : IsStruct(type) ? _structs[(int)type - 100].Name : null;
+        if (owner is null)
+        {
+            return false;
+        }
+
+        var accessorName = accessorKind switch {
+            BoundPropertyAccessorKind.Setter => "#set:",
+            BoundPropertyAccessorKind.Initializer => "#init:",
+            _ => string.Empty,
+        };
+        if (accessorName.Length == 0
+            || !TryFindFunctionExact(owner + "." + accessorName + name,
+                out accessor))
+        {
+            return false;
+        }
+
+        var signature = _signatures[accessor];
+        return !signature.IsStatic
+            && signature.PropertyName == name
+            && signature.PropertyAccessorKind == accessorKind;
+    }
+
     private bool TryFindGetter(PrimitiveType type, string name, out int getter)
     {
         var owner = IsClass(type) ? _classes[ManagedClassTypes.ClassIndex(type)].Name
@@ -13996,6 +21131,20 @@ internal sealed partial class Binder
         getter = -1;
         return owner is not null && TryFindFunctionExact(owner + ".#get:" + name, out getter)
             && !_signatures[getter].IsStatic && _signatures[getter].PropertyName == name;
+    }
+
+    private bool TryFindIndexerSetter(PrimitiveType type, out int setter)
+    {
+        var owner = IsClass(type)
+            ? _classes[ManagedClassTypes.ClassIndex(type)].Name
+            : IsStruct(type) ? _structs[(int)type - 100].Name
+            : TryPrimitiveType(TypeName(type), out var primitive)
+                && primitive == type ? TypeName(type) : null;
+        setter = -1;
+        return owner is not null
+            && TryFindFunctionExact(owner + ".#set:this", out setter)
+            && !_signatures[setter].IsStatic
+            && _signatures[setter].PropertyName == "this";
     }
 
     private bool TryFindStaticGetter(PrimitiveType type, string name, out int getter)
@@ -14024,7 +21173,8 @@ internal sealed partial class Binder
         type is PrimitiveType.Bool or PrimitiveType.Char8 or PrimitiveType.Char16 or PrimitiveType.Char32
             or PrimitiveType.Rune or PrimitiveType.Int8 or PrimitiveType.Int16 or PrimitiveType.Int32
             or PrimitiveType.Int64 or PrimitiveType.UInt8 or PrimitiveType.UInt16 or PrimitiveType.UInt32
-            or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64
+            or PrimitiveType.UInt64 or PrimitiveType.NativeInt
+            or PrimitiveType.NativeUInt or PrimitiveType.Float32 or PrimitiveType.Float64
             || NativeFunctionPointerTypes.IsType(type);
 
     private bool IsSupportedImplicitReferenceType(PrimitiveType type) =>
@@ -14199,7 +21349,9 @@ internal sealed partial class Binder
         var type = expected;
         if (type is not (PrimitiveType.Int8 or PrimitiveType.Int16 or PrimitiveType.Int32
             or PrimitiveType.UInt8 or PrimitiveType.UInt16 or PrimitiveType.UInt32
-            or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Char8
+            or PrimitiveType.Int64 or PrimitiveType.UInt64
+            or PrimitiveType.NativeInt or PrimitiveType.NativeUInt
+            or PrimitiveType.Char8
             or PrimitiveType.Char16 or PrimitiveType.Char32 or PrimitiveType.Rune))
         {
             Report("TRM3014", "An unsuffixed integer literal requires a numeric context.", token.Span);
@@ -14221,6 +21373,9 @@ internal sealed partial class Binder
             PrimitiveType.Int64 when based => ulong.MaxValue,
             PrimitiveType.Int64 => long.MaxValue,
             PrimitiveType.UInt64 => ulong.MaxValue,
+            PrimitiveType.NativeInt when based => ulong.MaxValue,
+            PrimitiveType.NativeInt => long.MaxValue,
+            PrimitiveType.NativeUInt => ulong.MaxValue,
             _ => int.MaxValue,
         };
         if ((hasDecodedIntegers && !TryIntegerMagnitude(token, out parsed)) || overflow)
@@ -14242,6 +21397,8 @@ internal sealed partial class Binder
         var value = type switch {
             PrimitiveType.UInt64 => unchecked((long)parsed),
             PrimitiveType.Int64 => unchecked((long)parsed),
+            PrimitiveType.NativeInt => unchecked((long)parsed),
+            PrimitiveType.NativeUInt => unchecked((long)parsed),
             PrimitiveType.Int8 => unchecked((sbyte)parsed),
             PrimitiveType.Int16 => unchecked((short)parsed),
             PrimitiveType.UInt8 or PrimitiveType.Char8 => (byte)parsed,
@@ -14264,14 +21421,17 @@ internal sealed partial class Binder
         }
         if (token.Kind != TokenKind.NumericLiteral
             || type is not (PrimitiveType.Int8 or PrimitiveType.Int16 or PrimitiveType.Int32
-                or PrimitiveType.Int64 or PrimitiveType.UInt8 or PrimitiveType.UInt16
+                or PrimitiveType.Int64 or PrimitiveType.NativeInt
+                or PrimitiveType.UInt8 or PrimitiveType.UInt16
                 or PrimitiveType.UInt32 or PrimitiveType.UInt64 or PrimitiveType.Char8
+                or PrimitiveType.NativeUInt
                 or PrimitiveType.Char16 or PrimitiveType.Char32 or PrimitiveType.Rune))
         {
             return false;
         }
         if (negative && type is PrimitiveType.UInt8 or PrimitiveType.UInt16
-            or PrimitiveType.UInt32 or PrimitiveType.UInt64)
+            or PrimitiveType.UInt32 or PrimitiveType.UInt64
+            or PrimitiveType.NativeUInt)
         {
             if (!TryIntegerMagnitude(token, out var unsignedMagnitude))
             {
@@ -14298,11 +21458,14 @@ internal sealed partial class Binder
             PrimitiveType.Int16 => negative ? 32768UL : 32767UL,
             PrimitiveType.Int32 => negative ? 2147483648UL : 2147483647UL,
             PrimitiveType.Int64 => negative ? 9223372036854775808UL : 9223372036854775807UL,
+            PrimitiveType.NativeInt => negative ? 9223372036854775808UL
+                : 9223372036854775807UL,
             PrimitiveType.UInt8 or PrimitiveType.Char8 => negative ? 0UL : byte.MaxValue,
             PrimitiveType.UInt16 or PrimitiveType.Char16 => negative ? 0UL : ushort.MaxValue,
             PrimitiveType.UInt32 or PrimitiveType.Char32 => negative ? 0UL : uint.MaxValue,
             PrimitiveType.Rune => negative ? 0UL : 0x10_FFFF,
             PrimitiveType.UInt64 => negative ? 0UL : ulong.MaxValue,
+            PrimitiveType.NativeUInt => negative ? 0UL : ulong.MaxValue,
             _ => ulong.MaxValue,
         };
         if (magnitude > maximum)
@@ -14323,11 +21486,16 @@ internal sealed partial class Binder
             PrimitiveType.Int32 => negative ? -(long)magnitude : (long)magnitude,
             PrimitiveType.Int64 => negative && magnitude == 9223372036854775808UL
                 ? long.MinValue : negative ? -(long)magnitude : (long)magnitude,
+            PrimitiveType.NativeInt => negative
+                && magnitude == 9223372036854775808UL
+                    ? long.MinValue
+                    : negative ? -(long)magnitude : (long)magnitude,
             PrimitiveType.UInt8 or PrimitiveType.Char8 => (long)(byte)magnitude,
             PrimitiveType.UInt16 or PrimitiveType.Char16 => (long)(ushort)magnitude,
             PrimitiveType.UInt32 => unchecked((int)magnitude),
             PrimitiveType.Char32 or PrimitiveType.Rune => (long)(uint)magnitude,
             PrimitiveType.UInt64 => unchecked((long)magnitude),
+            PrimitiveType.NativeUInt => unchecked((long)magnitude),
             _ => 0,
         };
         constant = new BoundConstant(value, type, span);
@@ -14481,8 +21649,18 @@ internal sealed partial class Binder
     {
         switch (node.Kind)
         {
+            case SyntaxKind.TypeOfQueryExpression:
+                return PrimitiveType.TypeIdentity;
+            case SyntaxKind.SizeOfQueryExpression
+                or SyntaxKind.AlignOfQueryExpression
+                or SyntaxKind.OffsetOfTypeQueryExpression
+                or SyntaxKind.OffsetOfPlaceQueryExpression
+                or SyntaxKind.CountOfQueryExpression:
+                return PrimitiveType.NativeInt;
             case SyntaxKind.ParenthesizedExpression:
                 return KnownType((SyntaxNode)node.Children[1]);
+            case SyntaxKind.InterfaceWitnessProjectionExpression:
+                return KnownType((SyntaxNode)node.Children[0]);
             case SyntaxKind.UnsafeExpression:
                 return KnownType((SyntaxNode)node.Children[2]);
             case SyntaxKind.ConstExpression:
@@ -14501,6 +21679,11 @@ internal sealed partial class Binder
                 if (TryFindVariable(token, out var slot))
                 {
                     return _unresolvedVacantLocals.Contains(slot) ? null : _variables[slot].Type;
+                }
+                if (TryGetGenericMethodConstantValue(name,
+                    out var genericConstant))
+                {
+                    return genericConstant.DomainType;
                 }
                 if (_hasReceiver && _currentStruct is not null
                     && _primitiveBackingFields.TryGetValue(_currentStruct, out var backing)
@@ -14537,7 +21720,9 @@ internal sealed partial class Binder
                 };
             }
             case SyntaxKind.IsNullExpression or SyntaxKind.IsSomeExpression
-                or SyntaxKind.IsVarNullableExpression or SyntaxKind.IsInitializedExpression:
+                or SyntaxKind.IsVarNullableExpression
+                or SyntaxKind.IsInitializedExpression
+                or SyntaxKind.IsPatternExpression:
                 return PrimitiveType.Bool;
             case SyntaxKind.InvocationExpression:
             {
@@ -14689,6 +21874,14 @@ internal sealed partial class Binder
                 {
                     return PrimitiveType.UInt64;
                 }
+                if (text is "nint.MinValue" or "nint.MaxValue")
+                {
+                    return PrimitiveType.NativeInt;
+                }
+                if (text is "nuint.MinValue" or "nuint.MaxValue")
+                {
+                    return PrimitiveType.NativeUInt;
+                }
                 if (text is "char16.MinValue" or "char16.MaxValue")
                 {
                     return PrimitiveType.Char16;
@@ -14696,6 +21889,8 @@ internal sealed partial class Binder
                 return null;
             }
             case SyntaxKind.IndexExpression:
+            {
+                var indexArgument = GetSingleIndexArgument(node);
                 if (TryGetNativeFixedArrayLayoutForValue(
                     (SyntaxNode)node.Children[0], out _, out var arrayLayout))
                 {
@@ -14703,14 +21898,27 @@ internal sealed partial class Binder
                 }
                 if (KnownType((SyntaxNode)node.Children[0]) == PrimitiveType.TokenSpan)
                 {
-                    return (PrimitiveType)(100 + TokenSpanContract.Find(_structs, TokenSpanContract.TokenName));
+                    return indexArgument is null ? null
+                        : (PrimitiveType)(100 + TokenSpanContract.Find(_structs,
+                            TokenSpanContract.TokenName));
                 }
-                return TryFindBuffer((SyntaxNode)node.Children[0], out var buffer)
-                    ? ((SyntaxNode)node.Children[2]).Kind == SyntaxKind.SliceRangeExpression
-                        ? null : _buffers[buffer].ElementType
-                    : ((SyntaxNode)node.Children[2]).Kind == SyntaxKind.SliceRangeExpression
+                var receiver = (SyntaxNode)node.Children[0];
+                if (KnownType(receiver) is PrimitiveType indexerOwner
+                    && TryFindGetter(indexerOwner, "this",
+                        out var indexerGetter)
+                    && _signatures[indexerGetter].Parameters.Length
+                        == GetIndexArguments(node).Length)
+                {
+                    return _signatures[indexerGetter].ReturnType;
+                }
+                return indexArgument is not null
+                    && TryFindBuffer((SyntaxNode)node.Children[0], out var buffer)
+                        ? indexArgument.Kind == SyntaxKind.SliceRangeExpression
+                            ? null : _buffers[buffer].ElementType
+                    : indexArgument?.Kind == SyntaxKind.SliceRangeExpression
                         && KnownType((SyntaxNode)node.Children[0]) == PrimitiveType.OwnedInt32Buffer
                             ? PrimitiveType.ReadonlyInt32BufferView : null;
+            }
             case SyntaxKind.UnaryExpression:
             {
                 var operandNode = (SyntaxNode)node.Children[1];
@@ -14820,13 +22028,15 @@ internal sealed partial class Binder
         }
 
         return NativeFixedArrayContract.MatchesLayout(layout, _structs,
-            _nativeFixedArrayTypes, _checkedReferenceTypes);
+            _nativeFixedArrayTypes, _checkedReferenceTypes,
+            _enumDefinitions);
     }
 
     private bool TryGetNativeFixedArrayLayout(PrimitiveType arrayType,
         out BoundNativeFixedArrayLayout layout)
         => NativeFixedArrayContract.TryGetLayout(arrayType, _structs,
-            _nativeFixedArrayTypes, out layout, _checkedReferenceTypes);
+            _nativeFixedArrayTypes, out layout, _checkedReferenceTypes,
+            _enumDefinitions);
 
     private bool TryGetNativeFixedArrayLayoutForValue(SyntaxNode node,
         out int variable, out BoundNativeFixedArrayLayout layout)
@@ -14858,6 +22068,7 @@ internal sealed partial class Binder
         variable = -1;
         layout = default;
         return node.Kind == SyntaxKind.IndexExpression
+            && GetSingleIndexArgument(node) is not null
             && TryGetNativeFixedArrayLayoutForValue(
                 (SyntaxNode)node.Children[0], out variable,
                 out var containingLayout)
@@ -14879,6 +22090,14 @@ internal sealed partial class Binder
         }
         while (node.Kind == SyntaxKind.IndexExpression)
         {
+            if (GetSingleIndexArgument(node) is null)
+            {
+                variable = -1;
+                fieldPlace = null;
+                projections = [];
+                return false;
+            }
+
             reversed.Add(node);
             node = (SyntaxNode)node.Children[0];
             while (node.Kind == SyntaxKind.ParenthesizedExpression)
@@ -14900,7 +22119,7 @@ internal sealed partial class Binder
         for (var index = reversed.Count - 1; index >= 0; index--)
         {
             var indexExpression = BindNativeFixedArrayIndex(
-                (SyntaxNode)reversed[index].Children[2], layout);
+                GetSingleIndexArgument(reversed[index])!, layout);
             if (indexExpression is BoundConstant
                 && !NativeFixedArrayContract.IsConstantIndexInRange(
                     indexExpression, layout.ElementCount))
@@ -15255,7 +22474,8 @@ internal sealed partial class Binder
 
     private bool HasVariableReceiverName(SyntaxNode receiver)
     {
-        while (receiver.Kind == SyntaxKind.MemberAccessExpression)
+        while (receiver.Kind is SyntaxKind.MemberAccessExpression
+            or SyntaxKind.InterfaceWitnessProjectionExpression)
         {
             receiver = (SyntaxNode)receiver.Children[0];
         }
@@ -15342,6 +22562,29 @@ internal sealed partial class Binder
             AppendTypeNameText(builder, "...", ref remainingCharacters);
             return;
         }
+        if (BoundSpanTypeTypes.IsValidType(type, _spanTypes))
+        {
+            var spanType = _spanTypes[BoundSpanTypeTypes.Index(type)];
+            if (spanType.IsWritable)
+            {
+                AppendTypeNameText(builder, "write ", ref remainingCharacters);
+            }
+            AppendTypeNameText(builder, "Span<", ref remainingCharacters);
+            if (spanType.IsInitialization)
+            {
+                AppendTypeNameText(builder, "init ",
+                    ref remainingCharacters);
+            }
+            if (spanType.IsElementWritable)
+            {
+                AppendTypeNameText(builder, "write ",
+                    ref remainingCharacters);
+            }
+            AppendTypeName(spanType.ElementType, builder,
+                ref remainingCharacters, ref remainingNodes, depth + 1);
+            AppendTypeNameText(builder, ">", ref remainingCharacters);
+            return;
+        }
         switch (type)
         {
             case PrimitiveType.Char8:
@@ -15370,6 +22613,16 @@ internal sealed partial class Binder
                 break;
             case PrimitiveType.UInt64:
                 AppendTypeNameText(builder, "uint64", ref remainingCharacters);
+                break;
+            case PrimitiveType.NativeInt:
+                AppendTypeNameText(builder, "nint", ref remainingCharacters);
+                break;
+            case PrimitiveType.NativeUInt:
+                AppendTypeNameText(builder, "nuint", ref remainingCharacters);
+                break;
+            case PrimitiveType.TypeIdentity:
+                AppendTypeNameText(builder, "type identity",
+                    ref remainingCharacters);
                 break;
             case PrimitiveType.Int128:
                 AppendTypeNameText(builder, "int128", ref remainingCharacters);
@@ -15527,6 +22780,36 @@ internal sealed partial class Binder
                 {
                     AppendTypeNameText(builder, _structs[(int)type - 100].Name, ref remainingCharacters);
                 }
+                else if (BoundGenericNominalTypeTypes.IsType(type))
+                {
+                    var index = BoundGenericNominalTypeTypes.Index(type);
+                    if ((uint)index >= (uint)_genericNominalTypeInstances.Count)
+                    {
+                        AppendTypeNameText(builder, "generic nominal type",
+                            ref remainingCharacters);
+                        break;
+                    }
+
+                    var identity = _genericNominalTypeInstances[index].Definition;
+                    var definition = _genericNominalTypeDefinitions
+                        .FirstOrDefault(candidate =>
+                            candidate.Identity == identity);
+                    if (definition is null)
+                    {
+                        AppendTypeNameText(builder, "generic nominal type",
+                            ref remainingCharacters);
+                        break;
+                    }
+
+                    if (definition.Namespace.Length != 0)
+                    {
+                        AppendTypeNameText(builder,
+                            $"{definition.Namespace}.",
+                            ref remainingCharacters);
+                    }
+                    AppendTypeNameText(builder, definition.Name,
+                        ref remainingCharacters);
+                }
                 else if (BoundEnumTypes.IsType(type)
                     && (uint)BoundEnumTypes.Index(type) < (uint)_enumDefinitions.Count)
                 {
@@ -15639,14 +22922,26 @@ internal sealed partial class Binder
         bool IsEscapedThis = false)
     {
         internal bool IsCanonicalImplicitReference { get; init; }
+        internal SyntaxNode? DefaultSyntax { get; init; }
+        internal BoundExpression? DefaultExpression { get; init; }
+        internal BoundConstant? DefaultValue { get; init; }
+        internal ImmutableArray<
+            BoundGenericMethodParameterDefaultFormalDependency>
+            DefaultFormalDependencies
+            { get; init; } = [];
     }
+
+    private readonly record struct ParameterDefaultBindingKey(
+        SyntaxNode Syntax, PrimitiveType Type, string? OwnerName,
+        ImmutableDictionary<string, PrimitiveType>? OwnerTypeArguments,
+        GenericInstantiation? OwnerContext);
 
     private sealed record NativeImportEnumArgumentExpressions(
         SyntaxNode? CallingConvention,
         SyntaxNode? ResolutionMode,
         SyntaxNode? ResolutionPolicy);
 
-    private sealed record SourceDeclarationContractClause(
+    internal sealed record SourceDeclarationContractClause(
         SyntaxTree Tree, SyntaxNode Clause);
 
     private sealed record StaticFieldSource(
@@ -15696,7 +22991,10 @@ internal sealed partial class Binder
         SyntaxNode? Body, SyntaxNode? Declaration, SyntaxTree Tree, string? StructName, bool IsConstructor, bool IsPrivate,
         bool IsInternal, bool IsMutable, bool IsStatic, bool NoFailureProof, bool DoesNotReturn, BoundFunction? External = null)
     {
+        internal BoundInterfaceType? ExplicitInterfaceOwner { get; init; }
         internal string? PropertyName { get; init; }
+        internal BoundPropertyAccessorKind PropertyAccessorKind
+            { get; init; }
         internal bool IsCleanup { get; init; }
         internal bool RequiresUnsafeCaller { get; init; }
         internal bool IsOperator { get; init; }
@@ -15707,11 +23005,18 @@ internal sealed partial class Binder
         internal bool NativeExportUsesDeclarationName { get; init; }
         internal GenericInstantiation? Generic { get; init; }
         internal ImmutableDictionary<string, PrimitiveType>? GenericOwnerTypeArguments { get; init; }
+        internal GenericInstantiation? GenericOwnerContext { get; init; }
         internal bool IsClassConstructor { get; init; }
         internal int ClassConstructor { get; init; } = -1;
+        internal int SourceDeclarationInputOrdinal { get; init; } = -1;
+        internal TextSpan SourceDeclarationSpan { get; init; }
+        internal bool HasExplicitVisibility { get; init; }
+        internal bool IsPartialConstructor { get; init; }
+        internal bool IsPartialConstructorComposed { get; init; }
         internal bool IsPartialStaticConstructor { get; init; }
         internal bool IsStaticConstructorComposed { get; init; }
         internal bool IsStaticAutoProperty { get; init; }
+        internal bool IsAutoPropertyAccessor { get; init; }
         internal ImmutableArray<BoundFriendTarget> FriendTargets { get; init; }
             = [];
         internal BoundStaticConstructorIdentity?
@@ -15722,6 +23027,10 @@ internal sealed partial class Binder
             StaticConstructorOwnerTypeArguments { get; init; }
                 = [];
         internal bool IsConstEval { get; init; }
+        internal BoundEvaluationFormSchemaBinding?
+            PureEvaluationFormSchema { get; init; }
+        internal BoundEvaluationFormSchemaBinding?
+            ConstEvalSchema { get; init; }
         internal bool DeclaredRequiresUnsafeCaller { get; init; }
         internal SyntaxNode? NativeCallableConventionExpression { get; init; }
         internal NativeImportEnumArgumentExpressions? NativeImportEnumArguments { get; init; }
@@ -15732,6 +23041,14 @@ internal sealed partial class Binder
         internal ImmutableArray<int> ResultDependencyParameters { get; init; } = [];
         internal bool ResultDependencyIncludesReceiver { get; init; }
         internal ImmutableArray<BoundDependencyContract> DependencyContracts { get; init; } = [];
+        internal ImmutableArray<NativeFunctionPointerSelector>
+            CheckedOutputSelectors { get; init; } = [];
+        internal ImmutableArray<NativeFunctionPointerOutputState>
+            CheckedOutputStates { get; init; } = [];
+        internal ImmutableArray<BoundOutputStatePredicate>
+            CheckedOutputStatePredicates { get; init; } = [];
+        internal bool HasPrivateCheckedOutputStateMetadata { get; init; }
+        internal bool HasStandardCheckedOutputStateMetadata { get; init; }
         internal ImmutableArray<SourceDeclarationContractClause>
             DeclarationContractClauses { get; init; } = [];
     }

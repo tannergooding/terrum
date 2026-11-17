@@ -8,6 +8,104 @@ namespace Terrum.CodeAnalysis.Modules;
 
 internal static class TrRmEnumProviderBindingValidator
 {
+    internal static void ValidateC1EnumSnapshot(
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables expected,
+        int expectedType,
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables actual,
+        int actualType)
+    {
+        if (!expected.Schema.UsesC1EnumClosure()
+            || !actual.Schema.UsesC1EnumClosure()
+            || expected.TypeDefs.GetKind(expectedType) != 4
+            || actual.TypeDefs.GetKind(actualType) != 4
+            || actual.Imports.IsExpectedDefinition(
+                0x1300_0000u | checked((uint)actualType))
+            || expected.TypeDefs.GetFlags(expectedType)
+                != actual.TypeDefs.GetFlags(actualType)
+            || !StringComparer.Ordinal.Equals(
+                expected.TypeDefs.GetNamespace(expectedType),
+                actual.TypeDefs.GetNamespace(actualType))
+            || !StringComparer.Ordinal.Equals(
+                expected.TypeDefs.GetName(expectedType),
+                actual.TypeDefs.GetName(actualType)))
+        {
+            throw InvalidBinding();
+        }
+
+        var expectedEnum = expected.EnumDefs.GetRowForTypeDef(expectedType);
+        var actualEnum = actual.EnumDefs.GetRowForTypeDef(actualType);
+        if (expected.EnumDefs.GetFlags(expectedEnum)
+                != actual.EnumDefs.GetFlags(actualEnum)
+            || !SamePrimitiveType(
+                expected.TypeSpecs.GetTypeSpecRef(
+                    expected.EnumDefs.GetUnderlyingTypeSpecRef(expectedEnum)),
+                actual.TypeSpecs.GetTypeSpecRef(
+                    actual.EnumDefs.GetUnderlyingTypeSpecRef(actualEnum))))
+        {
+            throw InvalidBinding();
+        }
+
+        var (expectedFirst, expectedCount)
+            = expected.EnumDefs.GetMemberRange(expectedEnum);
+        var (actualFirst, actualCount) = actual.EnumDefs.GetMemberRange(actualEnum);
+        if (expectedCount != actualCount
+            || !LayoutsMatch(expected, expectedType, actual, actualType))
+        {
+            throw InvalidBinding();
+        }
+
+        var expectedModule = expected.TypeDefs.GetOwnerModule(expectedType);
+        var actualModule = actual.TypeDefs.GetOwnerModule(actualType);
+        for (var ordinal = 0; ordinal < expectedCount; ordinal++)
+        {
+            var expectedMember = expectedFirst + ordinal;
+            var actualMember = actualFirst + ordinal;
+            if (expected.EnumMembers.GetOrdinal(expectedMember)
+                    != actual.EnumMembers.GetOrdinal(actualMember)
+                || !StringComparer.Ordinal.Equals(
+                    expected.EnumMembers.GetDeclarationKey(expectedMember),
+                    actual.EnumMembers.GetDeclarationKey(actualMember))
+                || !StringComparer.Ordinal.Equals(
+                    expected.EnumMembers.GetName(expectedMember),
+                    actual.EnumMembers.GetName(actualMember)))
+            {
+                throw InvalidBinding();
+            }
+
+            var expectedSourceRow = checked((int)
+                expected.EnumMembers.GetValueSourceRef(expectedMember));
+            var actualSourceRow = checked((int)
+                actual.EnumMembers.GetValueSourceRef(actualMember));
+            var expectedNodeRow = checked((int)
+                expected.ConstantSources.GetPayloadReference(
+                    expectedSourceRow));
+            var actualNodeRow = checked((int)
+                actual.ConstantSources.GetPayloadReference(actualSourceRow));
+            var expectedNodeTypeSpecRef
+                = expected.FrozenValueNodes.GetTypeSpecRef(expectedNodeRow);
+            var actualNodeTypeSpecRef
+                = actual.FrozenValueNodes.GetTypeSpecRef(actualNodeRow);
+            var expectedPayload
+                = TrRmConstantSourceValueValidator.GetFrozenScalarPayload(
+                    expectedSourceRow, expectedNodeTypeSpecRef,
+                    expectedModule, expected.ConstantSources,
+                    expected.FrozenValueNodes, expected.Blobs,
+                    expected.TypeSpecs, expected.Features, expected.Modules,
+                    expected.TypeDefs, expected.EnumDefs, expected.Imports);
+            var actualPayload
+                = TrRmConstantSourceValueValidator.GetFrozenScalarPayload(
+                    actualSourceRow, actualNodeTypeSpecRef, actualModule,
+                    actual.ConstantSources, actual.FrozenValueNodes,
+                    actual.Blobs, actual.TypeSpecs, actual.Features,
+                    actual.Modules, actual.TypeDefs, actual.EnumDefs,
+                    actual.Imports);
+            if (!expectedPayload.SequenceEqual(actualPayload))
+            {
+                throw InvalidBinding();
+            }
+        }
+    }
+
     internal static void Validate(
         TrRmStructuralMetadataValidator.ValidatedExecutionTables consumer,
         IReadOnlyList<byte[]> providerArtifacts)
@@ -215,4 +313,11 @@ internal static class TrRmEnumProviderBindingValidator
 
     private static InvalidDataException InvalidBinding()
         => new("Invalid TRRM nominal enum provider binding.");
+
+    private static bool SamePrimitiveType(
+        TrRmTypeSpecRefInfo left, TrRmTypeSpecRefInfo right)
+        => left.Form == 0x01 && right.Form == 0x01
+            && left.Qualifiers == 0 && right.Qualifiers == 0
+            && left.TypeCode == right.TypeCode
+            && left.ArgumentCode == right.ArgumentCode;
 }

@@ -15,6 +15,9 @@ internal sealed partial class Binder
     private readonly List<BoundInterfaceDefinition> _interfaces = [];
     private readonly Dictionary<string, PrimitiveType> _classNames = new(StringComparer.Ordinal);
     private readonly Dictionary<int, (SyntaxTree Tree, SyntaxNode Declaration)> _classDeclarations = [];
+    private readonly Dictionary<int,
+        List<(SyntaxTree Tree, SyntaxNode Declaration)>>
+        _classDeclarationParts = [];
 
     private sealed record PrivateClassSnapshotMaps(
         ImmutableArray<int> Structures, ImmutableArray<int> Classes,
@@ -181,6 +184,9 @@ internal sealed partial class Binder
                             : sourceClassName, [], 0) {
                         IsInternal = true,
                         IsMutable = snapshot.Classes[index].IsMutable,
+                        IsUnique = snapshot.Classes[index].IsUnique,
+                        HasCleanup = snapshot.Classes[index].HasCleanup,
+                        CleanupMethod = snapshot.Classes[index].CleanupMethod,
                     });
                 }
 
@@ -580,8 +586,6 @@ internal sealed partial class Binder
         }
         var qualified = Qualify(name.Name);
         if (qualified == DirectNativeImportContract.AttributeFullyQualifiedName
-            || _classes.Count >= SemanticVerifier.MaximumVariables
-            || _classNames.ContainsKey(qualified)
             || _structNames.ContainsKey(qualified)
             || _genericStructTemplates.ContainsKey(qualified)
             || qualified is NativeManagedNodeIntrinsics.TypeName or NativeManagedNodeIntrinsics.HeapName)
@@ -589,28 +593,183 @@ internal sealed partial class Binder
             Report("TRM3003", $"Duplicate or reserved managed class '{qualified}'.", declaration.Span);
             return;
         }
-        _classNames.Add(qualified, (PrimitiveType)(ManagedClassTypes.First + _classes.Count));
-        var index = _classes.Count;
+        var tokens = declaration.Children.OfType<SyntaxTokenElement>().ToArray();
+        var isPartial = tokens.Any(static token =>
+            token.Token.Kind == Terrum.CodeAnalysis.Lexing.TokenKind.Identifier
+            && token.Token.Text == "partial");
+        var hasVisibility = tokens.Any(static token =>
+            token.Token.Kind is Terrum.CodeAnalysis.Lexing.TokenKind.PublicKeyword
+                or Terrum.CodeAnalysis.Lexing.TokenKind.InternalKeyword
+                or Terrum.CodeAnalysis.Lexing.TokenKind.PrivateKeyword
+                || token.Token.Kind == Terrum.CodeAnalysis.Lexing.TokenKind.Identifier
+                    && token.Token.Text is "file" or "friend");
         var isMutable = false;
+        var isUnique = false;
         var isPublic = false;
-        foreach (var child in declaration.Children)
+        foreach (var token in tokens)
         {
-            if (child is not SyntaxTokenElement token)
-            {
-                continue;
-            }
             isMutable |= token.Token.Kind == Terrum.CodeAnalysis.Lexing.TokenKind.MutKeyword;
+            isUnique |= token.Token.Kind
+                == Terrum.CodeAnalysis.Lexing.TokenKind.UniqueKeyword;
             isPublic |= token.Token.Kind == Terrum.CodeAnalysis.Lexing.TokenKind.PublicKeyword;
             if (token.Token.Kind == Terrum.CodeAnalysis.Lexing.TokenKind.ExternKeyword)
             {
                 Report("TRM3030", "Extern is only valid on a supported callable declaration.", token.Token.Span);
             }
         }
+
+        if (_classNames.TryGetValue(qualified, out var existingType))
+        {
+            var existingIndex = ManagedClassTypes.ClassIndex(existingType);
+            if (!_classDeclarationParts.TryGetValue(existingIndex,
+                    out var parts)
+                || !isPartial
+                || parts.Any(part => !HasPartialClassModifier(
+                    part.Declaration)))
+            {
+                Report("TRM3003",
+                    $"Duplicate or non-partial managed class '{qualified}'.",
+                    declaration.Span);
+                return;
+            }
+
+            parts.Add((tree, declaration));
+            return;
+        }
+
+        if (_classes.Count >= SemanticVerifier.MaximumVariables)
+        {
+            Report("TRM3016",
+                "Source exceeds the supported number of managed classes.",
+                declaration.Span);
+            return;
+        }
+
+        var index = _classes.Count;
+        _classNames.Add(qualified,
+            (PrimitiveType)(ManagedClassTypes.First + index));
         _classes.Add(new BoundClass(qualified, [], 0) {
             IsInternal = !isPublic,
             IsMutable = isMutable,
+            IsUnique = isUnique,
+            HasCleanup = false,
         });
-        _classDeclarations.Add(index, (tree, declaration));
+        _classDeclarationParts.Add(index, [(tree, declaration)]);
+        if (hasVisibility || !isPartial)
+        {
+            _classDeclarations.Add(index, (tree, declaration));
+        }
+    }
+
+    private static bool HasPartialClassModifier(SyntaxNode declaration)
+        => declaration.Children.OfType<SyntaxTokenElement>().Any(
+            static token =>
+                token.Token.Kind == Terrum.CodeAnalysis.Lexing.TokenKind.Identifier
+                && token.Token.Text == "partial");
+
+    private static bool HasClassVisibilityModifier(
+        SyntaxNode declaration)
+        => declaration.Children.OfType<SyntaxTokenElement>().Any(
+            static token =>
+                token.Token.Kind is
+                    Terrum.CodeAnalysis.Lexing.TokenKind.PublicKeyword
+                    or Terrum.CodeAnalysis.Lexing.TokenKind.InternalKeyword
+                    or Terrum.CodeAnalysis.Lexing.TokenKind.PrivateKeyword
+                || token.Token.Kind
+                    == Terrum.CodeAnalysis.Lexing.TokenKind.Identifier
+                    && token.Token.Text is "file" or "friend");
+
+    private static bool HasClassModifier(SyntaxNode declaration,
+        Terrum.CodeAnalysis.Lexing.TokenKind kind)
+        => declaration.Children.OfType<SyntaxTokenElement>().Any(token =>
+            token.Token.Kind == kind);
+
+    private void FinalizeClassDeclarationGroups()
+    {
+        foreach (var (classIndex, parts) in _classDeclarationParts
+            .OrderBy(static pair => pair.Key))
+        {
+            if (parts.Count == 0)
+            {
+                Report("TRM3003",
+                    "A managed class has no source declaration part.",
+                    _tree.Root.Span);
+                continue;
+            }
+
+            var visibilityParts = parts.Where(part =>
+                HasClassVisibilityModifier(part.Declaration)).ToArray();
+            if (parts.Count > 1
+                && (parts.Any(part => !HasPartialClassModifier(
+                        part.Declaration))
+                    || visibilityParts.Length != 1))
+            {
+                SetContext(parts[0].Tree, parts[0].Declaration);
+                Report("TRM3003",
+                    "Partial class parts require one explicit-visibility primary and matching partial secondaries.",
+                    parts[0].Declaration.Span);
+            }
+
+            var primary = visibilityParts.Length == 1
+                ? visibilityParts[0] : parts[0];
+            foreach (var secondary in parts)
+            {
+                if (ReferenceEquals(secondary.Declaration,
+                        primary.Declaration))
+                {
+                    continue;
+                }
+
+                SetContext(secondary.Tree, secondary.Declaration);
+                if (HasClassVisibilityModifier(secondary.Declaration))
+                {
+                    Report("TRM3003",
+                        "A secondary partial class part cannot repeat visibility.",
+                        secondary.Declaration.Span);
+                }
+
+                foreach (var modifier in new[] {
+                    Terrum.CodeAnalysis.Lexing.TokenKind.MutKeyword,
+                    Terrum.CodeAnalysis.Lexing.TokenKind.UniqueKeyword,
+                    Terrum.CodeAnalysis.Lexing.TokenKind.StaticKeyword,
+                })
+                {
+                    if (HasClassModifier(secondary.Declaration, modifier)
+                        != HasClassModifier(primary.Declaration, modifier))
+                    {
+                        Report("TRM3003",
+                            "A secondary partial class part must repeat the primary type modifiers.",
+                            secondary.Declaration.Span);
+                    }
+                }
+            }
+
+            if (_classDeclarations.TryGetValue(classIndex,
+                    out var existingPrimary)
+                && !ReferenceEquals(existingPrimary.Declaration,
+                    primary.Declaration))
+            {
+                _classDeclarations[classIndex] = primary;
+            }
+            else if (!_classDeclarations.ContainsKey(classIndex))
+            {
+                _classDeclarations.Add(classIndex, primary);
+            }
+
+            var primaryTokens = primary.Declaration.Children
+                .OfType<SyntaxTokenElement>();
+            _classes[classIndex] = _classes[classIndex] with {
+                IsInternal = !primaryTokens.Any(static token =>
+                    token.Token.Kind
+                        == Terrum.CodeAnalysis.Lexing.TokenKind.PublicKeyword),
+                IsMutable = primaryTokens.Any(static token =>
+                    token.Token.Kind
+                        == Terrum.CodeAnalysis.Lexing.TokenKind.MutKeyword),
+                IsUnique = primaryTokens.Any(static token =>
+                    token.Token.Kind
+                        == Terrum.CodeAnalysis.Lexing.TokenKind.UniqueKeyword),
+            };
+        }
     }
 
     private enum DeclaredTypeResolution
@@ -621,22 +780,40 @@ internal sealed partial class Binder
         Invalid,
     }
 
-    private DeclaredTypeResolution ResolveTypeName(string name, out PrimitiveType type) =>
+    private DeclaredTypeResolution ResolveTypeName(string name,
+        out PrimitiveType type) =>
         ResolveTypeName(name, null, default, out type);
 
     private DeclaredTypeResolution ResolveTypeName(string name, ImmutableArray<PrimitiveType>? typeArguments,
-        TextSpan useSite, out PrimitiveType type)
+        TextSpan useSite, out PrimitiveType type,
+        ImmutableArray<SyntaxNode> typeArgumentSyntaxes = default)
     {
         if (typeArguments is not null && _genericProofSource is not null
             && FindAliasDefinition(name) is AliasDefinition localAlias)
         {
-            return ResolveAlias(localAlias, typeArguments, useSite, out type);
+            return ResolveAlias(localAlias, typeArguments, useSite, out type,
+                typeArgumentSyntaxes);
         }
         if (_genericContext is GenericInstantiation generic
             && generic.Template.ParameterIndex(name) is var index && index >= 0)
         {
             type = generic.Types[index];
             return DeclaredTypeResolution.Unique;
+        }
+        if (_genericProofSource is not null
+            && typeArguments is ImmutableArray<PrimitiveType>
+                sourceGenericArguments
+            && !HasNonGenericSourceTypeCandidate(name)
+            && !HasImportedGenericNominalTypeCandidate(name)
+            && TryFindGenericStructTemplateForTypeTerm(name,
+                out var sourceGenericTemplate))
+        {
+            var diagnosticCount = DiagnosticCount;
+            type = InstantiateGenericStruct(sourceGenericTemplate,
+                sourceGenericArguments, useSite);
+            return DiagnosticCount == diagnosticCount
+                ? DeclaredTypeResolution.Unique
+                : DeclaredTypeResolution.Invalid;
         }
         if (_genericProofSource is Binder source)
         {
@@ -708,7 +885,9 @@ internal sealed partial class Binder
         if (!hasCandidate && genericArityMismatch)
         {
             type = default;
-            Report("TRM3005", $"Generic type '{name}' requires its declared type argument count.", useSite);
+            Report("TRM3005",
+                $"Generic type '{name}' requires its declared type argument count.",
+                useSite);
             return DeclaredTypeResolution.Invalid;
         }
         if (ambiguous)
@@ -725,28 +904,61 @@ internal sealed partial class Binder
 
         void AddCandidate(string qualified)
         {
-            if (typeArguments is null && _structNames.TryGetValue(qualified, out var structure))
+            var hasNoTypeArguments = typeArguments is null
+                || typeArguments.Value.IsEmpty;
+            var hasNonGenericTypeDefinition
+                = _structNames.ContainsKey(qualified)
+                    || _classNames.ContainsKey(qualified)
+                    || _enumNames.ContainsKey(qualified)
+                    || _sourceEnumNames.ContainsKey((_tree, qualified))
+                    || (_aliases.TryGetValue(qualified,
+                            out var namedAlias)
+                        && namedAlias.TypeParameters.IsEmpty)
+                    || _genericNominalTypeDefinitions.Any(definition =>
+                        definition.Formals.IsEmpty
+                        && GetNominalTypeQualifiedName(definition)
+                            == qualified);
+            if (hasNoTypeArguments
+                && _ambiguousStructNames.Contains(qualified))
+            {
+                ambiguous = true;
+            }
+            else if (hasNoTypeArguments
+                && _structNames.TryGetValue(qualified,
+                    out var structure))
             {
                 AddTypeCandidate(structure);
             }
-            if (typeArguments is null && _classNames.TryGetValue(qualified, out var @class))
+            if (hasNoTypeArguments
+                && _classNames.TryGetValue(qualified, out var @class))
             {
                 AddTypeCandidate(@class);
             }
-            if (typeArguments is null
+            if (hasNoTypeArguments
                 && _ambiguousEnumNames.Contains(qualified))
             {
                 ambiguous = true;
             }
-            if (typeArguments is null && _enumNames.TryGetValue(qualified, out var enumType))
+            if (hasNoTypeArguments
+                && _enumNames.TryGetValue(qualified, out var enumType))
             {
                 AddTypeCandidate(enumType);
             }
-            if (_genericStructTemplates.TryGetValue(qualified, out var genericStruct))
+            if (hasNoTypeArguments
+                && _sourceEnumNames.TryGetValue((_tree, qualified),
+                    out var sourceEnumType))
+            {
+                AddTypeCandidate(sourceEnumType);
+            }
+            if (_genericStructTemplates.TryGetValue(qualified,
+                    out var genericStruct)
+                && !(hasNoTypeArguments
+                    && (hasNonGenericTypeDefinition || ambiguous)))
             {
                 var arguments = typeArguments
                     ?? [];
-                if (arguments.Length <= genericStruct.TypeParameters.Length
+                if (genericStruct.ConstantFormals.IsEmpty
+                    && arguments.Length <= genericStruct.TypeParameters.Length
                     && genericStruct.TypeDefaults.Skip(arguments.Length)
                         .All(static defaultType => defaultType is not null))
                 {
@@ -758,8 +970,10 @@ internal sealed partial class Binder
                 }
             }
             var genericNominalCandidates = _genericNominalTypeDefinitions
-                .Where(definition => !definition.Formals.IsEmpty
-                    && definition.Namespace + "." + definition.Name == qualified)
+                .Where(definition =>
+                    (!definition.Formals.IsEmpty
+                        || IsSourceLookupStandardClassDefinition(definition))
+                    && GetNominalTypeQualifiedName(definition) == qualified)
                 .ToArray();
             if (genericNominalCandidates.Length != 0)
             {
@@ -798,7 +1012,8 @@ internal sealed partial class Binder
                 && (visibleAlias is null
                     || ReferenceEquals(alias, visibleAlias)))
             {
-                var aliasResolution = ResolveAlias(alias, typeArguments, useSite, out var aliasType);
+                var aliasResolution = ResolveAlias(alias, typeArguments,
+                    useSite, out var aliasType, typeArgumentSyntaxes);
                 if (aliasResolution == DeclaredTypeResolution.Unique)
                 {
                     AddTypeCandidate(aliasType);
@@ -829,13 +1044,16 @@ internal sealed partial class Binder
         if (name.Contains('.', StringComparison.Ordinal))
         {
             return _genericNominalTypeDefinitions.Any(definition =>
-                !definition.Formals.IsEmpty
-                && definition.Namespace + "." + definition.Name == name);
+                (!definition.Formals.IsEmpty
+                    || IsSourceLookupStandardClassDefinition(definition))
+                && GetNominalTypeQualifiedName(definition) == name);
         }
 
         if (_genericNominalTypeDefinitions.Any(definition =>
-            !definition.Formals.IsEmpty
-            && (definition.Name == name || definition.Namespace + "." + definition.Name == name)))
+            (!definition.Formals.IsEmpty
+                || IsSourceLookupStandardClassDefinition(definition))
+            && (definition.Name == name
+                || GetNominalTypeQualifiedName(definition) == name)))
         {
             return true;
         }
@@ -845,17 +1063,73 @@ internal sealed partial class Binder
         {
             parent = parent[..parent.LastIndexOf('.', StringComparison.Ordinal)];
             if (_genericNominalTypeDefinitions.Any(definition =>
-                !definition.Formals.IsEmpty
-                && definition.Namespace + "." + definition.Name == parent + "." + name))
+                (!definition.Formals.IsEmpty
+                    || IsSourceLookupStandardClassDefinition(definition))
+                && GetNominalTypeQualifiedName(definition)
+                    == parent + "." + name))
             {
                 return true;
             }
         }
 
         return _usings.Any(imported => _genericNominalTypeDefinitions.Any(definition =>
-            !definition.Formals.IsEmpty
+            (!definition.Formals.IsEmpty
+                || IsSourceLookupStandardClassDefinition(definition))
             && definition.Namespace == imported && definition.Name == name));
     }
+
+    private bool HasNonGenericSourceTypeCandidate(string name)
+    {
+        var source = _genericProofSource ?? this;
+
+        var candidates = new HashSet<string>(StringComparer.Ordinal);
+        void Add(string candidate) => _ = candidates.Add(candidate);
+        if (name.Contains('.', StringComparison.Ordinal))
+        {
+            Add(name);
+        }
+        else
+        {
+            Add(name);
+            Add(Qualify(name));
+            var parent = _namespace;
+            while (parent.Contains('.', StringComparison.Ordinal))
+            {
+                parent = parent[..parent.LastIndexOf('.',
+                    StringComparison.Ordinal)];
+                Add(parent + "." + name);
+            }
+
+            foreach (var imported in _usings)
+            {
+                Add(imported + "." + name);
+            }
+        }
+
+        return candidates.Any(qualified =>
+            source._structNames.ContainsKey(qualified)
+            || source._classNames.ContainsKey(qualified)
+            || source._enumNames.ContainsKey(qualified)
+            || source._sourceEnumNames.ContainsKey((_tree, qualified))
+            || source._aliases.ContainsKey(qualified)
+            || source._genericNominalTypeDefinitions.Any(definition =>
+                definition.Formals.IsEmpty
+                && GetNominalTypeQualifiedName(definition)
+                    == qualified));
+    }
+
+    private bool IsSourceLookupStandardClassDefinition(
+        BoundGenericNominalTypeDefinition definition)
+        => definition.NominalKind == 2 && definition.Formals.IsEmpty
+            && _standardClassDeclarations.Any(declaration =>
+                declaration.Declaration.Identity == definition.Identity
+                && declaration.ExportKeys.Length != 0
+                && declaration.Expectations.IsEmpty);
+
+    private static string GetNominalTypeQualifiedName(
+        BoundGenericNominalTypeDefinition definition)
+        => definition.Namespace.Length == 0 ? definition.Name
+            : definition.Namespace + "." + definition.Name;
 
     private bool TryInstantiateGenericNominalType(
         BoundGenericNominalTypeDefinition definition,
@@ -863,7 +1137,15 @@ internal sealed partial class Binder
         TextSpan useSite, out PrimitiveType type)
     {
         type = default;
-        if (definition.Formals.IsEmpty || definition.Formals.Length > SemanticVerifier.MaximumArguments
+        if (definition.Formals.IsEmpty)
+        {
+            return (suppliedArguments is null
+                    || suppliedArguments.Value.IsEmpty)
+                && TryInstantiateSourceLookupStandardClass(definition,
+                    useSite, out type);
+        }
+
+        if (definition.Formals.Length > SemanticVerifier.MaximumArguments
             || definition.Formals.Any(static formal =>
                 formal.Kind != BoundGenericArgumentKind.Type))
         {
@@ -908,6 +1190,7 @@ internal sealed partial class Binder
         {
             return true;
         }
+
         if (_genericNominalTypeInstances.Count >= BoundGenericNominalTypeTypes.MaximumCount)
         {
             Report("TRM3005", "The generic nominal type instance limit was exceeded.", useSite);
@@ -918,6 +1201,354 @@ internal sealed partial class Binder
         _genericNominalTypeInstances.Add(new BoundGenericNominalTypeInstance(
             definition.Identity, immutableArguments, 0));
         _genericNominalTypeUses.Add(key, type);
+        return true;
+    }
+
+    private bool TryInstantiateSourceLookupStandardClass(
+        BoundGenericNominalTypeDefinition definition, TextSpan useSite,
+        out PrimitiveType type)
+    {
+        type = default;
+        if (!IsSourceLookupStandardClassDefinition(definition))
+        {
+            return false;
+        }
+
+        var arguments
+            = ImmutableArray<BoundGenericNominalTypeArgument>.Empty;
+        var key = BoundGenericNominalTypeContract.CreateUseKey(
+            definition.Identity, arguments, 0);
+        if (_genericNominalTypeUses.TryGetValue(key, out type))
+        {
+            return true;
+        }
+        if (_genericNominalTypeInstances.Count
+            >= BoundGenericNominalTypeTypes.MaximumCount)
+        {
+            Report("TRM3005",
+                "The generic nominal type instance limit was exceeded.",
+                useSite);
+            return false;
+        }
+
+        type = BoundGenericNominalTypeTypes.Type(
+            _genericNominalTypeInstances.Count);
+        _genericNominalTypeInstances.Add(
+            new BoundGenericNominalTypeInstance(definition.Identity,
+                arguments, 0));
+        _genericNominalTypeUses.Add(key, type);
+        return true;
+    }
+
+    private DeclaredTypeResolution ResolveTypeName(string name,
+        ImmutableArray<SyntaxNode> suppliedArguments, TextSpan useSite,
+        out PrimitiveType type)
+    {
+        type = default;
+        if (HasImportedGenericNominalTypeCandidate(name))
+        {
+            if (!TryFindGenericNominalTypeDefinitionForTypeTerm(name,
+                out var definition))
+            {
+                var coreTaskCandidate = _genericNominalTypeDefinitions
+                    .Any(candidate =>
+                        BoundGenericNominalTypeContract
+                            .IsGenericNominalTypeName(
+                                candidate.Namespace + "."
+                                    + candidate.Name)
+                        && (name == candidate.Name
+                            || name == candidate.Namespace + "."
+                                + candidate.Name
+                            || _usings.Contains(candidate.Namespace)));
+                Report("TRM3005", coreTaskCandidate
+                    ? $"Generic nominal type '{name}' requires an explicitly selected exact Core Task definition."
+                    : $"Generic nominal type '{name}' is ambiguous or has no exact selected identity.",
+                    useSite);
+                return DeclaredTypeResolution.Invalid;
+            }
+
+            if (!TryInstantiateGenericNominalType(definition,
+                suppliedArguments, useSite, out type))
+            {
+                type = default;
+                Report("TRM3005",
+                    $"Generic nominal type '{name}' has an invalid or unsupported type/constant argument list.",
+                    useSite);
+                return DeclaredTypeResolution.Invalid;
+            }
+
+            return DeclaredTypeResolution.Unique;
+        }
+
+        if (TryFindGenericStructTemplateForTypeTerm(name,
+            out var sourceGenericTemplate)
+            && !(suppliedArguments.IsEmpty
+                && HasNonGenericSourceTypeCandidate(name)))
+        {
+            if (!TryInstantiateGenericStruct(sourceGenericTemplate,
+                suppliedArguments, useSite, out type))
+            {
+                type = default;
+                return DeclaredTypeResolution.Invalid;
+            }
+
+            return DeclaredTypeResolution.Unique;
+        }
+
+        var diagnosticCount = DiagnosticCount;
+        var typeArguments = ImmutableArray.CreateBuilder<PrimitiveType>(
+            suppliedArguments.Length);
+        foreach (var argument in suppliedArguments)
+        {
+            typeArguments.Add(BindType(argument, allowVoid: false));
+        }
+        if (DiagnosticCount != diagnosticCount)
+        {
+            return DeclaredTypeResolution.Invalid;
+        }
+
+        return ResolveTypeName(name, typeArguments.MoveToImmutable(),
+            useSite, out type, suppliedArguments);
+    }
+
+    private bool TryInstantiateGenericNominalType(
+        BoundGenericNominalTypeDefinition definition,
+        ImmutableArray<SyntaxNode> suppliedArguments,
+        TextSpan useSite, out PrimitiveType type)
+    {
+        type = default;
+        if (definition.Formals.IsEmpty)
+        {
+            return suppliedArguments.IsEmpty
+                && TryInstantiateSourceLookupStandardClass(definition,
+                    useSite, out type);
+        }
+
+        if (definition.Formals.IsDefaultOrEmpty
+            || definition.Formals.Length
+                > SemanticVerifier.MaximumArguments
+            || suppliedArguments.Length > definition.Formals.Length)
+        {
+            return false;
+        }
+
+        var arguments = ImmutableArray.CreateBuilder<
+            BoundGenericNominalTypeArgument>(definition.Formals.Length);
+        for (var ordinal = 0; ordinal < definition.Formals.Length;
+            ordinal++)
+        {
+            var formal = definition.Formals[ordinal];
+            var syntax = ordinal < suppliedArguments.Length
+                ? suppliedArguments[ordinal] : null;
+            if (syntax?.Kind == SyntaxKind.GenericInferenceArgument)
+            {
+                return false;
+            }
+
+            var useDefault = syntax is null
+                || syntax.Kind == SyntaxKind.GenericDefaultArgument;
+            if (formal.Kind == BoundGenericArgumentKind.Type)
+            {
+                if (!formal.Constraints.IsEmpty)
+                {
+                    return false;
+                }
+
+                if (useDefault)
+                {
+                    if (formal.Default is not
+                        {
+                            Kind: BoundGenericArgumentKind.Type,
+                            DecodedType: PrimitiveType decodedType,
+                        } defaultType
+                        || defaultType.ProviderIdentity
+                            != definition.Identity.ProviderIdentity)
+                    {
+                        return false;
+                    }
+
+                    arguments.Add(
+                        BoundGenericNominalTypeArgument.ForMetadataType(
+                            decodedType, defaultType.TypeQualifiers,
+                            defaultType.Reference,
+                            defaultType.ProviderIdentity));
+                    continue;
+                }
+
+                if (syntax!.Kind == SyntaxKind.ConstantGenericArgument)
+                {
+                    return false;
+                }
+                var diagnosticCount = DiagnosticCount;
+                var argumentType = BindType(syntax, allowVoid: true);
+                if (DiagnosticCount != diagnosticCount)
+                {
+                    return false;
+                }
+                var argument
+                    = BoundGenericNominalTypeArgument.ForType(argumentType);
+                if (_genericContext is GenericInstantiation generic
+                    && generic.Template.FormalTypeOwnerOrdinal >= 0)
+                {
+                    var remaining
+                        = SemanticVerifier.MaximumAnalysisVisits;
+                    if (TryBuildGenericQueryTypeIdentityTerm(
+                            argumentType, generic, ref remaining, 0,
+                            out var typeArgumentTerm)
+                        && BoundGenericMethodTypeTerms
+                            .TryGetFormalDependencies(typeArgumentTerm,
+                                out var formalDependencies))
+                    {
+                        if (typeArgumentTerm.Kind
+                            == BoundGenericMethodTypeTermKind.Formal
+                            && formalDependencies.Length == 1)
+                        {
+                            argument = argument with {
+                                TypeFormalDefinitionOrdinal =
+                                    generic.Template.FormalTypeOwnerOrdinal,
+                                TypeFormalOrdinal = formalDependencies[0],
+                                TypeFormalOwnerKind =
+                                    BoundGenericTypeFormalOwnerKind
+                                        .GenericMethod,
+                            };
+                        }
+                        else if (typeArgumentTerm.Kind
+                                != BoundGenericMethodTypeTermKind.Concrete)
+                        {
+                            argument = argument with {
+                                TypeArgumentTerm = typeArgumentTerm,
+                                TypeFormalDefinitionOrdinal =
+                                    formalDependencies.IsEmpty
+                                        ? -1
+                                        : generic.Template
+                                            .FormalTypeOwnerOrdinal,
+                                TypeFormalOrdinal = -1,
+                                TypeFormalOwnerKind =
+                                    BoundGenericTypeFormalOwnerKind
+                                        .GenericMethod,
+                            };
+                        }
+                    }
+                }
+                arguments.Add(argument);
+                continue;
+            }
+
+            if (formal.Kind != BoundGenericArgumentKind.Constant
+                || !formal.Constraints.IsEmpty)
+            {
+                return false;
+            }
+
+            if (useDefault)
+            {
+                if (formal.Default is not
+                    {
+                        Kind: BoundGenericArgumentKind.Constant,
+                    } defaultConstant)
+                {
+                    return false;
+                }
+
+                if (defaultConstant.DecodedConstantArgument
+                    is BoundGenericNominalTypeArgument decodedConstant)
+                {
+                    arguments.Add(decodedConstant);
+                }
+                else if (defaultConstant.EarlierFormalOrdinal
+                    is int formalOrdinal)
+                {
+                    if ((uint)formalOrdinal >= (uint)arguments.Count
+                        || arguments[formalOrdinal].Kind
+                            != BoundGenericArgumentKind.Constant)
+                    {
+                        return false;
+                    }
+
+                    arguments.Add(arguments[formalOrdinal]);
+                }
+                else
+                {
+                    arguments.Add(
+                        BoundGenericNominalTypeArgument.ForConstantSource(
+                            defaultConstant.ProviderIdentity,
+                            defaultConstant.Reference));
+                }
+                continue;
+            }
+
+            if (syntax!.Kind == SyntaxKind.ConstantGenericArgument
+                || syntax.Kind == SyntaxKind.TypeName)
+            {
+                if (!TryBindGenericNominalTypeConstantArgument(formal,
+                    syntax, out var constantArgument))
+                {
+                    return false;
+                }
+                arguments.Add(constantArgument);
+                continue;
+            }
+
+            return false;
+        }
+
+        return TryInstantiateGenericNominalTypeArguments(definition,
+            arguments.MoveToImmutable(), useSite, out type);
+    }
+
+    private bool TryBindGenericNominalTypeConstantArgument(
+        BoundGenericNominalTypeFormal formal, SyntaxNode syntax,
+        out BoundGenericNominalTypeArgument argument)
+    {
+        argument = null!;
+        if (formal.ConstantDomainType is not PrimitiveType domainType
+            || !TryGetGenericMethodConstantCarrierType(domainType,
+                out var carrierType))
+        {
+            return false;
+        }
+        if (formal.ConstantCarrierType is PrimitiveType formalCarrier
+            && formalCarrier != carrierType)
+        {
+            return false;
+        }
+
+        var domainTerm = new BoundGenericMethodTypeTerm(
+            BoundGenericMethodTypeTermKind.Concrete, domainType, -1, -1,
+            [], false, false, false, false);
+        var temporaryFormal = new GenericMethodConstantFormal(-1, -1,
+            formal.Name, domainTerm, domainType, null, []);
+        if (!TryBindGenericMethodConstantArgument(temporaryFormal,
+            domainTerm, domainType, carrierType, syntax,
+            out var constantArgument))
+        {
+            return false;
+        }
+
+        if (constantArgument.Kind
+            == BoundGenericMethodConstantArgumentKind.Value)
+        {
+            argument = BoundGenericNominalTypeArgument.ForConstant(
+                domainType, carrierType, constantArgument.Bits.Low,
+                constantArgument.Bits.High);
+            return true;
+        }
+
+        if (constantArgument.Kind
+                != BoundGenericMethodConstantArgumentKind.Formal
+            || constantArgument.CallerDefinitionOrdinal < 0
+            || constantArgument.CallerConstantFormalOrdinal < 0
+            || !AreGenericMethodTypeTermsEquivalent(
+                constantArgument.Domain, domainTerm))
+        {
+            return false;
+        }
+
+        argument = BoundGenericNominalTypeArgument.ForConstantFormal(
+            constantArgument.CallerDefinitionOrdinal,
+            constantArgument.CallerConstantFormalOrdinal,
+            constantArgument.Domain,
+            constantArgument.CallerFormalOwnerKind);
         return true;
     }
 
@@ -983,10 +1614,46 @@ internal sealed partial class Binder
 
     private void DeclareClass(int index)
     {
-        var (tree, declaration) = _classDeclarations[index];
-        SetContext(tree, declaration);
-        var name = _classes[index].Name;
         var mutableClass = _classes[index].IsMutable;
+        var fields = ImmutableArray.CreateBuilder<BoundStructField>();
+        var offset = 0;
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (tree, declaration) in _classDeclarationParts[index])
+        {
+            SetContext(tree, declaration);
+            DeclareClassPart(index, declaration, mutableClass, fields,
+                names, ref offset);
+        }
+
+        var (primaryTree, primaryDeclaration) = _classDeclarations[index];
+        SetContext(primaryTree, primaryDeclaration);
+        if (fields.Count == 0)
+        {
+            Report("TRM3005",
+                "A managed class requires initialized instance fields.",
+                primaryDeclaration.Span);
+        }
+        if (fields.Count > ManagedClassTypes.MaximumFields)
+        {
+            Report("TRM3005",
+                $"A managed class supports at most {ManagedClassTypes.MaximumFields} fields.",
+                primaryDeclaration.Span);
+        }
+
+        _classes[index] = new BoundClass(_classes[index].Name,
+            fields.ToImmutable(), (offset + 7) & ~7) {
+            IsInternal = _classes[index].IsInternal,
+            IsMutable = mutableClass,
+            IsUnique = _classes[index].IsUnique,
+            HasCleanup = _classes[index].HasCleanup,
+            CleanupMethod = _classes[index].CleanupMethod,
+        };
+    }
+
+    private void DeclareClassPart(int index, SyntaxNode declaration,
+        bool mutableClass, ImmutableArray<BoundStructField>.Builder fields,
+        HashSet<string> names, ref int offset)
+    {
         foreach (var child in declaration.Children)
         {
             if (child is SyntaxNode {
@@ -1001,30 +1668,33 @@ internal sealed partial class Binder
                 }
             }
             else if (child is SyntaxNode {
-                    Kind: SyntaxKind.ConformanceList
-                        or SyntaxKind.OperatorDeclaration,
+                    Kind: SyntaxKind.OperatorDeclaration,
                 })
             {
                 Report("TRM3001",
-                    "Managed classes do not support inheritance or operators.",
+                    "Managed classes do not support operators.",
                     child.Span);
             }
             if (child is SyntaxTokenElement token)
             {
-                if (token.Token.Kind is Terrum.CodeAnalysis.Lexing.TokenKind.UniqueKeyword
-                    or Terrum.CodeAnalysis.Lexing.TokenKind.StaticKeyword
+                if (token.Token.Kind is Terrum.CodeAnalysis.Lexing.TokenKind.StaticKeyword
                     or Terrum.CodeAnalysis.Lexing.TokenKind.PrivateKeyword
                     or Terrum.CodeAnalysis.Lexing.TokenKind.UnsafeKeyword)
                 {
-                    Report("TRM3001", "Classes support public/internal visibility and optional mutability.", child.Span);
+                    Report("TRM3001",
+                        "Classes support public/internal visibility and optional mutability or uniqueness.",
+                        child.Span);
                 }
             }
         }
-        var fields = ImmutableArray.CreateBuilder<BoundStructField>();
-        var offset = 0;
-        var names = new HashSet<string>(StringComparer.Ordinal);
         foreach (var child in declaration.Children.OfType<SyntaxNode>())
         {
+            if (child.Kind == SyntaxKind.PropertyDeclaration)
+            {
+                DeclareClassPropertyBacking(index, child, mutableClass,
+                    fields, names, ref offset);
+                continue;
+            }
             if (child.Kind != SyntaxKind.FieldDeclaration)
             {
                 continue;
@@ -1064,7 +1734,7 @@ internal sealed partial class Binder
             }
             var width = ValueLayout.Size(type, _structs,
                 [.. _checkedReferenceTypes], _nativeLoweringAgreement,
-                _nativeFixedArrayTypes);
+                _nativeFixedArrayTypes, _enumDefinitions);
             var alignment = width == 0 ? 1 : ValueAlignment(type);
             offset = (offset + alignment - 1) & -alignment;
             var maximumFieldSize = _nativeLoweringAgreement
@@ -1116,18 +1786,189 @@ internal sealed partial class Binder
             });
             offset = checked(offset + (int)width);
         }
-        if (fields.Count == 0)
+    }
+
+    private void DeclareClassPropertyBacking(int classIndex,
+        SyntaxNode declaration, bool mutableClass,
+        ImmutableArray<BoundStructField>.Builder fields,
+        HashSet<string> names, ref int offset)
+    {
+        var isStatic = declaration.Children
+            .OfType<SyntaxTokenElement>()
+            .Any(static token =>
+                token.Token.Kind == TokenKind.StaticKeyword);
+        if (isStatic || !HasPropertyBacking(declaration))
         {
-            Report("TRM3005", "A managed class requires initialized instance fields.", declaration.Span);
+            return;
         }
-        if (fields.Count > ManagedClassTypes.MaximumFields)
+
+        var nameToken = FindStaticFieldNameToken(declaration);
+        var typeNode = declaration.Children.OfType<SyntaxNode>()
+            .FirstOrDefault(static child =>
+                child.Kind is not (SyntaxKind.Attribute
+                    or SyntaxKind.FriendVisibility));
+        if (nameToken is null || typeNode is null)
         {
-            Report("TRM3005", $"A managed class supports at most {ManagedClassTypes.MaximumFields} fields.", declaration.Span);
+            Report("TRM3005",
+                "A backed class property requires a valid type and name.",
+                declaration.Span);
+            return;
         }
-        _classes[index] = new BoundClass(name, fields.ToImmutable(), (offset + 7) & ~7) {
-            IsInternal = _classes[index].IsInternal,
-            IsMutable = mutableClass,
-        };
+
+        var propertyName = nameToken.Name;
+        var type = BindType(typeNode, allowVoid: false);
+        if (BoundGenericNominalTypeTypes.IsType(type))
+        {
+            Report("TRM3005",
+                "Generic nominal values do not have a supported class storage layout.",
+                declaration.Span);
+            return;
+        }
+        if (!_classes[classIndex].IsInternal
+            && ContainsGenericStructSpecialization(type))
+        {
+            Report("TRM3005",
+                "Public classes cannot expose compilation-local generic struct specializations.",
+                declaration.Span);
+        }
+        if (type is PrimitiveType.OwnedInt32Buffer
+            or PrimitiveType.ReadonlyInt32BufferView
+            or PrimitiveType.MutableInt32BufferView or PrimitiveType.TokenSpan
+            || IsUnique(type))
+        {
+            Report("TRM3023",
+                "Class property backing cannot contain unique, buffer, or non-value runtime storage.",
+                declaration.Span);
+            return;
+        }
+
+        var width = ValueLayout.Size(type, _structs,
+            [.. _checkedReferenceTypes], _nativeLoweringAgreement,
+            _nativeFixedArrayTypes, _enumDefinitions);
+        var alignment = width == 0 ? 1 : ValueAlignment(type);
+        offset = (offset + alignment - 1) & -alignment;
+        var maximumFieldSize = _nativeLoweringAgreement
+            == CompilationOptions.WindowsX64NormalBackingAgreement
+            ? ValueLayout.MaximumAddressStorageSize : ValueLayout.MaximumSize;
+        var backingName = "$property:" + propertyName;
+        if (width is < 1 || width > (ulong)maximumFieldSize
+            || (ulong)offset + width
+                > (ulong)ManagedClassTypes.MaximumPayload
+            || !names.Add(backingName))
+        {
+            Report("TRM3005",
+                "Managed property backing must fit the bounded class payload and have a unique identity.",
+                declaration.Span);
+            return;
+        }
+
+        var mutableBacking = HasMutableOrdinaryPropertyAccessor(
+            declaration);
+        if (mutableBacking && !mutableClass)
+        {
+            Report("TRM3008",
+                "Mutable property backing requires a mut class declaration.",
+                declaration.Span);
+        }
+
+        fields.Add(new BoundStructField(backingName, type,
+            checked((ulong)offset), width) {
+            BackingPropertyName = propertyName,
+            IsMutable = mutableBacking,
+            IsPrivate = true,
+        });
+        offset = checked(offset + (int)width);
+    }
+
+    private int FindClassPropertyBackingField(PrimitiveType ownerType,
+        string propertyName)
+    {
+        if (!ManagedClassTypes.IsClass(ownerType))
+        {
+            return -1;
+        }
+
+        var fields = _classes[ManagedClassTypes.ClassIndex(ownerType)]
+            .Fields;
+        for (var fieldIndex = 0; fieldIndex < fields.Length; fieldIndex++)
+        {
+            if (StringComparer.Ordinal.Equals(
+                    fields[fieldIndex].BackingPropertyName, propertyName))
+            {
+                return fieldIndex;
+            }
+        }
+
+        return -1;
+    }
+
+    private static bool HasPropertyFieldReference(SyntaxNode property)
+    {
+        foreach (var accessor in property.Children.OfType<SyntaxNode>()
+            .Where(static child => child.Kind is SyntaxKind.GetAccessor
+                or SyntaxKind.SetAccessor or SyntaxKind.InitAccessor))
+        {
+            var pending = new Stack<SyntaxNode>();
+            pending.Push(accessor);
+            while (pending.TryPop(out var current))
+            {
+                foreach (var child in current.Children)
+                {
+                    if (child is SyntaxTokenElement token
+                        && token.Token.Text == "field")
+                    {
+                        return true;
+                    }
+                    if (child is SyntaxNode nested)
+                    {
+                        pending.Push(nested);
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool HasPropertyBacking(SyntaxNode property)
+        => IsAutoGetterProperty(property)
+            || HasPropertyFieldReference(property)
+            || property.Children.OfType<SyntaxNode>().Any(
+                static accessor =>
+                    (accessor.Kind is SyntaxKind.SetAccessor
+                        or SyntaxKind.InitAccessor)
+                    && accessor.Children.LastOrDefault()
+                        is SyntaxTokenElement {
+                            Token.Kind: TokenKind.Semicolon,
+                        });
+
+    private static bool HasMutableOrdinaryPropertyAccessor(
+        SyntaxNode property)
+    {
+        foreach (var accessor in property.Children.OfType<SyntaxNode>()
+            .Where(static child => child.Kind is SyntaxKind.GetAccessor
+                or SyntaxKind.SetAccessor))
+        {
+            if (!accessor.Children.OfType<SyntaxTokenElement>()
+                .Any(static token =>
+                    token.Token.Kind == TokenKind.MutKeyword))
+            {
+                continue;
+            }
+
+            var isAuto = accessor.Children.LastOrDefault()
+                is SyntaxTokenElement {
+                    Token.Kind: TokenKind.Semicolon,
+                };
+            if (isAuto
+                ? accessor.Kind == SyntaxKind.SetAccessor
+                : HasPropertyFieldReference(accessor))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void DeclareClassFactories()

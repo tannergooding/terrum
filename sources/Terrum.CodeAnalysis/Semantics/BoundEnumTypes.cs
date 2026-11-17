@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using System.Numerics;
 using System.Text;
+using Terrum.CodeAnalysis.Syntax;
 
 namespace Terrum.CodeAnalysis.Semantics;
 
@@ -12,11 +14,17 @@ internal abstract record BoundEnumDeclarationIdentity
         : BoundEnumDeclarationIdentity;
     internal sealed record Private(BoundPrivateEnumOccurrence Value)
         : BoundEnumDeclarationIdentity;
+    internal sealed record Source(BoundSourceEnumDeclarationHandle Value)
+        : BoundEnumDeclarationIdentity;
+    internal sealed record Standard(BoundStandardEnumOccurrence Value)
+        : BoundEnumDeclarationIdentity;
 
     internal bool IsValid => this switch {
         Core core => core.Value.IsValid
             && core.Value.Kind == CoreDeclarationKind.EnumType,
         Private @private => @private.Value.IsInitialized,
+        Source source => source.Value.IsValid,
+        Standard standard => standard.Value.IsValid,
         _ => false,
     };
 
@@ -37,17 +45,26 @@ internal abstract record BoundEnumMemberIdentity
 {
     internal sealed record Core(CoreDeclarationIdentity Value)
         : BoundEnumMemberIdentity;
+    internal sealed record OwnerKey(
+        BoundEnumDeclarationIdentity Owner, string DeclarationKey)
+        : BoundEnumMemberIdentity;
     internal sealed record Private(
         BoundPrivateEnumOccurrence Owner, string DeclarationKey)
+        : BoundEnumMemberIdentity;
+    internal sealed record Source(BoundSourceEnumMemberHandle Value)
         : BoundEnumMemberIdentity;
 
     internal bool IsValid => this switch {
         Core core => core.Value.IsValid
             && core.Value.Kind == CoreDeclarationKind.EnumMember,
+        OwnerKey ownerKey => ownerKey.Owner.IsValid
+            && BoundEnumTypes.IsValidModuleDeclarationKey(
+                ownerKey.DeclarationKey),
         Private @private => @private.Owner.IsInitialized
             && !string.IsNullOrEmpty(@private.DeclarationKey)
             && !@private.DeclarationKey.Contains('\0',
                 StringComparison.Ordinal),
+        Source source => source.Value.IsValid,
         _ => false,
     };
 
@@ -62,6 +79,53 @@ internal abstract record BoundEnumMemberIdentity
         identity = default;
         return false;
     }
+}
+
+internal sealed record BoundSourceEnumPart(
+    int SourceInputOrdinal, SyntaxTree Tree, SyntaxNode Declaration,
+    bool IsPrimary);
+
+internal sealed class BoundSourceEnumDeclarationHandle
+{
+    internal string QualifiedName { get; }
+    internal ImmutableArray<BoundSourceEnumPart> Parts { get; }
+    internal bool IsPublic { get; }
+    internal bool IsFileLocal { get; }
+
+    internal bool IsValid
+        => !string.IsNullOrWhiteSpace(QualifiedName)
+            && !Parts.IsDefaultOrEmpty
+            && Parts.All(static part => part.SourceInputOrdinal >= 0
+                && part.Tree is not null
+                && part.Declaration.Kind == SyntaxKind.EnumDeclaration)
+            && Parts.Count(static part => part.IsPrimary) == 1;
+
+    internal BoundSourceEnumDeclarationHandle(string qualifiedName,
+        ImmutableArray<BoundSourceEnumPart> parts, bool isPublic,
+        bool isFileLocal)
+    {
+        QualifiedName = qualifiedName;
+        Parts = parts;
+        IsPublic = isPublic;
+        IsFileLocal = isFileLocal;
+    }
+
+    internal bool ContainsMember(SyntaxTree tree, SyntaxNode member)
+        => member.Kind == SyntaxKind.EnumMemberDeclaration
+            && Parts.Any(part => ReferenceEquals(part.Tree, tree)
+                && part.Declaration.Children.OfType<SyntaxNode>()
+                    .Any(child => ReferenceEquals(child, member)));
+}
+
+internal sealed class BoundSourceEnumMemberHandle(
+    BoundSourceEnumDeclarationHandle owner, SyntaxTree tree,
+    SyntaxNode declaration)
+{
+    internal BoundSourceEnumDeclarationHandle Owner { get; } = owner;
+    internal SyntaxTree Tree { get; } = tree;
+    internal SyntaxNode Declaration { get; } = declaration;
+    internal bool IsValid
+        => Owner.IsValid && Owner.ContainsMember(Tree, Declaration);
 }
 
 internal sealed class BoundPrivateEnumOccurrence
@@ -180,8 +244,9 @@ internal sealed record BoundEnumDefinition(
             definition.UnderlyingType, [
                 .. definition.Members.Select(static member =>
                     new BoundPrivateEnumMemberSnapshot(member.Name,
-                        member.Value, member.IsPublic,
-                        member.DeclarationKey)),
+                        checked((int)member.Value), member.IsPublic,
+                        member.DeclarationKey ?? throw new InvalidOperationException(
+                            "A private enum member has no declaration key."))),
             ], definition.IsPublic, definition.IsPrimary,
             definition.IsFlags, definition.BlittableTargetRequirement,
             definition.ModuleImport);
@@ -192,9 +257,9 @@ internal sealed record BoundEnumMemberDefinition(
     BoundEnumMemberIdentity Identity,
     BoundEnumDeclarationIdentity DeclaringEnum,
     string Name,
-    int Value,
+    BigInteger Value,
     bool IsPublic,
-    string DeclarationKey);
+    string? DeclarationKey);
 
 internal sealed record BoundPrivateEnumMemberSnapshot(
     string Name, int Value, bool IsPublic, string DeclarationKey);
@@ -205,6 +270,24 @@ internal static class BoundEnumTypes
 
     internal const int First = 100 + SemanticVerifier.MaximumVariables;
     internal const int MaximumCount = ManagedClassTypes.First - First;
+
+    internal static bool IsValidModuleDeclarationKey(string key)
+    {
+        if (string.IsNullOrEmpty(key)
+            || key.Contains('\0', StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        try
+        {
+            return s_strictUtf8.GetByteCount(key) <= 0xFF_FFFF;
+        }
+        catch (EncoderFallbackException)
+        {
+            return false;
+        }
+    }
 
     internal static bool IsType(PrimitiveType type) =>
         (int)type is >= First and < ManagedClassTypes.First;
@@ -228,6 +311,12 @@ internal static class BoundEnumTypes
 
     internal static bool IsValidType(PrimitiveType type, int definitionCount) =>
         IsType(type) && (uint)Index(type) < (uint)definitionCount;
+
+    internal static bool HasStandardDeclarations(
+        ImmutableArray<BoundEnumDefinition> definitions)
+        => !definitions.IsDefault
+            && definitions.Any(static definition => definition?.Identity
+                is BoundEnumDeclarationIdentity.Standard);
 
     internal static bool AreEquivalent(BoundEnumDefinition left, BoundEnumDefinition right) =>
         left.Identity == right.Identity && left.Name == right.Name
@@ -360,24 +449,54 @@ internal static class BoundEnumTypes
         var typeIdentities = new HashSet<BoundEnumDeclarationIdentity>();
         var memberIdentities = new HashSet<BoundEnumMemberIdentity>();
         var coreNames = new HashSet<string>(StringComparer.Ordinal);
+        var standardSites = new HashSet<BoundStandardEnumSiteIdentity>();
         for (var definitionIndex = 0;
              definitionIndex < definitions.Length; definitionIndex++)
         {
             var definition = definitions[definitionIndex];
+            var sourceIdentity = definition?.Identity
+                as BoundEnumDeclarationIdentity.Source;
+            var standardIdentity = definition?.Identity
+                as BoundEnumDeclarationIdentity.Standard;
             var coreIdentity = definition?.Identity.TryGetCore(
                 out var coreValue) == true
                 ? coreValue : (CoreDeclarationIdentity?)null;
             if (definition is null || !definition.Identity.IsValid
-                || definition.UnderlyingType != PrimitiveType.Int32
+                || (definition.Identity
+                        is BoundEnumDeclarationIdentity.Private
+                    ? definition.UnderlyingType != PrimitiveType.Int32
+                    : !PrimitiveTypeFacts.IsIntegerOrWide(
+                        definition.UnderlyingType))
+                || (sourceIdentity is not null
+                    && (sourceIdentity.Value.QualifiedName
+                            != definition.Name
+                        || sourceIdentity.Value.IsPublic
+                            != definition.IsPublic
+                        || definition.ModuleImport is not null))
+                || (standardIdentity is not null
+                    && !BoundStandardEnumDeclarationContract
+                        .IsValidDefinition(standardIdentity.Value,
+                            definition))
+                || (standardIdentity is not null
+                    && !standardSites.Add(
+                        BoundStandardEnumDeclarationContract
+                            .GetSiteIdentity(
+                                standardIdentity.Value.Declaration.Site)))
                 || definition.BlittableTargetRequirement is not (0
                     or FixedLayoutStorage.WindowsX64TargetRequirement)
                 || (definition.ModuleImport is BoundModuleImport moduleImport
                     && (moduleImport.TargetRequirement > 1
                         || moduleImport.RuntimePolicy > 1))
                 || string.IsNullOrWhiteSpace(definition.Name)
-                || !definition.IsPublic || !definition.IsPrimary || definition.Members.IsDefault
+                || (sourceIdentity is null
+                    && standardIdentity is null
+                    && !definition.IsPublic)
+                || !definition.IsPrimary || definition.Members.IsDefault
                 || definition.Members.Length > SemanticVerifier.MaximumAnalysisVisits
                 || !typeIdentities.Add(definition.Identity)
+                || definition.Members.Any(member => member is null
+                    || !IsEnumMemberValueInRange(member.Value,
+                        definition.UnderlyingType))
                 || (coreIdentity is CoreDeclarationIdentity core
                     && ((definition.ModuleImport is BoundModuleImport import
                             && (import.ProducerIdentity
@@ -400,14 +519,20 @@ internal static class BoundEnumTypes
                     out var memberCoreValue) == true
                     ? memberCoreValue
                     : (CoreDeclarationIdentity?)null;
+                var sourceMemberIdentity = member?.Identity
+                    as BoundEnumMemberIdentity.Source;
                 if (member is null || !member.Identity.IsValid
                     || member.DeclaringEnum != definition.Identity
                     || string.IsNullOrWhiteSpace(member.Name)
-                    || !member.IsPublic
+                    || (sourceIdentity is null
+                        && standardIdentity is null
+                        ? !member.IsPublic
+                        : member.IsPublic != definition.IsPublic)
                     || !IsValidMemberDeclarationKey(member)
                     || !memberIdentities.Add(member.Identity)
                     || !memberNames.Add(member.Name)
-                    || !memberDeclarationKeys.Add(member.DeclarationKey))
+                    || (member.DeclarationKey is string declarationKey
+                        && !memberDeclarationKeys.Add(declarationKey)))
                 {
                     return false;
                 }
@@ -430,6 +555,23 @@ internal static class BoundEnumTypes
                             privateEnum.Value)
                         || privateMember.DeclarationKey
                             != member.DeclarationKey))
+                {
+                    return false;
+                }
+                else if (member.Identity
+                        is BoundEnumMemberIdentity.OwnerKey ownerKey
+                    && (ownerKey.Owner != definition.Identity
+                        || ownerKey.DeclarationKey
+                            != member.DeclarationKey))
+                {
+                    return false;
+                }
+                else if (sourceMemberIdentity is not null
+                    && (sourceIdentity is null
+                        || !ReferenceEquals(
+                            sourceMemberIdentity.Value.Owner,
+                            sourceIdentity.Value)
+                        || member.DeclarationKey is not null))
                 {
                     return false;
                 }
@@ -481,10 +623,23 @@ internal static class BoundEnumTypes
         static bool IsValidMemberDeclarationKey(
             BoundEnumMemberDefinition member)
         {
-            if (member.Identity is not BoundEnumMemberIdentity.Private)
+            if (member.Identity is BoundEnumMemberIdentity.Source)
             {
-                return !string.IsNullOrWhiteSpace(member.DeclarationKey)
-                    && !member.DeclarationKey.Contains('\0',
+                return member.DeclarationKey is null;
+            }
+            if (member.Identity
+                is not BoundEnumMemberIdentity.Private)
+            {
+                if (member.Identity
+                    is BoundEnumMemberIdentity.OwnerKey)
+                {
+                    return member.DeclarationKey is string ownerKey
+                        && BoundEnumTypes.IsValidModuleDeclarationKey(
+                            ownerKey);
+                }
+                return member.DeclarationKey is string declarationKey
+                    && !string.IsNullOrWhiteSpace(declarationKey)
+                    && !declarationKey.Contains('\0',
                         StringComparison.Ordinal);
             }
 
@@ -503,6 +658,26 @@ internal static class BoundEnumTypes
             {
                 return false;
             }
+        }
+
+        static bool IsEnumMemberValueInRange(BigInteger value,
+            PrimitiveType underlyingType)
+        {
+            if (!PrimitiveTypeFacts.IsIntegerOrWide(underlyingType))
+            {
+                return false;
+            }
+
+            var width = PrimitiveTypeFacts.IntegerWidthOrWide(underlyingType);
+            var minimum = PrimitiveTypeFacts.IsSignedIntegerOrWide(
+                underlyingType)
+                ? -(BigInteger.One << (width - 1))
+                : BigInteger.Zero;
+            var maximum = PrimitiveTypeFacts.IsSignedIntegerOrWide(
+                underlyingType)
+                ? (BigInteger.One << (width - 1)) - BigInteger.One
+                : (BigInteger.One << width) - BigInteger.One;
+            return value >= minimum && value <= maximum;
         }
     }
 

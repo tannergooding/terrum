@@ -26,6 +26,9 @@ public readonly ref struct TrRmTypeSpecTableReader
 
     private readonly TrRmVariableTableIndex _rows;
     private readonly int _recordCount;
+    private readonly int _baseRecordCount;
+    private readonly ReadOnlyMemory<byte>[]? _appendedRows;
+    private readonly Dictionary<int, List<int>>? _appendedRowIndex;
     private readonly int _typeDefCount;
     private readonly int _importCount;
     private readonly int _genericParamCount;
@@ -61,6 +64,8 @@ public readonly ref struct TrRmTypeSpecTableReader
         }
         if (!ValidCount(methodDefCount) || !ValidCount(predicateCaptureCount)
             || schema is not (TrRmArtifactSchema.Standard
+                or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
+                or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft
                 or TrRmArtifactSchema.Development
                 or TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft
                 or TrRmArtifactSchema.DevelopmentNativeConventionsDraft
@@ -79,8 +84,30 @@ public readonly ref struct TrRmTypeSpecTableReader
                 or TrRmArtifactSchema.NominalEnumsDraft
                 or TrRmArtifactSchema.RootPinRuntimeDraft
                 or TrRmArtifactSchema.GeneralPredicateGraphsDraft
+                or TrRmArtifactSchema.InitializationReferencePointerLoadNativeParameterDraft
+                or TrRmArtifactSchema.InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft
                 or TrRmArtifactSchema.RegisterExceptionRegionsDraft
                 or TrRmArtifactSchema.GenericMethodCallsDraft
+                or TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft
+                or TrRmArtifactSchema.GenericMethodCallsParameterLabelsReceiverAccessDraft
+                or TrRmArtifactSchema.C1Draft
+                or TrRmArtifactSchema.C1ParameterLabelsReceiverAccessDraft
+                or TrRmArtifactSchema.C1M1Draft
+                or TrRmArtifactSchema.C1M1ParameterLabelsReceiverAccessDraft
+                or TrRmArtifactSchema.C1M1ConstructionDraft
+                or TrRmArtifactSchema.C1M1ConstructionParameterLabelsReceiverAccessDraft
+                or TrRmArtifactSchema.C1M1Construction2Draft
+                or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessDraft
+                or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft
+                or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateDraft
+                or TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft
+                or TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft
+                or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft
+                or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft
+                or TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft
+                or TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft
+                or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft
+                or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft
                 or TrRmArtifactSchema.GenericConstantMethodsDraft)
             || (!schema.IsDevelopmentProfile()
                 && nativeFunctionPointerSignatureCount != 0))
@@ -92,6 +119,9 @@ public readonly ref struct TrRmTypeSpecTableReader
         _rows = new TrRmVariableTableIndex(section, recordCount, 2, 1,
             resourceLedger);
         _recordCount = recordCount;
+        _baseRecordCount = recordCount;
+        _appendedRows = null;
+        _appendedRowIndex = null;
         _typeDefCount = typeDefCount;
         _importCount = importCount;
         _genericParamCount = genericParamCount;
@@ -111,6 +141,106 @@ public readonly ref struct TrRmTypeSpecTableReader
         _compactValueTypeKeys = CreateCompactValueTypeKeys();
     }
 
+    private TrRmTypeSpecTableReader(TrRmTypeSpecTableReader source,
+        ReadOnlyMemory<byte>[] appendedRows,
+        Dictionary<int, List<int>> appendedRowIndex)
+    {
+        _rows = source._rows;
+        _recordCount = checked(source._baseRecordCount
+            + appendedRows.Length);
+        _baseRecordCount = source._baseRecordCount;
+        _appendedRows = appendedRows;
+        _appendedRowIndex = appendedRowIndex;
+        _typeDefCount = source._typeDefCount;
+        _importCount = source._importCount;
+        _genericParamCount = source._genericParamCount;
+        _nativeFunctionPointerSignatureCount
+            = source._nativeFunctionPointerSignatureCount;
+        _nativeFunctionPointerTypeKeyCount
+            = source._nativeFunctionPointerTypeKeyCount;
+        _methodDefCount = source._methodDefCount;
+        _predicateCaptureCount = source._predicateCaptureCount;
+        _schema = source._schema;
+        _resourceLedger = source._resourceLedger;
+        _compactValueTypeKeys = source._compactValueTypeKeys;
+    }
+
+    internal TrRmTypeSpecTableReader WithAdditionalRows(
+        IReadOnlyList<ReadOnlyMemory<byte>> additionalRows)
+    {
+        ArgumentNullException.ThrowIfNull(additionalRows);
+        if (additionalRows.Count == 0)
+        {
+            return this;
+        }
+
+        var existingAppendedCount = _recordCount - _baseRecordCount;
+        var combinedRows = new ReadOnlyMemory<byte>[
+            checked(existingAppendedCount + additionalRows.Count)];
+        if (_appendedRows is not null)
+        {
+            Array.Copy(_appendedRows, combinedRows,
+                existingAppendedCount);
+        }
+        for (var index = 0; index < additionalRows.Count; index++)
+        {
+            combinedRows[existingAppendedCount + index]
+                = additionalRows[index].ToArray();
+        }
+
+        if (!ValidCount(checked(_baseRecordCount + combinedRows.Length)))
+        {
+            throw InvalidType();
+        }
+
+        var appendedRowIndex = _appendedRowIndex
+            ?? new Dictionary<int, List<int>>();
+        for (var index = 0; index < additionalRows.Count; index++)
+        {
+            var rowIndex = checked(_recordCount + index + 1);
+            var rowHash = GetTypeSpecRowHash(
+                combinedRows[rowIndex - _baseRecordCount - 1].Span);
+            if (!appendedRowIndex.TryGetValue(rowHash, out var indexes))
+            {
+                indexes = [];
+                appendedRowIndex.Add(rowHash, indexes);
+            }
+            indexes.Add(rowIndex);
+        }
+
+        var result = new TrRmTypeSpecTableReader(this, combinedRows,
+            appendedRowIndex);
+        for (var row = _recordCount + 1; row <= result._recordCount; row++)
+        {
+            result.Validate(row);
+        }
+        return result;
+    }
+
+    internal bool TryFindAppendedRow(ReadOnlySpan<byte> row,
+        out uint rowRef)
+    {
+        rowRef = 0;
+        if (_appendedRowIndex is null
+            || !_appendedRowIndex.TryGetValue(GetTypeSpecRowHash(row),
+                out var indexes))
+        {
+            return false;
+        }
+
+        foreach (var rowIndex in indexes)
+        {
+            if ((uint)rowIndex <= (uint)_recordCount
+                && GetRowCore(rowIndex).SequenceEqual(row))
+            {
+                rowRef = checked((uint)rowIndex);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>Gets the borrowed bytes of a one-based TypeSpec row.</summary>
     /// <param name="row">The one-based TypeSpec row.</param>
     /// <returns>The row's validated encoding.</returns>
@@ -122,7 +252,23 @@ public readonly ref struct TrRmTypeSpecTableReader
     private ReadOnlySpan<byte> GetRowCore(int row)
     {
         _resourceLedger?.ConsumeWork();
+        if (row > _baseRecordCount
+            && (uint)row <= (uint)_recordCount
+            && _appendedRows is not null)
+        {
+            return _appendedRows[row - _baseRecordCount - 1].Span;
+        }
         return _rows.GetRow(row);
+    }
+
+    private static int GetTypeSpecRowHash(ReadOnlySpan<byte> row)
+    {
+        var hash = StructuralHashOffset;
+        foreach (var value in row)
+        {
+            hash = unchecked((hash ^ value) * StructuralHashPrime);
+        }
+        return unchecked((int)hash);
     }
 
     internal TrRmTypeSpecRefInfo GetTypeSpecRef(
@@ -226,6 +372,101 @@ public readonly ref struct TrRmTypeSpecTableReader
         return bytes;
     }
 
+    internal bool IsInitializationDestinationType(uint typeSpecRef)
+    {
+        var type = GetTypeSpecBytes(typeSpecRef);
+        if (type.Length == 6 && type[0] == 0x0E)
+        {
+            var reference = GetTypeSpecRef(typeSpecRef);
+            var referent = GetTypeSpecRef(Read(
+                GetRowCore(reference.Row), 2), allowInitQualifier: true);
+            return !IsVoidTypeSpecRef(referent);
+        }
+
+        if (type.Length != 7 || type[0] != 0x0C || type[2] != 0x8A)
+        {
+            return false;
+        }
+
+        var argument = GetTypeSpecRef(Read(type, 3),
+            allowInitQualifier: true);
+        return (argument.Qualifiers & 0x04) != 0
+            && !IsVoidTypeSpecRef(argument);
+    }
+
+    internal bool TryGetInitializationReferenceReferentTypeSpecRef(
+        uint typeSpecRef, out uint referentTypeSpecRef,
+        out bool isWritable)
+    {
+        var type = GetTypeSpecRef(typeSpecRef);
+        if (type.Form != 0x0E || !type.IsRow)
+        {
+            referentTypeSpecRef = 0;
+            isWritable = false;
+            return false;
+        }
+
+        var data = GetRowCore(type.Row);
+        referentTypeSpecRef = Read(data, 2);
+        isWritable = (type.Qualifiers & 1) != 0;
+        if (IsVoidTypeSpecRef(GetTypeSpecRef(referentTypeSpecRef,
+                allowInitQualifier: true)))
+        {
+            referentTypeSpecRef = 0;
+            isWritable = false;
+            return false;
+        }
+
+        return true;
+    }
+
+    internal bool TryGetInitializationReferenceReferentTypeSpecRef(
+        uint typeSpecRef, out uint referentTypeSpecRef)
+        => TryGetInitializationReferenceReferentTypeSpecRef(typeSpecRef,
+            out referentTypeSpecRef, out _);
+
+    internal bool TryGetNativePointerPointeeTypeSpecRef(
+        uint typeSpecRef, out uint pointeeTypeSpecRef)
+    {
+        var pointerType = GetTypeSpecRef(typeSpecRef);
+        if ((pointerType.Qualifiers & 0x06) != 0)
+        {
+            pointeeTypeSpecRef = 0;
+            return false;
+        }
+
+        var bytes = GetTypeSpecBytes(typeSpecRef);
+        if (pointerType.Form == 0x01 && pointerType.TypeCode == 0x8C
+            && bytes.Length == 4)
+        {
+            pointeeTypeSpecRef = 0xF200_0000u | bytes[3];
+            return true;
+        }
+
+        if (pointerType.Form == 0x08 && pointerType.IsRow
+            && bytes.Length == 6)
+        {
+            pointeeTypeSpecRef = Read(bytes, 2);
+            _ = GetTypeSpecRef(pointeeTypeSpecRef);
+            return true;
+        }
+
+        if (pointerType.Form == 0x0C && pointerType.IsRow
+            && pointerType.TypeCode == 0x8C && bytes.Length == 7)
+        {
+            pointeeTypeSpecRef = Read(bytes, 3);
+            _ = GetTypeSpecRef(pointeeTypeSpecRef);
+            return true;
+        }
+
+        pointeeTypeSpecRef = 0;
+        return false;
+    }
+
+    private static bool IsVoidTypeSpecRef(TrRmTypeSpecRefInfo reference)
+        => reference.Form == 0x01 && reference.TypeCode == 0
+            && (reference.Qualifiers & ~0x04) == 0;
+
     internal bool TryGetImplicitReadonlyReferenceReferentTypeSpecRef(
         uint typeSpecRef, out uint referentTypeSpecRef)
     {
@@ -274,7 +515,8 @@ public readonly ref struct TrRmTypeSpecTableReader
 
         if (reference.Form == 0x01 && reference.TypeCode < 0x80
             && reference.TypeCode is 1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9
-                or 0x0B or 0x0C or 0x0D or 0x0E or 0x14 or 0x15)
+                or 0x0B or 0x0C or 0x0D or 0x0E or 0x10 or 0x11
+                or 0x14 or 0x15)
         {
             return reference.TypeCode;
         }
@@ -1076,7 +1318,8 @@ public readonly ref struct TrRmTypeSpecTableReader
         static bool IsCompactAtom(byte code)
         {
             return code is 1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9
-                or 0x0B or 0x0C or 0x0D or 0x0E or 0x14 or 0x15;
+                or 0x0B or 0x0C or 0x0D or 0x0E or 0x10 or 0x11
+                or 0x14 or 0x15;
         }
 
         static bool IsCompactOptionalAtom(byte code)

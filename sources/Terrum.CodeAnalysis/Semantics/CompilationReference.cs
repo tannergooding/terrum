@@ -35,7 +35,18 @@ public sealed class CompilationReference
         LazyInitializationCoreRegistrationSet?
             lazyInitializationCoreRegistration = null,
         NativeOutputCoreRegistrationSet?
-            nativeOutputCoreRegistration = null)
+            nativeOutputCoreRegistration = null,
+        ImmutableArray<BoundGenericMethodImport>
+            genericMethodImports = default,
+        BoundStandardQuerySourceAssociation?
+            standardQuerySourceAssociation = null,
+        ImmutableArray<CoreEvaluationFormIdentitySelection>
+            coreEvaluationFormIdentitySelections = default,
+        ImmutableArray<CoreEvaluationFormSchemaDeclarations>
+            coreEvaluationFormSchemaProviders = default,
+        ImmutableArray<BoundStandardClassDeclaration>
+            standardClassDeclarations = default,
+        ImmutableArray<BoundSpanTypeDefinition> spanTypes = default)
     {
         if (nativeCoreRegistration is not null && !nativeCoreRegistration.IsValid())
         {
@@ -72,6 +83,77 @@ public sealed class CompilationReference
                         nameof(privateClassReferences));
                 }
             }
+        }
+        if (!genericMethodImports.IsDefault
+            && genericMethodImports.Any(static import =>
+                import is null
+                || import.Origin is null
+                || string.IsNullOrEmpty(import.Origin.ProviderIdentity)
+                || string.IsNullOrEmpty(import.Origin.ExportKey)
+                || !StandardGenericMethodSchema.IsGenericMethodCalls(
+                    import.Origin.SchemaIdentity)
+                || import.Origin.ProviderArtifactDigest.IsDefault
+                || import.Origin.ProviderArtifactDigest.Length != 32
+                || import.Signature is null
+                || import.Formals.IsDefault
+                || import.Formals.Length
+                    != import.Signature.Formals.Length
+                || import.ProofFunction is null))
+        {
+            throw new ArgumentException(
+                "The selected generic MethodDef imports are invalid.",
+                nameof(genericMethodImports));
+        }
+        if (!CoreEvaluationFormIdentitySelectionContract
+            .IsValidAgainstProviders(
+                coreEvaluationFormIdentitySelections,
+                coreEvaluationFormSchemaProviders))
+        {
+            throw new ArgumentException(
+                "The selected evaluation-form identities or providers are invalid.",
+                nameof(coreEvaluationFormIdentitySelections));
+        }
+        var nominalDefinitions = genericNominalTypeDefinitions.IsDefault
+            ? [] : genericNominalTypeDefinitions;
+        var selectedClassDeclarations = standardClassDeclarations.IsDefault
+            ? [] : standardClassDeclarations;
+        if (!BoundStandardClassDeclarationContract.IsValidTable(
+                selectedClassDeclarations, nominalDefinitions))
+        {
+            throw new ArgumentException(
+                "The selected Standard class declaration metadata is invalid.",
+                nameof(standardClassDeclarations));
+        }
+        if (!functions.IsDefaultOrEmpty
+            && functions.Any(function =>
+                !CoreEvaluationFormIdentitySelectionContract
+                    .IsValidBoundFormBinding(
+                        function.PureEvaluationFormSchema,
+                        constEval: false,
+                        coreEvaluationFormIdentitySelections,
+                        coreEvaluationFormSchemaProviders)
+                || !CoreEvaluationFormIdentitySelectionContract
+                    .IsValidBoundFormBinding(
+                        function.ConstEvalSchema, constEval: true,
+                        coreEvaluationFormIdentitySelections,
+                        coreEvaluationFormSchemaProviders)))
+        {
+            throw new ArgumentException(
+                "The selected evaluation-form function identities are invalid.",
+                nameof(functions));
+        }
+        if (!CoreEvaluationFormIdentitySelectionContract
+                .AreRuntimePoliciesCompatible(
+                    coreEvaluationFormIdentitySelections,
+                    coreEvaluationFormSchemaProviders,
+                    (uint)runtimePolicy)
+            || (!coreEvaluationFormSchemaProviders.IsDefaultOrEmpty
+                && coreEvaluationFormSchemaProviders.Any(provider =>
+                    provider.Origin.RuntimePolicy != (uint)runtimePolicy)))
+        {
+            throw new ArgumentException(
+                "The evaluation-form provider runtime policy does not match the reference.",
+                nameof(coreEvaluationFormSchemaProviders));
         }
         if (layoutCoreRegistration is not null && !layoutCoreRegistration.IsValid())
         {
@@ -149,7 +231,9 @@ public sealed class CompilationReference
                 nameof(enumDefinitions));
         }
         if (!checkedReferenceTypes.IsDefault
-            && !CheckedReferenceTypeContract.IsValidTable(checkedReferenceTypes))
+            && !CheckedReferenceTypeContract.IsValidTable(
+                checkedReferenceTypes,
+                nativePointerTypes.IsDefault ? [] : nativePointerTypes))
         {
             throw new ArgumentException("The selected checked-reference types are invalid.",
                 nameof(checkedReferenceTypes));
@@ -159,13 +243,22 @@ public sealed class CompilationReference
                 nativeFixedArrayTypes,
                 checkedReferenceTypes.IsDefault
                     ? []
-                    : checkedReferenceTypes))
+                    : checkedReferenceTypes,
+                enumDefinitions.IsDefault ? [] : enumDefinitions))
         {
             throw new ArgumentException("The selected fixed-array types are invalid.",
                 nameof(nativeFixedArrayTypes));
         }
+        if (!spanTypes.IsDefault
+            && !BoundSpanTypeContract.TryCreateTypeIdentityIndex(
+                spanTypes, out _))
+        {
+            throw new ArgumentException(
+                "The selected Span type table is not canonical.",
+                nameof(spanTypes));
+        }
         if (!interfaces.IsDefault && !BoundInterfaceContract.IsValidTable(interfaces,
-            static _ => true))
+            static _ => true, genericNominalTypeDefinitions))
         {
             throw new ArgumentException("The selected interface declarations are invalid.",
                 nameof(interfaces));
@@ -218,6 +311,7 @@ public sealed class CompilationReference
         NativePointerTypes = nativePointerTypes.IsDefault ? [] : nativePointerTypes;
         NativeFixedArrayTypes = nativeFixedArrayTypes.IsDefault
             ? [] : nativeFixedArrayTypes;
+        SpanTypes = spanTypes.IsDefault ? [] : spanTypes;
         NativeCoreRegistration = nativeCoreRegistration;
         LayoutCoreRegistration = layoutCoreRegistration;
         StaticInitializationCoreRegistration
@@ -230,6 +324,7 @@ public sealed class CompilationReference
         Interfaces = interfaces.IsDefault ? [] : interfaces;
         GenericNominalTypeDefinitions = genericNominalTypeDefinitions.IsDefault
             ? [] : genericNominalTypeDefinitions;
+        StandardClassDeclarations = selectedClassDeclarations;
         GenericNominalTypeInstances = genericNominalTypeInstances.IsDefault
             ? [] : genericNominalTypeInstances;
         CoreTaskType = coreTaskType;
@@ -244,6 +339,15 @@ public sealed class CompilationReference
         Classes = classes.IsDefault ? [] : classes;
         PrivateClassReferences = privateClassReferences.IsDefault
             ? [] : privateClassReferences;
+        GenericMethodImports = genericMethodImports.IsDefault
+            ? [] : genericMethodImports;
+        StandardQuerySourceAssociation = standardQuerySourceAssociation;
+        CoreEvaluationFormIdentitySelections
+            = coreEvaluationFormIdentitySelections.IsDefault
+                ? [] : coreEvaluationFormIdentitySelections;
+        CoreEvaluationFormSchemaProviders
+            = coreEvaluationFormSchemaProviders.IsDefault
+                ? [] : coreEvaluationFormSchemaProviders;
     }
 
     private static bool IsValidPrivateClassReference(
@@ -349,6 +453,8 @@ public sealed class CompilationReference
 
     internal ImmutableArray<BoundNativeFixedArrayType> NativeFixedArrayTypes { get; }
 
+    internal ImmutableArray<BoundSpanTypeDefinition> SpanTypes { get; }
+
     // This host-selected Core profile is deliberately separate from normalized module declarations.
     internal NativeCoreRegistrationSet? NativeCoreRegistration { get; }
 
@@ -375,11 +481,25 @@ public sealed class CompilationReference
 
     internal ImmutableArray<BoundPrivateClassReference>
         PrivateClassReferences { get; }
+    internal ImmutableArray<BoundGenericMethodImport>
+        GenericMethodImports { get; }
+
+    internal BoundStandardQuerySourceAssociation?
+        StandardQuerySourceAssociation { get; }
+
+    internal ImmutableArray<CoreEvaluationFormIdentitySelection>
+        CoreEvaluationFormIdentitySelections { get; }
+
+    internal ImmutableArray<CoreEvaluationFormSchemaDeclarations>
+        CoreEvaluationFormSchemaProviders { get; }
 
     internal ImmutableArray<BoundInterfaceDefinition> Interfaces { get; }
 
     /// <summary>The exact nominal TypeDefs selected from checked providers.</summary>
     public ImmutableArray<BoundGenericNominalTypeDefinition> GenericNominalTypeDefinitions { get; }
+
+    internal ImmutableArray<BoundStandardClassDeclaration>
+        StandardClassDeclarations { get; }
 
     /// <summary>Nominal TypeDef uses retained by an imported declaration set.</summary>
     public ImmutableArray<BoundGenericNominalTypeInstance> GenericNominalTypeInstances { get; }
@@ -429,6 +549,15 @@ public sealed class CompilationReference
             lazyInitializationCoreRegistration:
                 LazyInitializationCoreRegistration,
             nativeOutputCoreRegistration:
-                NativeOutputCoreRegistration);
+                NativeOutputCoreRegistration,
+            genericMethodImports: GenericMethodImports,
+            standardQuerySourceAssociation:
+                StandardQuerySourceAssociation,
+            coreEvaluationFormIdentitySelections:
+                CoreEvaluationFormIdentitySelections,
+            coreEvaluationFormSchemaProviders:
+                CoreEvaluationFormSchemaProviders,
+            standardClassDeclarations: StandardClassDeclarations,
+            spanTypes: SpanTypes);
     }
 }

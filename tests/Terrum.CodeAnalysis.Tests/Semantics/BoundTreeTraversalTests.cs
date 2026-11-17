@@ -28,7 +28,8 @@ internal sealed class BoundTreeTraversalTests
             int32 Length() { return 1; }
             int32 Adjust(int32 value) { return value + 2; }
             public int32 Evaluate() {
-                require OwnedInt32Buffer.TryCreate(1, out var created);
+                init OwnedInt32Buffer created;
+                require OwnedInt32Buffer.TryCreate(1, ref init created);
                 mut OwnedInt32Buffer buffer = move created;
                 require buffer.TryAppend(40);
                 ReadonlyInt32BufferView view = buffer.Slice(Start(), Length());

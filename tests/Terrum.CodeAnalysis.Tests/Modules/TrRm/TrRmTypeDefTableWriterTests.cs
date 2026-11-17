@@ -72,6 +72,40 @@ internal sealed class TrRmTypeDefTableWriterTests
         _ = Assert.Throws<InvalidDataException>(() => Encode([first]));
     }
 
+    [Test]
+    public void C1M1WriterRetainsClassMutabilityWithoutTreatingC1AsAnAlias()
+    {
+        var stringBytes = TrRmStringTableWriter.EncodeTextRows([
+            ("", 0), ("Module", 0), ("Widget", 0),
+        ]);
+        var strings = new TrRmStringTableReader(stringBytes, 3);
+        var moduleBytes = TrRmModuleTableWriter.Encode([
+            new TrRmModuleRow(2, 0, 0, 0, 1, 1, 1, 1),
+        ], strings, 0, 1, 0, 0);
+        var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
+            0, 1, 0, 0);
+        var row = new TrRmTypeDefRow(1, 2, 0x8A, 0, 0, 0, 0, 0, 0, 0, 0);
+        var bytes = TrRmTypeDefTableWriter.Encode([row], strings, modules,
+            0, 0, 0, 0, TrRmArtifactSchema.C1M1Draft);
+        var types = new TrRmTypeDefTableReader(bytes, 1, strings, modules,
+            0, 0, 0, 0, TrRmArtifactSchema.C1M1Draft);
+        Assert.That(types.TryGetDeclaredClassMutability(1,
+            out var isMutable), Is.True);
+        Assert.That(isMutable, Is.True);
+
+        var standardSchemaRejected = false;
+        try
+        {
+            _ = TrRmTypeDefTableWriter.Encode([row], strings, modules,
+                0, 0, 0, 0, TrRmArtifactSchema.C1Draft);
+        }
+        catch (InvalidDataException)
+        {
+            standardSchemaRejected = true;
+        }
+        Assert.That(standardSchemaRejected, Is.True);
+    }
+
     private static byte[] Encode(TrRmTypeDefRow[] rows)
     {
         var names = Names();

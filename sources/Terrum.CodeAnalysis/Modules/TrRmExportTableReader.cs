@@ -180,6 +180,13 @@ public readonly ref struct TrRmExportTableReader
             && _exportedDefinitions.Contains(0x1600_0000u | (uint)methodDefRow);
     }
 
+    internal bool HasExportForTypeDef(int typeDefRow)
+    {
+        _resourceLedger?.ConsumeWork();
+        return typeDefRow > 0
+            && _exportedDefinitions.Contains(0x1300_0000u | (uint)typeDefRow);
+    }
+
     internal bool TryGetDefinitionForKey(int moduleRow, string key,
         out uint definition)
     {
@@ -267,6 +274,31 @@ public readonly ref struct TrRmExportTableReader
                 : StringComparer.Ordinal.Compare(left.ExportKey,
                     right.ExportKey);
         });
+        return exports.ToImmutable();
+    }
+
+    internal ImmutableArray<(uint Definition, string ExportKey)>
+        GetExportsForDefinitions(int moduleRow,
+            HashSet<uint> definitions)
+    {
+        ArgumentNullException.ThrowIfNull(definitions);
+        if (_definitionsByKey is null || definitions.Count == 0)
+        {
+            return [];
+        }
+
+        var exports = ImmutableArray.CreateBuilder<
+            (uint Definition, string ExportKey)>();
+        foreach (var entry in _definitionsByKey)
+        {
+            _resourceLedger?.ConsumeWork();
+            if (entry.Key.Module == moduleRow
+                && definitions.Contains(entry.Value))
+            {
+                exports.Add((entry.Value, entry.Key.Key));
+            }
+        }
+
         return exports.ToImmutable();
     }
 
