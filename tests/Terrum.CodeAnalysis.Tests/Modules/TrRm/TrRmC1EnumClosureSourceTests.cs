@@ -1292,6 +1292,117 @@ internal sealed class TrRmC1EnumClosureSourceTests
         Assert.That(NativeEmitter.EmitLibrary(reloaded, ["Offset"],
             NativeRuntimePolicy.FailFast), Is.Not.Empty);
 
+        TrRmSourceClassExport CreateRelocatedClassExport(
+            BoundProgram program, SyntaxTree tree, string name,
+            string typeKey, params string[] fieldKeys)
+        {
+            var declaration = tree.Root.Children.OfType<SyntaxNode>()
+                .Single(node => node.Kind == SyntaxKind.ClassDeclaration
+                    && node.Children.OfType<SyntaxTokenElement>().Any(token =>
+                        token.Token.Kind == TokenKind.Identifier
+                        && token.Token.Name == name));
+            var fields = declaration.Children.OfType<SyntaxNode>()
+                .Where(static node =>
+                    node.Kind == SyntaxKind.FieldDeclaration).ToArray();
+            if (fields.Length != fieldKeys.Length)
+            {
+                throw new InvalidDataException(
+                    "The relocated class fixture has an incomplete FieldDef key list.");
+            }
+
+            var classIndex = program.SourceClassProgramAssociation!
+                .Declarations.Single(item =>
+                    item.Span == declaration.Span).ClassIndex;
+            var memberExports = fields.Select((field, index) =>
+                    new TrRmSourceClassMemberExport(0, field.Span,
+                        fieldKeys[index]))
+                .ToImmutableArray();
+            return new TrRmSourceClassExport(program, classIndex,
+                declaration.Span, typeKey, memberExports);
+        }
+
+        var relocatedProviderTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public class Padding { public int32 Unused; }
+                public class Box {
+                    public uint8 Prefix;
+                    public int32 Value;
+                }
+            }
+            """);
+        var relocatedProviderCompilation
+            = Compilation.CreateLibrary(relocatedProviderTree);
+        Assert.That(relocatedProviderCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                relocatedProviderCompilation.Diagnostics));
+        var relocatedProviderProgram
+            = (BoundProgram)relocatedProviderCompilation.Program!;
+        var relocatedProviderArtifact
+            = TrRmExecutableCompiler.EmitStandard(
+                relocatedProviderProgram, "ClassLayoutProvider",
+                schemaIdentity, 1, [], [], [
+                    CreateRelocatedClassExport(relocatedProviderProgram,
+                        relocatedProviderTree, "Padding",
+                        "type.padding", "field.padding.unused"),
+                    CreateRelocatedClassExport(relocatedProviderProgram,
+                        relocatedProviderTree, "Box", "type.box",
+                        "field.box.prefix", "field.box.value"),
+                ], []);
+        relocatedProviderArtifact = AsSequentialClassLayout(
+            relocatedProviderArtifact, SchemaFor(schemaIdentity));
+        var relocatedProviderInput = new TrRmStandardArtifactInput(
+            schemaIdentity, relocatedProviderArtifact);
+        var originalProviderTables
+            = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                    providerArtifact, SchemaFor(schemaIdentity)));
+        var relocatedProviderTables
+            = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                    relocatedProviderArtifact, SchemaFor(schemaIdentity)));
+        var originalBoxDefinition = originalProviderTables.Exports
+            .GetExportsForModule(1).Single(static export =>
+                export.ExportKey == "type.box").Definition;
+        var relocatedBoxDefinition = relocatedProviderTables.Exports
+            .GetExportsForModule(1).Single(static export =>
+                export.ExportKey == "type.box").Definition;
+        Assert.That(relocatedBoxDefinition,
+            Is.Not.EqualTo(originalBoxDefinition));
+
+        var relocatedLoaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
+            "ClassLayoutConsumer", [relocatedProviderInput]);
+        var relocatedReturn = (BoundReturn)relocatedLoaded.Functions
+            .Single().Body.Statements.Single();
+        var relocatedMain = relocatedLoaded.Functions.Single() with {
+            Name = "Main",
+            ReturnType = PrimitiveType.Int32,
+            Body = new BoundBlock([
+                new BoundReturn(new BoundCast(relocatedReturn.Value!,
+                    PrimitiveType.Int32, default), default),
+            ], default),
+        };
+        var relocatedExecutable = relocatedLoaded with {
+            Functions = [relocatedMain],
+            EntryPoint = 0,
+        };
+        Assert.That(NativeJit.Execute(relocatedExecutable,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(2));
+        var relocatedReemitted = TrRmExecutableCompiler.EmitStandard(
+            relocatedLoaded, "ClassLayoutConsumer", schemaIdentity, 1);
+        var relocatedReemittedTables
+            = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                    relocatedReemitted, SchemaFor(schemaIdentity)));
+        Assert.That(relocatedReemittedTables
+            .TargetLayoutDependencies.Count, Is.EqualTo(3));
+        var relocatedReloaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                relocatedReemitted), "ClassLayoutConsumer",
+            [relocatedProviderInput]);
+        Assert.That(NativeEmitter.EmitLibrary(relocatedReloaded, ["Offset"],
+            NativeRuntimePolicy.FailFast), Is.Not.Empty);
+
         var coLocatedArtifact = TrRmExecutableCompiler.EmitStandard(
             queryCompilation.Program!, "ClassLayoutProvider",
             schemaIdentity, 1);
@@ -2649,18 +2760,22 @@ internal sealed class TrRmC1EnumClosureSourceTests
     }
 
     private static byte[] AsSequentialClassLayout(byte[] artifact,
-        TrRmArtifactSchema schema)
+        TrRmArtifactSchema schema, string typeName = "Box")
     {
         var index = new TrRmArtifactIndex(artifact, schema);
         var tables = TrRmStructuralMetadataValidator
             .ValidateC1AndGetExecutionTables(index);
-        if (tables.Layouts.Count != 1
-            || tables.LayoutFields.Count == 0)
+        var typeDefRow = Enumerable.Range(1, tables.TypeDefs.Count)
+            .Single(row => tables.TypeDefs.GetName(row) == typeName);
+        var (layoutFirst, layoutCount)
+            = tables.TypeDefs.GetLayoutRange(typeDefRow);
+        if (layoutCount != 1 || tables.LayoutFields.Count == 0)
         {
             throw new InvalidDataException(
                 "The sequential class fixture requires one complete Layout variant.");
         }
 
+        var layoutOffset = checked((layoutFirst - 1) * 28);
         var sections = new List<TrRmSection>(index.SectionCount);
         for (var entry = 0; entry < index.SectionCount; entry++)
         {
@@ -2669,15 +2784,18 @@ internal sealed class TrRmC1EnumClosureSourceTests
             if (kind == 0x0015)
             {
                 var layoutBytes = section.ToArray();
-                if (layoutBytes.Length != 28)
+                if (layoutBytes.Length != recordCount * 28
+                    || layoutOffset < 0
+                    || layoutOffset > layoutBytes.Length - 28)
                 {
                     throw new InvalidDataException(
                         "The sequential class fixture has an invalid Layout row.");
                 }
 
-                layoutBytes[8] = 1;
+                layoutBytes[layoutOffset + 8] = 1;
                 System.Buffers.Binary.BinaryPrimitives
-                    .WriteUInt32LittleEndian(layoutBytes.AsSpan(16), 1);
+                    .WriteUInt32LittleEndian(
+                        layoutBytes.AsSpan(layoutOffset + 16), 1);
                 sections.Add(new TrRmSection(kind, flags, recordCount,
                     layoutBytes));
             }
