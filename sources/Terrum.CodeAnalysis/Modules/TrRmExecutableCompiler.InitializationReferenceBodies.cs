@@ -539,13 +539,14 @@ public static partial class TrRmExecutableCompiler
 
     private static BoundExpression DecodeGeneralOutputStatePredicate(
         int methodRow, int graphRow,
-        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables)
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+        bool permitsUnconditionalVacancy)
     {
         var footprint = tables.PredicateGraphs.GetReadFootprintRow(graphRow);
         var footprints = tables.PredicateReadFootprints;
         var rootFirst = footprints.GetRootFirstRow(footprint);
         var rootCount = footprints.GetRootRowCount(footprint);
-        if (rootCount == 0
+        if ((rootCount == 0 && !permitsUnconditionalVacancy)
             || footprints.GetDependencyRowCount(footprint) != 0)
         {
             throw Unsupported(
@@ -1018,6 +1019,15 @@ public static partial class TrRmExecutableCompiler
             throw Invalid(
                 "The GeneralPredicateGraphsDraft OutputState root is not Boolean.");
         }
+        if (rootCount == 0
+            && result is not BoundConstant {
+                Type: PrimitiveType.Bool,
+                Value: 1,
+            })
+        {
+            throw Invalid(
+                "An empty OutputState footprint must encode unconditional vacancy as true.");
+        }
 
         return result;
     }
@@ -1071,6 +1081,20 @@ public static partial class TrRmExecutableCompiler
             NativeFunctionPointerSelector>(predicateContracts.Length);
         var generalGraphs = new Dictionary<int,
             (uint PhaseLocalOrdinal, BoundExpression Predicate)>();
+        var vacantOutputGraphs = new HashSet<int>();
+        var nonVacantOutputGraphs = new HashSet<int>();
+        foreach (var output in outputContracts)
+        {
+            if (output.State == 0)
+            {
+                _ = vacantOutputGraphs.Add(output.PredicateGraphRow);
+            }
+            else
+            {
+                _ = nonVacantOutputGraphs.Add(output.PredicateGraphRow);
+            }
+        }
+
         foreach (var predicate in predicateContracts.OrderBy(
             static item => item.PhaseLocalOrdinal))
         {
@@ -1096,7 +1120,11 @@ public static partial class TrRmExecutableCompiler
                 generalGraphs.Add(predicate.PredicateGraphRow,
                     (predicate.PhaseLocalOrdinal,
                         DecodeGeneralOutputStatePredicate(methodRow,
-                            predicate.PredicateGraphRow, tables)));
+                            predicate.PredicateGraphRow, tables,
+                            vacantOutputGraphs.Contains(
+                                predicate.PredicateGraphRow)
+                                && !nonVacantOutputGraphs.Contains(
+                                    predicate.PredicateGraphRow)));
             }
         }
 

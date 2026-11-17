@@ -533,6 +533,9 @@ operations, total conversions, conditionals, FrozenValueNode literals
 TypeSpec rows for the full built-in scalar domain; source-free provider
 re-emission covers the full built-in scalar domain. Native lowering does not
 evaluate phase-3 selector graphs.
+The source producer and consumer also represent unconditional vacancy with a
+true-valued graph and an empty read footprint; source-free loading rejects
+that empty footprint for any non-vacant relation.
 This composition does not select the LayoutQueries source/provider/query-Body
 profile. Phase-2 ensure persistence, checked conversions, bit reinterpretation,
 calls, captures, places, complete dependency/provider replacement remapping
