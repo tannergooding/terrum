@@ -3061,6 +3061,14 @@ public static partial class TrRmExecutableCompiler
         TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
         var schema = GetForeignInvocationSchema(schemaIdentity);
+        if (IsSelectedC1ClassInstanceLayoutSchemaIdentity(
+                schemaIdentity))
+        {
+            return new TrRmArtifactIndex(artifact, schema, resourceLedger,
+                usesNativePointerLoads: false,
+                standardSchemaIdentity: schemaIdentity);
+        }
+
         if (StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardInitReferenceBodiesPointerLoadsSchemaIdentity))
         {

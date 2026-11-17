@@ -1231,7 +1231,7 @@ internal static class TrRmFixedArrayProviderBindingValidator
                 TrRmStandardFieldProviderBinding> fieldBindings)
         {
             if (fieldReferences.IsEmpty
-                || !TryResolveInlineFieldPathOwner(artifactIndex,
+                    || !TryResolveFieldPathRoot(artifactIndex,
                     moduleRow, rootTypeSpecRef, null, out var current))
             {
                 throw InvalidFieldBinding();
@@ -1301,6 +1301,58 @@ internal static class TrRmFixedArrayProviderBindingValidator
                     throw InvalidFieldBinding();
                 }
             }
+        }
+
+        private bool TryResolveFieldPathRoot(
+            int artifactIndex, int moduleRow, uint typeSpecRef,
+            TypeFormalSubstitution? substitutions,
+            out ResolvedFieldPathOwner owner)
+        {
+            if (TryResolveInlineFieldPathOwner(artifactIndex, moduleRow,
+                    typeSpecRef, substitutions, out owner))
+            {
+                return true;
+            }
+
+            owner = default;
+            if (!TrRmExecutableCompiler
+                    .IsSelectedC1ClassInstanceLayoutSchemaIdentity(
+                        _schemaIdentities[artifactIndex]))
+            {
+                return false;
+            }
+
+            var tables = GetTables(artifactIndex);
+            var reference = tables.TypeSpecs.GetTypeSpecRef(typeSpecRef);
+            if (reference.Qualifiers != 0 || !reference.IsRow
+                || reference.Form is not (0x02 or 0x03))
+            {
+                return false;
+            }
+
+            var row = tables.TypeSpecs.GetRow(reference.Row);
+            var typeOrigin = ResolveNominalType(tables, artifactIndex,
+                moduleRow, reference, row);
+            if (!IsClassType(typeOrigin.Expected)
+                || !IsClassType(typeOrigin.Actual))
+            {
+                return false;
+            }
+
+            var expectedTables = GetTables(
+                typeOrigin.Expected.ArtifactIndex);
+            var actualTables = GetTables(typeOrigin.Actual.ArtifactIndex);
+            if (expectedTables.TypeDefs.GetGenericRange(
+                    typeOrigin.Expected.TypeDefRow).Count != 0
+                || actualTables.TypeDefs.GetGenericRange(
+                    typeOrigin.Actual.TypeDefRow).Count != 0)
+            {
+                return false;
+            }
+
+            owner = new ResolvedFieldPathOwner(typeOrigin.Expected,
+                typeOrigin.Actual, null);
+            return true;
         }
 
         private bool TryResolveInlineFieldPathOwner(
@@ -1457,6 +1509,12 @@ internal static class TrRmFixedArrayProviderBindingValidator
         {
             var tables = GetTables(type.ArtifactIndex);
             return ((tables.TypeDefs.GetFlags(type.TypeDefRow) >> 2) & 7) == 1;
+        }
+
+        private bool IsClassType(TypeOrigin type)
+        {
+            var tables = GetTables(type.ArtifactIndex);
+            return ((tables.TypeDefs.GetFlags(type.TypeDefRow) >> 2) & 7) == 2;
         }
 
         private static void ValidateRetainedFieldReference(

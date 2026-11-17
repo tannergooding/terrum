@@ -22,6 +22,7 @@ internal readonly ref struct TrRmConstantExecutionTableReader
     private readonly ReadOnlySpan<byte> _rows;
     private readonly int _recordCount;
     private readonly int[] _ownerModules;
+    private readonly byte[] _targetLayoutOwners;
     private readonly TrRmTypeSpecTableReader _typeSpecs;
 
     internal int Count => _recordCount;
@@ -40,7 +41,8 @@ internal readonly ref struct TrRmConstantExecutionTableReader
         TrRmTargetProfileTableReader targetProfiles,
         TrRmIntrinsicRegistrationTableReader intrinsicRegistrations,
         TrRmImportTableReader imports, TrRmFeatureTableReader features,
-        TrRmModuleTableReader modules, TrRmArtifactSchema schema)
+        TrRmModuleTableReader modules, TrRmArtifactSchema schema,
+        bool allowUnownedTargetLayoutDependencies = false)
     {
         if (!TrRmConstantExecutionTableValidation.ValidCount(recordCount)
             || !TrRmConstantExecutionTableValidation.ValidCount(bodyCount)
@@ -162,10 +164,14 @@ internal readonly ref struct TrRmConstantExecutionTableReader
         ValidateOwnedRows(substitutionsOwned, "ConstantExecutionSubstitution");
         ValidateOwnedRows(argumentsOwned, "ConstantExecutionArgument");
         ValidateOwnedRows(dependenciesOwned, "ConstantExecutionDependency");
-        ValidateOwnedRows(targetLayoutsOwned, "TargetLayoutDependency");
+        if (!allowUnownedTargetLayoutDependencies)
+        {
+            ValidateOwnedRows(targetLayoutsOwned, "TargetLayoutDependency");
+        }
         ValidateAcyclicArguments(arguments, views, substitutions,
             constantSources);
         _ownerModules = ownerModules;
+        _targetLayoutOwners = targetLayoutsOwned;
     }
 
     internal byte GetSourceKind(int row) => GetRow(row)[0];
@@ -175,6 +181,9 @@ internal readonly ref struct TrRmConstantExecutionTableReader
         => TrRmConstantExecutionTableValidation.Read(GetRow(row), 8);
     internal int GetTargetProfileRow(int row)
         => checked((int)TrRmConstantExecutionTableValidation.Read(GetRow(row), 12));
+    internal bool OwnsTargetLayoutDependency(int row)
+        => row > 0 && row < _targetLayoutOwners.Length
+            && _targetLayoutOwners[row] != 0;
     internal (int First, int Count) GetSubstitutionRange(int row)
         => ReadRange(GetRow(row), 16);
     internal (int First, int Count) GetArgumentRange(int row)
@@ -493,7 +502,8 @@ internal static class TrRmConstantExecutionTableWriter
         TrRmTargetProfileTableReader targetProfiles,
         TrRmIntrinsicRegistrationTableReader intrinsicRegistrations,
         TrRmImportTableReader imports, TrRmFeatureTableReader features,
-        TrRmModuleTableReader modules, TrRmArtifactSchema schema)
+        TrRmModuleTableReader modules, TrRmArtifactSchema schema,
+        bool allowUnownedTargetLayoutDependencies = false)
     {
         ArgumentNullException.ThrowIfNull(rows);
         if (rows.Count > 0xFF_FFFF)
@@ -544,7 +554,7 @@ internal static class TrRmConstantExecutionTableWriter
             targetLayoutDependencies, methods, typeDefs, signatures, generics,
             contracts, typeSpecs,
             targetProfiles, intrinsicRegistrations, imports, features, modules,
-            schema);
+            schema, allowUnownedTargetLayoutDependencies);
         return result;
     }
 }

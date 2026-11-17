@@ -753,7 +753,7 @@ public static partial class TrRmExecutableCompiler
             program, enumExportSnapshot);
         var schema = GetForeignInvocationSchema(schemaIdentity);
         return EmitC1EnumClosureDeclarationLibrary(program, moduleIdentity,
-            moduleTargetRequirement, schema, typeExportSnapshot,
+            schemaIdentity, moduleTargetRequirement, schema, typeExportSnapshot,
             sourceMethodExports, sourceClassExports, sourceEnumExports);
     }
 
@@ -813,8 +813,9 @@ public static partial class TrRmExecutableCompiler
                 "Standard enum origins require one of the exact EN1 schema identities.");
         }
         if (IsSelectedC1EnumClosureSchemaIdentity(schemaIdentity)
-            && BoundEnumTypes.HasStandardDeclarations(
-                program.EnumDefinitions))
+            && (BoundEnumTypes.HasStandardDeclarations(
+                    program.EnumDefinitions)
+                || !program.StandardClassDeclarations.IsEmpty))
         {
             if (sourceTypeExports is not null
                 || sourceGenericMethodExports is not null
@@ -825,7 +826,7 @@ public static partial class TrRmExecutableCompiler
             }
 
             return EmitC1EnumClosureDeclarationLibrary(program,
-                moduleIdentity, moduleTargetRequirement,
+                moduleIdentity, schemaIdentity, moduleTargetRequirement,
                 GetForeignInvocationSchema(schemaIdentity), null, null,
                 null, null);
         }
@@ -4565,6 +4566,12 @@ public static partial class TrRmExecutableCompiler
                             artifact),
                 _ => throw new ArgumentOutOfRangeException(nameof(schema)),
             }
+            : standardSchemaIdentity is { } selectedSchemaIdentity
+                && IsSelectedC1ClassInstanceLayoutSchemaIdentity(
+                    selectedSchemaIdentity)
+                    ? new TrRmArtifactIndex(artifact, schema, null,
+                        usesNativePointerLoads: false,
+                        standardSchemaIdentity: selectedSchemaIdentity)
             : new TrRmArtifactIndex(artifact, schema);
         var validatedTables = schema.UsesDevelopmentNativeConventions()
             ? TrRmStructuralMetadataValidator

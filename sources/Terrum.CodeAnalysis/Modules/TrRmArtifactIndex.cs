@@ -372,12 +372,14 @@ public readonly ref struct TrRmArtifactIndex
     private readonly ReadOnlySpan<byte> _directory;
     private readonly int _entryCount;
     private readonly TrRmArtifactSchema _schema;
+    private readonly string? _standardSchemaIdentity;
     private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
     private readonly bool _usesNativePointerLoads;
 
     /// <summary>Gets the number of indexed sections.</summary>
     public int SectionCount => _entryCount;
     internal TrRmArtifactSchema Schema => _schema;
+    internal string? StandardSchemaIdentity => _standardSchemaIdentity;
     internal bool UsesNativePointerLoads => _usesNativePointerLoads;
 
     /// <summary>Validates and indexes a standard TRRM artifact.</summary>
@@ -395,9 +397,20 @@ public readonly ref struct TrRmArtifactIndex
     internal TrRmArtifactIndex(ReadOnlySpan<byte> artifact,
         TrRmArtifactSchema schema,
         TrRmA3LayoutResourceLedger? resourceLedger,
-        bool usesNativePointerLoads = false)
+        bool usesNativePointerLoads = false,
+        string? standardSchemaIdentity = null)
     {
         _resourceLedger = resourceLedger;
+        if (standardSchemaIdentity is not null
+            && (!TrRmExecutableCompiler
+                    .IsSelectedC1ClassInstanceLayoutSchemaIdentity(
+                        standardSchemaIdentity)
+                || !schema.UsesC1EnumClosure()))
+        {
+            throw InvalidArtifact();
+        }
+
+        _standardSchemaIdentity = standardSchemaIdentity;
         if (usesNativePointerLoads
             && schema is not (TrRmArtifactSchema.Standard
                 or TrRmArtifactSchema.GeneralPredicateGraphsDraft

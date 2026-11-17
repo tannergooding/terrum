@@ -2290,6 +2290,11 @@ public static class TrRmStructuralMetadataValidator
                     logicalInputViewBytes, logicalInputViewCount,
                     frozenValueNodeCount, immutableData.Count,
                     constantExecutionCount, typeSpecs, logicalViewPathEntries);
+                var usesBodyLayoutQueryDependencies
+                    = index.StandardSchemaIdentity is { } schemaIdentity
+                        && TrRmExecutableCompiler
+                            .IsSelectedC1ClassInstanceLayoutSchemaIdentity(
+                                schemaIdentity);
                 constantExecutions = new TrRmConstantExecutionTableReader(
                     constantExecutionBytes, constantExecutionCount,
                     bodyCount, constantExecutionSubstitutions, constantSources,
@@ -2297,7 +2302,18 @@ public static class TrRmStructuralMetadataValidator
                     constantExecutionDependencies,
                     targetLayoutDependencies, methods, types, signatures, generics,
                     contracts, typeSpecs, targetProfiles, intrinsicRegistrations,
-                    imports, features, modules, index.Schema);
+                    imports, features, modules, index.Schema,
+                    usesBodyLayoutQueryDependencies);
+                if (usesBodyLayoutQueryDependencies)
+                {
+                    TrRmBodyTargetLayoutDependencyValidator.Validate(
+                        index.StandardSchemaIdentity,
+                        targetValueBindingCount, modules, methods, bodies,
+                        contracts, types, typeSpecs, fields, fieldPaths,
+                        imports, targetProfiles, constantExecutions,
+                        targetLayoutDependencies,
+                        targetLayoutDependencyFields);
+                }
             }
         }
         else if (importCount != 0)

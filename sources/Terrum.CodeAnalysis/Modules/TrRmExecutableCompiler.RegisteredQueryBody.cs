@@ -208,7 +208,12 @@ public static partial class TrRmExecutableCompiler
         int[] structureFieldFirst,
         List<TrRmFieldPathRow> fieldPathRows,
         Dictionary<(uint ExpectedDefinitionId, string ProducerIdentity,
-            string ExportKey), int> standardFieldImportRows)
+            string ExportKey), int> standardFieldImportRows,
+        Func<PrimitiveType, uint>? classQueryRootTypeSpecReference = null,
+        Dictionary<(BoundGenericNominalTypeIdentity Owner,
+            uint FieldDefinitionId), int>? standardClassFieldRows = null,
+        bool allowUnsafeClassOffsetQuery = false,
+        bool requireClassFieldImport = false)
     {
         if (function.Body.Statements.IsDefaultOrEmpty
             || function.Body.Statements[^1] is not BoundReturn returned
@@ -341,6 +346,11 @@ public static partial class TrRmExecutableCompiler
             {
                 return 0xF200_0000;
             }
+            if (BoundGenericNominalTypeTypes.IsType(type)
+                && classQueryRootTypeSpecReference is not null)
+            {
+                return classQueryRootTypeSpecReference(type);
+            }
 
             var row = NativeValueTypeRow(type, nativeRawPointerTypeRow,
                 nativeFunctionPointerTypeRows, typeRows, nativePointerTypeRows,
@@ -467,6 +477,78 @@ public static partial class TrRmExecutableCompiler
             for (var index = 0; index < path.Steps.Length; index++)
             {
                 var step = path.Steps[index];
+                if (step.StandardClassFieldOrigin is
+                    BoundStandardClassFieldDeclaration classField)
+                {
+                    if (index != 0
+                        || !BoundGenericNominalTypeContract
+                            .IsNominalClassType(step.OwnerType,
+                                program.GenericNominalTypeInstances,
+                                program.GenericNominalTypeDefinitions)
+                        || standardClassFieldRows is null)
+                    {
+                        throw Unsupported(
+                            $"Function '{function.Name}' has a class FieldPath step without an admitted class root.");
+                    }
+
+                    var instanceIndex
+                        = BoundGenericNominalTypeTypes.Index(step.OwnerType);
+                    if ((uint)instanceIndex
+                        >= (uint)program.GenericNominalTypeInstances.Length)
+                    {
+                        throw Unsupported(
+                            $"Function '{function.Name}' has a class FieldPath step without a complete class identity.");
+                    }
+
+                    var classIdentity = program.GenericNominalTypeInstances[
+                        instanceIndex].Definition;
+                    if (classField.OwnerDefinitionId
+                            != classIdentity.DefinitionId
+                        || classField.Type != step.FieldType
+                        || classField.SelectedExportKeys.IsEmpty
+                        || !standardClassFieldRows.TryGetValue(
+                            (classIdentity, classField.DefinitionId),
+                            out var classFieldRow))
+                    {
+                        throw Unsupported(
+                            $"Function '{function.Name}' has a class FieldPath step without its selected FieldDef.");
+                    }
+
+                    var localClassFieldDefinition = 0x1400_0000u
+                        | checked((uint)classFieldRow);
+                    var selectedFieldKey
+                        = classField.SelectedExportKeys[0];
+                    var classProvider = program.StandardClassDeclarations
+                        .SingleOrDefault(declaration =>
+                            declaration.Declaration.Identity
+                                == classIdentity)
+                        ?.Declaration.Provider
+                        ?? throw Unsupported(
+                            $"Function '{function.Name}' has a class FieldPath step without its provider snapshot.");
+                    if (standardFieldImportRows.TryGetValue(
+                            (localClassFieldDefinition,
+                                classProvider.ModuleIdentity,
+                                selectedFieldKey),
+                            out var classFieldImportRow))
+                    {
+                        fieldReferences[index] = 0x1C00_0000u
+                            | checked((uint)classFieldImportRow);
+                    }
+                    else
+                    {
+                        if (requireClassFieldImport)
+                        {
+                            throw Unsupported(
+                                $"Function '{function.Name}' has a class FieldPath step without its exact FieldDef Import.");
+                        }
+
+                        fieldReferences[index]
+                            = localClassFieldDefinition;
+                    }
+
+                    continue;
+                }
+
                 var structureIndex = (int)step.OwnerType - 100;
                 var fieldOrdinal = checked((int)step.FieldOrdinal);
                 if ((uint)structureIndex >= (uint)program.Structures.Length
@@ -556,7 +638,9 @@ public static partial class TrRmExecutableCompiler
                     mapIndex = GetTypeMapIndex(identity.Subject.Type);
                     break;
                 case BoundLayoutQuery query:
-                    if (query.Subject.RequiresUnsafe)
+                    if (query.Subject.RequiresUnsafe
+                        && (!allowUnsafeClassOffsetQuery
+                            || !IsAuthorizedClassOffsetQuery(query)))
                     {
                         throw Unsupported(
                             $"Function '{function.Name}' has a layout query with an unsafe obligation.");
@@ -587,6 +671,18 @@ public static partial class TrRmExecutableCompiler
             code.Add((byte)(mapIndex >> 8));
             return destination;
         }
+
+        bool IsAuthorizedClassOffsetQuery(BoundLayoutQuery query)
+            => query.Kind == BoundLayoutQueryKind.OffsetOfType
+                && query.Subject.Kind == BoundQuerySubjectKind.Type
+                && query.Subject.RequiresUnsafe
+                && query.Subject.IsUnsafeAuthorized
+                && query.Subject.FieldPath is BoundQueryFieldPath path
+                && BoundGenericNominalTypeContract.IsNominalClassType(
+                    path.RootType, program.GenericNominalTypeInstances,
+                    program.GenericNominalTypeDefinitions)
+                && !path.Steps.IsEmpty
+                && path.Steps[0].StandardClassFieldOrigin is not null;
 
         bool IsQueryValueFlowNode(BoundExpression expression)
         {
@@ -741,6 +837,15 @@ public static partial class TrRmExecutableCompiler
 
         int EmitExpression(BoundExpression expression)
         {
+            if (allowUnsafeClassOffsetQuery
+                && expression is BoundUnsafeExpression unsafeExpression
+                && unsafeExpression.Expression
+                    is BoundLayoutQuery unsafeClassQuery
+                && IsAuthorizedClassOffsetQuery(unsafeClassQuery))
+            {
+                return EmitQuery(unsafeClassQuery);
+            }
+
             if (expression is BoundRead read)
             {
                 if (localRegisters.TryGetValue(read.Variable,

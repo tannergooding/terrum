@@ -856,10 +856,7 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var schemaIdentity = s_schemaIdentities[0];
         var tree = SyntaxTree.Parse("""
             namespace Demo {
-                public class Box {
-                    public int32 Value;
-                    public static int32 Count;
-                }
+                public class Box { public int32 Value; }
             }
             """);
         var compilation = Compilation.CreateLibrary(tree);
@@ -869,19 +866,17 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
             .Single(static node =>
                 node.Kind == SyntaxKind.ClassDeclaration);
-        var fieldDeclarations = classDeclaration.Children
+        var fieldDeclaration = classDeclaration.Children
             .OfType<SyntaxNode>()
-            .Where(static node =>
-                node.Kind == SyntaxKind.FieldDeclaration).ToArray();
+            .Single(static node =>
+                node.Kind == SyntaxKind.FieldDeclaration);
         var classIndex = program.SourceClassProgramAssociation!
             .Declarations.Single(declaration =>
                 declaration.Span == classDeclaration.Span).ClassIndex;
         var classExport = new TrRmSourceClassExport(program, classIndex,
             classDeclaration.Span, "type.box", [
                 new TrRmSourceClassMemberExport(0,
-                    fieldDeclarations[0].Span, "field.box.value"),
-                new TrRmSourceClassMemberExport(0,
-                    fieldDeclarations[1].Span, "field.box.count"),
+                    fieldDeclaration.Span, "field.box.value"),
             ]);
         var artifact = TrRmExecutableCompiler.EmitStandard(program,
             "ClassQuery", schemaIdentity, 1, [], [], [classExport], []);
@@ -934,9 +929,6 @@ internal sealed class TrRmC1EnumClosureSourceTests
             diagnostic.Message.Contains(
                 "no selected Standard FieldDef ExportKey",
                 StringComparison.Ordinal)), Is.True);
-        Assert.Throws<ArgumentException>(() =>
-            TrRmExecutableCompiler.CreateStandardReference(input,
-                "ClassQuery", [], ["type.box"], ["field.box.count"]));
     }
 
     [Test]
@@ -1001,6 +993,51 @@ internal sealed class TrRmC1EnumClosureSourceTests
             Assert.That(queryCompilation.HasErrors, Is.False,
                 string.Join(Environment.NewLine,
                     queryCompilation.Diagnostics));
+            var emittedConsumer = TrRmExecutableCompiler.EmitStandard(
+                queryCompilation.Program!, "ClassLayoutConsumer",
+                schemaIdentity, 1);
+            var consumerTables = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                    emittedConsumer, SchemaFor(schemaIdentity), null,
+                    usesNativePointerLoads: false,
+                    standardSchemaIdentity: schemaIdentity));
+            Assert.That(consumerTables.Methods.Count, Is.EqualTo(1));
+            Assert.That(consumerTables.TargetLayoutDependencies.Count,
+                Is.EqualTo(1));
+            Assert.That(consumerTables.TargetLayoutDependencyFields.Count,
+                Is.EqualTo(1));
+            Assert.That(consumerTables.TargetLayoutDependencies
+                .GetQueryKind(1), Is.EqualTo((byte)3));
+            Assert.That(consumerTables.TargetLayoutDependencies
+                .GetTargetProfileRow(1), Is.EqualTo(1));
+            Assert.That(consumerTables.TargetLayoutDependencies
+                .GetFieldRange(1).Count, Is.EqualTo(1));
+            var subjectType = consumerTables.TypeSpecs.GetTypeSpecRef(
+                consumerTables.TargetLayoutDependencies
+                    .GetSubjectTypeSpecRef(1));
+            Assert.That(subjectType.Form, Is.EqualTo((byte)0x03));
+            Assert.That(consumerTables.Imports.GetExpectedDefinitionForImportRow(
+                subjectType.Row) >> 24, Is.EqualTo(0x13u));
+            Assert.That(subjectType,
+                Is.EqualTo(consumerTables.TypeSpecs.GetTypeSpecRef(
+                    consumerTables.FieldPaths.GetRootTypeSpecRef(1))));
+            Assert.Throws<InvalidDataException>(() =>
+                TrRmStructuralMetadataValidator
+                    .ValidateC1AndGetExecutionTables(
+                        new TrRmArtifactIndex(emittedConsumer,
+                            SchemaFor(baseSchemaIdentity))));
+            var queryBody = consumerTables.Bodies.GetRegisterBody(
+                consumerTables.Methods.GetBodyRow(1),
+                consumerTables.Contracts.Count);
+            Assert.That(queryBody.HasLayoutQueryOperation, Is.True);
+
+            var staticArtifact = AsStaticClassField(artifact,
+                SchemaFor(schemaIdentity));
+            Assert.Throws<ArgumentException>(() =>
+                TrRmExecutableCompiler.CreateStandardReference(
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        staticArtifact), "ClassLayoutProvider", [],
+                    ["type.box"], ["field.box.value"]));
 
             var baseArtifact = TrRmExecutableCompiler.EmitStandard(program,
                 "UnusedProvider", baseSchemaIdentity, 1, [], [],
@@ -2091,6 +2128,60 @@ internal sealed class TrRmC1EnumClosureSourceTests
         {
             throw new InvalidDataException(
                 "The C1 field fixture has no TypeSpec section.");
+        }
+
+        var result = TrRmArtifactWriter.Encode(sections, schema);
+        _ = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                new TrRmArtifactIndex(result, schema));
+        return result;
+    }
+
+    private static byte[] AsStaticClassField(byte[] artifact,
+        TrRmArtifactSchema schema)
+    {
+        var index = new TrRmArtifactIndex(artifact, schema);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(index);
+        if (tables.Fields.Count != 1 || tables.Layouts.Count != 1
+            || tables.LayoutFields.Count != 1)
+        {
+            throw new InvalidDataException(
+                "The static FieldDef fixture requires one class field and layout row.");
+        }
+
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var entry = 0; entry < index.SectionCount; entry++)
+        {
+            index.GetSection(entry, out var kind, out var flags,
+                out var section, out var recordCount);
+            if (kind == 0x0014)
+            {
+                var fieldBytes = section.ToArray();
+                var fieldFlags
+                    = System.Buffers.Binary.BinaryPrimitives
+                        .ReadUInt32LittleEndian(fieldBytes.AsSpan(12));
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteUInt32LittleEndian(fieldBytes.AsSpan(12),
+                        fieldFlags | 8);
+                sections.Add(new TrRmSection(kind, flags, recordCount,
+                    fieldBytes));
+            }
+            else if (kind == 0x0015)
+            {
+                var layoutBytes = section.ToArray();
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteUInt32LittleEndian(layoutBytes.AsSpan(20), 0);
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteUInt32LittleEndian(layoutBytes.AsSpan(24), 0);
+                sections.Add(new TrRmSection(kind, flags, recordCount,
+                    layoutBytes));
+            }
+            else if (kind != 0x0023)
+            {
+                sections.Add(new TrRmSection(kind, flags, recordCount,
+                    section.ToArray()));
+            }
         }
 
         var result = TrRmArtifactWriter.Encode(sections, schema);
