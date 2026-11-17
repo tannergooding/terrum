@@ -7,6 +7,56 @@
 
 ## Definitions and scope
 
+The separate provisional
+[G1 generic-method profile](../proposals/standard-trrm-generic-method-call-body-encoding.md)
+supports bounded module-level direct-return forwarding through local MethodDefs
+and expected MethodDef Imports. `CreateStandardReference` accepts exact G1
+`TrRmStandardArtifactInput` selections for the root and supplied providers.
+Binding preserves the original bodyless expectation, exact Import row,
+ModuleRef and ExportKey, ordinal formal correspondence and selected provider
+snapshot; source-free reconstruction uses the provider's open Body without replacing
+the expected defaults, effects or constraints. Distinct Import rows retain
+separate binding views even when they share an expected MethodDef; their
+selected provider definition must agree. A direct MethodMap reference to an
+expected stub with multiple Import rows is unsupported rather than selecting
+one arbitrarily. Unconsumed assigned TypeDef/FieldDef and nongeneric MethodDef
+Imports remain structurally checked, but this projection does not bind or
+expose their nominal/field contracts. Consuming those unsupported signature or
+Body references still rejects at the reference. This does not select C1,
+role-2 dispatch, interface witnesses, general generic Body persistence or a new
+closed-instance lowering route.
+
+The G1 generic-method source reader also decodes constructed TypeSpecs for
+local or exactly imported public TypeDefs in MethodSig and GenericCall
+signatures. Imported TypeDefs resolve through the selected ModuleRef/Import
+provider and compare the retained generic formal/default/constraint subset,
+fields and layouts before substitution. Source binding and source-free reading
+retain method-formal owner/ordinal identity; owners survive reference-set and
+graph remapping. Direct scalar/formal/nominal arguments, nested nominal
+constructions, non-optional/non-GC `ref`, and non-initializing Span type
+arguments are admitted when the TypeDef formal's ownership/nullability domains
+allow them. The reader retains `ref<init>` terms for complete checking, but
+they are non-Copy and cannot satisfy the currently assigned Copy/unique
+TypeDef domains. Wrapper terms retain their formal dependencies through
+generic substitution and reference/graph remapping; optional/GC forms remain
+unsupported. The unapproved [G1 generic-struct source-input
+proposal](../proposals/standard-trrm-generic-typedef-source-closure.md)
+defines a candidate producer boundary; generic-class TypeDef publication
+remains separate C1/C1M1 work. Reference-set and graph composition now
+canonicalize exact mixed Span/constructed identities and reject cycles; the
+closed `Box<Span<int32>>` identity is canonicalized. Constructed TypeSpec source emission/re-emission, broader
+wrapper/owner cases, associated-relation and non-frozen constant-default
+comparison, and qualification remain open.
+
+G1 generic MethodDef result Dependency rows preserve relationship 1 (storage
+only), 2 (backing only) and 3 (union) separately through source-free decoding
+and provider comparison. The row encoder can represent the same distinctions
+when present in bound facts; no source annotation or generic-import
+re-emission path supplies relationship 1 yet. Provider comparison preserves
+per-source dependency distinctions and rejects incompatible narrowing,
+widening, mixed-source and provider-only cases. Generic-import re-emission,
+private persistence, full provider replacement and closed lowering remain open.
+
 A **module artifact** is a `.trm` file with the `TRRM` identifier. A **producer**
 stores selected function bodies and exported contracts; a **consumer** stores
 its own bodies and the imported declarations it was compiled against. A
@@ -57,11 +107,52 @@ unapproved F/F+S selections now consume and emit bounded NativeAddress and
 scalar local-storage CallSite Bodies; this does not widen the default
 Development route or establish general standard register-Body execution. The
 separate unapproved `trrm/1-draft-init-reference-bodies-1` profile now
-round-trips scalar `ref<init T>` stores, direct-Home DD and source-use-5 calls,
+round-trips scalar `ref<init T>` stores (including multiple destinations),
+direct-Home DD and source-use-5 calls,
 plus a bounded three-block Boolean output/caller branch. Same-profile source
 MethodDef binding/re-emission and FailFast native-library execution are
-covered; Span, explicit OutputState clauses, general CFG joins, dependency
-graphs, provider-linked execution and CheckedExceptions remain open.
+covered.
+The distinct provisional
+`trrm/1-draft-init-reference-bodies-general-predicate-graphs-1` composition
+also emits, loads and re-emits these bounded Body forms against the
+GeneralPredicateGraphsDraft schema, preserving Feature 10/1 default
+OutputState rows. It also retains phase-3 Boolean input trees over
+`SubjectValue`, BooleanNot, Boolean operations and Conditional through
+same-profile provider binding and re-emission; the bounded same-module path
+has FailFast execution coverage. Native lowering does not evaluate these
+selector graphs. Both profiles now bind, load and re-emit pointer-cell
+consumer Bodies through exact provider Imports, and reject a mismatched
+pointer referent. Same-module loaded pointer-cell Bodies execute in
+FailFast PE libraries under both identities without changing pointee state;
+provider-linked native execution and AOT remain open.
+The distinct provisional C1 and C1M1 identities also route this bounded
+init-Body subset through schema-specific structural validation and source-free
+load/re-emission. Their catalog combines the G and G1 Feature requirements;
+this does not yet emit or consume GenericCall Bodies. C1M1 accepts TypeDef
+flag `0x80` only on class rows and its explicit type-root reference route now
+retains non-generic class declarations and binds class TypeDef Imports to exact
+provider snapshots, comparing mutability, field TypeSpecs and declared
+Layouts. The metadata remains outside executable `BoundProgram.Classes`;
+provider-only class declarations are not lookup roots. Type-only re-emission
+rebuilds the selected class TypeDefs, TypeSpec/FieldDef/Layout maps and exact
+ModuleRef/Import/Export rows, then revalidates the provider closure. C1 remains
+unchanged. The C1M1 construction successor routes class-free emission and
+validates Construction `0003` initializer/projection rows, class-handle
+qualifications, direct instance FieldDef guarantees, and actual/imported Body
+state. Compiler-owned source-class anchors and explicit member-key capture
+are implemented, but class TypeDef/member/MethodDef/Body publication,
+provider closure, independent carrier TypeSpec verification, private local
+type dependencies, broader remapping/replacement, interfaces/witnesses and
+runtime support remain open.
+The current C1M1 source-class writer requires known aliasable ownership and
+refuses unique classes; its TypeDef view carries no ownership fact, so imported
+class kind alone cannot satisfy Copy/unique-dependent admission. The separate
+unapproved C1M1U1 ownership proposal defines that successor.
+It does not select the LayoutQueries source/provider/query-Body profile.
+Phase-1/2 declaration-clause persistence (including explicit require binding
+and phase-2 construction context), Span, hidden preparation, authored
+OutputState clauses, source projection, other graph-node forms, complete
+remapping, graph execution and CheckedExceptions remain open.
 The separate `GeneralPredicateGraphsDraft` consumer structurally accepts
 general phase-3 OutputState graphs only for checked initialization destinations
 under Feature 17/1; source projection/emission, semantic proof and graph
@@ -87,7 +178,7 @@ the unapproved payload proposal; this does not implement relation satisfaction
 or witness execution. Standard
 ConstantSource rows validate tags and their selected target-table row bounds
 only. The FrozenValueNode structural reader is integrated, and its provisional
-24-scalar codec validates exact widths, unit, Boolean, rune and raw payload
+26-scalar codec validates exact widths, unit, Boolean, rune and raw payload
 bits. Selected standard register Body ConstantMap rows now require provisional
 Feature 11/1, tag-1/kind-1 source selection, exact scalar TypeSpecRef identity
 and Blob validity. Initialized InterfaceConstDef values apply the same
@@ -100,54 +191,62 @@ owning Module, including method signatures/parameters, fields, generic
 defaults/constant types, kind-1 constraints, interface bases and constants,
 associated-type defaults, union fields, builder registrations and text
 targets/captures. Ownerless witness, predicate and query contexts still need
-their selected-use Module binding. Windows x64 materialization maps all 24
+their selected-use Module binding. Register Body `0B` ConstructorBinding and
+`08` RequirementFailure now have typed writers; the reader checks ordered
+formal rows, map bounds, condition shape and exact `08`-to-`0B` exception
+TypeMap identity. Source constructor selection, Core class/witness binding and
+execution remain unsupported. Windows x64 materialization maps all 24
 provisional fixed-scalar carriers through `ScalarBits`, checks the selected
 Module target and exact native size/alignment, and preserves raw payload bits.
+The assigned `nint`/`nuint` TypeSpec codes `0x10`/`0x11` retain separate
+identities and materialize as eight-byte Windows x64 values; compact Body maps,
+private scalar serialization, native imports and checked native-call ABI paths
+preserve those identities rather than aliasing `int64`/`uint64`.
 The standard scalar loader executes an int32 ConstantMap load/return through
 JIT and PE emission. Private semantic modules retain exact revision 104 for
 features it admits under the user's provisional direction for the still-
 unapproved [wide-layout proposal](../proposals/wide-fixed-layout-private-persistence.md).
 The exact provisional revision-106/-2 successor composes checked references,
-direct-import expectations, callable/function-pointer contracts, CopyOrigin
-and raw-Union return coverage for bounded rootless-Copy aggregates with
-fixed-array fields; revision 105 and the withdrawn 106/-1 candidate are not
-reader aliases. This successor remains provisional under
-[`private-raw-union-return-coverage.md`](../proposals/private-raw-union-return-coverage.md).
-It retains revision 92 output contracts and revision 99's three u64 tag-35
-storage-address extents. Its inherited revision-103 codec includes the
-revision-100 structural array table and flat direct-local operations in tags
-43-46, RepeatCopy tag 47, revision-104's field-path write tag 48, revision-101's mandatory
-tag-35 ancestor-path count/list and revision-103's layout controls. Revision
-104 widens only inline struct size and struct-field offset/size operands to
-u64; managed-class size and fields remain i32. The reader revalidates the
-full-width geometry and rejects predecessor revision 103 exactly. The active
-`PrivateRepeatTag47IsCompactForZeroOneAndLargeCounts` test checks that the
-single seed child remains compact for N=0, N=1 and a large count.
-Revision 106 retains the inherited 102+FieldWrites constructor-backed
-nested-local role for direct-local field-suffixed writes and lawful address
-uses; its R places persist through PlaceRead 50 and CheckedStore 53, not tag
-48. Nested array reads and whole-inner-array replacement remain excluded.
-`PrivateNestedFieldPathBackingRoundTripsAndExecutes` exercises the 106
-source-free Repeat/field-write path through JIT and PE, then tests native
-consumer-set/graph embedding and compatible provider replacement.
-`PrivateRepeatBodiesSurviveSemanticModuleSetReemission` and
-`PrivateRepeatBodiesSurviveFixedArrayTableReorderingOnReplacement` cover
-source-free semantic consumer-set re-emission and Repeat fixed-array-table
-index remapping under provider replacement. Broader provider/dependency
-expectation closure and malformed consumer matrices remain separate gates.
-Positive-stride very-wide runtime use, by-value nested-array signatures and
-ptr-to-array runtime carriers also remain separate gates. The unapproved
+direct-import expectations, callable/function-pointer contracts, the
+candidate-93 general Dependency rows, CopyOrigin and raw-Union return coverage
+for bounded rootless-Copy aggregates with fixed-array fields; revision 105 and
+the withdrawn 106/-1 candidate are not reader aliases. Each Module retains
+its own canonical checked-reference type table, so consumer-local
+implementation rows need not equal a provider's unused rows. Imported
+signature references still require an exact structural mapping; unmatched
+provider types reject. General Dependency rows are mandatory on every
+ModuleFunction, including bodyless expectations;
+NativeOutput phase-1 rows remain exclusive to OutputContracts. Bodyful and
+bodyless producer/consumer, set, graph and replacement paths preserve the
+normalized general rows and apply source-bound per-source comparison of
+storage-only, backing-only and union permissions. Checked output-state vectors
+now use the same 12-byte selector/state records as the
+pointer owner, remain declaration-local, and preserve explicit empty vectors
+as unconditional-complete contracts. Boolean bare defaults serialize the
+true/complete and false/vacant pair. Readers validate selector/result pairs,
+ordinal bounds, uniqueness and reserved bytes; checked init-output Captures
+must correlate with a complete publication outcome. NativeOutput remains
+separate in OutputContracts. Producer/reference, bodyless consumer, set,
+graph, replacement, native-package, malformed-row and supervised success/
+vacancy execution are supported for the selected successor, which remains
+provisional; see [`private-raw-union-return-coverage.md`](../proposals/private-raw-union-return-coverage.md)
+for its exact contract. Private fixed-array persistence retains bounded
+direct-local and nested field-write paths, RepeatCopy and storage-address
+provenance through private semantic modules. Nested array reads, whole-inner-array
+replacement and ptr-to-array runtime carriers remain excluded. Broader
+provider/dependency closure, malformed consumers, positive-stride very-wide
+runtime use and by-value nested-array signatures remain open.
+The unapproved
 [fixed-array private-persistence proposal](../proposals/native-fixed-array-private-persistence.md)
-remains provisional; current evidence covers source-free flat scalar/unit
-JIT/AOT, set/graph packages, and CLI module run/link. The unapproved
+remains provisional. The unapproved
 [nested storage-address-path proposal](../proposals/native-storage-address-path-private-persistence.md)
 owns the tag-35 path extension; the separate unapproved
 [address-only backing companion](../proposals/native-storage-address-address-only-backing.md)
 provisionally admits recursively initialized positive nested local backing
 only when every retained use is a direct NoEscape `NativeParameter` address
-argument. The p=1/p=2 path is covered through private producer/reader,
-source-free consumer/re-emission, JIT/AOT and native package-set/graph
-execution. This does not admit ordinary nested value operations, vacant
+argument. The private producer/reader and native package routes support
+p=1/p=2 paths through source-free consumer re-emission. This does not admit
+ordinary nested value operations, vacant
 backing, escapes or pointer-to-array carriers. Nested and pointer-array
 recipes not rooted by this exact backing role remain metadata-only.
 The unapproved
@@ -190,6 +289,14 @@ element under both runtime policies; these remain separate from Standard A2.
 Owned managed-class fields whose pointer or nested-class graph reaches array
 metadata are rejected as runtime carriers. Reference-only class snapshots
 retain this closure as metadata without enabling those runtime operations.
+`BoundClass` now carries nullable ownership and Cleanup-selection facts. The
+currently selected private revisions do not serialize ownership, so legacy
+class ownership remains unknown and cannot satisfy ownership-dependent generic
+domains. Exact pre-CC110 private schemas do not admit class Cleanup and decode
+their class rows as known derived retirement; writers refuse a selected Cleanup
+method. The proposed [CH109 class ownership record](../proposals/private-class-handle-ownership-persistence.md)
+and separate [CC110 Cleanup selector](../proposals/private-class-cleanup-persistence.md)
+are unapproved and are not current wire capabilities.
 
 Private modules still reject the eight candidate revision-94 scalar
 identities; the unapproved
@@ -213,8 +320,8 @@ compares complete owner/field types, generic formal positions, flags and every
 retained Layout variant. The bound program retains provider snapshots and
 edges; unchanged `EmitStandard` preserves the exact root artifact, and direct
 FieldMap, FieldPath and TargetLayoutDependencyField uses cannot bypass the
-FieldDef Import for a stub under an imported owner. Focused provider,
-FieldPath, layout-dependency and re-emission regressions pass. This does not
+FieldDef Import for a stub under an imported owner. Provider binding,
+FieldPath and re-emission preserve these checks. This does not
 implement `DE` query evaluation or FieldPath type-substitution and immediate-
 owner checking.
 The provisional Standard LayoutQueries reference composer merges selected
@@ -289,12 +396,19 @@ storage-address extents and revision 92's NoThrow/output contracts, revision
 revision 103's selected layout controls, and revision 104's wide inline
 geometry. The reader accepts only exact revisions 104 and 106; all other
 private revisions reject and require regeneration, and proposed revisions
-93–98 are not implicitly composed. Revision 99 omits the general
-NoThrow field and contract tokens, persists direct-import NativeOutput
-declarations and output-specific dependency rows, and rejects general
-Dependency contracts it cannot represent. NativeCallable Captures and other
-general Dependency contracts require the candidate revision 93 described in
-the [provenance proposal](../proposals/reference-provenance-carriers.md).
+93–98 are not implicitly composed. When general declaration dependencies are
+present, the writer selects exact revision 106 even if the body otherwise
+needs only revision 104. Revision 106 writes candidate-93's 12-byte rows in
+the selected 106 declaration order; this is not a standalone revision-93
+reader. Revision 99 omits the general NoThrow field and contract tokens,
+persists direct-import NativeOutput declarations and output-specific
+dependency rows, and rejects general Dependency contracts it cannot represent.
+NativeCallable retained-formal Captures and other currently representable
+general Dependency contracts use the candidate revision 93 carrier described
+in the [provenance proposal](../proposals/reference-provenance-carriers.md).
+Checked init-output Captures remain rejected until their correlated checked
+selector/output-state vectors are implemented. Standard TRRM retains its
+separate selected schema and does not inherit these private rows.
 Revision 99 is private-only and is not a Standard TRRM or register-Body alias.
 Standard TRRM has a separate provisional F/F+S direct-import NativeOutput Body
 path for sequential and result-correlated calls, local-copy chains, and a
@@ -321,11 +435,9 @@ resolution, call traversal, linked verification and type-table remapping. This
 is private-only support under the unapproved
 [owning-field move persistence proposal](../proposals/owning-field-move-private-persistence.md),
 not Standard TRRM support. A
-supervised Windows x64 native-package test also executes the persisted
-consumer EXE/provider DLL using `kernel32!QueryPerformanceCounter` through
-aggregate NativeOutput under both runtime policies; this is single-provider
-package evidence, not general set/graph or TRRM execution support
-([test](../../tests/Terrum.CodeAnalysis.Tests/Native/Modules/NativeModuleTests.cs)).
+supervised Windows x64 native-package path supports the persisted
+consumer/provider aggregate NativeOutput route; it remains single-provider,
+not general set/graph or TRRM execution support.
 The separately unapproved
 [direct-import provider-binding proposal](../proposals/native-output-direct-import-provider-binding.md)
 is provisionally implemented in native containers: outer version 3 retains
@@ -405,9 +517,8 @@ stored in the consumer, and neither module artifact is rewritten. Changing
 the compatible producer changes the next process launch's behavior. Changing
 a contract fails before native execution. This is *load-time semantic-module
 replacement*, not a patch to already running code or native DLL live servicing.
-The CLI regression deletes both source files after compiling the artifacts,
-then launches the worker with producer v1 and v2 and compares the consumer's
-bytes before and after both executions.
+The consumer artifact is independent of source files, and both module
+artifacts remain unchanged during replacement.
 
 `link-module` is separate: it emits a **new static PE** from the two artifacts.
 The previously emitted PE remains bound to its original producer implementation
@@ -441,6 +552,10 @@ replacement's candidate set. Runtime virtual/interface dispatch and
 devirtualization are separate mechanisms. The current bounded module format
 does not yet provide general overload sets, generic-witness metadata or
 compatibility forwarders.
+Private semantic-module production rejects programs containing source
+interface declarations or witnesses; the private format has no interface
+member or receiver-access codec. It does not silently omit an unreferenced
+interface declaration.
 Compatible reordered type declarations are remapped to the consumer's local
 type indexes before verification. Member contracts retain declaring type,
 receiver/static mode and constructor identity; unexported producer dependencies
@@ -511,10 +626,10 @@ or input length. The artifact limit is 4 MiB, graph limit 100,000 nodes,
 nesting limit 128, and function limit 1,024. No reflection-based serialization
 or saved-source rebind occurs. Import contracts are declaration-derived, not
 implementation hashes. These are current repository reader/verifier limits,
-not selected limits for the pre-v1 `TRRM` specification. This format is not authenticated: artifact bytes are checked for structural
-safety and declared-contract compatibility, not provenance. Reader regressions
-exercise the current revision and rejection of retired or malformed inputs;
-they do not promise compatibility with historical artifacts.
+not selected limits for the pre-v1 `TRRM` specification. This format is not
+authenticated: artifact bytes are checked for structural safety and
+declared-contract compatibility, not provenance. Only the current private
+revision is supported; historical artifact compatibility is not promised.
 Most current C# verifier passes use separate provisional 100,000-visit
 counters, but `IndexedBody.Verify` still receives one counter shared across
 the program's functions. This is implementation behavior, not the selected
@@ -538,42 +653,11 @@ For existing API callers, `CreateConsumer` also accepts an already bound combine
 program and extracts selected producer definitions. The CLI uses independent
 consumer source and the validated artifact-reference path.
 Both library and reference compilation accept multiple `SyntaxTree` snapshots;
-source diagnostics retain the originating snapshot. The self-host component
-test builds `SourceRange`, `CharacterFacts`, `Utf16CodeUnits`, `IntegerFacts`,
-the test-only `IntegerFactsTestExports` bridge, `Token`, `CopyAlgorithms`,
-the producer-local `CopyAlgorithmsTests` wrapper, `Float32MathSelection`,
-`Float64MathSelection`, the producer-local `FloatMathSelectionTests` wrapper,
-`ManagedTokenChain` and its producer-local test wrapper, `WideIntegerFacts`,
-`IntegerFormatting`, the producer-local `IntegerFormattingTests` wrapper,
-`IntegerCheckedArithmetic`, `IntegerMath`, `IntegerSaturation`,
-`IntegerWrapping`, `IntegerCheckedConversions`, and `BitOperations` into one
-producer, then independently binds `RangeTests`, `TokenTests`, `WideIntegerTests`,
-`CharacterFactsTests`, `Utf16CodeUnitsTests`, `IntegerFactsTests`,
-`IntegerCheckedArithmeticTests`, `IntegerMathTests`,
-`IntegerSaturationTests`, `IntegerWrappingTests`,
-`IntegerCheckedConversionsTests`, `BitOperationsTests`, and the Terrum-authored
-`ComponentTestRunner` against its exported declarations.
-The formatter wrapper alone crosses the module boundary; its unique workspace
-is created, reused, and consumed inside the producer, so the candidate owner
-does not become a module export.
-The copy wrapper likewise keeps generic specializations in the producer and
-exports only its test result, not generic candidate functions.
-The managed-chain wrapper keeps owners, links, cursors, and token values within
-the producer; only its boolean result is exported. It exercises bounded
-append/clear, indexed reads, cursor invalidation, and collection, without
-establishing general owning-graph support.
-Those persisted modules execute through AOT and JIT under both runtime
-policies, including range boundaries,
-conditional-output failure, character classification, hexadecimal mapping and
-UTF-16 scalar decoding,
-aggregate token construction, 32-/64-bit checked arithmetic and accumulation,
-integer-math extrema, saturation and wrapping boundaries, checked-conversion
-publication, bit-operation boundaries, finite `float32`/`float64` math-selection
-cases, and repeated calls. The float checks cover only finite values and do not
-resolve NaN, signed-zero, payload, signaling, or status behavior, or approve the
-candidate APIs. C# still
-orchestrates the test; the entry harness only composes these explicitly
-selected component checks.
+source diagnostics retain the originating snapshot. `ComponentTestRunner.terrum`
+is a bounded source-authored harness for selected components, not general test
+discovery or a replacement for the C# host runner. Formatter workspaces,
+generic Copy specializations and managed-chain owners remain producer-local
+rather than module exports.
 The CLI accepts repeatable `--source <path>` options and, for producers,
 `--export <qualified-name>` options. It rejects duplicate source paths or exports,
 more than 256 sources or 1,024 exports, and more than 4 MiB of combined UTF-8

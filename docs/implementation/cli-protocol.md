@@ -61,18 +61,43 @@ the unapproved
 and `trrm/1-draft-local-aggregate-layout-execution-1` (L1) identities.
 A3 uses the exact identity described below. Eligible source commands can
 configure NativeImport roles through the provisional NativeCore manifest.
-The CLI does not expose the API's explicit source TypeDef export-key map.
+For the provisional `trrm/1-draft-nominal-enums-1` selection only,
+`compile-trrm --trrm-source-enum-exports <path>` now forwards the API's
+explicit source TypeDef ExportKeys and complete ordered enum member-key
+assignments. The strict version-1 JSON transport selects source declarations
+by exact namespace and simple name; it generates no keys and adds no fallback,
+Core authority or wire/schema field. The transport remains unapproved and
+provisional; see the [source enum CLI proposal](../proposals/standard-trrm-source-enum-cli-transport.md).
+`--trrm-source-generic-method-exports` accepts version-1 generic-method maps
+and version-3 interface-requirement/generic-method maps only under exact G1L1.
+Both map versions are rejected for C1-family label-bearing selectors without
+replacing existing output. The bounded
+C1L1R1, C1M1L1R1, Construction-1L1R1 and Construction-2L1R1 source routes
+use typed APIs; the Construction-1L1R1 route currently rejects class
+declarations. A separate version-1
+[class-source CLI manifest](../proposals/standard-trrm-c1-class-source-cli-transport.md)
+is provisionally proposed for exact Construction-1/2 L1R1 and PI1 successors,
+but is not implemented and requires complete class/member/Body closure; it
+does not broaden the G1 map. An unapproved [C1 enum-closure proposal](../proposals/standard-trrm-c1-enum-closure-composition.md)
+defines a version-2 class manifest for separate EN1 successors; it is also
+unimplemented and does not compose NominalEnumsDraft into C1.
+Source provider inputs and schema aliases remain unsupported; see the
+[G1/C1 parameter-label proposal](../proposals/standard-trrm-g1-interface-parameter-labels.md).
+The existing enum mapping is intentionally not a general TypeDef/FieldDef
+manifest. Nested FieldPath TypeDef/FieldDef mappings are not yet a verified
+CLI capability. A separate exact-schema producer mapping is an unapproved
+candidate; `compile-trrm` still has no source-provider input, so it does not
+enable consumer-side source imports. See the
+[source type/field CLI proposal](../proposals/standard-trrm-source-type-cli-transport.md).
 Artifact commands accept exact per-artifact schema identities and a root
 Module identity, plus repeatable explicitly selected provider schema/path
 pairs. The current whitelist includes F/F+S, A2/A2E/A2EU/A2EU+SF1,
 A2R1/A2R1+Repeat, A3, B+E1 and L1; provider schema selection remains exact
 and does not default or fall back. The L1 `run-trrm`/`build-trrm`/
 `build-trrm-library` route uses these existing options; it adds no CLI option
-or default selection. A focused Windows x64 CLI regression covers `run-trrm`
-and `build-trrm` for a bodyless MethodDef provider whose exact Param
-implicit-readonly-reference contract is exercised by the caller. A mismatched
-by-value provider rejects before publication and preserves the existing PE
-output. Generic,
+or default selection. L1 provider binding requires exact Param
+implicit-readonly-reference agreement; a by-value mismatch rejects before
+replacing output. Generic,
 receiver-bearing and MethodDef-contract-bearing provider cases remain open.
 The Development default remains unchanged.
 Artifact commands also accept repeatable
@@ -95,60 +120,14 @@ and `TRM5007`/2 (deterministic resource refusal). A2 retains its existing
 diagnostics. These A3-only codes and the host resource envelope are
 provisional candidates under the unapproved
 [A3 failure-class proposal](../proposals/standard-trrm-a3-layout-failure-classes.md),
-not `terrum.cli/1` assignments. Source-free loading reconstructs the exercised
-A2 positive-count scalar initialization, A2E direct/nested empty-array
-initialization, and provisional A2EU positive-count Unit stores using typed
-R14 `()`. A2E and A2EU artifacts pass their CLI PE-build selectors. These
-checks establish reconstruction and emission, not native execution or
-zero-extent backing. A2EU also captures checked `int32`/`uint32` division and
-remainder over Home reads in direct NativeImport arguments, reconstructing
-checked expressions and preserving operation-before-call/store order through
-canonical re-emission. It also retains checked fixed-array element-address
-arguments as PlaceSelection plus StorageAddress operations before the direct
-call, preserving the dynamic index Home through source-free reconstruction.
-These checks establish encoded ordering and re-emission, not runtime failure
-behavior. Provisional source support admits exact Unit/Unit conditional
-expressions in return and expression-statement contexts; both selected arms
-pass native JIT under both runtime policies. Explicit/inferred Unit locals now
-preserve zero-data initialization, liveness, reads, assignments and lifetime
-ends in hosted and standalone source paths. Focused regressions cover
-Unit-call initialization, expression-bodied Unit returns, both runtime
-policies, JIT and native PE execution. The conditional proposal remains
-unapproved. The Standard A2EU
-Body path now encodes nested Unit-valued array-initializer conditionals as
-multi-block `E4`/`ConditionalEdge` branches and `E3` joins. Source-free loading
-reconstructs structured `BoundIf` control flow and canonically re-emits the
-Body, including nested checked scalar and storage-address arguments. Its
-condition subset now includes Boolean Home reads, direct Boolean NativeImport
-results, constant selection, logical-not, short-circuit `&&`/`||`, nested
-Boolean conditional expressions, and non-Boolean scalar comparisons (`==`,
-`!=`, `<`, `<=`, `>`, `>=`) using assigned `0x40`/`0x41` instructions.
-Boolean equality/inequality uses assigned `0x32` XOR and `0x33` NOT. Comparison
-operands may be Home reads or admitted direct NativeImport calls; a left Home
-read is snapshotted before a right-side call, and nested checked argument
-failure prevents the branch. Boolean `==`/`!=` with one literal lowers by
-inverting the existing read/call branch.
-Numeric comparison literals are supported only by the distinct, provisional
-A2EU+SF1 selector, which adds typed Feature 11/1 frozen-value tables for the
-existing scalar codec while leaving A2EU unchanged; this comparison path
-admits literals only for the ten numeric types. Feature 11 is required only
-when an emitted Body retains a ConstantMap value. Source-free loading
-validates the Body/source/node/blob references, reconstructs the comparison,
-and canonically re-emits the typed value. Regressions cover all ten types and
-six predicates, both literal operand positions, malformed table/map references,
-legacy A2EU rejection, selected and co-located provider remapping, and
-compatible/incompatible provider replacement. The A2EU+SF1 selector is
-available to the CLI artifact selection path; its contract remains provisional
-under the unapproved
-[A2EU scalar-literal comparison proposal](../proposals/standard-trrm-a2eu-scalar-literal-comparisons.md).
-Non-source predicate masks and call forms outside the direct NativeImport
-capture profile remain unsupported. A co-located selected-provider regression
-shifts the conditional caller to Body row 2, remaps its maps, preserves
-body-local branches/records, and checks compatible and incompatible provider
-replacement.
-Supervised source-free A2EU JIT/AOT exercises these conditions under FailFast,
-including selected comparison-call failure; CheckedExceptions and
-cleanup/loan transport remain incomplete.
+not `terrum.cli/1` assignments. A2, A2E and A2EU support bounded
+source-free scalar/empty-array initialization and Unit stores; the A2EU Body
+subset also retains checked scalar calls, element-address arguments and
+nested Unit conditionals. The separate A2EU+SF1 candidate adds typed numeric
+literals to its comparison subset without changing A2EU. These routes provide
+bounded emission and reconstruction, not general runtime failure, cleanup or
+loan transport. The A2EU+SF1 selector remains provisional under the unapproved
+[scalar-literal comparison proposal](../proposals/standard-trrm-a2eu-scalar-literal-comparisons.md).
 The bounded F route runs/builds direct NativeImport executables and emits
 direct-import libraries. Its provisional native plan validates every retained
 MethodDef Import in the supplied exact-F Module closure, including disconnected
@@ -209,27 +188,64 @@ reject this option before consuming input. This follows the unapproved
 [NativeOutput CLI proposal](../proposals/native-output-cli-registration.md);
 it does not amend `terrum.cli/1`.
 
+## Provisional evaluation-form schema selection
+
+The source `analyze`, `build`, `build-native-import`, `build-library`, `jit`
+and `compile-trrm` commands accept one `--evaluation-core-manifest <path>`.
+Its exact `terrumc.evaluation-core-manifest/1` host grammar supplies the using
+Module, independently selected Pure/ConstEval export keys and actual local
+schema declarations/catalog origin. Export aliases retain one declaration;
+neither names, paths nor `--corelib` select identities. Text remains nonempty
+ordinal decoded text without NUL, including otherwise valid whitespace-only
+identities; source-qualified names keep their ordinary naming rules.
+
+The local catalog's runtime policy must agree with the source compilation.
+Selected Layout, NativeCore and NativeOutput manifests must agree on authority
+and using identity, without placing local evaluation declarations in their
+external-only binding carrier. Ineligible routes reject the option before
+input consumption; the internal frontend route and `terrum.cli/1` gain no
+configuration extension. External selectors reject: these CLI routes do not
+provide the ordinary checked schema-reference export projection they require.
+
+`compile-trrm` checks exact `--identity` agreement and forwards the selection
+for source binding, but declines publication of the captured evaluation
+context because its declaration/context codec is unavailable. It does not
+silently omit that context or serialize host authorization. Native final
+lowering can consume the checked source selection; this does not implement a
+general Pure-form verifier or expand existing constant-evaluation support.
+Unconfigured supported paths remain usable without the option.
+This follows the unapproved
+[evaluation-form CLI proposal](../proposals/core-evaluation-forms-cli-selection.md).
+
+The source CLI does not currently transport the separate
+`CoreContractFailureIdentitySelection`. Its exact host-manifest route is
+unapproved and provisional under
+[the CLI selection proposal](../proposals/core-contract-failure-cli-selection.md);
+no default Core failure provider or `terrum.cli/1` extension is implemented.
+
 ## Provisional source layout registration
 
 The source `analyze`, `build`, `build-native-import`, `build-library`, `jit`,
 `compile-trrm`, and private `compile-module producer`/`consumer` commands
 accept one `--layout-core-manifest <path>`. `compile-trrm` requires the
 manifest's `usingModuleIdentity` to exactly match its required `--identity`;
-private-module commands use that identity only for their source-binding
-context and do not persist it. The versioned JSON input is decoded strictly
-and constructs only the explicitly supplied in-process Layout/Blittable
-provider set; it does not select a default, configure native Core schemas,
-decode provider artifacts or choose a TRRM output schema. Manifest admission
-precedes source and consumer-artifact reading, and manifest aliases with
-sources, producer input or output reject before publication. Syntax-only,
-source-free, `compile-native`, native set/graph and other artifact commands
-reject the option. The `frontend-build`, `frontend-build-library` and
+without `--private-identity-manifest`, private-module commands use that
+identity only for their source-binding context and do not persist it. The
+versioned JSON input is decoded strictly and constructs only the explicitly
+supplied in-process Layout/Blittable provider set; it does not select a
+default, configure native Core schemas, decode provider artifacts or choose
+a TRRM output schema. Manifest admission precedes source and
+consumer-artifact reading, and manifest aliases with sources, producer input
+or output reject before publication. Syntax-only, source-free,
+`compile-native`, native set/graph and other artifact commands reject the
+option. The `frontend-build`, `frontend-build-library` and
 `frontend-run` fallback wrappers also reject it. The separate test-only
 `frontend-component` probe accepts it only for its fixed component-source
 compilation; it does not configure subject input or extend the fallback
 commands. A separate scanner extension admits it to
-`scan-component`/`build-component` only for scanner-source compilation;
-`build-component` does not pass it to subject-source compilation. Private
+`scan-component`/`build-component` for scanner-source compilation. For
+`build-component`, the same selected registration also configures the parsed
+subject-source compilation; `scan-component` has no subject compilation. Private
 module source inputs remain bounded file paths, not stdin. The manifest and
 component/private-route candidates remain unapproved:
 [Layout CLI configuration proposal](../proposals/source-layout-cli-registration.md)
@@ -250,8 +266,12 @@ and positional producer bytes; it does not add fields to `.trm`. If both
 manifests are supplied, their using-Module identities must match and satisfy
 both domains. Producer imports may select only checked Core enums from an
 explicit Core registration; consumer imports must resolve to owned exports in
-the positional producer artifact. The option is rejected by other commands
-and does not extend `terrum.cli/1`.
+the positional producer artifact. Consumer manifests cannot assign Core
+enum-member identities or select a Core enum directly from the Layout
+registration; they must use the positional producer's import. Invalid manifest
+combinations fail before output replacement. The option is rejected by other
+commands and does not extend
+`terrum.cli/1`.
 
 ## Provisional normal-backing agreement selection
 
@@ -296,10 +316,7 @@ separately from `"profile": null`.
 
 The current source-bound Windows x64 path selects 8/8 ordinary and optional
 reference values, direct reference arguments/results, and scalar/raw-pointer
-native import boundaries without normal-backing runtime data. Debug
-regressions exercise source-bound JIT lowering, PE build and
-supervised image execution, direct scalar System32 import execution, and the
-separate `build-native-import` producer, including optional presence testing.
+native import boundaries without normal-backing runtime data.
 Checked GC/init descriptors, managed-class runtime state, checked-reference
 foreign/function-pointer
 crossings, persisted module/TRRM/native-package transport and independently

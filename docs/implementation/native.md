@@ -707,19 +707,12 @@ fields and fixed-array geometry. The implemented rootless-Copy slice supports
 tagged construction, absence, presence tests, extraction, coalescing,
 conditional assignment and typed copies, plus null-niche data pointers.
 Optional fixed-array elements support initialization, reads, writes, nested
-paths, copies and repeat initialization. Debug JIT regressions exercise scalar,
-unit, function-pointer, aggregate, pointer and fixed-array cases under both
-runtime policies; a source-backed over-aligned payload checks natural
-alignment 8, required alignment 32, and optional payload offset/extent 32/64.
-A supervised Windows x64 image executes optional aggregate copy and repeat.
-Supervised guard-page JIT regressions confirm absent optional copies do not
-read their inaccessible payload and present aggregate copies do not read
-trailing padding. Supervised Windows x64 images execute optional aggregate
-copy/repeat, scalar/unit operations, raw-pointer and function-pointer forms,
-and the source-derived `A=8/R=32` composition.
-JIT tests also cover internal aggregate call/return, success-conditioned out
-publication and reads/writes through a checked reference to an optional slot
-under both runtime policies. This does not assign a stored reference-descriptor
+paths, copies and repeat initialization, alongside optional aggregate
+copy/repeat, scalar/unit operations, and raw-pointer and function-pointer
+forms on selected Windows x64 routes. The model also supports internal
+aggregate call/return,
+success-conditioned output publication and checked-reference access to an
+optional slot; no stored reference-descriptor
 layout or new ABI. Broader call/output paths and padding treatment remain in
 progress. The raw overlapping-layout Union payload remains excluded because no
 active-member copy representation is selected. The provisional Windows x64
@@ -954,8 +947,8 @@ different: their package contract is generated-module interop, and a
 runtime-policy-matched generated consumer may catch a Terrum failure
 unwinding from a provider image. The PE exports do not publish a stable
 foreign ABI; arbitrary native callers are outside this module contract.
-Regression coverage verifies both cross-image checked recovery and continued
-rejection from the public native-library export path.
+The module contract permits runtime-policy-matched generated consumers to
+catch provider failures; public native-library exports remain outside it.
 
 The internal conservative proof accepts initialized value/field reads and
 writes, constants, comparisons, boolean and integer bitwise operations, unary
@@ -1092,7 +1085,7 @@ the invocation's normal edge. The hosted binder/verifier and scalar frontend
 retain the complete signature, type-check arguments and unreachable source,
 and reject reachable normal returns or fallthrough. No public bottom type,
 void-to-value conversion or normal result is introduced. Source JIT and private
-native-module tests cover non-unit failure calls. The instance-struct and
+native-module routes support bounded non-unit failure calls. The instance-struct and
 managed-class constructor source slices are implemented provisionally under
 the unapproved
 [constructor-applicability proposal](../proposals/constructor-no-return-applicability.md).
@@ -1100,12 +1093,9 @@ the unapproved
 This does not establish current-schema TRRM execution: the development indexed
 Body retains non-unit no-return declaration/body facts but not terminal
 non-unit CallSites. Standard register CallSite decoding, canonical writing,
-dependency remapping and execution remain unfinished. Class-factory
-regressions exercise a failing no-return constructor through emitted native
-code and the JIT under fail-fast and checked-exception policies; checked
-unwinding confirms the unpublished allocation is reclaimed. Private semantic
-module linking and native-module consumer execution also retain the class
-constructor effect. This does not establish standard register-Body support,
+dependency remapping and execution remain unfinished. Class-factory source,
+private semantic modules and native-module consumers retain the constructor
+effect and unpublished allocation cleanup. This does not establish standard register-Body support,
 imported constructor replacement compatibility, or authored static
 initialization, which remain gated by their ownership, initialization and
 representation contracts.
@@ -1193,11 +1183,11 @@ native image layouts are rejected rather than loaded for compatibility.
 | Area | Supported |
 |---|---|
 | Program | File-scoped namespaces, using directives, top-level/static/instance functions; parameterless `int32 Main()` or `void Main()`; multi-source executable/library compilation |
-| Types | `int32`, `uint32`, `int64`, `uint64`, `char16`, `bool`, `void` results; compact reference-free structs |
+| Types | `int32`, `uint32`, `int64`, `uint64`, distinct target-width `nint`/`nuint`, `char16`, `bool`, `void` results; compact reference-free structs |
 | Literals/constants | Context-typed decimal, hexadecimal and binary integers without a fallback type; digit separators; based literals construct target-width bit patterns; primitive `MinValue`/`MaxValue`; booleans; unit `()` |
 | Variables | Initialized typed/inferred locals; immutable bindings by default, explicit `mut` assignments; lexical scopes |
-| Expressions | Direct calls, forward calls/recursion, constructors, field reads, checked numeric type-call conversions to `int32`, `uint32`, `int64`, `uint64` and `char16`; unary `+`, signed checked `-`, `~`, `!`; nominal static `++`/`--` updates on the eligible writable `Copy`-struct place envelope, with exact operand/result type equality |
-| Operators | Checked signed/unsigned `+ - * / %`, bitwise operations, signed/unsigned comparisons, same-type scalar equality, boolean operations; code-unit comparison but no `char16` arithmetic |
+| Expressions | Direct calls, forward calls/recursion, constructors, field reads, checked numeric type-call conversions to `int32`, `uint32`, `int64`, `uint64`, `nint`, `nuint` and `char16`; unary `+`, signed checked `-`, `~`, `!`; nominal static `++`/`--` updates on the eligible writable `Copy`-struct place envelope, with exact operand/result type equality |
+| Operators | Checked signed/unsigned `+ - * / %`, bitwise operations, signed/unsigned comparisons, same-type scalar equality, boolean operations; target-width shifts validate counts before lowering; code-unit comparison but no `char16` arithmetic |
 | Flow | Blocks, `if`/`else`, `while`, scoped `for`, return, boolean `require`; left-to-right argument/operand evaluation and short-circuit `&&`/`\|\|` |
 | Outputs | Bool/out true-only publication and definite assignment through branches, `!`, `&&`, `\|\|` and `require` |
 | Storage | Explicitly granted, initialized fixed host buffers with checked indexing and read/write access; capabilities are not first-class source values |
@@ -1249,14 +1239,17 @@ and non-nearest transfer depths
 when present. Native calling conventions, cleanup funclets and public ABI do
 not change.
 
-Other integer widths, runtime text, inheritance, general optional/generic/family
+Other integer widths (`int8`, `uint8`, `int16`, `uint16`, `int128`, `uint128`),
+runtime text, inheritance, general optional/generic/family
 binding, general borrowed references, ownership graphs and exception objects,
 production GC, async, arbitrary interop and the standard library remain outside
 the bounded support described above. Their syntax may be inspectable, but a build
 must diagnose unsupported semantics. No source library is silently assumed.
 The 64-bit types are fixed-width integers, not aliases for `nint`, `nuint` or
-native pointers. Entry-point process statuses remain `int32`; a wider return
-value requires an explicit checked conversion before returning from `Main`.
+native pointers. On the Windows x64 target, `nint`/`nuint` are eight-byte
+signed/unsigned integers but retain distinct source, TypeSpec and ABI identities.
+Entry-point process statuses remain `int32`; a wider return value requires an
+explicit checked conversion before returning from `Main`.
 
 ## Values, places and conditional publication
 
@@ -1466,56 +1459,13 @@ overwrites its by-value input storage.
 The receiver-loan ABI composes with a hidden result pointer and stack arguments;
 it neither transfers ownership nor makes the owner copyable.
 
-The independent [aggregate ABI test](../../tests/Terrum.CodeAnalysis.Tests/Native/Interop/NativeLoaderInteropTests.Aggregates.cs)
-uses .NET unmanaged function pointers, rather than validating calls only by
-having Terrum call itself. It compiles the actual
-[`aggregate-abi.terrum`](../../tests/Terrum.CodeAnalysis.Tests/Native/Interop/Fixtures/aggregate-abi.terrum) sample and
-checks flat and nested direct and indirect aggregates passed/returned by value,
-including one-field transparent scalar wrappers,
-hidden results and register/stack arguments, true/false output publication, guard storage
-around scalar and aggregate output destinations, and narrow
-arguments with deliberately dirty upper register bits supplied by a 64-bit
-caller signature. Independent sequential CLR carriers check sizes and field
-offsets for nested fields with interior and tail padding,
-followed by by-value and output calls. This is physical classification
-evidence for the existing Windows x64 profile, not an exported native layout
-commitment. The test
-also checks readonly unique receivers of 4, 8 and 16 bytes, preserved caller
-storage, and a borrowed receiver combined with an indirect result and five
-explicit arguments. These callers provide initialized primitive payloads
-at a trusted test boundary; they are not a general source interop facility.
-The test
-obtains function addresses from encoder ranges; the development executable
-does not advertise an exported native API.
-
-The separate checked-policy generated-DLL
-[owned-call test](../../tests/Terrum.CodeAnalysis.Tests/Native/Interop/NativeOwnedCallAbiTests.cs)
-exercises unique direct/indirect by-value parameters and returns from an
-independent .NET caller,
-including hidden-result RAX storage identity and a sixth owning argument.
-It checks owning output stack placement, true-only publication, unchanged
-false/partial/caught-failure output bytes, guard storage, repeated calls,
-and caught later-argument failure. Composite cases cover 8- and 16-byte owners,
-nested child loans, nonzero field offsets, and failed partial construction.
-The nonzero field offsets in these cases are computed from normal field order,
-size and alignment; they are not user-selected explicit offsets.
-This fixture's cleanup methods are empty;
-Host.Trace execution tests, not this ABI probe, establish cleanup order and
-exactly-once effects. This remains a bounded test boundary, not a general
-native interop or resource-release contract.
-
-The same test fixture also binds parent/child cleanup through the verified IR's
-explicit native-import boundary. A .NET unmanaged callback observes parent
-calls and ordering, then calls `GetSystemTimeAsFileTime` to overwrite the
-parent's indirect by-value scratch where the child semaphore handle lives.
-Child cleanup must still release the original semaphore; count checks preserve
-the parent-before-child and exactly-once assertions. Both runtime policies
-exercise normal destruction, replacement,
-an owning output call with a staged owning argument, destruction while a
-return value is pending, and recursive cleanup through an outer owner with no
-custom cleanup.
-This is a test-only system/native-call boundary, not a source-level interop
-extension or an OS resource-owner library.
+The implemented Windows x64 aggregate boundary uses the direct/indirect
+carriers and unique receiver rules described above; it is physical ABI
+classification, not an exported native layout commitment. The development
+executable does not advertise a general exported native API. Checked-policy
+generated-module calls preserve value transfer, output publication and
+parent-before-child cleanup through a test-only native callback. This is not a
+source-level interop extension or an OS resource-owner library.
 
 Images prefer base `0x1_4000_0000`, with 4 KiB section alignment and 512-byte
 file alignment. `.text` is read/execute, `.idata` read/write and

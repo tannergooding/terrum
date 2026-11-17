@@ -34,8 +34,8 @@ DLL names by absolute System32 path.
 The graph-JIT root uses the same System32 path for direct imports while
 selected package imports resolve to staged provider DLLs. Neither path stages
 arbitrary raw-import DLLs.
-Windows x64 runtime regressions also call `CompareStringOrdinal` through
-readonly addresses of local `char16` values in standalone and graph-JIT roots.
+Standalone and graph-JIT roots support `CompareStringOrdinal` through readonly
+addresses of local `char16` values on Windows x64.
 
 ```powershell
 dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll jit samples\LanguageFeatures\ControlFlow\factorial.terrum --runtime fail-fast

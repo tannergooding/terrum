@@ -1,5 +1,10 @@
 # Terrum-authored compiler components
 
+For a concise support overview and open gates, see
+[`implementation.md`](../implementation.md) and
+[`conformance-gaps.md`](conformance-gaps.md); this file is the component-level
+reference.
+
 The
 [`Terrum.CodeAnalysis.Terrum` source project](../../sources/Terrum.CodeAnalysis.Terrum/README.md)
 contains maintained Terrum-authored compiler components, but is not yet an
@@ -19,8 +24,7 @@ The existing `TokenCursor`, v87/v88 scalar projection and private
 `Span<Token>` module paths are implementation prototypes, not selected
 compiler interfaces. The intended parser path uses `Span<Token>` directly
 with the accepted backing/lifetime obligations; it does not require a cursor
-wrapper or persistent span schema. Tests that compile these prototypes remain
-implementation evidence only.
+wrapper or persistent span schema.
 
 Private `Host.Source` grants, the persisted scanner profile, and the scalar
 frontend invocation profiles below are unselected prototypes. Compiler input
@@ -37,175 +41,13 @@ source or program-wide cap. A function's published contracts, rather than
 private facts found by inspecting its body, govern calls. JIT/AOT or metadata
 emission may retain private whole-program/module facts in compiler state, but
 they are not persisted as cross-module guarantees.
-The full-solution build also produces
-`artifacts\bin\sources\Terrum.CodeAnalysis.Terrum\<configuration>\terrum-compiler-primitives.dll`
-from `BitOperations`, `CharacterFacts`, `Float32MathSelection`,
-`Float64MathSelection`, `IntegerCheckedArithmetic`, `IntegerFormatting`,
-`IntegerCheckedConversions`, `IntegerFloatConversion`, `Char16FloatConversion`,
-`FloatingFormatConversion`, `IntegerMath`, `SourceRange`, `Token`,
-`FloatingNegation`, `FloatingComparison`, `FloatingArithmetic`,
-`FloatingIntegerConversion`, `IntegerSaturation`, `IntegerWrapping`,
-`Utf16CodeUnits`, `WideIntegerFacts`, `IntegerFacts` and `CopyAlgorithms`.
-The test build also includes
-`tests\Terrum.CodeAnalysis.Terrum.Tests\TestHelpers\Abi\integer-formatting-abi.terrum`
-for workspace setup and consumption,
-`tests\Terrum.CodeAnalysis.Terrum.Tests\TestHelpers\Abi\token-abi.terrum`
-for aggregate ABI selection,
-`tests\Terrum.CodeAnalysis.Terrum.Tests\TestHelpers\Abi\integer-facts-abi.terrum`
-for integer-fact predicates and
-`tests\Terrum.CodeAnalysis.Terrum.Tests\TestHelpers\Abi\copy-algorithms-abi.terrum`
-for concrete Copy specialization;
-these helper exports are test-only. The build also emits a separate
-provisional `terrum-compiler-primitives-source-grant.dll` from
-`CharacterFacts`, `SourceCodeUnit`, `SourceLineCount`, `SourceLineEnd`,
-`CharacterLiteralPacked`, `CharacterLiteralScalar`, `HexDigitValue`,
-`BasedIntegerFloatLiteral`, `HexFloatLiteral`, `DecimalFloatLiteral`,
-`SourceRangeValidation`,
-`SourceTextLength`, `SourceOffset`, `SourcePosition`, `StringEscapePacked`,
-`StringLiteralEncodedLength`, `StringNameRowByteLength`, `StringLiteralScalarAt`,
-`StringLiteralScalarCount`,
-`WideIntegerFacts`, `SourceIntegerParsing`,
-`Utf16CodeUnits` and `Utf16Scalar`,
-with a hash-bound export manifest; it does not change the source-free
-compiler-primitives DLL or establish a stable ABI. The native source-grant
-companion remains an experiment with no adopted export ABI or result contract;
-see [CG-018](conformance-gaps.md#cg-018).
-This maintained native
-compiler-primitives library exports `Terrum.CodeAnalysis.SourceRange.TryCreate`,
-`Terrum.CodeAnalysis.IsAsciiDigit`,
-`Terrum.CodeAnalysis.IsLineBreak`, `Terrum.CodeAnalysis.GetDecimalDigit`,
-`Terrum.CodeAnalysis.TryGetHexDigit`, `Terrum.CodeAnalysis.DecodeUtf16Scalar` and
-`Terrum.CodeAnalysis.Utf16ScalarWidth`, plus
-`Terrum.CodeAnalysis.Numerics64.MagnitudeInt64`,
-`Terrum.CodeAnalysis.Numerics64.TryAccumulateDecimal` and
-`Terrum.CodeAnalysis.Numerics64.TryAccumulateBase`,
-`Terrum.CodeAnalysis.Numerics64.TryAddInt64`,
-`Terrum.CodeAnalysis.Numerics64.TrySubtractInt64`,
-`Terrum.CodeAnalysis.Numerics64.TryMultiplyInt64`,
-`Terrum.CodeAnalysis.Numerics64.TryDivideInt64`,
-`Terrum.CodeAnalysis.Numerics64.TryRemainderInt64`,
-`Terrum.CodeAnalysis.Numerics64.TryNegateInt64`,
-`Terrum.CodeAnalysis.Numerics64.TryAbsoluteInt64`, and the five matching
-unsigned binary helpers. It also exports the nine `BitOperations` functions
-for each width: leading/trailing-zero count, population count, left/right
-rotation, bit/endianness reversal, power-of-two test and checked round-up.
-It also exports the fifteen existing `IntegerMath` functions across `int32`
-and `int64`, including conditional absolute value, min/max/clamp, widened
-`int32` multiplication and unsigned-magnitude GCD.
-It also exports thirteen `IntegerCheckedArithmetic` helpers for checked
-signed/unsigned 32-bit arithmetic, signed negation/absolute value and signed
-magnitude.
-It also exports all twenty existing `IntegerCheckedConversions` helpers for
-integer width/signedness conversions and `char16` narrowings/widenings.
-It also exports all twenty existing `IntegerSaturation` helpers for
-integer and `char16` conversion candidates.
-It also exports all twenty existing `IntegerWrapping` helpers for
-integer and `char16` conversion candidates.
-It also exports the five existing `IntegerFormatting` radix-length queries for
-32-/64-bit signed and unsigned values and `char16` code units. Internal Windows
-x64 direct-call tests compare radices 2 through 36 against a `BigInteger`
-oracle and check invalid-radix output preservation with adjacent canaries.
-This evidence does not approve the candidate formatting API or general
-`init ref` behavior.
-The DLL also exports all fifteen existing `IntegerFormatting` decimal and
-radix formatting functions. Direct-call tests compare every emitted digit
-against hosted decimal formatting or an independent `BigInteger` radix oracle
-for bases 2 through 36, including exact-capacity workspaces and a reused
-workspace. Test-only helpers create and consume the opaque owner inside
-Terrum; this does not establish an external owner protocol or a stable native
-ABI.
-It also exports the four existing `Float32MathSelection` and four
-`Float64MathSelection` functions. Their Windows x64 direct-call tests pass
-floating representations through integer bit carriers, matching the Terrum
-internal floating-value ABI rather than the standard C floating ABI. This is
-internal execution evidence only; it does not approve either candidate API or
-settle NaN payload, signaling, or status behavior.
-It also exports the existing `Token` constructor and a test-only selector for
-four by-value Token arguments and an aggregate return. Internal Windows x64
-tests check the sequential C# carrier's current 12-byte layout and field
-offsets, construct tokens from valid ranges, and select each argument in turn,
-including the stack-passed argument. This is rebuild-coupled ABI evidence only;
-it does not approve a public layout, stable C ABI, or exact hidden-result write
-extent.
-The source-grant-dependent `Utf16Scalar.ReadUtf16Scalar` adapter remains
-outside the source-free DLL. The separate companion exports its checked
-`ReadUtf16ScalarChecked` adapter and scalar-only queries for
-`GetSourceLineCount`, `GetSourceTextLength`,
-`GetSourceCodeUnitOrMinusOne`, `GetSourceOffsetOrMinusOne`,
-`GetSourceLineNumberOrMinusOne` and `GetSourceCharacterPositionOrMinusOne`,
-`GetSourceLineContentEndOrMinusOne`, `GetSourceLineEndOrMinusOne`,
-`CanGetSourceRange`, `AnalyzeCharacterLiteralPacked`,
-`GetCharacterLiteralScalarOrMinusOne`,
-`AnalyzeStringEscapePacked`, `GetStringLiteralScalarCountOrMinusOne`,
-`GetStringLiteralScalarOrMinusOne`,
-`GetStringLiteralEncodedLengthOrMinusOne`,
-`GetStringNameRowByteLengthOrMinusOne`,
-`GetStringNamespaceRowByteLengthOrMinusOne`,
-`GetHexFloat32LiteralBitsOrMinusOne`, `GetHexFloat64LiteralBitsOrMinusOne`,
-`GetBasedIntegerFloat32BitsOrMinusOne`, `GetBasedIntegerFloat64BitsOrMinusOne`,
-integer-parsing query pairs and the unchanged source-free decoder. The scalar
-length, code-unit, offset, position, line-end
-and range-validation components isolate `SourceText`/`SourceLines` behavior;
-the code-unit query preserves every UTF-16 value, the offset query returns `-1`
-for invalid line/character pairs, and the position queries return `-1` for
-invalid source offsets. The two line-end queries return the content and
-including-break exclusive ends, respectively, or `-1` for an invalid line;
-callers combine either with the existing line-start offset query on the same
-unchanged snapshot. The content end is the first break unit, while the
-including-break end is after the complete break and may be the next line's
-start. Position and line-end queries scan independently; querying both ends
-for every line is not an indexed lookup. None of these queries is the
-complete `SourceText` or `SourceLines` facade.
-`CanGetSourceRange` returns true only for a source-bounded half-open range,
-including a zero-length range at EOF; it returns false for negative or
-out-of-snapshot bounds and does not return an aggregate range.
-The persisted
-semantic-module JIT test also checks every BMP code unit at a one-unit source
-boundary under both runtime policies, ensuring that a following code unit
-cannot complete a surrogate pair outside the requested extent. These are
-internal compiler implementation exports, not a language-level API or stable
-native ABI; the library is not a self-host compiler or an executable
-scanner/parser.
-Separately, `HexFloatLiteral.terrum` is a standalone conversion helper over a
-caller-delimited token slice in invocation-scoped `Host.Source`. Persisted
-semantic-module tests compare its direct `float32`/`float64` bit results with
-hosted bound constants across IEEE rounding boundaries, malformed spellings,
-deterministic random valid spellings and 16,000 fractional hex digits
-under both runtime policies. It now supplies positive raw-bit literal payloads
-to the bounded scalar frontend alongside the decimal and based-integer helpers;
-the host reader independently checks those payloads against the hosted parser.
-Unary signs remain separate frontend operations, and verification and emission
-remain hosted.
-`DecimalFloatLiteral.terrum` similarly converts caller-delimited decimal
-numeric slices directly to `float32` or `float64` bits, without rounding
-`float32` through `float64`. Its exact midpoint comparisons use an owned
-multi-limb workspace and are covered by semantic-module parity tests for ties,
-subnormal and overflow boundaries, malformed spellings, deterministic random
-values and long significand/exponent inputs under both runtime policies. The
-provisional source-grant companion also exports its two scalar `int64`
-entry points with `int32` start/length parameters. The classifier admits only
-the internal by-value owner transfers, lexical views and canonical buffer
-intrinsics required by their verified helper closure; the exports remain
-scalar-only and the source-free compiler-primitives DLL is unchanged. Direct
-DLL checks cover the exact-rounding corpus and a maximum-length source grant.
-The tracked native ABI probe verifies source-context forwarding, successful
-owner cleanup in both runtime policies, and checked unwinding and allocation
-failure without a live owner. Allocation failure remains a native checked or
-fail-fast failure, distinct from malformed input. This prototype evidence does
-not approve unwinding across an ordinary foreign boundary. The scalar frontend
-still compiles the helper into its semantic-module component, and this does not
-move verification or emission out of the hosted implementation. The host test
-runner still orchestrates compilation and assertions in C#.
-`ComponentTestRunner.terrum` is a bounded Terrum entry harness composing the
-`SourceRange`, `CharacterFacts`, `Utf16CodeUnits`, `IntegerFacts`, `Token`,
-`CopyAlgorithms`, finite `Float32MathSelection`/`Float64MathSelection`,
-bounded `ManagedTokenChain`, `WideIntegerFacts`, `IntegerFormatting`,
-`IntegerCheckedArithmetic`, `IntegerMath`, `IntegerSaturation`,
-`IntegerWrapping`, `IntegerCheckedConversions`, `IntegerFloatConversion`,
-`Char16FloatConversion`, `FloatingArithmetic`, `FloatingComparison`,
-`FloatingFormatConversion`, `FloatingNegation`, `FloatingIntegerConversion`,
-and `BitOperations` module tests; it does not provide general test discovery or
-replace the host runner.
+The source project builds maintained compiler components and a native
+compiler-primitives library through the normal solution workflow. A separate
+source-grant companion and scalar frontend remain prototypes with no adopted
+export ABI or source-to-JIT handoff; see [CG-018](conformance-gaps.md#cg-018).
+The host remains responsible for compilation, verification and emission.
+`ComponentTestRunner.terrum` is a bounded entry harness, not general test
+discovery or a replacement for the host runner.
 
 ## Scalar frontend and interchange
 
@@ -558,10 +400,9 @@ remain limits of the test-only frontend prototype, not source-language limits.
 
 ## Component inventory
 
-Rows for `TokenCursor` and the scalar frontend/projection describe current
-code and tests, not selected compiler interfaces. The target parser uses
-`Span<Token>` directly; the Terrum and C# compilers do not exchange projected
-syntax or semantic records.
+This table records current component scope, not selected compiler interfaces.
+The target parser uses `Span<Token>` directly; the Terrum and C# compilers do
+not exchange projected syntax or semantic records.
 
 | Candidate | Purpose | Gates before execution |
 |---|---|---|
@@ -703,7 +544,7 @@ Raw `char16` values are code units, not automatically validated Unicode scalars.
 
 `SelectCopy<T>` selects one of two already-evaluated by-value arguments. Both
 arguments are evaluated under ordinary call rules; this is not a lazy conditional
-expression. Its `[Copy]` constraint is enough for whole-value returns without
+expression. Its default Copy-capable type-formal domain is enough for whole-value returns without
 operator conformance, construction, field inspection or a default value.
 The caller can compose it through another Copy-constrained helper without a
 general no-failure promise. Token/range fixtures verify independent nested

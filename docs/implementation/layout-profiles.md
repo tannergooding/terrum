@@ -39,52 +39,32 @@ Alignment, and the recomputed Alignment/RequiredAlignment facts alongside its
 fixed-array data. Its unapproved wide-layout candidate is implemented
 provisionally: `BoundStruct.Size` and struct-field offsets/sizes use u64 in the
 private record, while managed-class geometry remains i32. The reader
-recomputes and compares full-width facts; tests cover a positive-stride
-type-only aggregate above u32, exact u64 bytes, consumer linking, predecessor
-revision rejection and incompatible replacement. Standard `Layout` rows
-preserve normalized Packing and declared Alignment, then rederive geometry on
-load. Standard type-only source-free round-trip and provider binding are
-covered, including a positive-stride fixed-array extent above u32. These
-metadata paths do not establish executable L1 Body support.
+recomputes and compares full-width facts. Standard `Layout` rows preserve
+normalized Packing and declared Alignment, then rederive geometry on load;
+these metadata paths do not establish executable L1 Body support.
 The unapproved
 [L1 aggregate-layout proposal](../proposals/standard-trrm-local-aggregate-layout-execution.md)
 is provisionally implemented through local constructors, field/array places,
 calls/returns, source-free reconstruction, bounded provider closure and native
-lowering. Selected Debug tests exercise interleaved imported nominal
-array/field paths, provider relocation, JIT/AOT, a no-entry root-only library,
-wide geometry and the manifest routes. The nested Standard L1 field-place
-slice now covers two array projections, a field suffix, a conditional RHS call
-and repeated postfix-index writes. Its `Pack=1`, `Alignment=32` source-free
-JIT/AOT case observes adjacent fields/elements. This remains focused slice
-evidence, not complete L1 acceptance: other negative boundaries, full
-remapping/re-emission, all CLI routes, generic/receiver-bearing providers and
-overall L1 qualification remain open. Bodyless MethodDef provider binding now
-preserves the assigned implicit-readonly-reference Param marker, validates it
-against the provider signature, re-emits the import and executes the adapted
-CallSite through the selected native L1 route.
-Separate A2/L1 wide-array tests cover source-free L1 Body/TypeMap re-emission
-of a positive-stride extent
-above u32 with a retained UInt64 index, A2 type-only reconstruction of wide
-positive-stride arrays, A2 Body-map admission of a maximum-u32 address count
-within a larger array, and the distinct A2R1+Repeat zero-stride maximum-count
-case. These metadata tests do not allocate or execute the large arrays.
+lowering. The bounded slice includes nested field/array places and conditional
+writes. Full remapping/re-emission, generic/receiver-bearing providers and
+overall L1 qualification remain open. Bodyless MethodDef provider binding
+preserves the assigned implicit-readonly-reference Param marker through
+provider comparison and the selected CallSite route. A2/L1 metadata retains
+wide positive-stride extents and UInt64 indices; this does not allocate or
+execute large arrays.
 
 Native x64 frames account for object alignment, dynamic stack alignment,
-probing and recoverable unwind state. Supervised JIT/AOT tests cover
-Alignment=32 and 8192 with packed-field and array access; only Alignment=32
-is covered by the Standard L1 source-free runtime cases. The unapproved
+probing and recoverable unwind state. Standard L1 runtime support is bounded
+to Alignment=32. The unapproved
 [Layout CLI manifest proposal](../proposals/source-layout-cli-registration.md)
-is provisionally exercised through its direct/Standard source commands and the
-separately unapproved
+defines the direct/Standard source commands and the separately unapproved
 [private-module extension](../proposals/private-module-source-layout-registration.md).
 The latter admits only `compile-module producer`/`consumer` source binding;
 the separate scanner extension admits `scan-component`/`build-component`
 only for scanner-source compilation, not subject-source compilation.
 `compile-native`, native set/graph, source-free and syntax-only routes still
-reject the option. Active regressions cover strict manifest admission,
-`TRM2001` configuration failures, `TRM2002` source/producer/output aliases,
-private producer and consumer source compilation, and unchanged native-route
-rejection. The manifest configures only the explicit Layout/Blittable
+reject the option. The manifest configures only the explicit Layout/Blittable
 providers; it does not select native Core schemas or persist host
 authorization/context in `.trm`.
 
