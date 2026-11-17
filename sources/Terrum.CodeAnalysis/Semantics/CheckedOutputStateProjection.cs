@@ -82,44 +82,43 @@ internal static class CheckedOutputStateProjection
         private readonly IReadOnlyList<CheckedReferenceTypeDefinition>
             _checkedReferenceTypes;
         private readonly AnalysisBudget _budget;
+        private readonly Func<BoundExpression, PredicateKey> _getPredicateKey;
         private readonly List<BoundExpression> _guardExpressions = [];
-        private readonly Dictionary<BoundExpression, int> _guardOrdinals
-            = new(ReferenceEqualityComparer.Instance);
+        private readonly Dictionary<PredicateKey, int> _guardOrdinals = [];
         private readonly List<ImmutableArray<int>> _valueReadOutputs = [];
-        private readonly Dictionary<BoundExpression, int> _valueReadOrdinals
-            = new(ReferenceEqualityComparer.Instance);
-        private readonly HashSet<int> _referencedOutputFormals = [];
+        private readonly Dictionary<PredicateKey, int> _valueReadOrdinals = [];
 
         internal ClauseProjection(BoundFunction function,
             IReadOnlyDictionary<int, int> outputIndexes,
             IReadOnlyList<CheckedReferenceTypeDefinition>
                 checkedReferenceTypes,
-            AnalysisBudget budget)
+            AnalysisBudget budget,
+            Func<BoundExpression, PredicateKey> getPredicateKey)
         {
             _function = function;
             _outputIndexes = outputIndexes;
             _checkedReferenceTypes = checkedReferenceTypes;
             _budget = budget;
+            _getPredicateKey = getPredicateKey;
         }
-
-        internal IReadOnlySet<int> ReferencedOutputFormals
-            => _referencedOutputFormals;
 
         internal bool TryBuild(BoundExpression expression,
             out Formula formula)
+            => TryBuild(expression, out formula, out _);
+
+        internal bool TryBuild(BoundExpression expression,
+            out Formula formula, out ImmutableArray<int> referencedFormals)
         {
             _budget.Consume();
             formula = null!;
+            referencedFormals = [];
             if (expression.Type != PrimitiveType.Bool)
             {
                 return false;
             }
 
             var references = InspectOutputReferences(expression);
-            foreach (var formal in references.ReferencedFormals)
-            {
-                _referencedOutputFormals.Add(formal);
-            }
+            referencedFormals = references.ReferencedFormals;
             if (references.IsInvalid)
             {
                 return false;
@@ -142,7 +141,8 @@ internal static class CheckedOutputStateProjection
                 {
                     if (!references.HasOutputReferences)
                     {
-                        return TryGetGuardAtom(expression, out formula);
+                        return TryBuildIndependentPredicate(expression,
+                            out formula);
                     }
 
                     return false;
@@ -154,7 +154,8 @@ internal static class CheckedOutputStateProjection
 
             if (!references.HasOutputReferences)
             {
-                return TryGetGuardAtom(expression, out formula);
+                return TryBuildIndependentPredicate(expression,
+                    out formula);
             }
 
             if (expression is BoundUnary {
@@ -218,11 +219,12 @@ internal static class CheckedOutputStateProjection
             requiredOutputIndexes.Sort();
             var requiredOutputs = requiredOutputIndexes
                 .Distinct().ToImmutableArray();
-            if (!_valueReadOrdinals.TryGetValue(expression,
+            var valueReadKey = _getPredicateKey(expression);
+            if (!_valueReadOrdinals.TryGetValue(valueReadKey,
                     out var valueOrdinal))
             {
                 valueOrdinal = _valueReadOutputs.Count;
-                _valueReadOrdinals.Add(expression, valueOrdinal);
+                _valueReadOrdinals.Add(valueReadKey, valueOrdinal);
                 _valueReadOutputs.Add(requiredOutputs);
             }
 
@@ -429,16 +431,87 @@ internal static class CheckedOutputStateProjection
                 return false;
             }
 
-            if (!_guardOrdinals.TryGetValue(expression,
+            var key = _getPredicateKey(expression);
+            if (!_guardOrdinals.TryGetValue(key,
                     out var ordinal))
             {
                 ordinal = _guardExpressions.Count;
-                _guardOrdinals.Add(expression, ordinal);
+                _guardOrdinals.Add(key, ordinal);
                 _guardExpressions.Add(expression);
             }
 
             formula = new GuardAtomFormula(ordinal);
             return true;
+        }
+
+        private bool TryBuildIndependentPredicate(
+            BoundExpression expression, out Formula formula)
+        {
+            _budget.Consume();
+            if (expression is BoundConstant {
+                    Type: PrimitiveType.Bool,
+                } constant)
+            {
+                formula = new ConstantFormula(constant.Value != 0);
+                return true;
+            }
+
+            if (expression is BoundUnary {
+                    Operator: TokenKind.Bang,
+                    Type: PrimitiveType.Bool,
+                    Operand.Type: PrimitiveType.Bool,
+                } unary)
+            {
+                if (!TryBuildIndependentPredicate(unary.Operand,
+                        out var operand))
+                {
+                    formula = null!;
+                    return false;
+                }
+
+                formula = new NotFormula(operand);
+                return true;
+            }
+
+            if (expression is BoundBinary binary
+                && IsBooleanConnective(binary))
+            {
+                if (!TryBuildIndependentPredicate(binary.Left,
+                        out var left)
+                    || !TryBuildIndependentPredicate(binary.Right,
+                        out var right))
+                {
+                    formula = null!;
+                    return false;
+                }
+
+                formula = new BinaryFormula(binary.Operator, left, right);
+                return true;
+            }
+
+            if (expression is BoundConditional conditional
+                && conditional.Type == PrimitiveType.Bool
+                && conditional.Condition.Type == PrimitiveType.Bool
+                && conditional.WhenTrue.Type == PrimitiveType.Bool
+                && conditional.WhenFalse.Type == PrimitiveType.Bool)
+            {
+                if (!TryBuildIndependentPredicate(conditional.Condition,
+                        out var condition)
+                    || !TryBuildIndependentPredicate(conditional.WhenTrue,
+                        out var whenTrue)
+                    || !TryBuildIndependentPredicate(conditional.WhenFalse,
+                        out var whenFalse))
+                {
+                    formula = null!;
+                    return false;
+                }
+
+                formula = new ConditionalFormula(condition, whenTrue,
+                    whenFalse);
+                return true;
+            }
+
+            return TryGetGuardAtom(expression, out formula);
         }
 
         private bool IsSafeGuardExpression(BoundExpression expression)
@@ -794,7 +867,11 @@ internal static class CheckedOutputStateProjection
         var explicitlyReplacedOutputFormals = new HashSet<int>();
         var predicateKeys = new Dictionary<BoundExpression, PredicateKey>(
             ReferenceEqualityComparer.Instance);
+        var supportedClauses = new List<(
+            uint Ordinal, BoundExpression Predicate,
+            bool HasOutputReferences)>();
         var hasOutputContract = false;
+        var canCombineClauses = true;
         PredicateKey GetPredicateKey(BoundExpression predicate)
         {
             if (predicateKeys.TryGetValue(predicate, out var existingKey))
@@ -823,20 +900,24 @@ internal static class CheckedOutputStateProjection
                     continue;
                 }
 
-                var projection = new ClauseProjection(function,
-                    outputIndexes, checkedReferenceTypes, budget);
+                var projection = new ClauseProjection(function, outputIndexes,
+                    checkedReferenceTypes, budget, GetPredicateKey);
                 if (!projection.TryBuild(clause.Predicate,
-                        out var formula))
+                        out var formula, out var referencedFormals))
                 {
-                    if (projection.ReferencedOutputFormals.Count != 0)
+                    if (!referencedFormals.IsEmpty)
                     {
                         return function;
                     }
 
+                    canCombineClauses = false;
                     continue;
                 }
 
-                if (projection.ReferencedOutputFormals.Count == 0)
+                var hasOutputReferences = !referencedFormals.IsEmpty;
+                supportedClauses.Add((clause.PhaseLocalOrdinal,
+                    clause.Predicate, hasOutputReferences));
+                if (!hasOutputReferences)
                 {
                     continue;
                 }
@@ -854,6 +935,62 @@ internal static class CheckedOutputStateProjection
                 derivedRelations.AddRange(clauseRelations);
                 explicitlyReplacedOutputFormals.UnionWith(
                     clauseOutputFormals);
+            }
+
+            if (canCombineClauses && hasOutputContract
+                && supportedClauses.Count > 1)
+            {
+                try
+                {
+                    var combinedProjection = new ClauseProjection(function,
+                        outputIndexes, checkedReferenceTypes, budget,
+                        GetPredicateKey);
+                    var formulas = new List<Formula>(
+                        supportedClauses.Count);
+                    uint? combinedClauseOrdinal = null;
+                    var canDeriveConjunction = true;
+                    foreach (var clause in supportedClauses)
+                    {
+                        if (!combinedProjection.TryBuild(clause.Predicate,
+                                out var formula,
+                                out var referencedFormals)
+                            || referencedFormals.IsEmpty
+                                == clause.HasOutputReferences)
+                        {
+                            canDeriveConjunction = false;
+                            break;
+                        }
+
+                        formulas.Add(formula);
+                        if (clause.HasOutputReferences
+                            && (combinedClauseOrdinal is null
+                                || clause.Ordinal
+                                    < combinedClauseOrdinal.Value))
+                        {
+                            combinedClauseOrdinal = clause.Ordinal;
+                        }
+                    }
+
+                    if (canDeriveConjunction
+                        && combinedClauseOrdinal is uint clauseOrdinal)
+                    {
+                        var combinedFormula
+                            = CombineClauseConjunction(formulas, budget);
+                        if (combinedProjection.TryDerive(combinedFormula,
+                                clauseOrdinal, outputs.ToImmutable(),
+                                GetPredicateKey, out var relations,
+                                out var outputFormals))
+                        {
+                            derivedRelations.AddRange(relations);
+                            explicitlyReplacedOutputFormals.UnionWith(
+                                outputFormals);
+                        }
+                    }
+                }
+                catch (ProjectionDeclinedException)
+                {
+                    // The conjunction supplements valid per-clause relations.
+                }
             }
         }
         catch (ProjectionDeclinedException)
@@ -998,6 +1135,33 @@ internal static class CheckedOutputStateProjection
         }
     }
 
+    private static Formula CombineClauseConjunction(
+        IReadOnlyList<Formula> formulas, AnalysisBudget budget)
+    {
+        if (formulas.Count == 0)
+        {
+            throw new ArgumentException(
+                "A clause conjunction requires at least one formula.",
+                nameof(formulas));
+        }
+
+        return Combine(0, formulas.Count);
+
+        Formula Combine(int start, int count)
+        {
+            if (count == 1)
+            {
+                return formulas[start];
+            }
+
+            budget.Consume();
+            var leftCount = count / 2;
+            return new BinaryFormula(TokenKind.AmpersandAmpersand,
+                Combine(start, leftCount),
+                Combine(start + leftCount, count - leftCount));
+        }
+    }
+
     internal static HashSet<int> GetExplicitOutputFormals(
         BoundFunction function,
         IReadOnlyList<CheckedReferenceTypeDefinition>
@@ -1044,6 +1208,18 @@ internal static class CheckedOutputStateProjection
 
         var immutableOutputs = outputs.ToImmutable();
         var budget = new AnalysisBudget();
+        PredicateKey GetPredicateKey(BoundExpression predicate)
+            => new(BoundTreeTraversal.RewriteExpressions(predicate,
+                expression => {
+                    budget.Consume();
+                    return expression with { Span = default };
+                }));
+
+        var supportedClauses = new List<(
+            uint Ordinal, BoundExpression Predicate,
+            bool HasOutputReferences)>();
+        var hasOutputContract = false;
+        var canCombineClauses = true;
         try
         {
             foreach (var clause in function.DeclarationContractClauses)
@@ -1055,27 +1231,33 @@ internal static class CheckedOutputStateProjection
                 }
 
                 var projection = new ClauseProjection(function,
-                    outputIndexes, checkedReferenceTypes, budget);
+                    outputIndexes, checkedReferenceTypes, budget,
+                    GetPredicateKey);
                 if (!projection.TryBuild(clause.Predicate,
-                        out var formula))
+                        out var formula, out var referencedFormals))
                 {
-                    if (projection.ReferencedOutputFormals.Count != 0)
+                    if (!referencedFormals.IsEmpty)
                     {
                         throw new NotSupportedException(
                             "A checked output-state relation could not be rederived from its retained postcondition.");
                     }
 
+                    canCombineClauses = false;
                     continue;
                 }
 
-                if (projection.ReferencedOutputFormals.Count == 0)
+                var hasOutputReferences = !referencedFormals.IsEmpty;
+                supportedClauses.Add((clause.PhaseLocalOrdinal,
+                    clause.Predicate, hasOutputReferences));
+                if (!hasOutputReferences)
                 {
                     continue;
                 }
 
+                hasOutputContract = true;
                 if (!projection.TryDerive(formula,
                         clause.PhaseLocalOrdinal, immutableOutputs,
-                        static predicate => new PredicateKey(predicate),
+                        GetPredicateKey,
                         out _, out var clauseOutputFormals))
                 {
                     throw new NotSupportedException(
@@ -1083,6 +1265,61 @@ internal static class CheckedOutputStateProjection
                 }
 
                 explicitOutputFormals.UnionWith(clauseOutputFormals);
+            }
+
+            if (canCombineClauses && hasOutputContract
+                && supportedClauses.Count > 1)
+            {
+                try
+                {
+                    var combinedProjection = new ClauseProjection(function,
+                        outputIndexes, checkedReferenceTypes, budget,
+                        GetPredicateKey);
+                    var formulas = new List<Formula>(
+                        supportedClauses.Count);
+                    uint? combinedClauseOrdinal = null;
+                    var canDeriveConjunction = true;
+                    foreach (var clause in supportedClauses)
+                    {
+                        if (!combinedProjection.TryBuild(clause.Predicate,
+                                out var formula,
+                                out var referencedFormals)
+                            || referencedFormals.IsEmpty
+                                == clause.HasOutputReferences)
+                        {
+                            canDeriveConjunction = false;
+                            break;
+                        }
+
+                        formulas.Add(formula);
+                        if (clause.HasOutputReferences
+                            && (combinedClauseOrdinal is null
+                                || clause.Ordinal
+                                    < combinedClauseOrdinal.Value))
+                        {
+                            combinedClauseOrdinal = clause.Ordinal;
+                        }
+                    }
+
+                    if (canDeriveConjunction
+                        && combinedClauseOrdinal is uint clauseOrdinal)
+                    {
+                        var combinedFormula
+                            = CombineClauseConjunction(formulas, budget);
+                        if (combinedProjection.TryDerive(combinedFormula,
+                                clauseOrdinal, immutableOutputs,
+                                GetPredicateKey, out _,
+                                out var combinedOutputFormals))
+                        {
+                            explicitOutputFormals.UnionWith(
+                                combinedOutputFormals);
+                        }
+                    }
+                }
+                catch (ProjectionDeclinedException)
+                {
+                    // The conjunction supplements per-clause consequences.
+                }
             }
         }
         catch (ProjectionDeclinedException exception)

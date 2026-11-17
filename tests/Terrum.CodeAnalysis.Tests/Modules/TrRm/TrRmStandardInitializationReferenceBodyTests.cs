@@ -4059,16 +4059,27 @@ internal sealed class TrRmStandardInitializationReferenceBodyTests
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        var function = ((BoundProgram)compilation.Program!).Functions
-            .Single(static candidate => candidate.Name == "MaybeFill");
+        var program = (BoundProgram)compilation.Program!;
+        var function = program.Functions.Single(
+            static candidate => candidate.Name == "MaybeFill");
         Assert.That(function.DeclarationContractClauses,
             Has.Length.EqualTo(3));
-        Assert.That(function.CheckedOutputStatePredicates.Select(
+        var predicates = function.CheckedOutputStatePredicates;
+        Assert.That(predicates, Has.Length.EqualTo(3));
+        Assert.That(predicates.Select(
                 static predicate => (predicate.FormalOrdinal,
                     predicate.PhaseLocalOrdinal, predicate.State)),
-            Is.EqualTo([(2, 0u, (byte)1), (2, 1u, (byte)1)]));
+            Is.EqualTo([
+                (2, 0u, (byte)1), (2, 1u, (byte)1),
+                (2, 2u, (byte)1),
+            ]));
+        var coveragePredicate = predicates.Single(static predicate =>
+            predicate.Predicate is BoundBinary {
+                Operator: TokenKind.PipePipe,
+            });
+        Assert.That(coveragePredicate.State, Is.EqualTo(1));
 
-        var readVariables = function.CheckedOutputStatePredicates
+        var readVariables = predicates
             .Select(predicate => {
                 var reads = new SortedSet<int>();
                 _ = BoundTreeTraversal.VisitExpressionTree(
@@ -4078,12 +4089,35 @@ internal sealed class TrRmStandardInitializationReferenceBodyTests
                             _ = reads.Add(read.Variable);
                         }
                     });
-                return reads.ToArray();
+                return string.Join(",", reads);
             });
-        Assert.That(readVariables, Is.EqualTo(new[] {
-            new[] { 0 },
-            new[] { 1 },
-        }));
+        Assert.That(readVariables, Is.EquivalentTo(["0", "1", "0,1"]));
+
+        const string moduleIdentity = "cross-clause-output-state";
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            moduleIdentity, GeneralPredicateGraphsSchemaIdentity, 1);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateGeneralPredicateGraphsDraftAndGetExecutionTables(
+                TrRmArtifactIndex.ForGeneralPredicateGraphsDraft(artifact));
+        var outputs = tables.Contracts.GetOutputStateContracts(1);
+        Assert.That(outputs, Has.Length.EqualTo(3));
+        var footprintRootCounts = outputs.Select(output => {
+            var footprintRow
+                = tables.PredicateGraphs.GetReadFootprintRow(
+                    checked((int)output.PredicateGraphRow));
+            return tables.PredicateReadFootprints.GetRootRowCount(
+                footprintRow);
+        });
+        Assert.That(footprintRootCounts,
+            Is.EquivalentTo(new[] { 1u, 1u, 2u }));
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(
+                GeneralPredicateGraphsSchemaIdentity, artifact),
+            moduleIdentity, []);
+        Assert.That(loaded.Functions.Single(
+                static candidate => candidate.Name == "MaybeFill")
+            .CheckedOutputStatePredicates, Has.Length.EqualTo(3));
     }
 
     [Test]

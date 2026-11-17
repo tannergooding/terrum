@@ -533,13 +533,18 @@ operations, total conversions, conditionals, FrozenValueNode literals
 TypeSpec rows for the full built-in scalar domain; source-free provider
 re-emission covers the full built-in scalar domain. Native lowering does not
 evaluate phase-3 selector graphs.
+The source projection preserves per-clause OutputState consequences and adds
+bounded conjunction-derived relations when the normal-postcondition set is
+within the supported scalar subset, correlating repeated guard expressions
+across clauses.
 The Standard producer and source-free re-emitter preserve rootless scalar
 predicates with an empty read footprint for either OutputState value. Loading
 checks the graph and relation shape without re-proving the producer's body.
 This composition does not select the LayoutQueries source/provider/query-Body
 profile. Phase-2 ensure persistence, checked conversions, bit reinterpretation,
-calls, captures, places, complete dependency/provider replacement remapping
-and graph execution remain open. Native JIT and PE execution also cover
+calls, captures, places, broader cross-clause value coverage, complete
+dependency/provider replacement remapping and graph execution remain open.
+Native JIT and PE execution also cover
 imported default-Boolean OutputState calls after same-profile
 provider/consumer re-emission; they do not establish phase-3 graph execution.
 The provisional
