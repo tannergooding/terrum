@@ -568,6 +568,144 @@ internal sealed class TrRmC1EnumClosureSourceTests
     }
 
     [Test]
+    public void ReemitsTransitiveImportedStructClosureAcrossProviders()
+    {
+        var schemaIdentity = s_schemaIdentities[0];
+        var leafTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public struct Leaf { public int32 Id; }
+            }
+            """);
+        var leafCompilation = Compilation.CreateLibrary(leafTree);
+        Assert.That(leafCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, leafCompilation.Diagnostics));
+        var leafProgram = (BoundProgram)leafCompilation.Program!;
+        var leafExport = new TrRmSourceTypeExport("Demo", "Leaf",
+            "type.leaf") {
+            FieldExports = [
+                new TrRmSourceFieldExport("Id", "field.leaf.id"),
+            ],
+        };
+        var leafArtifact = TrRmExecutableCompiler.EmitStandard(
+            leafProgram, "StructLeafProvider", schemaIdentity, 1,
+            [leafExport], [], [], []);
+        var leafInput = new TrRmStandardArtifactInput(schemaIdentity,
+            leafArtifact);
+        var leafReference = TrRmExecutableCompiler.CreateStandardReference(
+            leafInput, "StructLeafProvider", [], ["type.leaf"]);
+
+        var middleTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public struct Wrapper { public Leaf Child; }
+            }
+            """);
+        var middleCompilation = Compilation.CreateLibrary(middleTree,
+            leafReference);
+        Assert.That(middleCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                middleCompilation.Diagnostics));
+        var middleProgram = (BoundProgram)middleCompilation.Program!;
+        var wrapperExport = new TrRmSourceTypeExport("Demo", "Wrapper",
+            "type.wrapper") {
+            FieldExports = [
+                new TrRmSourceFieldExport("Child",
+                    "field.wrapper.child"),
+            ],
+        };
+        var middleArtifact = TrRmExecutableCompiler.EmitStandard(
+            middleProgram, "StructMiddleProvider", schemaIdentity, 1,
+            [wrapperExport], [], [], []);
+        var middleInput = new TrRmStandardArtifactInput(schemaIdentity,
+            middleArtifact);
+        var middleReference = TrRmExecutableCompiler.CreateStandardReference(
+            middleInput, "StructMiddleProvider", [leafInput],
+            ["type.wrapper"]);
+        Assert.That(middleReference.Structures.Any(
+            static structure => structure.Name == "Demo.Leaf"), Is.True);
+
+        var consumerTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public struct Packet { public Wrapper Value; }
+            }
+            """);
+        var consumerCompilation = Compilation.CreateLibrary(consumerTree,
+            middleReference);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerProgram = (BoundProgram)consumerCompilation.Program!;
+        var packetExport = new TrRmSourceTypeExport("Demo", "Packet",
+            "type.packet") {
+            FieldExports = [
+                new TrRmSourceFieldExport("Value", "field.packet.value"),
+            ],
+        };
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            consumerProgram, "StructConsumer", schemaIdentity, 1,
+            [packetExport], [], [], []);
+        var consumerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            consumerArtifact);
+        var providers = new[] { middleInput, leafInput };
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            consumerInput, "StructConsumer", providers, ["type.packet"]);
+        Assert.That(reference.Structures, Has.Length.EqualTo(3));
+        Assert.That(reference.Structures.Any(
+            static structure => structure.Name == "Demo.Leaf"
+                && structure.StandardTypeOrigin is not null), Is.True);
+        Assert.That(reference.Structures.Any(
+            static structure => structure.Name == "Demo.Wrapper"
+                && structure.StandardTypeOrigin is not null), Is.True);
+
+        var sourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), reference);
+        Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceFreeCompilation.Diagnostics));
+        var reemitted = TrRmExecutableCompiler.EmitStandard(
+            sourceFreeCompilation.Program!, "StructConsumer",
+            schemaIdentity, 1);
+        var reloadedReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+            "StructConsumer", providers, ["type.packet"]);
+        Assert.That(reloadedReference.Structures, Has.Length.EqualTo(3));
+        var reloadedCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), reloadedReference);
+        Assert.That(reloadedCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                reloadedCompilation.Diagnostics));
+
+        var incompatibleLeafTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public struct Leaf { public int64 Id; }
+            }
+            """);
+        var incompatibleLeafCompilation
+            = Compilation.CreateLibrary(incompatibleLeafTree);
+        Assert.That(incompatibleLeafCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                incompatibleLeafCompilation.Diagnostics));
+        var incompatibleLeafArtifact
+            = TrRmExecutableCompiler.EmitStandard(
+                (BoundProgram)incompatibleLeafCompilation.Program!,
+                "StructLeafProvider", schemaIdentity, 1, [
+                    new TrRmSourceTypeExport("Demo", "Leaf",
+                        "type.leaf") {
+                        FieldExports = [
+                            new TrRmSourceFieldExport("Id",
+                                "field.leaf.id"),
+                        ],
+                    },
+                ], [], [], []);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                consumerInput, "StructConsumer", [
+                    middleInput,
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        incompatibleLeafArtifact),
+                ], ["type.packet"]));
+    }
+
+    [Test]
     public void EmitsEN1ClassFieldsWithTypedEnumReferences()
     {
         var schemaIdentity = s_schemaIdentities[0];

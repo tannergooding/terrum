@@ -1531,7 +1531,9 @@ closure. Fresh source emission can carry selected imported enum roots into
 local struct FieldDefs. Mixed type-only loading also accepts direct imported
 enum fields and non-generic struct TypeDef Imports; source-free re-emission
 preserves TypeDef/FieldDef ExportKeys, Import edges and FieldDef TypeSpec
-references.
+references. A two-provider Leaf-to-Wrapper-to-Packet regression now exercises
+transitive imported struct closure and source-free re-emission/reload; it
+remains unverified under the active hold.
 
 EN1 source emission now also supports local non-generic class TypeDefs and
 FieldDefs with class, struct and enum TypeSpecs, default layouts and explicit
