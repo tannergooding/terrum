@@ -33,8 +33,10 @@ internal sealed class MutableBufferFieldViewTests
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Owner + """
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(1, out var first);
-                require OwnedInt32Buffer.TryCreate(1, out var second);
+                init OwnedInt32Buffer first;
+                require OwnedInt32Buffer.TryCreate(1, ref init first);
+                init OwnedInt32Buffer second;
+                require OwnedInt32Buffer.TryCreate(1, ref init second);
                 mut Owner owner = new Owner(move first, move second);
                 mut MutableInt32BufferView view = owner.Words.SliceMutable(0, 0);
             """ + operation + " return view.Length; }"));
@@ -52,7 +54,8 @@ internal sealed class MutableBufferFieldViewTests
                 public Owner(OwnedInt32Buffer words) { Words = move words; Marker = 42; }
             }
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(1, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(1, ref init raw);
                 mut Owner owner = new Owner(move raw);
                 mut MutableInt32BufferView view = owner.Words.SliceMutable(0, 0);
                 int32 marker = owner.Marker;
@@ -68,8 +71,10 @@ internal sealed class MutableBufferFieldViewTests
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Owner + """
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(1, out var first);
-                require OwnedInt32Buffer.TryCreate(1, out var second);
+                init OwnedInt32Buffer first;
+                require OwnedInt32Buffer.TryCreate(1, ref init first);
+                init OwnedInt32Buffer second;
+                require OwnedInt32Buffer.TryCreate(1, ref init second);
                 mut Owner owner = new Owner(move first, move second);
                 ReadonlyInt32BufferView outer = owner.Words.Slice(0, 0);
                 if (true) {
@@ -93,14 +98,18 @@ internal sealed class MutableBufferFieldViewTests
         var compilation = Compilation.Create(SyntaxTree.Parse(Owner + """
             int32 ToInt(bool value) { return 0; }
             bool Replace(out Owner result) {
-                require OwnedInt32Buffer.TryCreate(1, out var first);
-                require OwnedInt32Buffer.TryCreate(1, out var second);
+                init OwnedInt32Buffer first;
+                require OwnedInt32Buffer.TryCreate(1, ref init first);
+                init OwnedInt32Buffer second;
+                require OwnedInt32Buffer.TryCreate(1, ref init second);
                 result = new Owner(move first, move second);
                 return true;
             }
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(1, out var first);
-                require OwnedInt32Buffer.TryCreate(1, out var second);
+                init OwnedInt32Buffer first;
+                require OwnedInt32Buffer.TryCreate(1, ref init first);
+                init OwnedInt32Buffer second;
+                require OwnedInt32Buffer.TryCreate(1, ref init second);
             """ + acquisition + " return 0; }"));
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3023"),Is.True);
         Assert.That(compilation.Program, Is.Null);
@@ -133,7 +142,8 @@ internal sealed class MutableBufferFieldViewTests
                 public Owner(OwnedInt32Buffer words) { Words = move words; }
             }
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(1, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(1, ref init raw);
                 mut Owner owner = new Owner(move raw);
                 mut MutableInt32BufferView view = {{receiver}}.SliceMutable(0, 0);
                 return view.Length;

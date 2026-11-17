@@ -54,7 +54,7 @@ internal sealed class NoThrowTests
     [TestCase("[NoThrow(1)] int32 F() { return 42; }")]
     [TestCase("struct Value { public int32 Number; [NoThrow] public Value(int32 number) { Number = number; } }")]
     [TestCase("struct Value { public int32 Result { [NoThrow] get { return 42; } } }")]
-    [TestCase("[NoThrow] T Identity<T>(T value) where T : [Copy] { return value; }")]
+    [TestCase("[NoThrow] T Identity<T>(T value)  { return value; }")]
     [TestCase("interface Addition<A, B, C> { [NoThrow] static C operator +(A left, B right); }")]
     public void RetiredNoThrowSourceUseIsDiagnosed(string source)
     {
@@ -194,7 +194,6 @@ internal sealed class NoThrowTests
     [TestCase("int32","int32(uint32.MaxValue)")]
     [TestCase("int32","(int32.MaxValue + 1) - 1")]
     [TestCase("uint32","(uint32.MaxValue + 1) - 1")]
-    [TestCase("int32","0 * Read()")]
     [TestCase("int32","1 + value")]
     [TestCase("uint32","uint32(int32(-1))")]
     [TestCase("int64","int64(uint64.MaxValue)")]
@@ -571,8 +570,6 @@ internal sealed class NoThrowTests
     [TestCase("int32 F(int32 value) { return value + 1; }")]
     [TestCase("int32 F(int32 value) { return value - 1; }")]
     [TestCase("int64 F(int64 value) { return value * 2; }")]
-    [TestCase("uint64 F(uint64 value) { return value / 2; }")]
-    [TestCase("int32 F(int32 value) { return value % 2; }")]
     [TestCase("int32 F(int32 value) { return -value; }")]
     [TestCase("int32 F() { return -int32.MinValue; }")]
     [TestCase("int64 F() { return -int64.MinValue; }")]
@@ -612,6 +609,169 @@ internal sealed class NoThrowTests
         var forged = program with { Functions = program.Functions.SetItem(index, program.Functions[index] with { NoFailureProof = true }) };
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(forged))!;
         _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(forged, NativeRuntimePolicy.FailFast))!;
+    }
+
+    [TestCase("""
+        int32 AddIfInRange(int32 sourceLength, int32 start, int32 length) {
+            if (sourceLength < 0 || start < 0 || length < 0
+                || start > sourceLength) { return 0; }
+            int32 availableLength = sourceLength - start;
+            if (length > availableLength || length == 0) { return 0; }
+            return start + length;
+        }
+        """)]
+    [TestCase("""
+        int32 AddIfInRange(int32 start, int32 length) {
+            if (start < 0 || length < 0
+                || length > int32.MaxValue - start) { return 0; }
+            return start + length;
+        }
+        """)]
+    [TestCase("""
+        int32 SubtractIfOrdered(int32 sourceLength, int32 start) {
+            if (sourceLength < 0 || start < 0 || start > sourceLength) {
+                return 0;
+            }
+            return sourceLength - start;
+        }
+        """)]
+    public void GuardedIntegerRangesSatisfyInternalNoFailureProof(
+        string source)
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = MarkNoFailureProof(compilation.Program!);
+        SemanticVerifier.VerifyLibrary(program);
+    }
+
+    [Test]
+    public void GuardedNativeWidthArithmeticSatisfiesInternalNoFailureProof()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            nint IncrementSigned(nint value) {
+                if (value == nint.MaxValue) { return value; }
+                return value + nint(1);
+            }
+
+            nuint IncrementUnsigned(nuint value) {
+                if (value == nuint.MaxValue) { return value; }
+                return value + nuint(1);
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        SemanticVerifier.VerifyLibrary(
+            MarkNoFailureProof(compilation.Program!));
+    }
+
+    [TestCase("""
+        int32 Add(int32 left, int32 right) { return left + right; }
+        """)]
+    [TestCase("""
+        int32 AddOnePastBoundary(int32 start, int32 length) {
+            if (start < 0 || length < 0
+                || length > int32.MaxValue - start) { return 0; }
+            return start + length + 1;
+        }
+        """)]
+    [TestCase("""
+        int32 Divide(int32 value, int32 divisor) {
+            return value / divisor;
+        }
+        """)]
+    [TestCase("""
+        int32 Shift(int32 value, int32 count) {
+            return value << count;
+        }
+        """)]
+    [TestCase("""
+        nint Add(nint left, nint right) { return left + right; }
+        """)]
+    [TestCase("""
+        nuint Add(nuint left, nuint right) { return left + right; }
+        """)]
+    public void UnguardedAndOnePastIntegerOperationsFailNoFailureProof(
+        string source)
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        _ = Assert.Throws<ArgumentException>(() =>
+            SemanticVerifier.VerifyLibrary(
+                MarkNoFailureProof(compilation.Program!)));
+    }
+
+    [Test]
+    public void TotalDivisionAndRemainderRemainNoFailureOperations()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            uint64 DivideByTwo(uint64 value) { return value / 2; }
+            int32 RemainderByTwo(int32 value) { return value % 2; }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        SemanticVerifier.VerifyLibrary(
+            MarkNoFailureProof(compilation.Program!));
+    }
+
+    [Test]
+    public void ZeroMultiplicationStillRequiresCalleeNoFailureGuarantee()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            int32 Read() { return 42; }
+            int32 Fold() { return 0 * Read(); }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        _ = Assert.Throws<ArgumentException>(() =>
+            SemanticVerifier.VerifyLibrary(
+                MarkNoFailureProof(program, "Fold")));
+        SemanticVerifier.VerifyLibrary(MarkNoFailureProof(program));
+    }
+
+    [Test]
+    public void GuardedInvocationBufferIndexSatisfiesNoFailureProof()
+    {
+        var source = SyntaxTree.Parse("""
+            int32 ReadIfInRange(int32 start) {
+                int32 sourceLength = Host.Source.Length;
+                if (start < 0 || start >= sourceLength) { return 0; }
+                return int32(Host.Source[start]);
+            }
+            """);
+        var compilation = Compilation.CreateLibrary([source], [
+            new HostBuffer("Source", PrimitiveType.Char16, [], false) {
+                IsInvocationScoped = true,
+            },
+        ], BoundRuntimePolicy.CheckedExceptions);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        SemanticVerifier.VerifyLibrary(
+            MarkNoFailureProof(compilation.Program!));
+    }
+
+    [Test]
+    public void UnguardedInvocationBufferIndexDoesNotSatisfyNoFailureProof()
+    {
+        var compilation = Compilation.CreateLibrary(
+            [SyntaxTree.Parse("""
+                int32 ReadAt(int32 start) {
+                    return int32(Host.Source[start]);
+                }
+                """)], [
+                new HostBuffer("Source", PrimitiveType.Char16, [], false) {
+                    IsInvocationScoped = true,
+                },
+            ], BoundRuntimePolicy.CheckedExceptions);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        _ = Assert.Throws<ArgumentException>(() =>
+            SemanticVerifier.VerifyLibrary(
+                MarkNoFailureProof(compilation.Program!)));
     }
     [TestCase("int32 index = 0; return Host.Data[index];")]
     [TestCase("mut int32 index = 0; Host.Data[index] = 1; return 0;")]

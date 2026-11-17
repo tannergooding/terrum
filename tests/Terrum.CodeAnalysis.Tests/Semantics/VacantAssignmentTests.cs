@@ -38,8 +38,8 @@ internal sealed class VacantAssignmentTests
     [TestCase("init int32 value; value = 1; value = 42; return value;")]
     [TestCase("init int32 value; if (Pick()) { value = 1; } value = 42; return value;")]
     [TestCase("init int32 value; while (Pick()) { value = 42; } return 42;")]
-    [TestCase("init int32 value; Fill(init value); value = 42; return value;")]
-    [TestCase("init int32 value; if (Pick()) { require Fill(init value); } require Fill(init value); return value;")]
+    [TestCase("init int32 value; Fill(ref init value); value = 42; return value;")]
+    [TestCase("init int32 value; if (Pick()) { require Fill(ref init value); } require Fill(ref init value); return value;")]
     [TestCase("init var value; value = int32(1); value = int64(42); return 42;")]
     [TestCase("init bool value; value = FillBool(init value); return 42;")]
     [TestCase("int32 value = 1; value = 42; return value;")]
@@ -47,8 +47,8 @@ internal sealed class VacantAssignmentTests
     {
         var compilation = Compilation.Create(SyntaxTree.Parse($$"""
             bool Pick() { return false; }
-            bool Fill(init ref<int32> value) { value = 42; return true; }
-            bool FillBool(init ref<bool> value) { value = true; return true; }
+            bool Fill(ref<init int32> value) { *value = 42; return true; }
+            bool FillBool(ref<init bool> value) { *value = true; return true; }
             int32 Main() { {{body}} }
             """));
         Assert.That(compilation.HasErrors, Is.True);
@@ -158,11 +158,15 @@ internal sealed class VacantAssignmentTests
     }
 
     [Test]
-    public void InlineOutputDeclarationCannotForgeStandaloneInitializationAuthority()
+    public void TypedVacantLocalCarriesVerifiedInitializationAuthority()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
-            bool Fill(init ref<int32> value) { value = 42; return true; }
-            int32 Main() { if (Fill(init var value)) { return value; } return 0; }
+            bool Fill(ref<init int32> value) { *value = 42; return true; }
+            int32 Main() {
+                init int32 value;
+                if (Fill(ref init value)) { return value; }
+                return 0;
+            }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => {
@@ -173,10 +177,12 @@ internal sealed class VacantAssignmentTests
         var functionIndex = program.Functions.Select((function, index) => (function, index))
             .Single(item => item.function.Name == "Main").index;
         var function = program.Functions[functionIndex];
-        var slot = global::System.Linq.Enumerable.Single(function.Variables.Select((variable, index) => (variable, index))).index;
+        var slot = global::System.Linq.Enumerable.Single(
+            function.Variables.Select((variable, index) => (variable, index)),
+            static item => item.variable.Name == "value").index;
         var forged = function with {
             Variables = function.Variables.SetItem(slot, function.Variables[slot] with {
-                IsInitializationLocal = true,
+                IsInitializationLocal = false,
             }),
         };
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {

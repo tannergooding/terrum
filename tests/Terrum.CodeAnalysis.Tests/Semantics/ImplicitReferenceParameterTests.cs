@@ -141,7 +141,8 @@ internal sealed class ImplicitReferenceParameterTests
                 return Observe(view.Read(0));
             }
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(1, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(1, ref init raw);
                 mut OwnedInt32Buffer value = move raw;
                 require value.TryAppend(42);
                 return Read(move value);

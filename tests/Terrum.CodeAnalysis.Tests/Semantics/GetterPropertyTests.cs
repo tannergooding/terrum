@@ -310,6 +310,46 @@ internal sealed class GetterPropertyTests
     }
 
     [Test]
+    public void ClassConstructorInitializesFieldBackedGetterOnlyProperty()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            class Box {
+                public int32 Value { get { return field; } }
+                public Box(int32 value) { Value = value; }
+            }
+            int32 Main() {
+                require Box.TryCreate(42, out var box);
+                return box.Value;
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var boxClass = global::System.Linq.Enumerable.Single(
+            program.Classes);
+        Assert.That(global::System.Linq.Enumerable.Single(boxClass.Fields)
+            .BackingPropertyName, Is.EqualTo("Value"));
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast),
+            Is.EqualTo(42));
+    }
+
+    [Test]
+    public void OrdinaryClassMethodCannotUseConstructorBackingPrivilege()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            class Box {
+                public int32 Value { get { return field; } }
+                public Box(int32 value) { Value = value; }
+                public void Update(int32 value) { Value = value; }
+            }
+            int32 Main() { return 0; }
+            """));
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
+    }
+
+    [Test]
     public void GetterVerifierRejectsFieldNameCollisionsForStructsAndClasses()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(ValueSource));
@@ -373,7 +413,7 @@ internal sealed class GetterPropertyTests
                 public Counter(int32 value) { _value = value; }
                 public int32 Value { get { return _value; } }
             }
-            int32 Read<T>(T input) where T : [Copy] { return input.Value; }
+            int32 Read<T>(T input)  { return input.Value; }
             int32 Main() { return Read(new Counter(42)); }
             """));
         Assert.That(compilation.HasErrors, Is.True);
@@ -497,14 +537,15 @@ internal sealed class GetterPropertyTests
                 public Counter(int32 value) { _value = value; }
                 public int32 Value {  get { return _value; } }
             }
-            bool Fill(init ref<int32> value) { value = 42; return true; }
+            bool Fill(ref<init int32> value) { *value = 42; return true; }
             public int32 Read() {
-                require Fill(init var result);
+                init int32 result;
+                require Fill(ref init result);
                 return new Counter(result).Value;
             }
             """, NativeRuntimePolicy.FailFast);
         var producer = ModuleCompiler.CreateProducer(program, ["Read"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(104));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(106));
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Read(); }"),
             ModuleCompiler.CreateReference(producer));
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));

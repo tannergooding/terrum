@@ -21,11 +21,11 @@ internal sealed class DependencySourceRecipeTests
             "[this: Captures(nameof(source))] internal void CaptureReceiver(Holder source) { }",
             "[param(holder): Captures(\"source\")] internal void CaptureHolder(Holder holder, Holder source) { }",
             "[param(holder): Captures(nameof(source))] [param(holder): ForwardsBacking(nameof(source))] internal void ForwardCapture(Holder holder, Holder source) { }",
-            "[param(output): Captures(nameof(source))] internal bool CaptureOutput(init ref<write Holder> output, Holder source) { require Holder.TryCreate(out var created); *output = created; return true; }",
+            "[param(output): Captures(nameof(source))] internal bool CaptureOutput(ref<init write Holder> output, Holder source) { require Holder.TryCreate(out var created); *output = created; return true; }",
             "[Captures()] internal void CaptureNothing() { }",
-            "[param(output): DependsOn(nameof(source))] internal bool Initialize(init ref<int32> output, int32 source) { output = source; return true; }",
-            "[param(output): DependsOn(nameof(source))] [param(output): ForwardsBacking(nameof(source))] internal bool ForwardOutput(init ref<write Holder> output, write Holder source) { *output = source; return true; }",
-            "internal bool InitializeInline([DependsOn(nameof(source))] init ref<int32> output, int32 source) { output = source; return true; }",
+            "[param(output): DependsOn(nameof(source))] internal bool Initialize(ref<init int32> output, int32 source) { *output = source; return true; }",
+            "[param(output): DependsOn(nameof(source))] [param(output): ForwardsBacking(nameof(source))] internal bool ForwardOutput(ref<init write Holder> output, write Holder source) { *output = source; return true; }",
+            "internal bool InitializeInline([DependsOn(nameof(source))] ref<init int32> output, int32 source) { *output = source; return true; }",
             "[return: DependsOn()] internal int32 Independent() { return 42; }",
         ];
         var prefix = """
@@ -133,11 +133,11 @@ internal sealed class DependencySourceRecipeTests
     [TestCase("[this: Captures(nameof(source))] internal void CaptureReceiver(Holder source) { }")]
     [TestCase("[param(holder): Captures(\"source\")] internal void CaptureHolder(Holder holder, Holder source) { }")]
     [TestCase("[param(holder): Captures(nameof(source))] [param(holder): ForwardsBacking(nameof(source))] internal void ForwardCapture(Holder holder, Holder source) { }")]
-    [TestCase("[param(output): Captures(nameof(source))] internal bool CaptureOutput(init ref<write Holder> output, Holder source) { require Holder.TryCreate(out var created); *output = created; return true; }")]
+    [TestCase("[param(output): Captures(nameof(source))] internal bool CaptureOutput(ref<init write Holder> output, Holder source) { require Holder.TryCreate(out var created); *output = created; return true; }")]
     [TestCase("[Captures()] internal void CaptureNothing() { }")]
-    [TestCase("[param(output): DependsOn(nameof(source))] internal bool Initialize(init ref<int32> output, int32 source) { output = source; return true; }")]
-    [TestCase("[param(output): DependsOn(nameof(source))] [param(output): ForwardsBacking(nameof(source))] internal bool ForwardOutput(init ref<write Holder> output, write Holder source) { *output = source; return true; }")]
-    [TestCase("internal bool InitializeInline([DependsOn(nameof(source))] init ref<int32> output, int32 source) { output = source; return true; }")]
+    [TestCase("[param(output): DependsOn(nameof(source))] internal bool Initialize(ref<init int32> output, int32 source) { *output = source; return true; }")]
+    [TestCase("[param(output): DependsOn(nameof(source))] [param(output): ForwardsBacking(nameof(source))] internal bool ForwardOutput(ref<init write Holder> output, write Holder source) { *output = source; return true; }")]
+    [TestCase("internal bool InitializeInline([DependsOn(nameof(source))] ref<init int32> output, int32 source) { *output = source; return true; }")]
     [TestCase("[return: DependsOn()] internal int32 Independent() { return 42; }")]
     [TestCase("internal int32 Current { [DependsOn(this)] get { return Value; } }")]
     public void EachValidRecipeBindsIndependently(string declaration)
@@ -158,7 +158,7 @@ internal sealed class DependencySourceRecipeTests
     [TestCase("[return: DependsOn(this)] internal static int32 Select() { return 42; }")]
     [TestCase("[param(missing): Captures()] internal void Store(Holder value) { }")]
     [TestCase("[return: DependsOn(nameof(value))] [return: DependsOn(\"value\")]")]
-    [TestCase("internal bool InitializeInline([ForwardsBacking()] init ref<int32> output) { output = 42; return true; }")]
+    [TestCase("internal bool InitializeInline([ForwardsBacking()] ref<init int32> output) { *output = 42; return true; }")]
     public void RejectsUnknownDuplicateOrIncompatibleRecipes(string attribute)
     {
         var compilation = CompileLibrary(attribute

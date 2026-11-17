@@ -17,15 +17,15 @@ namespace Terrum.CodeAnalysis.Tests.Semantics;
 internal sealed class VacantLocalTests
 {
     internal const string ScalarSource = """
-        bool Fill(bool publish, init ref<int32> value) {
+        bool Fill(bool publish, ref<init int32> value) {
             if (!publish) { return false; }
-            value = 42;
+            *value = 42;
             return true;
         }
         public int32 Read() {
-            init var value;
-            if (Fill(false, init value)) { return 1; }
-            require Fill(true, init value);
+            init int32 value;
+            if (Fill(false, ref init value)) { return 1; }
+            require Fill(true, ref init value);
             return value;
         }
         int32 Main() { return Read(); }
@@ -63,11 +63,10 @@ internal sealed class VacantLocalTests
         Assert.That(tree.Root.ToFullString(), Is.EqualTo(source));
     }
     [TestCase("init int32 value;",PrimitiveType.Int32)]
-    [TestCase("init var value;",PrimitiveType.Int32)]
-    public void BothDeclarationsBindAReadOnlyVacantSlot(string declaration, PrimitiveType type)
+    public void TypedVacantDeclarationBindsAReadOnlySlot(string declaration, PrimitiveType type)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(
-            ScalarSource.Replace("init var value;", declaration, StringComparison.Ordinal)));
+            ScalarSource.Replace("init int32 value;", declaration, StringComparison.Ordinal)));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => {
             var __nunitActual0 = compilation.Program;
@@ -159,20 +158,21 @@ internal sealed class VacantLocalTests
         }))!;
     }
     [TestCase("return value;","TRM3016")]
-    [TestCase("if (Fill(true, init value)) { return value; } return value;","TRM3016")]
-    [TestCase("require Fill(true, init value); require Fill(true, init value); return value;","TRM3016")]
-    [TestCase("require Fill(true, init value); value = 1; return value;","TRM3016")]
+    [TestCase("if (Fill(true, ref init value)) { return value; } return value;","TRM3016")]
+    [TestCase("require Fill(true, ref init value); require Fill(true, ref init value); return value;","TRM3030")]
+    [TestCase("require Fill(true, ref init value); value = 1; return value;","TRM3016")]
     [TestCase("require Fill(true, out value); return value;","TRM3011")]
     [TestCase("init var value;","TRM3016")]
     public void VacantLocalCannotBeReadOrReinitializedOutsideItsCheckedCompletion(string body, string code)
     {
         var source = ScalarSource[..ScalarSource.IndexOf("public int32 Read()", StringComparison.Ordinal)]
-            + "int32 Main() { init var value; " + body + " return 42; }";
+            + "int32 Main() { init int32 value; " + body + " return 42; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == code),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == code),Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
     }
-    [TestCase("for (init int32 value; Fill(true, init value); ) { return value; } return 42;",true)]
-    [TestCase("while (false) { require Fill(true, init value); } return value;",false)]
+    [TestCase("for (init int32 value; Fill(true, ref init value); ) { return value; } return 42;",true)]
+    [TestCase("while (false) { require Fill(true, ref init value); } return value;",false)]
     public void LoopInitializationRespectsTheEntryAndBackEdge(string body, bool valid)
     {
         var declaration = body.StartsWith("for", StringComparison.Ordinal) ? "" : "init int32 value;";
@@ -188,14 +188,15 @@ internal sealed class VacantLocalTests
             Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3016"),Is.True);
         }
     }
-    [TestCase("init int64 value;","Fill(init value)")]
-    [TestCase("init var value;","Copy(init value)")]
-    public void VacantInferenceRejectsIncompatibleOrUnresolvedOutput(string declaration, string call)
+    [TestCase("init int64 value;","Fill(ref init value)","TRM3007")]
+    [TestCase("init var value;","Copy(int32(42), ref init value)","TRM3016")]
+    public void VacantInferenceRejectsIncompatibleOrUnresolvedOutput(
+        string declaration, string call, string expectedCode)
     {
         var source = $$"""
-            bool Fill(init ref<int32> value) { value = 42; return true; }
-             bool Copy<T>(T source, init ref<T> value) where T : [Copy] {
-                value = source;
+            bool Fill(ref<init int32> value) { *value = 42; return true; }
+             bool Copy<T>(T source, ref<init T> value)  {
+                *value = source;
                 return true;
             }
             int32 Main() {
@@ -205,20 +206,22 @@ internal sealed class VacantLocalTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3011"),Is.True);
+            Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,
+                diagnostic => diagnostic.Code == expectedCode), Is.True,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
     }
 
     [Test]
     public void GenericInputAndVacantOutputCannotEstablishContradictoryTypes()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
-             bool Copy<T>(T source, init ref<T> result) where T : [Copy] {
-                result = source;
+             bool Copy<T>(T source, ref<init T> result)  {
+                *result = source;
                 return true;
             }
             int32 Main() {
                 init int64 output;
-                require Copy(int32(42), init output);
+                require Copy(int32(42), ref init output);
                 return 42;
             }
             """));
@@ -238,7 +241,7 @@ internal sealed class VacantLocalTests
             return (BoundProgram)__nunitActual5!;
         }))();
         var producer = ModuleCompiler.CreateProducer(program, ["Read"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(104));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(106));
         var oldHeader = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(oldHeader.AsSpan(4, 4), 39);
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(oldHeader))!;

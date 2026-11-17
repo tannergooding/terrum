@@ -94,6 +94,81 @@ internal sealed class NoReturnTests
         Assert.That(noBottomConversion.HasErrors, Is.True);
     }
 
+    [TestCase("void", PrimitiveType.Void)]
+    [TestCase("bool", PrimitiveType.Bool)]
+    [TestCase("char8", PrimitiveType.Char8)]
+    [TestCase("char16", PrimitiveType.Char16)]
+    [TestCase("char32", PrimitiveType.Char32)]
+    [TestCase("rune", PrimitiveType.Rune)]
+    [TestCase("int8", PrimitiveType.Int8)]
+    [TestCase("uint8", PrimitiveType.UInt8)]
+    [TestCase("int16", PrimitiveType.Int16)]
+    [TestCase("uint16", PrimitiveType.UInt16)]
+    [TestCase("int32", PrimitiveType.Int32)]
+    [TestCase("uint32", PrimitiveType.UInt32)]
+    [TestCase("int64", PrimitiveType.Int64)]
+    [TestCase("uint64", PrimitiveType.UInt64)]
+    [TestCase("int128", PrimitiveType.Int128)]
+    [TestCase("uint128", PrimitiveType.UInt128)]
+    [TestCase("float16", PrimitiveType.Float16)]
+    [TestCase("bfloat16", PrimitiveType.BFloat16)]
+    [TestCase("float32", PrimitiveType.Float32)]
+    [TestCase("float64", PrimitiveType.Float64)]
+    [TestCase("float128", PrimitiveType.Float128)]
+    [TestCase("decimal32", PrimitiveType.Decimal32)]
+    [TestCase("decimal64", PrimitiveType.Decimal64)]
+    [TestCase("decimal128", PrimitiveType.Decimal128)]
+    public void NoReturnAppliesToEveryDeclaredPrimitiveResultType(
+        string resultTypeName, PrimitiveType resultType)
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            $"[DoesNotReturn] public {resultTypeName} Stop() {{ require false; }}"));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var actual = compilation.Program;
+            Assert.That(actual, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)actual!;
+        }))();
+        Assert.That(program.Functions[0].ReturnType, Is.EqualTo(resultType));
+        Assert.That(program.Functions[0].DoesNotReturn, Is.True);
+        SemanticVerifier.VerifyLibrary(program);
+    }
+
+    [Test]
+    public void GenericNoReturnKeepsItsFormalResultType()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "[DoesNotReturn] T Stop<T>(T value) { require false; } "
+            + "int32 Caller() { return Stop<int32>(42); }"));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var actual = compilation.Program;
+            Assert.That(actual, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)actual!;
+        }))();
+        var definition = global::System.Linq.Enumerable.Single(
+            program.GenericMethodDefinitions,
+            static candidate => candidate.Name == "Stop");
+        var function = definition.ProofProgram.Functions[
+            definition.FunctionIndex];
+        var caller = global::System.Linq.Enumerable.Single(
+            program.Functions, static candidate => candidate.Name == "Caller");
+        var call = (BoundCall)((BoundReturn)
+            global::System.Linq.Enumerable.Single(caller.Body.Statements))
+            .Value!;
+
+        Assert.That(function.DoesNotReturn, Is.True);
+        Assert.That(function.ReturnType, Is.Not.EqualTo(PrimitiveType.Void));
+        Assert.That(program.Functions[call.Function].DoesNotReturn, Is.True);
+        SemanticVerifier.VerifyLibrary(program);
+
+        var invalid = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "[DoesNotReturn] T Identity<T>(T value) { return value; }"));
+        Assert.That(invalid.HasErrors, Is.True);
+    }
+
     [Test]
     public void InstanceConstructorsCanPublishNoReturnWithoutPublishingAReceiver()
     {

@@ -20,7 +20,7 @@ internal sealed class TryFinallyTests
     [TestCase("int32 Main() { try { return 42; } catch { return 0; } }","TRM")]
     [TestCase("int32 Main() { try { return 42; } }","TRM1001")]
     [TestCase("bool Take(out int32 x) { x = 42; try { return true; } finally { Clear(out x); } }  bool Clear(out int32 x) { return false; } int32 Main() { return 0; }","TRM3016")]
-    [TestCase("bool Fill(bool publish, init ref<int32> value) { if (publish) { value = 42; return true; } return false; } bool ReadAfterCall(bool publish) { init int32 value; try { return Fill(publish, init value); } finally { int32 observed = value; } } int32 Main() { return 0; }","TRM3016")]
+    [TestCase("bool Fill(bool publish, ref<init int32> value) { if (publish) { *value = 42; return true; } return false; } bool ReadAfterCall(bool publish) { init int32 value; try { return Fill(publish, ref init value); } finally { int32 observed = value; } } int32 Main() { return 0; }","TRM3016")]
     [TestCase("int32 Main() { try { return 42; } finally { use = 0; } int32 use = 1; }","TRM3006")]
     [TestCase("int32 Main() { try { int32 hidden = 42; } finally { int32 copy = hidden; } return 0; }","TRM3006")]
     [TestCase("bool Take(bool choose, out int32 x) { try { if (choose) { x = 42; return true; } } finally { int32 copy = x; } return false; } int32 Main() { return 0; }","TRM3016")]

@@ -251,7 +251,7 @@ internal sealed class NoThrowModuleTests
     }
 
     [Test]
-    public void PureUnfoldedCheckedArithmeticCannotForgeNoThrowInPersistedProducer()
+    public void OverflowingUnfoldedCheckedArithmeticCannotForgeNoThrowInPersistedProducer()
     {
         var folded = MarkNoFailureProof(CompileLibrary("public int32 Compute() { return 1 + 2; }"), "Compute");
         var function = global::System.Linq.Enumerable.Single(folded.Functions);
@@ -266,8 +266,8 @@ internal sealed class NoThrowModuleTests
             return (BoundConstant)__nunitActual5!;
         }))();
         var arithmetic = new BoundBinary(TokenKind.Plus,
+            new BoundConstant(int.MaxValue, PrimitiveType.Int32, constant.Span),
             new BoundConstant(1, PrimitiveType.Int32, constant.Span),
-            new BoundConstant(2, PrimitiveType.Int32, constant.Span),
             PrimitiveType.Int32, constant.Span);
         var forged = folded with {
             Functions = folded.Functions.SetItem(0, function with {

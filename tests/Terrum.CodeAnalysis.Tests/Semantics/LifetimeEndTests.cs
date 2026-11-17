@@ -28,14 +28,14 @@ internal sealed class LifetimeEndTests
     [TestCase("mut int32 value = 1; do { value = _; value = 42; } while (Pick()); return value;")]
     [TestCase("mut int32 value = 1; for (mut int32 i = 0; i < 2; i++) { value = _; value = 42; } return value;")]
     [TestCase("mut int32 value = 1; try { value = _; } finally { value = 42; } return value;")]
-    [TestCase("init int32 value; value = 1; value = _; require Fill(init value); return value;")]
-    [TestCase("mut int32 value = 1; value = _; require Fill(init value); return value;")]
+    [TestCase("init int32 value; value = 1; value = _; require Fill(ref init value); return value;")]
+    [TestCase("init mut int32 value; value = 1; value = _; require Fill(ref init value); return value;")]
     [TestCase("mut int32 value = 1; if (Pick()) { value = _; return 42; } return value + 41;")]
     public void EndLeavesAFixedBindingAndPreservesExistingInitializationAuthority(string body)
     {
         var program = Bind($$"""
             bool Pick() { return false; }
-            bool Fill(init ref<int32> value) { value = 42; return true; }
+            bool Fill(ref<init int32> value) { *value = 42; return true; }
             int32 Main() { {{body}} }
             """);
         SemanticVerifier.Verify(program);
@@ -66,8 +66,8 @@ internal sealed class LifetimeEndTests
         Assert.That(compilation.Program, Is.Null);
     }
     [TestCase("void End(int32 value) { value = _; }")]
-    [TestCase("bool Fill(init ref<int32> value) { value = 42; return true; } void End() { int32 value = 1; value = _; require Fill(init value); }")]
-    [TestCase("void End(init ref<int32> value) { value = _; }")]
+    [TestCase("bool Fill(ref<init int32> value) { *value = 42; return true; } void End() { int32 value = 1; value = _; require Fill(ref init value); }")]
+    [TestCase("void End(ref<init int32> value) { *value = _; }")]
     [TestCase("struct Pair { public int32 Value; public Pair() { Value = 1; } public void End() { this = _; } }")]
     [TestCase("struct Pair { public int32 Value; public Pair() { Value = 1; } public void End() { Value = _; } }")]
     [TestCase("struct Pair { public int32 Value; public Pair() { Value = 1; } } void End() { mut Pair pair = new Pair(); pair.Value = _; }")]
@@ -98,31 +98,30 @@ internal sealed class LifetimeEndTests
 
     [TestCase(false)]
     [TestCase(true)]
-    public void InlineInitCanRetryBeforePublicationButCannotReviveAnEndedReadonlyValue(bool endBeforeRetry)
+    public void InitReferenceCanRetryBeforePublicationAndAfterEndingTheValue(bool endBeforeRetry)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse($$"""
-            bool Fill(bool publish, init ref<int32> value) {
+            bool Fill(bool publish, ref<init int32> value) {
                 if (!publish) { return false; }
-                value = 42;
+                *value = 42;
                 return true;
             }
             int32 Main() {
-                if (Fill(false, init var value)) { return 1; }
-                require Fill(true, init value);
-                {{(endBeforeRetry ? "value = _; require Fill(true, init value);" : "")}}
+                init int32 value;
+                if (Fill(false, ref init value)) { return 1; }
+                require Fill(true, ref init value);
+                {{(endBeforeRetry ? "value = _; require Fill(true, ref init value);" : "")}}
                 return value;
             }
             """));
-        Assert.That(compilation.HasErrors, Is.EqualTo(endBeforeRetry));
-        if (!endBeforeRetry)
-        {
-            Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
-                var __nunitActual0 = compilation.Program;
-                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
-                return (BoundProgram)__nunitActual0!;
-            }))(),
-                NativeRuntimePolicy.FailFast), Is.EqualTo(42));
-        }
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))(),
+            NativeRuntimePolicy.FailFast), Is.EqualTo(42));
     }
 
     [Test]
@@ -134,11 +133,11 @@ internal sealed class LifetimeEndTests
                 public Owner() { Value = 42; }
                  [Cleanup] public void Close() { }
             }
-            bool Fill(init ref<Owner> value) { value = new Owner(); return true; }
+            bool Fill(ref<init Owner> value) { *value = new Owner(); return true; }
             int32 Main() {
                 Owner owner = new Owner();
                 Owner moved = move owner;
-                require Fill(init owner);
+                require Fill(ref init owner);
                 return moved.Value;
             }
             """));
@@ -155,7 +154,8 @@ internal sealed class LifetimeEndTests
                 public Owner(OwnedInt32Buffer words) { Words = move words; }
             }
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(1, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(1, ref init raw);
                 mut Owner owner = new Owner(move raw);
                 mut MutableInt32BufferView view = owner.Words.SliceMutable(0, 0);
                 {{(retireView ? "view = _;" : "")}}
@@ -182,7 +182,8 @@ internal sealed class LifetimeEndTests
     private const string Buffer = """
         bool Pick() { return false; }
         int32 Main() {
-            require OwnedInt32Buffer.TryCreate(2, out var raw);
+            init OwnedInt32Buffer raw;
+            require OwnedInt32Buffer.TryCreate(2, ref init raw);
             mut OwnedInt32Buffer owner = move raw;
             require owner.TryAppend(42);
         """;
@@ -349,7 +350,7 @@ internal sealed class LifetimeEndTests
     public void VerifierRejectsParameterEndAndImmutableInitCallAfterEnd()
     {
         var program = Bind("""
-            bool Fill(init ref<int32> result) { result = 42; return true; }
+            bool Fill(ref<init int32> result) { *result = 42; return true; }
             int32 End(int32 parameter) { int32 local = 1; local = _; return 42; }
             int32 Main() { return End(1); }
             """);

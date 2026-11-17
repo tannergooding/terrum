@@ -30,12 +30,14 @@ internal sealed class MutableOwningBufferFieldTests
             int32 Consume(Owner value) { return 42; }
             int32 ToInt(bool value) { return 42; }
             bool Replace(out Owner result) {
-                if (!OwnedInt32Buffer.TryCreate(1, out var next)) { return false; }
+                init OwnedInt32Buffer next;
+                if (!OwnedInt32Buffer.TryCreate(1, ref init next)) { return false; }
                 result = new Owner(move next);
                 return true;
             }
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(1, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(1, ref init raw);
             """ + operation + " return 0; }"));
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3023"),Is.True);
         Assert.That(compilation.Program, Is.Null);
@@ -55,8 +57,10 @@ internal sealed class MutableOwningBufferFieldTests
                  [Cleanup] public void Close() {}
             }
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(1, out var first);
-                require OwnedInt32Buffer.TryCreate(1, out var second);
+                init OwnedInt32Buffer first;
+                require OwnedInt32Buffer.TryCreate(1, ref init first);
+                init OwnedInt32Buffer second;
+                require OwnedInt32Buffer.TryCreate(1, ref init second);
                 mut Owner owner = new Owner(move first, move second);
             """ + operation + " return 0; }"));
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == code),Is.True);
@@ -88,7 +92,8 @@ internal sealed class MutableOwningBufferFieldTests
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Owner + """
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(2, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(2, ref init raw);
                 mut Owner owner = new Owner(move raw);
                 require owner.Words.TryAppend(42);
             """ + operation + " return 0; }"));
