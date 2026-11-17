@@ -1325,6 +1325,95 @@ internal sealed class TrRmC1EnumClosureSourceTests
     }
 
     [Test]
+    public void RefusesEN1ClassLayoutWithAnUnrepresentedTrailingHandle()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
+        var schemaIdentity
+            = $"{s_schemaIdentities[0]}-class-instance-layout-1";
+        var providerTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public class Leaf { public int32 Id; }
+                public class Box {
+                    public int32 Value;
+                    public Leaf Tail;
+                }
+            }
+            """);
+        var providerCompilation = Compilation.CreateLibrary(providerTree);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var providerProgram = (BoundProgram)providerCompilation.Program!;
+        TrRmSourceClassExport CreateClassExport(string name,
+            string typeKey, params string[] fieldKeys)
+        {
+            var declaration = providerTree.Root.Children
+                .OfType<SyntaxNode>()
+                .Single(node => node.Kind == SyntaxKind.ClassDeclaration
+                    && node.Children.OfType<SyntaxTokenElement>().Any(token =>
+                        token.Token.Kind == TokenKind.Identifier
+                        && token.Token.Name == name));
+            var fields = declaration.Children.OfType<SyntaxNode>()
+                .Where(static node =>
+                    node.Kind == SyntaxKind.FieldDeclaration).ToArray();
+            if (fields.Length != fieldKeys.Length)
+            {
+                throw new InvalidDataException(
+                    "The class layout fixture has an incomplete FieldDef key list.");
+            }
+
+            var classIndex = providerProgram
+                .SourceClassProgramAssociation!.Declarations.Single(
+                    item => item.Span == declaration.Span).ClassIndex;
+            var memberExports = fields.Select((field, index) =>
+                    new TrRmSourceClassMemberExport(0, field.Span,
+                        fieldKeys[index]))
+                .ToImmutableArray();
+            return new TrRmSourceClassExport(providerProgram, classIndex,
+                declaration.Span, typeKey, memberExports);
+        }
+
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, "ClassLayoutProvider", schemaIdentity, 1, [],
+            [], [
+                CreateClassExport("Leaf", "type.leaf", "field.leaf.id"),
+                CreateClassExport("Box", "type.box", "field.box.value",
+                    "field.box.tail"),
+            ], []);
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, "ClassLayoutProvider", [], [
+                "type.box",
+                "type.leaf",
+            ], ["field.box.value"]);
+        var queryCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Demo;
+                nint Offset() {
+                    return unsafe(offsetof(Box, Value));
+                }
+                """), reference, new CompilationOptions {
+                LayoutCoreRegistration
+                    = LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(queryCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                queryCompilation.Diagnostics));
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            queryCompilation.Program!, "ClassLayoutConsumer",
+            schemaIdentity, 1);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                consumerArtifact), "ClassLayoutConsumer", [providerInput]);
+
+        Assert.Throws<NotSupportedException>(() =>
+            NativeEmitter.EmitLibrary(loaded, ["Offset"],
+                NativeRuntimePolicy.FailFast));
+    }
+
+    [Test]
     public void LowersEN1ClassQueryThroughInlineStructLayout()
     {
         Assume.That(OperatingSystem.IsWindows()
