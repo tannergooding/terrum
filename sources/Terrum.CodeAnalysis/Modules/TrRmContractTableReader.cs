@@ -1544,6 +1544,8 @@ public readonly ref struct TrRmContractTableReader
                         {
                             throw InvalidContract();
                         }
+
+                        break;
                     default:
                         throw InvalidContract();
                 }
