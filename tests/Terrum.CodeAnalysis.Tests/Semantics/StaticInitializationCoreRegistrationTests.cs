@@ -6,6 +6,7 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics;
 
@@ -499,6 +500,181 @@ internal sealed class StaticInitializationCoreRegistrationTests
                 "sample.static-fields",
                 "trrm/1-draft-layout-queries-1", 1),
             Throws.TypeOf<NotSupportedException>());
+    }
+
+    [Test]
+    public void VerifierRejectsForgedStaticFieldUnsafeAuthorization()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            struct Example {
+                int32 Instance;
+                public static mut int32 Value = 1;
+                public static int32 ReadUnsafe() {
+                    unsafe { return Value; }
+                }
+                public static int32 ReadSafe() { return Value; }
+                public static void WriteUnsafe() {
+                    unsafe { Value = 2; }
+                }
+            }
+            """));
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        SemanticVerifier.Verify(program);
+
+        var readUnsafeIndex = program.Functions.IndexOf(
+            program.Functions.Single(static function =>
+                function.Name == "Example.ReadUnsafe"));
+        var readUnsafe = program.Functions[readUnsafeIndex];
+        var unauthorizedRead = BoundTreeTraversal.RewriteExpressions(
+            readUnsafe, static expression =>
+                expression is BoundStaticFieldRead fieldRead
+                    ? fieldRead with { IsUnsafeAuthorized = false }
+                    : expression);
+        Assert.That(() => SemanticVerifier.Verify(program with {
+            Functions = program.Functions.SetItem(readUnsafeIndex,
+                unauthorizedRead),
+        }), Throws.ArgumentException);
+
+        var readSafeIndex = program.Functions.IndexOf(
+            program.Functions.Single(static function =>
+                function.Name == "Example.ReadSafe"));
+        var readSafe = BoundTreeTraversal.RewriteExpressions(
+            program.Functions[readSafeIndex], static expression =>
+                expression is BoundStaticFieldRead fieldRead
+                    ? fieldRead with { IsUnsafeAuthorized = true }
+                    : expression);
+        Assert.That(() => SemanticVerifier.Verify(program with {
+            Functions = program.Functions.SetItem(readSafeIndex, readSafe),
+        }), Throws.ArgumentException);
+
+        var writeUnsafeIndex = program.Functions.IndexOf(
+            program.Functions.Single(static function =>
+                function.Name == "Example.WriteUnsafe"));
+        var writeUnsafe = program.Functions[writeUnsafeIndex];
+        var unsafeBlock = (BoundUnsafe)writeUnsafe.Body.Statements.Single();
+        var assignment = (BoundStaticFieldAssignment)
+            unsafeBlock.Body.Statements.Single();
+        var unauthorizedWrite = writeUnsafe with {
+            Body = writeUnsafe.Body with {
+                Statements = writeUnsafe.Body.Statements.SetItem(0,
+                    unsafeBlock with {
+                        Body = unsafeBlock.Body with {
+                            Statements = unsafeBlock.Body.Statements
+                                .SetItem(0, assignment with {
+                                    IsUnsafeAuthorized = false,
+                                }),
+                        },
+                    }),
+            },
+        };
+        Assert.That(() => SemanticVerifier.Verify(program with {
+            Functions = program.Functions.SetItem(writeUnsafeIndex,
+                unauthorizedWrite),
+        }), Throws.ArgumentException);
+    }
+
+    [Test]
+    public void VerifierRejectsInconsistentStaticFieldSourceAndInitializerFacts()
+    {
+        var compilation = Compilation.CreateLibrary([
+            SyntaxTree.Parse("""
+                struct Example {
+                    int32 Instance;
+                    public static int32 First = 1;
+                    public static int32 Other = 2;
+                }
+                """),
+            SyntaxTree.Parse("public int32 Identity() { return 1; }"),
+        ]);
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        SemanticVerifier.Verify(program);
+        var field = program.StaticFields[0];
+        var invalidFieldSourceOffset = program with {
+            StaticFields = program.StaticFields.SetItem(0,
+                field with { SourceOffset = field.SourceOffset + 1 }),
+        };
+        Assert.That(() => SemanticVerifier.Verify(invalidFieldSourceOffset),
+            Throws.ArgumentException);
+
+        var laterField = program.StaticFields[1];
+        var laterInitializerIndex = laterField.InitializerFunctionIndex;
+        var laterInitializer = program.Functions[laterInitializerIndex];
+        var initializerIndex = field.InitializerFunctionIndex;
+        var initializer = program.Functions[initializerIndex];
+        var combinedSpan = new TextSpan(field.Span.Start,
+            laterField.Span.Start + laterField.Span.Length
+                - field.Span.Start);
+        var invalidFieldOrder = program with {
+            StaticFields = program.StaticFields.SetItem(0,
+                field with {
+                    SourceOffset = combinedSpan.Start,
+                    Span = combinedSpan,
+                }).SetItem(1, laterField with {
+                    SourceOffset = combinedSpan.Start,
+                    Span = combinedSpan,
+                }),
+            Functions = program.Functions.SetItem(initializerIndex,
+                initializer with { Span = combinedSpan }).SetItem(
+                    laterInitializerIndex,
+                    laterInitializer with { Span = combinedSpan }),
+        };
+        Assert.That(() => SemanticVerifier.Verify(invalidFieldOrder),
+            Throws.ArgumentException);
+
+        var invalidInitializerSource = program with {
+            Functions = program.Functions.SetItem(initializerIndex,
+                initializer with { SourceInputOrdinal = 1 }),
+        };
+        Assert.That(() => SemanticVerifier.Verify(invalidInitializerSource),
+            Throws.ArgumentException);
+
+        var invalidInitializerSpan = program with {
+            Functions = program.Functions.SetItem(initializerIndex,
+                initializer with {
+                    Span = new TextSpan(field.Span.Start + 1,
+                        field.Span.Length - 1),
+                }),
+        };
+        Assert.That(() => SemanticVerifier.Verify(invalidInitializerSpan),
+            Throws.ArgumentException);
+    }
+
+    [Test]
+    public void VerifierRejectsMismatchedGenericStaticOwnerSubstitution()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            struct Box<T> {
+                T Value;
+                public static int32 Marker = 1;
+            }
+            public int32 Read() { return Box<int32>.Marker; }
+            """));
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        var field = program.StaticFields.Single();
+        var group = program.StaticInitializationGroups.Single();
+        var mismatchedOwner = field.Owner with {
+            TypeArguments = field.Owner.TypeArguments.SetItem("T",
+                PrimitiveType.UInt32),
+        };
+        var malformedProgram = program with {
+            StaticFields = program.StaticFields.SetItem(0,
+                field with { Owner = mismatchedOwner }),
+            StaticInitializationGroups =
+                program.StaticInitializationGroups.SetItem(0,
+                    group with { Owner = mismatchedOwner }),
+        };
+
+        Assert.That(() => SemanticVerifier.Verify(malformedProgram),
+            Throws.ArgumentException);
     }
 
     [Test]

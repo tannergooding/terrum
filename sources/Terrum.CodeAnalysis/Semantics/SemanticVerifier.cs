@@ -3452,6 +3452,22 @@ public static partial class SemanticVerifier
             }
             var pending = new Stack<(object Node, bool IsUnsafe, int Depth)>();
             Push(pending, function.Body, false, 0);
+            foreach (var clause in function.DeclarationContractClauses)
+            {
+                if (clause is null || clause.Predicate is null)
+                {
+                    throw Invalid(function.Span);
+                }
+                Push(pending, clause.Predicate, false, 0);
+            }
+            foreach (var predicate in function.CheckedOutputStatePredicates)
+            {
+                if (predicate is null || predicate.Predicate is null)
+                {
+                    throw Invalid(function.Span);
+                }
+                Push(pending, predicate.Predicate, false, 0);
+            }
             var remaining = MaximumAnalysisVisits;
             while (pending.TryPop(out var item))
             {
@@ -3491,6 +3507,11 @@ public static partial class SemanticVerifier
                         when PrivatePlaceRequiresUnsafe(store.Destination,
                             program) && !item.IsUnsafe:
                         throw InvalidEffect(store.Span, "UnsafeCaller");
+                    case BoundStaticFieldRead fieldRead
+                        when !IsStaticFieldUnsafeAuthorizationValid(
+                            fieldRead.Field, fieldRead.IsUnsafeAuthorized,
+                            item.IsUnsafe, program):
+                        throw InvalidEffect(fieldRead.Span, "UnsafeCaller");
                     case BoundNativePointerAddress address when !item.IsUnsafe || !address.IsUnsafeAuthorized:
                         throw InvalidEffect(address.Span, "NativePointer");
                     case BoundNativeFixedArrayPointerAddress address
@@ -3523,6 +3544,14 @@ public static partial class SemanticVerifier
                         Push(pending, assignment.Value, item.IsUnsafe, depth);
                         break;
                     case BoundStaticFieldAssignment assignment:
+                        if (!IsStaticFieldUnsafeAuthorizationValid(
+                                assignment.Field,
+                                assignment.IsUnsafeAuthorized,
+                                item.IsUnsafe, program))
+                        {
+                            throw InvalidEffect(assignment.Span,
+                                "UnsafeCaller");
+                        }
                         Push(pending, assignment.Value, item.IsUnsafe, depth);
                         break;
                     case BoundBufferAssignment assignment:
@@ -24213,10 +24242,11 @@ public static partial class SemanticVerifier
                     || field.DeclarationOrdinal != (uint)ordinal
                     || field.SourceInputOrdinal < previousSourceInput
                     || (field.SourceInputOrdinal == previousSourceInput
-                        && field.SourceOffset < previousSourceOffset)
+                        && field.SourceOffset <= previousSourceOffset)
                     || field.SourceInputOrdinal < 0
                     || field.SourceInputOrdinal >= program.SourceInputCount
                     || field.SourceOffset < 0
+                    || field.SourceOffset != field.Span.Start
                     || (field.IsPrivate && field.IsInternal)
                     || (field.IsFile
                         && (field.IsPrivate || field.IsInternal))
@@ -24309,6 +24339,9 @@ public static partial class SemanticVerifier
                     if (initializer is null
                         || initializer.StaticFieldInitializerIndex
                             != fieldIndex
+                        || initializer.SourceInputOrdinal
+                            != field.SourceInputOrdinal
+                        || initializer.Span != field.Span
                         || initializer.ReturnType != field.Type
                         || initializer.ParameterCount != 0
                         || initializer.IsExternal || !initializer.IsStatic
@@ -24412,8 +24445,83 @@ public static partial class SemanticVerifier
                 < (uint)program.Classes.Length
             && program.Classes[ManagedClassTypes.ClassIndex(ownerType)].Name
                 == owner.Name;
-        return isStruct || isClass;
+        if (isStruct)
+        {
+            return IsValidStaticOwnerTypeArguments(owner,
+                (int)ownerType - 100, program);
+        }
+        return isClass && owner.TypeArguments.IsEmpty;
     }
+
+    private static bool IsValidStaticOwnerTypeArguments(
+        BoundStaticOwnerIdentity owner, int structureIndex,
+        BoundProgram program)
+    {
+        var structure = program.Structures[structureIndex];
+        var definitionIndex = structure.SourceGenericTypeDefinitionIndex;
+        if (definitionIndex < 0)
+        {
+            return owner.TypeArguments.IsEmpty;
+        }
+        if ((uint)definitionIndex
+                >= (uint)program.SourceGenericTypeDefinitions.Length
+            || program.SourceGenericTypeInstances.IsDefault)
+        {
+            return false;
+        }
+
+        BoundSourceGenericTypeInstance? instance = null;
+        foreach (var candidate in program.SourceGenericTypeInstances)
+        {
+            if (candidate.StructureIndex != structureIndex)
+            {
+                continue;
+            }
+            if (instance is not null)
+            {
+                return false;
+            }
+            instance = candidate;
+        }
+        if (instance is null
+            || instance.DefinitionIndex != definitionIndex)
+        {
+            return false;
+        }
+
+        var definition = program.SourceGenericTypeDefinitions[
+            definitionIndex];
+        var typeFormalOrdinal = 0;
+        foreach (var formal in definition.Formals)
+        {
+            if (formal.Kind != BoundGenericMethodFormalKind.Type)
+            {
+                continue;
+            }
+            if (formal.TypeFormalOrdinal != typeFormalOrdinal
+                || (uint)typeFormalOrdinal
+                    >= (uint)instance.TypeArguments.Length
+                || !owner.TypeArguments.TryGetValue(formal.Name,
+                    out var actualType)
+                || actualType
+                    != instance.TypeArguments[typeFormalOrdinal])
+            {
+                return false;
+            }
+            typeFormalOrdinal++;
+        }
+
+        return typeFormalOrdinal == instance.TypeArguments.Length
+            && owner.TypeArguments.Count == typeFormalOrdinal;
+    }
+
+    private static bool IsStaticFieldUnsafeAuthorizationValid(
+        int fieldIndex, bool isUnsafeAuthorized, bool isUnsafe,
+        BoundProgram program)
+        => (uint)fieldIndex < (uint)program.StaticFields.Length
+            && isUnsafeAuthorized == isUnsafe
+            && (!program.StaticFields[fieldIndex].RequiresUnsafeCaller
+                || isUnsafe);
 
     private static bool IsValidStaticFriendTargets(
         ImmutableArray<BoundFriendTarget> targets,
