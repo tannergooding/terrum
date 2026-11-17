@@ -146,6 +146,8 @@ public static partial class TrRmExecutableCompiler
         ImmutableArray<BoundFunction>.Builder functions,
         int[] functionIndexByMethodRow,
         ImmutableArray<BoundStruct> structures,
+        List<CheckedReferenceTypeDefinition>
+            checkedReferenceTypes,
         List<NativePointerTypeDefinition> nativePointerTypeDefinitions,
         int[] structureTypeByTypeDef, uint ruleRevision)
     {
@@ -167,9 +169,10 @@ public static partial class TrRmExecutableCompiler
             if (place.ParameterOrdinal >= 0)
             {
                 if (place.ParameterOrdinal >= variables.Count
-                    || !variables[place.ParameterOrdinal].IsOut
-                    || !variables[place.ParameterOrdinal].IsInit
-                    || variables[place.ParameterOrdinal].Type != placeType)
+                    || !TryGetScalarInitOutputReferentType(
+                        variables[place.ParameterOrdinal],
+                        checkedReferenceTypes, out var outputType)
+                    || outputType != placeType)
                 {
                     throw Invalid("An output place does not match its formal parameter.");
                 }
@@ -193,6 +196,7 @@ public static partial class TrRmExecutableCompiler
         var valueVariables = new int[body.Values.Length];
         Array.Fill(valueVariables, -1);
         var valueExpressions = new BoundExpression?[body.Values.Length];
+        var valueConstants = new BoundConstant?[body.Values.Length];
         var conditionalResult = body.Terminator.Opcode == 0x81
             ? body.Terminator.Operands[0] : 0;
         var conditionalResultIsCall = conditionalResult != 0
@@ -286,6 +290,10 @@ public static partial class TrRmExecutableCompiler
 
             var variable = valueVariables[valueId - 1];
             valueExpressions[valueId - 1] = new BoundRead(variable, expression.Type, default);
+            if (expression is BoundConstant constant)
+            {
+                valueConstants[valueId - 1] = constant;
+            }
             AddStatement(new BoundLocal(variable, expression, default));
         }
 
@@ -396,7 +404,23 @@ public static partial class TrRmExecutableCompiler
                         var placeId = PlaceForHandle(operation.Operands[0]);
                         var place = PlaceVariable(placeId);
                         var initialValue = ReadValue(operation.Operands[1]);
-                        if (body.Places[placeId - 1].Flags is 5 or 7)
+                        var placeInfo = body.Places[placeId - 1];
+                        if (placeInfo.ParameterOrdinal >= 0)
+                        {
+                            var parameter = variables[place];
+                            if (!TryGetScalarInitOutputReferentType(
+                                    parameter, checkedReferenceTypes,
+                                    out var referentType)
+                                || referentType != initialValue.Type)
+                            {
+                                throw Invalid("An initialization write does not match its reference formal.");
+                            }
+                            AddStatement(new BoundExpressionStatement(
+                                new BoundReferenceWrite(
+                                    new BoundRead(place, parameter.Type, default),
+                                    initialValue, default), default));
+                        }
+                        else if (placeInfo.Flags is 5 or 7)
                         {
                             AddStatement(new BoundLocal(place, initialValue, default));
                         }
@@ -485,20 +509,39 @@ public static partial class TrRmExecutableCompiler
                             }
                             else if (formal.IsOut || formal.IsInit)
                             {
-                                if (!formal.IsOut || !formal.IsInit
-                                    || !IsOutputScalarType(formal.Type))
+                                if (!TryGetScalarInitOutputReferentType(
+                                        formal, checkedReferenceTypes,
+                                        out var outputType))
                                 {
                                     throw Invalid("The output formal type is outside the executable profile.");
                                 }
 
                                 var place = PlaceVariable(PlaceForHandle(argument));
-                                if (variables[place].Type != formal.Type)
+                                var outputVariable = variables[place];
+                                if (outputVariable.IsInit && !outputVariable.IsOut)
                                 {
-                                    throw Invalid("Output argument type does not match its formal.");
+                                    if (!CanForwardInitializationReference(
+                                            outputVariable, formal,
+                                            checkedReferenceTypes, outputType))
+                                    {
+                                        throw Invalid("An initialization output argument is incompatible with its destination.");
+                                    }
+                                    arguments.Add(new BoundReferenceReborrow(
+                                        new BoundRead(place, outputVariable.Type,
+                                            default),
+                                        formal.Type, default));
                                 }
-                                arguments.Add(new BoundOutArgument(place, false, formal.Type, default) {
-                                    IsInit = true,
-                                });
+                                else
+                                {
+                                    if (outputVariable.Type != outputType
+                                        || !outputVariable.IsInitializationLocal)
+                                    {
+                                        throw Invalid("An initialization output argument must name a vacant local place.");
+                                    }
+                                    arguments.Add(new BoundReferenceFormation(
+                                        new BoundRead(place, outputType, default),
+                                        formal.Type, default));
+                                }
                             }
                             else
                             {
@@ -703,7 +746,7 @@ public static partial class TrRmExecutableCompiler
                         var isShift = operation.Kind is 6 or 7;
                         if (!IsInteger(integerLeft.Type)
                             || (isShift
-                                ? integerRight.Type != PrimitiveType.UInt32
+                                ? integerRight.Type != PrimitiveType.Int32
                                 : integerLeft.Type != integerRight.Type))
                         {
                             throw Invalid("Binary operands are outside the executable integer profile.");
@@ -719,11 +762,8 @@ public static partial class TrRmExecutableCompiler
                             7 => TokenKind.ShiftRight,
                             _ => throw Invalid("The executable place profile has an unsupported Binary kind."),
                         };
-                        var rightValue = isShift
-                            ? new BoundCast(integerRight, PrimitiveType.Int32, default)
-                            : integerRight;
                         DefineValue(operation.Result, new BoundBinary(token,
-                            integerLeft, rightValue, integerLeft.Type, default));
+                            integerLeft, integerRight, integerLeft.Type, default));
                         break;
                     }
                     default:
@@ -742,7 +782,9 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 var result = terminator.Operands[0];
-                AddStatement(new BoundReturn(result == 0 ? null : ReadValue(result), default));
+                var returnValue = result == 0 ? null
+                    : valueConstants[result - 1] ?? ReadValue(result);
+                AddStatement(new BoundReturn(returnValue, default));
             }
             else if (terminator.Opcode == 0x87)
             {
@@ -772,7 +814,9 @@ public static partial class TrRmExecutableCompiler
             }
 
             DecodeOperations(body.Blocks[0].Operations, types);
-            conditionalCondition ??= ReadValue(body.Terminator.Operands[0]);
+            var conditionValue = body.Terminator.Operands[0];
+            conditionalCondition ??= valueConstants[conditionValue - 1]
+                ?? ReadValue(conditionValue);
             if (conditionalCondition.Type != PrimitiveType.Bool)
             {
                 throw Invalid("Conditional output Body condition is not Boolean.");
@@ -818,7 +862,72 @@ public static partial class TrRmExecutableCompiler
     private static bool IsOutputScalarType(PrimitiveType type)
         => type is PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32
             or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
+            or PrimitiveType.NativeInt or PrimitiveType.NativeUInt
             or PrimitiveType.Float32 or PrimitiveType.Float64;
+
+    private static bool TryGetScalarInitOutputReferentType(
+        BoundVariable parameter,
+        IReadOnlyList<CheckedReferenceTypeDefinition> checkedReferenceTypes,
+        out PrimitiveType referentType)
+    {
+        referentType = default;
+        if (!parameter.IsInit || parameter.IsOut
+            || !CheckedReferenceTypeContract.IsValidType(parameter.Type,
+                checkedReferenceTypes))
+        {
+            return false;
+        }
+
+        var reference = checkedReferenceTypes[
+            CheckedReferenceTypes.Index(parameter.Type)];
+        if (!reference.IsInitialization
+            || reference.IsGarbageCollected || reference.IsOptional
+            || !IsOutputScalarType(reference.ReferentType))
+        {
+            return false;
+        }
+
+        referentType = reference.ReferentType;
+        return true;
+    }
+
+    private static bool CanForwardInitializationReference(
+        BoundVariable source, BoundVariable target,
+        IReadOnlyList<CheckedReferenceTypeDefinition> checkedReferenceTypes,
+        PrimitiveType referentType)
+    {
+        if (!source.IsInit || source.IsOut || !target.IsInit || target.IsOut
+            || !IsCompatibleInitializationReferenceType(source.Type,
+                target.Type, referentType, checkedReferenceTypes))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool IsCompatibleInitializationReferenceType(
+        PrimitiveType sourceType, PrimitiveType targetType,
+        PrimitiveType referentType,
+        IReadOnlyList<CheckedReferenceTypeDefinition> checkedReferenceTypes)
+    {
+        if (!CheckedReferenceTypeContract.IsValidType(sourceType,
+                checkedReferenceTypes)
+            || !CheckedReferenceTypeContract.IsValidType(targetType,
+                checkedReferenceTypes))
+        {
+            return false;
+        }
+
+        var source = checkedReferenceTypes[CheckedReferenceTypes.Index(sourceType)];
+        var target = checkedReferenceTypes[CheckedReferenceTypes.Index(targetType)];
+        return source.IsInitialization && target.IsInitialization
+            && !source.IsGarbageCollected && !target.IsGarbageCollected
+            && !source.IsOptional && !target.IsOptional
+            && source.ReferentType == referentType
+            && target.ReferentType == referentType
+            && (!target.IsWritable || source.IsWritable);
+    }
 
     private static bool IsOutputBodyValueType(PrimitiveType type)
         => IsOutputScalarType(type) || type == PrimitiveType.NativeRawPointer
@@ -838,7 +947,8 @@ public static partial class TrRmExecutableCompiler
                 TokenKind.ShiftLeft or TokenKind.ShiftRight =>
                     binary.Right.Type == PrimitiveType.Int32,
                 TokenKind.ShiftRightUnsigned => binary.Right.Type == PrimitiveType.Int32
-                    && binary.Left.Type is PrimitiveType.UInt32 or PrimitiveType.UInt64,
+                    && binary.Left.Type is PrimitiveType.UInt32 or PrimitiveType.UInt64
+                        or PrimitiveType.NativeUInt,
                 _ => false,
             });
 
@@ -847,7 +957,8 @@ public static partial class TrRmExecutableCompiler
 
     private static bool IsOutputReturnType(PrimitiveType type)
         => type is PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32 or PrimitiveType.UInt32
-            or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float32
+            or PrimitiveType.Int64 or PrimitiveType.UInt64
+            or PrimitiveType.NativeInt or PrimitiveType.NativeUInt or PrimitiveType.Float32
             or PrimitiveType.Float64;
 
     private sealed class OutputBodyWriter
@@ -883,6 +994,7 @@ public static partial class TrRmExecutableCompiler
         private int _returnValue;
         private int _failureReason;
         private int _currentBlock;
+        private bool[]? _fallthroughInheritedPlaces;
         private bool _ended;
         private bool _unsafeScope;
 
@@ -928,8 +1040,9 @@ public static partial class TrRmExecutableCompiler
                 var parameter = function.Variables[variable];
                 if (parameter.IsOut || parameter.IsInit)
                 {
-                    if (!parameter.IsOut || !parameter.IsInit
-                        || !IsOutputScalarType(parameter.Type))
+                    if (parameter.IsOut || !parameter.IsInit
+                        || !IsOutputScalarType(
+                            InitializationOutputReferentType(parameter)))
                     {
                         throw Unsupported("The output Body profile requires scalar init ref parameters.");
                     }
@@ -1024,6 +1137,12 @@ public static partial class TrRmExecutableCompiler
                 CaptureBlock();
                 _ended = true;
             }
+            else if (_blocks.Count == 2
+                && _fallthroughInheritedPlaces is not null)
+            {
+                CaptureBlock(inheritedPlaces: _fallthroughInheritedPlaces);
+                _ended = true;
+            }
             return BuildBody();
         }
 
@@ -1058,6 +1177,38 @@ public static partial class TrRmExecutableCompiler
             _placeByVariable[variable] = place;
         }
 
+        private PrimitiveType PlaceValueType(int variable)
+        {
+            var value = _function.Variables[variable];
+            return value.IsInit && !value.IsOut
+                ? InitializationOutputReferentType(value)
+                : value.Type;
+        }
+
+        private PrimitiveType InitializationOutputReferentType(
+            BoundVariable parameter)
+        {
+            if (!parameter.IsInit || parameter.IsOut
+                || !CheckedReferenceTypeContract.IsValidType(parameter.Type,
+                    _program.CheckedReferenceTypes))
+            {
+                throw Unsupported(
+                    "The output Body profile requires canonical ref<init T> formals.");
+            }
+
+            var reference = _program.CheckedReferenceTypes[
+                CheckedReferenceTypes.Index(parameter.Type)];
+            if (!reference.IsInitialization
+                || reference.IsGarbageCollected || reference.IsOptional
+                || !IsOutputScalarType(reference.ReferentType))
+            {
+                throw Unsupported(
+                    "The output Body profile requires scalar ref<init T> referents.");
+            }
+
+            return reference.ReferentType;
+        }
+
         private int AddValue(PrimitiveType type, byte kind, uint definitionOffset)
             => AddValue(type, kind, definitionOffset, null);
 
@@ -1090,7 +1241,7 @@ public static partial class TrRmExecutableCompiler
             WriteInstruction(_operations, 0x0B, width, 0);
             Write(_operations, (ulong)result, width);
             Write(_operations, (ulong)place, width);
-            var type = _function.Variables[_places[place].Variable].Type;
+            var type = PlaceValueType(_places[place].Variable);
             _ = AddValue(type, 1, (uint)offset);
             _placeHandles[place] = result;
             UsePlace(place, _operationCount);
@@ -1144,11 +1295,22 @@ public static partial class TrRmExecutableCompiler
                 case BoundAssignment assignment:
                     EmitAssignment(assignment);
                     break;
+                case BoundExpressionStatement {
+                    Expression: BoundReferenceWrite referenceWrite,
+                }:
+                    EmitInitializationReferenceWrite(referenceWrite);
+                    break;
                 case BoundExpressionStatement { Expression: BoundCall call }:
                     if (EmitCall(call) != 0)
                     {
                         throw Unsupported("Only void calls may be used as output-profile statements.");
                     }
+                    break;
+                case BoundIf {
+                    Condition: BoundConstant { Type: PrimitiveType.Bool } condition,
+                } conditional:
+                    EmitInlineStatements(condition.Value != 0
+                        ? conditional.Then : conditional.Else);
                     break;
                 case BoundReturn result:
                     EmitReturn(result);
@@ -1161,31 +1323,53 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
+        private void EmitInlineStatements(BoundStatement? statement)
+        {
+            if (statement is BoundBlock block)
+            {
+                foreach (var child in block.Statements)
+                {
+                    EmitStatement(child);
+                }
+            }
+            else if (statement is not null)
+            {
+                EmitStatement(statement);
+            }
+        }
+
         private void EmitConditional(BoundIf conditional)
         {
-            if (conditional.Condition is not BoundCall { Type: PrimitiveType.Bool } call)
+            if (conditional.Condition.Type != PrimitiveType.Bool)
             {
-                throw Unsupported("Output Body conditionals require a direct Boolean call.");
+                throw Unsupported("Output Body conditionals require a Boolean condition.");
             }
 
-            var condition = EmitCall(call);
-            if (condition == 0)
-            {
-                throw Unsupported("Output Body conditionals require a Boolean call result.");
-            }
+            var call = conditional.Condition as BoundCall;
+            var condition = EmitValue(conditional.Condition);
             UseValue(condition, _operationCount);
 
             var outputPlaces = new List<int>();
-            foreach (var argument in call.Arguments)
+            if (call is not null)
             {
-                if (argument is BoundOutArgument { IsInit: true } output)
+                var target = _program.Functions[call.Function];
+                for (var index = 0; index < call.Arguments.Length; index++)
                 {
-                    if ((uint)output.Variable >= (uint)_placeByVariable.Length
-                        || _placeByVariable[output.Variable] == 0)
+                    var parameter = target.Variables[call.ParameterIndex(index)];
+                    if (!parameter.IsInit || parameter.IsOut)
                     {
-                        throw Unsupported("Conditional output destinations must be scalar local places.");
+                        continue;
                     }
-                    outputPlaces.Add(_placeByVariable[output.Variable]);
+
+                    var referentType = InitializationOutputReferentType(parameter);
+                    if (!TryGetOutputDestination(call.Arguments[index], parameter,
+                            referentType, out var outputVariable)
+                        || _placeByVariable[outputVariable] == 0)
+                    {
+                        throw Unsupported(
+                            "Conditional output destinations must be local places or compatible init-reference formals.");
+                    }
+                    outputPlaces.Add(_placeByVariable[outputVariable]);
                 }
             }
             var falseState = _placeInitialized.ToArray();
@@ -1199,22 +1383,31 @@ public static partial class TrRmExecutableCompiler
             _currentBlock = 1;
             RestorePlaceState(trueState);
             var trueEntryState = _placeInitialized.ToArray();
-            EmitBranchTerminal(conditional.Then);
+            if (!EmitBranchTerminal(conditional.Then))
+            {
+                throw Unsupported(
+                    "Output Body true arms must terminate before the false-arm continuation.");
+            }
             CaptureBlock(inheritedPlaces: trueEntryState);
 
             _currentBlock = 2;
             RestorePlaceState(falseState);
             if (conditional.Else is null)
             {
-                throw Unsupported("Output Body conditionals require two terminal arms.");
+                _fallthroughInheritedPlaces = _placeInitialized.ToArray();
+                return;
             }
             var falseEntryState = _placeInitialized.ToArray();
-            EmitBranchTerminal(conditional.Else);
+            if (!EmitBranchTerminal(conditional.Else))
+            {
+                throw Unsupported(
+                    "Output Body false arms must terminate.");
+            }
             CaptureBlock(inheritedPlaces: falseEntryState);
             _ended = true;
         }
 
-        private void EmitBranchTerminal(BoundStatement statement)
+        private bool EmitBranchTerminal(BoundStatement statement)
         {
             var terminal = statement switch {
                 BoundBlock { RetiredManagedLocals.IsEmpty: true, Statements.Length: 1 } block
@@ -1222,11 +1415,25 @@ public static partial class TrRmExecutableCompiler
                 _ => statement,
             };
 
+            if (terminal is BoundBlock branchBlock)
+            {
+                for (var index = 0; index < branchBlock.Statements.Length; index++)
+                {
+                    EmitStatement(branchBlock.Statements[index]);
+                    if (_ended && index != branchBlock.Statements.Length - 1)
+                    {
+                        throw Unsupported(
+                            "Output Body branch statements cannot follow a terminal operation.");
+                    }
+                }
+                return _ended;
+            }
+
             switch (terminal)
             {
                 case BoundReturn returned:
                     EmitReturn(returned);
-                    break;
+                    return true;
                 case BoundRequire {
                     Condition: BoundConstant { Type: PrimitiveType.Bool, Value: 0 },
                 }:
@@ -1236,9 +1443,9 @@ public static partial class TrRmExecutableCompiler
                     }
                     _failureReason = 1;
                     _ended = true;
-                    break;
+                    return true;
                 default:
-                    throw Unsupported("Conditional output arms require one terminal Return or Fail reason 1.");
+                    return false;
             }
         }
 
@@ -1294,11 +1501,53 @@ public static partial class TrRmExecutableCompiler
                 _currentValues[assignment.Variable] = value;
                 return;
             }
-            if (!_placeDeclared[place] || _placeInitialized[place])
+            EmitPlaceInitialization(place, variableType, assignment.Value);
+        }
+
+        private void EmitInitializationReferenceWrite(
+            BoundReferenceWrite referenceWrite)
+        {
+            if (referenceWrite.Descriptor is not BoundRead descriptor
+                || (uint)descriptor.Variable >= (uint)_function.ParameterCount)
+            {
+                throw Unsupported(
+                    "The output Body profile supports writes through direct init-reference formals.");
+            }
+
+            var parameter = _function.Variables[descriptor.Variable];
+            var referentType = InitializationOutputReferentType(parameter);
+            if (descriptor.Type != parameter.Type
+                || referenceWrite.Value.Type != referentType)
+            {
+                throw Unsupported(
+                    "An initialization-reference write must preserve its formal and referent types.");
+            }
+
+            var place = _placeByVariable[descriptor.Variable];
+            if (place == 0 || !_places[place].IsParameter)
+            {
+                throw Unsupported(
+                    "An initialization-reference write requires its formal place.");
+            }
+
+            EmitPlaceInitialization(place, referentType, referenceWrite.Value);
+        }
+
+        private void EmitPlaceInitialization(int place, PrimitiveType type,
+            BoundExpression valueExpression)
+        {
+            if (place <= 0 || place >= _places.Count
+                || !_placeDeclared[place] || _placeInitialized[place])
             {
                 throw Unsupported("Initialize requires an active vacant place.");
             }
 
+            var value = EmitValue(valueExpression);
+            if (!IsOutputScalarType(type)
+                || _valueTypes[value - 1] != BodyTypeRow(type))
+            {
+                throw Unsupported("Output initialization requires an exactly typed scalar value.");
+            }
             var handle = _placeHandles[place];
             var width = Width((ulong)Math.Max(handle, value));
             WriteInstruction(_operations, 0x0E, width, 0);
@@ -1392,16 +1641,20 @@ public static partial class TrRmExecutableCompiler
                         (PrimitiveType.Float32 or PrimitiveType.Float64,
                             PrimitiveType.Float32 or PrimitiveType.Float64) => (byte)0x1A,
                         (PrimitiveType.Int32 or PrimitiveType.UInt32
-                            or PrimitiveType.Int64 or PrimitiveType.UInt64,
+                            or PrimitiveType.Int64 or PrimitiveType.UInt64
+                            or PrimitiveType.NativeInt or PrimitiveType.NativeUInt,
                             PrimitiveType.Float32 or PrimitiveType.Float64) => (byte)0x1B,
                         (PrimitiveType.Char16, PrimitiveType.Float32 or PrimitiveType.Float64) => (byte)0x1E,
                         (PrimitiveType.Float32 or PrimitiveType.Float64,
                             PrimitiveType.Int32 or PrimitiveType.UInt32
-                                or PrimitiveType.Int64 or PrimitiveType.UInt64) => (byte)0x1F,
+                                or PrimitiveType.Int64 or PrimitiveType.UInt64
+                                or PrimitiveType.NativeInt or PrimitiveType.NativeUInt) => (byte)0x1F,
                         (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
-                            or PrimitiveType.UInt64 or PrimitiveType.Char16,
+                            or PrimitiveType.UInt64 or PrimitiveType.NativeInt
+                            or PrimitiveType.NativeUInt or PrimitiveType.Char16,
                             PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
-                                or PrimitiveType.UInt64 or PrimitiveType.Char16) => (byte)0x16,
+                                or PrimitiveType.UInt64 or PrimitiveType.NativeInt
+                                or PrimitiveType.NativeUInt or PrimitiveType.Char16) => (byte)0x16,
                         _ => throw Unsupported("Conversion is outside the output Body scalar profile."),
                     };
                     var castOperand = EmitValue(cast.Operand);
@@ -1458,6 +1711,7 @@ public static partial class TrRmExecutableCompiler
                     var unaryOperand = EmitValue(unary.Operand);
                     if (unary.Operator == TokenKind.Minus && IsInteger(unary.Type)
                         && (unary.Type is PrimitiveType.UInt32 or PrimitiveType.UInt64
+                            or PrimitiveType.NativeUInt
                             || unary.OverflowBehavior == BoundIntegerOverflowBehavior.Wrapping))
                     {
                         var zero = EmitValue(new BoundConstant(0, unary.Type, default));
@@ -1526,7 +1780,8 @@ public static partial class TrRmExecutableCompiler
                         || (!isFloat && (isEquality
                             ? binary.Left.Type is not (PrimitiveType.Bool or PrimitiveType.Char16
                                 or PrimitiveType.Int32 or PrimitiveType.UInt32
-                                or PrimitiveType.Int64 or PrimitiveType.UInt64)
+                                or PrimitiveType.Int64 or PrimitiveType.UInt64
+                                or PrimitiveType.NativeInt or PrimitiveType.NativeUInt)
                             : !IsInteger(binary.Left.Type))))
                     {
                         throw Unsupported("Comparison operands are outside the output Body profile.");
@@ -1560,11 +1815,7 @@ public static partial class TrRmExecutableCompiler
                 case BoundBinary binary when IsOutputIntegerBinary(binary):
                 {
                     var integerLeft = EmitValue(binary.Left);
-                    var isShift = binary.Operator is TokenKind.ShiftLeft or TokenKind.ShiftRight
-                        or TokenKind.ShiftRightUnsigned;
-                    var integerRight = isShift
-                        ? EmitValue(new BoundCast(binary.Right, PrimitiveType.UInt32, default))
-                        : EmitValue(binary.Right);
+                    var integerRight = EmitValue(binary.Right);
                     var integerResult = _valueTypes.Count + 1;
                     var integerKind = binary.Operator switch {
                         TokenKind.Plus => 1,
@@ -1638,7 +1889,8 @@ public static partial class TrRmExecutableCompiler
             var target = _program.Functions[call.Function];
             var isNativeImport = target.IsExternal && target.DirectNativeImport is not null
                 && DirectNativeImportContract.IsValid(target, _program.Structures,
-                    _program.NativeFunctionPointerSignatures, _program.NativePointerTypes);
+                    _program.NativeFunctionPointerSignatures,
+                    _program.NativePointerTypes, _program.EnumDefinitions);
             var isNativeVTable = !target.IsExternal
                 && target.NativeVTableMethod is not null
                 && target.Intrinsic == BoundIntrinsic.NativeVTableCall
@@ -1713,26 +1965,32 @@ public static partial class TrRmExecutableCompiler
                 }
                 else if (parameter.IsOut || parameter.IsInit)
                 {
-                    if (!parameter.IsOut || !parameter.IsInit || !IsOutputScalarType(parameter.Type)
-                        || value is not BoundOutArgument {
-                            IsInit: true,
-                            DeclaresVariable: false,
-                            Type: var outputType,
-                        } output
-                        || outputType != parameter.Type
-                        || (uint)output.Variable >= (uint)_placeByVariable.Length
-                        || _placeByVariable[output.Variable] == 0
-                        || _function.Variables[output.Variable].Type != parameter.Type
-                        || output.Variable < _function.ParameterCount
-                        || !_placeDeclared[_placeByVariable[output.Variable]]
-                        || _placeInitialized[_placeByVariable[output.Variable]]
-                        || !outputTargets.Add(output.Variable))
+                    var parameterType
+                        = InitializationOutputReferentType(parameter);
+                    if (!IsOutputScalarType(parameterType)
+                        || !TryGetOutputDestination(value, parameter,
+                            parameterType, out var outputVariable))
                     {
-                        throw Unsupported("Mode 0x02 requires a distinct vacant local place of the formal type.");
+                        throw Unsupported(
+                            "Mode 0x02 requires a vacant local formation or compatible init-reference reborrow.");
                     }
-                    var place = _placeByVariable[output.Variable];
-                    arguments[argument] = _placeHandles[place];
-                    outputPlaces[argument] = place;
+                    if ((uint)outputVariable >= (uint)_placeByVariable.Length
+                        || _placeByVariable[outputVariable] == 0)
+                    {
+                        throw Unsupported(
+                            "An initialization destination has no Body place.");
+                    }
+
+                    var outputPlace = _placeByVariable[outputVariable];
+                    if (!_placeDeclared[outputPlace]
+                        || _placeInitialized[outputPlace]
+                        || !outputTargets.Add(outputVariable))
+                    {
+                        throw Unsupported(
+                            "Mode 0x02 requires a distinct vacant destination.");
+                    }
+                    arguments[argument] = _placeHandles[outputPlace];
+                    outputPlaces[argument] = outputPlace;
                 }
                 else
                 {
@@ -1829,6 +2087,75 @@ public static partial class TrRmExecutableCompiler
             return result;
         }
 
+        private bool TryGetOutputDestination(BoundExpression argument,
+            BoundVariable target, PrimitiveType referentType,
+            out int variable)
+        {
+            switch (argument)
+            {
+                case BoundReferenceFormation {
+                    Place: BoundRead place,
+                } formation
+                    when (uint)place.Variable < (uint)_function.Variables.Length:
+                {
+                    var local = _function.Variables[place.Variable];
+                    if (!local.IsInitializationLocal
+                        || local.Type != referentType
+                        || place.Type != local.Type
+                        || !IsCompatibleInitializationReferenceType(
+                            formation.Type, target.Type, referentType,
+                            _program.CheckedReferenceTypes))
+                    {
+                        break;
+                    }
+
+                    variable = place.Variable;
+                    return true;
+                }
+                case BoundReferenceReborrow {
+                    Descriptor: BoundRead descriptor,
+                } reborrow
+                    when (uint)descriptor.Variable < (uint)_function.ParameterCount:
+                {
+                    var source = _function.Variables[descriptor.Variable];
+                    if (descriptor.Type != source.Type
+                        || !CanForwardInitializationReference(source, target,
+                            _program.CheckedReferenceTypes, referentType)
+                        || !IsCompatibleInitializationReferenceType(
+                            reborrow.Type, target.Type, referentType,
+                            _program.CheckedReferenceTypes))
+                    {
+                        break;
+                    }
+
+                    variable = descriptor.Variable;
+                    return true;
+                }
+                case BoundOutArgument output
+                    when output.IsInit && !output.DeclaresVariable
+                        && (uint)output.Variable < (uint)_function.Variables.Length:
+                {
+                    var source = _function.Variables[output.Variable];
+                    if (output.Variable < _function.ParameterCount
+                        ? !CanForwardInitializationReference(source, target,
+                            _program.CheckedReferenceTypes, referentType)
+                            || output.Type != source.Type
+                        : !source.IsInitializationLocal
+                            || source.Type != referentType
+                            || output.Type != referentType)
+                    {
+                        break;
+                    }
+
+                    variable = output.Variable;
+                    return true;
+                }
+            }
+
+            variable = -1;
+            return false;
+        }
+
         private int EmitNativeStorageAddress(BoundNativeStorageAddress address,
             int pointerTypeRow, PrimitiveType pointerValueType)
         {
@@ -1890,7 +2217,9 @@ public static partial class TrRmExecutableCompiler
             for (var place = 1; place < _places.Count; place++)
             {
                 UsePlace(place, _operationCount);
-                if (_places[place].IsParameter && !_placeInitialized[place])
+                if (_places[place].IsParameter
+                    && _function.ReturnType != PrimitiveType.Bool
+                    && !_placeInitialized[place])
                 {
                     throw Unsupported("Every init ref scalar formal must be initialized before normal return.");
                 }
@@ -2044,7 +2373,7 @@ public static partial class TrRmExecutableCompiler
             }
             for (var place = 1; place < _places.Count; place++)
             {
-                var type = _function.Variables[_places[place].Variable].Type;
+                var type = PlaceValueType(_places[place].Variable);
                 Write(body, (ulong)_bodyTypeIds[BodyTypeRow(type)], localWidth);
                 Write(body, 0, localWidth); // function-root region
                 body.Add(_places[place].IsAddressableLocal

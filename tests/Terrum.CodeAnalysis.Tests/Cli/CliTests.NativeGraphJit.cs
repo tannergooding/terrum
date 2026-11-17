@@ -6,12 +6,36 @@ using System.IO;
 using System.Threading.Tasks;
 using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
+using Terrum.CodeAnalysis.Native;
+using Terrum.CodeAnalysis.Semantics;
+using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
 internal sealed partial class CliTests
 {
+    private static byte[] CreateLayoutAwareNativeProducer(string source,
+        string identity, string policy, params string[] exports)
+    {
+        var runtimePolicy = policy switch {
+            "fail-fast" => NativeRuntimePolicy.FailFast,
+            "checked-exceptions" => NativeRuntimePolicy.CheckedExceptions,
+            _ => throw new ArgumentOutOfRangeException(nameof(policy)),
+        };
+        var compilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(source), new CompilationOptions {
+                RuntimePolicy = (BoundRuntimePolicy)runtimePolicy,
+                LayoutCoreRegistration =
+                    LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        return NativeModuleCompiler.CreateProducer(compilation.Program!,
+            exports, identity, runtimePolicy);
+    }
+
     [Test]
     public async Task CheckedJitApphostCatchesAndReportsUnhandledFailuresUnderCetAsync()
     {
@@ -77,7 +101,8 @@ internal sealed partial class CliTests
         {
             await File.WriteAllTextAsync(leafSource, """
                 public OwnedInt32Buffer Build() {
-                    require OwnedInt32Buffer.TryCreate(2, out var created);
+                    init OwnedInt32Buffer created;
+                    require OwnedInt32Buffer.TryCreate(2, ref init created);
                     mut OwnedInt32Buffer buffer = move created;
                     require buffer.TryAppend(40);
                     require buffer.TryAppend(2);
@@ -137,8 +162,12 @@ internal sealed partial class CliTests
                 ? "int32 Main() { unsafe { try { Parent value = Forward(); require false; } "
                     + "catch { return 42; } } return 0; }"
                 : "int32 Main() { Parent value = Forward(); return value.Owned.Value + 2; }").ConfigureAwait(false);
-            Assert.That((await RunAsync([], "compile-native", "producer", leafSource, "Leaf",
-                "--export", "Make", "--export", "Child.Close", "-o", leaf, "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
+            await File.WriteAllBytesAsync(leaf,
+                CreateLayoutAwareNativeProducer(
+                    await File.ReadAllTextAsync(leafSource)
+                        .ConfigureAwait(false),
+                    "Leaf", policy, "Make", "Child.Close"))
+                .ConfigureAwait(false);
             Assert.That((await RunAsync([], "compile-native-graph", "producer", middleSource, "Middle",
                 "--provider", leaf, "--export", "Forward", "-o", middle, "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
             Assert.That((await RunAsync([], "compile-native-graph", "consumer", rootSource,
@@ -169,9 +198,12 @@ internal sealed partial class CliTests
         var fixture = Path.Combine(repository, "samples", "DependencyGraphServicing");
         try
         {
-            Assert.That((await RunAsync([], "compile-native", "producer",
-                Path.Combine(fixture, "owned-leaf.terrum"), "Leaf", "--export", "Make",
-                "--export", "Ticket.Close", "-o", leaf, "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
+            await File.WriteAllBytesAsync(leaf,
+                CreateLayoutAwareNativeProducer(
+                    await File.ReadAllTextAsync(Path.Combine(fixture,
+                        "owned-leaf.terrum")).ConfigureAwait(false),
+                    "Leaf", policy, "Make", "Ticket.Close"))
+                .ConfigureAwait(false);
             Assert.That((await RunAsync([], "compile-native-graph", "producer",
                 Path.Combine(fixture, "owned-middle.terrum"), "Middle", "--provider", leaf,
                 "--export", "Forward", "--export", "TryForward", "-o", middle, "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
@@ -188,9 +220,13 @@ internal sealed partial class CliTests
                 "run-native-graph-jit", root, "--provider", middle, "--provider", leaf, "--runtime", policy).ConfigureAwait(false);
             Assert.That(apphostOriginal, Is.EqualTo(42));
             Assert.That(originalError, Is.Empty);
-            Assert.That((await RunAsync([], "compile-native", "producer",
-                Path.Combine(fixture, "owned-leaf-replacement.terrum"), "Leaf", "--export", "Make",
-                "--export", "Ticket.Close", "-o", replacement, "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
+            await File.WriteAllBytesAsync(replacement,
+                CreateLayoutAwareNativeProducer(
+                    await File.ReadAllTextAsync(Path.Combine(fixture,
+                        "owned-leaf-replacement.terrum"))
+                        .ConfigureAwait(false),
+                    "Leaf", policy, "Make", "Ticket.Close"))
+                .ConfigureAwait(false);
             Assert.That((await RunAsync([], "run-native-graph", root, "--provider", replacement,
                 "--provider", middle, "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(44));
             Assert.That((await RunAsync([], "run-native-graph-jit", root, "--provider", middle,
@@ -213,9 +249,12 @@ internal sealed partial class CliTests
             await File.WriteAllTextAsync(incompatibleSource,
                 originalSource.Replace("public int32 Value;", "public int64 Value;", StringComparison.Ordinal)
                     .Replace("Value = value;", "Value = int64(value);", StringComparison.Ordinal)).ConfigureAwait(false);
-            Assert.That((await RunAsync([], "compile-native", "producer", incompatibleSource, "Leaf",
-                "--export", "Make", "--export", "Ticket.Close", "-o", incompatible,
-                "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
+            var incompatibleProducer = CreateLayoutAwareNativeProducer(
+                await File.ReadAllTextAsync(incompatibleSource)
+                    .ConfigureAwait(false),
+                "Leaf", policy, "Make", "Ticket.Close");
+            await File.WriteAllBytesAsync(incompatible, incompatibleProducer)
+                .ConfigureAwait(false);
             Assert.That((await RunAsync([], "run-native-graph-jit", root,
                 "--provider", incompatible, "--provider", middle, "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(1));
             var damaged = Path.Combine(directory, "damaged.trmn");

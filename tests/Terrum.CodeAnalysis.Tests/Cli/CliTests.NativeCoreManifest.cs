@@ -1172,6 +1172,17 @@ internal sealed partial class CliTests
                     $"{string.Join(' ', outputManifestArguments)}: "
                         + outputResult + outputError);
                 AssertInputDiagnosticCode(outputResult, "TRM2000");
+
+                var evaluationArguments = arguments.ToArray();
+                evaluationArguments[manifestIndex]
+                    = "--evaluation-core-manifest";
+                var (evaluationExit, evaluationResult, evaluationError)
+                    = await RunAsync(malformedSource, evaluationArguments)
+                        .ConfigureAwait(true);
+                Assert.That(evaluationExit, Is.EqualTo(2),
+                    string.Join(' ', evaluationArguments)
+                        + evaluationResult + evaluationError);
+                AssertInputDiagnosticCode(evaluationResult, "TRM2000");
             }
         }
         finally

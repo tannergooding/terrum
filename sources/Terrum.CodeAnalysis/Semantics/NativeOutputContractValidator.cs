@@ -11,7 +11,8 @@ internal static class NativeOutputContractValidator
     internal static bool IsValid(BoundFunction function,
         IReadOnlyList<BoundStruct> structures,
         ImmutableArray<NativePointerTypeDefinition> pointerTypes,
-        ImmutableArray<NativeFunctionPointerSignatureDefinition> functionPointerSignatures)
+        ImmutableArray<NativeFunctionPointerSignatureDefinition> functionPointerSignatures,
+        IReadOnlyList<BoundEnumDefinition>? enumDefinitions = null)
     {
         var outputs = function.NativeOutputContracts;
         if (outputs.IsDefault)
@@ -62,7 +63,8 @@ internal static class NativeOutputContractValidator
             var type = output.PointeeType;
             var formal = function.Variables[output.FormalOrdinal];
             if (!DirectNativeImportContract.IsNativeOutputCellType(type, structures,
-                    functionPointerSignatures, pointerTypes)
+                    functionPointerSignatures, pointerTypes,
+                    enumDefinitions)
                 || !NativePointerTypeContract.IsValidType(formal.Type, pointerTypes)
                 || pointerTypes[NativePointerTypes.Index(formal.Type)].PointeeType != type
                 || !pointerTypes[NativePointerTypes.Index(formal.Type)].IsWritable

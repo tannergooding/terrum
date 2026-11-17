@@ -56,10 +56,11 @@ public static partial class TrRmExecutableCompiler
             || target.ParameterCount != target.Variables.Length
             || !DirectNativeImportContract.IsValid(target, program.Structures,
                 program.NativeFunctionPointerSignatures,
-                program.NativePointerTypes)
+                program.NativePointerTypes, program.EnumDefinitions)
             || !NativeOutputContractValidator.IsValid(target,
                 program.Structures, program.NativePointerTypes,
-                program.NativeFunctionPointerSignatures)
+                program.NativeFunctionPointerSignatures,
+                program.EnumDefinitions)
             || !NativePointerTypeContract.IsValidTable(
                 program.NativePointerTypes, program.Structures,
                 program.NativeFunctionPointerSignatures))

@@ -17,7 +17,11 @@ namespace Terrum.CodeAnalysis.Native;
 /// <summary>Behavior on a checked runtime failure in a native executable.</summary>
 public enum NativeRuntimePolicy
 {
-    /// <summary>Terminate with 0xE0540001 for overflow, 0xE0540002 for zero division, 0xE0540003 for failed requirements, or 0xE0540004 for buffer bounds.</summary>
+    /// <summary>
+    /// Terminate with 0xE0540001 for overflow, 0xE0540002 for zero division,
+    /// 0xE0540003 for failed requirements, or 0xE0540004 for buffer bounds and
+    /// invalid shift counts.
+    /// </summary>
     FailFast,
     /// <summary>Use the bounded, versioned native checked-failure exception contract.</summary>
     CheckedExceptions,
@@ -107,7 +111,8 @@ public static class NativeEmitter
             if (function.DirectNativeImport is DirectNativeImport directImport)
             {
                 if (!DirectNativeImportContract.IsValid(function, program.Structures,
-                    program.NativeFunctionPointerSignatures, program.NativePointerTypes))
+                    program.NativeFunctionPointerSignatures,
+                    program.NativePointerTypes, program.EnumDefinitions))
                 {
                     throw new ArgumentException("A direct native import does not retain its verified contract.",
                         nameof(program));
@@ -124,11 +129,6 @@ public static class NativeEmitter
                 nameof(program));
         }
 
-        if (bindings.Count == 0 && !HasNativeFixedArrayStorage(program))
-        {
-            throw new ArgumentException("The program contains no supported native imports.",
-                nameof(program));
-        }
         var code = CompileWithImports(program, bindings.ToImmutable(),
             runtimePolicy, allowNativeImports: true,
             nativeLoweringAgreement: nativeLoweringAgreement,
@@ -340,7 +340,8 @@ public static class NativeEmitter
             }
             if (function.DirectNativeImport is not DirectNativeImport import
                 || !DirectNativeImportContract.IsValid(function, program.Structures,
-                    program.NativeFunctionPointerSignatures, program.NativePointerTypes))
+                    program.NativeFunctionPointerSignatures,
+                    program.NativePointerTypes, program.EnumDefinitions))
             {
                 throw new NotSupportedException(
                     "Direct-native JIT requires every external declaration to retain its direct import contract.");
@@ -413,10 +414,10 @@ public static class NativeEmitter
     private static Dictionary<int, NativeImportBinding> SelectImports(BoundProgram program,
         IReadOnlyList<NativeImportBinding> bindings, CancellationToken cancellationToken)
     {
-        if (bindings.Count > 1024 || (bindings.Count == 0 && !HasNativeFixedArrayStorage(program)))
+        if (bindings.Count > 1024)
         {
             throw new ArgumentException(
-                "Native consumers require 1 to 1024 explicit import bindings unless the program uses fixed-array storage.",
+                "Native consumers support at most 1024 explicit import bindings.",
                 nameof(bindings));
         }
         var externals = new Dictionary<string, int>(bindings.Count, StringComparer.Ordinal);
@@ -448,12 +449,6 @@ public static class NativeEmitter
         }
         return selected;
     }
-
-    private static bool HasNativeFixedArrayStorage(BoundProgram program) =>
-        !program.NativeFixedArrayTypes.IsDefaultOrEmpty
-        || program.Functions.Any(static function =>
-            function.Variables.Any(static variable =>
-                NativeFixedArrayTypes.IsType(variable.Type)));
 
     private static ImmutableArray<NativeImportBinding> UsedImports(NativeCode code,
         Dictionary<int, NativeImportBinding>? bindings)
@@ -642,7 +637,8 @@ public static class NativeEmitter
             }
             if (function.DirectNativeImport is not DirectNativeImport import
                 || !DirectNativeImportContract.IsValid(function, program.Structures,
-                    program.NativeFunctionPointerSignatures, program.NativePointerTypes))
+                    program.NativeFunctionPointerSignatures,
+                    program.NativePointerTypes, program.EnumDefinitions))
             {
                 throw new NotSupportedException(
                     "Native library packages currently require direct imports for every external declaration.");
@@ -670,7 +666,8 @@ public static class NativeEmitter
             if (!directFunctions.TryGetValue(binding.FunctionName, out var function)
                 || function.DirectNativeImport is not DirectNativeImport import
                 || !DirectNativeImportContract.IsValid(function, program.Structures,
-                    program.NativeFunctionPointerSignatures, program.NativePointerTypes)
+                    program.NativeFunctionPointerSignatures,
+                    program.NativePointerTypes, program.EnumDefinitions)
                 || !StringComparer.OrdinalIgnoreCase.Equals(import.LibraryName, binding.DllName)
                 || import.ExportName != binding.ExportName)
             {
@@ -867,7 +864,8 @@ public static class NativeEmitter
             }
             if (!allowDirectNativeImports || function.IsModuleReference || function.ModuleImport is not null
                 || !DirectNativeImportContract.IsValid(function, program.Structures,
-                    program.NativeFunctionPointerSignatures, program.NativePointerTypes)
+                    program.NativeFunctionPointerSignatures,
+                    program.NativePointerTypes, program.EnumDefinitions)
                 || imports is null || !imports.TryGetValue(functionIndex, out var import)
                 || !StringComparer.OrdinalIgnoreCase.Equals(import.DllName, directImport.LibraryName)
                 || import.ExportName != directImport.ExportName)
@@ -942,7 +940,8 @@ public static class NativeEmitter
         }
 
         if (!CheckedReferenceTypeContract.IsValidTable(
-                program.CheckedReferenceTypes))
+                program.CheckedReferenceTypes,
+                program.NativePointerTypes))
         {
             throw new ArgumentException(
                 "The rootless reference type table is invalid.",
@@ -955,15 +954,15 @@ public static class NativeEmitter
             var reference = program.CheckedReferenceTypes[index];
             var type = CheckedReferenceTypes.Type(index);
             if (reference.IsGarbageCollected
-                || reference.IsInitialization
                 || !CheckedReferenceTypeContract
                     .IsSupportedReferenceStoreValueType(type,
                         program.Structures, program.Classes,
                         program.EnumDefinitions.Length,
-                        program.CheckedReferenceTypes))
+                        program.CheckedReferenceTypes,
+                        program.NativePointerTypes))
             {
                 throw new NotSupportedException(
-                    "The rootless reference agreement supports only complete externally bounded ordinary references and their optional forms.");
+                    "The rootless reference agreement supports only complete externally bounded non-GC references with supported referent storage.");
             }
         }
     }
@@ -1025,7 +1024,8 @@ public static class NativeEmitter
             || (function.IsExternal && !isOwnedDirectNativeImport)
             || (isOwnedDirectNativeImport
                 && !DirectNativeImportContract.IsValid(function, program.Structures,
-                    program.NativeFunctionPointerSignatures, program.NativePointerTypes)))
+                    program.NativeFunctionPointerSignatures,
+                    program.NativePointerTypes, program.EnumDefinitions)))
         {
             return false;
         }
@@ -1044,7 +1044,8 @@ public static class NativeEmitter
             }
         }
         if (!PublicLayout(function.ReturnType)
-            || (managedExports && !ManagedExportShape.Supported(function, program.Structures)))
+            || (managedExports && !ManagedExportShape.Supported(function,
+                program.Structures, program.CheckedReferenceTypes)))
         {
             return false;
         }
@@ -1142,6 +1143,11 @@ public static class NativeEmitter
                 "Source native imports require the explicit EmitWithNativeImports path.");
         }
 
+        if (HasGenericNominalValueTypes(program))
+        {
+            throw new NotSupportedException(
+                "Native emission for generic nominal values is not supported.");
+        }
         SemanticVerifier.Verify(program, nativeLoweringAgreement);
         if (nativeLoweringAgreement
             == CompilationOptions.WindowsX64NormalBackingAgreement)
@@ -1160,6 +1166,40 @@ public static class NativeEmitter
         var managedNodes = UsesManagedNodes(program);
         return new PeCompiler(program, managedNodes, cancellationToken: cancellationToken)
             .Compile() with { NativeLoweringAgreement = nativeLoweringAgreement };
+    }
+
+    private static bool HasGenericNominalValueTypes(BoundProgram program)
+    {
+        foreach (var function in program.Functions)
+        {
+            if (BoundGenericNominalTypeTypes.IsType(function.ReturnType)
+                || function.Variables.Any(static variable =>
+                    BoundGenericNominalTypeTypes.IsType(variable.Type)))
+            {
+                return true;
+            }
+
+            var found = false;
+            if (function.Body is not null)
+            {
+                _ = BoundTreeTraversal.VisitExpressions(function.Body,
+                    expression => found |=
+                        BoundGenericNominalTypeTypes.IsType(
+                            expression.Type));
+            }
+            if (!BoundTreeTraversal.VisitContractExpressions(function,
+                expression => found |=
+                    BoundGenericNominalTypeTypes.IsType(expression.Type)))
+            {
+                return true;
+            }
+            if (found)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
 
@@ -1202,6 +1242,7 @@ internal sealed partial class PeCompiler
     private readonly int[][][] _partialFieldSlots;
     private readonly PartialFieldNode?[][][] _partialFieldTrees;
     private readonly int[][] _initializationFlags;
+    private readonly int[][] _referenceInitializationFlags;
     private readonly int[][] _constructedFieldSlots;
     private readonly int[] _replacementSlots;
     private readonly int[] _oldReplacementSlots;
@@ -1277,12 +1318,13 @@ internal sealed partial class PeCompiler
         IReadOnlyDictionary<int, NativeImportBinding>? imports = null, bool[]? sourceDependent = null,
         CancellationToken cancellationToken = default)
     {
-        if (program.Functions.Any(static function =>
-            function.DeclarationContractClauses.IsDefault
-                || !function.DeclarationContractClauses.IsEmpty))
+        if (program.Functions.Any(function =>
+            !SemanticVerifier
+                .HasOnlyUnconditionalInitializationOutputContracts(
+                    function, program)))
         {
             throw new NotSupportedException(
-                "Native lowering of declaration contract clauses is not implemented.");
+                "Native lowering supports only unconditional initialization-reference postconditions.");
         }
         if (!program.StaticFields.IsDefaultOrEmpty
             || !program.StaticInitializationGroups.IsDefaultOrEmpty
@@ -1339,6 +1381,7 @@ internal sealed partial class PeCompiler
         _partialFieldSlots = new int[program.Functions.Length][][];
         _partialFieldTrees = new PartialFieldNode?[program.Functions.Length][][];
         _initializationFlags = new int[program.Functions.Length][];
+        _referenceInitializationFlags = new int[program.Functions.Length][];
         _managedRootFrames = new int[program.Functions.Length];
         _managedRootFlags = new Dictionary<int, int>[program.Functions.Length];
         _normalBackingCallResultRoots = new HashSet<int>[program.Functions.Length];
@@ -1496,6 +1539,20 @@ internal sealed partial class PeCompiler
     }
     internal NativeCode Compile()
     {
+        if (_program.Classes.Any(static @class =>
+                @class is { HasCleanup: not false }))
+        {
+            throw new NotSupportedException(
+                "The selected native runtime requires a known, supported managed-class Cleanup selection.");
+        }
+
+        if (!_normalBacking && _program.Classes.Any(static @class =>
+                @class is { IsUnique: true }))
+        {
+            throw new NotSupportedException(
+                "Unique class handles require the selected normal-backing runtime.");
+        }
+
         PrepareFrames();
         InitializeImageData();
         var (processEntry, processEnd) = EmitEntryAndFailureHelpers();
@@ -1750,6 +1807,7 @@ internal sealed partial class PeCompiler
         for (var i = 0; i < _program.Functions.Length; i++)
         {
             _cancellationToken.ThrowIfCancellationRequested();
+            _currentFunction = i;
             var function = _program.Functions[i];
             if (function.IsExternal || (_normalBacking && function.Intrinsic is
                 >= BoundIntrinsic.NodeTryCreate and <= BoundIntrinsic.NodeCollect))
@@ -1782,6 +1840,13 @@ internal sealed partial class PeCompiler
                 throw new InvalidOperationException(
                     "Native frame-alignment traversal is incomplete.");
             }
+            if (!BoundTreeTraversal.VisitContractExpressions(function,
+                expression => frameAlignment = Math.Max(frameAlignment,
+                    ScratchAlignment(expression.Type))))
+            {
+                throw new InvalidOperationException(
+                    "Native contract frame-alignment traversal is incomplete.");
+            }
             if (function.IndexedBody is TrRmScalarGraph frameGraph)
             {
                 foreach (var type in frameGraph.Types)
@@ -1800,6 +1865,14 @@ internal sealed partial class PeCompiler
                 "A verified source function has no body.");
             var spillSlots = StatementSpills(body, ref maximumArguments, ref needsReturnSnapshot,
                 _checkedExceptions && _managedNodes);
+            foreach (var clause in function.DeclarationContractClauses)
+            {
+                spillSlots = Math.Max(spillSlots,
+                    ExpressionSpills(clause.Predicate, ref maximumArguments));
+                needsReturnSnapshot |= clause.Phase
+                        == BoundDeclarationContractPhase.NormalPostcondition
+                    && function.ReturnType != PrimitiveType.Void;
+            }
             _spillCounts[i] = spillSlots;
             if (function.IndexedBody is TrRmScalarGraph indexedBody)
             {
@@ -1844,11 +1917,8 @@ internal sealed partial class PeCompiler
                 if (NativeFixedArrayTypes.IsType(variableType))
                 {
                     if (!NativeFixedArrayContract.TryGetLayout(
-                            variableType,
-                            _program.Structures,
-                            _program.NativeFixedArrayTypes,
-                            out var fixedArrayLayout,
-                            _program.CheckedReferenceTypes))
+                            variableType, _program,
+                            out var fixedArrayLayout))
                     {
                         throw new InvalidOperationException(
                             "The native fixed-array local has no structural type row.");
@@ -1985,9 +2055,35 @@ internal sealed partial class PeCompiler
                     {
                         _ = partialFieldOwners.Add(rootVariable);
                     }
+                    else if (expression is BoundReferenceFormation {
+                            Place: BoundFieldRead place,
+                        }
+                        && TryGetFieldRootVariable(place, out rootVariable))
+                    {
+                        _ = partialFieldOwners.Add(rootVariable);
+                    }
                 }))
             {
                 throw new InvalidOperationException("Verified field-move traversal is incomplete.");
+            }
+            if (!BoundTreeTraversal.VisitContractExpressions(function,
+                expression => {
+                    if (expression is BoundFieldMove move
+                        && TryGetFieldRootVariable(move.Place, out var rootVariable))
+                    {
+                        _ = partialFieldOwners.Add(rootVariable);
+                    }
+                    else if (expression is BoundReferenceFormation {
+                            Place: BoundFieldRead place,
+                        }
+                        && TryGetFieldRootVariable(place, out rootVariable))
+                    {
+                        _ = partialFieldOwners.Add(rootVariable);
+                    }
+                }))
+            {
+                throw new InvalidOperationException(
+                    "Verified contract field-move traversal is incomplete.");
             }
             if (function.Body is not null
                 && !BoundTreeTraversal.VisitStatements(function.Body, statement =>
@@ -2051,6 +2147,24 @@ internal sealed partial class PeCompiler
             {
                 throw new InvalidOperationException("Verified reference-store traversal is incomplete.");
             }
+            if (!BoundTreeTraversal.VisitContractExpressions(function,
+                expression => {
+                    if (expression is BoundReferenceWrite write
+                        && IsUnique(write.Value.Type))
+                    {
+                        hasUniqueReferenceReplacement = true;
+                        maximumReferenceReplacementSize = Math.Max(
+                            maximumReferenceReplacementSize,
+                            ScratchSize(write.Value.Type));
+                        maximumReferenceReplacementAlignment = Math.Max(
+                            maximumReferenceReplacementAlignment,
+                            ScratchAlignment(write.Value.Type));
+                    }
+                }))
+            {
+                throw new InvalidOperationException(
+                    "Verified contract reference-store traversal is incomplete.");
+            }
             var hasUnique = false;
             var replacementSize = 8;
             var replacementAlignment = 16;
@@ -2087,6 +2201,7 @@ internal sealed partial class PeCompiler
                 var type = function.Variables[variable].Type;
                 if (!partialFieldOwners.Contains(variable)
                     || !IsUnique(type) || type == PrimitiveType.OwnedInt32Buffer
+                    || ManagedClassTypes.IsManaged(type)
                     || (variable == 0 && function.DeclaringStruct is not null
                         && !function.IsStatic && !function.IsConstructor))
                 {
@@ -2116,9 +2231,13 @@ internal sealed partial class PeCompiler
             }
             _partialFieldSlots[i] = partialFields;
             _partialFieldTrees[i] = partialTrees;
-            var initializationTests = InitializationTestVariables(function);
+            var (initializationTests, referenceInitializationTests)
+                = InitializationTestVariables(function);
             var initializationFlags = new int[function.Variables.Length];
             Array.Fill(initializationFlags, -1);
+            var referenceInitializationFlags
+                = new int[function.Variables.Length];
+            Array.Fill(referenceInitializationFlags, -1);
             for (var variable = 0; variable < function.Variables.Length; variable++)
             {
                 var slot = function.Variables[variable];
@@ -2128,8 +2247,21 @@ internal sealed partial class PeCompiler
                     initializationFlags[variable] = checked((int)required);
                     required = checked(required + 4);
                 }
+                if (referenceInitializationTests.Contains(variable)
+                    && CheckedReferenceTypeContract.IsValidType(
+                        slot.Type, _program.CheckedReferenceTypes)
+                    && _program.CheckedReferenceTypes[
+                        CheckedReferenceTypes.Index(slot.Type)]
+                        .IsInitialization)
+                {
+                    referenceInitializationFlags[variable]
+                        = checked((int)required);
+                    required = checked(required + 4);
+                }
             }
             _initializationFlags[i] = initializationFlags;
+            _referenceInitializationFlags[i]
+                = referenceInitializationFlags;
             var constructed = function.IsConstructor
                 ? new int[_program.Structures[(int)function.ReturnType - 100].Fields.Length] : [];
             Array.Fill(constructed, -1);
@@ -2193,6 +2325,20 @@ internal sealed partial class PeCompiler
                     throw new InvalidOperationException(
                         "A normal-backed call-plan traversal is incomplete.");
                 }
+                if (!BoundTreeTraversal.VisitContractExpressions(function,
+                    expression => {
+                        if (expression is BoundCall call
+                            && RequiresNormalBackingCallPlan(
+                                _program.Functions[call.Function], _program))
+                        {
+                            maximumCallPlanSize = Math.Max(maximumCallPlanSize,
+                                NormalBackingCallPlanSize(call, _program));
+                        }
+                    }))
+                {
+                    throw new InvalidOperationException(
+                        "A normal-backed contract call-plan traversal is incomplete.");
+                }
                 if (maximumCallPlanSize != 0)
                 {
                     required = checked((required + 15) & ~15L);
@@ -2226,6 +2372,7 @@ internal sealed partial class PeCompiler
                 _frames[i] = frame;
             }
         }
+        _currentFunction = -1;
     }
 
     private void IncludeCleanupScratch(PrimitiveType type,
@@ -2361,6 +2508,13 @@ internal sealed partial class PeCompiler
                     _code.Clear(flag);
                 }
             }
+            foreach (var flag in _referenceInitializationFlags[i])
+            {
+                if (flag >= 0)
+                {
+                    _code.Clear(flag);
+                }
+            }
             foreach (var variableFields in _partialFieldSlots[i])
             {
                 foreach (var field in variableFields)
@@ -2474,7 +2628,8 @@ internal sealed partial class PeCompiler
                     SetPartialFieldSlots(slot, live: true);
                 }
                 var initializationFlag = _initializationFlags[i][slot];
-                if (initializationFlag >= 0 && !function.Variables[slot].IsOut)
+                if (initializationFlag >= 0 && !function.Variables[slot].IsOut
+                    && !function.Variables[slot].IsInit)
                 {
                     _code.Set(initializationFlag);
                 }
@@ -2857,6 +3012,46 @@ internal sealed partial class PeCompiler
     {
         switch (expression)
         {
+            case BoundPrivateReferenceForm formation:
+                return ExpressionSpills(
+                    LowerPrivateReferenceFormation(formation),
+                    ref maximumArguments);
+            case BoundPrivatePlaceRead read:
+            {
+                var function = _program.Functions[_currentFunction];
+                var remaining = SemanticVerifier.MaximumAnalysisVisits;
+                var placeExpression = SemanticVerifier.PrivateBodyPlaceExpression(
+                    read.Place, function, _program, read.Span,
+                    ref remaining, 0);
+                if (read.UseKind == 2)
+                {
+                    if (read.Place is BoundPrivateLocalPlace local)
+                    {
+                        return ExpressionSpills(new BoundMove(
+                            local.Variable, local.Type, read.Span),
+                            ref maximumArguments);
+                    }
+                    if (read.Place is BoundPrivateInlineFieldPlace inlineField)
+                    {
+                        return ExpressionSpills(new BoundFieldMove(
+                            (BoundFieldRead)placeExpression,
+                            inlineField.Type, read.Span),
+                            ref maximumArguments);
+                    }
+                    throw new NotSupportedException(
+                        "Native lowering does not support this private move place.");
+                }
+                if (read.UseKind is not (1 or 3))
+                {
+                    throw new NotSupportedException(
+                        "Native lowering does not support this private place-read kind.");
+                }
+                return ExpressionSpills(placeExpression,
+                    ref maximumArguments);
+            }
+            case BoundPrivateCheckedStore store:
+                return ExpressionSpills(LowerPrivateCheckedStore(store),
+                    ref maximumArguments);
             case BoundNativeFixedArrayInitialization fixedArray:
                 var fixedArraySpills = 1;
                 foreach (var element in fixedArray.Elements)
@@ -2987,6 +3182,9 @@ internal sealed partial class PeCompiler
                     ExpressionSpills(formation.Place, ref maximumArguments));
             case BoundReferenceReborrow reborrow:
                 return ExpressionSpills(reborrow.Descriptor, ref maximumArguments);
+            case BoundInitializationAttenuation attenuation:
+                return ExpressionSpills(attenuation.Descriptor,
+                    ref maximumArguments);
             case BoundReferenceRead referenceRead:
                 return ExpressionSpills(referenceRead.Descriptor, ref maximumArguments);
             case BoundReferenceWrite referenceWrite
@@ -3093,6 +3291,17 @@ internal sealed partial class PeCompiler
                 return ExpressionSpills(pattern.Value, ref maximumArguments);
             case BoundIsInitialized:
                 return 0;
+            case BoundPrivatePlaceIsInitialized privateInitializationTest:
+                if (!TryGetPrivateInitializationTestTarget(
+                        privateInitializationTest.Place, out _, out _))
+                {
+                    throw new NotSupportedException(
+                        "Native lowering does not support this private initialization-test place.");
+                }
+                return 0;
+            case BoundReferenceInitializationTest referenceTest:
+                return ExpressionSpills(referenceTest.Descriptor,
+                    ref maximumArguments);
             case BoundFieldRead field when IsTaggedOptionalValueType(field.Type)
                 && IsStruct(field.Receiver.Type)
                 && !IsIndirect(field.Receiver.Type)
@@ -3202,6 +3411,72 @@ internal sealed partial class PeCompiler
     private int CallResultSpills(BoundCall call) =>
         SpillSlotsForType(call.Type);
 
+    private BoundReferenceFormation LowerPrivateReferenceFormation(
+        BoundPrivateReferenceForm formation)
+    {
+        if (formation.FormationKind is not (1 or 2))
+        {
+            throw new NotSupportedException(
+                "Native lowering does not support this private reference formation kind.");
+        }
+
+        var function = _program.Functions[_currentFunction];
+        var remaining = SemanticVerifier.MaximumAnalysisVisits;
+        var place = SemanticVerifier.PrivateBodyPlaceExpression(
+            formation.Place, function, _program, formation.Span,
+            ref remaining, 0);
+        return new BoundReferenceFormation(place, formation.Type,
+            formation.Span);
+    }
+
+    private BoundExpression LowerPrivateCheckedStore(
+        BoundPrivateCheckedStore store)
+    {
+        var function = _program.Functions[_currentFunction];
+        if (store.Destination is BoundPrivateReferentPlace {
+                Descriptor: BoundPrivatePlaceRead {
+                    UseKind: 3,
+                    Place: BoundPrivateLocalPlace descriptor,
+                } descriptorRead,
+            })
+        {
+            if ((uint)descriptor.Variable
+                >= (uint)function.Variables.Length)
+            {
+                throw new InvalidOperationException(
+                    $"Private initialization-reference store descriptor "
+                        + $"{descriptor.Variable} is outside function "
+                        + $"'{function.Name}' with "
+                        + $"{function.Variables.Length} variables.");
+            }
+            if (function.Variables[descriptor.Variable].Type
+                != descriptorRead.Type)
+            {
+                throw new InvalidOperationException(
+                    $"Private initialization-reference descriptor type "
+                        + $"{descriptorRead.Type} does not match local "
+                        + $"{descriptor.Variable} type "
+                        + $"{function.Variables[descriptor.Variable].Type}.");
+            }
+            return new BoundReferenceWrite(
+                new BoundRead(descriptor.Variable, descriptorRead.Type,
+                    store.Span),
+                store.Value, store.Span);
+        }
+
+        var remaining = SemanticVerifier.MaximumAnalysisVisits;
+        if (store.Transition == 2
+            && SemanticVerifier.TryCreatePrivateNativeArrayPathWrite(
+                store.Destination, store.Value, store.Span, function,
+                _program, ref remaining, 0, out var arrayPathWrite))
+        {
+            return arrayPathWrite;
+        }
+
+        throw new NotSupportedException(
+            "Native lowering does not support this private checked-store place.");
+    }
+
     private int CallArgumentSpills(BoundCall call)
     {
         var total = 0;
@@ -3212,11 +3487,18 @@ internal sealed partial class PeCompiler
         return total;
     }
 
-    private static HashSet<int> InitializationTestVariables(BoundFunction function)
+    private static (HashSet<int> InitializationTests,
+        HashSet<int> ReferenceInitializationTests)
+        InitializationTestVariables(BoundFunction function)
     {
         var variables = new HashSet<int>();
+        var referenceInitializationVariables = new HashSet<int>();
         VisitStatement(function.Body);
-        return variables;
+        foreach (var clause in function.DeclarationContractClauses)
+        {
+            VisitExpression(clause.Predicate);
+        }
+        return (variables, referenceInitializationVariables);
 
         void VisitStatement(BoundStatement statement)
         {
@@ -3304,6 +3586,31 @@ internal sealed partial class PeCompiler
             {
                 case BoundIsInitialized initializationTest:
                     _ = variables.Add(initializationTest.Variable);
+                    break;
+                case BoundPrivatePlaceIsInitialized privateInitializationTest:
+                    if (!TryGetPrivateInitializationTestTarget(
+                            privateInitializationTest.Place, out var variable,
+                            out var isReference))
+                    {
+                        throw new NotSupportedException(
+                            "Native lowering does not support this private initialization-test place.");
+                    }
+                    _ = (isReference ? referenceInitializationVariables
+                        : variables).Add(variable);
+                    break;
+                case BoundReferenceInitializationTest referenceTest:
+                    if (referenceTest.Descriptor is BoundRead descriptor)
+                    {
+                        _ = referenceInitializationVariables.Add(
+                            descriptor.Variable);
+                    }
+                    else
+                    {
+                        VisitExpression(referenceTest.Descriptor);
+                    }
+                    break;
+                case BoundInitializationAttenuation attenuation:
+                    VisitExpression(attenuation.Descriptor);
                     break;
                 case BoundUnary unary:
                     VisitExpression(unary.Operand);
@@ -3565,6 +3872,175 @@ internal sealed partial class PeCompiler
 
     private int OwnerPlace(int index) =>
         _program.Functions[_currentFunction].Variables[index].IsOut ? OutSlot(index) : Slot(index);
+
+    private bool IsInitializationReferenceOutputParameter(
+        BoundFunction target, int parameterSlot)
+    {
+        if ((uint)parameterSlot >= (uint)target.Variables.Length)
+        {
+            return false;
+        }
+
+        var parameter = target.Variables[parameterSlot];
+        return parameter.IsInit && !parameter.IsOut
+            && CheckedReferenceTypeContract.IsValidType(
+                parameter.Type, _program.CheckedReferenceTypes)
+            && _program.CheckedReferenceTypes[
+                CheckedReferenceTypes.Index(parameter.Type)]
+                is {
+                    IsInitialization: true,
+                    IsGarbageCollected: false,
+                    IsOptional: false,
+                };
+    }
+
+    private void SetInitializationReferenceOutputState(
+        BoundExpression argument, bool initialized)
+    {
+        if (argument is BoundReferenceFormation {
+                Place: BoundRead place,
+            })
+        {
+            if ((uint)place.Variable
+                >= (uint)_program.Functions[_currentFunction].Variables.Length)
+            {
+                throw new InvalidOperationException(
+                    "An initialization-reference local output has an invalid variable.");
+            }
+            SetInitializationLocalState(place.Variable, initialized);
+            return;
+        }
+
+        if (argument is BoundReferenceFormation {
+                Place: BoundFieldRead fieldPlace,
+            })
+        {
+            if (!IsStruct(fieldPlace.Receiver.Type)
+                || !TryGetFieldRootVariable(fieldPlace,
+                    out var fieldRootVariable)
+                || (uint)fieldRootVariable
+                    >= (uint)_program.Functions[_currentFunction]
+                        .Variables.Length)
+            {
+                throw new NotSupportedException(
+                    "The native emitter cannot publish initialization state for this field destination.");
+            }
+
+            SetPartialFieldSlot(fieldPlace, initialized);
+            return;
+        }
+
+        if (argument is BoundReferenceReborrow {
+                Descriptor: BoundRead descriptor,
+            })
+        {
+            if ((uint)descriptor.Variable
+                >= (uint)_program.Functions[_currentFunction].Variables.Length)
+            {
+                throw new InvalidOperationException(
+                    "An initialization-reference reborrow has an invalid descriptor.");
+            }
+            SetReferenceInitializationFlag(descriptor.Variable, initialized);
+            return;
+        }
+
+        if (argument is BoundPrivateReferenceForm {
+                FormationKind: 1,
+                Place: BoundPrivateLocalPlace privatePlace,
+            })
+        {
+            if ((uint)privatePlace.Variable
+                >= (uint)_program.Functions[_currentFunction].Variables.Length)
+            {
+                throw new InvalidOperationException(
+                    "A private initialization-reference output has an invalid local.");
+            }
+            SetInitializationLocalState(privatePlace.Variable,
+                initialized);
+            return;
+        }
+
+        if (argument is BoundPrivateReferenceForm {
+                FormationKind: 2,
+                Place: BoundPrivateReferentPlace {
+                    Descriptor: BoundPrivatePlaceRead {
+                        UseKind: 3,
+                        Place: BoundPrivateLocalPlace privateDescriptor,
+                    },
+                },
+            })
+        {
+            if ((uint)privateDescriptor.Variable
+                >= (uint)_program.Functions[_currentFunction].Variables.Length)
+            {
+                throw new InvalidOperationException(
+                    "A private initialization-reference reborrow has an invalid descriptor.");
+            }
+            SetReferenceInitializationFlag(privateDescriptor.Variable,
+                initialized);
+            return;
+        }
+
+        throw new NotSupportedException(
+            "The native emitter cannot publish initialization state for this destination form.");
+    }
+
+    private static bool TryGetPrivateInitializationTestTarget(
+        BoundPrivatePlace place, out int variable, out bool isReference)
+    {
+        switch (place)
+        {
+            case BoundPrivateLocalPlace local:
+                variable = local.Variable;
+                isReference = false;
+                return true;
+            case BoundPrivateReferentPlace {
+                Descriptor: BoundPrivatePlaceRead {
+                    UseKind: 3,
+                    Place: BoundPrivateLocalPlace descriptor,
+                },
+            }:
+                variable = descriptor.Variable;
+                isReference = true;
+                return true;
+            default:
+                variable = -1;
+                isReference = false;
+                return false;
+        }
+    }
+
+    private void SetInitializationLocalState(int variable,
+        bool initialized)
+    {
+        var type = _program.Functions[_currentFunction].Variables[variable]
+            .Type;
+        if (ManagedClassTypes.IsManaged(type))
+        {
+            SetManagedRoot(OwnerPlace(variable), initialized);
+        }
+        else if (IsUnique(type))
+        {
+            var live = _liveSlots[_currentFunction][variable];
+            if (live >= 0)
+            {
+                if (initialized)
+                {
+                    _code.Set(live);
+                }
+                else
+                {
+                    _code.Clear(live);
+                }
+            }
+            SetPartialFieldSlots(variable, initialized);
+        }
+        else
+        {
+            SetInitializationFlag(variable, initialized);
+        }
+    }
+
     private void SetInitializationFlag(int variable, bool initialized)
     {
         var flag = _initializationFlags[_currentFunction][variable];
@@ -3580,6 +4056,36 @@ internal sealed partial class PeCompiler
         {
             _code.Clear(flag);
         }
+    }
+
+    private void SetReferenceInitializationFlag(int variable,
+        bool initialized)
+    {
+        var flag = _referenceInitializationFlags[_currentFunction][variable];
+        if (flag < 0)
+        {
+            return;
+        }
+        if (initialized)
+        {
+            _code.Set(flag);
+        }
+        else
+        {
+            _code.Clear(flag);
+        }
+    }
+
+    private void EmitReferenceInitializationTest(int variable)
+    {
+        var flag = _referenceInitializationFlags[_currentFunction][variable];
+        if (flag < 0)
+        {
+            throw new InvalidOperationException(
+                "Reference initialization test has no runtime state flag.");
+        }
+        _code.Load(flag);
+        _code.Bytes(0x85, 0xC0, 0x0F, 0x95, 0xC0, 0x0F, 0xB6, 0xC0);
     }
 
     private void EmitInitializationTest(int variable)
@@ -3626,8 +4132,12 @@ internal sealed partial class PeCompiler
     private static bool RequiresFloatingEnvironment(PrimitiveType source, PrimitiveType target) =>
         source is PrimitiveType.Float32 or PrimitiveType.Float64
             || target is PrimitiveType.Float32 or PrimitiveType.Float64;
-    private static bool IsWide(PrimitiveType type) =>
-        type is PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float64 or PrimitiveType.Decimal64
+    private bool IsWide(PrimitiveType type)
+    {
+        type = RepresentationType(type);
+        return type is PrimitiveType.Int64 or PrimitiveType.UInt64
+            or PrimitiveType.NativeInt or PrimitiveType.NativeUInt
+            or PrimitiveType.Float64 or PrimitiveType.Decimal64
             or PrimitiveType.OwnedInt32Buffer
             or PrimitiveType.TokenSpan or PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
             or PrimitiveType.NativeRawPointer
@@ -3636,6 +4146,7 @@ internal sealed partial class PeCompiler
             || NativeFunctionPointerTypes.IsType(type)
             || CheckedReferenceTypes.IsType(type)
             || ManagedClassTypes.IsManaged(type);
+    }
     private int Size(PrimitiveType type)
     {
         if (NativeFixedArrayTypes.IsType(type))
@@ -3656,7 +4167,264 @@ internal sealed partial class PeCompiler
 
         return NativeLayoutSize(ValueLayout.Size(type, _program.Structures,
             _program.CheckedReferenceTypes, _program.NativeLoweringAgreement,
-            _program.NativeFixedArrayTypes));
+            _program.NativeFixedArrayTypes, _program.EnumDefinitions));
+    }
+
+    private void EmitNativeLayoutQuery(BoundLayoutQuery query)
+    {
+        if (query.Subject.RequiresUnsafe
+            && !query.Subject.IsUnsafeAuthorized)
+        {
+            throw new InvalidOperationException(
+                "A verified unsafe layout query has no body authorization.");
+        }
+
+        var result = query.Kind switch {
+            BoundLayoutQueryKind.SizeOf
+                => GetNativeQuerySize(query.Subject.Type),
+            BoundLayoutQueryKind.AlignOf
+                => GetNativeQueryAlignment(query.Subject.Type),
+            BoundLayoutQueryKind.OffsetOfType
+                when query.Subject.Kind == BoundQuerySubjectKind.Type
+                    && query.Subject.FieldPath is BoundQueryFieldPath path
+                    && path.RootType == query.Subject.Type
+                => GetNativeQueryFieldPathOffset(path, _program.Structures,
+                    terminalOnly: false),
+            BoundLayoutQueryKind.OffsetOfPlace
+                when (query.Subject.Kind is BoundQuerySubjectKind.Place
+                        or BoundQuerySubjectKind.FieldPathPlace)
+                    && query.Subject.FieldPath is BoundQueryFieldPath path
+                    && path.LeafType == query.Subject.Type
+                => GetNativeQueryFieldPathOffset(path, _program.Structures,
+                    terminalOnly: true),
+            _ => throw new NotSupportedException(
+                "The native emitter received an unsupported layout-query subject."),
+        };
+        if (result > long.MaxValue)
+        {
+            throw new NotSupportedException(
+                "The selected target layout query result does not fit nint.");
+        }
+
+        _code.Bytes(0x48, 0xB8);
+        _code.Int64(checked((long)result));
+    }
+
+    private ulong GetNativeQuerySize(PrimitiveType type)
+    {
+        var size = ValueLayout.Size(type, _program.Structures,
+            _program.CheckedReferenceTypes, _program.NativeLoweringAgreement,
+            _program.NativeFixedArrayTypes, _program.EnumDefinitions);
+        if (size == 0 && !HasKnownZeroExtent(type))
+        {
+            throw new NotSupportedException(
+                "The native emitter cannot resolve the selected target size for this type.");
+        }
+
+        return size;
+    }
+
+    private ulong GetNativeQueryAlignment(PrimitiveType type)
+    {
+        var alignment = ValueLayout.Alignment(type, _program.Structures,
+            _program.CheckedReferenceTypes, _program.NativeLoweringAgreement,
+            _program.NativeFixedArrayTypes, _program.EnumDefinitions);
+        if (type == PrimitiveType.Void && alignment == 0)
+        {
+            return 0;
+        }
+        if (alignment <= 0)
+        {
+            throw new NotSupportedException(
+                "The native emitter cannot resolve the selected target alignment for this type.");
+        }
+
+        return checked((ulong)alignment);
+    }
+
+    private bool HasKnownZeroExtent(PrimitiveType type)
+    {
+        if (type == PrimitiveType.Void)
+        {
+            return true;
+        }
+
+        if (IsStruct(type))
+        {
+            var structureIndex = (int)type - 100;
+            return (uint)structureIndex < (uint)_program.Structures.Length
+                && _program.Structures[structureIndex].Size == 0;
+        }
+
+        return NativeFixedArrayTypes.IsType(type)
+            && NativeFixedArrayContract.TryGetLayout(type,
+                _program.Structures, _program.NativeFixedArrayTypes,
+                out var layout, _program.CheckedReferenceTypes,
+                _program.EnumDefinitions)
+            && layout.ByteExtent == 0;
+    }
+
+    private static ulong GetNativeQueryFieldPathOffset(
+        BoundQueryFieldPath path, ImmutableArray<BoundStruct> structures,
+        bool terminalOnly)
+    {
+        if (!path.HasValidStructure
+            || (terminalOnly && path.Steps.Length != 1))
+        {
+            throw new InvalidOperationException(
+                "A verified layout-query FieldPath is invalid.");
+        }
+
+        ulong offset = 0;
+        foreach (var step in path.Steps)
+        {
+            var structureIndex = (int)step.OwnerType - 100;
+            var fieldOrdinal = checked((int)step.FieldOrdinal);
+            if ((uint)structureIndex >= (uint)structures.Length
+                || (uint)fieldOrdinal
+                    >= (uint)structures[structureIndex].Fields.Length)
+            {
+                throw new InvalidOperationException(
+                    "A verified layout-query FieldPath has an unrepresented field.");
+            }
+
+            var field = structures[structureIndex].Fields[fieldOrdinal];
+            if (field.Type != step.FieldType)
+            {
+                throw new InvalidOperationException(
+                    "A verified layout-query FieldPath field type changed before emission.");
+            }
+
+            if (terminalOnly)
+            {
+                return field.Offset;
+            }
+
+            offset = checked(offset + field.Offset);
+        }
+
+        return offset;
+    }
+
+    private static bool TryGetNativeTypeIdentity(
+        BoundExpression expression, out PrimitiveType type)
+    {
+        if (expression is BoundTypeIdentityQuery identity
+            && identity.Subject.TypeIdentityTerm is null)
+        {
+            type = identity.Subject.Type;
+            return true;
+        }
+
+        if (expression is BoundUnsafeExpression unsafeExpression
+            && unsafeExpression.Type == PrimitiveType.TypeIdentity)
+        {
+            return TryGetNativeTypeIdentity(unsafeExpression.Expression,
+                out type);
+        }
+
+        if (expression is BoundConditional conditional
+            && TryGetNativeBoolean(conditional.Condition, out var condition))
+        {
+            return TryGetNativeTypeIdentity(
+                condition ? conditional.WhenTrue : conditional.WhenFalse,
+                out type);
+        }
+
+        type = default;
+        return false;
+    }
+
+    private static bool TryGetNativeBoolean(
+        BoundExpression expression, out bool value)
+    {
+        if (expression is BoundConstant {
+                Type: PrimitiveType.Bool,
+            } constant)
+        {
+            value = constant.Value != 0;
+            return true;
+        }
+
+        if (expression is BoundBinary binary
+            && binary.Type == PrimitiveType.Bool
+            && binary.Left.Type == PrimitiveType.TypeIdentity
+            && binary.Right.Type == PrimitiveType.TypeIdentity
+            && (binary.Operator is TokenKind.EqualsEquals
+                or TokenKind.BangEquals)
+            && TryGetNativeTypeIdentity(binary.Left, out var leftType)
+            && TryGetNativeTypeIdentity(binary.Right, out var rightType))
+        {
+            value = binary.Operator == TokenKind.EqualsEquals
+                ? leftType == rightType
+                : leftType != rightType;
+            return true;
+        }
+
+        value = false;
+        return false;
+    }
+
+    private static bool TryCreateNativeTypeIdentityComparison(
+        BoundExpression left, BoundExpression right, TokenKind operation,
+        out BoundExpression comparison)
+    {
+        var remaining = SemanticVerifier.MaximumAnalysisVisits;
+        return TryCreateNativeTypeIdentityComparison(left, right, operation,
+            ref remaining, 0, out comparison);
+    }
+
+    private static bool TryCreateNativeTypeIdentityComparison(
+        BoundExpression left, BoundExpression right, TokenKind operation,
+        ref int remaining, int depth, out BoundExpression comparison)
+    {
+        if (depth > SemanticVerifier.MaximumDepth || --remaining < 0)
+        {
+            comparison = left;
+            return false;
+        }
+
+        if (TryGetNativeTypeIdentity(left, out var leftType)
+            && TryGetNativeTypeIdentity(right, out var rightType))
+        {
+            var equal = leftType == rightType;
+            var result = operation == TokenKind.EqualsEquals
+                ? equal : !equal;
+            comparison = new BoundConstant(result ? 1 : 0,
+                PrimitiveType.Bool, default);
+            return true;
+        }
+
+        if (left is BoundConditional leftConditional
+            && leftConditional.Type == PrimitiveType.TypeIdentity
+            && TryCreateNativeTypeIdentityComparison(
+                leftConditional.WhenTrue, right, operation, ref remaining,
+                depth + 1, out var leftTrue)
+            && TryCreateNativeTypeIdentityComparison(
+                leftConditional.WhenFalse, right, operation, ref remaining,
+                depth + 1, out var leftFalse))
+        {
+            comparison = new BoundConditional(leftConditional.Condition,
+                leftTrue, leftFalse, PrimitiveType.Bool, default);
+            return true;
+        }
+
+        if (right is BoundConditional rightConditional
+            && rightConditional.Type == PrimitiveType.TypeIdentity
+            && TryCreateNativeTypeIdentityComparison(left,
+                rightConditional.WhenTrue, operation, ref remaining,
+                depth + 1, out var rightTrue)
+            && TryCreateNativeTypeIdentityComparison(left,
+                rightConditional.WhenFalse, operation, ref remaining,
+                depth + 1, out var rightFalse))
+        {
+            comparison = new BoundConditional(rightConditional.Condition,
+                rightTrue, rightFalse, PrimitiveType.Bool, default);
+            return true;
+        }
+
+        comparison = left;
+        return false;
     }
 
     private static int NativeLayoutOffset(ulong offset) =>
@@ -3671,8 +4439,27 @@ internal sealed partial class PeCompiler
                 "The native emitter cannot materialize a fixed-layout value larger than Int32.MaxValue.")
             : (int)size;
 
-    private static bool IsNarrowInteger(PrimitiveType type) =>
-        PrimitiveTypeFacts.IntegerWidth(type) is 8 or 16;
+    private bool IsNarrowInteger(PrimitiveType type)
+    {
+        type = RepresentationType(type);
+        return PrimitiveTypeFacts.IntegerWidth(type) is 8 or 16;
+    }
+
+    private PrimitiveType RepresentationType(PrimitiveType type)
+    {
+        if (!BoundEnumTypes.IsType(type))
+        {
+            return type;
+        }
+
+        var index = BoundEnumTypes.Index(type);
+        if ((uint)index >= (uint)_program.EnumDefinitions.Length)
+        {
+            throw new InvalidOperationException(
+                "A verified enum type has no definition.");
+        }
+        return _program.EnumDefinitions[index].UnderlyingType;
+    }
 
     private void LoadTypedPointerField(int offset, PrimitiveType type)
     {
@@ -3703,10 +4490,10 @@ internal sealed partial class PeCompiler
     {
         var alignment = ValueLayout.Alignment(type, _program.Structures,
             _program.CheckedReferenceTypes, _program.NativeLoweringAgreement,
-            _program.NativeFixedArrayTypes);
+            _program.NativeFixedArrayTypes, _program.EnumDefinitions);
         var requiredAlignment = ValueLayout.RequiredAlignment(type,
             _program.Structures, _program.NativeFixedArrayTypes,
-            _program.CheckedReferenceTypes);
+            _program.CheckedReferenceTypes, _program.EnumDefinitions);
         return Math.Max(8, Math.Max(alignment, requiredAlignment));
     }
     private static int AlignOffset(int offset, int alignment)
@@ -5576,14 +6363,21 @@ internal sealed partial class PeCompiler
     private bool IsTaggedOptionalValueType(PrimitiveType type) =>
         IsOptionalValueType(type) && !GetOptionalValueLayout(type).UsesNullNiche;
 
-    private bool IsIndirect(PrimitiveType type) => type == PrimitiveType.TokenSpan
-        || NativeFixedArrayTypes.IsType(type)
-        || (IsOptionalValueType(type)
-            ? Size(type) is not (1 or 2 or 4 or 8)
-            : _normalBacking && CheckedReferenceTypes.IsType(type))
-        || type is PrimitiveType.Int128 or PrimitiveType.UInt128 or PrimitiveType.Float128
-            or PrimitiveType.Decimal128
-        || (IsStruct(type) && Size(type) is not (1 or 2 or 4 or 8));
+    private bool IsIndirect(PrimitiveType type)
+    {
+        if (BoundEnumTypes.IsType(type))
+        {
+            return IsIndirect(RepresentationType(type));
+        }
+        return type == PrimitiveType.TokenSpan
+            || NativeFixedArrayTypes.IsType(type)
+            || (IsOptionalValueType(type)
+                ? Size(type) is not (1 or 2 or 4 or 8)
+                : _normalBacking && CheckedReferenceTypes.IsType(type))
+            || type is PrimitiveType.Int128 or PrimitiveType.UInt128 or PrimitiveType.Float128
+                or PrimitiveType.Decimal128
+            || (IsStruct(type) && Size(type) is not (1 or 2 or 4 or 8));
+    }
     private bool IsIndirectResult(PrimitiveType type) =>
         type != PrimitiveType.Float128 && IsIndirect(type);
     private static bool IsFloatingCallCarrier(PrimitiveType type) =>
@@ -5591,7 +6385,21 @@ internal sealed partial class PeCompiler
             or PrimitiveType.Float32 or PrimitiveType.Float64;
     private bool IsUnique(PrimitiveType type) =>
         type == PrimitiveType.OwnedInt32Buffer
+            || IsUniqueClassHandle(type)
             || (IsStruct(type) && _program.Structures[(int)type - 100].IsUnique);
+    private bool IsUniqueClassHandle(PrimitiveType type)
+    {
+        if ((int)type < ManagedClassTypes.First
+            || !ManagedClassTypes.IsManaged(type))
+        {
+            return false;
+        }
+
+        var classIndex = ManagedClassTypes.ClassIndex(type);
+        return (uint)classIndex < (uint)_program.Classes.Length
+            && _program.Classes[classIndex].IsUnique == true;
+    }
+
     private bool HasDeclaredCleanup(PrimitiveType type) =>
         IsStruct(type) && _program.Structures[(int)type - 100].CleanupMethod is not null;
     private bool IsBorrowedReceiver()
@@ -5705,13 +6513,23 @@ internal sealed partial class PeCompiler
     private void DropOwner(int variable)
     {
         var live = _liveSlots[_currentFunction][variable];
+        var type = _program.Functions[_currentFunction]
+            .Variables[variable].Type;
+        if (ManagedClassTypes.IsManaged(type))
+        {
+            _code.Clear(live);
+            SetManagedValueRoots(OwnerPlace(variable), type,
+                active: false);
+            return;
+        }
+
         _code.Load(live);
         _code.Bytes(0x85, 0xC0);
         var vacant = _code.JumpIf(0x84);
-        var type = _program.Functions[_currentFunction].Variables[variable].Type;
         _code.Clear(live);
         var partialFields = _partialFieldSlots[_currentFunction][variable];
         if (partialFields.Length != 0
+            && !ManagedClassTypes.IsManaged(type)
             && type != PrimitiveType.OwnedInt32Buffer
             && _program.Structures[(int)type - 100].CleanupMethod is null)
         {
@@ -6162,6 +6980,11 @@ internal sealed partial class PeCompiler
             _code.PatchRelative(released, _code.Position);
             return;
         }
+        if (ManagedClassTypes.IsManaged(type))
+        {
+            SetManagedValueRoots(place, type, active: false);
+            return;
+        }
         var structure = _program.Structures[(int)type - 100];
         var name = structure.CleanupMethod;
         if (name is not null)
@@ -6283,6 +7106,11 @@ internal sealed partial class PeCompiler
         if (IsTaggedOptionalValueType(type) && !IsIndirect(type))
         {
             LoadTaggedOptionalValueFromFrame(offset, type);
+        }
+        else if (type is PrimitiveType.Bool or PrimitiveType.Char16)
+        {
+            _code.LoadUnsigned(offset,
+                type == PrimitiveType.Bool ? sizeof(byte) : sizeof(ushort));
         }
         else if (IsIndirect(type))
         {
@@ -7194,6 +8022,16 @@ internal sealed partial class PeCompiler
                     StoreValue(Slot(local.Variable), local.Initializer.Type);
                 }
                 SetInitializationFlag(local.Variable, initialized: true);
+                if (CheckedReferenceTypeContract.IsValidType(
+                        local.Initializer.Type,
+                        _program.CheckedReferenceTypes)
+                    && _program.CheckedReferenceTypes[
+                        CheckedReferenceTypes.Index(local.Initializer.Type)]
+                        .IsInitialization)
+                {
+                    SetReferenceInitializationFlag(local.Variable,
+                        initialized: false);
+                }
                 if (ManagedClassTypes.IsManaged(local.Initializer.Type)
                     || (_normalBacking
                         && ContainsNormalBackingReferenceValue(
@@ -7306,8 +8144,10 @@ internal sealed partial class PeCompiler
                     break;
                 }
                 Expression(assignment.Value, 0);
-                if (ManagedClassTypes.IsManaged(assignment.Value.Type)
-                    || (_normalBacking
+                if ((ManagedClassTypes.IsManaged(assignment.Value.Type)
+                        && !IsUnique(assignment.Value.Type))
+                    || (!ManagedClassTypes.IsManaged(assignment.Value.Type)
+                        && _normalBacking
                         && ContainsNormalBackingReferenceValue(
                             assignment.Value.Type, _program)))
                 {
@@ -7320,9 +8160,24 @@ internal sealed partial class PeCompiler
                 if (IsUnique(assignment.Value.Type))
                 {
                     StoreValue(_replacementSlots[_currentFunction], assignment.Value.Type);
+                    if (ManagedClassTypes.IsManaged(assignment.Value.Type))
+                    {
+                        SetManagedValueRoots(
+                            _replacementSlots[_currentFunction],
+                            assignment.Value.Type, active: true);
+                    }
                     DropOwner(assignment.Variable);
                     LoadValue(_replacementSlots[_currentFunction], assignment.Value.Type);
-                    StoreValue(OwnerPlace(assignment.Variable), assignment.Value.Type);
+                    var uniqueDestination = OwnerPlace(assignment.Variable);
+                    StoreValue(uniqueDestination, assignment.Value.Type);
+                    if (ManagedClassTypes.IsManaged(assignment.Value.Type))
+                    {
+                        SetManagedValueRoots(uniqueDestination,
+                            assignment.Value.Type, active: true);
+                        SetManagedValueRoots(
+                            _replacementSlots[_currentFunction],
+                            assignment.Value.Type, active: false);
+                    }
                     _code.Set(_liveSlots[_currentFunction][assignment.Variable]);
                     SetPartialFieldSlots(assignment.Variable, live: true);
                     break;
@@ -8580,6 +9435,12 @@ internal sealed partial class PeCompiler
         _cancellationToken.ThrowIfCancellationRequested();
         switch (expression)
         {
+            case BoundPrivateReferenceForm formation:
+                EmitCheckedReferenceFormation(
+                    LowerPrivateReferenceFormation(formation), spill,
+                    allowInitializationReference:
+                        formation.FormationKind == 2);
+                break;
             case BoundPrivatePlaceRead read:
             {
                 var function = _program.Functions[_currentFunction];
@@ -8620,18 +9481,8 @@ internal sealed partial class PeCompiler
             }
             case BoundPrivateCheckedStore store:
             {
-                var function = _program.Functions[_currentFunction];
-                var remaining = SemanticVerifier.MaximumAnalysisVisits;
-                if (store.Transition == 2
-                    && SemanticVerifier.TryCreatePrivateNativeArrayPathWrite(
-                        store.Destination, store.Value, store.Span, function,
-                        _program, ref remaining, 0, out var arrayPathWrite))
-                {
-                    Expression(arrayPathWrite, spill);
-                    break;
-                }
-                throw new NotSupportedException(
-                    "Native lowering does not support this private checked-store place.");
+                Expression(LowerPrivateCheckedStore(store), spill);
+                break;
             }
             case BoundNativeFixedArrayElement fixedArrayElement:
                 EmitNativeFixedArrayElement(fixedArrayElement, spill);
@@ -8669,6 +9520,9 @@ internal sealed partial class PeCompiler
             case BoundReferenceReborrow reborrow:
                 EmitCheckedReferenceReborrow(reborrow, spill);
                 break;
+            case BoundInitializationAttenuation attenuation:
+                Expression(attenuation.Descriptor, spill);
+                break;
             case BoundReferenceRead referenceRead:
                 EmitCheckedReferenceRead(referenceRead, spill);
                 break;
@@ -8692,7 +9546,14 @@ internal sealed partial class PeCompiler
                     _ = _externalFunctionAddresses.Add(address.Function);
                 }
                 break;
+            case BoundLayoutQuery query:
+                EmitNativeLayoutQuery(query);
+                break;
+            case BoundTypeIdentityQuery:
+                throw new NotSupportedException(
+                    "TypeIdentity is an internal comparison value and cannot be materialized by native lowering.");
             case BoundConstant constant:
+                var representationType = constant.RepresentationType;
                 if (constant.Type == PrimitiveType.NativeUtf16ZPointer)
                 {
                     if (constant.Value < 0 || constant.Value >= _nativeUtf16ZOffsets.Length)
@@ -8713,7 +9574,7 @@ internal sealed partial class PeCompiler
                         _nativeUtf8ZOffsets[checked((int)constant.Value)]));
                     _code.Bytes(0x48, 0x89, 0xD0); // mov rax,rdx
                 }
-                else if (constant.Type is PrimitiveType.Int128 or PrimitiveType.UInt128
+                else if (representationType is PrimitiveType.Int128 or PrimitiveType.UInt128
                     or PrimitiveType.Float128 or PrimitiveType.Decimal128)
                 {
                     var storage = Spill(spill);
@@ -8725,7 +9586,7 @@ internal sealed partial class PeCompiler
                     _code.Store64(storage + sizeof(ulong));
                     _code.Address(storage);
                 }
-                else if (IsWide(constant.Type))
+                else if (IsWide(representationType))
                 {
                     _code.Bytes(0x48, 0xB8);
                     _code.Int64(constant.Value);
@@ -8733,7 +9594,7 @@ internal sealed partial class PeCompiler
                 else
                 {
                     _code.Byte(0xB8);
-                    _code.Int32(constant.Type is PrimitiveType.Float32 or PrimitiveType.UInt32
+                    _code.Int32(representationType is PrimitiveType.Float32 or PrimitiveType.UInt32
                         or PrimitiveType.Decimal32
                         ? unchecked((int)constant.Value) : checked((int)constant.Value));
                 }
@@ -9007,6 +9868,42 @@ internal sealed partial class PeCompiler
             case BoundIsInitialized initializationTest:
                 EmitInitializationTest(initializationTest.Variable);
                 break;
+            case BoundPrivatePlaceIsInitialized privateInitializationTest:
+                if (!TryGetPrivateInitializationTestTarget(
+                        privateInitializationTest.Place, out var variable,
+                        out var isReference))
+                {
+                    throw new NotSupportedException(
+                        "Native lowering does not support this private initialization-test place.");
+                }
+                if (isReference)
+                {
+                    EmitReferenceInitializationTest(variable);
+                }
+                else
+                {
+                    EmitInitializationTest(variable);
+                }
+                break;
+            case BoundReferenceInitializationTest referenceTest:
+                if (referenceTest.Descriptor is not BoundRead initializedReferenceDescriptor)
+                {
+                    throw new InvalidOperationException(
+                        "A reference initialization test requires a direct descriptor local.");
+                }
+                EmitReferenceInitializationTest(
+                    initializedReferenceDescriptor.Variable);
+                break;
+            case BoundContractReturnValue contractReturn:
+                if (contractReturn.Type
+                        != _program.Functions[_currentFunction].ReturnType
+                    || contractReturn.Type == PrimitiveType.Void)
+                {
+                    throw new InvalidOperationException(
+                        "A declaration postcondition has an invalid saved result.");
+                }
+                LoadValue(PendingReturnSlot(), contractReturn.Type);
+                break;
             case BoundRead read:
                 var readVariable = _program.Functions[_currentFunction].Variables[read.Variable];
                 if (readVariable.IsImplicitRef)
@@ -9277,6 +10174,7 @@ internal sealed partial class PeCompiler
                             else if (unary.OverflowBehavior == BoundIntegerOverflowBehavior.Checked)
                             {
                                 RuntimeBranch(unary.Type is PrimitiveType.UInt32 or PrimitiveType.UInt64
+                                    or PrimitiveType.NativeUInt
                                     ? (byte)0x82 : (byte)0x80, 0);
                             }
                         }
@@ -9425,6 +10323,7 @@ internal sealed partial class PeCompiler
                     else if (update.OverflowBehavior == BoundIntegerOverflowBehavior.Checked)
                     {
                         RuntimeBranch(update.Type is PrimitiveType.UInt32 or PrimitiveType.UInt64
+                            or PrimitiveType.NativeUInt
                             ? (byte)0x82 : (byte)0x80, 0);
                     }
                     _code.Load64(Spill(spill + 1), destinationRegister: true);
@@ -9674,6 +10573,26 @@ internal sealed partial class PeCompiler
                 EmitOptionalEquality(equality, spill);
                 break;
             case BoundBinary binary:
+                if (binary.Left.Type == PrimitiveType.TypeIdentity
+                    || binary.Right.Type == PrimitiveType.TypeIdentity)
+                {
+                    if (binary.Left.Type != PrimitiveType.TypeIdentity
+                        || binary.Right.Type != PrimitiveType.TypeIdentity
+                        || binary.Type != PrimitiveType.Bool
+                        || binary.Operator is not (TokenKind.EqualsEquals
+                            or TokenKind.BangEquals)
+                        || !TryCreateNativeTypeIdentityComparison(
+                            binary.Left, binary.Right, binary.Operator,
+                            out var comparison))
+                    {
+                        throw new NotSupportedException(
+                            "Native TypeIdentity comparison requires closed, exact query subjects and supported selection flow.");
+                    }
+
+                    Expression(comparison, spill);
+                    break;
+                }
+
                 EnsureSupportedNativeFloatingBinary(binary.Left.Type, binary.Operator);
                 if (binary.Operator is TokenKind.AmpersandAmpersand or TokenKind.PipePipe)
                 {
@@ -10052,7 +10971,8 @@ internal sealed partial class PeCompiler
                         DropOwner(output.Variable);
                     }
                     if (argument is BoundOutArgument managedOutput
-                        && ManagedClassTypes.IsManaged(managedOutput.Type))
+                        && ManagedClassTypes.IsManaged(managedOutput.Type)
+                        && !IsUnique(managedOutput.Type))
                     {
                         SetManagedRoot(OwnerPlace(managedOutput.Variable), active: false);
                     }
@@ -10164,9 +11084,13 @@ internal sealed partial class PeCompiler
                     _code.Address(resultSlot);
                 }
                 var hasOut = false;
-                foreach (var argument in call.Arguments)
+                for (var i = 0; i < call.Arguments.Length; i++)
                 {
-                    hasOut |= argument is BoundOutArgument;
+                    hasOut |= call.Arguments[i] is BoundOutArgument;
+                    var parameterSlot = call.ParameterIndex(i)
+                        + (targetFunction.IsConstructor ? 1 : 0);
+                    hasOut |= IsInitializationReferenceOutputParameter(
+                        targetFunction, parameterSlot);
                 }
                 if (hasOut)
                 {
@@ -10226,6 +11150,17 @@ internal sealed partial class PeCompiler
                             }
                             SetInitializationFlag(output.Variable, initialized: true);
                         }
+                        else
+                        {
+                            var parameterSlot = call.ParameterIndex(i)
+                                + (targetFunction.IsConstructor ? 1 : 0);
+                            if (IsInitializationReferenceOutputParameter(
+                                targetFunction, parameterSlot))
+                            {
+                                SetInitializationReferenceOutputState(
+                                    call.Arguments[i], initialized: true);
+                            }
+                        }
                     }
                     if (conditionalOutputs)
                     {
@@ -10241,6 +11176,18 @@ internal sealed partial class PeCompiler
                                     _code.Clear(_liveSlots[_currentFunction][output.Variable]);
                                 }
                                 SetInitializationFlag(output.Variable, initialized: false);
+                            }
+                            else
+                            {
+                                var parameterSlot = call.ParameterIndex(i)
+                                    + (targetFunction.IsConstructor ? 1 : 0);
+                                if (IsInitializationReferenceOutputParameter(
+                                    targetFunction, parameterSlot))
+                                {
+                                    SetInitializationReferenceOutputState(
+                                        call.Arguments[i],
+                                        initialized: false);
+                                }
                             }
                         }
                         _code.PatchRelative(done, _code.Position);
@@ -11481,7 +12428,9 @@ internal sealed partial class PeCompiler
         int controlledMxcsr, int resultSpill)
     {
         if (source is PrimitiveType.Float32 or PrimitiveType.Float64
-            && target is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64)
+            && target is PrimitiveType.Int32 or PrimitiveType.UInt32
+                or PrimitiveType.Int64 or PrimitiveType.UInt64
+                or PrimitiveType.NativeInt or PrimitiveType.NativeUInt)
         {
             EmitFloatingToInteger(source, target, savedMxcsr, controlledMxcsr);
             return;
@@ -11489,7 +12438,7 @@ internal sealed partial class PeCompiler
         if (target is PrimitiveType.Float32 or PrimitiveType.Float64
             && (PrimitiveTypeFacts.IsInteger(source) || source == PrimitiveType.Char16))
         {
-            if (source == PrimitiveType.UInt64)
+            if (source is PrimitiveType.UInt64 or PrimitiveType.NativeUInt)
             {
                 EmitUInt64ToFloating(target);
             }
@@ -11505,7 +12454,8 @@ internal sealed partial class PeCompiler
         }
         if ((source is PrimitiveType.Char16 or PrimitiveType.Int8 or PrimitiveType.Int16
                 or PrimitiveType.Int32 or PrimitiveType.Int64 or PrimitiveType.UInt8
-                or PrimitiveType.UInt16 or PrimitiveType.UInt32 or PrimitiveType.UInt64)
+                or PrimitiveType.UInt16 or PrimitiveType.UInt32 or PrimitiveType.UInt64
+                or PrimitiveType.NativeInt or PrimitiveType.NativeUInt)
             && (target is PrimitiveType.Int128 or PrimitiveType.UInt128))
         {
             EmitIntegerTo128(source, target, resultSpill);
@@ -11545,7 +12495,7 @@ internal sealed partial class PeCompiler
         {
             _code.Bytes(0x0F, 0xB7, 0xC0); // zero-extend the raw code unit
         }
-        else if (sourceSigned && source != PrimitiveType.Int64)
+        else if (sourceSigned && source is not (PrimitiveType.Int64 or PrimitiveType.NativeInt))
         {
             _code.Bytes(0x48, 0x63, 0xC0); // sign-extend the source value to RAX
         }
@@ -11658,12 +12608,14 @@ internal sealed partial class PeCompiler
                 FloatingRuntimeBranch(0x83, 0, savedMxcsr, controlledMxcsr);
                 break;
             case PrimitiveType.Int64:
+            case PrimitiveType.NativeInt:
                 CompareFloat64(-9223372036854775808.0);
                 FloatingRuntimeBranch(0x82, 0, savedMxcsr, controlledMxcsr);
                 CompareFloat64(9223372036854775808.0);
                 FloatingRuntimeBranch(0x83, 0, savedMxcsr, controlledMxcsr);
                 break;
             case PrimitiveType.UInt64:
+            case PrimitiveType.NativeUInt:
                 CompareFloat64(-1.0);
                 FloatingRuntimeBranch(0x86, 0, savedMxcsr, controlledMxcsr);
                 CompareFloat64(18446744073709551616.0);
@@ -11683,7 +12635,7 @@ internal sealed partial class PeCompiler
             default:
                 throw new InvalidOperationException("Floating-to-integer target was not verified.");
         }
-        if (target != PrimitiveType.UInt64)
+        if (target is not (PrimitiveType.UInt64 or PrimitiveType.NativeUInt))
         {
             _code.Bytes(0xF2, 0x48, 0x0F, 0x2C, 0xC0); // cvttsd2si rax,xmm0
         }
@@ -11700,7 +12652,7 @@ internal sealed partial class PeCompiler
     private void EmitIntegerToFloating(PrimitiveType source, PrimitiveType target)
     {
         _code.Byte(target == PrimitiveType.Float32 ? (byte)0xF3 : (byte)0xF2);
-        if (source is PrimitiveType.UInt32 or PrimitiveType.Int64)
+        if (source is PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.NativeInt)
         {
             _code.Byte(0x48);
         }
@@ -11782,7 +12734,8 @@ internal sealed partial class PeCompiler
     private void CheckedDivRem(PrimitiveType type)
     {
         var isWide = IsWide(type);
-        var isUnsigned = type is PrimitiveType.UInt32 or PrimitiveType.UInt64;
+        var isUnsigned = type is PrimitiveType.UInt32 or PrimitiveType.UInt64
+            or PrimitiveType.NativeUInt;
         if (isWide)
         {
             _code.Bytes(0x48, 0x85, 0xC9);
@@ -11837,6 +12790,16 @@ internal sealed partial class PeCompiler
         {
             throw new InvalidOperationException("TRRM integer conversion policy was not verified.");
         }
+        source = source switch {
+            PrimitiveType.NativeInt => PrimitiveType.Int64,
+            PrimitiveType.NativeUInt => PrimitiveType.UInt64,
+            _ => source,
+        };
+        target = target switch {
+            PrimitiveType.NativeInt => PrimitiveType.Int64,
+            PrimitiveType.NativeUInt => PrimitiveType.UInt64,
+            _ => target,
+        };
         if (source == target)
         {
             return;
@@ -11950,7 +12913,8 @@ internal sealed partial class PeCompiler
     private bool TryEmitUnsignedPowerOfTwoBinary(BoundBinary binary)
     {
         if (binary.Operator is not (TokenKind.Slash or TokenKind.Percent)
-            || binary.Left.Type is not (PrimitiveType.UInt32 or PrimitiveType.UInt64)
+            || binary.Left.Type is not (PrimitiveType.UInt32 or PrimitiveType.UInt64
+                or PrimitiveType.NativeUInt)
             || binary.Right is not BoundConstant constant)
         {
             return false;
@@ -11968,7 +12932,7 @@ internal sealed partial class PeCompiler
         {
             if (divisor != 1)
             {
-                if (binary.Left.Type == PrimitiveType.UInt64)
+                if (IsWide(binary.Left.Type))
                 {
                     _code.Byte(0x48);
                 }
@@ -12001,7 +12965,8 @@ internal sealed partial class PeCompiler
     private bool TryEmitSignedPowerOfTwoBinary(BoundBinary binary)
     {
         if (binary.Operator is not (TokenKind.Slash or TokenKind.Percent)
-            || binary.Left.Type is not (PrimitiveType.Int32 or PrimitiveType.Int64)
+            || binary.Left.Type is not (PrimitiveType.Int32 or PrimitiveType.Int64
+                or PrimitiveType.NativeInt)
             || binary.Right is not BoundConstant constant)
         {
             return false;
@@ -12022,7 +12987,7 @@ internal sealed partial class PeCompiler
             return true;
         }
 
-        var wide = binary.Left.Type == PrimitiveType.Int64;
+        var wide = IsWide(binary.Left.Type);
         var width = wide ? 64 : 32;
         var shift = BitOperations.TrailingZeroCount((ulong)divisor);
         if (binary.Operator == TokenKind.Percent)
@@ -12227,7 +13192,8 @@ internal sealed partial class PeCompiler
         }
         if (IsWide(type))
         {
-            BinaryWide(op, type == PrimitiveType.UInt64, overflowBehavior);
+            BinaryWide(op, type is PrimitiveType.UInt64 or PrimitiveType.NativeUInt,
+                overflowBehavior);
             return;
         }
         var width = PrimitiveTypeFacts.IntegerWidth(type);
@@ -12240,7 +13206,7 @@ internal sealed partial class PeCompiler
             case TokenKind.ShiftRight:
             case TokenKind.ShiftRightUnsigned:
                 _code.Bytes(0x48, 0x83, 0xF9, checked((byte)width));
-                RuntimeBranch(0x83, 0);
+                RuntimeBranch(0x83, 3);
                 if (op == TokenKind.ShiftRightUnsigned && narrow
                     && PrimitiveTypeFacts.IsSignedInteger(type))
                 {
@@ -12354,6 +13320,7 @@ internal sealed partial class PeCompiler
 
     private void NormalizeNarrowInteger(PrimitiveType type, bool checkRange)
     {
+        type = RepresentationType(type);
         var width = PrimitiveTypeFacts.IntegerWidth(type);
         if (width is not (8 or 16))
         {
@@ -12960,7 +13927,7 @@ internal sealed partial class PeCompiler
             case TokenKind.ShiftRight:
             case TokenKind.ShiftRightUnsigned:
                 _code.Bytes(0x48, 0x83, 0xF9, 0x40); // cmp rcx,64; unsigned comparison rejects negative or oversized counts
-                RuntimeBranch(0x83, 0);
+                RuntimeBranch(0x83, 3);
                 _code.Bytes(0x48, 0xD3, op == TokenKind.ShiftLeft ? (byte)0xE0
                     : op == TokenKind.ShiftRight && !unsigned ? (byte)0xF8 : (byte)0xE8);
                 break;

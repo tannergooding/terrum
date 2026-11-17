@@ -172,10 +172,22 @@ internal sealed class NativeOwnedCallAbiTests
             ? function with { IsExternal = true, Body = new BoundBlock([], default) } : function).ToArray();
         program = program with { Functions = [.. functions] };
         var exports = new[] { "Check", "CheckReplacement", "CheckStaged", "CheckPendingReturn", "CheckNested" };
-        var image = NativeEmitter.EmitLibraryWithImports(program, exports, [
+        NativeImportBinding[] bindings = [
             new NativeImportBinding("Parent.Close", "kernel32.dll", "GetSystemTimeAsFileTime"),
             new NativeImportBinding("ReleaseCleanupSemaphore", "kernel32.dll", "ReleaseSemaphore"),
-        ], policy);
+        ];
+        if (policy == NativeRuntimePolicy.CheckedExceptions)
+        {
+            var exception = Assert.Throws<ArgumentException>(() =>
+                NativeEmitter.EmitLibraryWithImports(program, exports, bindings,
+                    policy));
+            Assert.That(exception!.Data["Terrum.InvalidEffect"],
+                Is.EqualTo("NoThrow"));
+            return;
+        }
+
+        var image = NativeEmitter.EmitLibraryWithImports(program, exports,
+            bindings, policy);
         var directory = TestArtifactPaths.CreateDirectory("terrum-cleanup-copy-abi-");
         var handle = IntPtr.Zero;
         var semaphore = IntPtr.Zero;

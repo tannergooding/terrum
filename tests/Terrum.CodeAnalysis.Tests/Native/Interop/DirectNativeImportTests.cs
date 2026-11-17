@@ -917,6 +917,42 @@ internal sealed class DirectNativeImportTests
     }
 
     [Test]
+    public void DirectNativeImportPreservesNativeWidthScalarSignatures()
+    {
+        var compilation = Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("fixture.dll", "RoundTripSigned")]
+            public unsafe extern nint RoundTripSigned(nint value);
+
+            [Terrum.Interop.NativeImport("fixture.dll", "RoundTripUnsigned")]
+            public unsafe extern nuint RoundTripUnsigned(nuint value);
+
+            int32 Main() {
+                unsafe {
+                    if (RoundTripSigned(nint(42)) != nint(42)) { return 1; }
+                    return int32(RoundTripUnsigned(nuint(42)));
+                }
+            }
+            """));
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new AssertionException("Expected a bound program.");
+        var signed = program.Functions.Single(static function =>
+            function.Name == "RoundTripSigned");
+        var unsigned = program.Functions.Single(static function =>
+            function.Name == "RoundTripUnsigned");
+        Assert.That(signed.ReturnType, Is.EqualTo(PrimitiveType.NativeInt));
+        Assert.That(signed.Variables[0].Type, Is.EqualTo(PrimitiveType.NativeInt));
+        Assert.That(unsigned.ReturnType, Is.EqualTo(PrimitiveType.NativeUInt));
+        Assert.That(unsigned.Variables[0].Type, Is.EqualTo(PrimitiveType.NativeUInt));
+        Assert.That(signed.DirectNativeImport, Is.Not.Null);
+        Assert.That(unsigned.DirectNativeImport, Is.Not.Null);
+        Assert.That(NativeEmitter.EmitWithNativeImports(
+            program, NativeRuntimePolicy.FailFast), Is.Not.Empty);
+    }
+
+    [Test]
     public void RetiredNativeStorageRecordOrdinalIsRejectedAsAValueType()
     {
         var compilation = Create(SyntaxTree.Parse("""

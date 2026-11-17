@@ -282,10 +282,11 @@ internal sealed class NativeOutputCoreRegistrationTests
             internal NativeOutputCondition ForwardCondition() {
                 return BaseCondition();
             }
-            """), new CompilationOptions {
-                NativeCoreRegistration = native,
-                NativeOutputCoreRegistration = output,
-            });
+            """), CoreEvaluationFormTestHelpers.WithConstEval(
+                new CompilationOptions {
+                    NativeCoreRegistration = native,
+                    NativeOutputCoreRegistration = output,
+                }));
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));

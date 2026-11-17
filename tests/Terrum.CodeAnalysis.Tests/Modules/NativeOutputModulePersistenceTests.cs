@@ -123,6 +123,19 @@ internal sealed class NativeOutputModulePersistenceTests
         var artifact = CreateOutputProducer();
         Assert.That(ReadRevision(artifact), Is.EqualTo(106));
         Assert.That(ModuleCompiler.CreateReference(artifact), Is.Not.Null);
+        var directCompilation = CreateLibrary(
+            SyntaxTree.Parse(DirectOutputDeclarationSource));
+        Assert.That(directCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                directCompilation.Diagnostics));
+        var directProducer = ModuleCompiler.CreateProducer(
+            directCompilation.Program!, ["ReadValue"]);
+        var directReference = ModuleCompiler.CreateReference(directProducer);
+        var nativeOutput = global::System.Linq.Enumerable.Single(
+            directReference.Functions,
+            static function => !function.NativeOutputContracts.IsEmpty);
+        Assert.That(nativeOutput.CheckedOutputSelectors, Is.Empty);
+        Assert.That(nativeOutput.CheckedOutputStates, Is.Empty);
 
         foreach (var revision in new[] {
             76, 79, 80, 82, 83, 84, 85, 86, 87, 88, 89, 92,

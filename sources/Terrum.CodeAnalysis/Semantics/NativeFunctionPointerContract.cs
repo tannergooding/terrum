@@ -53,11 +53,12 @@ internal static class NativeFunctionPointerTypes
 internal static class NativeFunctionPointerContract
 {
     internal static bool IsValidTable(ImmutableArray<NativeFunctionPointerSignatureDefinition> signatures)
-        => IsValidTable(signatures, null);
+        => IsValidTable(signatures, null, null);
 
     internal static bool IsValidTable(
         ImmutableArray<NativeFunctionPointerSignatureDefinition> signatures,
-        Func<PrimitiveType, bool>? isValidNativeParameterPointee)
+        Func<PrimitiveType, bool>? isValidNativeParameterPointee,
+        IReadOnlyList<BoundEnumDefinition>? enumDefinitions = null)
     {
         if (signatures.IsDefault)
         {
@@ -68,7 +69,7 @@ internal static class NativeFunctionPointerContract
         for (var index = 0; index < signatures.Length; index++)
         {
             if (!IsValidSignature(index, signatures, state, 0,
-                    isValidNativeParameterPointee))
+                    isValidNativeParameterPointee, enumDefinitions))
             {
                 return false;
             }
@@ -84,7 +85,8 @@ internal static class NativeFunctionPointerContract
     internal static bool IsValidNativeImportContractTable(
         ImmutableArray<NativeFunctionPointerSignatureDefinition> signatures,
         ImmutableArray<NativePointerTypeDefinition> pointerTypes,
-        ImmutableArray<BoundStruct> structures)
+        ImmutableArray<BoundStruct> structures,
+        IReadOnlyList<BoundEnumDefinition>? enumDefinitions = null)
     {
         if (signatures.IsDefault || pointerTypes.IsDefault || structures.IsDefault)
         {
@@ -110,7 +112,8 @@ internal static class NativeFunctionPointerContract
                 var pointer = pointerTypes[NativePointerTypes.Index(parameterType)];
                 if (!pointer.IsWritable
                     || !DirectNativeImportContract.IsNativeOutputCellType(
-                        pointer.PointeeType, structures, signatures, pointerTypes))
+                        pointer.PointeeType, structures, signatures,
+                        pointerTypes, enumDefinitions))
                 {
                     return false;
                 }
@@ -1134,7 +1137,8 @@ internal static class NativeFunctionPointerContract
         type is PrimitiveType.Bool or PrimitiveType.Char8 or PrimitiveType.Char16 or PrimitiveType.Char32
             or PrimitiveType.Rune or PrimitiveType.Int8 or PrimitiveType.Int16 or PrimitiveType.Int32
             or PrimitiveType.Int64 or PrimitiveType.UInt8 or PrimitiveType.UInt16 or PrimitiveType.UInt32
-            or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64
+            or PrimitiveType.UInt64 or PrimitiveType.NativeInt
+            or PrimitiveType.NativeUInt or PrimitiveType.Float32 or PrimitiveType.Float64
             or PrimitiveType.NativeRawPointer
             || BoundEnumTypes.IsType(type)
             || NativePointerTypes.IsType(type)
@@ -1148,7 +1152,8 @@ internal static class NativeFunctionPointerContract
     private static bool IsValidSignature(int index,
         ImmutableArray<NativeFunctionPointerSignatureDefinition> signatures,
         byte[] state, int depth,
-        Func<PrimitiveType, bool>? isValidNativeParameterPointee)
+        Func<PrimitiveType, bool>? isValidNativeParameterPointee,
+        IReadOnlyList<BoundEnumDefinition>? enumDefinitions)
     {
         if (depth > SemanticVerifier.MaximumDepth)
         {
@@ -1179,7 +1184,8 @@ internal static class NativeFunctionPointerContract
             || !IsValidType(signature.ReturnType, signatures, state,
                 allowVoid: true, depth: depth + 1,
                 isValidNativeParameterPointee:
-                    isValidNativeParameterPointee))
+                    isValidNativeParameterPointee,
+                enumDefinitions: enumDefinitions))
         {
             return false;
         }
@@ -1188,7 +1194,8 @@ internal static class NativeFunctionPointerContract
             if (!IsValidType(parameterType, signatures, state,
                     allowVoid: false, depth: depth + 1,
                     isValidNativeParameterPointee:
-                        isValidNativeParameterPointee))
+                        isValidNativeParameterPointee,
+                    enumDefinitions: enumDefinitions))
             {
                 return false;
             }
@@ -1198,7 +1205,8 @@ internal static class NativeFunctionPointerContract
             if (isValidNativeParameterPointee is null
                 ? !IsValidType(parameter.PointeeType, signatures, state,
                     allowVoid: true, depth: depth + 1,
-                    isValidNativeParameterPointee: null)
+                    isValidNativeParameterPointee: null,
+                    enumDefinitions: enumDefinitions)
                 : !isValidNativeParameterPointee(parameter.PointeeType))
             {
                 return false;
@@ -1211,14 +1219,15 @@ internal static class NativeFunctionPointerContract
     private static bool IsValidType(PrimitiveType type,
         ImmutableArray<NativeFunctionPointerSignatureDefinition> signatures, byte[] state, bool allowVoid,
         int depth,
-        Func<PrimitiveType, bool>? isValidNativeParameterPointee)
+        Func<PrimitiveType, bool>? isValidNativeParameterPointee,
+        IReadOnlyList<BoundEnumDefinition>? enumDefinitions)
     {
         if (NativeFunctionPointerTypes.IsType(type))
         {
             var index = NativeFunctionPointerTypes.Index(type);
             return (uint)index < (uint)signatures.Length
                 && IsValidSignature(index, signatures, state, depth + 1,
-                    isValidNativeParameterPointee);
+                    isValidNativeParameterPointee, enumDefinitions);
         }
 
         return type == PrimitiveType.NativeRawPointer || NativePointerTypes.IsType(type)
@@ -1226,7 +1235,8 @@ internal static class NativeFunctionPointerContract
             || type is PrimitiveType.Bool or PrimitiveType.Char8 or PrimitiveType.Char16 or PrimitiveType.Char32
                 or PrimitiveType.Rune or PrimitiveType.Int8 or PrimitiveType.Int16 or PrimitiveType.Int32
                 or PrimitiveType.Int64 or PrimitiveType.UInt8 or PrimitiveType.UInt16 or PrimitiveType.UInt32
-                or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64
+                or PrimitiveType.UInt64 or PrimitiveType.NativeInt
+                or PrimitiveType.NativeUInt or PrimitiveType.Float32 or PrimitiveType.Float64
             || (allowVoid && type == PrimitiveType.Void);
     }
 }

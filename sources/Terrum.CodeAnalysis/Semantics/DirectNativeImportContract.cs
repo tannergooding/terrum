@@ -63,8 +63,10 @@ internal static class DirectNativeImportContract
     internal static bool IsValidPrivateWindows(BoundFunction function,
         IReadOnlyList<BoundStruct> structures,
         ImmutableArray<NativeFunctionPointerSignatureDefinition> functionPointerSignatures = default,
-        ImmutableArray<NativePointerTypeDefinition> pointerTypes = default) =>
-        IsValid(function, structures, functionPointerSignatures, pointerTypes)
+        ImmutableArray<NativePointerTypeDefinition> pointerTypes = default,
+        IReadOnlyList<BoundEnumDefinition>? enumDefinitions = null) =>
+        IsValid(function, structures, functionPointerSignatures, pointerTypes,
+            enumDefinitions)
         && function.DirectNativeImport is DirectNativeImport import
         && IsValidPrivateWindowsLibraryName(import.LibraryName);
 
@@ -76,7 +78,8 @@ internal static class DirectNativeImportContract
         type is PrimitiveType.Bool or PrimitiveType.Char8 or PrimitiveType.Char16 or PrimitiveType.Char32
             or PrimitiveType.Rune or PrimitiveType.Int8 or PrimitiveType.Int16 or PrimitiveType.Int32
             or PrimitiveType.Int64 or PrimitiveType.UInt8 or PrimitiveType.UInt16 or PrimitiveType.UInt32
-            or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64
+            or PrimitiveType.UInt64 or PrimitiveType.NativeInt
+            or PrimitiveType.NativeUInt or PrimitiveType.Float32 or PrimitiveType.Float64
             || BoundEnumTypes.IsType(type);
 
     internal static bool IsValueParameter(PrimitiveType type,
@@ -137,24 +140,31 @@ internal static class DirectNativeImportContract
             || NativeFunctionPointerTypes.IsType(type);
 
     internal static bool IsOutputPointee(PrimitiveType type,
-        IReadOnlyList<BoundStruct> structures) =>
+        IReadOnlyList<BoundStruct> structures,
+        IReadOnlyList<BoundEnumDefinition>? enumDefinitions = null) =>
         IsOutputPointee(type) || IsBlittableAggregate(type, structures);
 
     internal static bool IsAggregateOutputPointee(PrimitiveType type,
-        IReadOnlyList<BoundStruct> structures) =>
+        IReadOnlyList<BoundStruct> structures,
+        IReadOnlyList<BoundEnumDefinition>? enumDefinitions = null) =>
         IsBlittableAggregate(type, structures) && !IsUniqueValue(type, structures)
-        && ValueLayout.Size(type, structures) > 0;
+        && ValueLayout.Size(type, structures,
+            enumDefinitions: enumDefinitions) > 0;
 
     internal static bool IsNativeOutputCellType(PrimitiveType type,
-        IReadOnlyList<BoundStruct> structures) =>
-        IsOutputPointee(type) || IsAggregateOutputPointee(type, structures);
+        IReadOnlyList<BoundStruct> structures,
+        IReadOnlyList<BoundEnumDefinition>? enumDefinitions = null) =>
+        IsOutputPointee(type) || IsAggregateOutputPointee(type, structures,
+            enumDefinitions);
 
     internal static bool IsNativeOutputCellType(PrimitiveType type,
         IReadOnlyList<BoundStruct> structures,
         ImmutableArray<NativeFunctionPointerSignatureDefinition> functionPointerSignatures,
-        ImmutableArray<NativePointerTypeDefinition> pointerTypes) =>
-        IsNativeOutputCellType(type, structures)
-        && ValueLayout.Size(type, structures) > 0
+        ImmutableArray<NativePointerTypeDefinition> pointerTypes,
+        IReadOnlyList<BoundEnumDefinition>? enumDefinitions = null) =>
+        IsNativeOutputCellType(type, structures, enumDefinitions)
+        && ValueLayout.Size(type, structures,
+            enumDefinitions: enumDefinitions) > 0
         && (!NativePointerTypes.IsType(type)
             || NativePointerTypeContract.IsValidType(type, pointerTypes))
         && (!NativeFunctionPointerTypes.IsType(type)
@@ -274,7 +284,8 @@ internal static class DirectNativeImportContract
 
     internal static bool IsValid(BoundFunction function, IReadOnlyList<BoundStruct> structures,
         ImmutableArray<NativeFunctionPointerSignatureDefinition> functionPointerSignatures = default,
-        ImmutableArray<NativePointerTypeDefinition> pointerTypes = default)
+        ImmutableArray<NativePointerTypeDefinition> pointerTypes = default,
+        IReadOnlyList<BoundEnumDefinition>? enumDefinitions = null)
     {
         if (function.DirectNativeImport is not DirectNativeImport import
             || !function.IsExternal
@@ -286,7 +297,7 @@ internal static class DirectNativeImportContract
             || function.Variables.IsDefault || function.ParameterCount < 0
             || function.ParameterCount > function.Variables.Length
             || !NativeOutputContractValidator.IsValid(function, structures, pointerTypes,
-                functionPointerSignatures)
+                functionPointerSignatures, enumDefinitions)
             || (function.ReturnType != PrimitiveType.Void
                 && !IsValueParameter(function.ReturnType, functionPointerSignatures, pointerTypes))
             || import.Outputs.Length > function.ParameterCount)
@@ -301,7 +312,8 @@ internal static class DirectNativeImportContract
             if (output is null || output.ParameterIndex < 0 || output.ParameterIndex >= function.ParameterCount
                 || outputs[output.ParameterIndex]
                 || !IsNativeOutputCellType(output.PointeeType, structures,
-                    functionPointerSignatures, pointerTypes)
+                    functionPointerSignatures, pointerTypes,
+                    enumDefinitions)
                 || (NativePointerTypes.IsType(output.PointeeType)
                     && !NativePointerTypeContract.IsValidType(output.PointeeType, pointerTypes))
                 || !IsValidResultCondition(function.ReturnType, output.ResultCondition)
@@ -401,7 +413,9 @@ internal static class DirectNativeImportContract
     internal static bool MatchesAddress(BoundNativeStorageAddress address, DirectNativeOutput output,
         BoundFunction caller, BoundProgram program)
     {
-        var extent = ValueLayout.Size(output.PointeeType, program.Structures);
+        var extent = ValueLayout.Size(output.PointeeType,
+            program.Structures,
+            enumDefinitions: program.EnumDefinitions);
         return address.Type == PrimitiveType.NativeStorageAddress
             && address.AddressType == PrimitiveType.NativeStorageAddress
             && address.CarrierType == output.PointeeType
@@ -423,11 +437,13 @@ internal static class DirectNativeImportContract
         reservation.Type == PrimitiveType.Void
         && reservation.PointeeType == output.PointeeType
         && IsNativeOutputCellType(output.PointeeType, program.Structures,
-            program.NativeFunctionPointerSignatures, program.NativePointerTypes)
+            program.NativeFunctionPointerSignatures,
+            program.NativePointerTypes, program.EnumDefinitions)
         && (uint)reservation.Variable < (uint)caller.Variables.Length
         && caller.Variables[reservation.Variable].Type == output.PointeeType
         && caller.Variables[reservation.Variable].IsInitializationLocal
-        && ValueLayout.Size(output.PointeeType, program.Structures) > 0;
+        && ValueLayout.Size(output.PointeeType, program.Structures,
+            enumDefinitions: program.EnumDefinitions) > 0;
 
     internal static bool MatchesAddress(BoundNativeStorageAddress address, DirectNativeParameter parameter,
         BoundFunction caller, BoundProgram program)
@@ -530,7 +546,9 @@ internal static class DirectNativeImportContract
                     address.Index, indexCount);
         }
 
-        var elementExtent = ValueLayout.Size(address.ElementType, program.Structures);
+        var elementExtent = ValueLayout.Size(address.ElementType,
+            program.Structures,
+            enumDefinitions: program.EnumDefinitions);
         return address.CarrierType == address.ElementType
             && NativeFixedArrayContract.IsConstantIndex(address.Index, 0)
             && (parameter.PointeeType == PrimitiveType.Void

@@ -36,9 +36,12 @@ internal sealed partial class CliTests
             await File.WriteAllTextAsync(middleSource, "public Ticket Forward() { return Make(); }").ConfigureAwait(false);
             await File.WriteAllTextAsync(rootSource,
                 "int32 Main() { Ticket value = Forward(); return value.Value + 22; }").ConfigureAwait(false);
-            Assert.That((await RunAsync([], "compile-native", "producer", leafSource, "Leaf",
-                "--export", "Make", "--export", "Ticket.Close", "-o", leaf,
-                "--runtime", "fail-fast").ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
+            await File.WriteAllBytesAsync(leaf,
+                CreateLayoutAwareNativeProducer(
+                    await File.ReadAllTextAsync(leafSource)
+                        .ConfigureAwait(false),
+                    "Leaf", "fail-fast", "Make", "Ticket.Close"))
+                .ConfigureAwait(false);
             Assert.That((await RunAsync([], "compile-native-graph", "producer", middleSource, "Middle",
                 "--provider", leaf, "--export", "Forward", "-o", middle, "--runtime", "fail-fast").ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
             Assert.That((await RunAsync([], "compile-native-graph", "consumer", rootSource,

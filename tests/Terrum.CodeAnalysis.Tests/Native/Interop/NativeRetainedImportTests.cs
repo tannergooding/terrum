@@ -52,6 +52,16 @@ internal sealed class NativeRetainedImportTests
         Assert.That(global::System.Linq.Enumerable.Any(external,static function => function.Name == "Token.Close"),Is.True);
         NativeImportBinding[] bindings = [.. external.Select(static function =>
             new NativeImportBinding(function.Name, "retained-leaf.dll", function.Name))];
+        if (policy == NativeRuntimePolicy.CheckedExceptions)
+        {
+            var exception = Assert.Throws<ArgumentException>(() =>
+                NativeEmitter.EmitLibraryWithImports(program, ["Forward"],
+                    bindings, policy));
+            Assert.That(exception!.Data["Terrum.InvalidEffect"],
+                Is.EqualTo("NoThrow"));
+            return;
+        }
+
         var image = NativeEmitter.EmitLibraryWithImports(program, ["Forward"], bindings, policy);
         Assert.That(ReadImports(image, "retained-leaf.dll"), Is.EqualTo(["Make"]));
         _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibraryWithImports(program,

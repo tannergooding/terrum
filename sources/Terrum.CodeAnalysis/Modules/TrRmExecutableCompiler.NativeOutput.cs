@@ -75,6 +75,12 @@ public static partial class TrRmExecutableCompiler
             throw Unsupported(
                 "Direct NativeOutput Body emission requires a bounded selected-schema program.");
         }
+        if (program.Structures.Any(static structure =>
+                structure.SourceGenericTypeDefinitionIndex >= 0))
+        {
+            throw Unsupported(
+                "The selected TRRM schema has no assigned source generic type persistence.");
+        }
 
         var targetIndex = -1;
         var callerIndex = -1;
@@ -469,7 +475,8 @@ public static partial class TrRmExecutableCompiler
             throw Invalid("The direct NativeOutput program has invalid pointer types.");
         }
         _ = FixedLayoutStorage.Validate(program.Structures,
-            program.NativeFixedArrayTypes);
+            program.NativeFixedArrayTypes,
+            enumDefinitions: program.EnumDefinitions);
 
         if (program.EntryPoint < 0)
         {
@@ -895,19 +902,11 @@ public static partial class TrRmExecutableCompiler
             foreach (var nativeParameter in importedFunctionImport.Parameters
                 .OrderBy(static parameter => parameter.ParameterIndex))
             {
-                var nativeParameterPayload = new byte[12];
-                BinaryPrimitives.WriteUInt32LittleEndian(
-                    nativeParameterPayload,
-                    checked((uint)nativeParameter.ParameterIndex));
-                nativeParameterPayload[4]
-                    = checked((byte)((byte)nativeParameter.Access + 1));
-                nativeParameterPayload[5] = 1;
-                nativeParameterPayload[6]
-                    = nativeParameter.Extent == 0 ? (byte)0 : (byte)1;
-                BinaryPrimitives.WriteUInt32LittleEndian(
-                    nativeParameterPayload.AsSpan(8), nativeParameter.Extent);
                 contractRows.Add(new TrRmContractRow(contractOwner, 0x0E,
-                    nativeParameterPayload));
+                    StandardNativeParameterContractPayload(
+                        nativeParameter.ParameterIndex,
+                        nativeParameter.Access, nativeParameter.Retention,
+                        nativeParameter.Extent)));
             }
 
             var outputs = importedFunction.NativeOutputContracts;
@@ -2052,10 +2051,11 @@ public static partial class TrRmExecutableCompiler
         => target.DirectNativeImport is not null
             && DirectNativeImportContract.IsValid(target,
                 program.Structures, program.NativeFunctionPointerSignatures,
-                program.NativePointerTypes)
+                program.NativePointerTypes, program.EnumDefinitions)
             && NativeOutputContractValidator.IsValid(target,
                 program.Structures, program.NativePointerTypes,
-                program.NativeFunctionPointerSignatures);
+                program.NativeFunctionPointerSignatures,
+                program.EnumDefinitions);
 
     private static List<BoundCall> CollectDirectNativeOutputCalls(
         BoundFunction caller)

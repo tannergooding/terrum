@@ -2044,8 +2044,8 @@ internal sealed class NativeFunctionPointerTests
             [Terrum.Interop.NativeCallable]
             int32 CallbackDecoy(int32 value) { return 30; }
 
-            int32 Fill(init ref<int32> output) {
-                output = 0;
+            int32 Fill(ref<init int32> output) {
+                *output = 0;
                 return Chosen(1);
             }
 
@@ -2179,6 +2179,56 @@ internal sealed class NativeFunctionPointerTests
                 var sum = (delegate* unmanaged<double, int, double, int, double, double>)
                     NativeLibrary.GetExport(handle, "Sum");
                 Assert.That(sum(1.5, 0, 3.0, 0, 5.0), Is.EqualTo(9.5));
+            }
+        }
+        finally
+        {
+            if (handle != IntPtr.Zero)
+            {
+                NativeLibrary.Free(handle);
+            }
+            await TestFileCleanup.DeleteWithRetryAsync(libraryPath).ConfigureAwait(true);
+            Directory.Delete(directory);
+        }
+    }
+
+    [Test]
+    public async Task NativeWidthNativeCallableMatchesDotNetAbiAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var directory = TestArtifactPaths.CreateDirectory("terrum-native-width-callback-");
+        var libraryPath = Path.Combine(directory, "native-width-callback.dll");
+        var handle = IntPtr.Zero;
+        try
+        {
+            var compilation = CreateLibrary(SyntaxTree.Parse("""
+                [Terrum.Interop.NativeCallable]
+                public nint EchoSigned(nint value, nint ignored) {
+                    return value;
+                }
+
+                [Terrum.Interop.NativeCallable]
+                public nuint EchoUnsigned(nuint value, nuint ignored) {
+                    return value;
+                }
+                """));
+            Assert.That(compilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            await File.WriteAllBytesAsync(libraryPath,
+                NativeEmitter.EmitLibrary(compilation.Program!,
+                    ["EchoSigned", "EchoUnsigned"], NativeRuntimePolicy.FailFast))
+                .ConfigureAwait(true);
+
+            handle = NativeLibrary.Load(libraryPath);
+            unsafe
+            {
+                var echoSigned = (delegate* unmanaged<nint, nint, nint>)
+                    NativeLibrary.GetExport(handle, "EchoSigned");
+                var echoUnsigned = (delegate* unmanaged<nuint, nuint, nuint>)
+                    NativeLibrary.GetExport(handle, "EchoUnsigned");
+                Assert.That(echoSigned(42, -20), Is.EqualTo((nint)42));
+                Assert.That(echoUnsigned(42, 22), Is.EqualTo((nuint)42));
             }
         }
         finally
