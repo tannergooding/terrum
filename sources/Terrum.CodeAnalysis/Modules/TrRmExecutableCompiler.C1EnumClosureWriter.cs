@@ -391,9 +391,11 @@ public static partial class TrRmExecutableCompiler
             || !program.NativeUtf8ZLiterals.IsEmpty
             || program.StandardMethodProviderClosure is not null
             || (program.StandardFieldProviderClosure is not null
-                && !hasStandardStructViews)
+                && !hasStandardStructViews
+                && classQueryFunction is null)
             || (program.StandardQuerySourceAssociation is not null
-                && !hasStandardStructViews)
+                && !hasStandardStructViews
+                && classQueryFunction is null)
             || program.NativeCoreRegistration is not null
             || program.NativeOutputCoreRegistration is not null
             || (program.LayoutCoreRegistration is not null
@@ -1592,7 +1594,8 @@ public static partial class TrRmExecutableCompiler
             var selectedRootSnapshot = rootSnapshot
                 ?? throw Invalid(
                     "An EN1 FieldDef provider closure has no selected root Module.");
-            if (!hasStandardStructViews
+            if ((!hasStandardStructViews
+                    && classQueryFunction is null)
                 || !IsSelectedC1EnumClosureSchemaIdentity(
                     fieldProviderClosure.SchemaIdentity)
                 || !StringComparer.Ordinal.Equals(
@@ -1629,6 +1632,72 @@ public static partial class TrRmExecutableCompiler
                     fieldProviderClosure.SchemaIdentity),
                 fieldProviderClosure.SchemaIdentity, null,
                 createA3ResourceLedger: false);
+            bool IsRetainedClassFieldProviderEdge(
+                BoundStandardFieldProviderEdge edge)
+            {
+                if (classQueryFunction is null
+                    || (edge.ExpectedDefinitionId >> 24) != 0x14
+                    || (edge.ActualDefinitionId >> 24) != 0x14)
+                {
+                    return false;
+                }
+
+                var expectedOwnerDefinitionId = 0x1300_0000u
+                    | checked((uint)edge.ExpectedOwnerTypeDefRow);
+                var providerOwnerDefinitionId = 0x1300_0000u
+                    | checked((uint)edge.ProviderTypeDefRow);
+                var expectation = program.StandardClassDeclarations
+                    .SelectMany(static declaration =>
+                        declaration.Expectations)
+                    .SelectMany(static declaration =>
+                        declaration.FieldExpectations)
+                    .SingleOrDefault(field =>
+                        field.ImportRow == edge.ImportRow
+                        && field.OwnerImportRow == edge.OwnerImportRow);
+                var providerArtifact
+                    = fieldProviderClosure.Artifacts.FirstOrDefault(
+                        artifact => artifact.ArtifactIndex
+                            == edge.ProviderArtifactIndex);
+                var providerModule = fieldProviderClosure.Modules
+                    .FirstOrDefault(module =>
+                        module.ArtifactIndex == edge.ProviderArtifactIndex
+                        && module.ModuleRow == edge.ProviderModuleRow);
+                return expectation is not null
+                    && providerArtifact is not null
+                    && providerModule is not null
+                    && expectation.ExpectedDefinitionId
+                        == edge.ExpectedDefinitionId
+                    && expectation.ExpectedOwnerDefinitionId
+                        == expectedOwnerDefinitionId
+                    && expectation.ProviderDefinitionId
+                        == edge.ActualDefinitionId
+                    && expectation.ProviderOwnerDefinitionId
+                        == providerOwnerDefinitionId
+                    && StringComparer.Ordinal.Equals(
+                        expectation.ExportKey, edge.ExportKey)
+                    && StringComparer.Ordinal.Equals(
+                        expectation.Provider.ModuleIdentity,
+                        edge.ProducerIdentity)
+                    && expectation.Provider.ModuleRow
+                        == edge.ProviderModuleRow
+                    && expectation.Provider.TargetRequirement
+                        == edge.TargetRequirement
+                    && expectation.Provider.RuntimePolicy
+                        == edge.RuntimePolicy
+                    && StringComparer.Ordinal.Equals(
+                        providerArtifact.SchemaIdentity,
+                        expectation.Provider.SchemaIdentity)
+                    && providerArtifact.ArtifactSnapshot.AsSpan()
+                        .SequenceEqual(
+                            expectation.Provider.ArtifactSnapshot.AsSpan())
+                    && StringComparer.Ordinal.Equals(
+                        providerModule.Identity, edge.ProducerIdentity)
+                    && providerModule.TargetRequirement
+                        == edge.TargetRequirement
+                    && providerModule.RuntimePolicy
+                        == edge.RuntimePolicy;
+            }
+
             var structureIndexByExpectedTypeDef
                 = new Dictionary<int, int>(program.Structures.Length);
             for (var structureIndex = 0;
@@ -1693,13 +1762,23 @@ public static partial class TrRmExecutableCompiler
                     || (edge.ActualDefinitionId >> 24) != 0x14
                     || edge.ImportRow <= 0
                     || edge.ModuleRefRow <= 0
-                    || edge.OwnerImportRow <= 0
-                    || !structureIndexByExpectedTypeDef.TryGetValue(
-                        edge.ExpectedOwnerTypeDefRow,
-                        out var structureIndex))
+                    || edge.OwnerImportRow <= 0)
                 {
                     throw Invalid(
                         "An EN1 FieldDef provider edge has an invalid root or definition identity.");
+                }
+
+                if (!structureIndexByExpectedTypeDef.TryGetValue(
+                        edge.ExpectedOwnerTypeDefRow,
+                        out var structureIndex))
+                {
+                    if (IsRetainedClassFieldProviderEdge(edge))
+                    {
+                        continue;
+                    }
+
+                    throw Invalid(
+                        "An EN1 FieldDef provider edge has no retained struct or class expectation.");
                 }
 
                 var expectedFieldRow = checked((int)(

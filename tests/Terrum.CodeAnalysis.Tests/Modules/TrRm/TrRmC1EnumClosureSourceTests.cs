@@ -1238,6 +1238,39 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 reemittedArtifact), "ClassLayoutConsumer", [providerInput]);
         Assert.That(NativeEmitter.EmitLibrary(reloaded, ["Offset"],
             NativeRuntimePolicy.FailFast), Is.Not.Empty);
+
+        var coLocatedArtifact = TrRmExecutableCompiler.EmitStandard(
+            queryCompilation.Program!, "ClassLayoutProvider",
+            schemaIdentity, 1);
+        var coLocatedTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                coLocatedArtifact, SchemaFor(schemaIdentity), null,
+                usesNativePointerLoads: false,
+                standardSchemaIdentity: schemaIdentity));
+        var coLocatedRootType = coLocatedTables.TypeSpecs.GetTypeSpecRef(
+            coLocatedTables.TargetLayoutDependencies
+                .GetSubjectTypeSpecRef(1));
+        Assert.That(coLocatedRootType.Form, Is.EqualTo((byte)0x02));
+        Assert.That(coLocatedTables.TargetLayoutDependencies.Count,
+            Is.EqualTo(3));
+        Assert.That(Enumerable.Range(1,
+                coLocatedTables.TargetLayoutDependencyFields.Count)
+            .All(row => coLocatedTables
+                .TargetLayoutDependencyFields.GetFieldReference(row) >> 24
+                == 0x14), Is.True);
+        var coLocated = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                coLocatedArtifact), "ClassLayoutProvider", []);
+        Assert.That(NativeEmitter.EmitLibrary(coLocated, ["Offset"],
+            NativeRuntimePolicy.FailFast), Is.Not.Empty);
+        var coLocatedReemittedArtifact
+            = TrRmExecutableCompiler.EmitStandard(coLocated,
+                "ClassLayoutProvider", schemaIdentity, 1);
+        var coLocatedReemitted = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                coLocatedReemittedArtifact), "ClassLayoutProvider", []);
+        Assert.That(NativeEmitter.EmitLibrary(coLocatedReemitted, ["Offset"],
+            NativeRuntimePolicy.FailFast), Is.Not.Empty);
     }
 
     [Test]

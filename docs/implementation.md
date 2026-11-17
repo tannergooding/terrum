@@ -1553,9 +1553,10 @@ unapproved exact class-layout successors, the bounded producer emits a
 single parameterless `nint` method whose return expression may combine
 class-root OffsetOfType operations, with one ordered FieldPath/0045 dependency
 per query occurrence. Source-free load/re-emission preserves the selected
-class provider and FieldDef expectations, and native lowering derives
-supported Auto/Sequential field offsets from complete class/inline-struct
-layouts. Direct/nested load/JIT, multiple-query and exact-successor
+class provider and expected FieldDef imports while preserving co-located
+direct FieldDef references, and native lowering derives supported
+Auto/Sequential field offsets from complete class/inline-struct layouts.
+Direct/nested load/JIT, multiple-query and exact-successor
 re-emission/reload regressions are added but unverified under the active hold.
 Broader Body composition, provider
 replacement and nontrivial dependency remapping, optional folding, additional
