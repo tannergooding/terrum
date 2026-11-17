@@ -4537,9 +4537,19 @@ internal sealed partial class PeCompiler
         if (IsInlineClassLayoutStruct(type, program))
         {
             var structure = program.Structures[(int)type - 100];
+            var structureAlignment = ValueLayout.Alignment(type,
+                program.Structures, program.CheckedReferenceTypes,
+                program.NativeLoweringAgreement,
+                program.NativeFixedArrayTypes, program.EnumDefinitions);
+            var structureRequiredAlignment = ValueLayout.RequiredAlignment(
+                type, program.Structures, program.NativeFixedArrayTypes,
+                program.CheckedReferenceTypes, program.EnumDefinitions);
             if (structure.BlittableTargetRequirement
                     != FixedLayoutStorage.WindowsX64TargetRequirement
-                || structure.Size <= 0 || structure.Alignment <= 0)
+                || structure.Size <= 0 || structureAlignment <= 0
+                || structureRequiredAlignment <= 0
+                || !IsPowerOfTwo((uint)structureAlignment)
+                || !IsPowerOfTwo((uint)structureRequiredAlignment))
             {
                 throw new NotSupportedException(
                     "An inline class field struct has no complete selected Windows x64 layout.");
@@ -4590,7 +4600,26 @@ internal sealed partial class PeCompiler
 
         try
         {
-            foreach (var field in program.Structures[structureIndex].Fields)
+            var structure = program.Structures[structureIndex];
+            var structureAlignment = ValueLayout.Alignment(type,
+                program.Structures, program.CheckedReferenceTypes,
+                program.NativeLoweringAgreement,
+                program.NativeFixedArrayTypes, program.EnumDefinitions);
+            var structureRequiredAlignment = ValueLayout.RequiredAlignment(
+                type, program.Structures, program.NativeFixedArrayTypes,
+                program.CheckedReferenceTypes, program.EnumDefinitions);
+            if (structure.BlittableTargetRequirement
+                    != FixedLayoutStorage.WindowsX64TargetRequirement
+                || structure.Size <= 0 || structureAlignment <= 0
+                || structureRequiredAlignment <= 0
+                || !IsPowerOfTwo((uint)structureAlignment)
+                || !IsPowerOfTwo((uint)structureRequiredAlignment))
+            {
+                throw new NotSupportedException(
+                    "An inline class field struct has no complete selected Windows x64 layout.");
+            }
+
+            foreach (var field in structure.Fields)
             {
                 if (IsInlineClassLayoutStruct(field.Type, program))
                 {
@@ -4611,6 +4640,37 @@ internal sealed partial class PeCompiler
                 {
                     throw new NotSupportedException(
                         "An inline class field struct contains an unsupported field representation.");
+                }
+
+                if (BoundEnumTypes.IsType(field.Type)
+                    && !BoundEnumTypes.IsValidType(field.Type,
+                        program.EnumDefinitions))
+                {
+                    throw new NotSupportedException(
+                        "An inline class field struct enum has no complete selected definition.");
+                }
+
+                var fieldSize = ValueLayout.Size(field.Type,
+                    program.Structures, program.CheckedReferenceTypes,
+                    program.NativeLoweringAgreement,
+                    program.NativeFixedArrayTypes, program.EnumDefinitions);
+                var fieldAlignment = ValueLayout.Alignment(field.Type,
+                    program.Structures, program.CheckedReferenceTypes,
+                    program.NativeLoweringAgreement,
+                    program.NativeFixedArrayTypes, program.EnumDefinitions);
+                var fieldRequiredAlignment
+                    = ValueLayout.RequiredAlignment(field.Type,
+                        program.Structures, program.NativeFixedArrayTypes,
+                        program.CheckedReferenceTypes,
+                        program.EnumDefinitions);
+                if (fieldSize == 0 || field.Size != fieldSize
+                    || fieldAlignment <= 0 || fieldRequiredAlignment <= 0
+                    || !IsPowerOfTwo((uint)fieldAlignment)
+                    || !IsPowerOfTwo((uint)fieldRequiredAlignment)
+                    || checked(field.Offset + fieldSize) > structure.Size)
+                {
+                    throw new NotSupportedException(
+                        "An inline class field struct contains a field outside its completed layout.");
                 }
             }
         }

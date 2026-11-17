@@ -1191,6 +1191,153 @@ internal sealed class TrRmC1EnumClosureSourceTests
     }
 
     [Test]
+    public void LowersEN1ClassQueryThroughInlineStructLayout()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
+        var schemaIdentity
+            = $"{s_schemaIdentities[0]}-class-instance-layout-1";
+        var layoutOptions = new CompilationOptions {
+            LayoutCoreRegistration
+                = LayoutCoreRegistrationTestData.Create(),
+        };
+        var providerTree = SyntaxTree.Parse("""
+            namespace Demo {
+                [Blittable]
+                [Layout(LayoutKind.Sequential, Packing: 4)]
+                public struct Payload {
+                    public uint8 Prefix;
+                    public int32 Value;
+                }
+                public class Box {
+                    public uint8 Prefix;
+                    public Payload Data;
+                }
+            }
+            """);
+        var providerCompilation = Compilation.CreateLibrary(providerTree,
+            layoutOptions);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var providerProgram = (BoundProgram)providerCompilation.Program!;
+        var classDeclaration = providerTree.Root.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var classFields = classDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Where(static node => node.Kind == SyntaxKind.FieldDeclaration)
+            .ToArray();
+        var classIndex = providerProgram.SourceClassProgramAssociation!
+            .Declarations.Single(declaration =>
+                declaration.Span == classDeclaration.Span).ClassIndex;
+        var classExport = new TrRmSourceClassExport(providerProgram,
+            classIndex, classDeclaration.Span, "type.box", [
+                new TrRmSourceClassMemberExport(0,
+                    classFields[0].Span, "field.box.prefix"),
+                new TrRmSourceClassMemberExport(0,
+                    classFields[1].Span, "field.box.data"),
+            ]);
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, "ClassLayoutProvider", schemaIdentity, 1, [
+                new TrRmSourceTypeExport("Demo", "Payload",
+                    "type.payload") {
+                    FieldExports = [
+                        new TrRmSourceFieldExport("Prefix",
+                            "field.payload.prefix"),
+                        new TrRmSourceFieldExport("Value",
+                            "field.payload.value"),
+                    ],
+                },
+            ], [], [classExport], []);
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, "ClassLayoutProvider", [], [
+                "type.box",
+                "type.payload",
+            ], [
+                "field.box.prefix",
+                "field.box.data",
+                "field.payload.prefix",
+                "field.payload.value",
+            ]);
+        var queryCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Demo;
+                nint Offset() {
+                    return unsafe(offsetof(Box, Data.Value));
+                }
+                """), reference, layoutOptions);
+        Assert.That(queryCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, queryCompilation.Diagnostics));
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            queryCompilation.Program!, "ClassLayoutConsumer",
+            schemaIdentity, 1);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                consumerArtifact, SchemaFor(schemaIdentity), null,
+                usesNativePointerLoads: false,
+                standardSchemaIdentity: schemaIdentity));
+        Assert.That(tables.TargetLayoutDependencies.Count, Is.EqualTo(1));
+        Assert.That(tables.TargetLayoutDependencyFields.Count,
+            Is.EqualTo(2));
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
+            "ClassLayoutConsumer", [providerInput]);
+        var returned = (BoundReturn)loaded.Functions.Single().Body
+            .Statements.Single();
+        var unsafeExpression = (BoundUnsafeExpression)returned.Value!;
+        var query = (BoundLayoutQuery)unsafeExpression.Expression;
+        Assert.That(query.Subject.FieldPath!.Steps, Has.Length.EqualTo(2));
+        Assert.That(query.Subject.FieldPath.Steps[0]
+            .StandardClassFieldOrigin!.SelectedExportKeys,
+            Is.EqualTo(["field.box.data"]));
+        var main = loaded.Functions.Single() with {
+            Name = "Main",
+            ReturnType = PrimitiveType.Int32,
+            Body = new BoundBlock([
+                new BoundReturn(new BoundCast(unsafeExpression,
+                    PrimitiveType.Int32, default), default),
+            ], default),
+        };
+        var executable = loaded with {
+            Functions = [main],
+            EntryPoint = 0,
+        };
+
+        Assert.That(NativeJit.Execute(executable,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(8));
+
+        var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(loaded,
+            "ClassLayoutConsumer", schemaIdentity, 1);
+        var reemittedTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                reemittedArtifact, SchemaFor(schemaIdentity), null,
+                usesNativePointerLoads: false,
+                standardSchemaIdentity: schemaIdentity));
+        Assert.That(reemittedTables.TargetLayoutDependencies.Count,
+            Is.EqualTo(1));
+        Assert.That(reemittedTables.TargetLayoutDependencyFields.Count,
+            Is.EqualTo(2));
+        Assert.That(reemittedTables.ConstantExecutions.Count, Is.Zero);
+        var reloaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                reemittedArtifact), "ClassLayoutConsumer", [providerInput]);
+        BoundLayoutQuery? reloadedQuery = null;
+        Assert.That(BoundTreeTraversal.VisitExpressions(
+            reloaded.Functions.Single().Body,
+            expression => reloadedQuery ??=
+                expression as BoundLayoutQuery), Is.True);
+        Assert.That(reloadedQuery!.Subject.FieldPath!.Steps,
+            Has.Length.EqualTo(2));
+        Assert.That(reloadedQuery.Subject.FieldPath.Steps[1]
+            .StandardFieldOrigin!.SelectedExportKeys,
+            Is.EqualTo(["field.payload.value"]));
+    }
+
+    [Test]
     public void ReemitsEN1ClassTypeDefAndFieldImportsAndTypeSpecs()
     {
         var schemaIdentity = s_schemaIdentities[0];
