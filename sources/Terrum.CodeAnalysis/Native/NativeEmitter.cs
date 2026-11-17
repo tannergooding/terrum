@@ -4306,7 +4306,9 @@ internal sealed partial class PeCompiler
 
             var structureIndex = (int)step.OwnerType - 100;
             var fieldOrdinal = checked((int)step.FieldOrdinal);
-            if ((uint)structureIndex >= (uint)program.Structures.Length
+            if (BoundEnumTypes.IsType(step.OwnerType)
+                || (uint)structureIndex
+                    >= (uint)program.Structures.Length
                 || (uint)fieldOrdinal
                     >= (uint)program.Structures[structureIndex].Fields.Length)
             {

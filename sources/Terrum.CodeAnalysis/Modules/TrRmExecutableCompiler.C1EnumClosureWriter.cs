@@ -103,9 +103,12 @@ public static partial class TrRmExecutableCompiler
         var instance = program.GenericNominalTypeInstances[instanceIndex];
         if (instance is null || !instance.Arguments.IsEmpty
             || instance.Qualifiers != 0
-            || instance.TypeSpecReference != 0
-            || instance.TypeSpecProviderIdentity is not null
-            || instance.TypeSpecForm != 0)
+            || (instance.TypeSpecReference == 0
+                ? instance.TypeSpecProviderIdentity is not null
+                    || instance.TypeSpecForm != 0
+                : string.IsNullOrEmpty(
+                        instance.TypeSpecProviderIdentity)
+                    || instance.TypeSpecForm is not (0x02 or 0x03)))
         {
             throw Unsupported(
                 "An EN1 class query Body requires an ordinary nongeneric class root.");
@@ -115,10 +118,12 @@ public static partial class TrRmExecutableCompiler
             candidate =>
                 candidate.Declaration.Identity == instance.Definition
                 && !candidate.SelectedExportKeys.IsEmpty);
-        if (declaration is null || fieldPath.Steps.Length != 1)
+        if (declaration is null || fieldPath.Steps.IsEmpty
+            || fieldPath.Steps.Skip(1).Any(step =>
+                step.StandardClassFieldOrigin is not null))
         {
             throw Unsupported(
-                "The bounded EN1 Body route requires one selected public instance scalar FieldDef on its class root.");
+                "The bounded EN1 Body route requires a selected public class FieldDef followed only by inline-struct FieldPath steps.");
         }
 
         var classField = fieldPath.Steps[0].StandardClassFieldOrigin;
@@ -127,11 +132,10 @@ public static partial class TrRmExecutableCompiler
                 != declaration.Declaration.Identity.DefinitionId
             || classField.SelectedExportKeys.IsEmpty
             || (classField.Flags & 3) != 2
-            || (classField.Flags & 8) != 0
-            || !PrimitiveTypeFacts.IsBuiltInScalar(classField.Type))
+            || (classField.Flags & 8) != 0)
         {
             throw Unsupported(
-                "The bounded EN1 Body route requires one selected public instance scalar FieldDef on its class root.");
+                "The bounded EN1 Body route requires a selected public nonstatic class FieldDef.");
         }
 
         return function;

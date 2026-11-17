@@ -552,7 +552,9 @@ public static partial class TrRmExecutableCompiler
 
                 var structureIndex = (int)step.OwnerType - 100;
                 var fieldOrdinal = checked((int)step.FieldOrdinal);
-                if ((uint)structureIndex >= (uint)program.Structures.Length
+                if (BoundEnumTypes.IsType(step.OwnerType)
+                    || (uint)structureIndex
+                        >= (uint)program.Structures.Length
                     || !structureTypeDefRows.TryGetValue(structureIndex,
                         out var typeDefRow)
                     || fieldOrdinal >= program.Structures[structureIndex]

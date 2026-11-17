@@ -269,10 +269,12 @@ permission to bypass the current gate.
 | Scope isolation | Pointer traversal, class-handle traversal, unsupported class kinds/qualifications, class Blittable/Union/Transparent mappings and invented source layout attributes refuse. No successful offset establishes class value access, construction, marshalling, ownership, header shape or a native class ABI. |
 
 Formal approval remains outstanding. Candidate A's exact successor identities
-are the provisional implementation direction. Static source inspection shows
-the standard native binding plan retains schema identities and artifact
-snapshots; class-query dependency validation and native qualification remain
-unimplemented and unverified. Public fixed class-field publication/safe observation,
+are the provisional implementation direction. Bounded exact-successor
+dependency validation, source-free class-query load/re-emission and
+Auto/Sequential lowering for supported complete layouts now exist; direct and
+nested regressions are added but remain unverified under the active hold.
+Nontrivial remapping/replacement, folding and native qualification remain
+unverified or open. Public fixed class-field publication/safe observation,
 additional stored field representations, arbitrary explicit offsets and
 object/header/handle/runtime ABIs remain separate **unselected decisions**, not
 implementation discretion under this agreement. Existing source/member/Body

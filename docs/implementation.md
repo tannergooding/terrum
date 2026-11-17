@@ -903,7 +903,7 @@ function-pointer and pointer identities through bound-tree remapping. The
 | Source binding | Supports partial and file-local enums, exact wide values, duplicate-valued members and source identities distinct from Core/private identities. |
 | Private persistence | The unapproved source-enum route is limited to public namespace-level int32 enums with explicit ordered member keys; internal, file-local and wide enums are not persisted by it. |
 | Standard enums | NominalEnumsDraft remains a separate unapproved candidate. Its API and CLI require explicit declaration/member keys, generate none, and support only bounded enum declarations, constant-return and enum-identity Bodies. The baseline emitter is Windows x64 target-1-only; the candidate preserves target requirements 0/1 for non-Blittable enums and requires 1 for Blittable. See the [CLI inventory](implementation/cli-protocol.md#provisional-trrm-source-schema-selection). |
-| EN1 | The separate [C1 enum-closure proposal](proposals/standard-trrm-c1-enum-closure-composition.md) leaves NominalEnumsDraft and CG1 unchanged. Partial enum source/reference and direct-import re-emission paths exist; bounded local non-generic struct FieldDef/Layout emission, fresh source emission using selected imported enum roots, mixed type-only loading with direct imported enum fields, direct non-generic struct TypeDef Imports, and FieldDef Imports inside imported struct stubs are implemented but unverified under the active hold. Source emission now includes local non-generic class fields with class/struct/enum TypeSpecs, and source-free loading/re-emission handles selected class roots, class TypeDef Imports, and nested local class dependencies. Direct struct-to-class source-free identity, PI1 property carriers, broader FieldMap/FieldPath provider closure, class members/Bodies and runtime remain open; EN1 is not end-to-end support. See the [conformance gap index](implementation/conformance-gaps.md). |
+| EN1 | The separate [C1 enum-closure proposal](proposals/standard-trrm-c1-enum-closure-composition.md) leaves NominalEnumsDraft and CG1 unchanged. Partial enum source/reference and direct-import re-emission paths exist; bounded local non-generic struct FieldDef/Layout emission, fresh source emission using selected imported enum roots, mixed type-only loading with direct imported enum fields, direct non-generic struct TypeDef Imports, and FieldDef Imports inside imported struct stubs are implemented but unverified under the active hold. Source emission now includes local non-generic class fields with class/struct/enum TypeSpecs, and source-free loading/re-emission handles selected class roots, class TypeDef Imports, and nested local class dependencies. Under the unapproved exact class-layout successors, a bounded class-root OffsetOfType Body now carries ordered FieldPath/0045 dependencies through source-free load/re-emission and lowers supported Auto/Sequential field layouts, including nested inline-struct paths; direct/nested JIT and round-trip regressions are added but unverified. Broader FieldMap/FieldPath provider remapping, optional folding, PI1 property carriers, class members/Bodies and dependent runtime/CLI remain open; EN1 is not end-to-end support. See the [conformance gap index](implementation/conformance-gaps.md). |
 `NativeParameter` still adds
 prototype raw pointer annotations; without it, a raw pointer remains
 caller-unsafe and carries no checked access, retention, extent, or alignment
@@ -1546,10 +1546,18 @@ TypeSpec/provider identities. Nested structs preserve unknown class ownership
 and are rejected by Copy-sensitive verification. These class and struct routes
 are unverified under the active hold and do not cover PI1 property carriers.
 Provisional EN1 type+field-key reference selection now retains selected local
-class fields and fields in the selected inline-struct closure, but does not yet
-bind class FieldPaths or emit class FieldMap Bodies. Broader provider closure,
-class/member/Body production, replacement and private-origin remapping, runtime
-and CLI support remain open.
+class fields and fields in the selected inline-struct closure. Source binding
+and mandatory verification admit class-root offsetof FieldPaths through one
+selected public instance field and subsequent inline-struct fields. Under the
+unapproved exact class-layout successors, the bounded producer emits one
+parameterless `nint` OffsetOfType Body with ordered FieldPath/0045 linkage;
+source-free load/re-emission preserves the selected class provider and
+FieldDef expectations, and native lowering derives supported Auto/Sequential
+field offsets from complete class/inline-struct layouts. Direct and nested
+load/JIT and exact-successor re-emission/reload regressions are added but
+unverified under the active hold. Broader Body composition, provider
+replacement and nontrivial dependency remapping, optional folding, additional
+class representations, runtime/AOT and CLI support remain open.
 No end-to-end EN1 support is implemented.
 These source-bound definitions are not generally interoperable: source-authored
 generic classes and complete nominal conformance rules remain unsupported.
