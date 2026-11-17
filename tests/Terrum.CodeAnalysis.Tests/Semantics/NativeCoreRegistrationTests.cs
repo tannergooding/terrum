@@ -314,6 +314,12 @@ internal sealed class NativeCoreRegistrationTests
                 public static unsafe int32 Read();
             }
             """,
+            """
+            [Terrum.Interop.ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface IProbe {
+                public extern unsafe int32 Read();
+            }
+            """,
         };
 
         foreach (var source in sources)
