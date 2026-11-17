@@ -29,7 +29,7 @@
     <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
     <EnableAotAnalyzer>false</EnableAotAnalyzer>
     <EnableSingleFileAnalyzer>false</EnableSingleFileAnalyzer>
-    <NoWarn>$(NoWarn);CA5360</NoWarn>
+    <NoWarn>$(NoWarn);CA5360;CA1851;CA2000;IDE0320;IDE0305;IDE0008;CA2016;CA1303;CA1043;CA1508;CA2225;CA2329;CA2330;CA3001;CA5390;CA5394;CA5403</NoWarn>
     <RunAnalyzers>false</RunAnalyzers>
     <UseSharedCompilation>false</UseSharedCompilation>
   </PropertyGroup>

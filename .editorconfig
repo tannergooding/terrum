@@ -67,6 +67,16 @@ dotnet_diagnostic.CA5390.severity = none
 dotnet_diagnostic.CA5394.severity = none
 dotnet_diagnostic.CA5403.severity = none
 
+# Preserve known analyzer exclusions if project analyzer execution is re-enabled.
+dotnet_diagnostic.CA1851.severity = none
+dotnet_diagnostic.CA2000.severity = none
+dotnet_diagnostic.CA5360.severity = none
+dotnet_diagnostic.IDE0320.severity = none
+dotnet_diagnostic.IDE0305.severity = none
+dotnet_diagnostic.IDE0008.severity = none
+dotnet_diagnostic.CA2016.severity = none
+dotnet_diagnostic.CA1303.severity = none
+
 ###############################################################################
 # Set dotnet naming rules to:
 #    require async methods be pascal case suffixed with Async
