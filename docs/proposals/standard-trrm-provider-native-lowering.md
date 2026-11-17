@@ -85,20 +85,12 @@ root. The selected-root ModuleRef remains the sole dependency edge; every
 other populated Module, whether co-located or supplied, must be a supported
 leaf with no retained ModuleRefs/Imports.
 
-**Recorded bounded evidence:** the latest Debug fast build passed and the
-focused F producer/loader/provider/CLI selection passed 27/27 with zero skips
-at `artifacts\\tst\\Debug\\fnptr-fprofile-multimodule-colocated-final-v2\\fnptr-fprofile-multimodule-colocated-final-v2.trx`.
-It covers non-first root/provider Modules, a co-located leaf provider through
-the public Standard loader/JIT/PE-emission APIs, and CLI JIT plus supervised
-AOT executable execution without `--trrm-provider`. The separate-provider
-CLI test also exercises provider-bound DLL emission, mismatch rejection
-before sentinel replacement, and refusal to export the imported expectation
-as a root-owned library function. Input hashes are retained at
-`artifacts\\log\\fnptr-fprofile-multimodule-colocated-final-v2-inputs.txt`.
-This does not exercise co-located library CLI emission/runtime invocation,
-pointer NativeParameter runtime access/extent, dynamic resolution, provider
-chains or provider library execution; it is not formal approval or milestone
-acceptance.
+The bounded route covers co-located leaf providers through the public Standard
+loader/JIT/PE APIs, CLI JIT and supervised AOT without `--trrm-provider`, and
+separate-provider CLI DLL emission. Co-located library CLI emission/runtime
+invocation, pointer NativeParameter runtime access/extent, dynamic resolution,
+provider chains and provider library execution remain open; this is not formal
+approval or milestone acceptance.
 
 Consequently, the checked single/set/graph APIs cannot complete this route
 unchanged. Creating native packages first would require additional private

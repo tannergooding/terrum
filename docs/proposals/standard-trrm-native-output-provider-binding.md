@@ -417,14 +417,10 @@ implementation is provisional evidence, not normative adoption.
   [native binding plan](../../sources/Terrum.CodeAnalysis/Modules/TrRmStandardNativeBindingPlan.cs)
   revalidates the selected closure before PE/JIT lowering.
 - The active [`foreign-invocation tests`](../../tests/Terrum.CodeAnalysis.Tests/Modules/TrRm/TrRmForeignInvocationAddressEmitterTests.cs)
-  cover separate and co-located declaration-only providers, F/F+S and
-  F+S-consumer/F-provider selection, scalar and nested raw-pointer cells
-  including `ptr<void>`, dependency and selector comparison, TypeSpec and
-  predicate-graph row permutation, source-free re-emission, PE emission, and
-  rejection of changed foreign targets/types/contracts. The combined
-  NativeAddress/NativeImport/provider/local-aggregate selection passes
-  514/514 with no skips, and the analyzer-enabled Debug build passes with
-  zero warnings/errors.
+  cover separate and co-located declaration-only providers, selected schema
+  variants, scalar and nested raw-pointer cells, dependency and selector
+  comparison, row permutation, source-free re-emission, PE emission, and
+  rejection of changed foreign targets/types/contracts.
 
 F+S is deliberately bounded to one selected provider Module and does not
 acquire F-only provider-graph admission. Active F regressions now cover
