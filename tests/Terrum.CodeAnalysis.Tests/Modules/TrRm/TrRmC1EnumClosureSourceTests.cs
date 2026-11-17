@@ -576,8 +576,10 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 public enum Shade : int8 { Dark = -1 }
                 public class Palette {
                     public Shade ShadeValue;
+                    public Shelf ShelfValue;
                     public int32 Id;
                 }
+                public class Shelf { public Shade ShelfShade; }
             }
             """);
         var compilation = Compilation.CreateLibrary(tree);
@@ -585,18 +587,23 @@ internal sealed class TrRmC1EnumClosureSourceTests
             string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = (BoundProgram)compilation.Program!;
         var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
-            .Single(static node =>
+            .First(static node =>
                 node.Kind == SyntaxKind.ClassDeclaration);
         var fieldDeclarations = classDeclaration.Children
             .OfType<SyntaxNode>()
             .Where(static node => node.Kind == SyntaxKind.FieldDeclaration)
             .ToArray();
-        var classExport = new TrRmSourceClassExport(program, 0,
+        var classIndex = program.SourceClassProgramAssociation!
+            .Declarations.Single(declaration =>
+                declaration.Span == classDeclaration.Span).ClassIndex;
+        var classExport = new TrRmSourceClassExport(program, classIndex,
             classDeclaration.Span, "type.palette", [
                 new TrRmSourceClassMemberExport(0,
                     fieldDeclarations[0].Span, "field.palette.shade"),
                 new TrRmSourceClassMemberExport(0,
-                    fieldDeclarations[1].Span, "field.palette.id"),
+                    fieldDeclarations[1].Span, "field.palette.shelf"),
+                new TrRmSourceClassMemberExport(0,
+                    fieldDeclarations[2].Span, "field.palette.id"),
             ]);
         var enumExport = CreateExport(program, tree, 0, "Shade",
             ["type.shade"], "shade");
@@ -607,19 +614,24 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var tables = TrRmStructuralMetadataValidator
             .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
                 artifact, SchemaFor(schemaIdentity)));
-        Assert.That(tables.TypeDefs.Count, Is.EqualTo(2));
+        Assert.That(tables.TypeDefs.Count, Is.EqualTo(3));
         Assert.That(tables.TypeDefs.GetKind(1), Is.EqualTo(4));
         Assert.That(tables.TypeDefs.GetKind(2), Is.EqualTo(2));
         Assert.That(tables.TypeDefs.GetFlags(2), Is.EqualTo(0x0Au));
+        Assert.That(tables.TypeDefs.GetName(3), Is.EqualTo("Shelf"));
         Assert.That(tables.Exports.TryGetDefinitionForKey(1,
             "type.palette", out var paletteDefinition), Is.True);
         Assert.That(tables.Exports.TryGetDefinitionForKey(1,
             "field.palette.shade", out var shadeFieldDefinition), Is.True);
         Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "field.palette.shelf", out var shelfFieldDefinition), Is.True);
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
             "field.palette.id", out var idFieldDefinition), Is.True);
         var paletteTypeDefRow = checked((int)(paletteDefinition
             & 0x00FF_FFFF));
         var shadeFieldRow = checked((int)(shadeFieldDefinition
+            & 0x00FF_FFFF));
+        var shelfFieldRow = checked((int)(shelfFieldDefinition
             & 0x00FF_FFFF));
         var idFieldRow = checked((int)(idFieldDefinition
             & 0x00FF_FFFF));
@@ -627,6 +639,10 @@ internal sealed class TrRmC1EnumClosureSourceTests
             Is.EqualTo(paletteTypeDefRow));
         Assert.That(tables.Fields.GetOwnerTypeDef(idFieldRow),
             Is.EqualTo(paletteTypeDefRow));
+        var shelfFieldType = tables.TypeSpecs.GetTypeSpecRef(
+            tables.Fields.GetTypeSpecRef(shelfFieldRow));
+        Assert.That(shelfFieldType.Form, Is.EqualTo((byte)0x02));
+        Assert.That(shelfFieldType.Row, Is.EqualTo(3));
         var shadeFieldType = tables.TypeSpecs.GetTypeSpecRef(
             tables.Fields.GetTypeSpecRef(shadeFieldRow));
         Assert.That(shadeFieldType.Form, Is.EqualTo((byte)0x02));
@@ -638,7 +654,7 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var reference = TrRmExecutableCompiler.CreateStandardReference(
             new TrRmStandardArtifactInput(schemaIdentity, artifact),
             "PaletteModule", [], ["type.palette"]);
-        Assert.That(reference.StandardClassDeclarations, Has.Length.EqualTo(1));
+        Assert.That(reference.StandardClassDeclarations, Has.Length.EqualTo(2));
         Assert.That(reference.EnumDefinitions, Has.Length.EqualTo(1));
         var sourceFreeCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(string.Empty), reference);
@@ -651,12 +667,14 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var reemittedTables = TrRmStructuralMetadataValidator
             .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
                 reemitted, SchemaFor(schemaIdentity)));
-        Assert.That(reemittedTables.TypeDefs.Count, Is.EqualTo(2));
-        Assert.That(reemittedTables.Fields.Count, Is.EqualTo(2));
+        Assert.That(reemittedTables.TypeDefs.Count, Is.EqualTo(3));
+        Assert.That(reemittedTables.Fields.Count, Is.EqualTo(4));
         Assert.That(reemittedTables.Exports.TryGetDefinitionForKey(1,
             "type.palette", out _), Is.True);
         Assert.That(reemittedTables.Exports.TryGetDefinitionForKey(1,
             "field.palette.shade", out _), Is.True);
+        Assert.That(reemittedTables.Exports.TryGetDefinitionForKey(1,
+            "field.palette.shelf", out _), Is.True);
         Assert.That(reemittedTables.Exports.TryGetDefinitionForKey(1,
             "field.palette.id", out _), Is.True);
 
@@ -664,7 +682,7 @@ internal sealed class TrRmC1EnumClosureSourceTests
             new TrRmStandardArtifactInput(schemaIdentity, reemitted),
             "PaletteModule", [], ["type.palette"]);
         Assert.That(reloadedReference.StandardClassDeclarations,
-            Has.Length.EqualTo(1));
+            Has.Length.EqualTo(2));
         Assert.That(reloadedReference.EnumDefinitions, Has.Length.EqualTo(1));
     }
 

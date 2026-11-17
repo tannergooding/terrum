@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
@@ -14,7 +15,11 @@ public static partial class TrRmExecutableCompiler
 
     private sealed record C1EnumClosureImport(
         string ProducerIdentity, string ExportKey, uint TargetRequirement,
-        uint RuntimePolicy);
+        uint RuntimePolicy, int RootImportRow = 0);
+
+    private sealed record C1EnumClosureStandardClassEmission(
+        BoundStandardClassTypeView View, ImmutableArray<string> ExportKeys,
+        C1EnumClosureImport? Import, int RootTypeDefRow);
 
     private sealed record C1EnumClosureEmissionLayout(
         uint TargetProfileId, uint TargetProfileRuleRevision,
@@ -50,21 +55,34 @@ public static partial class TrRmExecutableCompiler
         var standardClassDeclarations = program.StandardClassDeclarations;
         var hasStandardClassDeclarations
             = !standardClassDeclarations.IsEmpty;
+        var standardClassIdentities = standardClassDeclarations.Select(
+                static declaration => declaration.Declaration.Identity)
+            .ToHashSet();
+        var standardStructureIdentities = program.Structures
+            .Where(static structure =>
+                structure.StandardTypeOrigin is not null)
+            .Select(static structure => {
+                var origin = structure.StandardTypeOrigin!;
+                return new BoundGenericNominalTypeIdentity(
+                    origin.Provider.ModuleIdentity,
+                    origin.Provider.ModuleIdentity, origin.DefinitionId);
+            })
+            .ToHashSet();
         var standardClassClosureIsValid
             = standardClassDeclarations.IsEmpty
                 ? program.GenericNominalTypeDefinitions.IsEmpty
                 : BoundStandardClassDeclarationContract.IsValidTable(
                         standardClassDeclarations,
                         program.GenericNominalTypeDefinitions)
-                    && program.GenericNominalTypeDefinitions.Length
-                        == standardClassDeclarations.Length
-                    && standardClassDeclarations.All(declaration =>
-                        program.GenericNominalTypeDefinitions.Any(
-                            definition =>
-                                definition.Identity
-                                    == declaration.Declaration.Identity
-                                && definition.NominalKind == 2
-                                && definition.Formals.IsEmpty));
+                    && program.GenericNominalTypeDefinitions.All(
+                        definition =>
+                            definition.Formals.IsEmpty
+                            && (definition.NominalKind == 2
+                                ? standardClassIdentities.Contains(
+                                    definition.Identity)
+                                : definition.NominalKind == 1
+                                    && standardStructureIdentities.Contains(
+                                        definition.Identity)));
         BoundSourceTypeProviderSnapshot? rootSnapshot = null;
         if ((sourceEnumExports is not null
                 && !ReferenceEquals(sourceEnumExports.Program, program))
@@ -290,6 +308,8 @@ public static partial class TrRmExecutableCompiler
                 exportKeys, import, rootImportRow);
         }
 
+        var standardClassEmissions
+            = new List<C1EnumClosureStandardClassEmission>();
         if (hasStandardClassDeclarations)
         {
             var classRoots = standardClassDeclarations.Where(
@@ -297,13 +317,10 @@ public static partial class TrRmExecutableCompiler
                         declaration.Expectations.IsEmpty
                         && !declaration.ExportKeys.IsEmpty)
                 .ToArray();
-            if (classRoots.Length == 0
-                || standardClassDeclarations.Any(
-                    static declaration =>
-                        !declaration.Expectations.IsEmpty))
+            if (classRoots.Length == 0)
             {
                 throw Unsupported(
-                    "EN1 class re-emission currently requires local class roots without TypeDef Import dependencies.");
+                    "EN1 class re-emission requires at least one local exported class root.");
             }
 
             foreach (var classRoot in classRoots)
@@ -328,6 +345,83 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 rootSnapshot = provider;
+            }
+
+            foreach (var declaration in standardClassDeclarations)
+            {
+                var classView = declaration.Declaration;
+                if (declaration.Expectations.IsEmpty)
+                {
+                    if (!SameA2SourceTypeProviderSnapshot(rootSnapshot!,
+                            classView.Provider))
+                    {
+                        continue;
+                    }
+
+                    if ((classView.Identity.DefinitionId >> 24) != 0x13
+                        || (classView.Identity.DefinitionId
+                            & 0x00FF_FFFF) == 0)
+                    {
+                        throw Invalid(
+                            "An EN1 class root has an invalid TypeDef identity.");
+                    }
+
+                    standardClassEmissions.Add(
+                        new C1EnumClosureStandardClassEmission(
+                            classView, declaration.ExportKeys, null,
+                            checked((int)(classView.Identity.DefinitionId
+                                & 0x00FF_FFFF))));
+                    continue;
+                }
+
+                foreach (var expectation in declaration.Expectations)
+                {
+                    var binding = expectation.Binding;
+                    if (!SameA2SourceTypeProviderSnapshot(
+                            rootSnapshot!, binding.UsingModule))
+                    {
+                        continue;
+                    }
+
+                    var expectedView = expectation.ExpectedDeclaration;
+                    if ((binding.ExpectedDefinitionId >> 24) != 0x13
+                        || (binding.ExpectedDefinitionId
+                            & 0x00FF_FFFF) == 0
+                        || binding.ImportRow <= 0
+                        || !SameA2SourceTypeProviderSnapshot(rootSnapshot!,
+                            expectedView.Provider)
+                        || !SameA2SourceTypeProviderSnapshot(
+                            classView.Provider, binding.Provider)
+                        || binding.ProviderDefinitionId
+                            != classView.Identity.DefinitionId)
+                    {
+                        throw Invalid(
+                            "An EN1 class TypeDef Import lost its expected or provider identity.");
+                    }
+
+                    standardClassEmissions.Add(
+                        new C1EnumClosureStandardClassEmission(
+                            expectedView, [], new C1EnumClosureImport(
+                                binding.ProducerIdentity, binding.ExportKey,
+                                binding.TargetRequirement,
+                                binding.RuntimePolicy,
+                                binding.ImportRow),
+                            checked((int)(binding.ExpectedDefinitionId
+                                & 0x00FF_FFFF))));
+                }
+            }
+
+            standardClassEmissions.Sort(static (left, right)
+                => left.RootTypeDefRow.CompareTo(right.RootTypeDefRow));
+            for (var index = 1;
+                index < standardClassEmissions.Count; index++)
+            {
+                if (standardClassEmissions[index - 1].RootTypeDefRow
+                    == standardClassEmissions[index].RootTypeDefRow)
+                {
+                    throw Invalid(
+                        "EN1 class re-emission contains duplicate root TypeDef views.");
+                }
             }
         }
 
@@ -983,7 +1077,7 @@ public static partial class TrRmExecutableCompiler
                         typeImports.Add(new C1EnumClosureImport(
                             binding.ProducerIdentity, binding.ExportKey,
                             binding.TargetRequirement,
-                            binding.RuntimePolicy));
+                            binding.RuntimePolicy, binding.ImportRow));
                     }
 
                     if (typeImports.Count == 0)
@@ -1576,6 +1670,19 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
+        var structureIndexByRootTypeDefRow
+            = new Dictionary<int, int>(rootTypeDefRowByStructureIndex.Count);
+        foreach (var (structureIndex, typeDefRow)
+            in rootTypeDefRowByStructureIndex)
+        {
+            if (typeDefRow <= 0
+                || !structureIndexByRootTypeDefRow.TryAdd(typeDefRow,
+                    structureIndex))
+            {
+                throw Invalid(
+                    "EN1 class re-emission found an invalid or duplicate root struct TypeDef identity.");
+            }
+        }
         var stringRows = new List<(string Text, int Encoding)> {
             ("", 0), (moduleIdentity, GetStringEncoding(moduleIdentity)),
         };
@@ -1585,10 +1692,7 @@ public static partial class TrRmExecutableCompiler
             [moduleIdentity] = 2,
         };
         var standardClassDeclarationsByTypeDef
-            = standardClassDeclarations.OrderBy(
-                static declaration =>
-                    declaration.Declaration.Identity.DefinitionId)
-                .ToArray();
+            = standardClassEmissions.ToArray();
         var typeDefRows = new List<TrRmTypeDefRow>(
             emittedEnums.Count + retainedClassIndexes.Count
                 + standardClassDeclarationsByTypeDef.Length
@@ -1614,18 +1718,20 @@ public static partial class TrRmExecutableCompiler
         var typeDefRowByEnumIndex = new Dictionary<int, int>();
         var importRowByEnumIndex = new Dictionary<int, int>();
         var importRowByStructureIndex = new Dictionary<int, int>();
+        var importRowByRootStructureImport = new Dictionary<int, int>();
+        var importRowByRootClassImport = new Dictionary<int, int>();
         var typeDefRowByClass = retainedClassIndexes
             .Select((classIndex, ordinal) => (classIndex,
                 typeDefRow: emittedEnums.Count + ordinal + 1))
             .ToDictionary(static item => item.classIndex,
                 static item => item.typeDefRow);
-        var typeDefRowByStandardClassIdentity
+        var typeDefRowByRootClassTypeDef
             = standardClassDeclarationsByTypeDef
-                .Select((declaration, ordinal) => (declaration,
+                .Select((emission, ordinal) => (emission,
                     typeDefRow: emittedEnums.Count
                         + retainedClassIndexes.Count + ordinal + 1))
                 .ToDictionary(static item =>
-                        item.declaration.Declaration.Identity,
+                        item.emission.RootTypeDefRow,
                     static item => item.typeDefRow);
         var typeDefRowByStructure = retainedStructureIndexes
             .Select((structureIndex, ordinal) => (structureIndex,
@@ -1723,8 +1829,15 @@ public static partial class TrRmExecutableCompiler
             return row;
         }
 
+        var standardClassTypeSpecRows = new Dictionary<uint, uint>();
+        var activeStandardClassTypeSpecs = new HashSet<uint>();
         uint StandardClassFieldTypeSpecReference(
             BoundStandardClassFieldDeclaration field)
+            => RemapStandardClassTypeSpecReference(
+                field.TypeSpecReference, 0);
+
+        uint RemapStandardClassTypeSpecReference(uint sourceTypeSpec,
+            int depth)
         {
             if (standardClassRootTables is null)
             {
@@ -1733,32 +1846,116 @@ public static partial class TrRmExecutableCompiler
             }
 
             var type = standardClassRootTables.TypeSpecs.GetTypeSpecRef(
-                field.TypeSpecReference);
+                sourceTypeSpec);
             if (type.Form == 0xF2 && type.Qualifiers == 0)
             {
-                return field.TypeSpecReference;
+                return sourceTypeSpec;
             }
-
-            if (type.Form == 0x02 && type.Qualifiers == 0
-                && enumIndexByRootTypeDefRow.TryGetValue(
-                    checked((int)type.Row), out var enumIndex))
+            if (depth > SemanticVerifier.MaximumDepth)
             {
-                return FieldTypeSpecReference(
-                    BoundEnumTypes.Type(enumIndex));
+                throw Unsupported(
+                    "EN1 class TypeSpec remapping exceeds the checked nesting limit.");
             }
-
-            if (type.Form == 0x03 && type.Qualifiers == 0
-                && importRowByRootEnumImport.TryGetValue(
-                    checked((int)type.Row), out var importRow))
+            if (standardClassTypeSpecRows.TryGetValue(sourceTypeSpec,
+                    out var existingTypeSpec))
             {
-                var typeSpecRow = checked((uint)typeSpecRows.Count + 1);
-                typeSpecRows.Add(TrRmTypeSpecTableWriter.Reference(0x03,
-                    checked((uint)importRow)));
-                return typeSpecRow;
+                return existingTypeSpec;
+            }
+            if (!type.IsRow || !activeStandardClassTypeSpecs.Add(
+                    sourceTypeSpec))
+            {
+                throw Invalid(
+                    "An EN1 class FieldDef contains a cyclic or non-row TypeSpec reference.");
             }
 
-            throw Unsupported(
-                "The bounded EN1 class re-emission supports scalar and local/imported enum FieldDef TypeSpecs only.");
+            try
+            {
+                uint encodedTypeSpec;
+                if (type.Form == 0x06 && type.Qualifiers == 0)
+                {
+                    var row = standardClassRootTables.TypeSpecs.GetRow(
+                        type.Row);
+                    var innerTypeSpec = BinaryPrimitives
+                        .ReadUInt32LittleEndian(row[2..]);
+                    encodedTypeSpec = checked((uint)typeSpecRows.Count + 1);
+                    typeSpecRows.Add(TrRmTypeSpecTableWriter.Wrapped(
+                        type.Form, RemapStandardClassTypeSpecReference(
+                            innerTypeSpec, depth + 1), type.Qualifiers));
+                }
+                else if (type.Form is 0x02 or 0x03)
+                {
+                    var oldReferenceRow = checked((int)type.Row);
+                    uint newReferenceRow;
+                    if (type.Form == 0x02
+                        && typeDefRowByRootClassTypeDef.TryGetValue(
+                            oldReferenceRow, out var classTypeDefRow))
+                    {
+                        newReferenceRow = checked((uint)classTypeDefRow);
+                    }
+                    else if (type.Form == 0x03
+                        && importRowByRootClassImport.TryGetValue(
+                            oldReferenceRow, out var classImportRow))
+                    {
+                        newReferenceRow = checked((uint)classImportRow);
+                    }
+                    else if (type.Form == 0x02 && type.Qualifiers == 0
+                        && enumIndexByRootTypeDefRow.TryGetValue(
+                            oldReferenceRow, out var enumIndex))
+                    {
+                        encodedTypeSpec = FieldTypeSpecReference(
+                            BoundEnumTypes.Type(enumIndex));
+                        standardClassTypeSpecRows.Add(sourceTypeSpec,
+                            encodedTypeSpec);
+                        return encodedTypeSpec;
+                    }
+                    else if (type.Form == 0x03 && type.Qualifiers == 0
+                        && importRowByRootEnumImport.TryGetValue(
+                            oldReferenceRow, out var enumImportRow))
+                    {
+                        newReferenceRow = checked((uint)enumImportRow);
+                    }
+                    else if (type.Form == 0x02 && type.Qualifiers == 0
+                        && structureIndexByRootTypeDefRow.TryGetValue(
+                            oldReferenceRow, out var structureIndex))
+                    {
+                        encodedTypeSpec = FieldTypeSpecReference(
+                            (PrimitiveType)(100 + structureIndex));
+                        standardClassTypeSpecRows.Add(sourceTypeSpec,
+                            encodedTypeSpec);
+                        return encodedTypeSpec;
+                    }
+                    else if (type.Form == 0x03 && type.Qualifiers == 0
+                        && importRowByRootStructureImport.TryGetValue(
+                            oldReferenceRow,
+                            out var structureImportRow))
+                    {
+                        newReferenceRow
+                            = checked((uint)structureImportRow);
+                    }
+                    else
+                    {
+                        throw Unsupported(
+                            "An EN1 class FieldDef TypeSpec refers to an unretained class, struct or enum identity.");
+                    }
+
+                    encodedTypeSpec = checked((uint)typeSpecRows.Count + 1);
+                    typeSpecRows.Add(TrRmTypeSpecTableWriter.Reference(
+                        type.Form, newReferenceRow, type.Qualifiers));
+                }
+                else
+                {
+                    throw Unsupported(
+                        "The bounded EN1 class re-emission supports scalar, wrapper and class/struct/enum TypeSpec forms only.");
+                }
+
+                standardClassTypeSpecRows.Add(sourceTypeSpec,
+                    encodedTypeSpec);
+                return encodedTypeSpec;
+            }
+            finally
+            {
+                _ = activeStandardClassTypeSpecs.Remove(sourceTypeSpec);
+            }
         }
 
         uint FieldTypeSpecReference(PrimitiveType type)
@@ -2057,6 +2254,94 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
+        foreach (var emission in standardClassDeclarationsByTypeDef)
+        {
+            if (emission.Import is not C1EnumClosureImport typeImport)
+            {
+                continue;
+            }
+
+            if (!BoundEnumTypes.IsValidModuleDeclarationKey(
+                    typeImport.ProducerIdentity)
+                || !BoundEnumTypes.IsValidModuleDeclarationKey(
+                    typeImport.ExportKey)
+                || typeImport.RootImportRow <= 0
+                || !typeDefRowByRootClassTypeDef.TryGetValue(
+                    emission.RootTypeDefRow, out var typeDefRow))
+            {
+                throw Invalid(
+                    "An EN1 class TypeDef Import has an invalid provider or root identity.");
+            }
+
+            var providerKey = (typeImport.ProducerIdentity,
+                typeImport.TargetRequirement, typeImport.RuntimePolicy);
+            if (!moduleRefRowsByProvider.TryGetValue(providerKey,
+                    out var moduleRefRow))
+            {
+                moduleRefRow = moduleRefRows.Count + 1;
+                moduleRefRows.Add(new TrRmModuleRefRow(
+                    AddString(typeImport.ProducerIdentity),
+                    typeImport.TargetRequirement,
+                    typeImport.RuntimePolicy));
+                moduleRefRowsByProvider.Add(providerKey, moduleRefRow);
+            }
+
+            importRows.Add(new TrRmImportRow(moduleRefRow,
+                AddString(typeImport.ExportKey),
+                0x1300_0000u | checked((uint)typeDefRow)));
+            if (!importRowByRootClassImport.TryAdd(
+                    typeImport.RootImportRow, importRows.Count))
+            {
+                throw Invalid(
+                    "An EN1 class TypeDef Import row was emitted more than once.");
+            }
+        }
+
+        foreach (var (structureIndex, importsForType) in
+            sourceStructImportsByIndex.OrderBy(
+                static item => item.Key))
+        {
+            var typeDefRow = typeDefRowByStructure[structureIndex];
+            foreach (var typeImport in importsForType)
+            {
+                if (!BoundEnumTypes.IsValidModuleDeclarationKey(
+                        typeImport.ProducerIdentity)
+                    || !BoundEnumTypes.IsValidModuleDeclarationKey(
+                        typeImport.ExportKey))
+                {
+                    throw Invalid(
+                        "A mixed EN1 struct Import has an invalid provider identity or ExportKey.");
+                }
+
+                var providerKey = (typeImport.ProducerIdentity,
+                    typeImport.TargetRequirement, typeImport.RuntimePolicy);
+                if (!moduleRefRowsByProvider.TryGetValue(providerKey,
+                        out var moduleRefRow))
+                {
+                    moduleRefRow = moduleRefRows.Count + 1;
+                    moduleRefRows.Add(new TrRmModuleRefRow(
+                        AddString(typeImport.ProducerIdentity),
+                        typeImport.TargetRequirement,
+                        typeImport.RuntimePolicy));
+                    moduleRefRowsByProvider.Add(providerKey, moduleRefRow);
+                }
+
+                importRows.Add(new TrRmImportRow(moduleRefRow,
+                    AddString(typeImport.ExportKey),
+                    0x1300_0000u | checked((uint)typeDefRow)));
+                _ = importRowByStructureIndex.TryAdd(structureIndex,
+                    importRows.Count);
+                if (typeImport.RootImportRow != 0
+                    && (typeImport.RootImportRow < 0
+                        || !importRowByRootStructureImport.TryAdd(
+                            typeImport.RootImportRow, importRows.Count)))
+                {
+                    throw Invalid(
+                        "An EN1 struct TypeDef Import row was emitted more than once.");
+                }
+            }
+        }
+
         foreach (var classIndex in retainedClassIndexes)
         {
             var @class = program.Classes[classIndex];
@@ -2132,12 +2417,10 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        foreach (var declaration in standardClassDeclarationsByTypeDef)
+        foreach (var emission in standardClassDeclarationsByTypeDef)
         {
-            var classView = declaration.Declaration;
+            var classView = emission.View;
             if (standardClassRootTables is null
-                || !BoundStandardClassDeclarationContract.IsValidTable(
-                    [declaration], program.GenericNominalTypeDefinitions)
                 || !SameA2SourceTypeProviderSnapshot(rootSnapshot!,
                     classView.Provider)
                 || classView.Provider.ModuleRow != rootSnapshot!.ModuleRow
@@ -2158,8 +2441,8 @@ public static partial class TrRmExecutableCompiler
                     "EN1 class re-emission supports the default Auto Layout variant only.");
             }
 
-            var typeDefRow = typeDefRowByStandardClassIdentity[
-                classView.Identity];
+            var typeDefRow = typeDefRowByRootClassTypeDef[
+                emission.RootTypeDefRow];
             var fieldFirst = classView.Fields.IsEmpty
                 ? 0 : checked(fieldRows.Count + 1);
             var layoutFieldFirst = classView.Fields.IsEmpty
@@ -2192,6 +2475,12 @@ public static partial class TrRmExecutableCompiler
                 if (standardClassFieldExportKeysByDefinition.TryGetValue(
                         field.DefinitionId, out var fieldExportKeys))
                 {
+                    if (emission.Import is not null)
+                    {
+                        throw Invalid(
+                            "An EN1 imported class TypeDef cannot re-export its expected FieldDefs.");
+                    }
+
                     foreach (var exportKey in fieldExportKeys)
                     {
                         fieldExportRows.Add(new TrRmExportRow(
@@ -2210,48 +2499,11 @@ public static partial class TrRmExecutableCompiler
                 classView.Fields.Length, 0, 0,
                 checked((uint)layoutFirst), 1, 0, 0));
             typeDefNames.Add((classView.Namespace, classView.Name));
-            foreach (var exportKey in declaration.ExportKeys)
+            foreach (var exportKey in emission.ExportKeys)
             {
                 exportRows.Add(new TrRmExportRow(
                     0x1300_0000u | checked((uint)typeDefRow),
                     AddString(exportKey)));
-            }
-        }
-
-        foreach (var (structureIndex, importsForType) in
-            sourceStructImportsByIndex.OrderBy(
-                static item => item.Key))
-        {
-            var typeDefRow = typeDefRowByStructure[structureIndex];
-            foreach (var typeImport in importsForType)
-            {
-                if (!BoundEnumTypes.IsValidModuleDeclarationKey(
-                        typeImport.ProducerIdentity)
-                    || !BoundEnumTypes.IsValidModuleDeclarationKey(
-                        typeImport.ExportKey))
-                {
-                    throw Invalid(
-                        "A mixed EN1 struct Import has an invalid provider identity or ExportKey.");
-                }
-
-                var providerKey = (typeImport.ProducerIdentity,
-                    typeImport.TargetRequirement, typeImport.RuntimePolicy);
-                if (!moduleRefRowsByProvider.TryGetValue(providerKey,
-                        out var moduleRefRow))
-                {
-                    moduleRefRow = moduleRefRows.Count + 1;
-                    moduleRefRows.Add(new TrRmModuleRefRow(
-                        AddString(typeImport.ProducerIdentity),
-                        typeImport.TargetRequirement,
-                        typeImport.RuntimePolicy));
-                    moduleRefRowsByProvider.Add(providerKey, moduleRefRow);
-                }
-
-                importRows.Add(new TrRmImportRow(moduleRefRow,
-                    AddString(typeImport.ExportKey),
-                    0x1300_0000u | checked((uint)typeDefRow)));
-                _ = importRowByStructureIndex.TryAdd(structureIndex,
-                    importRows.Count);
             }
         }
 

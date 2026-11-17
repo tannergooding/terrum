@@ -1,6 +1,7 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
@@ -429,11 +430,160 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
+        var localClassTypeDefRows = new SortedSet<int>(
+            selectedTypeDefs.Keys);
+        var pendingLocalClassTypeDefRows = new Queue<int>(
+            selectedTypeDefs.Keys);
+        var visitedClassTypeSpecs = new HashSet<uint>();
+        var remainingClassTypeVisits
+            = SemanticVerifier.MaximumAnalysisVisits;
+        void VisitClassFieldTypeSpec(uint typeSpecReference, int depth)
+        {
+            if (--remainingClassTypeVisits < 0
+                || depth > SemanticVerifier.MaximumDepth)
+            {
+                throw Unsupported(
+                    "The C1 class TypeSpec closure exceeds its traversal limit.");
+            }
+
+            var type = rootTables.TypeSpecs.GetTypeSpecRef(
+                typeSpecReference);
+            if (type.Form == 0xF2 && type.Qualifiers == 0)
+            {
+                return;
+            }
+            if (!type.IsRow)
+            {
+                throw Unsupported(
+                    "The C1 class TypeSpec closure contains an unsupported inline family.");
+            }
+            if (!visitedClassTypeSpecs.Add(typeSpecReference))
+            {
+                return;
+            }
+
+            var row = rootTables.TypeSpecs.GetRow(type.Row);
+            if (type.Form == 0x06)
+            {
+                if (type.Qualifiers != 0)
+                {
+                    throw Unsupported(
+                        "The C1 class TypeSpec closure does not support qualified optional wrappers.");
+                }
+
+                VisitClassFieldTypeSpec(BinaryPrimitives
+                    .ReadUInt32LittleEndian(row[2..]), depth + 1);
+                return;
+            }
+
+            if (type.Form == 0x03)
+            {
+                var importRow = checked((int)type.Row);
+                var expectedDefinitionId = rootTables.Imports
+                    .GetExpectedDefinitionForImportRow(importRow);
+                if ((expectedDefinitionId >> 24) != 0x13)
+                {
+                    throw Invalid(
+                        "A C1 class TypeSpec Import does not identify a TypeDef.");
+                }
+
+                var expectedTypeDefRow = checked((int)(
+                    expectedDefinitionId & 0x00FF_FFFF));
+                var expectedKind
+                    = rootTables.TypeDefs.GetKind(expectedTypeDefRow);
+                if (expectedKind is not (1 or 2)
+                    && !(isEN1 && expectedKind == 4))
+                {
+                    throw Unsupported(
+                        "The C1 class TypeSpec closure imports an unsupported TypeDef kind.");
+                }
+
+                return;
+            }
+
+            if (type.Form != 0x02)
+            {
+                throw Unsupported(
+                    "The C1 class TypeSpec closure supports scalar, optional, and nominal TypeSpecs only.");
+            }
+
+            var typeDefRow = checked((int)type.Row);
+            if (rootTables.TypeDefs.GetOwnerModule(typeDefRow)
+                != rootModuleRow)
+            {
+                throw Invalid(
+                    "A direct C1 class TypeSpec references a TypeDef owned by another Module.");
+            }
+
+            var kind = rootTables.TypeDefs.GetKind(typeDefRow);
+            if (kind == 2)
+            {
+                var definitionId = 0x1300_0000u
+                    | checked((uint)typeDefRow);
+                if (rootTables.Imports.IsExpectedDefinition(definitionId))
+                {
+                    throw Invalid(
+                        "A C1 class handle TypeSpec directly references an expected TypeDef stub.");
+                }
+                if (rootTables.TypeDefs.GetGenericRange(typeDefRow).Count != 0
+                    || rootTables.TypeDefs.GetContractRange(typeDefRow).Count
+                        != 0)
+                {
+                    throw Unsupported(
+                        "The C1 class TypeSpec closure does not support generic or contracted local class dependencies.");
+                }
+
+                if (localClassTypeDefRows.Add(typeDefRow))
+                {
+                    if (localClassTypeDefRows.Count
+                        > ManagedClassTypes.OptionalFirst
+                            - ManagedClassTypes.First)
+                    {
+                        throw Unsupported(
+                            "The C1 local class TypeSpec closure exceeds the registered class limit.");
+                    }
+
+                    pendingLocalClassTypeDefRows.Enqueue(typeDefRow);
+                }
+                return;
+            }
+
+            if ((kind == 1
+                    && rootTables.TypeDefs.GetGenericRange(typeDefRow).Count == 0
+                    && rootTables.TypeDefs.GetContractRange(typeDefRow).Count
+                        == 0)
+                || (isEN1 && kind == 4))
+            {
+                return;
+            }
+
+            throw Unsupported(
+                "The C1 class TypeSpec closure supports only non-generic local structs, enum Types and local classes.");
+        }
+
+        while (pendingLocalClassTypeDefRows.TryDequeue(
+            out var localClassTypeDefRow))
+        {
+            if (--remainingClassTypeVisits < 0)
+            {
+                throw Unsupported(
+                    "The C1 local class TypeDef closure exceeds its traversal limit.");
+            }
+
+            var (fieldStart, fieldEnd)
+                = rootTables.TypeDefs.GetFieldRange(localClassTypeDefRow);
+            for (var fieldRow = fieldStart; fieldRow < fieldEnd; fieldRow++)
+            {
+                VisitClassFieldTypeSpec(
+                    rootTables.Fields.GetTypeSpecRef(fieldRow), 1);
+            }
+        }
+
         var typeDefinitions = ImmutableArray.CreateBuilder<
             BoundGenericNominalTypeDefinition>();
         var definitionsByIdentity = new Dictionary<
             BoundGenericNominalTypeIdentity, int>();
-        foreach (var typeDefRow in selectedTypeDefs.Keys)
+        foreach (var typeDefRow in localClassTypeDefRows)
         {
             AddTypeDefinition(typeDefinitions, definitionsByIdentity,
                 bindingsByActualType, rootTables, moduleIdentity,
@@ -486,13 +636,31 @@ public static partial class TrRmExecutableCompiler
             var definitions = CreateGenericNominalTypeDefinitions(tables,
                 moduleIdentity, [], moduleRow: providerModuleRow,
                 onlyTypeDefRow: typeDefRow);
-            if (definitions.Length != 1)
+            BoundGenericNominalTypeDefinition definition;
+            if (definitions.Length == 0
+                && tables.TypeDefs.GetKind(typeDefRow) == 2
+                && tables.TypeDefs.GetGenericRange(typeDefRow).Count == 0
+                && tables.TypeDefs.GetContractRange(typeDefRow).Count == 0
+                && !tables.Exports.TryGetExportKeyForDefinition(
+                    providerModuleRow, identity.DefinitionId, out _))
+            {
+                definition = new BoundGenericNominalTypeDefinition(
+                    identity, tables.TypeDefs.GetNamespace(typeDefRow),
+                    tables.TypeDefs.GetName(typeDefRow), 2, [],
+                    tables.TypeSpecs.Count, tables.ConstantSources.Count,
+                    tables.Constraints.Count,
+                    tables.AssociatedRelations.Count);
+            }
+            else if (definitions.Length == 1)
+            {
+                definition = definitions[0];
+            }
+            else
             {
                 throw Unsupported(
                     "The C1 class source-reference closure contains a non-public or unsupported nominal TypeDef.");
             }
 
-            var definition = definitions[0];
             if (definition.Identity != identity)
             {
                 throw Invalid(
@@ -536,6 +704,28 @@ public static partial class TrRmExecutableCompiler
                     typeDefRow),
                 []));
             _ = classIdentities.Add(identity);
+        }
+
+        foreach (var typeDefRow in localClassTypeDefRows)
+        {
+            if (selectedTypeDefs.ContainsKey(typeDefRow))
+            {
+                continue;
+            }
+
+            var identity = new BoundGenericNominalTypeIdentity(
+                moduleIdentity, moduleIdentity,
+                0x1300_0000u | checked((uint)typeDefRow));
+            if (!classIdentities.Add(identity))
+            {
+                throw Invalid(
+                    "A local EN1 class TypeDef dependency was retained more than once.");
+            }
+
+            var declaration = CreateStandardClassTypeView(rootTables,
+                identity, rootSnapshot, typeDefRow);
+            classDeclarations.Add(new BoundStandardClassDeclaration(
+                declaration, [], []));
         }
 
         foreach (var binding in typeProviderBindings)
