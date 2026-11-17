@@ -247,6 +247,20 @@ internal sealed class TrRmFieldDefImportExportTests
     }
 
     [Test]
+    public void ValidatesCompactFieldBodiesAgainstImportedStubFields()
+    {
+        var directFieldUse = CreateCompactFieldBodyFixture(
+            directFieldReference: true);
+        _ = Assert.Throws<InvalidDataException>(
+            () => BindFieldImports(directFieldUse));
+
+        var importedFieldUse = CreateCompactFieldBodyFixture(
+            directFieldReference: false);
+        Assert.That(BindFieldImports(importedFieldUse).FieldBindings,
+            Has.Length.EqualTo(1));
+    }
+
+    [Test]
     public void RetainsFieldImportInTargetLayoutDependencyRange()
     {
         var fixture = CreateProviderBindingFixture(
@@ -450,6 +464,87 @@ internal sealed class TrRmFieldDefImportExportTests
                 0, 1, 1)];
         return new ProviderBindingFixture(consumerArtifact,
             providerArtifact, modules);
+    }
+
+    private static ProviderBindingFixture CreateCompactFieldBodyFixture(
+        bool directFieldReference)
+    {
+        var fixture = CreateProviderBindingFixture();
+        var artifactIndex = new TrRmArtifactIndex(
+            fixture.ConsumerArtifact, TrRmArtifactSchema.Standard);
+        var tables
+            = TrRmStructuralMetadataValidator
+                .ValidateAndGetExecutionTables(artifactIndex);
+        if (!artifactIndex.TryGetSection(0x0001, out _,
+                out _)
+            || !artifactIndex.TryGetSection(0x0002, out var stringBytes,
+                out var stringCount))
+        {
+            throw new InvalidDataException(
+                "The compact FieldDef fixture is missing Module or String metadata.");
+        }
+
+        var strings = new TrRmStringTableReader(stringBytes, stringCount);
+        var modules = TrRmModuleTableWriter.Encode([
+            new TrRmModuleRow(1, 1, 0, 0, 1, 1, 1, 1, 1, 1),
+        ], strings, tables.ModuleRefs.Count, tables.TypeDefs.Count, 1, 0,
+            tables.Features.Count);
+        var moduleReader = new TrRmModuleTableReader(modules, 1, strings,
+            tables.ModuleRefs.Count, tables.TypeDefs.Count, 1, 0,
+            tables.Features.Count);
+        var signatureBytes = TrRmMethodSigTableWriter.Encode([
+            new TrRmMethodSigRow(
+                tables.Fields.GetTypeSpecRef(1), 1, 0, 0, 0, 0),
+        ], tables.TypeSpecs, 0, 0);
+        var signatures = new TrRmMethodSigTableReader(signatureBytes, 1,
+            tables.TypeSpecs, 0, 0);
+        var body = new byte[8];
+        body[0] = 0x02;
+        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(4),
+            directFieldReference
+                ? 0x1400_0001u : 0x1C00_0002u);
+        var bodyBytes = TrRmVariableTableWriter.EncodeBodies([
+            new ReadOnlyMemory<byte>(body),
+        ]);
+        var methods = TrRmMethodDefTableWriter.Encode([
+            new TrRmMethodDefRow(1, 6, 1, 2, 0, 0, 1),
+        ], strings, moduleReader, tables.TypeDefs, signatures, 0, 1);
+
+        var sections = new List<TrRmSection>(
+            artifactIndex.SectionCount + 3);
+        var replacedMethodSection = false;
+        for (var section = 0; section < artifactIndex.SectionCount;
+            section++)
+        {
+            artifactIndex.GetSection(section, out var kind, out var flags,
+                out var sectionBytes, out var recordCount);
+            if (kind == 0x0001)
+            {
+                sections.Add(new TrRmSection(kind, flags, 1, modules));
+            }
+            else if (kind == 0x0016)
+            {
+                sections.Add(new TrRmSection(kind, flags, 1, methods));
+                replacedMethodSection = true;
+            }
+            else
+            {
+                sections.Add(new TrRmSection(kind, flags, recordCount,
+                    sectionBytes.ToArray()));
+            }
+        }
+        if (!replacedMethodSection)
+        {
+            sections.Add(new TrRmSection(0x0016, 0, 1, methods));
+        }
+        sections.Add(new TrRmSection(0x0017, 0, 1, signatureBytes));
+        sections.Add(new TrRmSection(0x0020, 0, 1, bodyBytes));
+        sections.Sort(static (left, right)
+            => left.Kind.CompareTo(right.Kind));
+        return fixture with {
+            ConsumerArtifact = TrRmArtifactWriter.Encode(sections,
+                TrRmArtifactSchema.Standard),
+        };
     }
 
     private static byte[] CreateNestedGenericFieldPathArtifact(

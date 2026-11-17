@@ -1055,27 +1055,63 @@ internal static class TrRmFixedArrayProviderBindingValidator
                     methodRow < methodEnd; methodRow++)
                 {
                     var bodyRow = tables.Methods.GetBodyRow(methodRow);
-                    if (bodyRow == 0 || tables.Bodies.GetRow(bodyRow)[0] != 0x01)
+                    if (bodyRow == 0)
                     {
                         continue;
                     }
 
-                    var body = tables.Bodies.GetRegisterBody(bodyRow,
-                        tables.Contracts.Count);
-                    for (var mapIndex = 0;
-                        mapIndex < body.FieldCount; mapIndex++)
+                    var bodyBytes = tables.Bodies.GetRow(bodyRow);
+                    if (bodyBytes.IsEmpty)
                     {
-                        var token = BinaryPrimitives.ReadUInt32LittleEndian(
-                            body.FieldMap[(mapIndex * sizeof(uint))..]);
-                        if ((token >> 24) == 0x1D)
+                        throw InvalidFieldBinding();
+                    }
+
+                    var bodyKind = bodyBytes[0];
+                    if (bodyKind != 0x01)
+                    {
+                        tables.Bodies.ValidateSelectedImplementation(
+                            bodyRow, tables.Contracts.Count);
+                    }
+
+                    switch (bodyKind)
+                    {
+                        case 0x01:
                         {
-                            continue;
+                            var body = tables.Bodies.GetRegisterBody(bodyRow,
+                                tables.Contracts.Count);
+                            for (var mapIndex = 0;
+                                mapIndex < body.FieldCount; mapIndex++)
+                            {
+                                var token = BinaryPrimitives
+                                    .ReadUInt32LittleEndian(body.FieldMap[
+                                        (mapIndex * sizeof(uint))..]);
+                                if ((token >> 24) == 0x1D)
+                                {
+                                    continue;
+                                }
+
+                                ValidateRetainedFieldReference(
+                                    module.ArtifactIndex, tables, token,
+                                    ownerImports, importedFieldRows,
+                                    boundImportRows);
+                            }
+                            break;
                         }
 
-                        ValidateRetainedFieldReference(
-                            module.ArtifactIndex, tables, token,
-                            ownerImports, importedFieldRows,
-                            boundImportRows);
+                        case 0x02 or 0x03 or 0x04:
+                            ValidateRetainedFieldReference(
+                                module.ArtifactIndex, tables,
+                                BinaryPrimitives.ReadUInt32LittleEndian(
+                                    bodyBytes[4..]),
+                                ownerImports, importedFieldRows,
+                                boundImportRows);
+                            break;
+
+                        case 0x05:
+                            break;
+
+                        default:
+                            throw InvalidFieldBinding();
                     }
                 }
 
