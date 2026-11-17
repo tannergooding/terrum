@@ -795,6 +795,24 @@ public static partial class TrRmExecutableCompiler
                     out var expectations) ? [.. expectations] : []));
         }
 
+        if (isEN1)
+        {
+            foreach (var binding in typeProviderBindings)
+            {
+                if (binding.ConsumerArtifactIndex != 0
+                    || binding.ConsumerModuleRow != rootModuleRow
+                    || rootTables.TypeDefs.GetKind(
+                        binding.ExpectedTypeDefRow) != 2)
+                {
+                    continue;
+                }
+
+                AddTypeDefinition(typeDefinitions, definitionsByIdentity,
+                    bindingsByActualType, rootTables, moduleIdentity,
+                    rootModuleRow, binding.ExpectedTypeDefRow);
+            }
+        }
+
         return new CompilationReference([], [],
             (BoundRuntimePolicy)rootTables.Modules
                 .GetRequirements(rootModuleRow).RuntimePolicy,
@@ -967,7 +985,8 @@ public static partial class TrRmExecutableCompiler
             schemaIdentities, moduleIdentity, [.. selectedClassKeys]);
         var enumAndStructReference
             = CreateC1EnumClosureSourceTypeReferenceCore(artifacts,
-                schemaIdentities, moduleIdentity, enumAndStructKeys);
+                schemaIdentities, moduleIdentity, enumAndStructKeys,
+                classReference);
         if (classReference.RuntimePolicy
                 != enumAndStructReference.RuntimePolicy)
         {
@@ -975,22 +994,13 @@ public static partial class TrRmExecutableCompiler
                 "The EN1 class and enum references selected different runtime policies.");
         }
 
-        return new CompilationReference(
-            enumAndStructReference.Structures,
-            enumAndStructReference.Functions,
-            enumAndStructReference.RuntimePolicy,
-            enumDefinitions: enumAndStructReference.EnumDefinitions,
-            genericNominalTypeDefinitions:
-                classReference.GenericNominalTypeDefinitions,
-            standardQuerySourceAssociation:
-                enumAndStructReference.StandardQuerySourceAssociation,
-            standardClassDeclarations:
-                classReference.StandardClassDeclarations);
+        return enumAndStructReference;
     }
 
     private static CompilationReference CreateC1EnumClosureSourceTypeReferenceCore(
         byte[][] artifacts, string[] schemaIdentities, string moduleIdentity,
-        string[] selectedExportKeys)
+        string[] selectedExportKeys,
+        CompilationReference? standardClassReference = null)
     {
         var moduleValidation = ValidateStandardInputModules(artifacts,
             schemaIdentities, moduleIdentity, a3LayoutResourceLedger: null);
@@ -1430,6 +1440,102 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
+        var standardClassDeclarations
+            = standardClassReference?.StandardClassDeclarations ?? [];
+        var genericNominalTypeDefinitions
+            = standardClassReference?.GenericNominalTypeDefinitions
+                ?? ImmutableArray<BoundGenericNominalTypeDefinition>.Empty;
+        var genericNominalTypeDefinitionBuilder
+            = genericNominalTypeDefinitions.ToBuilder();
+        var genericNominalTypeIdentities = genericNominalTypeDefinitions
+            .Select(static definition => definition.Identity)
+            .ToHashSet();
+        if (standardClassReference is not null)
+        {
+            foreach (var typeDefRow in structTypeDefRows)
+            {
+                var identity = new BoundGenericNominalTypeIdentity(
+                    moduleIdentity, moduleIdentity,
+                    0x1300_0000u | checked((uint)typeDefRow));
+                if (genericNominalTypeIdentities.Add(identity))
+                {
+                    genericNominalTypeDefinitionBuilder.Add(
+                        new BoundGenericNominalTypeDefinition(identity,
+                            rootTables.TypeDefs.GetNamespace(typeDefRow),
+                            rootTables.TypeDefs.GetName(typeDefRow), 1, [],
+                            rootTables.TypeSpecs.Count,
+                            rootTables.ConstantSources.Count,
+                            rootTables.Constraints.Count,
+                            rootTables.AssociatedRelations.Count));
+                }
+            }
+        }
+
+        genericNominalTypeDefinitions
+            = genericNominalTypeDefinitionBuilder.ToImmutable();
+        var classIdentityByRootTypeDefRow = new Dictionary<int,
+            BoundGenericNominalTypeIdentity>();
+        var classIdentityByRootImportRow = new Dictionary<int,
+            BoundGenericNominalTypeIdentity>();
+        foreach (var declaration in standardClassDeclarations)
+        {
+            var classIdentity = declaration.Declaration.Identity;
+            if (BoundStandardEnumDeclarationContract.SnapshotsMatch(
+                    declaration.Declaration.Provider, rootSnapshot))
+            {
+                var typeDefId = classIdentity.DefinitionId;
+                if ((typeDefId >> 24) != 0x13
+                    || !classIdentityByRootTypeDefRow.TryAdd(
+                        checked((int)(typeDefId & 0x00FF_FFFF)),
+                        classIdentity))
+                {
+                    throw Invalid(
+                        "The EN1 class reference contains an invalid or duplicate local class TypeDef identity.");
+                }
+            }
+
+            foreach (var expectation in declaration.Expectations)
+            {
+                var binding = expectation.Binding;
+                if (!BoundStandardEnumDeclarationContract.SnapshotsMatch(
+                        binding.UsingModule, rootSnapshot))
+                {
+                    continue;
+                }
+
+                if (binding.ImportRow <= 0
+                    || !classIdentityByRootImportRow.TryAdd(
+                        binding.ImportRow, classIdentity))
+                {
+                    throw Invalid(
+                        "The EN1 class reference contains an invalid or duplicate class Import identity.");
+                }
+            }
+        }
+
+        var genericNominalTypeInstances
+            = standardClassReference?.GenericNominalTypeInstances
+                .ToBuilder()
+                ?? ImmutableArray.CreateBuilder<
+                    BoundGenericNominalTypeInstance>();
+        var classTypeInstanceIndexes = new Dictionary<(
+            BoundGenericNominalTypeIdentity Identity,
+            string TypeSpecProviderIdentity, uint TypeSpecReference), int>();
+        for (var instanceIndex = 0;
+            instanceIndex < genericNominalTypeInstances.Count;
+            instanceIndex++)
+        {
+            var instance = genericNominalTypeInstances[instanceIndex];
+            if (instance.TypeSpecReference != 0
+                && instance.TypeSpecProviderIdentity
+                    is string typeSpecProviderIdentity)
+            {
+                _ = classTypeInstanceIndexes.TryAdd((
+                    instance.Definition, typeSpecProviderIdentity,
+                    instance.TypeSpecReference), instanceIndex);
+            }
+        }
+
         var structures = structTypeDefRows.Length == 0
             ? ImmutableArray<BoundStruct>.Empty
             : CreateC1EnumClosureStructSourceTypes(rootTables,
@@ -1438,12 +1544,21 @@ public static partial class TrRmExecutableCompiler
                 enumIndexByImportRow, structureIndexByImportRow,
                 enumDefinitions, typeProviderBindings,
                 fieldProviderValidation.FieldBindings, GetTables,
-                GetSnapshot, GetExportKeys);
+                GetSnapshot, GetExportKeys,
+                genericNominalTypeDefinitions,
+                genericNominalTypeInstances, classTypeInstanceIndexes,
+                classIdentityByRootTypeDefRow,
+                classIdentityByRootImportRow);
         var program = new BoundProgram([], -1) {
             RuntimePolicy = (BoundRuntimePolicy)rootTables.Modules
                 .GetRequirements(rootModuleRow).RuntimePolicy,
             Structures = structures,
             EnumDefinitions = enumDefinitions,
+            GenericNominalTypeDefinitions =
+                genericNominalTypeDefinitions,
+            GenericNominalTypeInstances =
+                genericNominalTypeInstances.ToImmutable(),
+            StandardClassDeclarations = standardClassDeclarations,
         };
         if (!structures.IsEmpty)
         {
@@ -1467,7 +1582,12 @@ public static partial class TrRmExecutableCompiler
                 .GetRequirements(rootModuleRow).RuntimePolicy,
             standardQuerySourceAssociation:
                 standardQuerySourceAssociation,
-            enumDefinitions: enumDefinitions);
+            enumDefinitions: enumDefinitions,
+            genericNominalTypeDefinitions:
+                genericNominalTypeDefinitions,
+            genericNominalTypeInstances:
+                genericNominalTypeInstances.ToImmutable(),
+            standardClassDeclarations: standardClassDeclarations);
     }
 
     private static ImmutableArray<BoundStruct>
@@ -1486,7 +1606,18 @@ public static partial class TrRmExecutableCompiler
             TrRmStructuralMetadataValidator.ValidatedExecutionTables>
             getTables,
         Func<int, int, BoundSourceTypeProviderSnapshot> getSnapshot,
-        Func<int, int, int, ImmutableArray<string>> getExportKeys)
+        Func<int, int, int, ImmutableArray<string>> getExportKeys,
+        ImmutableArray<BoundGenericNominalTypeDefinition>
+            classTypeDefinitions,
+        ImmutableArray<BoundGenericNominalTypeInstance>.Builder
+            classTypeInstances,
+        Dictionary<(BoundGenericNominalTypeIdentity Identity,
+            string TypeSpecProviderIdentity, uint TypeSpecReference), int>
+            classTypeInstanceIndexes,
+        Dictionary<int, BoundGenericNominalTypeIdentity>
+            classIdentityByRootTypeDefRow,
+        Dictionary<int, BoundGenericNominalTypeIdentity>
+            classIdentityByRootImportRow)
     {
         var structureIndexByTypeDefRow = new Dictionary<int, int>(
             typeDefRows.Length);
@@ -1628,6 +1759,78 @@ public static partial class TrRmExecutableCompiler
             keys.Add(exportKey);
         }
 
+        bool TryGetClassFieldType(uint typeSpecReference,
+            out PrimitiveType fieldType)
+        {
+            fieldType = PrimitiveType.Void;
+            var type = tables.TypeSpecs.GetTypeSpecRef(typeSpecReference);
+            var typeSpecForm = type.Form;
+            var qualifierSource = type;
+            var depth = 0;
+            while (type.Form == 0x06 && type.Qualifiers == 0)
+            {
+                if (++depth > SemanticVerifier.MaximumDepth)
+                {
+                    throw Unsupported(
+                        "The EN1 class-handle TypeSpec exceeds the nesting limit.");
+                }
+
+                var row = tables.TypeSpecs.GetRow(type.Row);
+                var innerTypeSpec = BinaryPrimitives
+                    .ReadUInt32LittleEndian(row[2..]);
+                type = tables.TypeSpecs.GetTypeSpecRef(innerTypeSpec);
+                qualifierSource = type;
+            }
+
+            var classIdentity = default(
+                BoundGenericNominalTypeIdentity);
+            var typeRow = checked((int)type.Row);
+            var hasClassIdentity = type.Form switch {
+                0x02 => classIdentityByRootTypeDefRow.TryGetValue(
+                    typeRow, out classIdentity),
+                0x03 => classIdentityByRootImportRow.TryGetValue(
+                    typeRow, out classIdentity),
+                _ => false,
+            };
+            if (!hasClassIdentity)
+            {
+                return false;
+            }
+
+            var definition = classTypeDefinitions.SingleOrDefault(
+                candidate => candidate.Identity == classIdentity);
+            if (definition is null || definition.NominalKind != 2
+                || !definition.Formals.IsEmpty)
+            {
+                throw Invalid(
+                    "An EN1 class FieldDef TypeSpec has no complete non-generic class declaration.");
+            }
+
+            var key = (classIdentity, provider.ModuleIdentity,
+                typeSpecReference);
+            if (!classTypeInstanceIndexes.TryGetValue(key,
+                    out var instanceIndex))
+            {
+                if (classTypeInstances.Count
+                    >= BoundGenericNominalTypeTypes.MaximumCount)
+                {
+                    throw Unsupported(
+                        "The EN1 class-handle instance limit was exceeded.");
+                }
+
+                instanceIndex = classTypeInstances.Count;
+                classTypeInstances.Add(new BoundGenericNominalTypeInstance(
+                    classIdentity, [],
+                    qualifierSource.Qualifiers,
+                    typeSpecReference, provider.ModuleIdentity,
+                    typeSpecForm));
+                classTypeInstanceIndexes.Add(key, instanceIndex);
+            }
+
+            fieldType = BoundGenericNominalTypeTypes.Type(instanceIndex);
+            return true;
+        }
+
         PrimitiveType DecodeFieldType(uint typeSpecReference)
         {
             var type = tables.TypeSpecs.GetTypeSpecRef(typeSpecReference);
@@ -1647,6 +1850,12 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 return scalarType;
+            }
+
+            if (TryGetClassFieldType(typeSpecReference,
+                    out var classFieldType))
+            {
+                return classFieldType;
             }
 
             if (type.Form == 0x02 && type.Qualifiers == 0
@@ -1921,12 +2130,18 @@ public static partial class TrRmExecutableCompiler
                     ComputeLayout(nestedIndex, depth + 1);
                 }
 
-                var width = ValueLayout.Size(field.Type, structures,
-                    enumDefinitions: enumDefinitions);
-                var fieldAlignment = ValueLayout.Alignment(field.Type,
-                    structures, enumDefinitions: enumDefinitions);
-                var fieldRequiredAlignment
-                    = ValueLayout.RequiredAlignment(field.Type, structures,
+                var isStandardClassHandle
+                    = BoundGenericNominalTypeContract.IsNominalClassType(
+                        field.Type, classTypeInstances,
+                        classTypeDefinitions);
+                var width = isStandardClassHandle ? 8UL
+                    : ValueLayout.Size(field.Type, structures,
+                        enumDefinitions: enumDefinitions);
+                var fieldAlignment = isStandardClassHandle ? 8
+                    : ValueLayout.Alignment(field.Type, structures,
+                        enumDefinitions: enumDefinitions);
+                var fieldRequiredAlignment = isStandardClassHandle ? 8
+                    : ValueLayout.RequiredAlignment(field.Type, structures,
                         enumDefinitions: enumDefinitions);
                 if (width == 0 || fieldAlignment <= 0
                     || fieldRequiredAlignment <= 0)

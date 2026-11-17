@@ -1538,10 +1538,13 @@ FieldDefs with class, struct and enum TypeSpecs, default layouts and explicit
 class/field ExportKeys. Source-free references retain selected class roots,
 class TypeDef Imports, and transitive local class TypeDef dependencies;
 re-emission remaps nested class/struct/enum TypeSpecs and exact root Import
-rows. These new class routes are unverified under the active hold and do not
-preserve struct-to-class field identities or PI1 property carriers. FieldMap/
-FieldPath use and broader provider closure, class/member/Body production,
-replacement and private-origin remapping, runtime and CLI support remain open.
+rows. Standard struct references also retain direct local/imported class-handle
+FieldDef TypeSpecs with their exact root TypeSpec/provider identities. Nested
+structs preserve unknown class ownership and are rejected by Copy-sensitive
+verification. These class and struct routes are unverified under the active
+hold and do not cover PI1 property carriers. FieldMap/FieldPath use and broader
+provider closure, class/member/Body production, replacement and private-origin
+remapping, runtime and CLI support remain open.
 No end-to-end EN1 support is implemented.
 These source-bound definitions are not generally interoperable: source-authored
 generic classes and complete nominal conformance rules remain unsupported.

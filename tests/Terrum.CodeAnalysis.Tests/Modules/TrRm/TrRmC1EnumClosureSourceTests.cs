@@ -733,9 +733,10 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var providerTables = TrRmStructuralMetadataValidator
             .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
                 providerArtifact, SchemaFor(schemaIdentity)));
-        var providerTypeDefRow = Enumerable.Range(1,
-                providerTables.TypeDefs.Count)
-            .Single(row => providerTables.TypeDefs.GetName(row) == "Shelf");
+        Assert.That(providerTables.Exports.TryGetDefinitionForKey(1,
+            "type.shelf", out var providerTypeDefinition), Is.True);
+        var providerTypeDefRow = checked((int)(providerTypeDefinition
+            & 0x00FF_FFFF));
 
         var consumerTree = SyntaxTree.Parse("""
             namespace Demo {
@@ -846,6 +847,256 @@ internal sealed class TrRmC1EnumClosureSourceTests
             declaration => declaration.Declaration.Identity.DefinitionId
                 == (0x1300_0000u
                     | checked((uint)providerTypeDefRow))), Is.True);
+    }
+
+    [Test]
+    public void ReemitsImportedClassHandleStructFieldsWithoutCopyOwnership()
+    {
+        var schemaIdentity = s_schemaIdentities[0];
+        var providerTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public class Shelf { public int32 Id; }
+            }
+            """);
+        var providerCompilation = Compilation.CreateLibrary(providerTree);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerProgram = (BoundProgram)providerCompilation.Program!;
+        var providerClassDeclaration = providerTree.Root.Children
+            .OfType<SyntaxNode>()
+            .Single(static node => node.Kind == SyntaxKind.ClassDeclaration);
+        var providerField = providerClassDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node => node.Kind == SyntaxKind.FieldDeclaration);
+        var providerClassIndex = providerProgram
+            .SourceClassProgramAssociation!.Declarations.Single(
+                declaration => declaration.Span
+                    == providerClassDeclaration.Span).ClassIndex;
+        var providerClassExport = new TrRmSourceClassExport(
+            providerProgram, providerClassIndex,
+            providerClassDeclaration.Span, "type.shelf", [
+                new TrRmSourceClassMemberExport(0, providerField.Span,
+                    "field.shelf.id"),
+            ]);
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, "ShelfProvider", schemaIdentity, 1,
+            [], [], [providerClassExport], []);
+        var providerTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                providerArtifact, SchemaFor(schemaIdentity)));
+        Assert.That(providerTables.Exports.TryGetDefinitionForKey(1,
+            "type.shelf", out var providerTypeDefinition), Is.True);
+        var providerTypeDefRow = checked((int)(providerTypeDefinition
+            & 0x00FF_FFFF));
+
+        var consumerTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public class Palette { public Shelf ShelfValue; }
+                public class Shelf { public int32 Id; }
+                public class LocalShelf { public int32 Value; }
+                public struct Payload {
+                    public int64 LocalValue;
+                    public uint64 ImportedValue;
+                }
+                public struct Packet { public Payload PayloadValue; }
+            }
+            """);
+        var consumerCompilation = Compilation.CreateLibrary(consumerTree);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerProgram = (BoundProgram)consumerCompilation.Program!;
+        var consumerClassDeclaration = consumerTree.Root.Children
+            .OfType<SyntaxNode>()
+            .First(static node => node.Kind == SyntaxKind.ClassDeclaration);
+        var consumerClassField = consumerClassDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node => node.Kind == SyntaxKind.FieldDeclaration);
+        var consumerClassIndex = consumerProgram
+            .SourceClassProgramAssociation!.Declarations.Single(
+                declaration => declaration.Span
+                    == consumerClassDeclaration.Span).ClassIndex;
+        var consumerClassExport = new TrRmSourceClassExport(
+            consumerProgram, consumerClassIndex,
+            consumerClassDeclaration.Span, "type.palette", [
+                new TrRmSourceClassMemberExport(0,
+                    consumerClassField.Span, "field.palette.shelf"),
+            ]);
+        var localClassDeclaration = consumerTree.Root.Children
+            .OfType<SyntaxNode>()
+            .Where(static node => node.Kind == SyntaxKind.ClassDeclaration)
+            .Last();
+        var localClassField = localClassDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node => node.Kind == SyntaxKind.FieldDeclaration);
+        var localClassIndex = consumerProgram
+            .SourceClassProgramAssociation!.Declarations.Single(
+                declaration => declaration.Span
+                    == localClassDeclaration.Span).ClassIndex;
+        var localClassExport = new TrRmSourceClassExport(
+            consumerProgram, localClassIndex,
+            localClassDeclaration.Span, "type.local-shelf", [
+                new TrRmSourceClassMemberExport(0, localClassField.Span,
+                    "field.local-shelf.value"),
+            ]);
+        var packetExport = new TrRmSourceTypeExport("Demo", "Packet",
+            "type.packet") {
+            FieldExports = [
+                new TrRmSourceFieldExport("PayloadValue",
+                    "field.packet.payload"),
+            ],
+        };
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            consumerProgram, "ClassHandleConsumer", schemaIdentity, 1,
+            [packetExport], [], [consumerClassExport, localClassExport], []);
+        var consumerTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                consumerArtifact, SchemaFor(schemaIdentity)));
+        var consumerShelfTypeDefRow = Enumerable.Range(1,
+                consumerTables.TypeDefs.Count)
+            .Single(row => consumerTables.TypeDefs.GetName(row) == "Shelf");
+        var localShelfTypeDefRow = Enumerable.Range(1,
+                consumerTables.TypeDefs.Count)
+            .Single(row => consumerTables.TypeDefs.GetName(row)
+                == "LocalShelf");
+        var paletteFieldRow = Enumerable.Range(1,
+                consumerTables.Fields.Count)
+            .Single(row => consumerTables.Fields.GetName(row)
+                == "ShelfValue");
+        var localPayloadFieldRow = Enumerable.Range(1,
+                consumerTables.Fields.Count)
+            .Single(row => consumerTables.Fields.GetName(row)
+                == "LocalValue");
+        var importedPayloadFieldRow = Enumerable.Range(1,
+                consumerTables.Fields.Count)
+            .Single(row => consumerTables.Fields.GetName(row)
+                == "ImportedValue");
+        consumerArtifact = AddTypeDefImport(consumerArtifact,
+            schemaIdentity, "ShelfProvider", "type.shelf",
+            0x1300_0000u | checked((uint)consumerShelfTypeDefRow));
+        consumerArtifact = RewriteFieldTypeSpecAsImport(consumerArtifact,
+            schemaIdentity, paletteFieldRow, 1);
+        consumerArtifact = RewriteFieldTypeSpecAsImport(consumerArtifact,
+            schemaIdentity, importedPayloadFieldRow, 1);
+        consumerArtifact = RewriteFieldTypeSpecAsTypeDef(consumerArtifact,
+            schemaIdentity, localPayloadFieldRow, localShelfTypeDefRow);
+        consumerTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                consumerArtifact, SchemaFor(schemaIdentity)));
+
+        var providers = new[] {
+            new TrRmStandardArtifactInput(schemaIdentity, providerArtifact),
+        };
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
+            "ClassHandleConsumer", providers, ["type.packet"]);
+        Assert.That(reference.Structures, Has.Length.EqualTo(2));
+        var packet = reference.Structures.Single(
+            static structure => structure.Name == "Demo.Packet");
+        var payload = reference.Structures.Single(
+            static structure => structure.Name == "Demo.Payload");
+        Assert.That(BoundGenericNominalTypeTypes.IsType(
+            payload.Fields[0].Type), Is.True);
+        Assert.That(BoundGenericNominalTypeTypes.IsType(
+            payload.Fields[1].Type), Is.True);
+        var classHandle = reference.GenericNominalTypeInstances[
+            BoundGenericNominalTypeTypes.Index(payload.Fields[0].Type)];
+        var importedClassHandle = reference.GenericNominalTypeInstances[
+            BoundGenericNominalTypeTypes.Index(payload.Fields[1].Type)];
+        Assert.That(classHandle.TypeSpecForm, Is.EqualTo((byte)0x02));
+        Assert.That(importedClassHandle.TypeSpecForm,
+            Is.EqualTo((byte)0x03));
+        Assert.That(classHandle.TypeSpecProviderIdentity,
+            Is.EqualTo("ClassHandleConsumer"));
+        Assert.That(classHandle.TypeSpecReference,
+            Is.EqualTo(consumerTables.Fields.GetTypeSpecRef(
+                localPayloadFieldRow)));
+        Assert.That(classHandle.Definition.DefinitionId,
+            Is.EqualTo(0x1300_0000u
+                | checked((uint)localShelfTypeDefRow)));
+        Assert.That(importedClassHandle.TypeSpecReference,
+            Is.EqualTo(consumerTables.Fields.GetTypeSpecRef(
+                importedPayloadFieldRow)));
+        Assert.That(importedClassHandle.Definition.DefinitionId,
+            Is.EqualTo(0x1300_0000u | checked((uint)providerTypeDefRow)));
+        Assert.That((int)packet.Fields.Single().Type, Is.GreaterThanOrEqualTo(100));
+        Assert.That((int)packet.Fields.Single().Type, Is.LessThan(ManagedClassTypes.First));
+
+        var sourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), reference);
+        Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceFreeCompilation.Diagnostics));
+        var reemitted = TrRmExecutableCompiler.EmitStandard(
+            sourceFreeCompilation.Program!, "ClassHandleConsumer",
+            schemaIdentity, 1);
+        var reemittedTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                reemitted, SchemaFor(schemaIdentity)));
+        Assert.That(reemittedTables.Imports.Count, Is.EqualTo(1));
+        var reemittedPayloadRow = Enumerable.Range(1,
+                reemittedTables.TypeDefs.Count)
+            .Single(row => reemittedTables.TypeDefs.GetName(row) == "Payload");
+        var (reemittedPayloadFieldStart, reemittedPayloadFieldEnd)
+            = reemittedTables.TypeDefs
+            .GetFieldRange(reemittedPayloadRow);
+        var reemittedLocalFieldRow = Enumerable.Range(
+                reemittedPayloadFieldStart, reemittedPayloadFieldEnd
+                    - reemittedPayloadFieldStart)
+            .Single(row => reemittedTables.Fields.GetName(row)
+                == "LocalValue");
+        var reemittedImportedFieldRow = Enumerable.Range(
+                reemittedPayloadFieldStart, reemittedPayloadFieldEnd
+                    - reemittedPayloadFieldStart)
+            .Single(row => reemittedTables.Fields.GetName(row)
+                == "ImportedValue");
+        var reemittedLocalFieldType
+            = reemittedTables.TypeSpecs.GetTypeSpecRef(
+            reemittedTables.Fields.GetTypeSpecRef(
+                reemittedLocalFieldRow));
+        var reemittedImportedFieldType
+            = reemittedTables.TypeSpecs.GetTypeSpecRef(
+                reemittedTables.Fields.GetTypeSpecRef(
+                    reemittedImportedFieldRow));
+        Assert.That(reemittedLocalFieldType.Form, Is.EqualTo((byte)0x02));
+        Assert.That(reemittedLocalFieldType.Row,
+            Is.EqualTo(checked((uint)Enumerable.Range(1,
+                    reemittedTables.TypeDefs.Count)
+                .Single(row => reemittedTables.TypeDefs.GetName(row)
+                    == "LocalShelf"))));
+        Assert.That(reemittedImportedFieldType.Form,
+            Is.EqualTo((byte)0x03));
+        var reemittedShelfRow = Enumerable.Range(1,
+                reemittedTables.TypeDefs.Count)
+            .Single(row => reemittedTables.TypeDefs.GetName(row) == "Shelf");
+        Assert.That(reemittedTables.Imports
+            .GetExpectedDefinitionForImportRow(
+                checked((int)reemittedImportedFieldType.Row)),
+            Is.EqualTo(0x1300_0000u | checked((uint)reemittedShelfRow)));
+
+        var reloadedReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+            "ClassHandleConsumer", providers, ["type.packet"]);
+        Assert.That(reloadedReference.StandardClassDeclarations.Any(
+            declaration => declaration.Declaration.Identity.DefinitionId
+                == (0x1300_0000u | checked((uint)providerTypeDefRow))),
+            Is.True);
+        var reloadedCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), reloadedReference);
+        Assert.That(reloadedCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                reloadedCompilation.Diagnostics));
+
+        var ownershipSensitiveUse = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                namespace Demo {
+                    public class Receiver {
+                        public Receiver(Packet value) { }
+                    }
+                }
+                """), reloadedReference);
+        Assert.That(ownershipSensitiveUse.HasErrors, Is.True);
     }
 
     [Test]
@@ -1341,6 +1592,16 @@ internal sealed class TrRmC1EnumClosureSourceTests
 
     private static byte[] RewriteFieldTypeSpecAsImport(byte[] artifact,
         string schemaIdentity, int fieldRow, int importRow)
+        => RewriteFieldTypeSpec(artifact, schemaIdentity, fieldRow, 0x03,
+            importRow);
+
+    private static byte[] RewriteFieldTypeSpecAsTypeDef(byte[] artifact,
+        string schemaIdentity, int fieldRow, int typeDefRow)
+        => RewriteFieldTypeSpec(artifact, schemaIdentity, fieldRow, 0x02,
+            typeDefRow);
+
+    private static byte[] RewriteFieldTypeSpec(byte[] artifact,
+        string schemaIdentity, int fieldRow, byte form, int referenceRow)
     {
         var schema = SchemaFor(schemaIdentity);
         var index = new TrRmArtifactIndex(artifact, schema);
@@ -1349,10 +1610,13 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 .ValidateC1AndGetExecutionTables(index);
         var typeSpecReference = tables.Fields.GetTypeSpecRef(fieldRow);
         if (typeSpecReference is 0 or > 0x00FF_FFFF
-            || importRow <= 0)
+            || form is not (0x02 or 0x03)
+            || referenceRow <= 0
+            || referenceRow > (form == 0x02
+                ? tables.TypeDefs.Count : tables.Imports.Count))
         {
             throw new InvalidDataException(
-                "The C1 field fixture has no row-based field type reference.");
+                "The C1 field fixture has no valid row-based field type reference.");
         }
         var typeSpec = tables.TypeSpecs.GetTypeSpecRef(typeSpecReference);
 
@@ -1360,8 +1624,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
         for (var row = 1; row <= typeSpecRows.Length; row++)
         {
             typeSpecRows[row - 1] = row == typeSpecReference
-                ? TrRmTypeSpecTableWriter.Reference(0x03,
-                    checked((uint)importRow), typeSpec.Qualifiers)
+                ? TrRmTypeSpecTableWriter.Reference(form,
+                    checked((uint)referenceRow), typeSpec.Qualifiers)
                 : tables.TypeSpecs.GetRow(row).ToArray();
         }
 

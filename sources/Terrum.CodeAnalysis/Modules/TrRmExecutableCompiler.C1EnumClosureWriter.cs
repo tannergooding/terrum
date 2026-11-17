@@ -58,16 +58,34 @@ public static partial class TrRmExecutableCompiler
         var standardClassIdentities = standardClassDeclarations.Select(
                 static declaration => declaration.Declaration.Identity)
             .ToHashSet();
-        var standardStructureIdentities = program.Structures
-            .Where(static structure =>
-                structure.StandardTypeOrigin is not null)
-            .Select(static structure => {
-                var origin = structure.StandardTypeOrigin!;
-                return new BoundGenericNominalTypeIdentity(
-                    origin.Provider.ModuleIdentity,
-                    origin.Provider.ModuleIdentity, origin.DefinitionId);
-            })
+        var standardClassExpectedIdentities = standardClassDeclarations
+            .SelectMany(static declaration => declaration.Expectations)
+            .Select(static expectation =>
+                expectation.ExpectedDeclaration.Identity)
             .ToHashSet();
+        var standardStructureIdentities
+            = new HashSet<BoundGenericNominalTypeIdentity>();
+        foreach (var structure in program.Structures)
+        {
+            if (structure.StandardTypeOrigin is not
+                BoundStandardTypeOrigin origin)
+            {
+                continue;
+            }
+
+            _ = standardStructureIdentities.Add(
+                new BoundGenericNominalTypeIdentity(
+                    origin.Provider.ModuleIdentity,
+                    origin.Provider.ModuleIdentity, origin.DefinitionId));
+            foreach (var expectation in origin.Expectations)
+            {
+                _ = standardStructureIdentities.Add(
+                    new BoundGenericNominalTypeIdentity(
+                        expectation.UsingModule.ModuleIdentity,
+                        expectation.UsingModule.ModuleIdentity,
+                        expectation.ExpectedDefinitionId));
+            }
+        }
         var standardClassClosureIsValid
             = standardClassDeclarations.IsEmpty
                 ? program.GenericNominalTypeDefinitions.IsEmpty
@@ -80,9 +98,24 @@ public static partial class TrRmExecutableCompiler
                             && (definition.NominalKind == 2
                                 ? standardClassIdentities.Contains(
                                     definition.Identity)
+                                    || standardClassExpectedIdentities
+                                        .Contains(definition.Identity)
                                 : definition.NominalKind == 1
                                     && standardStructureIdentities.Contains(
                                         definition.Identity)));
+        var standardClassTypeInstancesAreValid
+            = program.GenericNominalTypeInstances.IsEmpty
+                || (hasStandardClassDeclarations
+                    && program.GenericNominalTypeInstances.All(instance =>
+                        instance.Arguments.IsEmpty
+                        && instance.TypeSpecReference != 0
+                        && StringComparer.Ordinal.Equals(
+                            instance.TypeSpecProviderIdentity,
+                            moduleIdentity)
+                        && instance.TypeSpecForm
+                            is 0x02 or 0x03 or 0x06
+                        && standardClassIdentities.Contains(
+                            instance.Definition)));
         BoundSourceTypeProviderSnapshot? rootSnapshot = null;
         if ((sourceEnumExports is not null
                 && !ReferenceEquals(sourceEnumExports.Program, program))
@@ -138,7 +171,7 @@ public static partial class TrRmExecutableCompiler
                 && sourceClassExports?.Exports.IsEmpty != false)
             || !program.SourceGenericTypeDefinitions.IsEmpty
             || !program.SourceGenericTypeInstances.IsEmpty
-            || !program.GenericNominalTypeInstances.IsEmpty
+            || !standardClassTypeInstancesAreValid
             || !program.GenericMethodDefinitions.IsEmpty
             || !program.GenericMethodSignatures.IsEmpty
             || !program.GenericMethodOperatorProtocols.IsEmpty
@@ -1983,6 +2016,36 @@ public static partial class TrRmExecutableCompiler
 
         uint FieldTypeSpecReference(PrimitiveType type)
         {
+            if (BoundGenericNominalTypeTypes.IsType(type))
+            {
+                var instanceIndex
+                    = BoundGenericNominalTypeTypes.Index(type);
+                if ((uint)instanceIndex
+                        >= (uint)program.GenericNominalTypeInstances.Length
+                    || !BoundGenericNominalTypeContract.IsNominalClassType(
+                        type, program.GenericNominalTypeInstances,
+                        program.GenericNominalTypeDefinitions))
+                {
+                    throw Unsupported(
+                        "EN1 FieldDefs support metadata-only nongeneric class handles only.");
+                }
+
+                var instance = program.GenericNominalTypeInstances[
+                    instanceIndex];
+                if (instance.TypeSpecReference == 0
+                    || rootSnapshot is null
+                    || !StringComparer.Ordinal.Equals(
+                        instance.TypeSpecProviderIdentity,
+                        rootSnapshot.ModuleIdentity))
+                {
+                    throw Invalid(
+                        "An EN1 class FieldDef lost its root TypeSpec origin.");
+                }
+
+                return RemapStandardClassTypeSpecReference(
+                    instance.TypeSpecReference, 0);
+            }
+
             if (TryGetC1M1SourceClassFieldType(type,
                     out var classIndex, out var isWritable,
                     out var isOptional))

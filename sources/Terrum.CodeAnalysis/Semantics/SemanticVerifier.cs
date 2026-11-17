@@ -979,7 +979,9 @@ public static partial class SemanticVerifier
             var fieldNames = new HashSet<string>(structure.Fields.Length, StringComparer.Ordinal);
             foreach (var field in structure.Fields)
             {
-                if (field is null || BoundGenericNominalTypeTypes.IsType(field.Type)
+                if (field is null
+                    || (BoundGenericNominalTypeTypes.IsType(field.Type)
+                        && !IsStandardClassHandleType(field.Type, program))
                     || !ValidType(field.Type, allowVoid: false, program))
                 {
                     throw Invalid();
@@ -987,6 +989,12 @@ public static partial class SemanticVerifier
                 if (ManagedClassTypes.IsManaged(field.Type))
                 {
                     throw InvalidEffect(default, "Ownership");
+                }
+                if (BoundGenericNominalTypeContract.IsCoreTaskType(
+                        field.Type, program)
+                    && !structure.IsUnique)
+                {
+                    throw Invalid();
                 }
                 var nested = !NativePointerTypes.IsType(field.Type) && !NativeFunctionPointerTypes.IsType(field.Type)
                     && !BoundEnumTypes.IsType(field.Type)
@@ -1038,24 +1046,30 @@ public static partial class SemanticVerifier
                 }
                 else
                 {
-                    width = ValueLayout.Size(field.Type, program.Structures,
-                        program.CheckedReferenceTypes,
-                        program.NativeLoweringAgreement,
-                        program.NativeFixedArrayTypes,
-                        program.EnumDefinitions);
-                    fieldAlignment = nested >= 0 ? alignments[nested]
-                        : ValueLayout.Alignment(field.Type,
-                            program.Structures, program.CheckedReferenceTypes,
+                    var isStandardClassHandle
+                        = IsStandardClassHandleType(field.Type, program);
+                    width = isStandardClassHandle ? 8UL
+                        : ValueLayout.Size(field.Type, program.Structures,
+                            program.CheckedReferenceTypes,
                             program.NativeLoweringAgreement,
                             program.NativeFixedArrayTypes,
                             program.EnumDefinitions);
-                    fieldRequiredAlignment = nested >= 0
-                        ? requiredAlignments[nested]
-                        : ValueLayout.RequiredAlignment(field.Type,
-                            program.Structures,
-                            program.NativeFixedArrayTypes,
-                            program.CheckedReferenceTypes,
-                            program.EnumDefinitions);
+                    fieldAlignment = isStandardClassHandle ? 8
+                        : nested >= 0 ? alignments[nested]
+                            : ValueLayout.Alignment(field.Type,
+                                program.Structures,
+                                program.CheckedReferenceTypes,
+                                program.NativeLoweringAgreement,
+                                program.NativeFixedArrayTypes,
+                                program.EnumDefinitions);
+                    fieldRequiredAlignment = isStandardClassHandle ? 8
+                        : nested >= 0
+                            ? requiredAlignments[nested]
+                            : ValueLayout.RequiredAlignment(field.Type,
+                                program.Structures,
+                                program.NativeFixedArrayTypes,
+                                program.CheckedReferenceTypes,
+                                program.EnumDefinitions);
                 }
                 var fieldPlacementAlignment = fieldAlignment;
                 if ((structure.IsSequential || structure.IsUnion)
@@ -1595,8 +1609,8 @@ public static partial class SemanticVerifier
                 || function.Name != function.DeclaringStruct + ".#ctor"
                 || function.ParameterCount < 1 || function.ParameterCount > MaximumArguments
                 || function.Variables.Skip(1).Take(function.ParameterCount - 1)
-                    .Any(variable => variable.IsOut || !IsClassArgumentType(variable.Type,
-                        program.Structures, program.EnumDefinitions.Length))))
+                    .Any(variable => variable.IsOut
+                        || !IsClassArgumentType(variable.Type, program))))
             {
                 throw Invalid();
             }
@@ -33284,7 +33298,8 @@ public static partial class SemanticVerifier
             || BoundEnumTypes.IsValidType(type, program.EnumDefinitions)
             || ((int)type >= 100
                 && (int)type - 100 < program.Structures.Length
-                && !program.Structures[(int)type - 100].IsUnique)
+                && !program.Structures[(int)type - 100].IsUnique
+                && !IsClassOwnershipUnknown(type, program))
             || (NativeFixedArrayTypes.IsType(type)
                 && NativeFixedArrayContract.IsRootlessCopyFieldType(
                     type, program.Structures,
@@ -33400,6 +33415,25 @@ public static partial class SemanticVerifier
             || ((int)type >= 100 && (int)type - 100 < structures.Count
                 && !structures[(int)type - 100].IsUnique);
 
+    private static bool IsClassArgumentType(PrimitiveType type,
+        BoundProgram program)
+    {
+        if (!IsClassArgumentType(type, program.Structures,
+                program.EnumDefinitions.Length))
+        {
+            return false;
+        }
+
+        return !IsStructType(type, program)
+            || IsCopyStruct(program, type);
+    }
+
+    private static bool IsStructType(PrimitiveType type,
+        BoundProgram program) =>
+        (int)type >= 100
+        && (int)type - 100 < program.Structures.Length
+        && !BoundEnumTypes.IsType(type);
+
     private static bool IsUnique(BoundProgram program, PrimitiveType type) =>
         type == PrimitiveType.OwnedInt32Buffer
             || BoundGenericNominalTypeContract.IsCoreTaskType(type, program)
@@ -33466,8 +33500,67 @@ public static partial class SemanticVerifier
     private static bool IsClassOwnershipUnknown(PrimitiveType type,
         BoundProgram program)
     {
-        if ((int)type < ManagedClassTypes.First
-            || !ManagedClassTypes.IsManaged(type))
+        if (IsClassHandleOwnershipUnknown(type, program))
+        {
+            return true;
+        }
+
+        return IsStructType(type, program)
+            && IsClassOwnershipUnknown(type, program, new HashSet<int>());
+    }
+
+    private static bool IsClassOwnershipUnknown(PrimitiveType type,
+        BoundProgram program, HashSet<int> visitedStructures)
+    {
+        if (IsClassHandleOwnershipUnknown(type, program))
+        {
+            return true;
+        }
+
+        if (!IsStructType(type, program))
+        {
+            return false;
+        }
+
+        var structureIndex = (int)type - 100;
+        if ((uint)structureIndex >= (uint)program.Structures.Length)
+        {
+            return false;
+        }
+        if (!visitedStructures.Add(structureIndex))
+        {
+            return true;
+        }
+
+        var structure = program.Structures[structureIndex];
+        foreach (var field in structure.Fields)
+        {
+            if (field is null
+                || IsClassOwnershipUnknown(field.Type, program,
+                    visitedStructures))
+            {
+                _ = visitedStructures.Remove(structureIndex);
+                return true;
+            }
+        }
+
+        _ = visitedStructures.Remove(structureIndex);
+        return false;
+    }
+
+    private static bool IsClassHandleOwnershipUnknown(PrimitiveType type,
+        BoundProgram program)
+    {
+        if (BoundGenericNominalTypeContract.IsNominalClassType(type,
+                program.GenericNominalTypeInstances,
+                program.GenericNominalTypeDefinitions))
+        {
+            return !BoundGenericNominalTypeContract.IsCoreTaskType(
+                type, program);
+        }
+
+        if (!ManagedClassTypes.IsManaged(type)
+            || (int)type < ManagedClassTypes.First)
         {
             return false;
         }
@@ -33475,6 +33568,34 @@ public static partial class SemanticVerifier
         var classIndex = ManagedClassTypes.ClassIndex(type);
         return (uint)classIndex < (uint)program.Classes.Length
             && program.Classes[classIndex].IsUnique is null;
+    }
+
+    private static bool IsStandardClassHandleType(PrimitiveType type,
+        BoundProgram program)
+    {
+        if (!BoundGenericNominalTypeContract.IsNominalClassType(type,
+                program.GenericNominalTypeInstances,
+                program.GenericNominalTypeDefinitions))
+        {
+            return false;
+        }
+
+        var instanceIndex = BoundGenericNominalTypeTypes.Index(type);
+        if ((uint)instanceIndex
+                >= (uint)program.GenericNominalTypeInstances.Length
+            || program.GenericNominalTypeInstances[instanceIndex]
+                .TypeSpecReference == 0
+            || program.GenericNominalTypeInstances[instanceIndex]
+                .TypeSpecForm is not (0x02 or 0x03 or 0x06)
+            || !BoundGenericNominalTypeContract.TryGetDefinition(type,
+                program, out var definition)
+            || definition is null || !definition.Formals.IsEmpty)
+        {
+            return false;
+        }
+
+        return program.StandardClassDeclarations.Any(declaration =>
+            declaration.Declaration.Identity == definition.Identity);
     }
 
     private static bool RequiresUnsafeFieldAccess(BoundProgram program,
@@ -33672,8 +33793,9 @@ public static partial class SemanticVerifier
     }
 
     private static bool IsCopyStruct(BoundProgram program, PrimitiveType type) =>
-        (int)type >= 100 && (int)type - 100 < program.Structures.Length
-            && !program.Structures[(int)type - 100].IsUnique;
+        IsStructType(type, program)
+            && !program.Structures[(int)type - 100].IsUnique
+            && !IsClassOwnershipUnknown(type, program);
 
     private static void VerifyClassFactory(BoundProgram program, BoundFunction function, int index)
     {
@@ -33717,8 +33839,8 @@ public static partial class SemanticVerifier
             if (function.Variables[parameter].Type != constructor.Variables[parameter + 1].Type
                 || function.Variables[parameter].IsOut || function.Variables[parameter].IsMutable
                 || constructor.Variables[parameter + 1].IsOut
-                || !IsClassArgumentType(function.Variables[parameter].Type, program.Structures,
-                    program.EnumDefinitions.Length))
+                || !IsClassArgumentType(function.Variables[parameter].Type,
+                    program))
             {
                 throw Invalid();
             }
@@ -38310,8 +38432,7 @@ public static partial class SemanticVerifier
                 + propertyName
             || isIndexerGetter;
         if (isGetter
-            && !IsClassArgumentType(function.ReturnType,
-                program.Structures, program.EnumDefinitions.Length))
+            && !IsClassArgumentType(function.ReturnType, program))
         {
             return false;
         }
