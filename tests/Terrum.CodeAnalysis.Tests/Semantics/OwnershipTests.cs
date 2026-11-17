@@ -2,9 +2,11 @@
 
 using System;
 using System.Buffers.Binary;
+using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using NUnit.Framework;
@@ -148,17 +150,17 @@ internal sealed class OwnershipTests
                     Host.Trace[1] = Number;
                 }
             }
-            bool Create(bool publish, init ref<Owner> result) {
+            bool Create(bool publish, ref<init Owner> result) {
                 if (!publish) { return false; }
-                result = new Owner(42);
+                *result = new Owner(42);
                 return true;
             }
             int32 Main() {
                 {
-                    init var owner;
-                    if (Create(false, init owner)) { return 1; }
+                    init Owner owner;
+                    if (Create(false, ref init owner)) { return 1; }
                     if (Host.Trace[0] != 0) { return 2; }
-                    require Create(true, init owner);
+                    require Create(true, ref init owner);
                     if (owner.Number != 42 || Host.Trace[0] != 0) { return 3; }
                 }
                 if (Host.Trace[0] != 1 || Host.Trace[1] != 42) { return 4; }
@@ -181,15 +183,19 @@ internal sealed class OwnershipTests
                     Host.Trace[1] = Number;
                 }
             }
-            bool Create(bool publish, init ref<Owner> result) {
-                result = new Owner(42);
-                return publish;
+            bool Create(bool publish, ref<init Owner> result) {
+                init mut Owner candidate;
+                candidate = new Owner(42);
+                if (!publish) { candidate = _; return false; }
+                *result = move candidate;
+                return true;
             }
             int32 Main() {
                 {
-                    if (Create(false, init var owner)) { return 1; }
+                    init Owner owner;
+                    if (Create(false, ref init owner)) { return 1; }
                     if (Host.Trace[0] != 1 || Host.Trace[1] != 42) { return 2; }
-                    require Create(true, init owner);
+                    require Create(true, ref init owner);
                     if (owner.Number != 42 || Host.Trace[0] != 1) { return 3; }
                 }
                 if (Host.Trace[0] != 2 || Host.Trace[1] != 42) { return 4; }
@@ -249,7 +255,8 @@ internal sealed class OwnershipTests
             }
             int32 Main() {
                 {
-                    require OwnedInt32Buffer.TryCreate(1, out var raw);
+                    init OwnedInt32Buffer raw;
+                    require OwnedInt32Buffer.TryCreate(1, ref init raw);
                     mut Owner owner = new Owner(move raw);
                     require owner.Words.TryAppend(1);
                     owner.Update();
@@ -368,6 +375,161 @@ internal sealed class OwnershipTests
         var compilation = Compilation.Create(SyntaxTree.Parse(declarations + " int32 Main() { return 0; }"));
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == code),Is.True);
     }
+
+    [TestCase("class", false)]
+    [TestCase("unique class", true)]
+    public void ManagedClassCleanupRetainsPrivateSelection(string declaration,
+        bool isUnique)
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($$"""
+            {{declaration}} Owner {
+                public int32 Value;
+                public Owner(int32 value) { Value = value; }
+                [Cleanup] private void Close() { }
+            }
+            public int32 Use() {
+                Owner owner = new Owner(42);
+                return owner.Value;
+            }
+            """));
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        var @class = program.Classes.Single();
+        Assert.That(@class.IsUnique, Is.EqualTo(isUnique));
+        Assert.That(@class.HasCleanup, Is.True);
+        Assert.That(@class.CleanupMethod, Is.EqualTo("Owner.Close"));
+        var cleanup = program.Functions.Single(
+            static function => function.IsCleanup);
+        Assert.That(cleanup.IsPrivate, Is.True);
+        Assert.That(cleanup.DeclaringStruct, Is.EqualTo("Owner"));
+        var cleanupIndex = program.Functions.IndexOf(cleanup);
+        var drops = new List<BoundDrop>();
+        var use = program.Functions.Single(
+            static function => function.Name == "Use");
+        Assert.That(BoundTreeTraversal.VisitStatements(use.Body,
+            statement => {
+                if (statement is BoundDrop drop)
+                {
+                    drops.Add(drop);
+                }
+            }), Is.True);
+        Assert.That(drops.Any(drop =>
+            drop.CleanupFunction == cleanupIndex), Is.EqualTo(isUnique));
+    }
+
+    [Test]
+    public void AliasableClassCleanupOwnsUniqueFieldsAcrossHandleCopies()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public unique struct Child {
+                public int32 Value;
+                public Child(int32 value) { Value = value; }
+                [Cleanup] private void Release() { }
+            }
+            public class Owner {
+                public Child Payload;
+                public Owner(int32 value) { Payload = new Child(value); }
+                [Cleanup] private void Close() { }
+            }
+            public Owner Alias(Owner owner) { return owner; }
+            public int32 Read(Owner owner) { return owner.Payload.Value; }
+            """));
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        var child = program.Structures.Single(
+            static structure => structure.Name == "Child");
+        var owner = program.Classes.Single(
+            static @class => @class.Name == "Owner");
+        Assert.That(owner.IsUnique, Is.False);
+        Assert.That(owner.HasCleanup, Is.True);
+        Assert.That(owner.CleanupMethod, Is.EqualTo("Owner.Close"));
+        Assert.That(child.CleanupMethod, Is.EqualTo("Child.Release"));
+        var childType = (PrimitiveType)(
+            100 + program.Structures.IndexOf(child));
+        var ownerType = (PrimitiveType)(
+            ManagedClassTypes.First + program.Classes.IndexOf(owner));
+        Assert.That(owner.Fields.Single().Type,
+            Is.EqualTo(childType));
+        Assert.That(program.Functions.Single(
+            static function => function.Name == "Alias").ReturnType,
+            Is.EqualTo(ownerType));
+        Assert.That(program.Functions.Single(
+            static function => function.Name == "Alias")
+            .Variables[0].Type, Is.EqualTo(ownerType));
+    }
+
+    [TestCase("partial unique class Owner { }", true)]
+    [TestCase("partial class Owner { }", false)]
+    [TestCase("partial mut unique class Owner { }", false)]
+    public void PartialClassOwnershipModifiersMatchPrimary(
+        string secondaryDeclaration, bool isValid)
+    {
+        var compilation = Compilation.CreateLibrary([
+            SyntaxTree.Parse("""
+                public partial unique class Owner {
+                    public int32 Value;
+                    public Owner(int32 value) { Value = value; }
+                }
+                """),
+            SyntaxTree.Parse(secondaryDeclaration),
+        ]);
+
+        if (isValid)
+        {
+            Assert.That(compilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            Assert.That(compilation.Program!.Classes.Single().IsUnique,
+                Is.True);
+        }
+        else
+        {
+            Assert.That(compilation.Diagnostics.Any(
+                static diagnostic => diagnostic.Code == "TRM3003"), Is.True,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+        }
+    }
+
+    [Test]
+    public void ManagedClassCleanupCannotBeCalledDirectly()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            class Owner {
+                public int32 Value;
+                public Owner(int32 value) { Value = value; }
+                [Cleanup] private void Close() { }
+                public void CallCleanup() { this.Close(); }
+            }
+            """));
+
+        Assert.That(compilation.Diagnostics.Any(
+            static diagnostic => diagnostic.Code == "TRM3023"), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
+    public void UniqueStructCleanupRetainsOrdinaryPrivateVisibility()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            unique struct Owner {
+                public int32 Value;
+                public Owner(int32 value) { Value = value; }
+                [Cleanup] private void Close() { }
+            }
+            """));
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        Assert.That(program.Structures.Single().CleanupMethod,
+            Is.EqualTo("Owner.Close"));
+        Assert.That(program.Functions.Single(
+            static function => function.IsCleanup).IsPrivate, Is.True);
+    }
+
     [TestCase("Owner first = new Owner(1); Owner second = new Owner(2);",3,1)]
     [TestCase("Owner first = new Owner(1); Owner second = move first;",1,1)]
     [TestCase("mut Owner first = new Owner(1); first = new Owner(2);",3,2)]

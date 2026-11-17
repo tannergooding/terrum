@@ -12,7 +12,7 @@ internal sealed partial class JitTests
     public Task LifetimeEndRetainsGenericCopyAndClosedParameterAuthorityAsync(bool checkedFailures)
     {
         const string Source = """
-            T Copy<T>(T input) where T : [Copy] {
+            T Copy<T>(T input)  {
                 T local = input;
                 local = _;
                 return input;
@@ -113,7 +113,8 @@ internal sealed partial class JitTests
     {
         const string Source = """
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(2, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(2, ref init raw);
                 mut OwnedInt32Buffer owner = move raw;
                 require owner.TryAppend(42);
                 ReadonlyInt32BufferView view = owner.Slice(0, 1);

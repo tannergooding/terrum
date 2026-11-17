@@ -643,14 +643,15 @@ internal sealed class NativeModuleSetsTests
                 result = publish ? 42 : 41;
                 return publish;
             }
-            public void Complete(init ref<int32> result) { result = 43; }
+            public void Complete(ref<init int32> result) { *result = 43; }
             """;
         var outputProvider = Producer(OutputProvider, ["TryPublish", "Complete"], "First", policy);
         var second = Producer(Beta, "Beta", "Second", policy);
         const string ConsumerSource = """
             int32 Main() {
-                if (TryPublish(false, out var failed)) { return 1; }
-                Complete(init failed);
+                init mut int32 failed;
+                if (TryPublish(false, out failed)) { return 1; }
+                Complete(ref init failed);
                 if (failed != 43) { return 2; }
                 if (!TryPublish(true, out var published)) { return 3; }
                 return published + Beta();
@@ -684,8 +685,8 @@ internal sealed class NativeModuleSetsTests
     public async Task InitRefOutputBindsAcrossNativeConsumerSetsAsync(NativeRuntimePolicy policy)
     {
         var initializerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
-            public int32 Initialize(int32 value, init ref<int32> result) {
-                result = value;
+            public int32 Initialize(int32 value, ref<init int32> result) {
+                *result = value;
                 return 0;
             }
             """), (BoundRuntimePolicy)policy);
@@ -710,7 +711,7 @@ internal sealed class NativeModuleSetsTests
         const string ConsumerSource = """
             int32 Main() {
                 init int32 result;
-                int32 status = Initialize(result: init result, value: 20);
+                int32 status = Initialize(result: ref init result, value: 20);
                 return result + Beta() + status;
             }
             """;
@@ -737,8 +738,8 @@ internal sealed class NativeModuleSetsTests
                 value = 3.5;
                 return true;
             }
-            public bool Initialize(float64 value, init ref<float64> result) {
-                result = value;
+            public bool Initialize(float64 value, ref<init float64> result) {
+                *result = value;
                 return true;
             }
             """), (BoundRuntimePolicy)policy);
@@ -763,7 +764,7 @@ internal sealed class NativeModuleSetsTests
         const string ConsumerSource = """
             int32 Main() {
                 init float64 initialized;
-                if (!Initialize(7.75, init initialized)) { return 1; }
+                if (!Initialize(7.75, ref init initialized)) { return 1; }
                 if (!TryGet(out var output)) { return 2; }
                 return initialized == 7.75 && output == 3.5 ? 42 + Beta() : 0;
             }
@@ -784,16 +785,16 @@ internal sealed class NativeModuleSetsTests
     }
 
     [Test]
-    public async Task InitRefOutputRemainsVacantAfterProviderFailureInNativeConsumerSetAsync()
+    public async Task InitRefOutputCanBeRetiredAfterProviderFailureInNativeConsumerSetAsync()
     {
         const NativeRuntimePolicy policy = NativeRuntimePolicy.CheckedExceptions;
         var initializerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
-            public void FailAfterWrite(int32 value, init ref<int32> result) {
-                result = value;
+            public void FailAfterWrite(int32 value, ref<init int32> result) {
+                *result = value;
                 require false;
             }
-            public void Fill(int32 value, init ref<int32> result) {
-                result = value;
+            public void Fill(int32 value, ref<init int32> result) {
+                *result = value;
             }
             """), BoundRuntimePolicy.CheckedExceptions);
         Assert.That(initializerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, initializerCompilation.Diagnostics));
@@ -817,14 +818,16 @@ internal sealed class NativeModuleSetsTests
 
         const string ConsumerSource = """
             int32 Main() {
-                init int32 result;
+                init mut int32 result;
                 unsafe {
                     try {
-                        FailAfterWrite(41, init result);
+                        FailAfterWrite(41, ref init result);
                         return 1;
-                    } catch { }
+                    } catch {
+                        if (result is init) { result = _; }
+                    }
                 }
-                Fill(20, init result);
+                Fill(20, ref init result);
                 return result + Beta();
             }
             """;

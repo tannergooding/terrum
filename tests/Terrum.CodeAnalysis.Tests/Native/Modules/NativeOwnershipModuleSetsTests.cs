@@ -8,6 +8,7 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Tests.Semantics;
+using Terrum.CodeAnalysis.Tests.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Modules;
 
@@ -38,9 +39,10 @@ internal sealed class NativeOwnershipModuleSetsTests
             ticket = new SecondTicket(22);
             return success;
         }
-        public bool TrySecondInit(bool success, init ref<SecondTicket> ticket) {
-            ticket = new SecondTicket(2);
-            return success;
+        public bool TrySecondInit(bool success, ref<init SecondTicket> ticket) {
+            if (!success) { return false; }
+            *ticket = new SecondTicket(2);
+            return true;
         }
         public SecondTicket CreateSecond() { return new SecondTicket(0); }
         public int32 ConsumeSecond(SecondTicket ticket) {
@@ -71,8 +73,9 @@ internal sealed class NativeOwnershipModuleSetsTests
                 mut SecondTicket second = CreateSecond();
                 require !TrySecond(false, out second);
                 require TrySecond(true, out second);
-                if (TrySecondInit(false, init var initialized)) { return 1; }
-                require TrySecondInit(true, init initialized);
+                init SecondTicket initialized;
+                if (TrySecondInit(false, ref init initialized)) { return 1; }
+                require TrySecondInit(true, ref init initialized);
                 return ConsumeFirst(move first) + ConsumeSecond(move second)
                     + ConsumeSecond(move initialized) - 2;
             }
@@ -109,11 +112,13 @@ internal sealed class NativeOwnershipModuleSetsTests
                 LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
             });
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+        var program = ((global::System.Func<BoundProgram>)(() => {
             var __nunitActual1 = compilation.Program;
             Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
             return (BoundProgram)__nunitActual1!;
-        }))(),
-            exports, identity, policy);
+        }))();
+        return NativeModuleCompiler.CreateProducer(program, exports,
+            identity, policy, TextComponentTestHelpers.CreateIdentityInputs(
+                program, identity));
     }
 }

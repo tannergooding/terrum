@@ -20,7 +20,8 @@ internal sealed partial class NativeManagedClassModuleTests
     {
         const string Original = """
             public int32 LeafValue() {
-                require OwnedInt32Buffer.TryCreate(1, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(1, ref init raw);
                 mut OwnedInt32Buffer words = move raw;
                 require words.TryAppend(1);
                 words.Set(0, 1);
@@ -37,7 +38,8 @@ internal sealed partial class NativeManagedClassModuleTests
                  [Cleanup] public void Close() {}
             }
             public int32 LeafValue() {
-                require OwnedInt32Buffer.TryCreate(1, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(1, ref init raw);
                 mut Owner owner = new Owner(move raw);
                 require owner.Words.TryAppend(1);
                 owner.Words.Set(0, 41);
@@ -55,7 +57,7 @@ internal sealed partial class NativeManagedClassModuleTests
             ModuleCompiler.CreateReference(original), library: false), original);
         var hash = SHA256.HashData(consumer);
         var producer = ModuleCompiler.CreateProducer(replacementProgram, ["LeafValue"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(104));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(106));
         Assert.That(ModuleCompiler.CreateReference(producer).Structures, Is.Empty);
         var downgraded = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(downgraded.AsSpan(4, 4), 28);

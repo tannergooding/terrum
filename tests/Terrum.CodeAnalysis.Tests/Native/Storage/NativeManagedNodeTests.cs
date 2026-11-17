@@ -69,7 +69,10 @@ internal sealed class NativeManagedNodeTests
         public int32 CopyInput(CopyValue value) { return value.Value; }
         public UniqueValue UniqueReturn() { return new UniqueValue(42); }
         public bool OwnedOutput(out OwnedInt32Buffer result) {
-            return OwnedInt32Buffer.TryCreate(1, out result);
+            init OwnedInt32Buffer created;
+            if (!OwnedInt32Buffer.TryCreate(1, ref init created)) { return false; }
+            result = move created;
+            return true;
         }
         public int32 OwnedInput(OwnedInt32Buffer value) { return value.Read(0); }
         public bool OutScalar(out int32 result) { result = 42; return true; }
@@ -243,7 +246,7 @@ internal sealed class NativeManagedNodeTests
             return (BoundProgram)__nunitActual6!;
         }))();
         var module = ModuleCompiler.CreateProducer(program, ["Proof"]);
-        Assert.That(ModuleCompiler.GetNativeProfileVersion(module, false), Is.EqualTo("native-18"));
+        Assert.That(ModuleCompiler.GetNativeProfileVersion(module, false), Is.EqualTo("native-19"));
         Assert.That(NativeEmitter.EmitLibrary(program, ["Proof"], NativeRuntimePolicy.FailFast), Is.Not.Empty);
         _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(program,
             ["ManagedNode.TryCreate"], NativeRuntimePolicy.FailFast))!;

@@ -176,13 +176,14 @@ internal sealed partial class NativeManagedClassModuleTests
                 public int32 Value;
                 public Cell(int32 value) { Value = value; }
             }
-            bool Fill(init ref<int32> value) {
-                value = Bias();
+            bool Fill(ref<init int32> value) {
+                *value = Bias();
                 return true;
             }
             public int32 Middle() {
                 require Cell.TryCreate(40, out var cell);
-                require Fill(init var offset);
+                init int32 offset;
+                require Fill(ref init offset);
                 require ManagedHeap.Collect() == 0;
                 return cell.Value + offset;
             }
@@ -191,7 +192,7 @@ internal sealed partial class NativeManagedClassModuleTests
         var leaf = NativeModuleCompiler.CreateProducer(Compile(Leaf, policy), ["Source.Bias"], "NodeB", policy);
         var middle = NativeModuleCompiler.CreateGraphProducer(Compile(Middle, policy,
             NativeModuleCompiler.CreateGraphReference([leaf])), ["Middle"], "NodeA", [leaf], policy);
-        Assert.That(GraphSemanticVersion(middle), Is.EqualTo(104));
+        Assert.That(GraphSemanticVersion(middle), Is.EqualTo(106));
         var middleHash = SHA256.HashData(middle);
         var root = NativeModuleCompiler.CreateGraphConsumer(Compile(Root, policy,
             NativeModuleCompiler.CreateGraphReference([middle]), library: false), [middle], policy);
@@ -360,7 +361,7 @@ internal sealed partial class NativeManagedClassModuleTests
             [middle], policy);
         Assert.That(GraphSemanticVersion(middle), Is.EqualTo(104));
         Assert.That(GraphSemanticVersion(root), Is.EqualTo(104));
-        Assert.That(NativeModuleCompiler.InspectGraphArtifact(root).NativeProfileVersion, Is.EqualTo("native-18"));
+        Assert.That(NativeModuleCompiler.InspectGraphArtifact(root).NativeProfileVersion, Is.EqualTo("native-19"));
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [leaf, middle],
             TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
         var framework = new DirectoryInfo(AppContext.BaseDirectory);

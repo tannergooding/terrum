@@ -27,12 +27,14 @@ internal sealed partial class JitTests
                 }
             }
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(3, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(3, ref init raw);
                 mut OwnedInt32Buffer words = move raw;
                 require words.TryAppend(40);
                 require words.TryAppend(1);
                 mut Owner owner = new Owner(new Child(move words));
-                require OwnedInt32Buffer.TryCreate(2, out var extra);
+                init OwnedInt32Buffer extra;
+                require OwnedInt32Buffer.TryCreate(2, ref init extra);
                 mut OwnedInt32Buffer other = move extra;
                 {
                     mut MutableInt32BufferView empty = owner.Nested.Words.SliceMutable(
@@ -61,7 +63,8 @@ internal sealed partial class JitTests
                 public Owner(OwnedInt32Buffer words) { Words = move words; }
             }
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(1, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(1, ref init raw);
                 mut Owner owner = new Owner(move raw);
                 require owner.Words.TryAppend(1);
                 unsafe {
@@ -93,7 +96,8 @@ internal sealed partial class JitTests
                 public Owner(OwnedInt32Buffer words) { Words = move words; }
             }
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(2, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(2, ref init raw);
                 mut Owner owner = new Owner(move raw);
                 require owner.Words.TryAppend(42);
                 unsafe {
@@ -144,7 +148,8 @@ internal sealed partial class JitTests
                  [Cleanup] public void Close() {}
             }
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(2, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(2, ref init raw);
                 mut Owner owner = new Owner(new Storage(move raw));
                 require owner.Nested.Words.TryAppend(20);
                 require owner.Forward(22);
@@ -170,7 +175,8 @@ internal sealed partial class JitTests
                  [Cleanup] public void Close() {}
             }
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(2, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(2, ref init raw);
                 mut Owner owner = new Owner(move raw);
                 require owner.Words.TryAppend(41);
                 unsafe {
@@ -203,7 +209,8 @@ internal sealed partial class JitTests
                 public Owner(Child child) { Nested = move child; }
             }
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(2, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(2, ref init raw);
                 mut Owner owner = new Owner(new Child(move raw));
                 require owner.Nested.Words.TryAppend(41);
                 mut int32 caught = 0;

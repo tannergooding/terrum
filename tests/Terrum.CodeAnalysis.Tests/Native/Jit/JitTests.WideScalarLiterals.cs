@@ -41,7 +41,9 @@ internal sealed partial class JitTests
             }
             """;
 
-        await AssertFailFastExecutionAsync(source, 42).ConfigureAwait(true);
-        await AssertCheckedExecutionAsync(source, 42).ConfigureAwait(true);
+        await AssertFailFastExecutionAsync(source, 42,
+            ConstEvalSelection()).ConfigureAwait(true);
+        await AssertCheckedExecutionAsync(source, 42,
+            ConstEvalSelection(checkedFailures: true)).ConfigureAwait(true);
     }
 }

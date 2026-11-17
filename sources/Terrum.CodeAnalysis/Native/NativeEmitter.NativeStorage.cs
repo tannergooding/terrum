@@ -114,6 +114,7 @@ internal sealed partial class PeCompiler
                 }
                 break;
             case PrimitiveType.Int64:
+            case PrimitiveType.NativeInt:
                 _code.Bytes(0x48, 0x85, 0xC0);
                 RuntimeBranch(0x88, 3);
                 goto case PrimitiveType.UInt64;
@@ -122,6 +123,7 @@ internal sealed partial class PeCompiler
                 _code.Bytes(0x48, 0x85, 0xD2);
                 RuntimeBranch(0x85, 3);
                 goto case PrimitiveType.UInt64;
+            case PrimitiveType.NativeUInt:
             case PrimitiveType.UInt64:
                 _code.Bytes(0x48, 0xBA);
                 _code.Int64(unchecked((long)validIndexCount));
@@ -222,7 +224,7 @@ internal sealed partial class PeCompiler
             || !function.Variables[reservation.Variable].IsInitializationLocal
             || !DirectNativeImportContract.IsNativeOutputCellType(reservation.PointeeType,
                 _program.Structures, _program.NativeFunctionPointerSignatures,
-                _program.NativePointerTypes))
+                _program.NativePointerTypes, _program.EnumDefinitions))
         {
             throw new InvalidOperationException("The native output reservation has an invalid destination.");
         }
@@ -249,10 +251,12 @@ internal sealed partial class PeCompiler
         if (!IsIndirect(read.Type))
         {
             _code.LoadPointerField(0, Size(read.Type));
+            NormalizeNarrowInteger(read.Type, checkRange: false);
         }
     }
 
-    private void EmitCheckedReferenceFormation(BoundReferenceFormation formation, int spill)
+    private void EmitCheckedReferenceFormation(BoundReferenceFormation formation,
+        int spill, bool allowInitializationReference = false)
     {
         if (!CheckedReferenceTypeContract.IsValidType(
             formation.Type, _program.CheckedReferenceTypes))
@@ -261,8 +265,8 @@ internal sealed partial class PeCompiler
         }
 
         var referenceType = _program.CheckedReferenceTypes[CheckedReferenceTypes.Index(formation.Type)];
-        if (referenceType.IsGarbageCollected || referenceType.IsInitialization
-            || referenceType.IsOptional || referenceType.ReferentType != formation.Place.Type)
+        if (referenceType.IsGarbageCollected || referenceType.IsOptional
+            || referenceType.ReferentType != formation.Place.Type)
         {
             throw new InvalidOperationException("The checked-reference formation has an unsupported type.");
         }
@@ -298,7 +302,8 @@ internal sealed partial class PeCompiler
         }
         else
         {
-            EmitCheckedReferencePlaceAddress(formation.Place, spill, supportSlot);
+            EmitCheckedReferencePlaceAddress(formation.Place, spill,
+                supportSlot, allowInitializationReference);
         }
         if (_normalBacking)
         {
@@ -308,7 +313,8 @@ internal sealed partial class PeCompiler
     }
 
     private void EmitCheckedReferencePlaceAddress(
-        BoundExpression place, int spill, int supportSlot = -1)
+        BoundExpression place, int spill, int supportSlot = -1,
+        bool allowInitializationReference = false)
     {
         switch (place)
         {
@@ -338,7 +344,9 @@ internal sealed partial class PeCompiler
                 var referenceType = _program.CheckedReferenceTypes[
                     CheckedReferenceTypes.Index(referenceRead.Descriptor.Type)];
                 if (referenceType.IsGarbageCollected
-                    || referenceType.IsInitialization || referenceType.IsOptional
+                    || (referenceType.IsInitialization
+                        && !allowInitializationReference)
+                    || referenceType.IsOptional
                     || referenceType.ReferentType != referenceRead.Type)
                 {
                     throw new InvalidOperationException(
@@ -431,7 +439,9 @@ internal sealed partial class PeCompiler
                         || classField.Offset > (ulong)(@class.Size - fieldSize)
                         || !CheckedReferenceTypeContract.IsSupportedReferenceStoreValueType(
                             field.Type, _program.Structures, _program.Classes,
-                            _program.EnumDefinitions.Length, _program.CheckedReferenceTypes))
+                            _program.EnumDefinitions.Length,
+                            _program.CheckedReferenceTypes,
+                            _program.NativePointerTypes))
                     {
                         throw new InvalidOperationException(
                             "The checked-reference class field layout is invalid.");
@@ -470,7 +480,8 @@ internal sealed partial class PeCompiler
                     throw new InvalidOperationException(
                         "A checked reference to this cleanup-bearing field place is not supported.");
                 }
-                EmitCheckedReferencePlaceAddress(field.Receiver, spill, supportSlot);
+                EmitCheckedReferencePlaceAddress(field.Receiver, spill,
+                    supportSlot, allowInitializationReference);
                 var offset = fields[field.Field].Offset;
                 if (offset != 0)
                 {
@@ -496,8 +507,9 @@ internal sealed partial class PeCompiler
             CheckedReferenceTypes.Index(reborrow.Type)];
         var source = _program.CheckedReferenceTypes[
             CheckedReferenceTypes.Index(reborrow.Descriptor.Type)];
-        if (target.IsGarbageCollected || target.IsInitialization || target.IsOptional
-            || source.IsGarbageCollected || source.IsInitialization || source.IsOptional
+        if (target.IsGarbageCollected || target.IsOptional
+            || source.IsGarbageCollected || source.IsOptional
+            || target.IsInitialization != source.IsInitialization
             || target.ReferentType != source.ReferentType
             || (target.IsWritable && !source.IsWritable))
         {
@@ -517,8 +529,8 @@ internal sealed partial class PeCompiler
         }
 
         var referenceType = _program.CheckedReferenceTypes[CheckedReferenceTypes.Index(read.Descriptor.Type)];
-        if (referenceType.IsGarbageCollected || referenceType.IsInitialization
-            || referenceType.IsOptional || referenceType.ReferentType != read.Type)
+        if (referenceType.IsGarbageCollected || referenceType.IsOptional
+            || referenceType.ReferentType != read.Type)
         {
             throw new InvalidOperationException("The checked-reference descriptor does not match its referent.");
         }
@@ -549,8 +561,27 @@ internal sealed partial class PeCompiler
 
         var referenceType = _program.CheckedReferenceTypes[
             CheckedReferenceTypes.Index(write.Descriptor.Type)];
+        if (referenceType.IsInitialization)
+        {
+            if (referenceType.IsGarbageCollected || referenceType.IsOptional
+                || referenceType.ReferentType != write.Value.Type
+                || !IsSupportedCheckedReferenceWriteValueType(
+                    write.Value.Type))
+            {
+                throw new InvalidOperationException(
+                    "The initialization-reference store violates its destination or value contract.");
+            }
+
+            EmitPointerValueWrite(write.Descriptor, write.Value, spill);
+            if (write.Descriptor is BoundRead descriptorRead)
+            {
+                SetReferenceInitializationFlag(descriptorRead.Variable,
+                    initialized: true);
+            }
+            return;
+        }
         if (!referenceType.IsWritable || referenceType.IsGarbageCollected
-            || referenceType.IsInitialization || referenceType.IsOptional
+            || referenceType.IsOptional
             || referenceType.ReferentType != write.Value.Type
         || !IsSupportedCheckedReferenceWriteValueType(
             write.Value.Type))
@@ -746,7 +777,7 @@ internal sealed partial class PeCompiler
             _program.Structures, _program.Classes,
             _program.EnumDefinitions.Length, _program.CheckedReferenceTypes,
             _program.NativeLoweringAgreement,
-            _program.NativeFixedArrayTypes);
+            _program.NativeFixedArrayTypes, _program.NativePointerTypes);
 
     private void EmitPointerValueWrite(BoundExpression address, BoundExpression value, int spill)
     {
@@ -1361,8 +1392,7 @@ internal sealed partial class PeCompiler
         while (NativeFixedArrayTypes.IsType(currentType))
         {
             if (!NativeFixedArrayContract.TryGetLayout(currentType,
-                    _program.Structures, _program.NativeFixedArrayTypes,
-                    out var layout, _program.CheckedReferenceTypes))
+                    _program, out var layout))
             {
                 throw new InvalidOperationException(
                     "A verified fixed-array copy has no target layout.");
@@ -1652,8 +1682,7 @@ internal sealed partial class PeCompiler
             if (NativeFixedArrayTypes.IsType(type))
             {
                 if (!NativeFixedArrayContract.TryGetLayout(type,
-                        _program.Structures, _program.NativeFixedArrayTypes,
-                        out var layout, _program.CheckedReferenceTypes))
+                        _program, out var layout))
                 {
                     throw new InvalidOperationException(
                         "A verified fixed-array type has no target layout.");
@@ -1725,6 +1754,12 @@ internal sealed partial class PeCompiler
         {
             throw new InvalidOperationException(
                 "Native typed-copy scratch traversal is incomplete.");
+        }
+        if (!BoundTreeTraversal.VisitContractExpressions(function,
+            expression => Include(expression.Type)))
+        {
+            throw new InvalidOperationException(
+                "Native typed-copy contract scratch traversal is incomplete.");
         }
 
         if (function.IndexedBody is TrRmScalarGraph indexed)

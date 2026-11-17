@@ -20,12 +20,12 @@ internal sealed partial class JitTests
                 public Counter(int64 number) { Number = number; }
             }
              int32 Copy<T>(T value, T duplicate, out T result,
-                out T secondResult) where T : [Copy] {
+                out T secondResult)  {
                 result = value;
                 secondResult = duplicate;
                 return 7;
             }
-             void CopyVoid<T>(T value, out T result) where T : [Copy] {
+             void CopyVoid<T>(T value, out T result)  {
                 result = value;
             }
             int32 Main() {
@@ -55,18 +55,22 @@ internal sealed partial class JitTests
                 public int64 Number;
                 public Counter(int64 number) { Number = number; }
             }
-             int32 Fill<T>(T value, int32 status, init ref<T> result) where T : [Copy] {
-                result = value;
+             int32 Fill<T>(T value, int32 status, ref<init T> result)  {
+                *result = value;
                 return status;
             }
-             void FillVoid<T>(T value, init ref<T> result) where T : [Copy] {
-                result = value;
+             void FillVoid<T>(T value, ref<init T> result)  {
+                *result = value;
             }
             int32 Main() {
-                int32 zeroStatus = Fill(new Counter(20), 0, init var first);
-                int32 status = Fill(new Counter(20), 7, init var second);
-                FillVoid<Counter>(new Counter(2), init var third);
-                int32 boolStatus = Fill(true, 0, init var flag);
+                init Counter first;
+                init Counter second;
+                init Counter third;
+                init bool flag;
+                int32 zeroStatus = Fill(new Counter(20), 0, ref init first);
+                int32 status = Fill(new Counter(20), 7, ref init second);
+                FillVoid<Counter>(new Counter(2), ref init third);
+                int32 boolStatus = Fill(true, 0, ref init flag);
                 if (boolStatus != 0 || !flag) { return 1; }
                 return zeroStatus + status + int32(first.Number) + int32(second.Number)
                     + int32(third.Number) - 7;
@@ -86,17 +90,18 @@ internal sealed partial class JitTests
     public async Task GenericInitNonBooleanOutputPublishesManagedHandleAsync(NativeRuntimePolicy policy)
     {
         const string Source = """
-             int32 Fill<T>(T value, init ref<T> result) where T : [Copy] {
-                result = value;
+             int32 Fill<T>(T value, ref<init T> result)  {
+                *result = value;
                 return 7;
             }
-            int32 Make(init ref<write ManagedNode> result) {
+            int32 Make(ref<init write ManagedNode> result) {
                 require ManagedNode.TryCreate(42, out var created);
-                return Fill(created, init result);
+                return Fill(created, ref init *result);
             }
             int32 Main() {
                 if (ManagedHeap.Collect() != 0) { return 1; }
-                int32 status = Make(init var copy);
+                init write ManagedNode copy;
+                int32 status = Make(ref init copy);
                 if (ManagedHeap.Collect() != 0) { return 2; }
                 return status + copy.Value;
             }
@@ -126,26 +131,27 @@ internal sealed partial class JitTests
                  public Pair(Inner nested, float64 wide) { Nested = nested; Wide = wide; }
                  public float32 ReadSingle() { return Nested.Single; }
             }
-             T Identity<T>(T value) where T : [Copy] { return value; }
-             bool TryCreatePair(init ref<Pair> result) {
-                result = new Pair(new Inner(float32(1), 42), float64(2));
+             T Identity<T>(T value)  { return value; }
+             bool TryCreatePair(ref<init Pair> result) {
+                *result = new Pair(new Inner(float32(1), 42), float64(2));
                 return true;
             }
              float32 CopyFloat(float32 value) { return value; }
-             T Forward<T>(T value) where T : [Copy] {
-                if (!TryCreatePair(init var pair)) { return Identity(value); }
+             T Forward<T>(T value)  {
+                init Pair pair;
+                if (!TryCreatePair(ref init pair)) { return Identity(value); }
                 if (CopyFloat(pair.ReadSingle()) != float32(1) || pair.Wide != float64(2)) {
                     return Identity(value);
                 }
                 return Identity(value);
             }
-             bool TryCopy<T>(T value, bool publish, out T result) where T : [Copy] {
+             bool TryCopy<T>(T value, bool publish, out T result)  {
                 result = Forward(value);
                 return publish;
             }
-             bool TryCopyInit<T>(T value, bool publish, init ref<T> result) where T : [Copy] {
+             bool TryCopyInit<T>(T value, bool publish, ref<init T> result)  {
                 if (!publish) { return false; }
-                result = Forward(value);
+                *result = Forward(value);
                 return true;
             }
             int32 Main() {
@@ -153,8 +159,10 @@ internal sealed partial class JitTests
                 float64 second = Forward(float64(2));
                 if (TryCopy(first, false, out var absent32)) { return 1; }
                 require TryCopy<float32>(first, true, out var copied32);
-                if (TryCopyInit(second, false, init var absent64)) { return 2; }
-                require TryCopyInit<float64>(second, true, init var copied64);
+                init float64 absent64;
+                if (TryCopyInit(second, false, ref init absent64)) { return 2; }
+                init float64 copied64;
+                require TryCopyInit<float64>(second, true, ref init copied64);
                 if (copied32 != float32(40) || copied64 != float64(2)) { return 3; }
                 return int32(copied32) + int32(copied64);
             }
@@ -180,15 +188,17 @@ internal sealed partial class JitTests
         const string Source = """
             using Terrum;
             using Terrum.CodeAnalysis;
-             bool Choose<T>(int32 index, T first, T second, out T result) where T : [Copy] {
+             bool Choose<T>(int32 index, T first, T second, out T result)  {
                 return TrySelectCopy<T>(index, first, second, out result);
             }
-             bool ChooseInit<T>(int32 index, T first, T second, init ref<T> result) where T : [Copy] {
-                return TrySelectCopyInit<T>(index, first, second, init result);
+             bool ChooseInit<T>(int32 index, T first, T second, ref<init T> result)  {
+                return TrySelectCopyInit<T>(index, first, second, ref init *result);
             }
             int32 Main() {
-                require SourceRange.TryCreate(12, 5, init var firstRange);
-                require SourceRange.TryCreate(42, 7, init var secondRange);
+                init SourceRange firstRange;
+                init SourceRange secondRange;
+                require SourceRange.TryCreate(12, 5, ref init firstRange);
+                require SourceRange.TryCreate(42, 7, ref init secondRange);
                 Token first = new Token(1, firstRange);
                 Token second = new Token(2, secondRange);
                 if (Choose<Token>(-1, first, second, out var absent)) { return 1; }
@@ -199,9 +209,11 @@ internal sealed partial class JitTests
                 if (Choose<Token>(2, first, second, out var missing)) { return 3; }
                 require Choose<Token>(0, first, second, out var again);
                 require again.Kind == 1 && again.Range.Start == 12;
-                if (ChooseInit<Token>(-1, first, second, init var deferred)) { return 4; }
-                require ChooseInit<Token>(1, first, second, init deferred);
-                require ChooseInit<SourceRange>(0, firstRange, secondRange, init var initRange);
+                init Token deferred;
+                if (ChooseInit<Token>(-1, first, second, ref init deferred)) { return 4; }
+                require ChooseInit<Token>(1, first, second, ref init deferred);
+                init SourceRange initRange;
+                require ChooseInit<SourceRange>(0, firstRange, secondRange, ref init initRange);
                 if (deferred.Kind != 2 || deferred.Range.Start != 42
                     || initRange.Start != 12 || initRange.Length != 5) { return 5; }
                 return chosen.Range.Start;
@@ -227,11 +239,11 @@ internal sealed partial class JitTests
                 public Pair(int64 first, int64 second) { First = first; Second = second; }
             }
              bool Forward<T>(T first, T second, bool publish, out T left, out T right,
-                out uint64 number, out char16 unit) where T : [Copy] {
+                out uint64 number, out char16 unit)  {
                 return Split<T>(first, 42, second, publish, out left, out right, out number, out unit);
             }
              bool Split<T>(T first, int32 marker, T second, bool publish,
-                out T left, out T right, out uint64 number, out char16 unit) where T : [Copy] {
+                out T left, out T right, out uint64 number, out char16 unit)  {
                 if (marker != 42) { return false; }
                 left = first;
                 right = second;
@@ -240,19 +252,19 @@ internal sealed partial class JitTests
                 return publish;
             }
              bool ForwardInit<T>(T first, T second, bool publish,
-                init ref<T> left, init ref<T> right, init ref<uint64> number, init ref<char16> unit)
-                where T : [Copy] {
-                return SplitInit<T>(first, 42, second, publish, init left, init right,
-                    init number, init unit);
+                 ref<init T> left, ref<init T> right, ref<init uint64> number, ref<init char16> unit)
+                 {
+                return SplitInit<T>(first, 42, second, publish, ref init *left, ref init *right,
+                     ref init *number, ref init *unit);
             }
              bool SplitInit<T>(T first, int32 marker, T second, bool publish,
-                init ref<T> left, init ref<T> right, init ref<uint64> number, init ref<char16> unit)
-                where T : [Copy] {
+                 ref<init T> left, ref<init T> right, ref<init uint64> number, ref<init char16> unit)
+                 {
                 if (marker != 42 || !publish) { return false; }
-                left = first;
-                right = second;
-                number = 18446744073709551615;
-                unit = char16(55296);
+                 *left = first;
+                 *right = second;
+                 *number = 18446744073709551615;
+                 *unit = char16(55296);
                 return true;
             }
             int32 Main() {
@@ -264,10 +276,14 @@ internal sealed partial class JitTests
                     out var number, out var unit);
                 require left.First == -9223372036854775808 && left.Second == 9223372036854775807;
                 require number == 18446744073709551615 && unit == char16(55296);
-                if (ForwardInit<Pair>(first, second, false, init var initLeft, init var initRight,
-                    init var initNumber, init var initUnit)) { return 2; }
-                require ForwardInit<Pair>(first, second, true, init initLeft, init initRight,
-                    init initNumber, init initUnit);
+                init Pair initLeft;
+                init Pair initRight;
+                init uint64 initNumber;
+                init char16 initUnit;
+                if (ForwardInit<Pair>(first, second, false, ref init initLeft, ref init initRight,
+                    ref init initNumber, ref init initUnit)) { return 2; }
+                require ForwardInit<Pair>(first, second, true, ref init initLeft, ref init initRight,
+                    ref init initNumber, ref init initUnit);
                 require initLeft.First == -9223372036854775808
                     && initLeft.Second == 9223372036854775807;
                 require initRight.First == right.First && initRight.Second == right.Second;
@@ -289,23 +305,26 @@ internal sealed partial class JitTests
     public async Task GenericInitDoesNotPublishAfterCheckedFailureAsync()
     {
         const string Source = """
-            bool FailAfterWrite<T>(T value, init ref<T> result) where T : [Copy] {
-                result = value;
+            bool FailAfterWrite<T>(T value, ref<init T> result)  {
+                *result = value;
                 require false;
                 return true;
             }
-             bool Fill<T>(T value, init ref<T> result) where T : [Copy] {
-                result = value;
+             bool Fill<T>(T value, ref<init T> result)  {
+                *result = value;
                 return true;
             }
-             bool None<T>(init ref<T> result) where T : [Copy] { return false; }
+             bool None<T>(ref<init T> result)  { return false; }
             int32 Main() {
-                if (None<int32>(init var target)) { return 1; }
+                init mut int32 target;
+                if (None<int32>(ref init target)) { return 1; }
                 unsafe {
-                    try { if (FailAfterWrite<int32>(41, init target)) { return 1; } }
-                    catch { }
+                    try { if (FailAfterWrite<int32>(41, ref init target)) { return 1; } }
+                    catch {
+                        if (target is init) { target = _; }
+                    }
                 }
-                require Fill(42, init target);
+                require Fill<int32>(42, ref init target);
                 return target;
             }
             """;
@@ -320,10 +339,10 @@ internal sealed partial class JitTests
                 public int64 Number;
                 public Value(int64 number) { Number = number; }
             }
-             bool Enabled<T>(T value, bool enabled) where T : [Copy] { return enabled; }
-             uint64 Number<T>(T value, uint64 number) where T : [Copy] { return number; }
-             int32 Count<T>(T value, int32 count) where T : [Copy] { return count; }
-             char16 Unit<T>(T value, char16 unit) where T : [Copy] { return unit; }
+             bool Enabled<T>(T value, bool enabled)  { return enabled; }
+             uint64 Number<T>(T value, uint64 number)  { return number; }
+             int32 Count<T>(T value, int32 count)  { return count; }
+             char16 Unit<T>(T value, char16 unit)  { return unit; }
             int32 Main() {
                 Value value = new Value(0);
                 var count = Count<Value>(value, 40) + 2;
@@ -351,7 +370,7 @@ internal sealed partial class JitTests
                 }
             }
             bool TryAccumulate<T>(T value, T seed, int32 repetitions, out T result)
-                where T : Addition<T, T, T>, [Copy] {
+                where T : Addition<T, T, T> {
                 if (repetitions < 0) { return false; }
                 mut T sum = seed;
                 for (mut int32 i = 0; i < repetitions; i = i + 1) {
@@ -383,7 +402,7 @@ internal sealed partial class JitTests
                 public int64 Second;
                 public Pair(int64 first, int64 second) { First = first; Second = second; }
             }
-            bool Try<T>(T value, bool complete, out T result) where T : [Copy] {
+            bool Try<T>(T value, bool complete, out T result)  {
                 result = value;
                 require complete;
                 return true;
@@ -412,7 +431,7 @@ internal sealed partial class JitTests
                 public int64 Number;
                 public Value(int64 number) { Number = number; }
             }
-            int32 Fill<T>(T value, bool complete, out T result) where T : [Copy] {
+            int32 Fill<T>(T value, bool complete, out T result)  {
                 result = value;
                 require complete;
                 return 7;
@@ -442,20 +461,20 @@ internal sealed partial class JitTests
                 public int64 Number;
                 public Value(int64 number) { Number = number; }
             }
-            int32 Fill<T>(T value, bool complete, init ref<T> result) where T : [Copy] {
-                result = value;
+            int32 Fill<T>(T value, bool complete, ref<init T> result)  {
+                *result = value;
                 require complete;
                 return 7;
             }
             int32 Main() {
-                init Value result;
+                init mut Value result;
                 unsafe {
                     try {
-                        Fill(new Value(40), false, init result);
+                        Fill(new Value(40), false, ref init result);
                         return 1;
                     } catch {
-                        if (result is init) { return 2; }
-                        Fill<Value>(new Value(42), true, init result);
+                        if (result is init) { result = _; }
+                        Fill<Value>(new Value(42), true, ref init result);
                         return int32(result.Number);
                     }
                 }
@@ -474,33 +493,36 @@ internal sealed partial class JitTests
                 public Pair(int64 first, int64 second) { First = first; Second = second; }
             }
              int32 Fill<T, U>(T value, U second, int32 status, out T result,
-                init ref<U> initialized) where T : [Copy] where U : [Copy] {
+                ref<init U> initialized)   {
                 result = value;
-                initialized = second;
+                *initialized = second;
                 return status;
             }
              void FillVoid<T, U>(T value, U second, out T result,
-                init ref<U> initialized) where T : [Copy] where U : [Copy] {
+                ref<init U> initialized)   {
                 result = value;
-                initialized = second;
+                *initialized = second;
             }
-             int32 FillSame<T>(T value, out T result, init ref<T> initialized)
-                where T : [Copy] {
+             int32 FillSame<T>(T value, out T result, ref<init T> initialized)
+                 {
                 result = value;
-                initialized = value;
+                *initialized = value;
                 return 7;
             }
             int32 Main() {
                 mut Pair previous = new Pair(1, 2);
-                int32 zeroStatus = Fill(new Pair(40, 2), int64(3), 0, out previous, init var first);
+                init int64 first;
+                init int64 second;
+                int32 zeroStatus = Fill(new Pair(40, 2), int64(3), 0, out previous, ref init first);
                 int32 status = Fill<Pair, int64>(new Pair(42, 2), int64(5), 7,
-                    out previous, init var second);
+                    out previous, ref init second);
                 mut Pair voidResult = new Pair(0, 0);
                 init int64 voidInitialized;
-                FillVoid(new Pair(40, 2), int64(6), out voidResult, init voidInitialized);
+                FillVoid(new Pair(40, 2), int64(6), out voidResult, ref init voidInitialized);
                 mut Pair sameTypeResult = new Pair(0, 0);
+                init Pair sameTypeInitialized;
                 int32 sameTypeStatus = FillSame(new Pair(44, 2), out sameTypeResult,
-                    init var sameTypeInitialized);
+                    ref init sameTypeInitialized);
                 if (zeroStatus != 0 || status != 7 || previous.First != 42 || first != 3 || second != 5
                     || voidResult.First != 40 || voidInitialized != 6 || sameTypeStatus != 7
                     || sameTypeResult.First != 44 || sameTypeInitialized.First != 44) {
@@ -528,16 +550,17 @@ internal sealed partial class JitTests
                 public int64 Second;
                 public Pair(int64 first, int64 second) { First = first; Second = second; }
             }
-            int32 Fill<T>(T value, out T result, out int32 count, init ref<float64> score)
-                where T : [Copy] {
+            int32 Fill<T>(T value, out T result, out int32 count, ref<init float64> score)
+                 {
                 result = value;
                 count = 2;
-                score = float64(3.5);
+                *score = float64(3.5);
                 return 7;
             }
             int32 Main() {
                 mut Pair copied = new Pair(0, 0);
-                int32 status = Fill(new Pair(40, 2), out copied, out var count, init var score);
+                init float64 score;
+                int32 status = Fill(new Pair(40, 2), out copied, out var count, ref init score);
                 if (status != 7 || copied.First != 40 || count != 2 || score != float64(3.5)) {
                     return 1;
                 }
@@ -558,23 +581,27 @@ internal sealed partial class JitTests
     public async Task FloatingGenericNonBooleanAndVoidOutputsPublishAsync(bool checkedFailures)
     {
         const string Source = """
-             int32 Fill<T>(T value, int32 status, out T copied, init ref<T> initialized)
-                where T : [Copy] {
+             int32 Fill<T>(T value, int32 status, out T copied, ref<init T> initialized)
+                 {
                 copied = value;
-                initialized = value;
+                *initialized = value;
                 return status;
             }
-             void FillVoid<T>(T value, out T copied, init ref<T> initialized)
-                where T : [Copy] {
+             void FillVoid<T>(T value, out T copied, ref<init T> initialized)
+                 {
                 copied = value;
-                initialized = value;
+                *initialized = value;
             }
             int32 Main() {
-                int32 zeroStatus = Fill(float32(1.5), 0, out var first, init var firstCopy);
-                int32 status = Fill<float64>(float64(2.5), 7, out var second, init var secondCopy);
-                FillVoid(float32(3.5), out var voidCopy, init var voidInitialized);
+                init float32 firstCopy;
+                init float64 secondCopy;
+                init float32 voidInitialized;
+                init bool booleanInitialized;
+                int32 zeroStatus = Fill(float32(1.5), 0, out var first, ref init firstCopy);
+                int32 status = Fill<float64>(float64(2.5), 7, out var second, ref init secondCopy);
+                FillVoid(float32(3.5), out var voidCopy, ref init voidInitialized);
                 int32 booleanStatus = Fill<bool>(true, 0, out var booleanCopy,
-                    init var booleanInitialized);
+                    ref init booleanInitialized);
                 if (zeroStatus != 0 || status != 7 || booleanStatus != 0
                     || !booleanCopy || !booleanInitialized || first != float32(1.5)
                     || firstCopy != float32(1.5) || second != float64(2.5)
@@ -599,39 +626,44 @@ internal sealed partial class JitTests
     public async Task GenericFloatingResultsPreserveZeroAndSubnormalOutputsAsync(bool checkedFailures)
     {
         const string Source = """
-             float32 Fill32<T>(T value, out T copied, init ref<T> initialized,
-                out int32 count, init ref<float64> score)
-                where T : [Copy] {
+             float32 Fill32<T>(T value, out T copied, ref<init T> initialized,
+                out int32 count, ref<init float64> score)
+                 {
                 copied = value;
-                initialized = value;
+                *initialized = value;
                 count = 2;
-                score = float64(3.5);
+                *score = float64(3.5);
                 return float32(-0.0);
             }
-             float64 Fill64<T>(T value, out T copied, init ref<T> initialized,
-                out int32 count, init ref<float64> score)
-                where T : [Copy] {
+             float64 Fill64<T>(T value, out T copied, ref<init T> initialized,
+                out int32 count, ref<init float64> score)
+                 {
                 copied = value;
-                initialized = value;
+                *initialized = value;
                 count = 3;
-                score = float64(4.5);
+                *score = float64(4.5);
                 return float64(-0.0);
             }
-             float32 Tiny32<T>(T value, out T copied) where T : [Copy] {
+             float32 Tiny32<T>(T value, out T copied)  {
                 copied = value;
                 return float32(1.401298464324817e-45);
             }
-             float64 Tiny64<T>(T value, init ref<T> initialized) where T : [Copy] {
-                initialized = value;
+             float64 Tiny64<T>(T value, ref<init T> initialized)  {
+                *initialized = value;
                 return float64(4.9406564584124654e-324);
             }
             int32 Main() {
-                float32 negative32 = Fill32(int32(42), out var copied32, init var initialized32,
-                    out var count32, init var score32);
-                float64 negative64 = Fill64<int32>(int32(43), out var copied64, init var initialized64,
-                    out var count64, init var score64);
+                init int32 initialized32;
+                init float64 score32;
+                init int32 initialized64;
+                init float64 score64;
+                init int32 initializedTiny64;
+                float32 negative32 = Fill32(int32(42), out var copied32, ref init initialized32,
+                    out var count32, ref init score32);
+                float64 negative64 = Fill64<int32>(int32(43), out var copied64, ref init initialized64,
+                    out var count64, ref init score64);
                 float32 tiny32 = Tiny32(int32(44), out var copiedTiny32);
-                float64 tiny64 = Tiny64<int32>(int32(45), init var initializedTiny64);
+                float64 tiny64 = Tiny64<int32>(int32(45), ref init initializedTiny64);
                 if (negative32 != float32(0.0) || float32(1.0) / negative32 >= float32(0.0)
                     || negative64 != float64(0.0) || float64(1.0) / negative64 >= float64(0.0)
                     || copied32 != 42 || initialized32 != 42 || copied64 != 43 || initialized64 != 43
@@ -659,28 +691,29 @@ internal sealed partial class JitTests
     public Task GenericFloatingResultDoesNotPublishAfterCheckedFailureAsync()
     {
         const string Source = """
-            float64 Fill<T>(T value, bool complete, out T copied, init ref<T> initialized,
-                out int32 count, init ref<float64> score) where T : [Copy] {
+            float64 Fill<T>(T value, bool complete, out T copied, ref<init T> initialized,
+                out int32 count, ref<init float64> score)  {
                 copied = value;
-                initialized = value;
+                *initialized = value;
                 count = 2;
-                score = float64(3.5);
+                *score = float64(3.5);
                 require complete;
                 return float64(-0.0);
             }
             int32 Main() {
                 mut int32 copied = 40;
-                init int32 initialized;
+                init mut int32 initialized;
                 mut int32 count = 0;
-                init float64 score;
+                init mut float64 score;
                 unsafe {
                     try {
-                        Fill(int32(41), false, out copied, init initialized, out count, init score);
+                        Fill(int32(41), false, out copied, ref init initialized, out count, ref init score);
                         return 1;
                     } catch {
-                        if (initialized is init || score is init) { return 2; }
-                        float64 result = Fill<int32>(42, true, out copied, init initialized,
-                            out count, init score);
+                        if (initialized is init) { initialized = _; }
+                        if (score is init) { score = _; }
+                        float64 result = Fill<int32>(42, true, out copied, ref init initialized,
+                            out count, ref init score);
                         if (result != float64(0.0) || float64(1.0) / result >= float64(0.0)
                             || copied != 42 || initialized != 42 || count != 2
                             || score != float64(3.5)) { return 3; }
@@ -703,24 +736,24 @@ internal sealed partial class JitTests
                 public Pair(int64 first, int64 second) { First = first; Second = second; }
             }
             int32 Fill<T>(T value, bool complete, out T result, out int32 count,
-                init ref<float64> score) where T : [Copy] {
+                ref<init float64> score)  {
                 result = value;
                 count = 2;
-                score = float64(3.5);
+                *score = float64(3.5);
                 require complete;
                 return 7;
             }
             int32 Main() {
                 mut Pair copied = new Pair(1, 2);
-                init float64 score;
+                init mut float64 score;
                 unsafe {
                     try {
-                        Fill(new Pair(40, 2), false, out copied, out var count, init score);
+                        Fill(new Pair(40, 2), false, out copied, out var count, ref init score);
                         return 1;
                     } catch {
-                        if (score is init) { return 2; }
+                        if (score is init) { score = _; }
                         int32 status = Fill(new Pair(42, 2), true, out copied,
-                            out var retriedCount, init score);
+                            out var retriedCount, ref init score);
                         if (status != 7 || copied.First != 42 || retriedCount != 2
                             || score != float64(3.5)) { return 3; }
                         return 42;
@@ -742,19 +775,20 @@ internal sealed partial class JitTests
                 public Pair(int64 first, int64 second) { First = first; Second = second; }
             }
              int32 Copy<T, U>(T value, U second, int32 status, out T result,
-                init ref<U> initialized) where T : [Copy] where U : [Copy] {
+                ref<init U> initialized)   {
                 result = value;
-                initialized = second;
+                *initialized = second;
                 return status;
             }
-            int32 Fill(out Pair result, init ref<write ManagedNode> initialized) {
+            int32 Fill(out Pair result, ref<init write ManagedNode> initialized) {
                 require ManagedNode.TryCreate(42, out var created);
-                return Copy(new Pair(40, 2), created, 7, out result, init initialized);
+                return Copy(new Pair(40, 2), created, 7, out result, ref init *initialized);
             }
             int32 Main() {
                 if (ManagedHeap.Collect() != 0) { return 1; }
                 mut Pair pair = new Pair(0, 0);
-                int32 status = Fill(out pair, init var node);
+                init write ManagedNode node;
+                int32 status = Fill(out pair, ref init node);
                 if (ManagedHeap.Collect() != 0) { return 2; }
                 if (pair.First != 40 || pair.Second != 2) { return 3; }
                 return status + node.Value;
@@ -780,27 +814,27 @@ internal sealed partial class JitTests
                 public Pair(int64 first, int64 second) { First = first; Second = second; }
             }
             int32 Copy<T, U>(T value, U second, bool complete, out T result,
-                init ref<U> initialized) where T : [Copy] where U : [Copy] {
+                ref<init U> initialized)   {
                 result = value;
-                initialized = second;
+                *initialized = second;
                 require complete;
                 return 7;
             }
-            int32 Fill(bool complete, out Pair result, init ref<write ManagedNode> initialized) {
+            int32 Fill(bool complete, out Pair result, ref<init write ManagedNode> initialized) {
                 require ManagedNode.TryCreate(42, out var created);
-                return Copy(new Pair(42, 2), created, complete, out result, init initialized);
+                return Copy(new Pair(42, 2), created, complete, out result, ref init *initialized);
             }
             int32 Main() {
                 mut Pair previous = new Pair(40, 2);
-                init write ManagedNode node;
+                init mut write ManagedNode node;
                 unsafe {
                     try {
-                        Fill(false, out previous, init node);
+                        Fill(false, out previous, ref init node);
                         return 1;
                     } catch {
-                        if (node is init) { return 2; }
+                        if (node is init) { node = _; }
                         if (ManagedHeap.Collect() != 1) { return 3; }
-                        int32 status = Fill(true, out previous, init node);
+                        int32 status = Fill(true, out previous, ref init node);
                         if (ManagedHeap.Collect() != 0 || previous.First != 42) { return 4; }
                         return status + node.Value;
                     }
@@ -816,16 +850,18 @@ internal sealed partial class JitTests
     {
         const string Source = """
              bool Fill<T>(T value, int32 number, bool publish, out T result,
-                init ref<int32> initialized) where T : [Copy] {
+                ref<init int32> initialized)  {
                 result = value;
-                initialized = number;
-                return publish;
+                if (!publish) { return false; }
+                *initialized = number;
+                return true;
             }
             int32 Main() {
                 require ManagedNode.TryCreate(40, out var value);
                 require ManagedNode.TryCreate(42, out var replacement);
-                if (Fill(value, 3, false, out var absent, init var number)) { return 1; }
-                require Fill(replacement, 5, true, out var result, init number);
+                init int32 number;
+                if (Fill(value, 3, false, out var absent, ref init number)) { return 1; }
+                require Fill(replacement, 5, true, out var result, ref init number);
                 return result.Value + number - 5;
             }
             """;
@@ -849,23 +885,23 @@ internal sealed partial class JitTests
                 public Pair(int64 first, int64 second) { First = first; Second = second; }
             }
             int32 Fill<T, U>(T value, U second, bool complete, out T result,
-                init ref<U> initialized) where T : [Copy] where U : [Copy] {
+                ref<init U> initialized)   {
                 result = value;
-                initialized = second;
+                *initialized = second;
                 require complete;
                 return 7;
             }
             int32 Main() {
                 mut Pair previous = new Pair(40, 2);
-                init int64 initialized;
+                init mut int64 initialized;
                 unsafe {
                     try {
-                        Fill(new Pair(42, 3), int64(4), false, out previous, init initialized);
+                        Fill(new Pair(42, 3), int64(4), false, out previous, ref init initialized);
                         return 1;
                     } catch {
-                        if (initialized is init) { return 2; }
+                        if (initialized is init) { initialized = _; }
                         int32 status = Fill<Pair, int64>(new Pair(42, 2), int64(5), true,
-                            out previous, init initialized);
+                            out previous, ref init initialized);
                         if (status != 7 || initialized != 5) { return 3; }
                         return int32(previous.First);
                     }
@@ -880,25 +916,25 @@ internal sealed partial class JitTests
     public Task GenericInitManagedOutputFailureRetiresTemporaryRootAsync()
     {
         const string Source = """
-            int32 Copy<T>(T value, bool complete, init ref<T> result) where T : [Copy] {
-                result = value;
+            int32 Copy<T>(T value, bool complete, ref<init T> result)  {
+                *result = value;
                 require complete;
                 return 7;
             }
-            int32 Fill(bool complete, init ref<write ManagedNode> result) {
+            int32 Fill(bool complete, ref<init write ManagedNode> result) {
                 require ManagedNode.TryCreate(42, out var created);
-                return Copy(created, complete, init result);
+                return Copy(created, complete, ref init *result);
             }
             int32 Main() {
-                init write ManagedNode node;
+                init mut write ManagedNode node;
                 unsafe {
                     try {
-                        Fill(false, init node);
+                        Fill(false, ref init node);
                         return 1;
                     } catch {
-                        if (node is init) { return 2; }
+                        if (node is init) { node = _; }
                         if (ManagedHeap.Collect() != 1) { return 3; }
-                        int32 status = Fill(true, init node);
+                        int32 status = Fill(true, ref init node);
                         if (ManagedHeap.Collect() != 0) { return 4; }
                         return status + node.Value;
                     }

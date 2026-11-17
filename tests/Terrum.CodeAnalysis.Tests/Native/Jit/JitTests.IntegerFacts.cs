@@ -62,8 +62,11 @@ internal sealed partial class JitTests
                     static require !CanNegateInt32(int32.MinValue);
                     static require !CanAbsoluteInt32(int32.MinValue);
                 """ + assertions + "\nreturn 42;\n}";
-            await AssertFailFastExecutionAsync(source, 42).ConfigureAwait(true);
-            await AssertCheckedExecutionAsync(source, 42).ConfigureAwait(true);
+            await AssertFailFastExecutionAsync(source, 42,
+                ConstEvalSelection()).ConfigureAwait(true);
+            await AssertCheckedExecutionAsync(source, 42,
+                ConstEvalSelection(checkedFailures: true))
+                .ConfigureAwait(true);
         }
     }
 
@@ -110,8 +113,11 @@ internal sealed partial class JitTests
                     static require !CanDivideUInt32(1, 0);
                     static require !CanRemainderUInt32(1, 0);
                 """ + assertions + "\nreturn 42;\n}";
-            await AssertFailFastExecutionAsync(source, 42).ConfigureAwait(true);
-            await AssertCheckedExecutionAsync(source, 42).ConfigureAwait(true);
+            await AssertFailFastExecutionAsync(source, 42,
+                ConstEvalSelection()).ConfigureAwait(true);
+            await AssertCheckedExecutionAsync(source, 42,
+                ConstEvalSelection(checkedFailures: true))
+                .ConfigureAwait(true);
         }
     }
 
@@ -211,8 +217,11 @@ internal sealed partial class JitTests
                 $"if ({check}) {{ return {index + 1}; }}"));
             var source = component + "\nint32 Main() {\n" + proofs + "\n"
                 + assertions + "\nreturn 42;\n}";
-            await AssertFailFastExecutionAsync(source, 42).ConfigureAwait(true);
-            await AssertCheckedExecutionAsync(source, 42).ConfigureAwait(true);
+            await AssertFailFastExecutionAsync(source, 42,
+                ConstEvalSelection()).ConfigureAwait(true);
+            await AssertCheckedExecutionAsync(source, 42,
+                ConstEvalSelection(checkedFailures: true))
+                .ConfigureAwait(true);
         }
     }
 }

@@ -141,7 +141,7 @@ internal sealed class NativeGraphJitTests
     }
 
     [Test]
-    public void Revision92RejectsNativeCallableCaptureDependencies()
+    public void NativeCallableCaptureDependenciesRoundTripThroughPrivateModules()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
             [param(output): Captures(nameof(value))]
@@ -158,9 +158,36 @@ internal sealed class NativeGraphJitTests
         Assert.That(function.DependencyContracts.Any(static dependency =>
             dependency.Relation == BoundDependencyRelation.Captures), Is.True);
 
-        var exception = Assert.Throws<ModuleContractException>(() =>
-            NativeModuleCompiler.CreateProducer(compilation.Program!,
-                ["FailWithPointer"], "GraphJitFailedOutputProvider", NativeRuntimePolicy.FailFast));
-        Assert.That(exception!.Message, Does.Contain("complete function-pointer invocation contracts"));
+        var producer = NativeModuleCompiler.CreateProducer(
+            compilation.Program!, ["FailWithPointer"],
+            "GraphJitFailedOutputProvider", NativeRuntimePolicy.FailFast);
+        var reference = NativeModuleCompiler.CreateReference(producer);
+        var persistedFunction = reference.Functions.Single(static candidate =>
+            candidate.Name == "FailWithPointer");
+        var capture = persistedFunction.DependencyContracts.Single();
+        Assert.That(capture.Relation,
+            Is.EqualTo(BoundDependencyRelation.Captures));
+        Assert.That(capture.Destination,
+            Is.EqualTo(BoundDependencyDestination.RetainedFormal));
+        Assert.That(capture.DestinationOrdinal, Is.EqualTo(0));
+        Assert.That(capture.Sources, Has.Length.EqualTo(1));
+        Assert.That(capture.Sources[0].Kind,
+            Is.EqualTo(BoundDependencySourceKind.Formal));
+        Assert.That(capture.Sources[0].FormalOrdinal, Is.EqualTo(1));
+
+        Assert.That(persistedFunction.NativeFunctionPointerType.HasValue,
+            Is.True);
+        var signature = reference.NativeFunctionPointerSignatures[
+            NativeFunctionPointerTypes.Index(
+                persistedFunction.NativeFunctionPointerType
+                    .GetValueOrDefault())];
+        Assert.That(signature.Dependencies, Has.Length.EqualTo(1));
+        var pointerDependency = signature.Dependencies[0];
+        Assert.That(pointerDependency.DestinationKind, Is.EqualTo(3));
+        Assert.That(pointerDependency.SourceKind, Is.EqualTo(1));
+        Assert.That(pointerDependency.Relationship, Is.EqualTo(3));
+        Assert.That(pointerDependency.Phase, Is.EqualTo(2));
+        Assert.That(pointerDependency.DestinationOrdinal, Is.Zero);
+        Assert.That(pointerDependency.SourceOrdinal, Is.EqualTo(1));
     }
 }

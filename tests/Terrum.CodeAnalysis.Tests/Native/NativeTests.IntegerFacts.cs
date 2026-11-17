@@ -12,6 +12,7 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Native;
 
@@ -207,7 +208,13 @@ internal sealed partial class NativeTests
 
     private static byte[] Emit(string source, BoundRuntimePolicy policy)
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse(source), policy);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            new CompilationOptions {
+                RuntimePolicy = policy,
+                CoreEvaluationFormIdentitySelection
+                    = CoreEvaluationFormTestHelpers.ConstEvalSelection(
+                        policy),
+            });
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         return NativeEmitter.Emit(((global::System.Func<BoundProgram>)(() => {
             var __nunitActual0 = compilation.Program;

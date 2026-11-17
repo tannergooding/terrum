@@ -49,7 +49,8 @@ internal sealed partial class JitTests
         var source = component + $$"""
 
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(20, out var workspace);
+                init OwnedInt32Buffer workspace;
+                require OwnedInt32Buffer.TryCreate(20, ref init workspace);
                 OwnedInt32Buffer maximum = {{format}}({{maximum}}, move workspace);
                 OwnedInt32Buffer digits = {{format}}({{value}}, move maximum);
                 if (digits.Count != {{expected.Length}} || digits.Capacity != 20) { return 1; }
@@ -71,7 +72,8 @@ internal sealed partial class JitTests
         const string Failure = """
 
             int32 Attempt() {
-                require OwnedInt32Buffer.TryCreate(19, out var workspace);
+                init OwnedInt32Buffer workspace;
+                require OwnedInt32Buffer.TryCreate(19, ref init workspace);
                 OwnedInt32Buffer digits = FormatUInt64(uint64.MaxValue, move workspace);
                 return digits.Count;
             }
@@ -111,7 +113,8 @@ internal sealed partial class JitTests
         var source = component + $$"""
 
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate({{capacity}}, out var workspace);
+                init OwnedInt32Buffer workspace;
+                require OwnedInt32Buffer.TryCreate({{capacity}}, ref init workspace);
                 OwnedInt32Buffer digits = {{format}}({{value}}, move workspace);
                 if (digits.Count != {{value.Length}} || digits.Capacity != {{capacity}}) { return 1; }
                 {{checks}}
@@ -135,7 +138,8 @@ internal sealed partial class JitTests
         var attempt = $$"""
 
             int32 Attempt() {
-                require OwnedInt32Buffer.TryCreate({{capacity}}, out var workspace);
+                init OwnedInt32Buffer workspace;
+                require OwnedInt32Buffer.TryCreate({{capacity}}, ref init workspace);
                 OwnedInt32Buffer digits = {{format}}({{value}}, move workspace);
                 return digits.Count;
             }
@@ -201,9 +205,11 @@ internal sealed partial class JitTests
         var source = component + $$"""
 
             int32 Main() {
-                require {{measure}}({{value}}, {{radix}}, init var capacity);
+                init int32 capacity;
+                require {{measure}}({{value}}, {{radix}}, ref init capacity);
                 if (capacity != {{expected.Length}}) { return 4; }
-                require OwnedInt32Buffer.TryCreate(capacity, out var workspace);
+                init OwnedInt32Buffer workspace;
+                require OwnedInt32Buffer.TryCreate(capacity, ref init workspace);
                 OwnedInt32Buffer digits = {{format}}({{value}}, {{radix}}, move workspace);
                 if (digits.Count != capacity || digits.Capacity != capacity) { return 1; }
                 {{checks}}
@@ -259,15 +265,20 @@ internal sealed partial class JitTests
         var source = component + $$"""
 
             int32 Main() {
-                if (TryGetChar16BaseLength(char16({{value}}), 1, init var bad)) { return 6; }
-                require TryGetChar16BaseLength(char16({{value}}), {{radix}}, init var capacity);
+                init int32 bad;
+                if (TryGetChar16BaseLength(char16({{value}}), 1, ref init bad)) { return 6; }
+                init int32 capacity;
+                require TryGetChar16BaseLength(char16({{value}}), {{radix}}, ref init capacity);
                 if (capacity != {{expected.Length}}) { return 1; }
-                require OwnedInt32Buffer.TryCreate(capacity, out var workspace);
+                init OwnedInt32Buffer workspace;
+                require OwnedInt32Buffer.TryCreate(capacity, ref init workspace);
                 OwnedInt32Buffer formatted = {{format}}(char16({{value}}), {{radix}}, move workspace);
                 if (formatted.Count != capacity || formatted.Capacity != capacity) { return 3; }
                 {{checks}}
-                require TryGetChar16BaseLength(char16({{value}}), 10, init var decimalLength);
-                require OwnedInt32Buffer.TryCreate(decimalLength, out var decimalWorkspace);
+                init int32 decimalLength;
+                require TryGetChar16BaseLength(char16({{value}}), 10, ref init decimalLength);
+                init OwnedInt32Buffer decimalWorkspace;
+                require OwnedInt32Buffer.TryCreate(decimalLength, ref init decimalWorkspace);
                 OwnedInt32Buffer decimalDigits = FormatChar16(char16({{value}}), move decimalWorkspace);
                 if (decimalLength != {{decimalText.Length}} || decimalDigits.Count != decimalLength
                     || decimalDigits.Capacity != decimalLength) { return 4; }
@@ -301,7 +312,8 @@ internal sealed partial class JitTests
         var attempt = $$"""
 
             int32 Attempt() {
-                require OwnedInt32Buffer.TryCreate({{capacity}}, out var workspace);
+                init OwnedInt32Buffer workspace;
+                require OwnedInt32Buffer.TryCreate({{capacity}}, ref init workspace);
                 OwnedInt32Buffer digits = {{format}}(char16.MaxValue, {{radix}}, move workspace);
                 return digits.Count;
             }
@@ -338,7 +350,8 @@ internal sealed partial class JitTests
         var attempt = $$"""
 
             int32 Attempt() {
-                require OwnedInt32Buffer.TryCreate({{capacity}}, out var workspace);
+                init OwnedInt32Buffer workspace;
+                require OwnedInt32Buffer.TryCreate({{capacity}}, ref init workspace);
                 OwnedInt32Buffer digits = {{format}}({{value}}, {{radix}}, move workspace);
                 return digits.Count;
             }

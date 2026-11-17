@@ -21,7 +21,8 @@ internal sealed partial class JitTests
         const string Source = """
             int32 Read(OwnedInt32Buffer buffer) => buffer.Read(0);
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(1, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(1, ref init raw);
                 mut OwnedInt32Buffer buffer = move raw;
                 require buffer.TryAppend(42);
                 return Read(move buffer);
@@ -37,7 +38,8 @@ internal sealed partial class JitTests
         const string Source = """
             int32 Read(OwnedInt32Buffer buffer) => buffer.Read(1);
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(1, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(1, ref init raw);
                 mut OwnedInt32Buffer buffer = move raw;
                 require buffer.TryAppend(10);
                 unsafe {

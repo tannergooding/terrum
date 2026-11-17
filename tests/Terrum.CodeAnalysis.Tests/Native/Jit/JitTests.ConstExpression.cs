@@ -12,7 +12,10 @@ internal sealed partial class JitTests
     public Task ExpressionRequirementPreservesRuntimeCallsAndConditionalOrderAsync(bool checkedFailures)
     {
         const string Source = """
-            [ConstEval] int32 Twice(int32 value) { return value + value; }
+            [ConstEval] int32 Twice(int32 value) {
+                if (value < -1073741824 || value > 1073741823) { return 0; }
+                return value + value;
+            }
             [ConstEval] bool Truth() { return true; }
             int32 Runtime(int32 value) { require value != 0; return value + 1; }
             bool Explode() { require false; return false; }
@@ -25,15 +28,20 @@ internal sealed partial class JitTests
             }
             """;
         return checkedFailures
-            ? AssertCheckedExecutionAsync(Source, 42)
-            : AssertFailFastExecutionAsync(Source, 42);
+                ? AssertCheckedExecutionAsync(Source, 42,
+                    ConstEvalSelection(checkedFailures))
+                : AssertFailFastExecutionAsync(Source, 42,
+                    ConstEvalSelection(checkedFailures));
     }
     [TestCase(false)]
     [TestCase(true)]
     public Task ParenthesizedRequirementAndNestedCallsExecuteAsync(bool checkedFailures)
     {
         const string Source = """
-            [ConstEval] int32 Next(int32 value) { return value + 1; }
+            [ConstEval] int32 Next(int32 value) {
+                if (value == int32.MaxValue) { return 0; }
+                return value + 1;
+            }
             int32 Main() {
                 int32 before = Next(const (Next(39) + 1));
                 if (const (Next(0) == 1)) {
@@ -43,7 +51,9 @@ internal sealed partial class JitTests
             }
             """;
         return checkedFailures
-            ? AssertCheckedExecutionAsync(Source, 42)
-            : AssertFailFastExecutionAsync(Source, 42);
+                ? AssertCheckedExecutionAsync(Source, 42,
+                    ConstEvalSelection(checkedFailures))
+                : AssertFailFastExecutionAsync(Source, 42,
+                    ConstEvalSelection(checkedFailures));
     }
 }

@@ -19,8 +19,9 @@ namespace Terrum.CodeAnalysis.Tests.Native.Ownership;
 internal sealed class NativeOwnedBufferTests
 {
     private const string BufferBuilder = """
-        public bool Make(int32 capacity, out OwnedInt32Buffer result) {
-            return OwnedInt32Buffer.TryCreate(capacity, out result);
+        public bool Make(int32 capacity,
+            ref<init OwnedInt32Buffer> result) {
+            return OwnedInt32Buffer.TryCreate(capacity, ref init *result);
         }
         public int32 ReadFirst(OwnedInt32Buffer value) {
             return value.Read(0);
@@ -73,7 +74,8 @@ internal sealed class NativeOwnedBufferTests
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(1, out var created);
+                init OwnedInt32Buffer created;
+                require OwnedInt32Buffer.TryCreate(1, ref init created);
                 mut OwnedInt32Buffer value = move created;
                 require value.TryAppend(42);
                 return value.Read(0);
@@ -86,6 +88,11 @@ internal sealed class NativeOwnedBufferTests
         }))();
         var code = NativeEmitter.EmitCode(program, (NativeRuntimePolicy)policy);
         var intrinsicCount = 0;
+        var createIntrinsic = global::System.Linq.Enumerable.Single(
+            program.Functions, static function =>
+                function.Intrinsic == BoundIntrinsic.BufferTryCreate);
+        Assert.That(createIntrinsic.Variables[1].IsInit, Is.True);
+        Assert.That(createIntrinsic.Variables[1].IsOut, Is.False);
         for (var index = 0; index < program.Functions.Length; index++)
         {
             if (program.Functions[index].Intrinsic == BoundIntrinsic.None)
@@ -111,7 +118,8 @@ internal sealed class NativeOwnedBufferTests
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(2, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(2, ref init raw);
                 mut OwnedInt32Buffer buffer = move raw;
                 require buffer.TryAppend(40);
                 {
@@ -154,15 +162,17 @@ internal sealed class NativeOwnedBufferTests
     public async Task BufferPrefixAndTransfersExecuteAsync(BoundRuntimePolicy policy)
     {
         const string Source = BufferBuilder + """
-            bool Forward(out OwnedInt32Buffer result) {
-                if (!Make(2, out var raw)) { return false; }
+            bool Forward(ref<init OwnedInt32Buffer> result) {
+                init OwnedInt32Buffer raw;
+                if (!Make(2, ref init raw)) { return false; }
                 mut OwnedInt32Buffer first = move raw;
                 if (!first.TryAppend(40) || !first.TryAppend(42) || first.TryAppend(99)) { return false; }
-                result = move first;
+                *result = move first;
                 return true;
             }
             int32 Main() {
-                if (!Forward(out var raw)) { return 0; }
+                init OwnedInt32Buffer raw;
+                if (!Forward(ref init raw)) { return 0; }
                 mut OwnedInt32Buffer value = move raw;
                 if (value.Capacity != 2 || value.Count != 2 || value.Read(0) != 40) { return 1; }
                 value.Set(1, value.Read(1));
@@ -178,10 +188,13 @@ internal sealed class NativeOwnedBufferTests
     {
         const string Source = """
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(2, out var created);
+                init OwnedInt32Buffer created;
+                require OwnedInt32Buffer.TryCreate(2, ref init created);
                 mut OwnedInt32Buffer buffer = move created;
                 require buffer.TryAppend(1);
-                require OwnedInt32Buffer.TryCreate(1, out buffer);
+                init OwnedInt32Buffer replacement;
+                require OwnedInt32Buffer.TryCreate(1, ref init replacement);
+                buffer = move replacement;
                 require buffer.TryAppend(42);
                 return buffer.Read(0);
             }
@@ -194,7 +207,8 @@ internal sealed class NativeOwnedBufferTests
     {
         const string Source = """
             int32 Main() {
-                if (!OwnedInt32Buffer.TryCreate(3, out var raw)) { return 1; }
+                init OwnedInt32Buffer raw;
+                if (!OwnedInt32Buffer.TryCreate(3, ref init raw)) { return 1; }
                 mut OwnedInt32Buffer words = move raw;
                 for (mut int32 i = 0; i < 3; i = i + 1) {
                     char16 character = Host.Source[i];
@@ -218,14 +232,18 @@ internal sealed class NativeOwnedBufferTests
         var source = """
             int32 Steal(OwnedInt32Buffer item) { return item.Count; }
             bool Replace(out OwnedInt32Buffer item) {
-                return OwnedInt32Buffer.TryCreate(1, out item);
+                init OwnedInt32Buffer created;
+                if (!OwnedInt32Buffer.TryCreate(1, ref init created)) { return false; }
+                item = move created;
+                return true;
             }
             int32 Observe(bool result) {
                 if (result) { return 1; }
                 return 0;
             }
             int32 Main() {
-                if (!OwnedInt32Buffer.TryCreate(1, out var raw)) { return 0; }
+                init OwnedInt32Buffer raw;
+                if (!OwnedInt32Buffer.TryCreate(1, ref init raw)) { return 0; }
                 mut OwnedInt32Buffer value = move raw;
             """ + body + """
                 return 0;
@@ -242,14 +260,21 @@ internal sealed class NativeOwnedBufferTests
     {
         var source = $$"""
             bool Replace(out OwnedInt32Buffer item) {
-                return OwnedInt32Buffer.TryCreate(1, out item);
+                init OwnedInt32Buffer created;
+                if (!OwnedInt32Buffer.TryCreate(1, ref init created)) { return false; }
+                item = move created;
+                return true;
             }
             bool ReplaceMoved(OwnedInt32Buffer previous, out OwnedInt32Buffer item) {
-                return OwnedInt32Buffer.TryCreate(1, out item);
+                init OwnedInt32Buffer created;
+                if (!OwnedInt32Buffer.TryCreate(1, ref init created)) { return false; }
+                item = move created;
+                return true;
             }
             int32 Observe(bool result) { if (result) { return 0; } return 0; }
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(2, out var created);
+                init OwnedInt32Buffer created;
+                require OwnedInt32Buffer.TryCreate(2, ref init created);
                 mut OwnedInt32Buffer value = move created;
                 require value.TryAppend(40);
                 return {{expression}};
@@ -270,7 +295,8 @@ internal sealed class NativeOwnedBufferTests
                 return count - 1;
             }
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(1, out var created);
+                init OwnedInt32Buffer created;
+                require OwnedInt32Buffer.TryCreate(1, ref init created);
                 mut OwnedInt32Buffer value = move created;
                 require value.TryAppend(41);
                 int32 result = value.Read(Index(value.Count));
@@ -296,10 +322,12 @@ internal sealed class NativeOwnedBufferTests
             bool Consume(OwnedInt32Buffer item) { return item.Count == 0; }
             int32 Observe(bool result) { if (result) { return 0; } return 0; }
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(1, out var first);
+                init OwnedInt32Buffer first;
+                require OwnedInt32Buffer.TryCreate(1, ref init first);
                 mut OwnedInt32Buffer value = move first;
                 require value.TryAppend(42);
-                require OwnedInt32Buffer.TryCreate(1, out var second);
+                init OwnedInt32Buffer second;
+                require OwnedInt32Buffer.TryCreate(1, ref init second);
                 mut OwnedInt32Buffer other = move second;
                 return {{expression}};
             }
@@ -313,7 +341,8 @@ internal sealed class NativeOwnedBufferTests
         const string Source = """
             bool Consume(OwnedInt32Buffer item) { return item.Read(0) == 42; }
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(1, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(1, ref init raw);
                 mut OwnedInt32Buffer value = move raw;
                 require value.TryAppend(42);
                 if (false && Consume(move value)) { return 1; }
@@ -331,7 +360,8 @@ internal sealed class NativeOwnedBufferTests
         const string Source = """
             bool Consume(OwnedInt32Buffer item) { return item.Count == 0; }
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(1, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(1, ref init raw);
                 mut OwnedInt32Buffer value = move raw;
                 if (Consume(move value)) { return value.Read(0); }
                 return 0;
@@ -363,7 +393,7 @@ internal sealed class NativeOwnedBufferTests
     }
 
     [TestCase("int32 Get(OwnedInt32Buffer value) { return value.Read(0); }", "Get")]
-    [TestCase("bool Make(out OwnedInt32Buffer value) { return OwnedInt32Buffer.TryCreate(1, out value); }", "Make")]
+    [TestCase("bool Make(ref<init OwnedInt32Buffer> value) { return OwnedInt32Buffer.TryCreate(1, ref init *value); }", "Make")]
     public void NativeBufferOperationsCannotForgeNoThrow(string declaration, string functionName)
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(declaration));
@@ -380,7 +410,8 @@ internal sealed class NativeOwnedBufferTests
                 public OwnedInt32Buffer Words;
                 public int32 Tail;
                 public Record() {
-                    require OwnedInt32Buffer.TryCreate(1, out var created);
+                    init OwnedInt32Buffer created;
+                    require OwnedInt32Buffer.TryCreate(1, ref init created);
                     mut OwnedInt32Buffer words = move created;
                     require words.TryAppend(40);
                     Words = move words;
@@ -402,7 +433,8 @@ internal sealed class NativeOwnedBufferTests
     {
         const string Source = """
             int32 Main() {
-                if (!OwnedInt32Buffer.TryCreate(1, out var value)) { return 0; }
+                init OwnedInt32Buffer value;
+                if (!OwnedInt32Buffer.TryCreate(1, ref init value)) { return 0; }
                 return value.Read(0);
             }
             """;
@@ -414,7 +446,8 @@ internal sealed class NativeOwnedBufferTests
     {
         var result = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {
-                if (!OwnedInt32Buffer.TryCreate(1, out var raw)) { return 0; }
+                init OwnedInt32Buffer raw;
+                if (!OwnedInt32Buffer.TryCreate(1, ref init raw)) { return 0; }
                 mut OwnedInt32Buffer value = move raw;
                 value.TryAppend(42);
                 return value.Read(0);
@@ -448,7 +481,8 @@ internal sealed class NativeOwnedBufferTests
         Assert.That(ModuleCompiler.GetNativeProfileVersion(producer, false), Is.EqualTo("native-15"));
         var client = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {
-                if (!Make(1, out var raw)) { return 0; }
+                init OwnedInt32Buffer raw;
+                if (!Make(1, ref init raw)) { return 0; }
                 mut OwnedInt32Buffer value = move raw;
                 if (!value.TryAppend(42)) { return 1; }
                 return ReadFirst(move value);

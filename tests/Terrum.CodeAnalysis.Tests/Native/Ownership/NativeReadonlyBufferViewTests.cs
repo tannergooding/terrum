@@ -21,7 +21,8 @@ internal sealed class NativeReadonlyBufferViewTests
 {
     private const string Buffer = """
         int32 Main() {
-            require OwnedInt32Buffer.TryCreate(3, out var raw);
+            init OwnedInt32Buffer raw;
+            require OwnedInt32Buffer.TryCreate(3, ref init raw);
             mut OwnedInt32Buffer buffer = move raw;
             require buffer.TryAppend(40);
             require buffer.TryAppend(41);
@@ -29,13 +30,20 @@ internal sealed class NativeReadonlyBufferViewTests
         """;
 
     private const string ForeignViewIndex = """
-        bool Replace(out OwnedInt32Buffer value) { return OwnedInt32Buffer.TryCreate(1, out value); }
+        bool Replace(out OwnedInt32Buffer value) {
+            init OwnedInt32Buffer created;
+            if (!OwnedInt32Buffer.TryCreate(1, ref init created)) { return false; }
+            value = move created;
+            return true;
+        }
         int32 Observe(bool value) { return 0; }
         int32 Main() {
-            require OwnedInt32Buffer.TryCreate(1, out var rawA);
+            init OwnedInt32Buffer rawA;
+            require OwnedInt32Buffer.TryCreate(1, ref init rawA);
             mut OwnedInt32Buffer ownerA = move rawA;
             require ownerA.TryAppend(41);
-            require OwnedInt32Buffer.TryCreate(1, out var rawB);
+            init OwnedInt32Buffer rawB;
+            require OwnedInt32Buffer.TryCreate(1, ref init rawB);
             mut OwnedInt32Buffer ownerB = move rawB;
             require ownerB.TryAppend(0);
             ReadonlyInt32BufferView viewB = ownerB.Slice(0, 1);
@@ -130,7 +138,8 @@ internal sealed class NativeReadonlyBufferViewTests
         }))(), ["Read"]);
         var client = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(2, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(2, ref init raw);
                 mut OwnedInt32Buffer value = move raw;
                 require value.TryAppend(20);
                 require value.TryAppend(22);
@@ -163,7 +172,8 @@ internal sealed class NativeReadonlyBufferViewTests
         }))(), ["Read"]);
         var client = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(2, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(2, ref init raw);
                 mut OwnedInt32Buffer value = move raw;
                 require value.TryAppend(20);
                 require value.TryAppend(22);
@@ -196,7 +206,8 @@ internal sealed class NativeReadonlyBufferViewTests
         }))(), ["Read"]);
         var client = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(5, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(5, ref init raw);
                 mut OwnedInt32Buffer value = move raw;
                 require value.TryAppend(10);
                 require value.TryAppend(20);
@@ -222,7 +233,8 @@ internal sealed class NativeReadonlyBufferViewTests
             int32 Start() { Host.Trace[0] = Host.Trace[0] + 1; return 1; }
             int32 End() { Host.Trace[1] = Host.Trace[0] + Host.Trace[1]; return 3; }
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(3, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(3, ref init raw);
                 mut OwnedInt32Buffer buffer = move raw;
                 require buffer.TryAppend(10);
                 require buffer.TryAppend(20);
@@ -247,7 +259,8 @@ internal sealed class NativeReadonlyBufferViewTests
         const string Source = """
             int32 Start() { return 1; }
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(2, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(2, ref init raw);
                 mut OwnedInt32Buffer buffer = move raw;
                 require buffer.TryAppend(20);
                 require buffer.TryAppend(22);
@@ -271,7 +284,8 @@ internal sealed class NativeReadonlyBufferViewTests
             int32 StartOffset() { Host.Trace[0] = Host.Trace[0] + 1; return 3; }
             int32 EndOffset() { Host.Trace[1] = Host.Trace[0] + Host.Trace[1]; return 1; }
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(5, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(5, ref init raw);
                 mut OwnedInt32Buffer buffer = move raw;
                 require buffer.TryAppend(10);
                 require buffer.TryAppend(20);
@@ -300,7 +314,8 @@ internal sealed class NativeReadonlyBufferViewTests
             int32 Start() { return {{start}}; }
             int32 End() { return {{end}}; }
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(1, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(1, ref init raw);
                 mut OwnedInt32Buffer buffer = move raw;
                 require buffer.TryAppend(42);
                 ReadonlyInt32BufferView view = buffer[Start()..End()];
@@ -319,7 +334,8 @@ internal sealed class NativeReadonlyBufferViewTests
             int32 Start() { return {{startOffset}}; }
             int32 End() { return {{endOffset}}; }
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(5, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(5, ref init raw);
                 mut OwnedInt32Buffer buffer = move raw;
                 require buffer.TryAppend(10);
                 require buffer.TryAppend(20);
@@ -432,7 +448,8 @@ internal sealed class NativeReadonlyBufferViewTests
             int32 Start() { Host.Trace[0] = Host.Trace[0] + 1; return 0; }
             int32 Length() { Host.Trace[1] = Host.Trace[0] + Host.Trace[1]; return 1; }
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(1, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(1, ref init raw);
                 mut OwnedInt32Buffer buffer = move raw;
                 require buffer.TryAppend(40);
                 ReadonlyInt32BufferView view = buffer.Slice(Start(), Length());
@@ -454,10 +471,12 @@ internal sealed class NativeReadonlyBufferViewTests
     {
         const string Source = """
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(1, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(1, ref init raw);
                 mut OwnedInt32Buffer owner = move raw;
                 require owner.TryAppend(40);
-                require OwnedInt32Buffer.TryCreate(1, out var otherRaw);
+                init OwnedInt32Buffer otherRaw;
+                require OwnedInt32Buffer.TryCreate(1, ref init otherRaw);
                 mut OwnedInt32Buffer other = move otherRaw;
                 require other.TryAppend(1);
                 ReadonlyInt32BufferView view = owner.Slice(0, 1);
@@ -482,7 +501,8 @@ internal sealed class NativeReadonlyBufferViewTests
                 }
             }
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(2, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(2, ref init raw);
                 mut OwnedInt32Buffer words = move raw;
                 require words.TryAppend(20);
                 require words.TryAppend(22);
@@ -593,7 +613,8 @@ internal sealed class NativeReadonlyBufferViewTests
     {
         var source = $$"""
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(4, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(4, ref init raw);
                 mut OwnedInt32Buffer buffer = move raw;
                 require buffer.TryAppend(42);
                 ReadonlyInt32BufferView view = {{range}};
@@ -608,7 +629,8 @@ internal sealed class NativeReadonlyBufferViewTests
     {
         var mutableView = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(1, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(1, ref init raw);
                 mut OwnedInt32Buffer owner = move raw;
                 mut MutableInt32BufferView view = owner[..];
                 return view.Length;
@@ -619,7 +641,8 @@ internal sealed class NativeReadonlyBufferViewTests
 
         var mutation = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(1, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(1, ref init raw);
                 mut OwnedInt32Buffer owner = move raw;
                 ReadonlyInt32BufferView view = owner[..];
                 owner.Set(0, 42);
@@ -653,7 +676,8 @@ internal sealed class NativeReadonlyBufferViewTests
     {
         const string Source = """
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(1, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(1, ref init raw);
                 OwnedInt32Buffer owner = move raw;
                 unsafe {
                     try {
@@ -672,7 +696,8 @@ internal sealed class NativeReadonlyBufferViewTests
     {
         const string Source = """
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(1, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(1, ref init raw);
                 OwnedInt32Buffer owner = move raw;
                 unsafe {
                     try {
@@ -686,7 +711,7 @@ internal sealed class NativeReadonlyBufferViewTests
         Assert.That(await RunAsync(Source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true), Is.EqualTo(42));
     }
     [TestCase("OwnedInt32Buffer consumed = move buffer;")]
-    [TestCase("OwnedInt32Buffer.TryCreate(1, out buffer);")]
+    [TestCase("init OwnedInt32Buffer replacement; require OwnedInt32Buffer.TryCreate(1, ref init replacement); buffer = move replacement;")]
     [TestCase("buffer.Set(0, 42);")]
     [TestCase("buffer.TryAppend(42);")]
     [TestCase("if (false) { buffer.Set(0, 42); }")]
@@ -767,7 +792,8 @@ internal sealed class NativeReadonlyBufferViewTests
                 return view.Read(0);
             }
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(1, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(1, ref init raw);
                 mut OwnedInt32Buffer value = move raw;
                 require value.TryAppend(42);
                 return Read(move value);
@@ -865,7 +891,8 @@ internal sealed class NativeReadonlyBufferViewTests
         Assert.That(ModuleCompiler.GetNativeProfileVersion(producer, false), Is.EqualTo("native-16"));
         var client = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(1, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(1, ref init raw);
                 mut OwnedInt32Buffer value = move raw;
                 require value.TryAppend(42);
                 {

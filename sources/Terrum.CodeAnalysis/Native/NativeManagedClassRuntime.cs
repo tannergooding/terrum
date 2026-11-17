@@ -60,7 +60,14 @@ internal sealed partial class PeCompiler
                     {
                         _ = referencedFunctions.Add(call.Function);
                     }
-                }))
+                })
+                || !BoundTreeTraversal.VisitContractExpressions(function,
+                    expression => {
+                        if (expression is BoundCall call)
+                        {
+                            _ = referencedFunctions.Add(call.Function);
+                        }
+                    }))
             {
                 throw new NotSupportedException(
                     "The selected normal-backing runtime requires a complete source-bound function body.");
@@ -98,12 +105,15 @@ internal sealed partial class PeCompiler
                 throw new NotSupportedException(
                     $"The selected normal-backing runtime does not support intrinsic function '{function.Name}'.");
             }
-            if (IsNormalBackingHandle(function.ReturnType))
+            if (IsNormalBackingHandle(function.ReturnType)
+                && !IsUniqueNormalBackingHandle(function.ReturnType,
+                    program))
             {
                 throw new NotSupportedException(
-                    $"The selected normal-backing runtime does not support handle results from '{function.Name}'.");
+                    $"The selected normal-backing runtime does not support aliasable or unknown handle results from '{function.Name}'.");
             }
             if (function.ReturnType != PrimitiveType.Void
+                && !IsNormalBackingHandle(function.ReturnType)
                 && !IsNormalBackingRuntimeValue(function.ReturnType, program, []))
             {
                 throw new NotSupportedException(
@@ -115,7 +125,8 @@ internal sealed partial class PeCompiler
                 var variable = function.Variables[variableIndex];
                 var isReference = CheckedReferenceTypes.IsType(variable.Type);
                 var containsReference = ContainsNormalBackingReferenceValue(variable.Type, program);
-                if (containsReference && variable.IsOut)
+                if (containsReference && variable.IsOut
+                    && !IsNormalBackingHandle(variable.Type))
                 {
                     throw new NotSupportedException(
                         "The selected normal-backing runtime does not support reference-bearing output parameters.");
@@ -123,7 +134,11 @@ internal sealed partial class PeCompiler
                 if ((!IsNormalBackingHandle(variable.Type)
                         && !IsNormalBackingRuntimeValue(variable.Type, program, [])
                         && !IsNormalBackingLocalReference(variable.Type, program))
-                    || (variable.IsOut && (IsNormalBackingHandle(variable.Type) || isReference)
+                    || (variable.IsOut
+                        && ((IsNormalBackingHandle(variable.Type)
+                                && !IsUniqueNormalBackingHandle(
+                                    variable.Type, program))
+                            || isReference)
                         && function.Intrinsic != BoundIntrinsic.ClassTryCreate))
                 {
                     throw new NotSupportedException(
@@ -144,9 +159,13 @@ internal sealed partial class PeCompiler
                         var argument = call.Arguments[index];
                         var isReceiver = (argument is BoundReceiverLoan or BoundMutableReceiverLoan)
                             || (index == 0 && !target.IsStatic && argument is BoundRead);
-                        if ((IsNormalBackingHandle(argument.Type)
-                                || (ContainsNormalBackingReferenceValue(argument.Type, program)
-                                    && argument is BoundOutArgument))
+                        if (((IsNormalBackingHandle(argument.Type)
+                                && !IsUniqueNormalBackingHandle(
+                                    argument.Type, program))
+                                || (ContainsNormalBackingReferenceValue(
+                                        argument.Type, program)
+                                    && argument is BoundOutArgument
+                                    && !IsNormalBackingHandle(argument.Type)))
                             && !isReceiver
                             && !(target.Intrinsic == BoundIntrinsic.ClassTryCreate
                                 && argument is BoundOutArgument))
@@ -155,7 +174,42 @@ internal sealed partial class PeCompiler
                         }
                     }
                 });
-            if (!expressionsVisited)
+            var contractExpressionsVisited
+                = BoundTreeTraversal.VisitContractExpressions(function,
+                    expression => {
+                        if (expression is not BoundCall call)
+                        {
+                            return;
+                        }
+                        var target = program.Functions[call.Function];
+                        for (var index = 0; index < call.Arguments.Length;
+                            index++)
+                        {
+                            var argument = call.Arguments[index];
+                            var isReceiver =
+                                (argument is BoundReceiverLoan
+                                    or BoundMutableReceiverLoan)
+                                || (index == 0 && !target.IsStatic
+                                    && argument is BoundRead);
+                            if (((IsNormalBackingHandle(argument.Type)
+                                    && !IsUniqueNormalBackingHandle(
+                                        argument.Type, program))
+                                    || (ContainsNormalBackingReferenceValue(
+                                            argument.Type, program)
+                                        && argument is BoundOutArgument
+                                        && !IsNormalBackingHandle(
+                                            argument.Type)))
+                                && !isReceiver
+                                && !(target.Intrinsic
+                                        == BoundIntrinsic.ClassTryCreate
+                                    && argument is BoundOutArgument))
+                            {
+                                unsupportedHandleCall
+                                    = $"{target.Name}({argument.GetType().Name}:{argument.Type})";
+                            }
+                        }
+                    });
+            if (!expressionsVisited || !contractExpressionsVisited)
             {
                 throw new NotSupportedException(
                     "The selected normal-backing runtime requires a complete bound-expression traversal.");
@@ -248,7 +302,7 @@ internal sealed partial class PeCompiler
         }
         return ValueLayout.Size(type, program.Structures, program.CheckedReferenceTypes,
             program.NativeLoweringAgreement,
-            program.NativeFixedArrayTypes) > 0;
+            program.NativeFixedArrayTypes, program.EnumDefinitions) > 0;
     }
 
     private static bool IsNormalBackingRuntimeValue(BoundStruct structure, BoundProgram program,
@@ -272,7 +326,8 @@ internal sealed partial class PeCompiler
         if (!CheckedReferenceTypeContract.IsValidType(type, program.CheckedReferenceTypes)
             || !CheckedReferenceTypeContract.IsSupportedReferenceStoreValueType(
                 type, program.Structures, program.Classes,
-                program.EnumDefinitions.Length, program.CheckedReferenceTypes))
+                program.EnumDefinitions.Length, program.CheckedReferenceTypes,
+                program.NativePointerTypes))
         {
             return false;
         }
@@ -369,6 +424,19 @@ internal sealed partial class PeCompiler
         ManagedClassTypes.IsClass(type)
         || (ManagedClassTypes.IsOptional(type)
             && ManagedClassTypes.IsClass(ManagedClassTypes.Required(type)));
+
+    private static bool IsUniqueNormalBackingHandle(PrimitiveType type,
+        BoundProgram program)
+    {
+        if (!IsNormalBackingHandle(type))
+        {
+            return false;
+        }
+
+        var classIndex = ManagedClassTypes.ClassIndex(type);
+        return (uint)classIndex < (uint)program.Classes.Length
+            && program.Classes[classIndex].IsUnique == true;
+    }
 
     private static bool IsNormalBackingLocalReference(PrimitiveType type, BoundProgram program)
         => IsNormalBackingStoredReference(type, program, [], []);

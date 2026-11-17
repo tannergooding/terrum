@@ -63,7 +63,8 @@ internal static class NativePointerTypeContract
         ImmutableArray<NativeFunctionPointerSignatureDefinition> functionPointers,
         ImmutableArray<BoundNativeFixedArrayType> fixedArrays = default,
         ImmutableArray<CheckedReferenceTypeDefinition>
-            checkedReferenceTypes = default)
+            checkedReferenceTypes = default,
+        IReadOnlyList<BoundEnumDefinition>? enumDefinitions = null)
     {
         var completeReferenceTypes = checkedReferenceTypes.IsDefault
             ? []
@@ -71,15 +72,15 @@ internal static class NativePointerTypeContract
         if (pointerTypes.IsDefault || structures.IsDefault || functionPointers.IsDefault
             || pointerTypes.Length > SemanticVerifier.MaximumAnalysisVisits
             || !CheckedReferenceTypeContract.IsValidTable(
-                completeReferenceTypes)
+                completeReferenceTypes, pointerTypes)
             || !NativeFunctionPointerContract.IsValidTable(functionPointers,
                 type => DirectNativeImportContract.IsInputPointee(type,
-                    structures))
+                    structures), enumDefinitions)
             || !NativeFunctionPointerContract.IsValidNativeImportContractTable(
-                functionPointers, pointerTypes, structures)
+                functionPointers, pointerTypes, structures, enumDefinitions)
             || (!fixedArrays.IsDefault
                 && !NativeFixedArrayContract.IsValidTable(structures,
-                    fixedArrays, completeReferenceTypes)))
+                    fixedArrays, completeReferenceTypes, enumDefinitions)))
         {
             return false;
         }
@@ -94,7 +95,8 @@ internal static class NativePointerTypeContract
             if (!IsValidFixedArray(index, pointerTypes, structures,
                     functionPointers, fixedArrays, pointerStates,
                     functionPointerStates, arrayStates,
-                    completeReferenceTypes, optionalValueStates, 0))
+                    completeReferenceTypes, optionalValueStates,
+                    enumDefinitions, 0))
             {
                 return false;
             }
@@ -103,7 +105,8 @@ internal static class NativePointerTypeContract
         {
             if (!IsValidPointer(index, pointerTypes, structures, functionPointers,
                 fixedArrays, pointerStates, functionPointerStates, arrayStates,
-                completeReferenceTypes, optionalValueStates, 0))
+                completeReferenceTypes, optionalValueStates,
+                enumDefinitions, 0))
             {
                 return false;
             }
@@ -113,7 +116,8 @@ internal static class NativePointerTypeContract
         {
             if (!IsValidFunctionPointer(index, pointerTypes, structures, functionPointers,
                 fixedArrays, pointerStates, functionPointerStates, arrayStates,
-                completeReferenceTypes, optionalValueStates, 0))
+                completeReferenceTypes, optionalValueStates,
+                enumDefinitions, 0))
             {
                 return false;
             }
@@ -136,7 +140,8 @@ internal static class NativePointerTypeContract
         byte[] arrayStates,
         ImmutableArray<CheckedReferenceTypeDefinition>
             checkedReferenceTypes,
-        byte[] optionalValueStates, int depth)
+        byte[] optionalValueStates,
+        IReadOnlyList<BoundEnumDefinition>? enumDefinitions, int depth)
     {
         if ((uint)index >= (uint)pointerTypes.Length || depth > SemanticVerifier.MaximumDepth
             || pointerStates[index] == 1)
@@ -160,7 +165,8 @@ internal static class NativePointerTypeContract
         pointerStates[index] = 1;
         if (!IsValidPointee(pointerType.PointeeType, pointerTypes, structures, functionPointers,
             fixedArrays, pointerStates, functionPointerStates, arrayStates,
-            checkedReferenceTypes, optionalValueStates, depth + 1))
+            checkedReferenceTypes, optionalValueStates, enumDefinitions,
+            depth + 1))
         {
             return false;
         }
@@ -177,7 +183,8 @@ internal static class NativePointerTypeContract
         byte[] arrayStates,
         ImmutableArray<CheckedReferenceTypeDefinition>
             checkedReferenceTypes,
-        byte[] optionalValueStates, int depth)
+        byte[] optionalValueStates,
+        IReadOnlyList<BoundEnumDefinition>? enumDefinitions, int depth)
     {
         if ((uint)index >= (uint)functionPointers.Length || depth > SemanticVerifier.MaximumDepth
             || functionPointerStates[index] == 1)
@@ -199,7 +206,7 @@ internal static class NativePointerTypeContract
             && !IsValidFunctionPointerValue(signature.ReturnType, pointerTypes, structures,
                 functionPointers, fixedArrays, pointerStates,
                 functionPointerStates, arrayStates, checkedReferenceTypes,
-                optionalValueStates, depth + 1))
+                optionalValueStates, enumDefinitions, depth + 1))
         {
             return false;
         }
@@ -208,7 +215,7 @@ internal static class NativePointerTypeContract
             if (!IsValidFunctionPointerValue(parameterType, pointerTypes, structures, functionPointers,
                 fixedArrays, pointerStates, functionPointerStates,
                 arrayStates, checkedReferenceTypes, optionalValueStates,
-                depth + 1))
+                enumDefinitions, depth + 1))
             {
                 return false;
             }
@@ -226,7 +233,8 @@ internal static class NativePointerTypeContract
         byte[] arrayStates,
         ImmutableArray<CheckedReferenceTypeDefinition>
             checkedReferenceTypes,
-        byte[] optionalValueStates, int depth)
+        byte[] optionalValueStates,
+        IReadOnlyList<BoundEnumDefinition>? enumDefinitions, int depth)
     {
         if (type == PrimitiveType.Void)
         {
@@ -237,28 +245,30 @@ internal static class NativePointerTypeContract
             return IsValidPointer(NativePointerTypes.Index(type), pointerTypes, structures,
                 functionPointers, fixedArrays, pointerStates,
                 functionPointerStates, arrayStates, checkedReferenceTypes,
-                optionalValueStates, depth + 1);
+                optionalValueStates, enumDefinitions, depth + 1);
         }
         if (NativeFunctionPointerTypes.IsType(type))
         {
             return IsValidFunctionPointer(NativeFunctionPointerTypes.Index(type), pointerTypes,
                 structures, functionPointers, fixedArrays, pointerStates,
                 functionPointerStates, arrayStates, checkedReferenceTypes,
-                optionalValueStates, depth + 1);
+                optionalValueStates, enumDefinitions, depth + 1);
         }
         if (NativeFixedArrayTypes.IsType(type))
         {
             return IsValidFixedArray(NativeFixedArrayTypes.Index(type),
                 pointerTypes, structures, functionPointers, fixedArrays,
                 pointerStates, functionPointerStates, arrayStates,
-                checkedReferenceTypes, optionalValueStates, depth + 1);
+                checkedReferenceTypes, optionalValueStates, enumDefinitions,
+                depth + 1);
         }
         if (CheckedReferenceTypes.IsType(type))
         {
             return IsValidOptionalValue(CheckedReferenceTypes.Index(type),
                 pointerTypes, structures, functionPointers, fixedArrays,
                 pointerStates, functionPointerStates, arrayStates,
-                checkedReferenceTypes, optionalValueStates, depth + 1);
+                checkedReferenceTypes, optionalValueStates, enumDefinitions,
+                depth + 1);
         }
         if (BoundEnumTypes.IsType(type))
         {
@@ -283,7 +293,8 @@ internal static class NativePointerTypeContract
         byte[] arrayStates,
         ImmutableArray<CheckedReferenceTypeDefinition>
             checkedReferenceTypes,
-        byte[] optionalValueStates, int depth)
+        byte[] optionalValueStates,
+        IReadOnlyList<BoundEnumDefinition>? enumDefinitions, int depth)
     {
         if ((uint)index >= (uint)checkedReferenceTypes.Length
             || depth > SemanticVerifier.MaximumDepth
@@ -304,7 +315,7 @@ internal static class NativePointerTypeContract
                 fixedArrays.IsDefault
                     ? []
                     : fixedArrays,
-                out _))
+                out _, enumDefinitions))
         {
             return false;
         }
@@ -314,7 +325,7 @@ internal static class NativePointerTypeContract
         if (!IsValidPointee(payloadType, pointerTypes, structures,
                 functionPointers, fixedArrays, pointerStates,
                 functionPointerStates, arrayStates, checkedReferenceTypes,
-                optionalValueStates, depth + 1))
+                optionalValueStates, enumDefinitions, depth + 1))
         {
             return false;
         }
@@ -331,7 +342,8 @@ internal static class NativePointerTypeContract
         byte[] arrayStates,
         ImmutableArray<CheckedReferenceTypeDefinition>
             checkedReferenceTypes,
-        byte[] optionalValueStates, int depth)
+        byte[] optionalValueStates,
+        IReadOnlyList<BoundEnumDefinition>? enumDefinitions, int depth)
     {
         if (fixedArrays.IsDefault || (uint)index >= (uint)fixedArrays.Length
             || depth > SemanticVerifier.MaximumDepth
@@ -348,7 +360,7 @@ internal static class NativePointerTypeContract
         if (!IsValidPointee(fixedArrays[index].ElementType, pointerTypes,
                 structures, functionPointers, fixedArrays, pointerStates,
                 functionPointerStates, arrayStates, checkedReferenceTypes,
-                optionalValueStates, depth + 1))
+                optionalValueStates, enumDefinitions, depth + 1))
         {
             return false;
         }
@@ -365,21 +377,22 @@ internal static class NativePointerTypeContract
         byte[] arrayStates,
         ImmutableArray<CheckedReferenceTypeDefinition>
             checkedReferenceTypes,
-        byte[] optionalValueStates, int depth)
+        byte[] optionalValueStates,
+        IReadOnlyList<BoundEnumDefinition>? enumDefinitions, int depth)
     {
         if (NativePointerTypes.IsType(type))
         {
             return IsValidPointer(NativePointerTypes.Index(type), pointerTypes, structures,
                 functionPointers, fixedArrays, pointerStates,
                 functionPointerStates, arrayStates, checkedReferenceTypes,
-                optionalValueStates, depth + 1);
+                optionalValueStates, enumDefinitions, depth + 1);
         }
         if (NativeFunctionPointerTypes.IsType(type))
         {
             return IsValidFunctionPointer(NativeFunctionPointerTypes.Index(type), pointerTypes,
                 structures, functionPointers, fixedArrays, pointerStates,
                 functionPointerStates, arrayStates, checkedReferenceTypes,
-                optionalValueStates, depth + 1);
+                optionalValueStates, enumDefinitions, depth + 1);
         }
         return IsSupportedFunctionPointerScalar(type);
     }
@@ -387,16 +400,20 @@ internal static class NativePointerTypeContract
     private static bool IsSupportedScalar(PrimitiveType type) =>
         type is PrimitiveType.Bool or PrimitiveType.Char8 or PrimitiveType.Char16 or PrimitiveType.Char32
             or PrimitiveType.Rune or PrimitiveType.Int8 or PrimitiveType.Int16 or PrimitiveType.Int32
-            or PrimitiveType.Int64 or PrimitiveType.UInt8 or PrimitiveType.UInt16 or PrimitiveType.UInt32
-            or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64
+            or PrimitiveType.Int64 or PrimitiveType.NativeInt
+            or PrimitiveType.UInt8 or PrimitiveType.UInt16 or PrimitiveType.UInt32
+            or PrimitiveType.UInt64 or PrimitiveType.NativeUInt
+            or PrimitiveType.Float32 or PrimitiveType.Float64
             or PrimitiveType.NativeRawPointer or PrimitiveType.NativeUtf16ZPointer
             or PrimitiveType.NativeUtf8ZPointer;
 
     private static bool IsSupportedFunctionPointerScalar(PrimitiveType type) =>
         type is PrimitiveType.Bool or PrimitiveType.Char8 or PrimitiveType.Char16 or PrimitiveType.Char32
             or PrimitiveType.Rune or PrimitiveType.Int8 or PrimitiveType.Int16 or PrimitiveType.Int32
-            or PrimitiveType.Int64 or PrimitiveType.UInt8 or PrimitiveType.UInt16 or PrimitiveType.UInt32
-            or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64
+            or PrimitiveType.Int64 or PrimitiveType.NativeInt
+            or PrimitiveType.UInt8 or PrimitiveType.UInt16 or PrimitiveType.UInt32
+            or PrimitiveType.UInt64 or PrimitiveType.NativeUInt
+            or PrimitiveType.Float32 or PrimitiveType.Float64
             or PrimitiveType.NativeRawPointer
             || BoundEnumTypes.IsType(type);
 }

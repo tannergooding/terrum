@@ -21,9 +21,14 @@ namespace Terrum.CodeAnalysis.Tests.Native.Jit;
 
 internal sealed partial class JitTests
 {
+    private const string EvaluationUsingModuleIdentity = "sample.consumer";
+    private const string EvaluationCoreAuthorityIdentity
+        = "test-layout-authority";
+
     private const string OwnedBufferProgram = """
         int32 Main() {
-            require OwnedInt32Buffer.TryCreate(3, out var created);
+            init OwnedInt32Buffer created;
+            require OwnedInt32Buffer.TryCreate(3, ref init created);
             mut OwnedInt32Buffer buffer = move created;
             require buffer.TryAppend(20);
             require buffer.TryAppend(22);
@@ -36,7 +41,8 @@ internal sealed partial class JitTests
 
     private const string ReadonlyBufferViewProgram = """
         int32 Main() {
-            require OwnedInt32Buffer.TryCreate(2, out var raw);
+            init OwnedInt32Buffer raw;
+            require OwnedInt32Buffer.TryCreate(2, ref init raw);
             mut OwnedInt32Buffer buffer = move raw;
             require buffer.TryAppend(20);
             require buffer.TryAppend(22);
@@ -47,7 +53,8 @@ internal sealed partial class JitTests
 
     private const string ReadonlyBufferViewFailure = """
         int32 Main() {
-            require OwnedInt32Buffer.TryCreate(1, out var raw);
+            init OwnedInt32Buffer raw;
+            require OwnedInt32Buffer.TryCreate(1, ref init raw);
             mut OwnedInt32Buffer buffer = move raw;
             require buffer.TryAppend(42);
             ReadonlyInt32BufferView slice = buffer.Slice(0, buffer.Count);
@@ -160,13 +167,29 @@ internal sealed partial class JitTests
     public Task WorkerAndNativeExecutableAgreeAsync(string source, int expected) =>
         AssertFailFastExecutionAsync(source, expected);
 
-    private static async Task AssertFailFastExecutionAsync(string source, int expected, params string[] sourcePaths)
+    private static Task AssertFailFastExecutionAsync(
+        string source, int expected, params string[] sourcePaths)
+        => AssertFailFastExecutionCoreAsync(source, expected, null,
+            sourcePaths);
+
+    private static Task AssertFailFastExecutionAsync(string source,
+        int expected, CoreEvaluationFormIdentitySelection evaluationFormSelection,
+        params string[] sourcePaths)
+        => AssertFailFastExecutionCoreAsync(source, expected,
+            evaluationFormSelection, sourcePaths);
+
+    private static async Task AssertFailFastExecutionCoreAsync(string source,
+        int expected,
+        CoreEvaluationFormIdentitySelection? evaluationFormSelection,
+        string[] sourcePaths)
     {
         AssertWindowsX64();
         var compilation = Compilation.Create(
             await ReadExecutionTreesAsync(source, sourcePaths).ConfigureAwait(true),
             new CompilationOptions {
                 LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+                CoreEvaluationFormIdentitySelection
+                    = evaluationFormSelection,
             });
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => {
@@ -178,16 +201,35 @@ internal sealed partial class JitTests
         var image = Path.Combine(directory, $"jit-{Guid.NewGuid():N}.exe");
         var layoutManifest = Path.Combine(directory,
             $"layout-{Guid.NewGuid():N}.json");
+        var evaluationManifest = evaluationFormSelection is null ? null
+            : Path.Combine(directory,
+                $"evaluation-{Guid.NewGuid():N}.json");
 
         try
         {
             await File.WriteAllTextAsync(layoutManifest,
-                CliTests.CreateLayoutCoreManifest("sample.jit"))
+                CliTests.CreateLayoutCoreManifest(
+                    evaluationFormSelection is null ? "sample.jit"
+                        : EvaluationUsingModuleIdentity))
                 .ConfigureAwait(true);
+            if (evaluationManifest is not null)
+            {
+                await File.WriteAllTextAsync(evaluationManifest,
+                    CoreEvaluationFormTestHelpers.ConstEvalManifestJson(
+                        BoundRuntimePolicy.FailFast,
+                        EvaluationUsingModuleIdentity,
+                        EvaluationCoreAuthorityIdentity))
+                    .ConfigureAwait(true);
+            }
             await File.WriteAllBytesAsync(image, NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast)).ConfigureAwait(true);
             (var nativeExit, _, _) = await RunAsync(new ProcessStartInfo(image) { UseShellExecute = false, CreateNoWindow = true }, []).ConfigureAwait(true);
             var jit = CliStart("jit", "-", "--runtime", "fail-fast",
                 "--layout-core-manifest", layoutManifest);
+            if (evaluationManifest is not null)
+            {
+                jit.ArgumentList.Add("--evaluation-core-manifest");
+                jit.ArgumentList.Add(evaluationManifest);
+            }
             foreach (var path in sourcePaths)
             {
                 jit.ArgumentList.Add("--source");
@@ -203,6 +245,11 @@ internal sealed partial class JitTests
         {
             File.Delete(image);
             File.Delete(layoutManifest);
+            if (evaluationManifest is not null)
+            {
+                await TestFileCleanup.DeleteWithRetryAsync(
+                    evaluationManifest).ConfigureAwait(true);
+            }
         }
     }
     [TestCase("int32 Main() { unsafe { try { return Divide(42, 0); } catch { return 42; } } } int32 Divide(int32 a, int32 b) { return a / b; }",42)]
@@ -235,7 +282,8 @@ internal sealed partial class JitTests
     [TestCase(ReadonlyBufferViewFailure,unchecked((int)0xE0540003))]
     [TestCase("""
         int32 Read() {
-            require OwnedInt32Buffer.TryCreate(1, out var raw);
+            init OwnedInt32Buffer raw;
+            require OwnedInt32Buffer.TryCreate(1, ref init raw);
             mut OwnedInt32Buffer buffer = move raw;
             require buffer.TryAppend(42);
             ReadonlyInt32BufferView slice = buffer.Slice(0, buffer.Count);
@@ -251,7 +299,21 @@ internal sealed partial class JitTests
     public Task CheckedExceptionWorkerAndExecutableAgreeAsync(string source, int expected) =>
         AssertCheckedExecutionAsync(source, expected);
 
-    private static async Task AssertCheckedExecutionAsync(string source, int expected, params string[] sourcePaths)
+    private static Task AssertCheckedExecutionAsync(
+        string source, int expected, params string[] sourcePaths)
+        => AssertCheckedExecutionCoreAsync(source, expected, null,
+            sourcePaths);
+
+    private static Task AssertCheckedExecutionAsync(string source,
+        int expected, CoreEvaluationFormIdentitySelection evaluationFormSelection,
+        params string[] sourcePaths)
+        => AssertCheckedExecutionCoreAsync(source, expected,
+            evaluationFormSelection, sourcePaths);
+
+    private static async Task AssertCheckedExecutionCoreAsync(string source,
+        int expected,
+        CoreEvaluationFormIdentitySelection? evaluationFormSelection,
+        string[] sourcePaths)
     {
         AssertWindowsX64();
         var compilation = Compilation.Create(
@@ -259,6 +321,8 @@ internal sealed partial class JitTests
             new CompilationOptions {
                 RuntimePolicy = BoundRuntimePolicy.CheckedExceptions,
                 LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+                CoreEvaluationFormIdentitySelection
+                    = evaluationFormSelection,
             });
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => {
@@ -270,11 +334,25 @@ internal sealed partial class JitTests
         var image = Path.Combine(directory, $"checked-{Guid.NewGuid():N}.exe");
         var layoutManifest = Path.Combine(directory,
             $"layout-{Guid.NewGuid():N}.json");
+        var evaluationManifest = evaluationFormSelection is null ? null
+            : Path.Combine(directory,
+                $"evaluation-{Guid.NewGuid():N}.json");
         try
         {
             await File.WriteAllTextAsync(layoutManifest,
-                CliTests.CreateLayoutCoreManifest("sample.jit"))
+                CliTests.CreateLayoutCoreManifest(
+                    evaluationFormSelection is null ? "sample.jit"
+                        : EvaluationUsingModuleIdentity))
                 .ConfigureAwait(true);
+            if (evaluationManifest is not null)
+            {
+                await File.WriteAllTextAsync(evaluationManifest,
+                    CoreEvaluationFormTestHelpers.ConstEvalManifestJson(
+                        BoundRuntimePolicy.CheckedExceptions,
+                        EvaluationUsingModuleIdentity,
+                        EvaluationCoreAuthorityIdentity))
+                    .ConfigureAwait(true);
+            }
             await File.WriteAllBytesAsync(image, NativeEmitter.Emit(program, NativeRuntimePolicy.CheckedExceptions)).ConfigureAwait(true);
             (var nativeExit, _, _) = await RunAsync(new ProcessStartInfo(image) {
                 UseShellExecute = false,
@@ -282,6 +360,11 @@ internal sealed partial class JitTests
             }, []).ConfigureAwait(true);
             var jit = CliStart("jit", "-", "--runtime", "checked-exceptions",
                 "--layout-core-manifest", layoutManifest);
+            if (evaluationManifest is not null)
+            {
+                jit.ArgumentList.Add("--evaluation-core-manifest");
+                jit.ArgumentList.Add(evaluationManifest);
+            }
             foreach (var path in sourcePaths)
             {
                 jit.ArgumentList.Add("--source");
@@ -297,8 +380,20 @@ internal sealed partial class JitTests
         {
             File.Delete(image);
             File.Delete(layoutManifest);
+            if (evaluationManifest is not null)
+            {
+                await TestFileCleanup.DeleteWithRetryAsync(
+                    evaluationManifest).ConfigureAwait(true);
+            }
         }
     }
+
+    private static CoreEvaluationFormIdentitySelection ConstEvalSelection(
+        bool checkedFailures = false)
+        => CoreEvaluationFormTestHelpers.ConstEvalSelection(
+            checkedFailures ? BoundRuntimePolicy.CheckedExceptions
+                : BoundRuntimePolicy.FailFast,
+            EvaluationUsingModuleIdentity);
 
     private static async Task<SyntaxTree[]> ReadExecutionTreesAsync(string source, string[] sourcePaths)
     {

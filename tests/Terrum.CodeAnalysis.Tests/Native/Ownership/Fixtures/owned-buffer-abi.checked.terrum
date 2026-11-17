@@ -13,7 +13,8 @@ public int32 Recover() {
 public int32 RecoverFormatting() {
     unsafe {
         try {
-            require OwnedInt32Buffer.TryCreate(19, out var workspace);
+            init OwnedInt32Buffer workspace;
+            require OwnedInt32Buffer.TryCreate(19, ref init workspace);
             OwnedInt32Buffer digits = FormatDigits(uint64.MaxValue, move workspace);
             return digits.Count;
         }
@@ -24,7 +25,8 @@ public int32 RecoverFormatting() {
 }
 
 public int32 RecoverField() {
-    require OwnedInt32Buffer.TryCreate(1, out var raw);
+    init OwnedInt32Buffer raw;
+    require OwnedInt32Buffer.TryCreate(1, ref init raw);
     mut FieldOwner owner = new FieldOwner(move raw);
     require owner.TryAppend(40);
     unsafe {
@@ -41,7 +43,8 @@ public int32 RecoverField() {
 }
 
 public int32 RecoverFieldView() {
-    require OwnedInt32Buffer.TryCreate(2, out var raw);
+    init OwnedInt32Buffer raw;
+    require OwnedInt32Buffer.TryCreate(2, ref init raw);
     mut OwnedInt32Buffer words = move raw;
     require words.TryAppend(40);
     require words.TryAppend(1);

@@ -26,7 +26,11 @@ internal sealed partial class JitTests
             uint128 WidenUnsigned(uint64 value) { return uint128(value); }
             [ConstEval] int128 WidenConstant(char16 value) { return int128(value); }
             [ConstEval] uint128 WidenUnsignedConstant(char16 value) { return uint128(value); }
-            [ConstEval] int8 NarrowConstant(int32 value) { return int8(value); }
+            [ConstEval] int8 NarrowConstant(int32 value) {
+                if (value < -128) { return int8(0); }
+                if (value > 127) { return int8(0); }
+                return int8(value);
+            }
             int32 Main() {
                 const int128 constant = WidenConstant(char16(65535));
                 const uint128 unsignedConstant = WidenUnsignedConstant(char16(65535));
@@ -59,8 +63,10 @@ internal sealed partial class JitTests
                 return 42;
             }
             """;
-        await AssertFailFastExecutionAsync(source, 42).ConfigureAwait(true);
-        await AssertCheckedExecutionAsync(source, 42).ConfigureAwait(true);
+        await AssertFailFastExecutionAsync(source, 42,
+            ConstEvalSelection()).ConfigureAwait(true);
+        await AssertCheckedExecutionAsync(source, 42,
+            ConstEvalSelection(checkedFailures: true)).ConfigureAwait(true);
     }
 
     [Test]
@@ -245,10 +251,14 @@ internal sealed partial class JitTests
         var source = component + $$"""
 
             int32 Main() {
-                require TryConvertChar16ToInt32(char16({{codeUnit}}), init var signed32);
-                require TryConvertChar16ToUInt32(char16({{codeUnit}}), init var unsigned32);
-                require TryConvertChar16ToInt64(char16({{codeUnit}}), init var signed64);
-                require TryConvertChar16ToUInt64(char16({{codeUnit}}), init var unsigned64);
+                init int32 signed32;
+                require TryConvertChar16ToInt32(char16({{codeUnit}}), ref init signed32);
+                init uint32 unsigned32;
+                require TryConvertChar16ToUInt32(char16({{codeUnit}}), ref init unsigned32);
+                init int64 signed64;
+                require TryConvertChar16ToInt64(char16({{codeUnit}}), ref init signed64);
+                init uint64 unsigned64;
+                require TryConvertChar16ToUInt64(char16({{codeUnit}}), ref init unsigned64);
                 if (signed32 != {{codeUnit}} || unsigned32 != {{codeUnit}}
                     || signed64 != {{codeUnit}} || unsigned64 != {{codeUnit}}) { return 1; }
                 return 42;

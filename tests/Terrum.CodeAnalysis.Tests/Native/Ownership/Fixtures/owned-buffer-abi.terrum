@@ -1,5 +1,8 @@
 public bool TryAcquire(out OwnedInt32Buffer buffer) {
-    return OwnedInt32Buffer.TryCreate(4, out buffer);
+    init OwnedInt32Buffer created;
+    if (!OwnedInt32Buffer.TryCreate(4, ref init created)) { return false; }
+    buffer = move created;
+    return true;
 }
 
 public OwnedInt32Buffer Relay(OwnedInt32Buffer buffer) {
@@ -7,7 +10,8 @@ public OwnedInt32Buffer Relay(OwnedInt32Buffer buffer) {
 }
 
 public OwnedInt32Buffer Build() {
-    require OwnedInt32Buffer.TryCreate(2, out var created);
+    init OwnedInt32Buffer created;
+    require OwnedInt32Buffer.TryCreate(2, ref init created);
     mut OwnedInt32Buffer buffer = move created;
     require buffer.TryAppend(40);
     require buffer.TryAppend(2);
@@ -24,18 +28,25 @@ public int32 Consume(OwnedInt32Buffer buffer) {
 }
 
 public int32 Rebuild() {
-    require OwnedInt32Buffer.TryCreate(2, out var created);
+    init OwnedInt32Buffer created;
+    require OwnedInt32Buffer.TryCreate(2, ref init created);
     mut OwnedInt32Buffer buffer = move created;
     require buffer.TryAppend(20);
-    require OwnedInt32Buffer.TryCreate(1, out buffer);
+    init OwnedInt32Buffer replacement;
+    require OwnedInt32Buffer.TryCreate(1, ref init replacement);
+    buffer = move replacement;
     require buffer.TryAppend(42);
     return buffer.Read(0);
 }
 
 public bool TryRebuild() {
-    require OwnedInt32Buffer.TryCreate(2, out var created);
+    init OwnedInt32Buffer created;
+    require OwnedInt32Buffer.TryCreate(2, ref init created);
     mut OwnedInt32Buffer buffer = move created;
-    return OwnedInt32Buffer.TryCreate(1, out buffer);
+    init OwnedInt32Buffer replacement;
+    if (!OwnedInt32Buffer.TryCreate(1, ref init replacement)) { return false; }
+    buffer = move replacement;
+    return true;
 }
 
 unique struct FieldOwner {
@@ -50,7 +61,8 @@ unique struct FieldOwner {
 }
 
 public int32 FieldMutation() {
-    require OwnedInt32Buffer.TryCreate(2, out var raw);
+    init OwnedInt32Buffer raw;
+    require OwnedInt32Buffer.TryCreate(2, ref init raw);
     mut FieldOwner owner = new FieldOwner(move raw);
     require owner.TryAppend(40);
     require owner.TryAppend(1);
@@ -86,7 +98,8 @@ unique struct FieldViewOwner {
 }
 
 public int32 FieldViewMutation() {
-    require OwnedInt32Buffer.TryCreate(2, out var raw);
+    init OwnedInt32Buffer raw;
+    require OwnedInt32Buffer.TryCreate(2, ref init raw);
     mut OwnedInt32Buffer words = move raw;
     require words.TryAppend(40);
     require words.TryAppend(1);
@@ -99,7 +112,8 @@ public unique struct Envelope {
     internal OwnedInt32Buffer Data;
 
     public Envelope(bool complete) {
-        require OwnedInt32Buffer.TryCreate(1, out var created);
+        init OwnedInt32Buffer created;
+        require OwnedInt32Buffer.TryCreate(1, ref init created);
         mut OwnedInt32Buffer buffer = move created;
         require buffer.TryAppend(42);
         Data = move buffer;
@@ -114,7 +128,8 @@ public int32 Composite() {
 }
 
 public OwnedInt32Buffer FormattingWorkspace() {
-    require OwnedInt32Buffer.TryCreate(24, out var buffer);
+    init OwnedInt32Buffer buffer;
+    require OwnedInt32Buffer.TryCreate(24, ref init buffer);
     return move buffer;
 }
 

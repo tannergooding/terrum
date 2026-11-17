@@ -168,6 +168,20 @@ internal sealed partial class PeCompiler
                 throw new InvalidOperationException(
                     "A normal-backed function has an incomplete reference scratch traversal.");
             }
+            if (!BoundTreeTraversal.VisitContractExpressions(function,
+                expression => {
+                    if (ContainsNormalBackingReferenceValue(expression.Type,
+                        _program))
+                    {
+                        maximumReferenceValueSize = Math.Max(
+                            maximumReferenceValueSize,
+                            Size(expression.Type));
+                    }
+                }))
+            {
+                throw new InvalidOperationException(
+                    "A normal-backed contract has an incomplete reference scratch traversal.");
+            }
             _normalBackingReferenceScratchSizes[functionIndex] =
                 maximumReferenceValueSize;
             at = (at + 7) & ~7L;
@@ -186,6 +200,10 @@ internal sealed partial class PeCompiler
         var slots = new HashSet<int>();
         var maximumArguments = 0;
         CollectStatement(function.Body);
+        foreach (var clause in function.DeclarationContractClauses)
+        {
+            CollectExpression(clause.Predicate, 0);
+        }
         return slots;
 
         void CollectStatement(BoundStatement statement)
@@ -286,7 +304,8 @@ internal sealed partial class PeCompiler
 
         void CollectExpression(BoundExpression expression, int spill)
         {
-            if (_normalBacking && referenceSpills is not null)
+            if (expression is not BoundContractReturnValue
+                && _normalBacking && referenceSpills is not null)
             {
                 foreach (var leaf in NormalBackingReferenceLeaves(
                     expression.Type, _program))
@@ -365,6 +384,12 @@ internal sealed partial class PeCompiler
                     break;
                 case BoundReferenceReborrow reborrow:
                     CollectExpression(reborrow.Descriptor, spill);
+                    break;
+                case BoundReferenceInitializationTest initializationTest:
+                    CollectExpression(initializationTest.Descriptor, spill);
+                    break;
+                case BoundInitializationAttenuation attenuation:
+                    CollectExpression(attenuation.Descriptor, spill);
                     break;
                 case BoundReferenceRead referenceRead:
                     CollectExpression(referenceRead.Descriptor, spill);

@@ -19,8 +19,8 @@ internal sealed partial class JitTests
     public Task GenericCopyInfersStandaloneVacantOutputAsync(bool checkedFailures)
     {
         const string Source = """
-             bool Copy<T>(T source, init ref<T> result) where T : [Copy] {
-                result = source;
+             bool Copy<T>(T source, ref<init T> result)  {
+                *result = source;
                 return true;
             }
             struct Pair {
@@ -30,8 +30,8 @@ internal sealed partial class JitTests
             }
             int32 Main() {
                 Pair input = new Pair(40, 2);
-                init var output;
-                require Copy(input, init output);
+                init Pair output;
+                require Copy(input, ref init output);
                 return output.First + output.Second;
             }
             """;
@@ -43,17 +43,17 @@ internal sealed partial class JitTests
     public Task StandaloneVacantManagedRootStartsInactiveAndPublishesOnSuccessAsync(bool checkedFailures)
     {
         const string Source = """
-            bool Fill(bool publish, init ref<write ManagedNode> node) {
+            bool Fill(bool publish, ref<init write ManagedNode> node) {
                 if (!publish) { return false; }
                 require ManagedNode.TryCreate(42, out var created);
-                node = created;
+                *node = created;
                 return true;
             }
             int32 Main() {
-                init var node;
-                if (Fill(false, init node)) { return 1; }
+                init write ManagedNode node;
+                if (Fill(false, ref init node)) { return 1; }
                 if (ManagedHeap.Collect() != 0) { return 2; }
-                require Fill(true, init node);
+                require Fill(true, ref init node);
                 if (ManagedHeap.Collect() != 0) { return 3; }
                 return node.Value;
             }
@@ -66,14 +66,14 @@ internal sealed partial class JitTests
     public Task ExplicitManagedVacancyRetainsTheWritableHandleAsync(bool checkedFailures)
     {
         const string Source = """
-            bool Fill(init ref<write ManagedNode> node) {
+            bool Fill(ref<init write ManagedNode> node) {
                 require ManagedNode.TryCreate(42, out var created);
-                node = created;
+                *node = created;
                 return true;
             }
             int32 Main() {
                 init write ManagedNode node;
-                require Fill(init node);
+                require Fill(ref init node);
                 if (ManagedHeap.Collect() != 0) { return 1; }
                 return node.Value;
             }
@@ -91,13 +91,13 @@ internal sealed partial class JitTests
                 public Owner(int32 number) { Number = number; }
                  [Cleanup] public void Close() { }
             }
-            bool Create(init ref<Owner> value) {
-                value = new Owner(42);
+            bool Create(ref<init Owner> value) {
+                *value = new Owner(42);
                 return true;
             }
             int32 Main() {
                 init Owner owner;
-                require Create(init owner);
+                require Create(ref init owner);
                 return owner.Number;
             }
             """;
@@ -109,15 +109,15 @@ internal sealed partial class JitTests
     public Task GenericTemplatesPreserveTypedAndInferredVacantSlotsAsync(bool checkedFailures)
     {
         const string Source = """
-             bool Copy<T>(T source, init ref<T> result) where T : [Copy] {
-                result = source;
+             bool Copy<T>(T source, ref<init T> result)  {
+                *result = source;
                 return true;
             }
-            T Relay<T>(T source) where T : [Copy] {
+            T Relay<T>(T source)  {
                 init T first;
-                init var second;
-                require Copy(source, init first);
-                require Copy(first, init second);
+                init T second;
+                require Copy(source, ref init first);
+                require Copy(first, ref init second);
                 return second;
             }
             int32 Main() { return Relay(int32(42)); }
@@ -129,15 +129,15 @@ internal sealed partial class JitTests
     [Test]
     public Task CheckedFailureCannotPublishStandaloneVacantStorageAsync() =>
         AssertCheckedExecutionAsync("""
-            bool Fail(init ref<int32> value) {
-                value = 42;
+            bool Fail(ref<init int32> value) {
                 require false;
+                *value = 42;
                 return true;
             }
             int32 Main() {
                 init int32 value;
                 unsafe {
-                    try { require Fail(init value); }
+                    try { require Fail(ref init value); }
                     catch { return 42; }
                 }
                 return 1;

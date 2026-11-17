@@ -21,7 +21,8 @@ internal sealed partial class JitTests
         {
             await File.WriteAllTextAsync(scanner, """
                 int32 Scan() {
-                    require OwnedInt32Buffer.TryCreate(1, out var buffer);
+                    init OwnedInt32Buffer buffer;
+                    require OwnedInt32Buffer.TryCreate(1, ref init buffer);
                     require buffer.Count == 0;
                     Host.Tokens[0] = 0;
                     Host.Tokens[1] = 0;

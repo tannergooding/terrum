@@ -55,7 +55,8 @@ internal sealed partial class JitTests
             unique struct Owner {
                 public OwnedInt32Buffer Buffer;
                 public Owner() {
-                    require OwnedInt32Buffer.TryCreate(1, out var created);
+                    init OwnedInt32Buffer created;
+                    require OwnedInt32Buffer.TryCreate(1, ref init created);
                     Buffer = move created;
                 }
             }
@@ -101,11 +102,13 @@ internal sealed partial class JitTests
         var source = $$"""
             int32 Observe(bool appended, int32 count) { return count; }
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(2, out var created);
+                init OwnedInt32Buffer created;
+                require OwnedInt32Buffer.TryCreate(2, ref init created);
                 mut OwnedInt32Buffer buffer = move created;
                 require buffer.TryAppend(40);
                 require buffer.TryAppend(1);
-                require OwnedInt32Buffer.TryCreate(2, out var extra);
+                init OwnedInt32Buffer extra;
+                require OwnedInt32Buffer.TryCreate(2, ref init extra);
                 mut OwnedInt32Buffer other = move extra;
                 {
                     mut MutableInt32BufferView window = buffer.SliceMutable(0, 2);
@@ -124,7 +127,8 @@ internal sealed partial class JitTests
     {
         var source = $$"""
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(1, out var created);
+                init OwnedInt32Buffer created;
+                require OwnedInt32Buffer.TryCreate(1, ref init created);
                 mut OwnedInt32Buffer buffer = move created;
                 require buffer.TryAppend(42);
                 mut MutableInt32BufferView window = buffer.SliceMutable(0, 1);
@@ -140,7 +144,8 @@ internal sealed partial class JitTests
     {
         const string Source = """
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(1, out var created);
+                init OwnedInt32Buffer created;
+                require OwnedInt32Buffer.TryCreate(1, ref init created);
                 mut OwnedInt32Buffer buffer = move created;
                 require buffer.TryAppend(42);
                 unsafe {

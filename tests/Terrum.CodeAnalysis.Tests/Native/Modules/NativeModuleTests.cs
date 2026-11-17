@@ -65,7 +65,8 @@ internal sealed class NativeModuleTests
         """;
     private const string OwnedBufferImportSource = """
         public int32 Run() {
-            if (!OwnedInt32Buffer.TryCreate(1, out var created)) { return 0; }
+            init OwnedInt32Buffer created;
+            if (!OwnedInt32Buffer.TryCreate(1, ref init created)) { return 0; }
             mut OwnedInt32Buffer buffer = move created;
             if (!buffer.TryAppend(42)) { return 0; }
             return buffer.Read(0);

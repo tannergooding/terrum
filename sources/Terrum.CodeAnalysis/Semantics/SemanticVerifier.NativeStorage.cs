@@ -544,8 +544,7 @@ public static partial class SemanticVerifier
         if (!NativeFixedArrayContract.MatchesProgram(program)
             || !NativeFixedArrayContract.IsCarrier(carrierType)
             || !NativeFixedArrayContract.TryGetLayout(carrierType,
-                program.Structures, program.NativeFixedArrayTypes,
-                out var layout, program.CheckedReferenceTypes)
+                program, out var layout)
             || variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
             || variable >= function.Variables.Length
             || !declarations.Contains(variable)

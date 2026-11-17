@@ -44,6 +44,85 @@ internal sealed partial class NativeManagedClassModuleTests
             nativeLoweringAgreement: agreement).ExitCode, Is.EqualTo(42));
     }
 
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task NormalBackingUniqueClassHandlesMoveAndReassignAsync(
+        NativeRuntimePolicy policy)
+    {
+        const string agreement = CompilationOptions.WindowsX64NormalBackingAgreement;
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            unique class Owner {
+                public int32 Value;
+                public Owner(int32 value) { Value = value; }
+                public int32 Read() { return Value; }
+            }
+            Owner Transfer(Owner owner) { return move owner; }
+            bool Fill(out Owner owner) {
+                owner = new Owner(40);
+                return true;
+            }
+            public int32 Main() {
+                require Fill(out var output);
+                mut Owner owner = new Owner(1);
+                mut Owner replacement = new Owner(42);
+                owner = Transfer(move replacement);
+                return output.Read() + owner.Read();
+            }
+            """), new CompilationOptions {
+            RuntimePolicy = (BoundRuntimePolicy)policy,
+            NativeLoweringAgreement = agreement,
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        _ = NativeEmitter.EmitCode(program, policy, agreement);
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(program, policy, agreement))
+            .ConfigureAwait(true), Is.EqualTo(82));
+        Assert.That(NativeJit.ExecuteWithData(program, policy,
+            nativeLoweringAgreement: agreement).ExitCode, Is.EqualTo(82));
+    }
+
+    [Test]
+    public async Task NormalBackingUniqueClassOutFailureReleasesStagedRootsAsync()
+    {
+        const string agreement = CompilationOptions.WindowsX64NormalBackingAgreement;
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            unique class Owner {
+                public int32 Value;
+                public Owner(int32 value) { Value = value; }
+            }
+            bool Fail(out Owner owner) {
+                owner = new Owner(40);
+                require false;
+                return true;
+            }
+            public int32 Main() {
+                unsafe {
+                    try {
+                        Fail(out var owner);
+                    } catch {
+                        return 42;
+                    }
+                }
+                return 0;
+            }
+            """), new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.CheckedExceptions,
+            NativeLoweringAgreement = agreement,
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        _ = NativeEmitter.EmitCode(program,
+            NativeRuntimePolicy.CheckedExceptions, agreement);
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(program,
+                NativeRuntimePolicy.CheckedExceptions, agreement))
+            .ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(NativeJit.ExecuteWithData(program,
+            NativeRuntimePolicy.CheckedExceptions,
+            nativeLoweringAgreement: agreement).ExitCode, Is.EqualTo(42));
+    }
+
     [Test]
     public async Task NormalBackingConstructionFailureRetiresUnpublishedControlAsync()
     {

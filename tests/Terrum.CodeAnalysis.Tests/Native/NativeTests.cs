@@ -83,6 +83,7 @@ internal sealed partial class NativeTests
     [TestCase("ControlFlow/for-loops.terrum",285)]
     [TestCase("Contracts/scalar-values.terrum",42)]
     [TestCase("Contracts/no-return.terrum",42)]
+    [TestCase("Ownership/owner-transfer.terrum",42)]
     public async Task LanguageFeatureSamplesExecuteAsync(string name, int expected)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));

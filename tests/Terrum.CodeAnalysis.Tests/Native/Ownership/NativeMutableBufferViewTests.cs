@@ -20,7 +20,8 @@ internal sealed class NativeMutableBufferViewTests
 {
     private const string Owner = """
         int32 Main() {
-            require OwnedInt32Buffer.TryCreate(2, out var created);
+            init OwnedInt32Buffer created;
+            require OwnedInt32Buffer.TryCreate(2, ref init created);
             mut OwnedInt32Buffer buffer = move created;
             require buffer.TryAppend(40);
             require buffer.TryAppend(1);
@@ -69,7 +70,8 @@ internal sealed class NativeMutableBufferViewTests
         const string Source = """
             int32 Observe(bool appended, int32 count) { return count; }
             """ + Owner + """
-            require OwnedInt32Buffer.TryCreate(4, out var createdOther);
+            init OwnedInt32Buffer createdOther;
+            require OwnedInt32Buffer.TryCreate(4, ref init createdOther);
             mut OwnedInt32Buffer other = move createdOther;
             {
                 mut MutableInt32BufferView window = buffer.SliceMutable(0, 2);
@@ -90,7 +92,8 @@ internal sealed class NativeMutableBufferViewTests
         const string Source = """
             int32 Overflow(int32 value) { return value + 1; }
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(3, out var created);
+                init OwnedInt32Buffer created;
+                require OwnedInt32Buffer.TryCreate(3, ref init created);
                 mut OwnedInt32Buffer buffer = move created;
                 require buffer.TryAppend(40);
                 require buffer.TryAppend(1);
@@ -131,7 +134,8 @@ internal sealed class NativeMutableBufferViewTests
                 value.Clear();
             }
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(1, out var created);
+                init OwnedInt32Buffer created;
+                require OwnedInt32Buffer.TryCreate(1, ref init created);
                 Reset(move created);
                 return 42;
             }
@@ -197,7 +201,7 @@ internal sealed class NativeMutableBufferViewTests
     [TestCase("buffer.Set(0, 41);")]
     [TestCase("buffer.Clear();")]
     [TestCase("OwnedInt32Buffer moved = move buffer;")]
-    [TestCase("OwnedInt32Buffer.TryCreate(1, out buffer);")]
+    [TestCase("init OwnedInt32Buffer replacement; require OwnedInt32Buffer.TryCreate(1, ref init replacement); buffer = move replacement;")]
     [TestCase("ReadonlyInt32BufferView other = buffer.Slice(0, 1);")]
     [TestCase("mut MutableInt32BufferView other = buffer.SliceMutable(0, 1);")]
     [TestCase("if (false) { buffer.Clear(); }")]
@@ -225,7 +229,8 @@ internal sealed class NativeMutableBufferViewTests
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(1, out var buffer);
+                init OwnedInt32Buffer buffer;
+                require OwnedInt32Buffer.TryCreate(1, ref init buffer);
                 mut MutableInt32BufferView window = buffer.SliceMutable(0, 0);
                 return 42;
             }
@@ -275,7 +280,12 @@ internal sealed class NativeMutableBufferViewTests
     public void MutableViewRejectsOutReplacementDuringAcquisitionOrSet()
     {
         const string Helpers = """
-            bool Replace(out OwnedInt32Buffer target) { return OwnedInt32Buffer.TryCreate(2, out target); }
+            bool Replace(out OwnedInt32Buffer target) {
+                init OwnedInt32Buffer created;
+                if (!OwnedInt32Buffer.TryCreate(2, ref init created)) { return false; }
+                target = move created;
+                return true;
+            }
             int32 Observe(bool value) { return 0; }
             """;
         foreach (var statement in new[] {
@@ -406,7 +416,8 @@ internal sealed class NativeMutableBufferViewTests
         Assert.That(ModuleCompiler.GetNativeProfileVersion(producer, false), Is.EqualTo("native-17"));
         var compilation = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(1, out var created);
+                init OwnedInt32Buffer created;
+                require OwnedInt32Buffer.TryCreate(1, ref init created);
                 mut OwnedInt32Buffer buffer = move created;
                 require buffer.TryAppend(0);
                 return Update(move buffer);

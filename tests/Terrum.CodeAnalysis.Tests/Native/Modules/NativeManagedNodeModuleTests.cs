@@ -33,7 +33,7 @@ internal sealed class NativeManagedNodeModuleTests
         var middleHash = SHA256.HashData(middle);
         var replacement = NativeModuleCompiler.CreateProducer(Compile(Sample(), policy),
             ["Leaf"], "NodeB", policy);
-        Assert.That(NativeModuleCompiler.Inspect(replacement).NativeProfileVersion, Is.EqualTo("native-18"));
+        Assert.That(NativeModuleCompiler.Inspect(replacement).NativeProfileVersion, Is.EqualTo("native-19"));
         NativeModuleCompiler.ValidateGraph(root, [middle, original]);
         NativeModuleCompiler.ValidateGraph(root, [replacement, middle]);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [original, middle],
@@ -87,11 +87,11 @@ internal sealed class NativeManagedNodeModuleTests
         var program = Compile(Sample(), NativeRuntimePolicy.FailFast);
         var contract = ModuleCompiler.CreateProducer(program, ["Leaf"]);
         Assert.That(BinaryPrimitives.ReadInt32LittleEndian(contract.AsSpan(4, 4)), Is.EqualTo(104));
-        Assert.That(ModuleCompiler.GetNativeProfileVersion(contract, false), Is.EqualTo("native-18"));
+        Assert.That(ModuleCompiler.GetNativeProfileVersion(contract, false), Is.EqualTo("native-19"));
         var profile = (byte[])contract.Clone();
-        var label = Encoding.UTF8.GetBytes("native-18");
+        var label = Encoding.UTF8.GetBytes("native-19");
         var profileOffset = Find(profile, label);
-        profile[profileOffset + label.Length - 1] = (byte)'7';
+        profile[profileOffset + label.Length - 1] = (byte)'8';
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(profile))!;
         BinaryPrimitives.WriteInt32LittleEndian(profile.AsSpan(4), 17);
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(profile))!;
@@ -129,8 +129,8 @@ internal sealed class NativeManagedNodeModuleTests
             ["Leaf"], "NodeB", NativeRuntimePolicy.FailFast);
         var downgraded = (byte[])package.Clone();
         var profileOffset = 18 + downgraded[7];
-        Assert.That(Encoding.ASCII.GetString(downgraded, profileOffset, downgraded[8]), Is.EqualTo("native-18"));
-        downgraded[profileOffset + downgraded[8] - 1] = (byte)'7';
+        Assert.That(Encoding.ASCII.GetString(downgraded, profileOffset, downgraded[8]), Is.EqualTo("native-19"));
+        downgraded[profileOffset + downgraded[8] - 1] = (byte)'8';
         Rehash(downgraded);
         _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(downgraded))!;
 

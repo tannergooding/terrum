@@ -2048,25 +2048,241 @@ internal sealed class NativePointerModuleTests
     [Test]
     public void NativePointerCannotPublishFunctionLocalBackingThroughInitParameter()
     {
-        var compilation = Create(SyntaxTree.Parse("""
-            [Blittable] [Layout(LayoutKind.Sequential)]
-            struct PointerHolder {
-                public mut ptr<int32> Value;
-                public unsafe PointerHolder(ptr<int32> value) { Value = value; }
-            }
-            unsafe bool Publish(init ref<PointerHolder> output) {
-                int32 value = 1;
-                unsafe { output = new PointerHolder(&value); }
+        const string Source = """
+            unsafe bool Publish(ref<init ptr<int32>> output) {
+                mut int32 value = 1;
+                unsafe { *output = &value; }
                 return true;
             }
-            int32 Main() { return 0; }
-            """), LayoutOptions());
+            """;
+        var compilation = CreateLibrary(SyntaxTree.Parse(Source), LayoutOptions());
+        var pointerOperandStart = Source.IndexOf("&value",
+            StringComparison.Ordinal);
 
         Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3016"), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Diagnostics.Any(diagnostic =>
             diagnostic.Code == "TRM3016"
-            && diagnostic.Message.Contains("NativePointer", StringComparison.Ordinal)), Is.True,
+            && diagnostic.Span.Start <= pointerOperandStart
+            && diagnostic.Span.End > pointerOperandStart), Is.True,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         Assert.That(compilation.Program, Is.Null);
+    }
+
+    [Test]
+    public void InitializationReferenceInitializesPointerCellWithoutInitializingPointee()
+    {
+        var compilation = Create(SyntaxTree.Parse("""
+            unsafe bool Publish(ref<init ptr<int32>> output, ptr<int32> value) {
+                unsafe { *output = value; }
+                return true;
+            }
+            int32 Main() {
+                init int32 pointee;
+                init ptr<int32> pointer;
+                mut int32 livePointee = 42;
+                init ptr<int32> livePointer;
+                unsafe {
+                    if (!Publish(ref init pointer, &pointee)) { return 1; }
+                    if (!(pointer is init) || pointee is init) { return 2; }
+                    if (!Publish(ref init livePointer, &livePointee)) {
+                        return 3;
+                    }
+                    return *livePointer;
+                }
+                return 0;
+            }
+            """), LayoutOptions());
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(compilation.Program!,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(42));
+    }
+
+    [Test]
+    public void PrivateModuleRoundTripPreservesPointerCellInitializationReference()
+    {
+        var providerCompilation = CreateLibrary(SyntaxTree.Parse("""
+            public unsafe bool Publish(ref<init ptr<int32>> output,
+                ptr<int32> value) {
+                unsafe { *output = value; }
+                return true;
+            }
+            """), LayoutOptions());
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(
+            providerCompilation.Program!, ["Publish"]);
+        var reference = ModuleCompiler.CreateReference(producer);
+        var outputType = reference.Functions.Single(
+            static function => function.Name == "Publish").Variables[0].Type;
+        var outputDefinition = reference.CheckedReferenceTypes[
+            CheckedReferenceTypes.Index(outputType)];
+        Assert.That(outputDefinition.IsInitialization, Is.True);
+        Assert.That(outputDefinition.ReferentType,
+            Is.EqualTo(NativePointerTypes.Type(0)));
+        Assert.That(reference.NativePointerTypes[0].PointeeType,
+            Is.EqualTo(PrimitiveType.Int32));
+
+        var consumerCompilation = Create(SyntaxTree.Parse("""
+            int32 Main() {
+                mut int32 pointee = 42;
+                init ptr<int32> pointer;
+                unsafe {
+                    if (!Publish(ref init pointer, &pointee)) { return 1; }
+                    return *pointer;
+                }
+                return 0;
+            }
+            """), reference);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(
+            consumerCompilation.Program!, producer);
+        var linked = ModuleCompiler.Link(consumer, producer);
+        Assert.That(NativeJit.Execute(linked,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(42));
+    }
+
+    [Test]
+    public async Task NativeGraphPublishesPointerCellWithoutInitializingPointeeAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var providerCompilation = CreateLibrary(SyntaxTree.Parse("""
+            public unsafe bool Publish(ref<init ptr<int32>> output,
+                ptr<int32> value) {
+                unsafe { *output = value; }
+                return true;
+            }
+            """), LayoutOptions());
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var provider = NativeModuleCompiler.CreateProducer(
+            providerCompilation.Program!, ["Publish"], "PointerCellProvider",
+            NativeRuntimePolicy.FailFast);
+        var reference = NativeModuleCompiler.CreateGraphReference([provider]);
+        var consumerCompilation = Create(SyntaxTree.Parse("""
+            int32 Main() {
+                mut int32 pointee = 42;
+                init ptr<int32> pointer;
+                unsafe {
+                    if (!Publish(ref init pointer, &pointee)) { return 1; }
+                    return *pointer;
+                }
+                return 0;
+            }
+            """), reference);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumer = NativeModuleCompiler.CreateGraphConsumer(
+            consumerCompilation.Program!, [provider],
+            NativeRuntimePolicy.FailFast);
+
+        NativeModuleCompiler.ValidateGraph(consumer, [provider]);
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(consumer,
+            [provider], TimeSpan.FromSeconds(10),
+            NativeRuntimePolicy.FailFast).ConfigureAwait(true), Is.EqualTo(42));
+    }
+
+    [Test]
+    public void SemanticAndModuleVerificationRejectMissingPointerCellType()
+    {
+        var compilation = CreateLibrary(SyntaxTree.Parse("""
+            public unsafe bool Publish(ref<init ptr<int32>> output,
+                ptr<int32> value) {
+                unsafe { *output = value; }
+                return true;
+            }
+            """), LayoutOptions());
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var outputType = program.Functions.Single(
+            static function => function.Name == "Publish").Variables[0].Type;
+        var referenceIndex = CheckedReferenceTypes.Index(outputType);
+        var invalidProgram = program with {
+            CheckedReferenceTypes = program.CheckedReferenceTypes.SetItem(
+                referenceIndex,
+                program.CheckedReferenceTypes[referenceIndex] with {
+                    ReferentType = NativePointerTypes.Type(
+                        program.NativePointerTypes.Length),
+                }),
+        };
+
+        _ = Assert.Throws<ArgumentException>(
+            () => SemanticVerifier.Verify(invalidProgram));
+        _ = Assert.Throws<ModuleContractException>(
+            () => ModuleCompiler.CreateProducer(invalidProgram, ["Publish"]));
+    }
+
+    [Test]
+    public void CheckedReferencePointerTypesRemapAcrossPrivateModuleSets()
+    {
+        var int32ProviderCompilation = CreateLibrary(SyntaxTree.Parse("""
+            public unsafe bool PublishInt32(ptr<uint32> decoy,
+                ref<init ptr<int32>> output, ptr<int32> value) {
+                unsafe { *output = value; }
+                return true;
+            }
+            """), LayoutOptions());
+        var int64ProviderCompilation = CreateLibrary(SyntaxTree.Parse("""
+            public unsafe bool PublishInt64(ptr<uint64> decoy,
+                ref<init ptr<int64>> output, ptr<int64> value) {
+                unsafe { *output = value; }
+                return true;
+            }
+            """), LayoutOptions());
+        Assert.That(int32ProviderCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                int32ProviderCompilation.Diagnostics));
+        Assert.That(int64ProviderCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                int64ProviderCompilation.Diagnostics));
+        var int32Producer = ModuleCompiler.CreateProducer(
+            int32ProviderCompilation.Program!, ["PublishInt32"]);
+        var int64Producer = ModuleCompiler.CreateProducer(
+            int64ProviderCompilation.Program!, ["PublishInt64"]);
+        var reference = ModuleCompiler.CreateReferenceSet(
+            [int32Producer, int64Producer]);
+
+        foreach (var (functionName, pointeeType) in new[] {
+            ("PublishInt32", PrimitiveType.Int32),
+            ("PublishInt64", PrimitiveType.Int64),
+        })
+        {
+            var function = reference.Functions.Single(
+                item => item.Name == functionName);
+            var outputType = function.Variables[1].Type;
+            var output = reference.CheckedReferenceTypes[
+                CheckedReferenceTypes.Index(outputType)];
+            var expectedPointerIndex = reference.NativePointerTypes
+                .Select((pointer, index) => (pointer, index))
+                .Single(item => item.pointer.PointeeType == pointeeType)
+                .index;
+            Assert.That(output.ReferentType,
+                Is.EqualTo(NativePointerTypes.Type(expectedPointerIndex)));
+        }
+
+        var consumerCompilation = Create(SyntaxTree.Parse("""
+            int32 Main() {
+                init ptr<int32> int32Pointer;
+                init ptr<int64> int64Pointer;
+                unsafe {
+                    if (!PublishInt32(null, ref init int32Pointer, null)) {
+                        return 1;
+                    }
+                    if (!PublishInt64(null, ref init int64Pointer, null)) {
+                        return 2;
+                    }
+                }
+                return int32Pointer is init && int64Pointer is init ? 42 : 0;
+            }
+            """), reference);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
     }
 
     [Test]
