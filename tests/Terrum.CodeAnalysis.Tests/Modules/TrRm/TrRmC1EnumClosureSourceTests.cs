@@ -962,6 +962,37 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 new TrRmSourceClassMemberExport(0,
                     fieldDeclaration.Span, "field.box.value"),
             ]);
+        var changedProviderTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public class Box { public int64 Value; }
+            }
+            """);
+        var changedProviderCompilation
+            = Compilation.CreateLibrary(changedProviderTree);
+        Assert.That(changedProviderCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                changedProviderCompilation.Diagnostics));
+        var changedProviderProgram
+            = (BoundProgram)changedProviderCompilation.Program!;
+        var changedClassDeclaration = changedProviderTree.Root.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var changedFieldDeclaration = changedClassDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.FieldDeclaration);
+        var changedClassIndex
+            = changedProviderProgram.SourceClassProgramAssociation!
+                .Declarations.Single(declaration =>
+                    declaration.Span == changedClassDeclaration.Span)
+                .ClassIndex;
+        var changedClassExport = new TrRmSourceClassExport(
+            changedProviderProgram, changedClassIndex,
+            changedClassDeclaration.Span, "type.box", [
+                new TrRmSourceClassMemberExport(0,
+                    changedFieldDeclaration.Span, "field.box.value"),
+            ]);
 
         foreach (var baseSchemaIdentity in s_schemaIdentities)
         {
@@ -1081,6 +1112,17 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 providerInputs);
             Assert.That(reloadedClassQuery.Functions.Single().Body
                 .Statements.Single(), Is.TypeOf<BoundReturn>());
+            var changedProviderArtifact
+                = TrRmExecutableCompiler.EmitStandard(
+                    changedProviderProgram, "ClassLayoutProvider",
+                    schemaIdentity, 1, [], [], [changedClassExport], []);
+            Assert.Throws<InvalidDataException>(() =>
+                TrRmExecutableCompiler.LoadStandard(
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        emittedConsumer), "ClassLayoutConsumer", [
+                        new TrRmStandardArtifactInput(schemaIdentity,
+                            changedProviderArtifact),
+                    ]));
 
             var staticArtifact = AsStaticClassField(artifact,
                 SchemaFor(schemaIdentity));
