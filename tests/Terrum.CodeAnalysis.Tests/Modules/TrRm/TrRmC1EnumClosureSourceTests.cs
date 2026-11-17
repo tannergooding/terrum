@@ -656,6 +656,14 @@ internal sealed class TrRmC1EnumClosureSourceTests
             "PaletteModule", [], ["type.palette"]);
         Assert.That(reference.StandardClassDeclarations, Has.Length.EqualTo(2));
         Assert.That(reference.EnumDefinitions, Has.Length.EqualTo(1));
+        var selectedPalette = reference.StandardClassDeclarations.Single(
+            declaration => declaration.Declaration.Name == "Palette");
+        Assert.That(selectedPalette.SelectedExportKeys,
+            Is.EqualTo(["type.palette"]));
+        var closureShelf = reference.StandardClassDeclarations.Single(
+            declaration => declaration.Declaration.Name == "Shelf");
+        Assert.That(closureShelf.ExportKeys, Is.Empty);
+        Assert.That(closureShelf.SelectedExportKeys, Is.Empty);
         var sourceFreeCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(string.Empty), reference);
         Assert.That(sourceFreeCompilation.HasErrors, Is.False,

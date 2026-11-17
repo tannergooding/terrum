@@ -312,22 +312,40 @@ public static partial class TrRmExecutableCompiler
             = new List<C1EnumClosureStandardClassEmission>();
         if (hasStandardClassDeclarations)
         {
-            var classRoots = standardClassDeclarations.Where(
-                    static declaration =>
-                        declaration.Expectations.IsEmpty
-                        && !declaration.ExportKeys.IsEmpty)
-                .ToArray();
-            if (classRoots.Length == 0)
+            if (schema.UsesPropertyInitializedState())
             {
                 throw Unsupported(
-                    "EN1 class re-emission requires at least one local exported class root.");
+                    "EN1 class re-emission does not retain PI1 property and initialized-state declarations.");
             }
 
-            foreach (var classRoot in classRoots)
+            var classRootProviders
+                = new List<BoundSourceTypeProviderSnapshot>();
+            foreach (var declaration in standardClassDeclarations)
             {
-                var provider = classRoot.Declaration.Provider;
-                if (schema.UsesPropertyInitializedState()
-                    || !IsSelectedC1EnumClosureSchemaIdentity(
+                if (declaration.Expectations.IsEmpty
+                    && StringComparer.Ordinal.Equals(
+                        declaration.Declaration.Provider.ModuleIdentity,
+                        moduleIdentity))
+                {
+                    classRootProviders.Add(
+                        declaration.Declaration.Provider);
+                }
+
+                foreach (var expectation in declaration.Expectations)
+                {
+                    if (StringComparer.Ordinal.Equals(
+                            expectation.Binding.UsingModule.ModuleIdentity,
+                            moduleIdentity))
+                    {
+                        classRootProviders.Add(
+                            expectation.Binding.UsingModule);
+                    }
+                }
+            }
+
+            foreach (var provider in classRootProviders)
+            {
+                if (!IsSelectedC1EnumClosureSchemaIdentity(
                         provider.SchemaIdentity)
                     || GetForeignInvocationSchema(provider.SchemaIdentity)
                         != schema
@@ -352,7 +370,8 @@ public static partial class TrRmExecutableCompiler
                 var classView = declaration.Declaration;
                 if (declaration.Expectations.IsEmpty)
                 {
-                    if (!SameA2SourceTypeProviderSnapshot(rootSnapshot!,
+                    if (rootSnapshot is null
+                        || !SameA2SourceTypeProviderSnapshot(rootSnapshot,
                             classView.Provider))
                     {
                         continue;
@@ -377,8 +396,12 @@ public static partial class TrRmExecutableCompiler
                 foreach (var expectation in declaration.Expectations)
                 {
                     var binding = expectation.Binding;
+                    if (rootSnapshot is null)
+                    {
+                        continue;
+                    }
                     if (!SameA2SourceTypeProviderSnapshot(
-                            rootSnapshot!, binding.UsingModule))
+                            rootSnapshot, binding.UsingModule))
                     {
                         continue;
                     }

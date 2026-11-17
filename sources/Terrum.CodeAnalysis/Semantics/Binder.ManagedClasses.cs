@@ -1123,7 +1123,7 @@ internal sealed partial class Binder
         => definition.NominalKind == 2 && definition.Formals.IsEmpty
             && _standardClassDeclarations.Any(declaration =>
                 declaration.Declaration.Identity == definition.Identity
-                && declaration.ExportKeys.Length != 0
+                && !declaration.SelectedExportKeys.IsEmpty
                 && declaration.Expectations.IsEmpty);
 
     private static string GetNominalTypeQualifiedName(

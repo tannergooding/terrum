@@ -663,7 +663,7 @@ public static partial class TrRmExecutableCompiler
         var rootDeclarations = program.StandardClassDeclarations
             .Where(static declaration =>
                 declaration.Expectations.IsEmpty
-                && !declaration.ExportKeys.IsEmpty)
+                && !declaration.SelectedExportKeys.IsEmpty)
             .ToArray();
         if (rootDeclarations.Length == 0)
         {

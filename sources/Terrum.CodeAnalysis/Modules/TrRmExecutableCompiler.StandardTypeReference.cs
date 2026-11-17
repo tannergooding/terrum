@@ -430,10 +430,40 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        var localClassTypeDefRows = new SortedSet<int>(
-            selectedTypeDefs.Keys);
-        var pendingLocalClassTypeDefRows = new Queue<int>(
-            selectedTypeDefs.Keys);
+        var localClassTypeDefRows = new SortedSet<int>();
+        var pendingLocalClassTypeDefRows = new Queue<int>();
+        foreach (var typeDefRow in selectedTypeDefs.Keys)
+        {
+            if (localClassTypeDefRows.Add(typeDefRow))
+            {
+                pendingLocalClassTypeDefRows.Enqueue(typeDefRow);
+            }
+        }
+        if (isEN1)
+        {
+            for (var typeDefRow = 1;
+                typeDefRow <= rootTables.TypeDefs.Count; typeDefRow++)
+            {
+                var definitionId = 0x1300_0000u
+                    | checked((uint)typeDefRow);
+                if (rootTables.TypeDefs.GetOwnerModule(typeDefRow)
+                        == rootModuleRow
+                    && rootTables.TypeDefs.GetKind(typeDefRow) == 2
+                    && !rootTables.Imports.IsExpectedDefinition(definitionId)
+                    && localClassTypeDefRows.Add(typeDefRow))
+                {
+                    if (localClassTypeDefRows.Count
+                        > ManagedClassTypes.OptionalFirst
+                            - ManagedClassTypes.First)
+                    {
+                        throw Unsupported(
+                            "The C1 local class TypeSpec closure exceeds the registered class limit.");
+                    }
+
+                    pendingLocalClassTypeDefRows.Enqueue(typeDefRow);
+                }
+            }
+        }
         var visitedClassTypeSpecs = new HashSet<uint>();
         var remainingClassTypeVisits
             = SemanticVerifier.MaximumAnalysisVisits;
@@ -701,8 +731,9 @@ public static partial class TrRmExecutableCompiler
             classDeclarations.Add(new BoundStandardClassDeclaration(
                 declaration,
                 GetStandardTypeExportKeys(rootTables, rootModuleRow,
-                    typeDefRow),
-                []));
+                    typeDefRow), []) {
+                SelectedExportKeys = [.. selectedTypeDefs[typeDefRow]],
+            });
             _ = classIdentities.Add(identity);
         }
 
@@ -915,7 +946,14 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        if (selectedClassKeys.Count == 0)
+        var (typeDefStart, typeDefEnd)
+            = rootTables.Modules.GetTypeDefRange(
+                moduleValidation.RootModuleRow);
+        var hasClassTypeDefs = Enumerable.Range(typeDefStart,
+                typeDefEnd - typeDefStart)
+            .Any(typeDefRow =>
+                rootTables.TypeDefs.GetKind(typeDefRow) == 2);
+        if (selectedClassKeys.Count == 0 && !hasClassTypeDefs)
         {
             return CreateC1EnumClosureSourceTypeReferenceCore(artifacts,
                 schemaIdentities, moduleIdentity, selectedExportKeys);

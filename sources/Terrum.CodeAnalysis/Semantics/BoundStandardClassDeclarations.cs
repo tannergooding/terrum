@@ -48,7 +48,10 @@ internal sealed record BoundStandardClassExpectation(
 internal sealed record BoundStandardClassDeclaration(
     BoundStandardClassTypeView Declaration,
     ImmutableArray<string> ExportKeys,
-    ImmutableArray<BoundStandardClassExpectation> Expectations);
+    ImmutableArray<BoundStandardClassExpectation> Expectations)
+{
+    internal ImmutableArray<string> SelectedExportKeys { get; init; } = [];
+}
 
 internal static class BoundStandardClassDeclarationContract
 {
@@ -86,6 +89,7 @@ internal static class BoundStandardClassDeclarationContract
                 || !IsValidView(declaration.Declaration)
                 || declaration.ExportKeys.IsDefault
                 || declaration.Expectations.IsDefault
+                || declaration.SelectedExportKeys.IsDefault
                 || !identities.Add(declaration.Declaration.Identity)
                 || !definitions.TryGetValue(declaration.Declaration.Identity,
                     out var definition)
@@ -97,7 +101,13 @@ internal static class BoundStandardClassDeclarationContract
                     declaration.Declaration.Name)
                 || (!declaration.ExportKeys.IsEmpty
                     && (declaration.Declaration.TypeDefFlags & 3) != 2)
-                || !IsUniqueText(declaration.ExportKeys))
+                || !IsUniqueText(declaration.ExportKeys)
+                || !IsUniqueText(declaration.SelectedExportKeys)
+                || declaration.SelectedExportKeys.Any(key =>
+                    !declaration.ExportKeys.Contains(key,
+                        StringComparer.Ordinal))
+                || (!declaration.Expectations.IsEmpty
+                    && !declaration.SelectedExportKeys.IsEmpty))
             {
                 return false;
             }
