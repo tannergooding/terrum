@@ -34,25 +34,25 @@ internal sealed partial class GenericControlFlowModuleTests
             public int64 Second;
             public Pair(int64 first, int64 second) { First = first; Second = second; }
         }
-         T Identity<T>(T value) where T : [Copy] { return value; }
+         T Identity<T>(T value) where T : null? { return value; }
          A Forward<A, B, C>(A first, B second, C third)
-            where A : [Copy] where B : [Copy] where C : [Copy] {
+               {
             return Identity<A>(first);
         }
-         B Reorder<A, B>(A first, B second) where A : [Copy] where B : [Copy] {
+         B Reorder<A, B>(A first, B second)   {
             return Forward<B, A, A>(second, first, first);
         }
          bool Publish<A, B>(A first, B second, out A left, out B right)
-            where A : [Copy] where B : [Copy] {
+              {
             left = first;
             right = second;
             return true;
         }
-         bool Absent<A, B>(A value, out B missing)
-            where A : [Copy] where B : [Copy] {
+         bool Absent<A, B>(A value, out B missing) where B : null?
+              {
             return false;
         }
-        T CreateAndRead<T>(T value) where T : [Copy] {
+        T CreateAndRead<T>(T value)  {
             if (Models.Cell.TryCreate(41, out var fresh)) {
                 fresh.Next = fresh;
                 ManagedHeap.Collect();
@@ -242,8 +242,19 @@ internal sealed partial class GenericControlFlowModuleTests
 
         var originalProgram = Compile("public int32 ManagedGenericProbe() { return 40; }", policy);
         var original = ModuleCompiler.CreateProducer(originalProgram, ["ManagedGenericProbe"]);
-        var replacement = ModuleCompiler.CreateProducer(program, ["ManagedGenericProbe"]);
-        var consumer = ModuleCompiler.CreateConsumer(Compile("""
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(source), new CompilationOptions {
+                RuntimePolicy = (BoundRuntimePolicy)policy,
+            });
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerProgram = (BoundProgram)providerCompilation.Program!;
+        var replacementIdentityInputs = CreateGenericOutputIdentityInputs(
+            providerProgram, "ManagedGenericProducer");
+        var replacement = ModuleCompiler.CreateProducer(providerProgram,
+            ["ManagedGenericProbe"], replacementIdentityInputs);
+        var consumerProgram = Compile("""
             mut class Record {
                 public int32 Value;
                 public Record(int32 value) { Value = value; }
@@ -252,7 +263,12 @@ internal sealed partial class GenericControlFlowModuleTests
                 require Record.TryCreate(2, out var record);
                 return ManagedGenericProbe() + record.Value - 2;
             }
-            """, policy, ModuleCompiler.CreateReference(original), library: false), original);
+            """, policy, ModuleCompiler.CreateReference(original),
+            library: false);
+        var consumerIdentityInputs = CreateGenericOutputIdentityInputs(
+            consumerProgram, "ManagedGenericConsumer");
+        var consumer = ModuleCompiler.CreateConsumer(consumerProgram,
+            original, consumerIdentityInputs);
         var hash = SHA256.HashData(consumer);
         var linked = ModuleCompiler.Link(consumer, replacement);
         Assert.That(linked.Classes.Select(static item => item.Name), Is.EqualTo(["Record", "$producer.Record"]));
@@ -261,8 +277,11 @@ internal sealed partial class GenericControlFlowModuleTests
 
         var nativeOriginal = NativeModuleCompiler.CreateProducer(originalProgram,
             ["ManagedGenericProbe"], "NodeB", policy);
-        var nativeReplacement = NativeModuleCompiler.CreateProducer(Compile(source, policy),
-            ["ManagedGenericProbe"], "NodeB", policy);
+        var nativeReplacementIdentityInputs
+            = CreateGenericOutputIdentityInputs(providerProgram, "NodeB");
+        var nativeReplacement = NativeModuleCompiler.CreateProducer(providerProgram,
+            ["ManagedGenericProbe"], "NodeB", policy,
+            nativeReplacementIdentityInputs);
         var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(Compile(
             "int32 Main() { return ManagedGenericProbe(); }", policy,
             NativeModuleCompiler.CreateGraphReference([nativeOriginal]), library: false),
@@ -283,7 +302,7 @@ internal sealed partial class GenericControlFlowModuleTests
                 public int32 Value;
                 public Cell(int32 value) { Value = value; }
             }
-            T Invalid<T>(T value) where T : [Copy] {
+            T Invalid<T>(T value)  {
             """ + body + """
             }
             int32 Main() {
@@ -309,7 +328,7 @@ internal sealed partial class GenericControlFlowModuleTests
                 public int32 Value;
                 public Frozen(int32 value) { Value = value; }
             }
-             T Identity<T>(T value) where T : [Copy] { return value; }
+             T Identity<T>(T value)  { return value; }
             int32 Main() {
                 require Cell.TryCreate(40, out var writable);
                 Cell read = writable;
@@ -332,7 +351,7 @@ internal sealed partial class GenericControlFlowModuleTests
                 public int32 Value;
                 public Cell(int32 value) { Value = value; }
             }
-            bool Copy<T>(T value, out T result) where T : [Copy] {
+            bool Copy<T>(T value, out T result)  {
                 result = value;
                 return true;
             }
@@ -347,10 +366,10 @@ internal sealed partial class GenericControlFlowModuleTests
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,item => item.Code == diagnostic),Is.True);
         Assert.That(compilation.Program, Is.Null);
     }
-    [TestCase("T Bad<T>(T value) where T : [Copy] { return value.Value; }")]
-    [TestCase("T? Bad<T>(T value) where T : [Copy] { return value; }")]
-    [TestCase("T Bad<T>(T value) where T : [Copy] { T? optional = null; return value; }")]
-    [TestCase("T Bad<T>(T value) where T : [Copy] { write T stronger = value; return value; }")]
+    [TestCase("T Bad<T>(T value)  { return value.Value; }")]
+    [TestCase("T? Bad<T>(T value)  { return value; }")]
+    [TestCase("T Bad<T>(T value)  { T? optional = null; return value; }")]
+    [TestCase("T Bad<T>(T value)  { write T stronger = value; return value; }")]
     public void OpaqueGenericFormalCannotBorrowOptionalOrWriteCapabilities(string declaration)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -376,7 +395,7 @@ internal sealed partial class GenericControlFlowModuleTests
                 public int32 Value;
                 public Cell(int32 value) { Value = value; }
             }
-             T Identity<T>(T value) where T : [Copy] { return value; }
+             T Identity<T>(T value) where T : null? { return value; }
             """ + declaration, NativeRuntimePolicy.FailFast);
         _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(program, ["Leak"]))!;
         _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.CreateProducer(program,
@@ -391,7 +410,7 @@ internal sealed partial class GenericControlFlowModuleTests
                 public int32 Value;
                 public Cell(int32 value) { Value = value; }
             }
-            bool Absent<T>(out T result) where T : [Copy] { return false; }
+            bool Absent<T>(out T result)  { return false; }
             int32 Main() {
                 if (Absent<write Cell>(out var value)) { return 1; }
                 return value.Value;
@@ -411,7 +430,8 @@ internal sealed partial class GenericControlFlowModuleTests
                 public Cell(int32 value) { Value = value; Next = null; }
             }
             bool Fail<T, U>(T first, U second, out T left, out U right)
-                where T : [Copy] where U : [Copy] {
+                where U : null?
+                  {
                 left = first;
                 right = second;
                 require false;

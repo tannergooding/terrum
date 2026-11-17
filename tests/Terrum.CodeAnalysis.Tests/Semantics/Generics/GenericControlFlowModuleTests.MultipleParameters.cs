@@ -16,6 +16,7 @@ namespace Terrum.CodeAnalysis.Tests.Semantics.Generics;
 
 internal sealed partial class GenericControlFlowModuleTests
 {
+    private static readonly byte[] s_defaultGenericFormalDomain = [1, 1];
     private const string MultipleCopyValues = """
         struct Left {
             public int32 Number;
@@ -26,38 +27,38 @@ internal sealed partial class GenericControlFlowModuleTests
             public int64 Spare;
             public Right(int64 number) { Number = number; Spare = 0; }
         }
-         A First<A, B>(A first, B second) where A : [Copy] where B : [Copy] {
+         A First<A, B>(A first, B second)   {
             return first;
         }
-         B Reverse<A, B>(A first, B second) where A : [Copy] where B : [Copy] {
+         B Reverse<A, B>(A first, B second)   {
             return First<B, A>(second, first);
         }
-         B ReverseInferred<A, B>(A first, B second) where A : [Copy] where B : [Copy] {
+         B ReverseInferred<A, B>(A first, B second)   {
             return First(second, first);
         }
          bool Publish<A, B>(A first, B second, out A left, out B right)
-            where A : [Copy] where B : [Copy] {
+              {
             left = first;
             right = second;
             return true;
         }
         A Step<A, B>(A first, B second, int32 remaining)
-            where A : [Copy] where B : [Copy] {
+              {
             if (remaining == 0) { return first; }
             return Relay<B, A>(second, first, remaining - 1);
         }
         B Relay<A, B>(A first, B second, int32 remaining)
-            where A : [Copy] where B : [Copy] {
+              {
             if (remaining == 0) { return second; }
             return Step<B, A>(second, first, remaining - 1);
         }
         A Direct<A, B>(A first, B second, int32 remaining)
-            where A : [Copy] where B : [Copy] {
+              {
             if (remaining == 0) { return first; }
             return Direct<A, B>(first, second, remaining - 1);
         }
         A Triple<A, B, C>(A first, B second, C third)
-            where A : [Copy] where B : [Copy] where C : [Copy] {
+               {
             return first;
         }
         """;
@@ -116,8 +117,8 @@ internal sealed partial class GenericControlFlowModuleTests
                 public static Right operator *(Right a, Right b) { return new Right(a.Number * b.Number); }
             }
             A Combine<A, B>(A first, B second)
-                where A : Addition<A, A, A>, [Copy]
-                where B : Multiplication<B, B, B>, [Copy] {
+                where A : Addition<A, A, A>
+                where B : Multiplication<B, B, B> {
                 B check = second * second;
                 return first + first;
             }
@@ -125,7 +126,7 @@ internal sealed partial class GenericControlFlowModuleTests
                 return Combine(new Left(20), new Right(2)).Number
                     + int32(First<Right, Left>(new Right(2), new Left(1)).Number);
             }
-             A First<A, B>(A first, B second) where A : [Copy] where B : [Copy] {
+             A First<A, B>(A first, B second)   {
                 return first;
             }
             """;
@@ -170,16 +171,32 @@ internal sealed partial class GenericControlFlowModuleTests
             return (BoundProgram)__nunitActual1!;
         }))();
         Assert.That(await ExecuteAsync(NativeEmitter.Emit(sample, policy)).ConfigureAwait(true), Is.EqualTo(42));
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(source), new CompilationOptions {
+                RuntimePolicy = (BoundRuntimePolicy)policy,
+            });
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerProgram = (BoundProgram)providerCompilation.Program!;
+        var sampleIdentityInputs = CreateGenericOutputIdentityInputs(providerProgram,
+            "NodeB");
         var original = ModuleCompiler.CreateProducer(Compile(
             "public int32 GenericPairProbe() { return 40; }", policy), ["GenericPairProbe"]);
-        var replacement = ModuleCompiler.CreateProducer(sample, ["GenericPairProbe"]);
-        var consumer = ModuleCompiler.CreateConsumer(Compile("""
+        var replacement = ModuleCompiler.CreateProducer(providerProgram,
+            ["GenericPairProbe"], sampleIdentityInputs);
+        var consumerProgram = Compile("""
             struct WidePair {
                 public int32 Unrelated;
                 public WidePair(int32 value) { Unrelated = value; }
             }
             int32 Main() { return GenericPairProbe() + new WidePair(0).Unrelated; }
-            """, policy, ModuleCompiler.CreateReference(original), library: false), original);
+            """, policy, ModuleCompiler.CreateReference(original),
+            library: false);
+        var consumerIdentityInputs = CreateGenericOutputIdentityInputs(
+            consumerProgram, "GenericPairConsumer");
+        var consumer = ModuleCompiler.CreateConsumer(consumerProgram,
+            original, consumerIdentityInputs);
         var hash = SHA256.HashData(consumer);
         var linked = ModuleCompiler.Link(consumer, replacement);
         Assert.That(linked.Structures.Select(static item => item.Name), Is.EqualTo(["WidePair", "$producer.WidePair"]));
@@ -187,8 +204,8 @@ internal sealed partial class GenericControlFlowModuleTests
         var nativeOriginal = NativeModuleCompiler.CreateProducer(Compile(
             "public int32 GenericPairProbe() { return 40; }", policy),
             ["GenericPairProbe"], "NodeB", policy);
-        var nativeReplacement = NativeModuleCompiler.CreateProducer(Compile(source, policy),
-            ["GenericPairProbe"], "NodeB", policy);
+        var nativeReplacement = NativeModuleCompiler.CreateProducer(providerProgram,
+            ["GenericPairProbe"], "NodeB", policy, sampleIdentityInputs);
         var root = NativeModuleCompiler.CreateGraphConsumer(Compile(
             "int32 Main() { return GenericPairProbe(); }", policy,
             NativeModuleCompiler.CreateGraphReference([nativeOriginal]), library: false),
@@ -201,13 +218,13 @@ internal sealed partial class GenericControlFlowModuleTests
     }
     [TestCase("var result = First(new Left(1), 2);","TRM3011")]
     [TestCase("Left result = First(new Left(1), 2);","TRM3011")]
-    [TestCase("var result = First<Left>(new Left(1), new Right(2));","TRM3011")]
+    [TestCase("var result = First<Left>(new Left(1), new Right(2));",null)]
     [TestCase("var result = First<Left, Right, bool>(new Left(1), new Right(2));","TRM3011")]
     [TestCase("Left result = First<Left, Right>(new Left(1), new Left(2));","TRM3007")]
     [TestCase("Right result = First(new Left(1), new Right(2));","TRM3007")]
     [TestCase("var result = First<Left, Right>(new Left(1), new Right(2));",null)]
-    [TestCase("var result = First<Left, _>(new Left(1), new Right(2));","TRM1001")]
-    public void ExplicitArgumentsNeedCompleteListsAndInferredPositionsNeedTypes(
+    [TestCase("var result = First<Left, _>(new Left(1), new Right(2));",null)]
+    public void GenericMethodArgumentsCanInferAfterExplicitPositions(
         string body, string? diagnostic)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(MultipleCopyValues
@@ -221,14 +238,33 @@ internal sealed partial class GenericControlFlowModuleTests
             Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,item => item.Code == diagnostic),Is.True);
         }
     }
-    [TestCase("T Identity<T, T>(T a, T b) where T : [Copy] { return a; }")]
-    [TestCase("T Identity<T, U>(T a, U b) where T : [Copy] { return a; }")]
-    [TestCase("T Identity<T, U>(T a, U b) where T : [Copy] where U : [Copy] where U : [Copy] { return a; }")]
-    [TestCase("T Identity<T, U>(T a, U b) where T : [Copy] where V : [Copy] { return a; }")]
-    public void AllIndependentFormalsNeedDistinctDeclaredCopyConstraints(string declaration)
+    [TestCase("T Identity<T, U>(T a, U b) { return a; }")]
+    [TestCase("T Identity<T, U>(T a, U b)    { return a; }")]
+    public void UnmarkedFormalsUseIndependentDefaultDomains(string declaration)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(declaration + "int32 Main() { return 0; }"));
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3007"),Is.True);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var definition = global::System.Linq.Enumerable.Single(
+            compilation.Program!.GenericMethodDefinitions);
+        Assert.That(definition.Formals.Select(
+                static formal => formal.OwnershipDomain),
+            Is.EqualTo(s_defaultGenericFormalDomain));
+        Assert.That(definition.Formals.Select(
+                static formal => formal.NullabilityDomain),
+            Is.EqualTo(s_defaultGenericFormalDomain));
+    }
+
+    [Test]
+    public void DuplicateGenericFormalsAreRejected()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(
+            "T Identity<T, T>(T a, T b) { return a; }"
+            + "int32 Main() { return 0; }"));
+        Assert.That(global::System.Linq.Enumerable.Any(
+            compilation.Diagnostics,
+            static diagnostic => diagnostic.Code == "TRM3007"), Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
     [TestCase("return left + right;")]
     [TestCase("return right;")]
@@ -241,7 +277,7 @@ internal sealed partial class GenericControlFlowModuleTests
                 public Value(int32 number) { Number = number; }
                 public static Value operator +(Value a, Value b) { return new Value(a.Number + b.Number); }
             }
-            A Invalid<A, B>(A left, B right) where A : Addition<A, A, A>, [Copy] where B : [Copy] {
+            A Invalid<A, B>(A left, B right) where A : Addition<A, A, A>  {
             """ + body + "}" + """
             int32 Main() { return Invalid<Value, Value>(new Value(20), new Value(22)).Number; }
             """));
@@ -266,7 +302,7 @@ internal sealed partial class GenericControlFlowModuleTests
                 }
             }
             A Keep<A, B>(A first, B second)
-                where A : [Copy] where B : Multiplication<B, B, B>, [Copy] {
+                 where B : Multiplication<B, B, B> {
                 B ignored = second * second;
                 return first;
             }
@@ -281,7 +317,7 @@ internal sealed partial class GenericControlFlowModuleTests
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(MultipleCopyValues + """
              bool Absent<A, B>(A first, out B result)
-                where A : [Copy] where B : [Copy] {
+                  {
                 return false;
             }
             int32 Main() {
@@ -324,7 +360,7 @@ internal sealed partial class GenericControlFlowModuleTests
     {
         var argument = incompatibleTypedArgument ? "int32(42)" : "42";
         var compilation = Compilation.Create(SyntaxTree.Parse(MultipleCopyValues + """
-             B Second<A, B>(A first, B second) where A : [Copy] where B : [Copy] {
+             B Second<A, B>(A first, B second)   {
                 return second;
             }
             int32 Main() {
@@ -356,11 +392,11 @@ internal sealed partial class GenericControlFlowModuleTests
                 public static Value operator +(Value a, Value b) { return new Value(a.Number + b.Number); }
             }
             A Needs<A, B>(A first, B second)
-                where A : Addition<A, A, A>, [Copy] where B : [Copy] {
+                where A : Addition<A, A, A>  {
                 return first + first;
             }
             A Borrow<A, B>(A first, B second)
-                where A : [Copy] where B : Addition<B, B, B>, [Copy] {
+                 where B : Addition<B, B, B> {
                 return Needs<A, B>(first, second);
             }
             int32 Main() { return Borrow<Value, Value>(new Value(20), new Value(22)).Number; }
@@ -373,12 +409,12 @@ internal sealed partial class GenericControlFlowModuleTests
     {
         var source = """
              A Forward<A, B>(A first, B second)
-                where A : [Copy] where B : [Copy] {
+                  {
                 return Pick<B, A>(second, first);
             }
             """ + """
             B Pick<A, B>(A first, B second)
-                where A : [Copy] where B : [Copy] {
+                  {
                 return second;
             }
             int32 Main() { return Forward<int32, bool>(int32(42), true); }
@@ -392,7 +428,7 @@ internal sealed partial class GenericControlFlowModuleTests
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(MultipleCopyValues + """
             bool Fail<A, B>(A first, B second, out A left, out B right)
-                where A : [Copy] where B : [Copy] {
+                  {
                 left = first;
                 right = second;
                 require false;

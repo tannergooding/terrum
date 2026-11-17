@@ -27,11 +27,11 @@ internal sealed partial class GenericControlFlowModuleTests
             public int32 Number;
             public Value(int32 number) { Number = number; }
         }
-        T Forward<T>(T value) where T : [Copy] {
+        T Forward<T>(T value)  {
             return Second<Value, T>(new Value(1), value);
         }
         U Second<A, U>(A first, U second)
-            where A : [Copy] where U : [Copy] { return second; }
+              { return second; }
         public int32 Read() { return Forward(int32(42)); }
         """;
     private const string GenericInitLibrary = """
@@ -40,20 +40,22 @@ internal sealed partial class GenericControlFlowModuleTests
             public int64 Second;
             public Pair(int64 first, int64 second) { First = first; Second = second; }
         }
-         bool Copy<T>(bool publish, T value, init ref<T> result) where T : [Copy] {
+         bool Copy<T>(bool publish, T value, ref<init T> result)  {
             if (!publish) { return false; }
-            result = value;
+            *result = value;
             return true;
         }
-         bool Forward<T>(T value, init ref<T> result) where T : [Copy] {
-            return Copy(true, value, init result);
+         bool Forward<T>(T value, ref<init T> result)  {
+            return Copy(true, value, ref init *result);
         }
-         bool None<T>(init ref<T> result) where T : [Copy] { return false; }
+         bool None<T>(ref<init T> result)  { return false; }
         public int32 Read() {
-            if (Copy(false, new Pair(1, 2), init var pair)) { return 1; }
-            if (None(init pair)) { return 3; }
-            require Forward(new Pair(40, 1), init pair);
-            require Copy(true, int32(2), init var scalar);
+            init Pair pair;
+            if (Copy(false, new Pair(1, 2), ref init pair)) { return 1; }
+            if (None<Pair>(ref init pair)) { return 3; }
+            require Forward(new Pair(40, 1), ref init pair);
+            init int32 scalar;
+            require Copy(true, int32(2), ref init scalar);
             if (pair.First != 40 || pair.Second != 1) { return 2; }
             return int32(pair.First) + scalar;
         }
@@ -62,7 +64,11 @@ internal sealed partial class GenericControlFlowModuleTests
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task GenericInitOutputsStayPrivateAcrossIndependentConsumersAsync(NativeRuntimePolicy policy)
     {
-        var producer = ModuleCompiler.CreateProducer(Compile(GenericInitLibrary, policy), ["Read"]);
+        var program = Compile(GenericInitLibrary, policy);
+        var identityInputs = CreateGenericOutputIdentityInputs(
+            program, "GenericControlFlowInitLibrary");
+        var producer = ModuleCompiler.CreateProducer(program, ["Read"],
+            identityInputs);
         var consumer = ModuleCompiler.CreateConsumer(Compile("int32 Main() { return Read(); }",
             policy, ModuleCompiler.CreateReference(producer), library: false), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
@@ -75,8 +81,8 @@ internal sealed partial class GenericControlFlowModuleTests
         Assert.That(NativeJit.Execute(linked, policy), Is.EqualTo(42));
         Assert.That(await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true), Is.EqualTo(42));
 
-        var nativeProducer = NativeModuleCompiler.CreateProducer(Compile(GenericInitLibrary, policy), ["Read"],
-            "Leaf", policy);
+        var nativeProducer = NativeModuleCompiler.CreateProducer(program,
+            ["Read"], "Leaf", policy, identityInputs);
         var nativeConsumer = NativeModuleCompiler.CreateConsumer(Compile("int32 Main() { return Read(); }",
             policy, NativeModuleCompiler.CreateReference(nativeProducer), library: false), nativeProducer, policy);
         Assert.That(await NativeModuleCompiler.RunAsync(nativeConsumer, nativeProducer,
@@ -87,25 +93,28 @@ internal sealed partial class GenericControlFlowModuleTests
     public async Task GenericInitDoesNotPublishAfterFailureAcrossIndependentModuleReplacementAsync()
     {
         const string ReplacementSource = """
-            bool FailAfterWrite<T>(T value, init ref<T> result) where T : [Copy] {
-                result = value;
+            bool FailAfterWrite<T>(T value, ref<init T> result)  {
+                *result = value;
                 require false;
                 return true;
             }
-             bool Fill<T>(T value, init ref<T> result) where T : [Copy] {
-                result = value;
+             bool Fill<T>(T value, ref<init T> result)  {
+                *result = value;
                 return true;
             }
-             bool None<T>(init ref<T> result) where T : [Copy] { return false; }
+             bool None<T>(ref<init T> result)  { return false; }
             public int32 PowerProbe() {
-                if (None<int32>(init var target)) { return 1; }
+                init mut int32 target;
+                if (None<int32>(ref init target)) { return 1; }
                 unsafe {
                     try {
-                        FailAfterWrite<int32>(41, init target);
+                        FailAfterWrite<int32>(41, ref init target);
                         return 2;
-                    } catch { }
+                    } catch {
+                        if (target is init) { target = _; }
+                    }
                 }
-                require Fill(42, init target);
+                require Fill<int32>(int32(42), ref init target);
                 return target;
             }
             """;
@@ -184,11 +193,11 @@ internal sealed partial class GenericControlFlowModuleTests
             }
             """, policy), ["Box.#ctor"]);
         var consumer = ModuleCompiler.CreateConsumer(Compile("""
-            T Forward<T>(T value) where T : [Copy] {
+            T Forward<T>(T value)  {
                 return Second<Box, T>(new Box(1), value);
             }
             U Second<A, U>(A first, U second)
-                where A : [Copy] where U : [Copy] { return second; }
+                  { return second; }
             int32 Main() { return Forward(int32(42)); }
             """, policy, ModuleCompiler.CreateReference(producer), library: false), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
@@ -207,11 +216,11 @@ internal sealed partial class GenericControlFlowModuleTests
             }
             """, policy), ["Box.Create"]);
         var consumer = ModuleCompiler.CreateConsumer(Compile("""
-            T Forward<T>(T value) where T : [Copy] {
+            T Forward<T>(T value)  {
                 return Second(Box.Create(), value);
             }
             U Second<A, U>(A first, U second)
-                where A : [Copy] where U : [Copy] { return second; }
+                  { return second; }
             int32 Main() { return Forward(int32(42)); }
             """, policy, ModuleCompiler.CreateReference(producer), library: false), producer);
         var linked = ModuleCompiler.Link(consumer, producer);

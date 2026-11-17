@@ -27,10 +27,10 @@ internal sealed partial class GenericControlFlowModuleTests
                     return new Value(left.Number ^ right.Number);
                 }
             }
-            T Mix<T>(T left, T right) where T : Exclusive<T, T, T>, [Copy] {
+            T Mix<T>(T left, T right) where T : Exclusive<T, T, T> {
                 return left ^ right;
             }
-            U Forward<U>(U left, U right) where U : Exclusive<U, U, U>, [Copy] {
+            U Forward<U>(U left, U right) where U : Exclusive<U, U, U> {
                 return Mix(left, right);
             }
             public int32 LeafValue() { return Forward(new Value(40), new Value(2)).Number; }
