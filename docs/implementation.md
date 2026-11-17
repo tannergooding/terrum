@@ -533,10 +533,9 @@ operations, total conversions, conditionals, FrozenValueNode literals
 TypeSpec rows for the full built-in scalar domain; source-free provider
 re-emission covers the full built-in scalar domain. Native lowering does not
 evaluate phase-3 selector graphs.
-The source producer and consumer preserve rootless scalar predicates with an
-empty read footprint for either vacant or complete OutputState relations.
-The OutputState is a producer-published fact; loading checks the graph and
-relation shape without re-proving the producer's body.
+The Standard producer and source-free re-emitter preserve rootless scalar
+predicates with an empty read footprint for either OutputState value. Loading
+checks the graph and relation shape without re-proving the producer's body.
 This composition does not select the LayoutQueries source/provider/query-Body
 profile. Phase-2 ensure persistence, checked conversions, bit reinterpretation,
 calls, captures, places, complete dependency/provider replacement remapping
