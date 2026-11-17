@@ -903,7 +903,7 @@ function-pointer and pointer identities through bound-tree remapping. The
 | Source binding | Supports partial and file-local enums, exact wide values, duplicate-valued members and source identities distinct from Core/private identities. |
 | Private persistence | The unapproved source-enum route is limited to public namespace-level int32 enums with explicit ordered member keys; internal, file-local and wide enums are not persisted by it. |
 | Standard enums | NominalEnumsDraft remains a separate unapproved candidate. Its API and CLI require explicit declaration/member keys, generate none, and support only bounded enum declarations, constant-return and enum-identity Bodies. The baseline emitter is Windows x64 target-1-only; the candidate preserves target requirements 0/1 for non-Blittable enums and requires 1 for Blittable. See the [CLI inventory](implementation/cli-protocol.md#provisional-trrm-source-schema-selection). |
-| EN1 | The separate [C1 enum-closure proposal](proposals/standard-trrm-c1-enum-closure-composition.md) leaves NominalEnumsDraft and CG1 unchanged. Partial classless source, reference and direct-import re-emission paths exist; EN1 is not end-to-end support. See the [conformance gap index](implementation/conformance-gaps.md). |
+| EN1 | The separate [C1 enum-closure proposal](proposals/standard-trrm-c1-enum-closure-composition.md) leaves NominalEnumsDraft and CG1 unchanged. Partial enum source/reference and direct-import re-emission paths exist; source emission also retains local non-generic struct FieldDef/Layout closure with enum TypeSpecs. Mixed source-free provider closure, class/member/Body routes and runtime remain open; EN1 is not end-to-end support. See the [conformance gap index](implementation/conformance-gaps.md). |
 `NativeParameter` still adds
 prototype raw pointer annotations; without it, a raw pointer remains
 caller-unsafe and carries no checked access, retention, extent, or alignment
@@ -1524,10 +1524,12 @@ enum-bearing Construction successors and a provisional Standard enum
 occurrence carrier. Schema/table admission, classless source-only emission and
 local/direct-import enum-only reference/re-emission are partial. Direct enum
 TypeDef imports compare complete expected/provider
-contracts and retain separate Standard expectations. Class/member/Body
-production, broader dependency closure, replacement and private-origin
-remapping, runtime and CLI support remain open. No end-to-end EN1 support is
-implemented.
+contracts and retain separate Standard expectations. Source emission also
+supports a bounded local non-generic struct closure with FieldDefs, layouts,
+and enum TypeSpec references. Mixed source-free provider closure,
+class/member/Body production, broader dependency closure, replacement and
+private-origin remapping, runtime and CLI support remain open. No end-to-end
+EN1 support is implemented.
 These source-bound definitions are not generally interoperable: source-authored
 generic classes and complete nominal conformance rules remain unsupported.
 Generic method formals retain verified nominal interface constraints with

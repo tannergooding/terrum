@@ -137,6 +137,106 @@ internal sealed class TrRmC1EnumClosureSourceTests
     }
 
     [Test]
+    public void EmitsLocalStructFieldClosureAlongsideEN1Enums()
+    {
+        var tree = SyntaxTree.Parse("""
+            namespace Demo {
+                public enum Shade : int8 { Dark = -1 }
+                public struct ColorPayload {
+                    public Shade Value;
+                }
+                public struct Packet {
+                    public int32 Id;
+                    public ColorPayload Payload;
+                }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var typeExport = new TrRmSourceTypeExport("Demo", "Packet",
+            "type.packet") {
+            FieldExports = [
+                new TrRmSourceFieldExport("Id", "field.packet.id"),
+                new TrRmSourceFieldExport("Payload", "field.packet.payload"),
+            ],
+        };
+        var enumExport = CreateExport(program, tree, 0, "Shade",
+            ["type.shade"], "shade");
+
+        foreach (var schemaIdentity in s_schemaIdentities)
+        {
+            var artifact = TrRmExecutableCompiler.EmitStandard(program,
+                "MixedSourceTypes", schemaIdentity, 1, [typeExport], [],
+                [], [enumExport]);
+            var tables = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                    artifact, SchemaFor(schemaIdentity)));
+
+            Assert.That(tables.TypeDefs.Count, Is.EqualTo(3));
+            Assert.That(tables.Fields.Count, Is.EqualTo(3));
+            Assert.That(tables.Layouts.Count, Is.EqualTo(3));
+            Assert.That(tables.LayoutFields.Count, Is.EqualTo(3));
+            Assert.That(Enumerable.Range(1, tables.Features.Count)
+                    .Select(row => tables.Features.GetFeature(row).FeatureId),
+                Does.Contain(13u));
+
+            Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+                "type.shade", out var enumDefinition), Is.True);
+            Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+                "type.packet", out var packetDefinition), Is.True);
+            Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+                "type.color-payload", out _), Is.False);
+            var enumTypeDefRow = checked((int)(enumDefinition
+                & 0x00FF_FFFF));
+            var packetTypeDefRow = checked((int)(packetDefinition
+                & 0x00FF_FFFF));
+            var colorPayloadTypeDefRow = Enumerable.Range(1,
+                tables.TypeDefs.Count).Single(row =>
+                    tables.TypeDefs.GetName(row) == "ColorPayload");
+            Assert.That(tables.TypeDefs.GetKind(enumTypeDefRow), Is.EqualTo(4));
+            Assert.That(tables.TypeDefs.GetKind(packetTypeDefRow), Is.EqualTo(1));
+            var (packetFieldStart, packetFieldEnd)
+                = tables.TypeDefs.GetFieldRange(packetTypeDefRow);
+            Assert.That(packetFieldEnd - packetFieldStart,
+                Is.EqualTo(2));
+
+            Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+                "field.packet.id", out var idFieldDefinition), Is.True);
+            Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+                "field.packet.payload", out var payloadFieldDefinition), Is.True);
+            var idFieldRow = checked((int)(idFieldDefinition
+                & 0x00FF_FFFF));
+            var payloadFieldRow = checked((int)(payloadFieldDefinition
+                & 0x00FF_FFFF));
+            Assert.That(tables.Fields.GetOwnerTypeDef(idFieldRow),
+                Is.EqualTo(packetTypeDefRow));
+            Assert.That(tables.Fields.GetOwnerTypeDef(payloadFieldRow),
+                Is.EqualTo(packetTypeDefRow));
+            Assert.That(tables.Fields.GetName(idFieldRow), Is.EqualTo("Id"));
+            Assert.That(tables.Fields.GetName(payloadFieldRow),
+                Is.EqualTo("Payload"));
+            Assert.That(tables.Fields.GetTypeSpecRef(idFieldRow),
+                Is.EqualTo(0xF200_0008u));
+            var payloadType = tables.TypeSpecs.GetTypeSpecRef(
+                tables.Fields.GetTypeSpecRef(payloadFieldRow));
+            Assert.That(payloadType.Form, Is.EqualTo((byte)0x02));
+            Assert.That(payloadType.Row,
+                Is.EqualTo(colorPayloadTypeDefRow));
+
+            var (payloadFieldStart, payloadFieldEnd)
+                = tables.TypeDefs.GetFieldRange(colorPayloadTypeDefRow);
+            var enumFieldType = tables.TypeSpecs.GetTypeSpecRef(
+                tables.Fields.GetTypeSpecRef(payloadFieldStart));
+            Assert.That(enumFieldType.Form, Is.EqualTo((byte)0x02));
+            Assert.That(enumFieldType.Row, Is.EqualTo(enumTypeDefRow));
+            Assert.That(payloadFieldEnd - payloadFieldStart,
+                Is.EqualTo(1));
+        }
+    }
+
+    [Test]
     public void ReconstructsSelectedAndClosureOnlyStandardEnumIdentities()
     {
         var secondary = SyntaxTree.Parse("""
