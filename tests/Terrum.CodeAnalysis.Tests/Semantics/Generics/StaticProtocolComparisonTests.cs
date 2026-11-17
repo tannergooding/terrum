@@ -26,7 +26,7 @@ internal sealed class StaticProtocolComparisonTests
             public int32 Number;
             public Other(int32 number) { Number = number; }
         }
-        bool Compare<T>(T left, T right) where T : Less<T, T, bool>, [Copy] {
+        bool Compare<T>(T left, T right) where T : Less<T, T, bool> {
             return left < right;
         }
         int32 Main() {
@@ -51,7 +51,7 @@ internal sealed class StaticProtocolComparisonTests
                     return left.Number {{operation}} right.Number;
                 }
             }
-            bool Compare<T>(T left, T right) where T : Comparison<T, T, bool>, [Copy] {
+            bool Compare<T>(T left, T right) where T : Comparison<T, T, bool> {
                 return left {{operation}} right;
             }
             int32 Main() {
@@ -82,9 +82,9 @@ internal sealed class StaticProtocolComparisonTests
     [TestCase("public static bool operator <(Value left, Value right)",        "public static int32 operator <(Value left, Value right)","TRM3007")]
     [TestCase("public static bool operator <(Value left, Value right)",        "public static bool operator <(Value left, Other right)","TRM3007")]
     [TestCase("static C operator <(A left, B right)",        "static B operator <(A left, B right)","TRM3001")]
-    [TestCase("where T : Less<T, T, bool>, [Copy]","where T : Less<T, T, T>, [Copy]","TRM3007")]
-    [TestCase("where T : Less<T, T, bool>, [Copy]","where T : OtherLess<T, T, bool>, [Copy]","TRM3007")]
-    [TestCase("where T : Less<T, T, bool>, [Copy]","where T : [Copy]","TRM3007")]
+    [TestCase("where T : Less<T, T, bool>","where T : Less<T, T, T>","TRM3007")]
+    [TestCase("where T : Less<T, T, bool>","where T : OtherLess<T, T, bool>","TRM3007")]
+    [TestCase("where T : Less<T, T, bool>","", "TRM3007")]
     [TestCase("return left < right;","return left == right;","TRM3007")]
     [TestCase("return left < right;","return left >= right;","TRM3007")]
     public void InvalidComparisonShapesAndMissingWitnessesAreRejected(
@@ -110,8 +110,8 @@ internal sealed class StaticProtocolComparisonTests
     [Test]
     public void DistinctSymbolicTypesCannotBorrowComparisonFromEqualActuals()
     {
-        var source = LessSource.Replace("bool Compare<T>(T left, T right) where T : Less<T, T, bool>, [Copy] {",
-            "bool Compare<T, U>(T left, U right) where T : Less<T, T, bool>, [Copy] where U : [Copy] {",
+        var source = LessSource.Replace("bool Compare<T>(T left, T right) where T : Less<T, T, bool> {",
+            "bool Compare<T, U>(T left, U right) where T : Less<T, T, bool>  {",
             StringComparison.Ordinal)
             .Replace("Compare(new Value(20), new Value(22))",
                 "Compare<Value, Value>(new Value(20), new Value(22))", StringComparison.Ordinal);
@@ -123,7 +123,7 @@ internal sealed class StaticProtocolComparisonTests
     public void UninstantiatedComparisonBodyStillNeedsItsOwnWitness()
     {
         var source = LessSource[..LessSource.IndexOf("int32 Main()", StringComparison.Ordinal)]
-            .Replace("where T : Less<T, T, bool>, [Copy]", "where T : [Copy]", StringComparison.Ordinal)
+            .Replace("where T : Less<T, T, bool>", "", StringComparison.Ordinal)
             + "int32 Main() { return 42; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3007"),Is.True);
@@ -135,7 +135,7 @@ internal sealed class StaticProtocolComparisonTests
     {
         var source = LessSource.Replace("struct Value : Less<Value, Value, bool>", "struct Value",
             StringComparison.Ordinal).Replace(
-                "bool Compare<T>(T left, T right) where T : Less<T, T, bool>, [Copy] {\n    return left < right;\n}",
+                "bool Compare<T>(T left, T right) where T : Less<T, T, bool> {\n    return left < right;\n}",
                 "", StringComparison.Ordinal)
             .Replace("Compare(new Value(20), new Value(22))",
                 "new Value(20) < new Value(22)", StringComparison.Ordinal);
@@ -222,7 +222,7 @@ internal sealed class StaticProtocolComparisonTests
                 public static bool operator >(Second a, Second b) { return a.Value > b.Value; }
             }
             bool TryChoose<T, U>(T first, T second, U left, U right, out T result)
-                where T : Less<T, T, bool>, [Copy] where U : Greater<U, U, bool>, [Copy] {
+                where T : Less<T, T, bool> where U : Greater<U, U, bool> {
                 if (first < second && left > right) {
                     result = first;
                     return true;
@@ -253,7 +253,7 @@ internal sealed class StaticProtocolComparisonTests
     {
         var source = LessSource[..LessSource.IndexOf("int32 Main()", StringComparison.Ordinal)]
             + """
-            bool TryChoose<T>(T left, T right, out T result) where T : Less<T, T, bool>, [Copy] {
+            bool TryChoose<T>(T left, T right, out T result) where T : Less<T, T, bool> {
                 if (left < right) { result = left; return true; }
                 return false;
             }

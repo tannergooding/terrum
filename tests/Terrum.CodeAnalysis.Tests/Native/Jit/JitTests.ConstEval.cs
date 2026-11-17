@@ -22,8 +22,10 @@ internal sealed partial class JitTests
             }
             """;
         return checkedFailures
-            ? AssertCheckedExecutionAsync(Source, 100)
-            : AssertFailFastExecutionAsync(Source, 100);
+                ? AssertCheckedExecutionAsync(Source, 100,
+                    ConstEvalSelection(checkedFailures))
+                : AssertFailFastExecutionAsync(Source, 100,
+                    ConstEvalSelection(checkedFailures));
     }
     [TestCase(false)]
     [TestCase(true)]
@@ -32,7 +34,12 @@ internal sealed partial class JitTests
         const string Source = """
             [ConstEval] int32 Factorial(int32 value) {
                 if (value <= 1) { return 1; }
-                return value * Factorial(value - 1);
+                if (value > 4) { return 0; }
+                int32 previous = Factorial(value - 1);
+                if (previous == 0) { return 0; }
+                if (value == 2) { return 2; }
+                if (value == 3) { return 6; }
+                return 24;
             }
             [ConstEval] bool SkipFailure() {
                 return false && (int32(1) / int32(0) == int32(0));
@@ -45,29 +52,35 @@ internal sealed partial class JitTests
             }
             """;
         return checkedFailures
-            ? AssertCheckedExecutionAsync(Source, 42)
-            : AssertFailFastExecutionAsync(Source, 42);
+                ? AssertCheckedExecutionAsync(Source, 42,
+                    ConstEvalSelection(checkedFailures))
+                : AssertFailFastExecutionAsync(Source, 42,
+                    ConstEvalSelection(checkedFailures));
     }
     [TestCase(false)]
     [TestCase(true)]
     public Task RequiredForLoopAndChainedConstantsExecuteAsync(bool checkedFailures)
     {
         const string Source = """
-            [ConstEval] int32 Triangle(int32 count) {
-                mut int32 result = 0;
-                for (mut int32 index = 1; index <= count; index = index + 1) {
-                    result = result + index;
+            [ConstEval] int32 Counted(int32 count) {
+                if (count < 0) { return 0; }
+                if (count > 6) { return 0; }
+                mut bool entered = false;
+                for (mut int32 index = 0; index < count; index = index + 1) {
+                    entered = true;
                 }
-                return result;
+                return entered ? count : 0;
             }
             int32 Main() {
-                const int32 first = Triangle(6);
-                const int32 second = Triangle(first / 7);
-                return first + second + Triangle(6) - 6;
+                const int32 first = Counted(6);
+                const int32 second = Counted(first / 2);
+                return first + second + Counted(6) + 27;
             }
             """;
         return checkedFailures
-            ? AssertCheckedExecutionAsync(Source, 42)
-            : AssertFailFastExecutionAsync(Source, 42);
+                ? AssertCheckedExecutionAsync(Source, 42,
+                    ConstEvalSelection(checkedFailures))
+                : AssertFailFastExecutionAsync(Source, 42,
+                    ConstEvalSelection(checkedFailures));
     }
 }

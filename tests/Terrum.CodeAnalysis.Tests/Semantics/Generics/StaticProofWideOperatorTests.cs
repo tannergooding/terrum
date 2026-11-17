@@ -5,6 +5,7 @@ using System.Linq;
 using NUnit.Framework;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
+using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Generics;
 
@@ -158,7 +159,8 @@ internal sealed class StaticProofWideOperatorTests
                 return Verify({{type}}(1), true);
             }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            CoreEvaluationFormTestHelpers.Options());
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));

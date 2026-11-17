@@ -9,6 +9,7 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
+using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Generics;
 
@@ -64,7 +65,9 @@ internal sealed class StaticProofModuleTests
 
     private static BoundProgram CompileLibrary(string source, NativeRuntimePolicy policy)
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            CoreEvaluationFormTestHelpers.Options(
+                (BoundRuntimePolicy)policy));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         return ((global::System.Func<BoundProgram>)(() => {
             var __nunitActual0 = compilation.Program;

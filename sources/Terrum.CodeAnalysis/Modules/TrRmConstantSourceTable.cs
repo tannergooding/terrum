@@ -74,8 +74,13 @@ public readonly ref struct TrRmConstantSourceTableReader
             var selectedCount = kind switch
             {
                 1 => frozenValueNodeCount,
-                2 => constantExecutionCount,
-                3 => targetValueBindingCount,
+                2 or 3 when schema.UsesGenericConstantMethods() => -1,
+                2 when !schema.UsesGenericConstantMethods()
+                    || schema.UsesGeneralPredicateGraphs()
+                    => constantExecutionCount,
+                3 when !schema.UsesGenericConstantMethods()
+                    || schema.UsesGeneralPredicateGraphs()
+                    => targetValueBindingCount,
                 4 when schema.UsesGenericConstantMethods()
                     => genericParamCount,
                 5 when schema.UsesGenericConstantMethods()

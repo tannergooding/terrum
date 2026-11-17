@@ -25,7 +25,7 @@ internal sealed class StaticProtocolExtendedTests
             public int32 Number;
             public Other(int32 number) { Number = number; }
         }
-        T Apply<T>(T left, T right) where T : BitMask<T, T, T>, [Copy] {
+        T Apply<T>(T left, T right) where T : BitMask<T, T, T> {
             return left & right;
         }
         int32 Main() { return Apply(new Value(40), new Value(2)).Number; }
@@ -36,8 +36,8 @@ internal sealed class StaticProtocolExtendedTests
     [TestCase("public static Value operator &(Value left, Value right)","private static Value operator &(Value left, Value right)","TRM3007")]
     [TestCase("static C operator &(A left, B right)","static B operator &(A left, B right)","TRM3001")]
     [TestCase("static C operator &(A left, B right)","[NoThrow] static C operator &(A left, B right)","TRM3017")]
-    [TestCase("where T : BitMask<T, T, T>, [Copy]","where T : [Copy]","TRM3007")]
-    [TestCase("where T : BitMask<T, T, T>, [Copy]","where T : BitMask<T, T, T>, OtherBitMask<T, T, T>, [Copy]","TRM3007")]
+    [TestCase("where T : BitMask<T, T, T>","", "TRM3007")]
+    [TestCase("where T : BitMask<T, T, T>","where T : BitMask<T, T, T>, OtherBitMask<T, T, T>","TRM3007")]
     [TestCase("return left & right;","return left ^ right;","TRM3007")]
     [TestCase("return Apply(new Value(40), new Value(2)).Number;","Apply(new Value(40), new Other(2)); return 0;","TRM3007")]
     [TestCase("return Apply(new Value(40), new Value(2)).Number;","Apply<int32>(40, 2); return 0;","TRM3007")]
@@ -57,7 +57,7 @@ internal sealed class StaticProtocolExtendedTests
         var source = Source.Replace(
             "int32 Main() { return Apply(new Value(40), new Value(2)).Number; }",
             """
-            U Forward<U>(U left, U right) where U : BitMask<U, U, U>, [Copy] {
+            U Forward<U>(U left, U right) where U : BitMask<U, U, U> {
                 return Apply(left, right);
             }
             int32 Main() { return Forward(new Value(40), new Value(2)).Number; }
@@ -79,8 +79,8 @@ internal sealed class StaticProtocolExtendedTests
         Assert.That(global::System.Linq.Enumerable.Any(program.Functions,function => function.IsExternal
             || function.Name.Contains('$', StringComparison.Ordinal)),Is.False);
     }
-    [TestCase("where U : [Copy]")]
-    [TestCase("where U : OtherBitMask<U, U, U>, [Copy]")]
+    [TestCase("")]
+    [TestCase("where U : OtherBitMask<U, U, U>")]
     public void CallerCannotBorrowMissingHelperWitnessFromConcreteStruct(string constraint)
     {
         var source = Source.Replace(

@@ -26,8 +26,10 @@ internal sealed partial class JitTests
             }
             """;
         return checkedFailures
-            ? AssertCheckedExecutionAsync(Source, 42)
-            : AssertFailFastExecutionAsync(Source, 42);
+                ? AssertCheckedExecutionAsync(Source, 42,
+                    ConstEvalSelection(checkedFailures))
+                : AssertFailFastExecutionAsync(Source, 42,
+                    ConstEvalSelection(checkedFailures));
     }
 
     [Test]

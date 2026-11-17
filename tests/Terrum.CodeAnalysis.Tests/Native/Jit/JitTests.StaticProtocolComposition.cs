@@ -20,7 +20,7 @@ internal sealed partial class JitTests
                 public int32 Value;
                 public Cell(int32 value) { Value = value; }
             }
-            bool TryForward<T>(T value, bool succeed, out T result) where T : [Copy] {
+            bool TryForward<T>(T value, bool succeed, out T result)  {
                 if (Cell.TryCreate(40, out var cell)) {
                     ManagedHeap.Collect();
                     require cell.Value == 40;
@@ -55,7 +55,7 @@ internal sealed partial class JitTests
                     require value != 0;
                 }
             }
-            int32 CreateOrRecover<T>(T value) where T : [Copy] {
+            int32 CreateOrRecover<T>(T value)  {
                 unsafe {
                     try {
                         if (Cell.TryCreate(0, out var incomplete)) { return 1; }
@@ -87,12 +87,12 @@ internal sealed partial class JitTests
     public async Task ConcreteCopyStructHelperArgumentsExecuteAcrossIndirectValuesAsync(bool checkedFailures)
     {
         var source = CompositionValue + """
-            T Forward<T>(T value) where T : [Copy] {
+            T Forward<T>(T value)  {
                 var fixedValue = Second<T, Value>(value, new Value(19, 23));
                 return Second<Value, T>(fixedValue, value);
             }
             U Second<A, U>(A first, U second)
-                where A : [Copy] where U : [Copy] { return second; }
+                  { return second; }
             int32 Main() {
                 var result = Forward(new Value(40, 2));
                 return int32(result.First + result.Second);
@@ -121,12 +121,14 @@ internal sealed partial class JitTests
         const string Source = """
             using Terrum;
             using Terrum.CodeAnalysis;
-             T Choose<T>(T first, T second) where T : [Copy] {
+             T Choose<T>(T first, T second)  {
                 return SelectCopy(false, SelectCopy(true, first, second), second);
             }
             int32 Main() {
-                require SourceRange.TryCreate(12, 5, init var firstRange);
-                require SourceRange.TryCreate(42, 7, init var secondRange);
+                init SourceRange firstRange;
+                init SourceRange secondRange;
+                require SourceRange.TryCreate(12, 5, ref init firstRange);
+                require SourceRange.TryCreate(42, 7, ref init secondRange);
                 mut Token first = new Token(1, firstRange);
                 mut Token second = new Token(2, secondRange);
                 var chosen = Choose(first, second);
@@ -157,7 +159,7 @@ internal sealed partial class JitTests
     public async Task RecursiveGenericHelpersPreserveIndirectCopyResultsAsync(bool mutual, bool infer)
     {
         var source = CompositionValue + """
-            T Repeat<T>(T value, uint32 count) where T : Addition<T, T, T>, [Copy] {
+            T Repeat<T>(T value, uint32 count) where T : Addition<T, T, T> {
                 if (count == 0) { return value; }
                 return Repeat(value + value, count - 1);
             }
@@ -170,7 +172,7 @@ internal sealed partial class JitTests
         {
             source = source.Replace("return Repeat(value + value", "return Again(value + value", StringComparison.Ordinal)
                 + """
-                U Again<U>(U value, uint32 count) where U : Addition<U, U, U>, [Copy] {
+                U Again<U>(U value, uint32 count) where U : Addition<U, U, U> {
                     return Repeat(value, count);
                 }
                 """;
@@ -190,12 +192,12 @@ internal sealed partial class JitTests
     public async Task ComposedHelpersPreserveMixedStackArgumentsAndNestedCopyTemporariesAsync(bool infer)
     {
         var source = CompositionValue + """
-            T Compose<T>(T value, T extra) where T : Addition<T, T, T>, [Copy] {
+            T Compose<T>(T value, T extra) where T : Addition<T, T, T> {
                 return Combine<T>(value, 10, extra, true, value + extra, 20,
                     Combine<T>(value, 10, extra, true, value, 20, extra, 30), 30);
             }
             U Combine<U>(U first, int32 a, U second, bool b, U third, int64 c, U fourth, uint64 d)
-                where U : Addition<U, U, U>, [Copy] {
+                where U : Addition<U, U, U> {
                 require (a == 10 && b && c == 20 && d == 30);
                 return first + second + third + fourth;
             }
@@ -230,8 +232,8 @@ internal sealed partial class JitTests
                     return new Value(Number);
                 }
             }
-            T Identity<T>(T value) where T : [Copy] { return value; }
-            int32 Read<T>(T value, int32 count) where T : [Copy] { return count; }
+            T Identity<T>(T value)  { return value; }
+            int32 Read<T>(T value, int32 count)  { return count; }
             int32 Main() {
                 mut Counter counter = new Counter(40);
                 var result = Identity(Identity(counter.Next()));
@@ -254,7 +256,7 @@ internal sealed partial class JitTests
     {
         const string Source = """
             using Terrum;
-             T Choose<T>(bool first, T left, T right) where T : [Copy] {
+             T Choose<T>(bool first, T left, T right)  {
                 return SelectCopy(first, left, right);
             }
             int32 Main() {
@@ -272,8 +274,9 @@ internal sealed partial class JitTests
                 require TrySelectCopy(0, wide, uint64(0), out var output);
                 require TrySelectCopy(1, int32(0), signed, out var intOutput);
                 require TrySelectCopy(0, true, false, out var boolOutput);
-                if (TrySelectCopyInit(2, wide, uint64(0), init var vacant)) { return 3; }
-                require TrySelectCopyInit(0, wide, uint64(0), init vacant);
+                init uint64 vacant;
+                if (TrySelectCopyInit(2, wide, uint64(0), ref init vacant)) { return 3; }
+                require TrySelectCopyInit(0, wide, uint64(0), ref init vacant);
                 if (contextual != 42 || typed != 41 || direct != 42 || intOutput != 42
                     || wide != output || destination != wide || narrow != 42
                     || vacant != wide || codeUnit != char16(65) || selected || !boolOutput) { return 1; }
@@ -299,8 +302,8 @@ internal sealed partial class JitTests
                 public int32 Number;
                 public Value(int32 number) { Number = number; }
             }
-             bool None<T>(out T result) where T : [Copy] { return false; }
-             bool TryCopy<T>(T value, bool publish, out T result) where T : [Copy] {
+             bool None<T>(out T result)  { return false; }
+             bool TryCopy<T>(T value, bool publish, out T result)  {
                 result = value;
                 return publish;
             }

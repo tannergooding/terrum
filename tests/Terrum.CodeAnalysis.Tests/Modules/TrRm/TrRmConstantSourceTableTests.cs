@@ -38,23 +38,26 @@ internal sealed class TrRmConstantSourceTableTests
             = TrRmArtifactSchema.GenericConstantMethodsDraft;
         var rows = new[]
         {
+            new TrRmConstantSourceRow(1, 1),
             new TrRmConstantSourceRow(4, 1),
             new TrRmConstantSourceRow(5, 1),
         };
-        var bytes = TrRmConstantSourceTableWriter.Encode(rows, 0, 0, 0,
+        var bytes = TrRmConstantSourceTableWriter.Encode(rows, 1, 0, 0,
             genericParamCount: 1, constantTemplateCount: 1,
             schema: schema);
-        var sources = new TrRmConstantSourceTableReader(bytes, 2, 0, 0, 0,
+        var sources = new TrRmConstantSourceTableReader(bytes, 3, 1, 0, 0,
             genericParamCount: 1, constantTemplateCount: 1,
             schema: schema);
 
         Assert.That((sources.GetKind(1), sources.GetPayloadReference(1)),
-            Is.EqualTo((4u, 1u)));
+            Is.EqualTo((1u, 1u)));
         Assert.That((sources.GetKind(2), sources.GetPayloadReference(2)),
+            Is.EqualTo((4u, 1u)));
+        Assert.That((sources.GetKind(3), sources.GetPayloadReference(3)),
             Is.EqualTo((5u, 1u)));
 
         _ = Assert.Throws<InvalidDataException>(() =>
-            TrRmConstantSourceTableWriter.Encode(rows, 0, 0, 0,
+            TrRmConstantSourceTableWriter.Encode(rows, 1, 0, 0,
                 genericParamCount: 1, constantTemplateCount: 1,
                 schema: TrRmArtifactSchema.GenericMethodCallsDraft));
         _ = Assert.Throws<InvalidDataException>(() =>
@@ -85,6 +88,45 @@ internal sealed class TrRmConstantSourceTableTests
             schema: schema);
         _ = Assert.Throws<InvalidDataException>(() =>
             ReadInvalidSource(validRowBytes, 0, 0, schema));
+    }
+
+    [Test]
+    public void CG1RejectsUnselectedConstantExecutionAndTargetBindingTags()
+    {
+        var cg1 = TrRmArtifactSchema.GenericConstantMethodsDraft;
+        foreach (var kind in new uint[] { 2, 3 })
+        {
+            _ = Assert.Throws<InvalidDataException>(() =>
+                TrRmConstantSourceTableWriter.Encode([
+                    new TrRmConstantSourceRow(kind, 1),
+                ], frozenValueNodeCount: 0,
+                    constantExecutionCount: 1,
+                    targetValueBindingCount: 1,
+                    genericParamCount: 0, constantTemplateCount: 0,
+                    schema: cg1));
+
+            var rowBytes = new byte[2 * sizeof(uint)];
+            BinaryPrimitives.WriteUInt32LittleEndian(rowBytes, kind);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                rowBytes.AsSpan(sizeof(uint)), 1);
+            _ = Assert.Throws<InvalidDataException>(() =>
+                new TrRmConstantSourceTableReader(rowBytes, 1, 0, 1, 1,
+                    genericParamCount: 0, constantTemplateCount: 0,
+                    schema: cg1));
+        }
+
+        var g1 = TrRmArtifactSchema.GenericMethodCallsDraft;
+        var g1Bytes = TrRmConstantSourceTableWriter.Encode([
+            new TrRmConstantSourceRow(2, 1),
+            new TrRmConstantSourceRow(3, 1),
+        ], frozenValueNodeCount: 0, constantExecutionCount: 1,
+            targetValueBindingCount: 1, genericParamCount: 0,
+            constantTemplateCount: 0, schema: g1);
+        var g1Sources = new TrRmConstantSourceTableReader(g1Bytes, 2, 0, 1,
+            1, genericParamCount: 0, constantTemplateCount: 0,
+            schema: g1);
+        Assert.That(g1Sources.GetKind(1), Is.EqualTo(2u));
+        Assert.That(g1Sources.GetKind(2), Is.EqualTo(3u));
     }
 
     [Test]

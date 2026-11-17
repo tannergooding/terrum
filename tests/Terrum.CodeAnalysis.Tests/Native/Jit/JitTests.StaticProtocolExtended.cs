@@ -43,7 +43,7 @@ internal sealed partial class JitTests
                     return new Value(left.Number {{op}} right.Number);
                 }
             }
-            T Apply<T>(T left, T right) where T : Operation<T, T, T>, [Copy] {
+            T Apply<T>(T left, T right) where T : Operation<T, T, T> {
                 return left {{op}} right;
             }
             int32 Main() { return Apply(new Value(40), new Value(2)).Number; }
@@ -79,7 +79,7 @@ internal sealed partial class JitTests
                     return new Value(left.Number {{op}} right.Number);
                 }
             }
-            T Apply<T>(T left, T right) where T : Operation<T, T, T>, [Copy] {
+            T Apply<T>(T left, T right) where T : Operation<T, T, T> {
                 return left {{op}} right;
             }
             int32 Main() {
@@ -106,7 +106,7 @@ internal sealed partial class JitTests
                     return new Value(left.Number & right.Number);
                 }
             }
-             T Apply<T>(T left, T right) where T : Mask<T, T, T>, [Copy] {
+             T Apply<T>(T left, T right) where T : Mask<T, T, T> {
                 return left & right;
             }
             int32 Main() { return Apply(new Value(42), new Value(63)).Number; }

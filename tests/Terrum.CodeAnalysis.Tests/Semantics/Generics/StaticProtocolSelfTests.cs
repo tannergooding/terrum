@@ -38,11 +38,11 @@ internal sealed class StaticProtocolSelfTests
                 return new Value(left.Number * right.Number);
             }
         }
-         T Preserve<T>(T value) where T : Negate<T>, [Copy] {
+         T Preserve<T>(T value) where T : Negate<T> {
             return -value;
         }
         T Calculate<T>(T left, T right)
-            where T : Addition<T, T>, Negate<T>, Ordinary<T, T, T>, [Copy] {
+            where T : Addition<T, T>, Negate<T>, Ordinary<T, T, T> {
             return left + right * Preserve(right);
         }
         int32 Main() { return Calculate(new Value(38), new Value(2)).Number; }
@@ -87,7 +87,7 @@ internal sealed class StaticProtocolSelfTests
                 public Box(int32 number) { Number = number; }
                 public static bool operator <(Box left, Box right) { return left.Number < right.Number; }
             }
-            bool Check<T>(T left, T right) where T : Less<T, bool>, [Copy] {
+            bool Check<T>(T left, T right) where T : Less<T, bool> {
                 return left < right;
             }
             int32 Main() {
@@ -216,8 +216,8 @@ internal sealed class StaticProtocolSelfTests
     [Test]
     public void DefinitionProofCannotInventAnUnlistedWitness()
     {
-        var source = Source.Replace("Addition<T, T>, Negate<T>, Ordinary<T, T, T>, [Copy]",
-            "Addition<T, T>, Negate<T>, [Copy]", StringComparison.Ordinal);
+        var source = Source.Replace("Addition<T, T>, Negate<T>, Ordinary<T, T, T>",
+            "Addition<T, T>, Negate<T>", StringComparison.Ordinal);
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3007"),Is.True);
     }

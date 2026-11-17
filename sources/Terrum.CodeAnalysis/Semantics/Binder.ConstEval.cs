@@ -21,8 +21,77 @@ internal sealed partial class Binder
     private bool _hasStaticProof;
     private bool _isBindingConstEvalBody;
     private BoundFunction?[]? _boundConstEvalFunctions;
+    private readonly HashSet<int> _constEvalFunctionsBeingBound = [];
     private ImmutableArray<BoundVariable> _staticProofVariables;
     private HashSet<(PrimitiveType Type, ScalarBits Bits)> _staticProofJoinConstants = [];
+
+    private BoundFunction?[] GetConstEvalFunctionBodies()
+    {
+        if (_boundConstEvalFunctions is not null)
+        {
+            BindConstEvalFunctionsFrom(0);
+            return _boundConstEvalFunctions
+                ?? throw new InvalidOperationException(
+                    "ConstEval function bodies were not initialized.");
+        }
+
+        return new BoundFunction?[_signatures.Count];
+    }
+
+    private BoundFunction?[]? EnsureConstEvalFunctionCapacity()
+    {
+        if (_boundConstEvalFunctions is not { } functions)
+        {
+            return null;
+        }
+        if (functions.Length >= _signatures.Count)
+        {
+            return functions;
+        }
+
+        var expanded = new BoundFunction?[_signatures.Count];
+        Array.Copy(functions, expanded, functions.Length);
+        _boundConstEvalFunctions = expanded;
+        return expanded;
+    }
+
+    private void BindConstEvalFunctionsFrom(int firstSignature)
+    {
+        for (var signatureIndex = firstSignature;
+            signatureIndex < _signatures.Count; signatureIndex++)
+        {
+            var functions = EnsureConstEvalFunctionCapacity();
+            if (functions is null)
+            {
+                return;
+            }
+
+            var signature = _signatures[signatureIndex];
+            if (!signature.IsConstEval
+                || functions[signatureIndex] is not null
+                || !_constEvalFunctionsBeingBound.Add(signatureIndex))
+            {
+                continue;
+            }
+
+            var previousBindingState = _isBindingConstEvalBody;
+            _isBindingConstEvalBody = true;
+            try
+            {
+                var function = BindSignatureBodyPreservingContext(
+                    signature, preserveConstEvalFunctions: true);
+                functions = EnsureConstEvalFunctionCapacity()
+                    ?? throw new InvalidOperationException(
+                        "ConstEval function storage was lost during body binding.");
+                functions[signatureIndex] = function;
+            }
+            finally
+            {
+                _isBindingConstEvalBody = previousBindingState;
+                _ = _constEvalFunctionsBeingBound.Remove(signatureIndex);
+            }
+        }
+    }
 
     private sealed record BoundRequiredConstant(BoundExpression Operand, TextSpan Span)
         : BoundExpression(Operand.Type, Span);
@@ -45,12 +114,18 @@ internal sealed partial class Binder
     private static bool ConstEvalScalar(PrimitiveType type) =>
         type is PrimitiveType.Bool or PrimitiveType.Char8 or PrimitiveType.Char16 or PrimitiveType.Char32
             or PrimitiveType.Rune or PrimitiveType.Int8 or PrimitiveType.Int16 or PrimitiveType.Int32
-            or PrimitiveType.Int64 or PrimitiveType.UInt8 or PrimitiveType.UInt16 or PrimitiveType.UInt32
-            or PrimitiveType.UInt64 or PrimitiveType.Int128 or PrimitiveType.UInt128
+            or PrimitiveType.Int64
+            or PrimitiveType.UInt8 or PrimitiveType.UInt16 or PrimitiveType.UInt32
+            or PrimitiveType.UInt64
+            or PrimitiveType.Int128 or PrimitiveType.UInt128
             or PrimitiveType.Float16 or PrimitiveType.BFloat16 or PrimitiveType.Float32
             or PrimitiveType.Float64 or PrimitiveType.Float128 or PrimitiveType.Decimal32
             or PrimitiveType.Decimal64 or PrimitiveType.Decimal128
             || BoundEnumTypes.IsType(type);
+
+    private bool IsConstEvalValueType(PrimitiveType type) =>
+        ConstEvalScalar(type)
+        || TryGetGenericMethodConstantCarrierType(type, out _);
 
     private bool ResolveRequiredConstants(ImmutableArray<BoundFunction>.Builder functions)
     {
@@ -59,9 +134,11 @@ internal sealed partial class Binder
             if (_signatures[index].IsConstEval)
             {
                 SetContext(_signatures[index].Tree, _signatures[index].Declaration);
-                if (!CheckConstStatement(functions[index].Body, out var unsupported))
+                if (!CheckConstFunction(functions[index],
+                    out var unsupported))
                 {
-                    Report("TRM3024", "ConstEval bodies support only scalar locals, assignments, branches, loops, returns, and calls to ConstEval functions.",
+                    Report("TRM3024",
+                        "ConstEval bodies require supported scalar or transparent-wrapper values, eligible constructor initialization, valid contracts, branches, loops, and ConstEval calls.",
                         unsupported);
                 }
             }
@@ -683,11 +760,13 @@ internal sealed partial class Binder
         if (!NativeFunctionPointerContract.IsValidTable(
                 [.. sourceFunctionPointers],
                 type => DirectNativeImportContract.IsInputPointee(type,
-                    _structs))
+                    _structs),
+                _enumDefinitions)
             || !NativePointerTypeContract.IsValidTable([.. sourcePointers], [.. _structs],
                 [.. sourceFunctionPointers], [.. sourceFixedArrays],
-                [.. sourceReferenceTypes])
-            || !CheckedReferenceTypeContract.IsValidTable([.. sourceReferenceTypes]))
+                [.. sourceReferenceTypes], _enumDefinitions)
+            || !CheckedReferenceTypeContract.IsValidTable(
+                [.. sourceReferenceTypes], sourcePointers))
         {
             Report("TRM3005", "Native type identities are invalid before convention normalization.",
                 _trees[0].Root.Span);
@@ -951,7 +1030,7 @@ internal sealed partial class Binder
                     source.ElementCount, _structs, normalizedFixedArrays,
                     normalizedFixedArrayTypeIndexes,
                     out var normalizedType, out var layout,
-                    _checkedReferenceTypes)
+                    _checkedReferenceTypes, _enumDefinitions)
                 || source.ElementStride != layout.ElementStride
                 || source.ByteExtent != layout.ByteExtent
                 || source.Alignment != layout.Alignment
@@ -1038,6 +1117,9 @@ internal sealed partial class Binder
             .Select(@class => BoundTreeTraversal.RewriteTypes(@class, RewriteType)).ToArray();
         var normalizedInterfaces = _interfaces
             .Select(@interface => BoundTreeTraversal.RewriteTypes(@interface, RewriteType)).ToArray();
+        var normalizedInterfaceWitnesses = _interfaceWitnesses
+            .Select(witness => BoundTreeTraversal.RewriteTypes(witness,
+                RewriteType)).ToArray();
         var normalizedPointerDefinitions = _nativePointerTypes
             .Select(pointer => pointer with { PointeeType = RewriteType(pointer.PointeeType) }).ToArray();
         var rewrittenFixedArrays = normalizedFixedArrays
@@ -1057,7 +1139,8 @@ internal sealed partial class Binder
                     NativeFixedArrayTypes.Type(index), fixedArray.ElementType,
                     fixedArray.ElementCount, normalizedStructuresImmutable,
                     rewrittenFixedArrays, out var layout,
-                    normalizedReferenceTypeDefinitions)
+                    normalizedReferenceTypeDefinitions,
+                    _enumDefinitions)
                 || fixedArray.ElementStride != layout.ElementStride
                 || fixedArray.ByteExtent != layout.ByteExtent
                 || fixedArray.Alignment != layout.Alignment
@@ -1071,12 +1154,16 @@ internal sealed partial class Binder
         if (!NativeFunctionPointerContract.IsValidTable(
                 [.. normalizedFunctionPointers],
                 type => DirectNativeImportContract.IsInputPointee(type,
-                    normalizedStructures))
+                    normalizedStructures),
+                _enumDefinitions)
             || !NativePointerTypeContract.IsValidTable([.. normalizedPointerDefinitions],
                 [.. normalizedStructures], [.. normalizedFunctionPointers],
                 [.. rewrittenFixedArrays],
-                [.. normalizedReferenceTypeDefinitions])
-            || !CheckedReferenceTypeContract.IsValidTable([.. normalizedReferenceTypeDefinitions]))
+                [.. normalizedReferenceTypeDefinitions],
+                _enumDefinitions)
+            || !CheckedReferenceTypeContract.IsValidTable(
+                [.. normalizedReferenceTypeDefinitions],
+                normalizedPointerDefinitions))
         {
             Report("TRM3005", "Normalized native type identities are invalid.",
                 _trees[0].Root.Span);
@@ -1094,6 +1181,12 @@ internal sealed partial class Binder
         for (var index = 0; index < normalizedInterfaces.Length; index++)
         {
             _interfaces[index] = normalizedInterfaces[index];
+        }
+        for (var index = 0;
+            index < normalizedInterfaceWitnesses.Length; index++)
+        {
+            _interfaceWitnesses[index] =
+                normalizedInterfaceWitnesses[index];
         }
         _nativeFunctionPointerSignatures.Clear();
         _nativeFunctionPointerSignatures.AddRange(normalizedFunctionPointers);
@@ -1124,6 +1217,13 @@ internal sealed partial class Binder
             functions[index] = BoundTreeTraversal.RewriteTypes(functions[index], RewriteType);
         }
 
+        for (var index = 0; index < _sourceGenericTypeDefinitions.Count;
+            index++)
+        {
+            _sourceGenericTypeDefinitions[index] =
+                BoundTreeTraversal.RewriteTypes(
+                    _sourceGenericTypeDefinitions[index], RewriteType);
+        }
         _pendingNativeCallConvExpressions.Clear();
         for (var index = 0; index < _sourceGenericTypeInstances.Count;
             index++)
@@ -1253,7 +1353,29 @@ internal sealed partial class Binder
         return value is 1 or 2;
     }
 
-    private bool CheckConstStatement(BoundStatement statement, out TextSpan unsupported)
+    private bool CheckConstFunction(BoundFunction function,
+        out TextSpan unsupported)
+    {
+        unsupported = function.Span;
+        if (!IsConstEvalValueType(function.ReturnType))
+        {
+            return false;
+        }
+
+        foreach (var contract in function.DeclarationContractClauses)
+        {
+            if (!CheckConstExpression(contract.Predicate, out unsupported))
+            {
+                return false;
+            }
+        }
+
+        return CheckConstStatement(function.Body, function,
+            out unsupported);
+    }
+
+    private bool CheckConstStatement(BoundStatement statement,
+        BoundFunction function, out TextSpan unsupported)
     {
         unsupported = statement.Span;
         switch (statement)
@@ -1261,7 +1383,8 @@ internal sealed partial class Binder
             case BoundBlock block:
                 foreach (var child in block.Statements)
                 {
-                    if (!CheckConstStatement(child, out unsupported))
+                    if (!CheckConstStatement(child, function,
+                        out unsupported))
                     {
                         return false;
                     }
@@ -1269,6 +1392,11 @@ internal sealed partial class Binder
                 return true;
             case BoundLocal local:
                 return CheckConstExpression(local.Initializer, out unsupported);
+            case BoundFieldAssignment assignment
+                when IsConstEvalWrapperFieldAssignment(function,
+                    assignment):
+                return CheckConstExpression(assignment.Value,
+                    out unsupported);
             case BoundVacantLocal or BoundLifetimeEnd:
                 return false;
             case BoundAssignment assignment:
@@ -1279,12 +1407,18 @@ internal sealed partial class Binder
                 return CheckConstExpression(proof.Condition, out unsupported);
             case BoundIf conditional:
                 return CheckConstExpression(conditional.Condition, out unsupported)
-                    && CheckConstStatement(conditional.Then, out unsupported)
-                    && (conditional.Else is null || CheckConstStatement(conditional.Else, out unsupported));
+                    && CheckConstStatement(conditional.Then, function,
+                        out unsupported)
+                    && (conditional.Else is null
+                        || CheckConstStatement(conditional.Else, function,
+                            out unsupported));
             case BoundWhile loop:
                 return CheckConstExpression(loop.Condition, out unsupported)
-                    && CheckConstStatement(loop.Body, out unsupported)
-                    && (loop.Iterator is null || CheckConstStatement(loop.Iterator, out unsupported));
+                    && CheckConstStatement(loop.Body, function,
+                        out unsupported)
+                    && (loop.Iterator is null
+                        || CheckConstStatement(loop.Iterator, function,
+                            out unsupported));
             case BoundReturn { Value: BoundExpression value }:
                 return CheckConstExpression(value, out unsupported);
             case BoundBreak or BoundContinue:
@@ -1297,7 +1431,7 @@ internal sealed partial class Binder
     private bool CheckConstExpression(BoundExpression expression, out TextSpan unsupported)
     {
         unsupported = expression.Span;
-        if (!ConstEvalScalar(expression.Type))
+        if (!IsConstEvalValueType(expression.Type))
         {
             return false;
         }
@@ -1307,6 +1441,9 @@ internal sealed partial class Binder
                 return CheckConstExpression(unsafeExpression.Expression, out unsupported);
             case BoundRequiredConstant required:
                 return CheckConstExpression(required.Operand, out unsupported);
+            case BoundFieldRead field when IsConstEvalWrapperFieldRead(field):
+                return CheckConstExpression(field.Receiver, out unsupported);
+            case BoundContractReturnValue:
             case BoundConstant or BoundRead:
                 return true;
             case BoundUnary unary:
@@ -1337,6 +1474,41 @@ internal sealed partial class Binder
             default:
                 return false;
         }
+    }
+
+    private bool IsConstEvalWrapperFieldAssignment(
+        BoundFunction function, BoundFieldAssignment assignment)
+    {
+        if (!function.IsConstructor || assignment.Variable != 0
+            || assignment.Field != 0 || !assignment.NestedFields.IsEmpty
+            || assignment.IsUnsafeAuthorized
+            || function.Variables.IsDefaultOrEmpty
+            || !TryGetGenericMethodConstantCarrierType(
+                function.Variables[0].Type, out var carrierType))
+        {
+            return false;
+        }
+
+        var structureIndex = (int)function.Variables[0].Type - 100;
+        return (uint)structureIndex < (uint)_structs.Count
+            && _structs[structureIndex].Fields is [{ } field]
+            && field.Type == carrierType;
+    }
+
+    private bool IsConstEvalWrapperFieldRead(BoundFieldRead field)
+    {
+        if (field.Field != 0
+            || !TryGetGenericMethodConstantCarrierType(
+                field.Receiver.Type, out var carrierType))
+        {
+            return false;
+        }
+
+        var structureIndex = (int)field.Receiver.Type - 100;
+        return (uint)structureIndex < (uint)_structs.Count
+            && _structs[structureIndex].Fields is [{ } carrierField]
+            && carrierField.Type == carrierType
+            && field.Type == carrierType;
     }
 
     private static void CollectStaticProofJoinConstants(BoundStatement statement,
@@ -2902,6 +3074,10 @@ internal sealed partial class Binder
             case PrimitiveType.UInt64:
                 width = 64;
                 return true;
+            case PrimitiveType.NativeInt:
+            case PrimitiveType.NativeUInt:
+                width = checked(NativeTargetProfile.PointerSize * 8);
+                return true;
             case PrimitiveType.Int128:
             case PrimitiveType.UInt128:
                 width = 128;
@@ -3852,19 +4028,42 @@ internal sealed partial class Binder
     }
 
     private BoundConstant EvaluateConstExpression(BoundExpression expression, BoundConstant?[] slots,
-        IReadOnlyList<BoundFunction?> functions, int depth, ConstEvalState state)
+        IReadOnlyList<BoundFunction?> functions, int depth, ConstEvalState state,
+        BoundFunction? currentFunction = null)
     {
         state.Step();
         switch (expression)
         {
             case BoundUnsafeExpression unsafeExpression:
-                return EvaluateConstExpression(unsafeExpression.Expression, slots, functions, depth, state);
+                return EvaluateConstExpression(unsafeExpression.Expression,
+                    slots, functions, depth, state, currentFunction);
             case BoundRequiredConstant required:
-                return EvaluateConstExpression(required.Operand, slots, functions, depth, state);
+                return EvaluateConstExpression(required.Operand, slots,
+                    functions, depth, state, currentFunction);
             case BoundConstant constant:
                 return constant;
             case BoundRead read when slots[read.Variable] is BoundConstant value:
                 return value;
+            case BoundContractReturnValue
+                when state.ContractReturnValue is BoundConstant returnValue:
+                return returnValue with { Span = expression.Span };
+            case BoundFieldRead field:
+            {
+                var receiver = EvaluateConstExpression(field.Receiver, slots,
+                    functions, depth, state, currentFunction);
+                if (!TryGetGenericMethodConstantCarrierType(
+                        receiver.Type, out var carrierType)
+                    || field.Field != 0
+                    || field.Type != carrierType
+                    || receiver.RepresentationType != carrierType
+                    || !receiver.Bits.IsCanonicalFor(carrierType))
+                {
+                    throw new ConstEvalFailure(
+                        "A constant wrapper field read is not a valid transparent carrier read.");
+                }
+                return new BoundConstant(receiver.Bits, carrierType,
+                    expression.Span);
+            }
             case BoundUpdate { Place: BoundRead read } update when slots[read.Variable] is BoundConstant old:
             {
                 var operation = update.Operator == TokenKind.PlusPlus ? TokenKind.Plus : TokenKind.Minus;
@@ -3878,7 +4077,8 @@ internal sealed partial class Binder
             }
             case BoundCompoundAssignment { Place: BoundRead read } compound when slots[read.Variable] is BoundConstant old:
             {
-                var right = EvaluateConstExpression(compound.Right, slots, functions, depth, state);
+                var right = EvaluateConstExpression(compound.Right, slots,
+                    functions, depth, state, currentFunction);
                 var next = FoldScalarConstant(new BoundBinary(CompoundOperators.Binary(compound.Operator),
                     old, right, compound.Type, compound.Span) {
                     OverflowBehavior = compound.OverflowBehavior,
@@ -3889,57 +4089,153 @@ internal sealed partial class Binder
             }
             case BoundUnary unary:
             {
-                var operand = EvaluateConstExpression(unary.Operand, slots, functions, depth, state);
+                var operand = EvaluateConstExpression(unary.Operand, slots,
+                    functions, depth, state, currentFunction);
                 return FoldScalarConstant(unary with { Operand = operand }) as BoundConstant
                     ?? throw new ConstEvalFailure("ConstEval checked arithmetic failed.");
             }
             case BoundBinary binary:
             {
-                var left = EvaluateConstExpression(binary.Left, slots, functions, depth, state);
+                var left = EvaluateConstExpression(binary.Left, slots,
+                    functions, depth, state, currentFunction);
                 if ((binary.Operator == TokenKind.AmpersandAmpersand && left.Value == 0)
                     || (binary.Operator == TokenKind.PipePipe && left.Value != 0))
                 {
                     return new BoundConstant(left.Value == 0 ? 0 : 1, PrimitiveType.Bool, expression.Span);
                 }
-                var right = EvaluateConstExpression(binary.Right, slots, functions, depth, state);
+                var right = EvaluateConstExpression(binary.Right, slots,
+                    functions, depth, state, currentFunction);
                 return FoldScalarConstant(binary with { Left = left, Right = right }) as BoundConstant
                     ?? throw new ConstEvalFailure("ConstEval checked arithmetic failed (overflow or division by zero).");
             }
             case BoundConditional conditional:
             {
-                var condition = EvaluateConstExpression(conditional.Condition, slots, functions, depth, state);
-                return EvaluateConstExpression(condition.Value != 0 ? conditional.WhenTrue : conditional.WhenFalse,
-                    slots, functions, depth, state);
+                var condition = EvaluateConstExpression(conditional.Condition,
+                    slots, functions, depth, state, currentFunction);
+                return EvaluateConstExpression(
+                    condition.Value != 0 ? conditional.WhenTrue
+                        : conditional.WhenFalse,
+                    slots, functions, depth, state, currentFunction);
             }
             case BoundCast cast:
             {
-                var operand = EvaluateConstExpression(cast.Operand, slots, functions, depth, state);
+                var operand = EvaluateConstExpression(cast.Operand, slots,
+                    functions, depth, state, currentFunction);
                 return FoldScalarConstant(cast with { Operand = operand }) as BoundConstant
                     ?? throw new ConstEvalFailure("ConstEval checked conversion failed.");
             }
             case BoundCall call when call.Function >= 0 && call.Function < _signatures.Count
                 && _signatures[call.Function].IsConstEval:
-            {
-                if (depth >= ConstEvalDepthLimit)
+                if ((uint)call.Function >= (uint)functions.Count)
                 {
-                    throw new ConstEvalFailure("ConstEval call depth limit exceeded.");
-                }
-                var callee = functions[call.Function]
-                    ?? throw new ConstEvalFailure(
+                    throw new ConstEvalFailure(
                         "ConstEval function body is unavailable in this type context.");
-                var arguments = new BoundConstant?[callee.Variables.Length];
-                for (var index = 0; index < call.Arguments.Length; index++)
-                {
-                    arguments[call.ParameterIndex(index)] =
-                        EvaluateConstExpression(call.Arguments[index], slots, functions, depth, state);
                 }
-                var result = EvaluateConstStatement(callee.Body, arguments, functions, depth + 1, state);
-                return result.Flow == ConstFlow.Return && result.Value is BoundConstant returned
-                    ? returned : throw new ConstEvalFailure("ConstEval function did not return a value.");
-            }
+                return EvaluateConstCall(call, slots, functions, depth,
+                    state, currentFunction);
             default:
-                throw new ConstEvalFailure("A required constant needs scalar values and ConstEval calls only.");
+                throw new ConstEvalFailure(
+                    "A required constant needs scalar values and admitted transparent-wrapper values with ConstEval calls only.");
         }
+    }
+
+    private BoundConstant EvaluateConstCall(BoundCall call,
+        BoundConstant?[] callerSlots,
+        IReadOnlyList<BoundFunction?> functions, int depth,
+        ConstEvalState state, BoundFunction? callerFunction)
+    {
+        if (depth >= ConstEvalDepthLimit)
+        {
+            throw new ConstEvalFailure("ConstEval call depth limit exceeded.");
+        }
+
+        var callee = functions[call.Function]
+            ?? throw new ConstEvalFailure(
+                "ConstEval function body is unavailable in this type context.");
+        var arguments = new BoundConstant?[callee.Variables.Length];
+        var receiverOffset = callee.IsConstructor ? 1 : 0;
+        if (receiverOffset != 0 && callee.Variables.IsDefaultOrEmpty)
+        {
+            throw new ConstEvalFailure(
+                "ConstEval constructor has no receiver storage.");
+        }
+
+        for (var index = 0; index < call.Arguments.Length; index++)
+        {
+            var parameter = call.ParameterIndex(index) + receiverOffset;
+            if ((uint)parameter >= (uint)arguments.Length)
+            {
+                throw new ConstEvalFailure(
+                    "ConstEval call argument has no parameter slot.");
+            }
+
+            var argument = EvaluateConstExpression(call.Arguments[index],
+                callerSlots, functions, depth, state, callerFunction);
+            if (argument.Type != callee.Variables[parameter].Type)
+            {
+                throw new ConstEvalFailure(
+                    "ConstEval argument type does not match its selected parameter.");
+            }
+            arguments[parameter] = argument;
+        }
+
+        foreach (var contract in callee.DeclarationContractClauses)
+        {
+            if (contract.Phase != BoundDeclarationContractPhase.Precondition)
+            {
+                continue;
+            }
+
+            var condition = EvaluateConstExpression(contract.Predicate,
+                arguments, functions, depth + 1, state, callee);
+            if (condition.Type != PrimitiveType.Bool
+                || !condition.Bits.IsCanonicalFor(PrimitiveType.Bool)
+                || condition.Value == 0)
+            {
+                throw new ConstEvalFailure(
+                    "ConstEval precondition failed.");
+            }
+        }
+
+        var result = EvaluateConstStatement(callee.Body, arguments,
+            functions, depth + 1, state, callee);
+        if (result.Flow != ConstFlow.Return
+            || result.Value is not BoundConstant returned
+            || returned.Type != callee.ReturnType)
+        {
+            throw new ConstEvalFailure(
+                "ConstEval function did not return a value of its declared type.");
+        }
+
+        var previousReturnValue = state.ContractReturnValue;
+        state.ContractReturnValue = returned;
+        try
+        {
+            foreach (var contract in callee.DeclarationContractClauses)
+            {
+                if (contract.Phase
+                    != BoundDeclarationContractPhase.NormalPostcondition)
+                {
+                    continue;
+                }
+
+                var condition = EvaluateConstExpression(contract.Predicate,
+                    arguments, functions, depth + 1, state, callee);
+                if (condition.Type != PrimitiveType.Bool
+                    || !condition.Bits.IsCanonicalFor(PrimitiveType.Bool)
+                    || condition.Value == 0)
+                {
+                    throw new ConstEvalFailure(
+                        "ConstEval normal postcondition failed.");
+                }
+            }
+        }
+        finally
+        {
+            state.ContractReturnValue = previousReturnValue;
+        }
+
+        return returned;
     }
 
     private static BoundConstant CreateConstEvalOne(PrimitiveType type, TextSpan span)
@@ -3967,7 +4263,8 @@ internal sealed partial class Binder
     }
 
     private ConstResult EvaluateConstStatement(BoundStatement statement, BoundConstant?[] slots,
-        IReadOnlyList<BoundFunction?> functions, int depth, ConstEvalState state)
+        IReadOnlyList<BoundFunction?> functions, int depth, ConstEvalState state,
+        BoundFunction? currentFunction = null)
     {
         state.Step();
         switch (statement)
@@ -3975,7 +4272,8 @@ internal sealed partial class Binder
             case BoundBlock block:
                 foreach (var child in block.Statements)
                 {
-                    var result = EvaluateConstStatement(child, slots, functions, depth, state);
+                    var result = EvaluateConstStatement(child, slots,
+                        functions, depth, state, currentFunction);
                     if (result.Flow != ConstFlow.Next)
                     {
                         return result;
@@ -3983,26 +4281,65 @@ internal sealed partial class Binder
                 }
                 return default;
             case BoundLocal local:
-                slots[local.Variable] = EvaluateConstExpression(local.Initializer, slots, functions, depth, state);
+                slots[local.Variable] = EvaluateConstExpression(
+                    local.Initializer, slots, functions, depth, state,
+                    currentFunction);
                 return default;
             case BoundAssignment assignment:
-                slots[assignment.Variable] = EvaluateConstExpression(assignment.Value, slots, functions, depth, state);
+                slots[assignment.Variable] = EvaluateConstExpression(
+                    assignment.Value, slots, functions, depth, state,
+                    currentFunction);
                 return default;
+            case BoundFieldAssignment assignment
+                when currentFunction is not null
+                    && IsConstEvalWrapperFieldAssignment(currentFunction,
+                        assignment):
+            {
+                var wrapperType = currentFunction.Variables[0].Type;
+                if (!TryGetGenericMethodConstantCarrierType(wrapperType,
+                    out var carrierType))
+                {
+                    throw new ConstEvalFailure(
+                        "A ConstEval constructor has no supported transparent carrier.");
+                }
+
+                var value = EvaluateConstExpression(assignment.Value, slots,
+                    functions, depth, state, currentFunction);
+                if (value.Type != carrierType
+                    || value.RepresentationType != carrierType
+                    || !value.Bits.IsCanonicalFor(carrierType)
+                    || (uint)assignment.Variable >= (uint)slots.Length)
+                {
+                    throw new ConstEvalFailure(
+                        "A ConstEval constructor produced an invalid carrier field value.");
+                }
+
+                slots[assignment.Variable] = new BoundConstant(value.Bits,
+                    wrapperType, carrierType, assignment.Span);
+                return default;
+            }
             case BoundExpressionStatement expression:
-                _ = EvaluateConstExpression(expression.Expression, slots, functions, depth, state);
+                _ = EvaluateConstExpression(expression.Expression, slots,
+                    functions, depth, state, currentFunction);
                 return default;
             case BoundIf conditional:
-                return EvaluateConstExpression(conditional.Condition, slots, functions, depth, state).Value != 0
-                    ? EvaluateConstStatement(conditional.Then, slots, functions, depth, state)
+                return EvaluateConstExpression(conditional.Condition, slots,
+                        functions, depth, state, currentFunction).Value != 0
+                    ? EvaluateConstStatement(conditional.Then, slots,
+                        functions, depth, state, currentFunction)
                     : conditional.Else is not null
-                        ? EvaluateConstStatement(conditional.Else, slots, functions, depth, state) : default;
+                        ? EvaluateConstStatement(conditional.Else, slots,
+                            functions, depth, state, currentFunction)
+                        : default;
             case BoundWhile loop:
                 var firstIteration = true;
                 while ((firstIteration && loop.IsPostTested)
-                    || EvaluateConstExpression(loop.Condition, slots, functions, depth, state).Value != 0)
+                    || EvaluateConstExpression(loop.Condition, slots,
+                        functions, depth, state, currentFunction).Value != 0)
                 {
                     firstIteration = false;
-                    var result = EvaluateConstStatement(loop.Body, slots, functions, depth, state);
+                    var result = EvaluateConstStatement(loop.Body, slots,
+                        functions, depth, state, currentFunction);
                     if (result.Flow is ConstFlow.Return)
                     {
                         return result;
@@ -4021,7 +4358,8 @@ internal sealed partial class Binder
                     }
                     if (loop.Iterator is not null)
                     {
-                        result = EvaluateConstStatement(loop.Iterator, slots, functions, depth, state);
+                        result = EvaluateConstStatement(loop.Iterator, slots,
+                            functions, depth, state, currentFunction);
                         if (result.Flow is ConstFlow.Return)
                         {
                             return result;
@@ -4035,7 +4373,8 @@ internal sealed partial class Binder
                 return default;
             case BoundReturn { Value: BoundExpression value }:
                 return new ConstResult(ConstFlow.Return,
-                    EvaluateConstExpression(value, slots, functions, depth, state));
+                    EvaluateConstExpression(value, slots, functions, depth,
+                        state, currentFunction));
             case BoundBreak transfer:
                 return new ConstResult(ConstFlow.Break, null, transfer.TargetDepth);
             case BoundContinue transfer:
@@ -4052,6 +4391,8 @@ internal sealed partial class Binder
     private sealed class ConstEvalState(CancellationToken cancellationToken)
     {
         private int _remaining = ConstEvalWorkLimit;
+
+        internal BoundConstant? ContractReturnValue { get; set; }
 
         internal void Step()
         {

@@ -19,6 +19,17 @@ internal sealed class TrRmConstantSourceValueBindingTests
         ValidateRegisterBodyMaps(artifact);
     }
 
+    [TestCase(0xF200_0010u)]
+    [TestCase(0xF200_0011u)]
+    public void SelectedConstantMapBindsDistinctNativeWidthScalarTypes(
+        uint typeSpecRef)
+    {
+        var artifact = CreateArtifact(includeFeature11: true, includeConstant: true,
+            mapTypeSpecRef: typeSpecRef, nodeTypeSpecRef: typeSpecRef);
+
+        ValidateRegisterBodyMaps(artifact);
+    }
+
     [Test]
     public void SelectedConstantMapRequiresFeatureEleven()
     {
@@ -108,7 +119,8 @@ internal sealed class TrRmConstantSourceValueBindingTests
             sections.Add(new TrRmSection(0x0004, 0, 1,
                 new byte[] { 11, 0, 0, 0, 1, 0, 0, 0 }));
         }
-        sections.Add(new TrRmSection(0x0003, 0, 1, CreateInt32Blob()));
+        sections.Add(new TrRmSection(0x0003, 0, 1,
+            IsNativeWidthScalar(nodeTypeSpecRef) ? CreateInt64Blob() : CreateInt32Blob()));
         sections.Add(new TrRmSection(0x0030, 0, 1,
             new byte[] { 1, 0, 0, 0, 1, 0, 0, 0 }));
         sections.Add(new TrRmSection(0x003F, 0, 1,
@@ -185,6 +197,12 @@ internal sealed class TrRmConstantSourceValueBindingTests
 
     private static byte[] CreateInt32Blob()
         => [0, 0, 0, 0, 4, 0, 0, 0, 42, 0, 0, 0];
+
+    private static byte[] CreateInt64Blob()
+        => [0, 0, 0, 0, 8, 0, 0, 0, 42, 0, 0, 0, 0, 0, 0, 0];
+
+    private static bool IsNativeWidthScalar(uint typeSpecRef)
+        => typeSpecRef is 0xF200_0010 or 0xF200_0011;
 
     private static byte[] AddConstantFormalDefault(byte[] artifact, uint constantTypeSpecRef)
     {

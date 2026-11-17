@@ -36,26 +36,33 @@ internal readonly record struct ScalarBits(ulong Low, ulong High)
     internal static bool TryFromIntegerValue(BigInteger value, PrimitiveType type,
         out ScalarBits bits)
     {
-        var minimum = type == PrimitiveType.Int128
-            ? -(BigInteger.One << 127) : BigInteger.Zero;
-        var maximum = type switch {
-            PrimitiveType.Int128 => (BigInteger.One << 127) - BigInteger.One,
-            PrimitiveType.UInt128 => (BigInteger.One << 128) - BigInteger.One,
-            _ => BigInteger.MinusOne,
-        };
-        if (maximum < BigInteger.Zero || value < minimum || value > maximum)
+        if (!PrimitiveTypeFacts.IsIntegerOrWide(type))
         {
             bits = default;
             return false;
         }
-        var raw = value.Sign < 0 ? (BigInteger.One << 128) + value : value;
+
+        var width = PrimitiveTypeFacts.IntegerWidthOrWide(type);
+        var modulus = BigInteger.One << width;
+        var signed = PrimitiveTypeFacts.IsSignedIntegerOrWide(type);
+        var minimum = signed ? -(BigInteger.One << (width - 1))
+            : BigInteger.Zero;
+        var maximum = signed ? (BigInteger.One << (width - 1)) - BigInteger.One
+            : modulus - BigInteger.One;
+        if (value < minimum || value > maximum)
+        {
+            bits = default;
+            return false;
+        }
+
+        var raw = value.Sign < 0 ? modulus + value : value;
         bits = new ScalarBits((ulong)(raw & ulong.MaxValue), (ulong)(raw >> 64));
         return true;
     }
 
     internal bool TryGetIntegerValue(PrimitiveType type, out BigInteger value)
     {
-        if (type is not (PrimitiveType.Int128 or PrimitiveType.UInt128)
+        if (!PrimitiveTypeFacts.IsIntegerOrWide(type)
             || !IsCanonicalFor(type))
         {
             value = BigInteger.Zero;
@@ -63,9 +70,15 @@ internal readonly record struct ScalarBits(ulong Low, ulong High)
         }
 
         var raw = (new BigInteger(High) << 64) | Low;
-        if (type == PrimitiveType.Int128 && (High & 0x8000_0000_0000_0000UL) != 0)
+        var width = PrimitiveTypeFacts.IntegerWidthOrWide(type);
+        if (width < 2 * sizeof(ulong))
         {
-            raw -= BigInteger.One << 128;
+            raw &= (BigInteger.One << width) - BigInteger.One;
+        }
+        if (PrimitiveTypeFacts.IsSignedIntegerOrWide(type)
+            && (raw & (BigInteger.One << (width - 1))) != 0)
+        {
+            raw -= BigInteger.One << width;
         }
         value = raw;
         return true;
@@ -86,6 +99,11 @@ internal readonly record struct ScalarBits(ulong Low, ulong High)
 
     internal bool IsCanonicalFor(PrimitiveType type)
     {
+        if (type == PrimitiveType.Bool)
+        {
+            return (Low is 0 or 1) && High == 0;
+        }
+
         var width = PrimitiveTypeFacts.ScalarWidth(type);
         if (width < 0)
         {
@@ -145,7 +163,9 @@ internal readonly record struct ScalarBits(ulong Low, ulong High)
                 => unchecked((long)raw),
             PrimitiveType.Float32 or PrimitiveType.Float16 or PrimitiveType.BFloat16
                 or PrimitiveType.Decimal32 => unchecked((long)raw),
-            PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float64 or PrimitiveType.Decimal64
+            PrimitiveType.Int64 or PrimitiveType.UInt64
+                or PrimitiveType.NativeInt or PrimitiveType.NativeUInt
+                or PrimitiveType.Float64 or PrimitiveType.Decimal64
                 => unchecked((long)raw),
             _ when BoundEnumTypes.IsType(type) => unchecked((int)raw),
             PrimitiveType.Bool => unchecked((long)raw),

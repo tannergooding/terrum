@@ -26,7 +26,7 @@ internal readonly ref struct TrRmConstantExecutionSubstitutionTableReader
         if (recordCount is < 0 or > 0xFF_FFFF
             || constantSourceCount is < 0 or > 0xFF_FFFF
             || (long)recordCount * RowSize != section.Length
-            || schema != TrRmArtifactSchema.GeneralPredicateGraphsDraft)
+            || !schema.UsesGeneralPredicateGraphs())
         {
             throw InvalidTable();
         }

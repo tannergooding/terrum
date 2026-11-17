@@ -41,7 +41,7 @@ internal sealed partial class JitTests
                     return a.Number {{op}} b.Number;
                 }
             }
-            bool Apply<T>(T a, T b) where T : Comparison<T, T, bool>, [Copy] {
+            bool Apply<T>(T a, T b) where T : Comparison<T, T, bool> {
                 return a {{op}} b;
             }
             int32 Main() {
@@ -67,7 +67,7 @@ internal sealed partial class JitTests
                 public static bool operator !=(Value a, Value b) { return true; }
             }
             bool Both<T>(T a, T b)
-                where T : [Copy], Equal<T, T, bool>, Unequal<T, T, bool> {
+                where T : Equal<T, T, bool>, Unequal<T, T, bool> {
                 return a == b && a != b;
             }
             int32 Main() {
@@ -94,7 +94,7 @@ internal sealed partial class JitTests
                     return a.Number < b.Number;
                 }
             }
-            bool Compare<T>(T a, T b) where T : Less<T, T, bool>, [Copy] { return a < b; }
+            bool Compare<T>(T a, T b) where T : Less<T, T, bool> { return a < b; }
             int32 Main() {
                 unsafe {
                     try {
@@ -121,7 +121,7 @@ internal sealed partial class JitTests
                     return a.High < b.High;
                 }
             }
-            bool Compare<T>(T a, T b) where T : Less<T, T, bool>, [Copy] { return a < b; }
+            bool Compare<T>(T a, T b) where T : Less<T, T, bool> { return a < b; }
             int32 Main() {
                 if (Compare(new Wide(20, 1), new Wide(22, 2))
                     && new Wide(20, 1) < new Wide(22, 2)) { return 42; }

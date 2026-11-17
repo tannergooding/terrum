@@ -51,17 +51,17 @@ struct Int32Value : Subtraction<Int32Value, Int32Value, Int32Value>,
 }
 
 T WholeUnits<T>(T total, T unitSize, T adjustment)
-    where T : Subtraction<T, T, T>, Division<T, T, T>, [Copy] {
+    where T : Subtraction<T, T, T>, Division<T, T, T> {
     return (total - adjustment) / unitSize;
 }
 
 T RemainingUnits<T>(T total, T unitSize)
-    where T : Remainder<T, T, T>, [Copy] {
+    where T : Remainder<T, T, T> {
     return total % unitSize;
 }
 
 T SelectBits<T>(T left, T right, T mask)
-    where T : BitwiseAnd<T, T, T>, BitwiseOr<T, T, T>, ExclusiveOr<T, T, T>, [Copy] {
+    where T : BitwiseAnd<T, T, T>, BitwiseOr<T, T, T>, ExclusiveOr<T, T, T> {
     return (left & mask) | (right ^ (right & mask));
 }
 

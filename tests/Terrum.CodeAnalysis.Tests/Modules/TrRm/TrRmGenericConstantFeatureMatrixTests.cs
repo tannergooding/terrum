@@ -54,6 +54,30 @@ internal sealed class TrRmGenericConstantFeatureMatrixTests
     }
 
     [Test]
+    public void GenericMethodFeatureIsRejectedWithoutADeclarationOrCallUse()
+    {
+        var context = CreateContext(moduleOneFormal: false,
+            moduleTwoFormal: false, moduleOneFeature24: false,
+            moduleTwoFeature24: false, moduleTwoFeature23: true,
+            constantSourceKind: 0);
+
+        var rejected = false;
+        try
+        {
+            TrRmStructuralMetadataValidator
+                .ValidateGenericMethodFeatureAssignments(
+                    context.Features, context.Modules, context.Methods,
+                    context.Signatures, default,
+                    TrRmArtifactSchema.GenericConstantMethodsDraft);
+        }
+        catch (InvalidDataException)
+        {
+            rejected = true;
+        }
+        Assert.That(rejected, Is.True);
+    }
+
+    [Test]
     public void UnreferencedGlobalConstantSourcesDoNotRequireEveryModuleFeature()
     {
         var context = CreateContext(moduleOneFormal: true,

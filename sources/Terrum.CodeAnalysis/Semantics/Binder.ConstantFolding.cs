@@ -208,18 +208,24 @@ internal sealed partial class Binder
     [SuppressMessage("Style", "IDE0072:Populate switch", Justification = "Only integral scalar constants can be folded.")]
     private static bool TryScalarValue(BoundConstant constant, out BigInteger value)
     {
+        if (BoundEnumTypes.IsType(constant.Type))
+        {
+            return constant.Bits.TryGetIntegerValue(
+                constant.RepresentationType, out value);
+        }
         if (PrimitiveTypeFacts.IsWideInteger(constant.Type))
         {
             return constant.Bits.TryGetIntegerValue(constant.Type, out value);
         }
 
         value = constant.Type switch {
-            PrimitiveType.Int8 or PrimitiveType.Int16 or PrimitiveType.Int32 or PrimitiveType.Int64
+            PrimitiveType.Int8 or PrimitiveType.Int16 or PrimitiveType.Int32
+                or PrimitiveType.Int64 or PrimitiveType.NativeInt
                 or PrimitiveType.Char8 or PrimitiveType.Char16 or PrimitiveType.Char32 or PrimitiveType.Rune => constant.Value,
             PrimitiveType.UInt8 => unchecked((byte)constant.Value),
             PrimitiveType.UInt16 => unchecked((ushort)constant.Value),
             PrimitiveType.UInt32 => unchecked((uint)(int)constant.Value),
-            PrimitiveType.UInt64 => unchecked((ulong)constant.Value),
+            PrimitiveType.UInt64 or PrimitiveType.NativeUInt => unchecked((ulong)constant.Value),
             _ => default,
         };
         return PrimitiveTypeFacts.IsIntegerOrWide(constant.Type)
@@ -257,7 +263,9 @@ internal sealed partial class Binder
         out long value)
     {
         value = 0;
-        if (destination is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64))
+        if (destination is not (PrimitiveType.Int32 or PrimitiveType.UInt32
+            or PrimitiveType.Int64 or PrimitiveType.UInt64
+            or PrimitiveType.NativeInt or PrimitiveType.NativeUInt))
         {
             return false;
         }
@@ -295,6 +303,12 @@ internal sealed partial class Binder
             PrimitiveType.UInt32 => value < 0 || value > uint.MaxValue,
             PrimitiveType.Int64 => value < long.MinValue || value > long.MaxValue,
             PrimitiveType.UInt64 => value < 0 || value > ulong.MaxValue,
+            PrimitiveType.NativeInt => value < -(BigInteger.One
+                << (PrimitiveTypeFacts.IntegerWidth(type) - 1))
+                || value > (BigInteger.One
+                    << (PrimitiveTypeFacts.IntegerWidth(type) - 1)) - BigInteger.One,
+            PrimitiveType.NativeUInt => value < 0
+                || value > (BigInteger.One << PrimitiveTypeFacts.IntegerWidth(type)) - BigInteger.One,
             PrimitiveType.Char8 => value < byte.MinValue || value > byte.MaxValue,
             PrimitiveType.Char16 => value < 0 || value > ushort.MaxValue,
             PrimitiveType.Char32 => value < 0 || value > uint.MaxValue,
@@ -310,6 +324,7 @@ internal sealed partial class Binder
             PrimitiveType.UInt16 or PrimitiveType.Char16 => (ushort)value,
             PrimitiveType.UInt32 => unchecked((int)(uint)value),
             PrimitiveType.UInt64 => unchecked((long)(ulong)value),
+            PrimitiveType.NativeUInt => unchecked((long)(ulong)value),
             PrimitiveType.Char32 or PrimitiveType.Rune => (long)(uint)value,
             _ => (long)value,
         };
@@ -345,6 +360,7 @@ internal sealed partial class Binder
             PrimitiveType.UInt16 => (ushort)wrapped,
             PrimitiveType.UInt32 => unchecked((int)(uint)wrapped),
             PrimitiveType.UInt64 => unchecked((long)(ulong)wrapped),
+            PrimitiveType.NativeUInt => unchecked((long)(ulong)wrapped),
             PrimitiveType.Int8 => (sbyte)wrapped,
             PrimitiveType.Int16 => (short)wrapped,
             _ => (long)wrapped,

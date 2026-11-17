@@ -1,12 +1,15 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
+using System.Collections.Generic;
+
 namespace Terrum.CodeAnalysis.Semantics;
 
 internal static class PrimitiveTypeFacts
 {
     internal static bool IsInteger(PrimitiveType type) => type is PrimitiveType.Int8 or PrimitiveType.Int16
         or PrimitiveType.Int32 or PrimitiveType.Int64 or PrimitiveType.UInt8 or PrimitiveType.UInt16
-        or PrimitiveType.UInt32 or PrimitiveType.UInt64;
+        or PrimitiveType.UInt32 or PrimitiveType.UInt64 or PrimitiveType.NativeInt
+        or PrimitiveType.NativeUInt;
 
     internal static bool IsWideInteger(PrimitiveType type) =>
         type is PrimitiveType.Int128 or PrimitiveType.UInt128;
@@ -15,7 +18,7 @@ internal static class PrimitiveTypeFacts
         IsInteger(type) || IsWideInteger(type);
 
     internal static bool IsSignedInteger(PrimitiveType type) => type is PrimitiveType.Int8 or PrimitiveType.Int16
-        or PrimitiveType.Int32 or PrimitiveType.Int64;
+        or PrimitiveType.Int32 or PrimitiveType.Int64 or PrimitiveType.NativeInt;
 
     internal static bool IsSignedIntegerOrWide(PrimitiveType type) =>
         IsSignedInteger(type) || type == PrimitiveType.Int128;
@@ -30,6 +33,8 @@ internal static class PrimitiveTypeFacts
         PrimitiveType.Int16 or PrimitiveType.UInt16 => 16,
         PrimitiveType.Int32 or PrimitiveType.UInt32 => 32,
         PrimitiveType.Int64 or PrimitiveType.UInt64 => 64,
+        PrimitiveType.NativeInt or PrimitiveType.NativeUInt
+            => checked(NativeTargetProfile.PointerSize * 8),
         _ => 0,
     };
 
@@ -44,11 +49,31 @@ internal static class PrimitiveTypeFacts
         PrimitiveType.Char32 or PrimitiveType.Rune or PrimitiveType.Int32 or PrimitiveType.UInt32
             or PrimitiveType.Float32 or PrimitiveType.Decimal32 => 4,
         PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float64 or PrimitiveType.Decimal64 => 8,
+        PrimitiveType.NativeInt or PrimitiveType.NativeUInt
+            => NativeTargetProfile.PointerSize,
         PrimitiveType.Int128 or PrimitiveType.UInt128 or PrimitiveType.Float128 or PrimitiveType.Decimal128 => 16,
         _ when BoundEnumTypes.IsType(type) => sizeof(int),
         _ => -1,
     };
 
+    internal static int ScalarWidth(PrimitiveType type,
+        IReadOnlyList<BoundEnumDefinition>? enumDefinitions)
+    {
+        if (!BoundEnumTypes.IsType(type))
+        {
+            return ScalarWidth(type);
+        }
+
+        var index = BoundEnumTypes.Index(type);
+        return enumDefinitions is not null
+            && (uint)index < (uint)enumDefinitions.Count
+            ? ScalarWidth(enumDefinitions[index].UnderlyingType) : 0;
+    }
+
     internal static bool IsCodeUnitOrRune(PrimitiveType type) => type is PrimitiveType.Char8
         or PrimitiveType.Char16 or PrimitiveType.Char32 or PrimitiveType.Rune;
+
+    internal static bool IsBuiltInScalar(PrimitiveType type) =>
+        type != PrimitiveType.Void && !BoundEnumTypes.IsType(type)
+        && ScalarWidth(type) > 0;
 }

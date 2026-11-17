@@ -101,6 +101,18 @@ internal sealed class Integer64Tests
     [TestCase("int32 Main() { int32 x = -int32(0x80000000); return 0; }",unchecked((int)0xE0540001))]
     [TestCase("int32 Main() { int32 x = -int32(0b10000000000000000000000000000000); return 0; }",unchecked((int)0xE0540001))]
     [TestCase("int32 Main() { int64 x = -int64(0x8000000000000000); return 0; }",unchecked((int)0xE0540001))]
+    [TestCase("int32 Main() { nint value = nint.MaxValue; return int32(value + nint(1)); }",unchecked((int)0xE0540001))]
+    [TestCase("int32 Main() { nuint value = nuint.MaxValue; return int32(value + nuint(1)); }",unchecked((int)0xE0540001))]
+    [TestCase("int32 Main() { nint value = nint.MinValue; return int32(value - nint(1)); }",unchecked((int)0xE0540001))]
+    [TestCase("int32 Main() { nuint value = nuint(0); return int32(value - nuint(1)); }",unchecked((int)0xE0540001))]
+    [TestCase("int32 Main() { nint value = nint.MinValue; return int32(value / nint(-1)); }",unchecked((int)0xE0540001))]
+    [TestCase("int32 Main() { nuint value = nuint(1); return int32(value / nuint(0)); }",unchecked((int)0xE0540002))]
+    [TestCase("int32 Main() { return int32(-nint.MinValue); }",unchecked((int)0xE0540001))]
+    [TestCase("int32 Main() { return int32(nint.MaxValue); }",unchecked((int)0xE0540001))]
+    [TestCase("int32 Main() { return int32(nint(nuint.MaxValue)); }",unchecked((int)0xE0540001))]
+    [TestCase("int32 Main() { return int32(nuint(nint(-1))); }",unchecked((int)0xE0540001))]
+    [TestCase("int32 Main() { nint count = nint(-1); return int32(nint(1) << count); }",unchecked((int)0xE0540004))]
+    [TestCase("int32 Main() { nuint count = nuint(64); return int32(nuint(1) >>> count); }",unchecked((int)0xE0540004))]
     public async Task WideFailuresUseCheckedRuntimePolicyAsync(string source, int expected)
     {
         await ExecuteBothAsync(Compile(source), expected).ConfigureAwait(true);
@@ -284,27 +296,29 @@ internal sealed class Integer64Tests
     [TestCase("int32","%","2")]
     [TestCase("int64","/","4611686018427387904")]
     [TestCase("int64","%","1")]
-    public void SignedPowerOfTwoSelectionDoesNotRelaxNoThrowProof(string type, string operation, string divisor)
+    public void SignedPowerOfTwoOperationsRemainNoFailure(string type,
+        string operation, string divisor)
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($$"""
              {{type}} Calculate({{type}} n) { return n {{operation}} {{type}}({{divisor}}); }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = BoundProgramTestHelpers.MarkNoFailureProof(compilation.Program!, "Calculate");
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
+        SemanticVerifier.VerifyLibrary(program);
     }
     [TestCase("uint32","/","2")]
     [TestCase("uint32","%","2147483648")]
     [TestCase("uint64","/","9223372036854775808")]
     [TestCase("uint64","%","1")]
-    public void NativeUnsignedStrengthReductionDoesNotRelaxNoThrowProof(string type, string operation, string divisor)
+    public void NativeUnsignedPowerOfTwoOperationsRemainNoFailure(
+        string type, string operation, string divisor)
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($$"""
              {{type}} Calculate({{type}} n) { return n {{operation}} {{type}}({{divisor}}); }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = BoundProgramTestHelpers.MarkNoFailureProof(compilation.Program!, "Calculate");
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
+        SemanticVerifier.VerifyLibrary(program);
     }
 
     [Test]
@@ -548,7 +562,29 @@ internal sealed class Integer64Tests
             var unused = Compilation.CreateLibrary(SyntaxTree.Parse("public int32 Unused() { return 0; }"));
             var producerBytes = ModuleCompiler.CreateProducer(CompileLibrary(unused), ["Unused"]);
             await File.WriteAllBytesAsync(producer, producerBytes).ConfigureAwait(true);
-            await File.WriteAllBytesAsync(consumer, ModuleCompiler.CreateConsumer(program, producerBytes)).ConfigureAwait(true);
+            var definitions = new PrivateNominalDefinition[
+                program.Structures.Length + program.Classes.Length];
+            for (var index = 0; index < program.Structures.Length; index++)
+            {
+                var structure = program.Structures[index];
+                definitions[index] = new PrivateNominalDefinition(
+                    (PrimitiveType)(100 + index),
+                    $"types.{structure.Name}",
+                    !structure.IsPrivate && !structure.IsInternal);
+            }
+            for (var index = 0; index < program.Classes.Length; index++)
+            {
+                var @class = program.Classes[index];
+                definitions[program.Structures.Length + index]
+                    = new PrivateNominalDefinition(
+                        (PrimitiveType)(ManagedClassTypes.First + index),
+                        $"classes.{@class.Name}", !@class.IsInternal);
+            }
+            var identityInputs = PrivateModuleIdentityInputs.Create(program,
+                "Integer64Consumer", definitions, []);
+            await File.WriteAllBytesAsync(consumer,
+                ModuleCompiler.CreateConsumer(program, producerBytes,
+                    identityInputs)).ConfigureAwait(true);
             var framework = new DirectoryInfo(AppContext.BaseDirectory);
             var configuration = framework.Parent?.Name ?? throw new InvalidOperationException("Missing configuration.");
             var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));

@@ -19,13 +19,13 @@ internal sealed class StaticProtocolInferenceTests
             public int32 Number;
             public Other(int32 number) { Number = number; }
         }
-        T Identity<T>(T value) where T : [Copy] { return value; }
+        T Identity<T>(T value)  { return value; }
         """;
     [TestCase("var result = Identity(42);","TRM3011")]
     [TestCase("Value result = Identity(42);","TRM3014")]
     [TestCase("Value result = Identity(new Other(42));","TRM3007")]
     [TestCase("var result = Both(new Value(1), new Other(2));","TRM3007")]
-    [TestCase("var result = Identity(new Owner(42));","TRM3007")]
+    [TestCase("var result = Identity(new Owner(42));","TRM3011")]
     public void InferenceDoesNotGuessOrRetargetTypedArguments(string body, string diagnostic)
     {
         var source = Values + """
@@ -33,7 +33,7 @@ internal sealed class StaticProtocolInferenceTests
                 public int32 Number;
                 public Owner(int32 number) { Number = number; }
             }
-            T Both<T>(T first, T second) where T : [Copy] { return first; }
+            T Both<T>(T first, T second)  { return first; }
             int32 Main() {
             """ + body + "return 0; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
@@ -45,7 +45,7 @@ internal sealed class StaticProtocolInferenceTests
     public void ExistingTypedOutLocalInfersTypeWithoutPublishingItDuringInference()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Values + """
-             bool None<T>(out T result) where T : [Copy] { return false; }
+             bool None<T>(out T result)  { return false; }
             int32 Main() {
                 mut Value target = new Value(42);
                 if (None(out target)) { return 1; }
@@ -64,7 +64,7 @@ internal sealed class StaticProtocolInferenceTests
     public void OutVarAloneDoesNotEstablishTheGenericType()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Values + """
-            bool None<T>(out T result) where T : [Copy] { return false; }
+            bool None<T>(out T result)  { return false; }
             int32 Main() {
                 if (None(out var result)) { return result.Number; }
                 return 42;
@@ -78,7 +78,7 @@ internal sealed class StaticProtocolInferenceTests
     public void KnownScalarReturnCannotBypassMissingStructInference()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Values + """
-            int32 Read<T>(T value, int32 count) where T : [Copy] { return count; }
+            int32 Read<T>(T value, int32 count)  { return count; }
             int32 Main() { return Read(42, 1) + Read(new Value(41), 1); }
             """));
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3011"),Is.True);
@@ -130,6 +130,23 @@ internal sealed class StaticProtocolInferenceTests
         Assert.That(global::System.Linq.Enumerable.Any(functions,function => function.Name == "Identity<float32>"),Is.True);
         Assert.That(global::System.Linq.Enumerable.Any(functions,function => function.Name == "Identity<float64>"),Is.True);
     }
+
+    [Test]
+    public void ExpectedResultCompletesAnExplicitGenericInferenceHole()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(Values + """
+            int32 Main() {
+                int64 result = Identity<_>(42);
+                return int32(result);
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(global::System.Linq.Enumerable.Any(
+            compilation.Program!.Functions, static function =>
+                function.Name == "Identity<int64>"), Is.True);
+    }
+
     [TestCase("float32")]
     [TestCase("float64")]
     public void ConcreteFloatingGenericArgumentsDoNotWidenGetterResults(string type)
@@ -160,7 +177,7 @@ internal sealed class StaticProtocolInferenceTests
     public void FailedScalarOutputLeavesTargetUnavailableUntilRepublished()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Values + """
-            bool TryCopy<T>(T value, bool publish, out T result) where T : [Copy] {
+            bool TryCopy<T>(T value, bool publish, out T result)  {
                 result = value;
                 return publish;
             }
@@ -178,7 +195,7 @@ internal sealed class StaticProtocolInferenceTests
     public void OwnedBufferIsNotACopyGenericArgument()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Values
-            + "int32 Main() { require OwnedInt32Buffer.TryCreate(1, out var raw);"
+            + "int32 Main() { init OwnedInt32Buffer raw; require OwnedInt32Buffer.TryCreate(1, ref init raw);"
             + " mut OwnedInt32Buffer buffer = move raw; var result = Identity(buffer); return 0; }"));
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3011"),Is.True);
         Assert.That(compilation.Program, Is.Null);
@@ -190,7 +207,7 @@ internal sealed class StaticProtocolInferenceTests
     public void CopyOnlyDefinitionDoesNotBorrowScalarCapabilities(string body)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Values
-            + "int32 Inspect<T>(T value) where T : [Copy] { " + body + " }"
+            + "int32 Inspect<T>(T value)  { " + body + " }"
             + "int32 Main() { return Inspect(int32(42)); }"));
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3007"),Is.True);
         Assert.That(compilation.Program, Is.Null);
@@ -210,7 +227,7 @@ internal sealed class StaticProtocolInferenceTests
                     return new Value(left.Number + right.Number);
                 }
             }
-            T Add<T>(T value) where T : Addition<T, T, T>, [Copy] { return value + value; }
+            T Add<T>(T value) where T : Addition<T, T, T> { return value + value; }
             int32 Main() {
                 var valid = Add(new Value(1));
                 return
@@ -223,7 +240,7 @@ internal sealed class StaticProtocolInferenceTests
     public void FailedInferredOutputLeavesExistingTargetUnavailableUntilRepublished()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Values + """
-            bool None<T>(out T result) where T : [Copy] { return false; }
+            bool None<T>(out T result)  { return false; }
             int32 Main() {
                 mut Value target = new Value(42);
                 None(out target);
@@ -238,10 +255,10 @@ internal sealed class StaticProtocolInferenceTests
     public void InferredHelperCallsNeedNoGeneralNoThrowDeclaration()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Values + """
-             U Wrap<U>(U value) where U : [Copy] {
+             U Wrap<U>(U value)  {
                 return Leaf(value);
             }
-            V Leaf<V>(V value) where V : [Copy] { return value; }
+            V Leaf<V>(V value)  { return value; }
             int32 Main() { return Wrap(new Value(42)).Number; }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -259,9 +276,9 @@ internal sealed class StaticProtocolInferenceTests
                     return new Value(left.Number + right.Number);
                 }
             }
-            T Add<T>(T value) where T : Addition<T, T, T>, [Copy] { return value + value; }
-            U Strong<U>(U value) where U : Addition<U, U, U>, [Copy] { return Add(value); }
-            V Weak<V>(V value) where V : [Copy] { return Add(value); }
+            T Add<T>(T value) where T : Addition<T, T, T> { return value + value; }
+            U Strong<U>(U value) where U : Addition<U, U, U> { return Add(value); }
+            V Weak<V>(V value)  { return Add(value); }
             int32 Main() {
                 var valid = Strong(new Value(21));
                 return Weak(valid).Number;

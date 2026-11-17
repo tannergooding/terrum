@@ -23,22 +23,20 @@ write Record CreateRecord(int32 value) {
 }
 
 T RetainAfterCollection<T, U>(T value, U witness)
-    where T : [Copy]
-    where U : [Copy] {
+{
     require ManagedHeap.Collect() == 0;
     return value;
 }
 
 U RetainReversed<T, U>(T witness, U value)
-    where T : [Copy]
-    where U : [Copy] {
+{
     return RetainAfterCollection(value, witness);
 }
 
- bool TrySelect<T>(bool enabled, T value, out T result)
-    where T : [Copy] {
+bool TrySelect<T>(bool enabled, T value, ref<init T> result) where T : null?
+{
     if (!enabled) { return false; }
-    result = value;
+    *result = value;
     return true;
 }
 
@@ -48,8 +46,10 @@ int32 ReadSelectedRecord() {
         CreateRecord(40), stamp);
     Record readOnly = RetainReversed(stamp, writable);
     write Record? optional = writable;
-    require !TrySelect(false, optional, out var missing);
-    require TrySelect<write Record?>(true, optional, out var selected);
+    init write Record? missing;
+    require !TrySelect(false, optional, ref init missing);
+    init write Record? selected;
+    require TrySelect<write Record?>(true, optional, ref init selected);
     require selected is some present;
     present.Value = readOnly.Value + int32(stamp.First + stamp.Second);
     require ManagedHeap.Collect() == 0;

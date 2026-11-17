@@ -1,6 +1,7 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.Linq;
 using NUnit.Framework;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
@@ -26,7 +27,7 @@ internal sealed class StaticProtocolOutputTests
     public void GenericKnownResultTypeComesFromReturnSignature(string type, string literal, PrimitiveType expected)
     {
         var source = Value + $$"""
-            {{type}} Echo<T>(T ignored, {{type}} value) where T : [Copy] { return value; }
+            {{type}} Echo<T>(T ignored, {{type}} value)  { return value; }
             int32 Main() {
                 var actual = Echo<Value>(new Value(1), {{literal}});
                 if (actual == {{literal}}) { return 42; }
@@ -51,10 +52,10 @@ internal sealed class StaticProtocolOutputTests
             ? "int32 Main() { require Pick<Value>(new Value(40), out var copy, out var count); return int32(copy.First) + count; }"
             : "int32 Main() { return 0; }";
         var source = Value + """
-             bool Pick<T>(T value, out T result, out int32 count) where T : [Copy] {
+             bool Pick<T>(T value, out T result, out int32 count)  {
                 return Forward<T>(value, out result, out count);
             }
-             bool Forward<U>(U value, out U result, out int32 count) where U : [Copy] {
+             bool Forward<U>(U value, out U result, out int32 count)  {
                 result = value;
                 count = 2;
                 return true;
@@ -79,13 +80,13 @@ internal sealed class StaticProtocolOutputTests
     }
     [TestCase("return true;")]
     [TestCase("T old = result; result = value; return true;")]
-    [TestCase("if (publish) { result = value; } return true;")]
+    [TestCase("if (publish) { *result = value; } return true;")]
     [TestCase("Other<T>(value, out result); return true;")]
     public void InvalidOutputFlowRejectsEvenInAnUnusedGenericDefinition(string body)
     {
         var source = Value + """
-            bool Other<T>(T value, out T result) where T : [Copy] { return false; }
-            bool Pick<T>(T value, bool publish, out T result) where T : [Copy] {
+            bool Other<T>(T value, out T result)  { return false; }
+            bool Pick<T>(T value, bool publish, out T result)  {
             """ + body + "} int32 Main() { return 0; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.True);
@@ -96,7 +97,7 @@ internal sealed class StaticProtocolOutputTests
     public void GenericOutputCannotDependOnAFormalReturnType()
     {
         var source = Value
-            + "T Pick<T>(T value, out T result) where T : [Copy] { result = value; return value; }"
+            + "T Pick<T>(T value, out T result)  { result = value; return value; }"
             + "int32 Main() { return 0; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.True);
@@ -119,7 +120,7 @@ internal sealed class StaticProtocolOutputTests
             ? explicitType ? "result = value; return;" : "result = value;"
             : "result = value; return 7;";
         var source = Value + " " + resultType
-            + " Fill<T>(T value, out T result) where T : [Copy] { "
+            + " Fill<T>(T value, out T result)  { "
             + body + "} int32 Main() { " + completion + " }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -148,19 +149,19 @@ internal sealed class StaticProtocolOutputTests
     public void GenericNonBooleanInitOutputsPublishOnNormalReturn(string resultType, bool explicitType)
     {
         var call = explicitType
-            ? "Fill<Value>(new Value(40), init var result)"
-            : "Fill(new Value(40), init var result)";
+            ? "Fill<Value>(new Value(40), ref init result)"
+            : "Fill(new Value(40), ref init result)";
         var returnValue = resultType == "char16" ? "char16(7)" : "7";
         var completion = resultType == "void"
             ? call + "; require result.First == 40; return 42;"
             : "var status = " + call + "; require status == " + returnValue + ";"
                 + " require result.First == 40; return 42;";
         var body = resultType == "void"
-            ? explicitType ? "result = value; return;" : "result = value;"
-            : "result = value; return " + returnValue + ";";
+            ? explicitType ? "*result = value; return;" : "*result = value;"
+            : "*result = value; return " + returnValue + ";";
         var source = Value + " " + resultType
-            + " Fill<T>(T value, init ref<T> result) where T : [Copy] { "
-            + body + "} int32 Main() { " + completion + " }";
+            + " Fill<T>(T value, ref<init T> result)  { "
+            + body + "} int32 Main() { init Value result; " + completion + " }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => {
@@ -178,6 +179,7 @@ internal sealed class StaticProtocolOutputTests
             _ => PrimitiveType.Void,
         };
         Assert.That(fill.ReturnType, Is.EqualTo(expectedReturn));
+        Assert.That(fill.Variables[1].IsOut, Is.False);
         Assert.That(fill.Variables[1].IsInit, Is.True);
     }
     [TestCase("int32","if (publish) { result = value; } return 7;")]
@@ -185,18 +187,18 @@ internal sealed class StaticProtocolOutputTests
     public void GenericNonBooleanOutputsRequirePublicationOnEveryNormalReturn(string resultType, string body)
     {
         var source = Value + resultType
-            + " Fill<T>(T value, bool publish, out T result) where T : [Copy] { "
+            + " Fill<T>(T value, bool publish, out T result)  { "
             + body + "} int32 Main() { return 0; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.True);
         Assert.That(compilation.Program, Is.Null);
     }
-    [TestCase("int32","if (publish) { result = value; } return 7;")]
-    [TestCase("void","if (publish) { result = value; }")]
+    [TestCase("int32","if (publish) { *result = value; } return 7;")]
+    [TestCase("void","if (publish) { *result = value; }")]
     public void GenericNonBooleanInitOutputsRequirePublicationOnEveryNormalReturn(string resultType, string body)
     {
         var source = Value + resultType
-            + " Fill<T>(T value, bool publish, init ref<T> result) where T : [Copy] { "
+            + " Fill<T>(T value, bool publish, ref<init T> result)  { "
             + body + "} int32 Main() { return 0; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.True);
@@ -207,14 +209,14 @@ internal sealed class StaticProtocolOutputTests
     public void GenericNonBooleanOutputsKeepVoidTemplatesAndManagedHandlesOutsideTheOutExtension()
     {
         var voidWithoutOutput = Compilation.Create(SyntaxTree.Parse("""
-            void Ignore<T>(T value) where T : [Copy] { }
+            void Ignore<T>(T value)  { }
             int32 Main() { return 0; }
             """));
         Assert.That(voidWithoutOutput.HasErrors, Is.True);
         Assert.That(voidWithoutOutput.Program, Is.Null);
 
         var managedHandle = Compilation.Create(SyntaxTree.Parse("""
-            int32 Fill<T>(T value, out T result) where T : [Copy] {
+            int32 Fill<T>(T value, out T result)  {
                 result = value;
                 return 7;
             }
@@ -228,7 +230,7 @@ internal sealed class StaticProtocolOutputTests
         Assert.That(managedHandle.Program, Is.Null);
 
         var fixedOutput = Compilation.Create(SyntaxTree.Parse(Value + """
-            int32 Fill<T>(T value, out int32 result) where T : [Copy] {
+            int32 Fill<T>(T value, out int32 result)  {
                 result = 7;
                 return 42;
             }
@@ -252,23 +254,24 @@ internal sealed class StaticProtocolOutputTests
     public void GenericNonBooleanMixedOutputsPreserveEachMode(string resultType, bool explicitType)
     {
         var call = explicitType
-            ? "Fill<Value, int32>(new Value(40), int32(2), out copied, init var initialized)"
-            : "Fill(new Value(40), int32(2), out copied, init var initialized)";
+            ? "Fill<Value, int32>(new Value(40), int32(2), out copied, ref init initialized)"
+            : "Fill(new Value(40), int32(2), out copied, ref init initialized)";
         var returnValue = resultType == "char16" ? "char16(7)" : "7";
         var body = resultType == "void"
-            ? "result = value; initialized = second;" + (explicitType ? " return;" : "")
-            : "result = value; initialized = second; return " + returnValue + ";";
+            ? "result = value; *initialized = second;" + (explicitType ? " return;" : "")
+            : "result = value; *initialized = second; return " + returnValue + ";";
         var completion = resultType == "void"
             ? "CALL; require copied.First == 40 && initialized == 2; return 42;"
             : "var status = CALL; require status == " + returnValue
                 + " && copied.First == 40 && initialized == 2; return 42;";
         var source = Value + """
-            RESULT Fill<T, U>(T value, U second, out T result, init ref<U> initialized)
-                where T : [Copy] where U : [Copy] {
+            RESULT Fill<T, U>(T value, U second, out T result, ref<init U> initialized)
+                  {
                 BODY
             }
             int32 Main() {
                 mut Value copied = new Value(0);
+                init int32 initialized;
                 COMPLETION
             }
             """.Replace("RESULT", resultType, StringComparison.Ordinal)
@@ -294,7 +297,7 @@ internal sealed class StaticProtocolOutputTests
         Assert.That(fill.ReturnType, Is.EqualTo(expectedReturn));
         Assert.That(fill.Variables[2].IsOut, Is.True);
         Assert.That(fill.Variables[2].IsInit, Is.False);
-        Assert.That(fill.Variables[3].IsOut, Is.True);
+        Assert.That(fill.Variables[3].IsOut, Is.False);
         Assert.That(fill.Variables[3].IsInit, Is.True);
     }
     [TestCase("bool",false)]
@@ -315,8 +318,8 @@ internal sealed class StaticProtocolOutputTests
     [TestCase("float64",true)]
     public void GenericFixedScalarOutputTypesRetainTheirMode(string outputType, bool isInit)
     {
-        var parameter = isInit ? $"init ref<{outputType}> side" : $"out {outputType} side";
-        var argument = isInit ? "init var side" : "out var side";
+        var parameter = isInit ? $"ref<init {outputType}> side" : $"out {outputType} side";
+        var argument = isInit ? "ref init side" : "out var side";
         var (assignment, predicate) = outputType switch {
             "bool" => ("true", "side"),
             "char16" => ("char16(7)", "side == char16(7)"),
@@ -325,13 +328,16 @@ internal sealed class StaticProtocolOutputTests
             "float64" => ("float64(7.5)", "side == float64(7.5)"),
             _ => throw new InvalidOperationException($"Unexpected output type '{outputType}'."),
         };
+        var sideWrite = isInit ? $"*side = {assignment};" : $"side = {assignment};";
+        var sideDeclaration = isInit ? $"init {outputType} side;" : string.Empty;
         var source = Value + $$"""
-            int32 Fill<T>(T value, out T result, {{parameter}}) where T : [Copy] {
+            int32 Fill<T>(T value, out T result, {{parameter}})  {
                 result = value;
-                side = {{assignment}};
+                {{sideWrite}}
                 return 7;
             }
             int32 Main() {
+                {{sideDeclaration}}
                 int32 status = Fill(new Value(40), out var copied, {{argument}});
                 require status == 7 && copied.First == 40 && {{predicate}};
                 return 42;
@@ -347,7 +353,7 @@ internal sealed class StaticProtocolOutputTests
         var fill = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "Fill<Value>");
         Assert.That(fill.Variables[1].IsOut, Is.True);
         Assert.That(fill.Variables[1].IsInit, Is.False);
-        Assert.That(fill.Variables[2].IsOut, Is.True);
+        Assert.That(fill.Variables[2].IsOut, Is.EqualTo(!isInit));
         Assert.That(fill.Variables[2].IsInit, Is.EqualTo(isInit));
         var expectedType = outputType switch {
             "bool" => PrimitiveType.Bool,
@@ -359,23 +365,34 @@ internal sealed class StaticProtocolOutputTests
             "float32" => PrimitiveType.Float32,
             _ => PrimitiveType.Float64,
         };
-        Assert.That(fill.Variables[2].Type, Is.EqualTo(expectedType));
+        if (isInit)
+        {
+            var reference = program.CheckedReferenceTypes[
+                CheckedReferenceTypes.Index(fill.Variables[2].Type)];
+            Assert.That(reference.ReferentType, Is.EqualTo(expectedType));
+            Assert.That(reference.IsInitialization, Is.True);
+        }
+        else
+        {
+            Assert.That(fill.Variables[2].Type, Is.EqualTo(expectedType));
+        }
     }
     [TestCase(false)]
     [TestCase(true)]
     public void GenericMixedOutputsCanShareOneTypeParameter(bool explicitType)
     {
         var call = explicitType
-            ? "Fill<Value>(new Value(40), out copied, init var initialized)"
-            : "Fill(new Value(40), out copied, init var initialized)";
+            ? "Fill<Value>(new Value(40), out copied, ref init initialized)"
+            : "Fill(new Value(40), out copied, ref init initialized)";
         var source = Value + """
-            int32 Fill<T>(T value, out T result, init ref<T> initialized) where T : [Copy] {
+            int32 Fill<T>(T value, out T result, ref<init T> initialized)  {
                 result = value;
-                initialized = value;
+                *initialized = value;
                 return 7;
             }
             int32 Main() {
                 mut Value copied = new Value(0);
+                init Value initialized;
                 int32 status = CALL;
                 require status == 7 && copied.First == 40 && initialized.First == 40;
                 return 42;
@@ -391,20 +408,20 @@ internal sealed class StaticProtocolOutputTests
         var fill = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "Fill<Value>");
         Assert.That(fill.Variables[1].IsOut, Is.True);
         Assert.That(fill.Variables[1].IsInit, Is.False);
-        Assert.That(fill.Variables[2].IsOut, Is.True);
+        Assert.That(fill.Variables[2].IsOut, Is.False);
         Assert.That(fill.Variables[2].IsInit, Is.True);
     }
-    [TestCase("Fill(new Value(1), new Value(2), init copied, out var initialized);")]
-    [TestCase("Fill(new Value(1), new Value(2), out copied, init copied);")]
-    [TestCase("Fill(new Value(1), new Value(2), out copied, init initialized);")]
-    [TestCase("Fill(new Value(1), new Value(2), out wrong, init var initialized);")]
+    [TestCase("Fill(new Value(1), new Value(2), ref init copied, out var initialized);")]
+    [TestCase("Fill(new Value(1), new Value(2), out copied, ref init copied);")]
+    [TestCase("Fill(new Value(1), new Value(2), out copied, ref init initialized);")]
+    [TestCase("Fill(new Value(1), new Value(2), out wrong, ref init initialized);")]
     public void GenericMixedOutputsRejectModeAndDestinationMismatches(string call)
     {
         var source = Value + """
-            int32 Fill<T, U>(T value, U second, out T result, init ref<U> initialized)
-                where T : [Copy] where U : [Copy] {
+            int32 Fill<T, U>(T value, U second, out T result, ref<init U> initialized)
+                  {
                 result = value;
-                initialized = second;
+                *initialized = second;
                 return 7;
             }
             int32 Main() {
@@ -434,22 +451,23 @@ internal sealed class StaticProtocolOutputTests
     public void GenericFixedScalarOutputsCanAccompanyGenericOutputs(string resultType, bool explicitType)
     {
         var call = explicitType
-            ? "Fill<Value>(new Value(40), out copied, out var count, init var score)"
-            : "Fill(new Value(40), out copied, out var count, init var score)";
+            ? "Fill<Value>(new Value(40), out copied, out var count, ref init score)"
+            : "Fill(new Value(40), out copied, out var count, ref init score)";
         var returnValue = resultType == "char16" ? "char16(7)" : "7";
-        var outputs = "result = value; count = 2; score = float64(3.5);";
+        var outputs = "result = value; count = 2; *score = float64(3.5);";
         var body = resultType == "void" ? outputs : outputs + " return " + returnValue + ";";
         var completion = resultType == "void"
             ? "CALL; require copied.First == 40 && count == 2 && score == float64(3.5); return 42;"
             : "var status = CALL; require status == " + returnValue
                 + " && copied.First == 40 && count == 2 && score == float64(3.5); return 42;";
         var source = Value + """
-            RESULT Fill<T>(T value, out T result, out int32 count, init ref<float64> score)
-                where T : [Copy] {
+            RESULT Fill<T>(T value, out T result, out int32 count, ref<init float64> score)
+                 {
                 BODY
             }
             int32 Main() {
                 mut Value copied = new Value(0);
+                init float64 score;
                 COMPLETION
             }
             """.Replace("RESULT", resultType, StringComparison.Ordinal)
@@ -477,28 +495,28 @@ internal sealed class StaticProtocolOutputTests
         Assert.That(fill.Variables[1].IsInit, Is.False);
         Assert.That(fill.Variables[2].IsOut, Is.True);
         Assert.That(fill.Variables[2].IsInit, Is.False);
-        Assert.That(fill.Variables[3].IsOut, Is.True);
+        Assert.That(fill.Variables[3].IsOut, Is.False);
         Assert.That(fill.Variables[3].IsInit, Is.True);
     }
     [TestCase("count = 2;")]
-    [TestCase("score = float64(3.5);")]
+    [TestCase("*score = float64(3.5);")]
     public void GenericFixedOutputsRequirePublicationOnEveryNormalReturn(string body)
     {
         var source = Value
-            + "int32 Fill<T>(T value, out T result, out int32 count, init ref<float64> score)"
-            + " where T : [Copy] { result = value; " + body + " return 7; }"
+            + "int32 Fill<T>(T value, out T result, out int32 count, ref<init float64> score)"
+            + "  { result = value; " + body + " return 7; }"
             + "int32 Main() { return 0; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.True);
         Assert.That(compilation.Program, Is.Null);
     }
     [TestCase("count = 2;")]
-    [TestCase("score = float64(3.5);")]
+    [TestCase("*score = float64(3.5);")]
     public void GenericFixedVoidOutputsRequirePublicationOnFallthrough(string body)
     {
         var source = Value
-            + "void Fill<T>(T value, out T result, out int32 count, init ref<float64> score)"
-            + " where T : [Copy] { result = value; " + body + " }"
+            + "void Fill<T>(T value, out T result, out int32 count, ref<init float64> score)"
+            + "  { result = value; " + body + " }"
             + "int32 Main() { return 0; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.True);
@@ -509,12 +527,15 @@ internal sealed class StaticProtocolOutputTests
     public void GenericFixedOutputsDoNotInferGenericTypeFromDestinations()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
-            int32 Fill<T>(init ref<T> result, out int32 count, init ref<float64> score)
-                where T : [Copy] {
+            int32 Fill<T>(ref<init T> result, out int32 count, ref<init float64> score)
+                 {
                 for (;;) { }
             }
             int32 Main() {
-                Fill(init var result, out var count, init var score);
+                init int32 result;
+                mut int32 count = 0;
+                init float64 score;
+                Fill(ref init result, out count, ref init score);
                 return 42;
             }
             """));
@@ -526,14 +547,15 @@ internal sealed class StaticProtocolOutputTests
     public void GenericFixedOutputsRequireAGenericTypedOutput()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
-            int32 Fill<T>(T value, out int32 count, init ref<float64> score)
-                where T : [Copy] {
+            int32 Fill<T>(T value, out int32 count, ref<init float64> score)
+                 {
                 count = 2;
-                score = float64(3.5);
+                *score = float64(3.5);
                 return 7;
             }
             int32 Main() {
-                int32 status = Fill(int32(40), out var count, init var score);
+                init float64 score;
+                int32 status = Fill(int32(40), out var count, ref init score);
                 return status + count + int32(score);
             }
             """));
@@ -545,11 +567,12 @@ internal sealed class StaticProtocolOutputTests
     public void GenericFloatingResultsPreserveOutputModes(string resultType, string resultValue)
     {
         var source = Value + resultType
-            + " Fill<T>(T value, out T copied, init ref<T> initialized) where T : [Copy] {"
-            + " copied = value; initialized = value; return " + resultValue + "; }"
+            + " Fill<T>(T value, out T copied, ref<init T> initialized)  {"
+            + " copied = value; *initialized = value; return " + resultValue + "; }"
             + "int32 Main() { mut Value copied = new Value(0);"
-            + resultType + " status1 = Fill(new Value(40), out copied, init var initialized1);"
-            + resultType + " status2 = Fill<Value>(new Value(42), out copied, init var initialized2);"
+            + "init Value initialized1; init Value initialized2;"
+            + resultType + " status1 = Fill(new Value(40), out copied, ref init initialized1);"
+            + resultType + " status2 = Fill<Value>(new Value(42), out copied, ref init initialized2);"
             + "return 42; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -562,44 +585,72 @@ internal sealed class StaticProtocolOutputTests
         Assert.That(fill.ReturnType, Is.EqualTo(resultType == "float32" ? PrimitiveType.Float32 : PrimitiveType.Float64));
         Assert.That(fill.Variables[1].IsOut, Is.True);
         Assert.That(fill.Variables[1].IsInit, Is.False);
+        Assert.That(fill.Variables[2].IsOut, Is.False);
         Assert.That(fill.Variables[2].IsInit, Is.True);
     }
-    [TestCase("float32","result = value; initialized = value; count = 2; return float32(1.5);")]
-    [TestCase("float64","result = value; initialized = value; score = float64(3.5); return float64(1.5);")]
-    [TestCase("float32","initialized = value; count = 2; score = float64(3.5); return float32(1.5);")]
-    [TestCase("float64","result = value; count = 2; score = float64(3.5); return float64(1.5);")]
+    [TestCase("float32","result = value; *initialized = value; count = 2; return float32(1.5);")]
+    [TestCase("float64","result = value; *initialized = value; *score = float64(3.5); return float64(1.5);")]
+    [TestCase("float32","*initialized = value; count = 2; *score = float64(3.5); return float32(1.5);")]
+    [TestCase("float64","result = value; count = 2; *score = float64(3.5); return float64(1.5);")]
     public void GenericFloatingResultRequiresEveryOutputOnNormalReturn(string resultType, string body)
     {
         var source = Value
-            + resultType + " Fill<T>(T value, out T result, init ref<T> initialized,"
-            + " out int32 count, init ref<float64> score)"
-            + " where T : [Copy] { " + body + " } int32 Main() { return 0; }";
+            + resultType + " Fill<T>(T value, out T result, ref<init T> initialized,"
+            + " out int32 count, ref<init float64> score)"
+            + "  { " + body + " } int32 Main() { return 0; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.True);
         Assert.That(compilation.Program, Is.Null);
     }
-    [TestCase("float32 Create<T>(T value) where T : [Copy] { return float32(1.5); }")]
-    [TestCase("float32 Fill<T>(T value, float32 threshold, out T result) where T : [Copy] { result = value; return float32(1.5); }")]
-    public void GenericFloatingResultDoesNotWidenTemplateTypes(string declaration)
+    [Test]
+    public void GenericFloatingResultWithoutGenericOutputAnchorRejects()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse(
-            declaration + " int32 Main() { return 0; }"));
-        Assert.That(compilation.HasErrors, Is.True);
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            float32 Create<T>(T value) { return float32(1.5); }
+            int32 Main() { return 0; }
+            """));
+        Assert.That(compilation.HasErrors, Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
         Assert.That(compilation.Program, Is.Null);
+    }
+
+    [Test]
+    public void GenericFloatingResultWithGenericOutputAnchorPreservesType()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            float32 Fill<T>(T value, float32 threshold, out T result) {
+                result = value;
+                return float32(1.5);
+            }
+            int32 Main() {
+                float32 status = Fill(int32(42), float32(0), out var result);
+                return int32(status) + result;
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var fill = program.Functions.Single(static function =>
+            function.Name.StartsWith("Fill<", StringComparison.Ordinal));
+        Assert.That(fill.ReturnType, Is.EqualTo(PrimitiveType.Float32));
+        Assert.That(fill.Variables[0].Type, Is.EqualTo(PrimitiveType.Int32));
+        Assert.That(fill.Variables[2].Type, Is.EqualTo(PrimitiveType.Int32));
     }
 
     [Test]
     public void GenericFloatingResultRequiresAGenericOutputAnchor()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
-            float32 Fill<T>(T value, out int32 count, init ref<float64> score)
-                where T : [Copy] {
+            float32 Fill<T>(T value, out int32 count, ref<init float64> score)
+                 {
                 count = 2;
-                score = float64(3.5);
+                *score = float64(3.5);
                 return float32(1.5);
             }
             int32 Main() {
-                Fill(int32(42), out var count, init var score);
+                init float64 score;
+                Fill(int32(42), out var count, ref init score);
                 return 42;
             }
             """));
@@ -611,12 +662,15 @@ internal sealed class StaticProtocolOutputTests
     public void GenericFloatingResultAndFixedOutputsDoNotInferOutputTypes()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
-             float64 None<T>(int32 marker, init ref<T> result, out int32 count,
-                init ref<float64> score) where T : [Copy] {
+             float64 None<T>(int32 marker, ref<init T> result, out int32 count,
+                ref<init float64> score)  {
                 for (;;) { }
             }
             int32 Main() {
-                float64 status = None(1, init var result, out var count, init var score);
+                init int32 result;
+                mut int32 count = 0;
+                init float64 score;
+                float64 status = None(1, ref init result, out count, ref init score);
                 require status == float64(0.0);
                 return 42;
             }
@@ -629,7 +683,7 @@ internal sealed class StaticProtocolOutputTests
     public void GenericFloatingResultMayFailInFinally()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
-            float64 Fill<T>(T value, out T copied) where T : [Copy] {
+            float64 Fill<T>(T value, out T copied)  {
                 copied = value;
                 try {
                     return float64(0.0);
@@ -649,12 +703,12 @@ internal sealed class StaticProtocolOutputTests
     public void GenericFloatingResultOutputsAreUnreadableAfterExceptionalDeparture(string catchRead)
     {
         var source = """
-            float64 Fill<T>(T value, bool complete, out T copied, init ref<T> initialized,
-                out int32 count, init ref<float64> score) where T : [Copy] {
+            float64 Fill<T>(T value, bool complete, out T copied, ref<init T> initialized,
+                out int32 count, ref<init float64> score)  {
                 copied = value;
-                initialized = value;
+                *initialized = value;
                 count = 2;
-                score = float64(3.5);
+                *score = float64(3.5);
                 require complete;
                 return float64(1.5);
             }
@@ -665,7 +719,7 @@ internal sealed class StaticProtocolOutputTests
                 init float64 score;
                 unsafe {
                     try {
-                        Fill(1, false, out copied, init initialized, out count, init score);
+                        Fill(1, false, out copied, ref init initialized, out count, ref init score);
                     } catch {
                         return int32(CATCH_READ);
                     }
@@ -678,15 +732,15 @@ internal sealed class StaticProtocolOutputTests
         Assert.That(compilation.Program, Is.Null);
     }
     [TestCase("int32","result = value; return 7;")]
-    [TestCase("int32","initialized = second; return 7;")]
+    [TestCase("int32","*initialized = second; return 7;")]
     [TestCase("void","result = value;")]
-    [TestCase("void","initialized = second;")]
+    [TestCase("void","*initialized = second;")]
     public void GenericNonBooleanMixedOutputsRequirePublicationOnEveryNormalReturn(
         string resultType, string body)
     {
         var source = Value + resultType
-            + " Fill<T, U>(T value, U second, bool publish, out T result, init ref<U> initialized)"
-            + " where T : [Copy] where U : [Copy] { " + body + "} int32 Main() { return 0; }";
+            + " Fill<T, U>(T value, U second, bool publish, out T result, ref<init U> initialized)"
+            + "   { " + body + "} int32 Main() { return 0; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.True);
         Assert.That(compilation.Program, Is.Null);
@@ -696,15 +750,16 @@ internal sealed class StaticProtocolOutputTests
     public void GenericMixedOutputDoesNotAdmitManagedOrdinaryOut()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
-            int32 Fill<T, U>(T value, U second, out T result, init ref<U> initialized)
-                where T : [Copy] where U : [Copy] {
+            int32 Fill<T, U>(T value, U second, out T result, ref<init U> initialized)
+                  {
                 result = value;
-                initialized = second;
+                *initialized = second;
                 return 7;
             }
             int32 Main() {
                 require ManagedNode.TryCreate(42, out var node);
-                int32 status = Fill(node, int32(3), out var copy, init var count);
+                init int32 count;
+                int32 status = Fill(node, int32(3), out var copy, ref init count);
                 return status + copy.Value + count;
             }
             """));
@@ -724,12 +779,12 @@ internal sealed class StaticProtocolOutputTests
                 public Pair(int64 first, int64 second) { First = first; Second = second; }
             }
             int32 Fill<T, U>(T value, U second, bool complete, out T result,
-                init ref<U> initialized, out int32 count, init ref<float64> score)
-                where T : [Copy] where U : [Copy] {
+                ref<init U> initialized, out int32 count, ref<init float64> score)
+                  {
                 result = value;
-                initialized = second;
+                *initialized = second;
                 count = 2;
-                score = float64(3.5);
+                *score = float64(3.5);
                 require complete;
                 return 7;
             }
@@ -740,8 +795,8 @@ internal sealed class StaticProtocolOutputTests
                 init float64 score;
                 unsafe {
                     try {
-                        Fill(new Pair(40, 2), int64(3), false, out previous, init initialized,
-                            out count, init score);
+                        Fill(new Pair(40, 2), int64(3), false, out previous, ref init initialized,
+                            out count, ref init score);
                     } catch {
                         return CATCH_READ;
                     }
@@ -762,7 +817,7 @@ internal sealed class StaticProtocolOutputTests
                 public int64 Number;
                 public Value(int64 number) { Number = number; }
             }
-            int32 Fill<T>(T value, bool complete, out T result) where T : [Copy] {
+            int32 Fill<T>(T value, bool complete, out T result)  {
                 result = value;
                 require complete;
                 return 7;
@@ -791,8 +846,8 @@ internal sealed class StaticProtocolOutputTests
                 public int64 Number;
                 public Value(int64 number) { Number = number; }
             }
-            int32 Fill<T>(T value, bool complete, init ref<T> result) where T : [Copy] {
-                result = value;
+            int32 Fill<T>(T value, bool complete, ref<init T> result)  {
+                *result = value;
                 require complete;
                 return 7;
             }
@@ -800,7 +855,7 @@ internal sealed class StaticProtocolOutputTests
                 init Value result;
                 unsafe {
                     try {
-                        Fill(new Value(40), false, init result);
+                        Fill(new Value(40), false, ref init result);
                     } catch {
                         return int32(result.Number);
                     }
@@ -853,7 +908,7 @@ internal sealed class StaticProtocolOutputTests
     public void FalseOrUnprovenGenericCallsDoNotInitializeCallerOutputs(string after)
     {
         var source = Value + """
-            bool Pick<T>(T value, out T result) where T : [Copy] { result = value; return false; }
+            bool Pick<T>(T value, out T result)  { result = value; return false; }
             int64 MainValue() {
                 Pick<Value>(new Value(40), out var result);
             """ + after + "} int32 Main() { return 0; }";
@@ -866,7 +921,7 @@ internal sealed class StaticProtocolOutputTests
     public void AnOutputOnlyTypeParameterCanDescribeAnAlwaysAbsentResult()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Value + """
-             bool None<T>(out T result) where T : [Copy] { return false; }
+             bool None<T>(out T result)  { return false; }
             int32 Main() {
                 if (None<Value>(out var result)) { return 1; }
                 return 42;
@@ -884,8 +939,8 @@ internal sealed class StaticProtocolOutputTests
     public void UnusedGenericInitOutputIsCheckedAtDefinition()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Value + """
-             bool Fill<T>(T value, init ref<T> result) where T : [Copy] {
-                result = value;
+             bool Fill<T>(T value, ref<init T> result)  {
+                *result = value;
                 return true;
             }
             int32 Main() { return 42; }
@@ -902,9 +957,10 @@ internal sealed class StaticProtocolOutputTests
     public void UntypedGenericInitDestinationDoesNotInferTheType()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Value + """
-             bool None<T>(init ref<T> result) where T : [Copy] { return false; }
+             bool None<T>(ref<init T> result)  { return false; }
             int32 Main() {
-                if (None(init var result)) { return 1; }
+                init Value result;
+                if (None(ref init result)) { return 1; }
                 return 42;
             }
             """));
@@ -913,22 +969,26 @@ internal sealed class StaticProtocolOutputTests
     }
     [TestCase("return true;")]
     [TestCase("return result.First;")]
-    [TestCase("if (publish) { result = value; } return true;")]
+    [TestCase("if (publish) { *result = value; } return true;")]
     public void InvalidGenericInitPublicationRejectsAtDefinition(string body)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Value + """
-            bool Fill<T>(T value, bool publish, init ref<T> result) where T : [Copy] {
+            bool Fill<T>(T value, bool publish, ref<init T> result)  {
             """ + body + "} int32 Main() { return 0; }"));
         Assert.That(compilation.HasErrors, Is.True);
         Assert.That(compilation.Program, Is.Null);
     }
-    [TestCase("if (Fill<int32>(int32(1), init var result)) { return 1; } return result;","TRM3016")]
-    [TestCase("require Fill<int32>(int32(1), out var result);","TRM3011")]
-    [TestCase("require Fill<int32>(int32(1), init var result); require Fill<int32>(int32(2), init result);","TRM3016")]
+    [TestCase("init int32 result; if (Fill<int32>(int32(1), false, ref init result)) { return 1; } return result;","TRM3016")]
+    [TestCase("require Fill<int32>(int32(1), false, out var result);","TRM3011")]
+    [TestCase("init mut int32 result; require Fill<int32>(int32(1), true, ref init result); require Fill<int32>(int32(2), true, ref init result);","TRM3030")]
     public void GenericInitCannotReadVacancyChangeModeOrRepublish(string body, string diagnostic)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Value + """
-            bool Fill<T>(T value, init ref<T> result) where T : [Copy] { return false; }
+            bool Fill<T>(T value, bool publish, ref<init T> result)  {
+                if (!publish) { return false; }
+                *result = value;
+                return true;
+            }
             int32 Main() {
             """ + body + " return 0; }"));
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,error => error.Code == diagnostic),Is.True);
@@ -942,7 +1002,7 @@ internal sealed class StaticProtocolOutputTests
             SyntaxTree.Parse("namespace Values;" + Value),
             SyntaxTree.Parse("""
                 namespace Helpers;
-                 uint64 Echo<T>(T ignored, uint64 value) where T : [Copy] { return value; }
+                 uint64 Echo<T>(T ignored, uint64 value)  { return value; }
                 """),
             SyntaxTree.Parse("""
                 using Helpers;
@@ -967,7 +1027,7 @@ internal sealed class StaticProtocolOutputTests
     public void ScalarReturnDoesNotPermitAccessToUndeclaredGenericMembers()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Value + """
-            int64 Read<T>(T value) where T : [Copy] { return value.First; }
+            int64 Read<T>(T value)  { return value.First; }
             int32 Main() { return int32(Read<Value>(new Value(42))); }
             """));
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3007"),Is.True);

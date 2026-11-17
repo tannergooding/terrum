@@ -158,6 +158,6 @@ internal sealed class StaticProtocolControlFlowTests
     }
 
     private static string Generic(string body) =>
-        "T Power<T>(T value, T one, uint32 exponent) where T : Multiplication<T, T, T>, [Copy] {"
+        "T Power<T>(T value, T one, uint32 exponent) where T : Multiplication<T, T, T> {"
         + body + "}";
 }

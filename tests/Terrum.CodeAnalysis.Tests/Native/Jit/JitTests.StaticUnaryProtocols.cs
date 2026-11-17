@@ -44,7 +44,7 @@ internal sealed partial class JitTests
                 public Value(int32 number) { Number = number; }
                 public static int32 operator {{operation}}(Value value) { return value.Number; }
             }
-            int32 Apply<T>(T value) where T : Operation<T, int32>, [Copy] {
+            int32 Apply<T>(T value) where T : Operation<T, int32> {
                 return {{operation}}value;
             }
             int32 Main() {
@@ -68,7 +68,7 @@ internal sealed partial class JitTests
                     return value.Number;
                 }
             }
-            int32 Apply<T>(T value) where T : Negate<T, int32>, [Copy] { return -value; }
+            int32 Apply<T>(T value) where T : Negate<T, int32> { return -value; }
             int32 Main() {
                 unsafe {
                     try { return Apply(new Value(3)); }
@@ -97,7 +97,7 @@ internal sealed partial class JitTests
                     return new Value(41 + Calls);
                 }
             }
-            int32 Apply<T>(T value) where T : Read<T, int32>, [Copy] { return !value; }
+            int32 Apply<T>(T value) where T : Read<T, int32> { return !value; }
             int32 Main() {
                 mut Counter counter = new Counter();
                 int32 result = Apply(counter.Next());

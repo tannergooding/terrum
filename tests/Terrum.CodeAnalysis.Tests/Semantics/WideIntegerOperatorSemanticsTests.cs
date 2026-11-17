@@ -47,6 +47,45 @@ internal sealed class WideIntegerOperatorSemanticsTests
         Assert.That(GetReturnConstant(functions["UnsignedComparison"]).Value, Is.EqualTo(1));
     }
 
+    [TestCase("int8", PrimitiveType.Int8)]
+    [TestCase("uint8", PrimitiveType.UInt8)]
+    [TestCase("int16", PrimitiveType.Int16)]
+    [TestCase("uint16", PrimitiveType.UInt16)]
+    [TestCase("int32", PrimitiveType.Int32)]
+    [TestCase("uint32", PrimitiveType.UInt32)]
+    [TestCase("int64", PrimitiveType.Int64)]
+    [TestCase("uint64", PrimitiveType.UInt64)]
+    [TestCase("nint", PrimitiveType.NativeInt)]
+    [TestCase("nuint", PrimitiveType.NativeUInt)]
+    [TestCase("int128", PrimitiveType.Int128)]
+    [TestCase("uint128", PrimitiveType.UInt128)]
+    public void ShiftAndCompoundAssignmentPreserveIntegerCountTypes(
+        string countTypeName, PrimitiveType countType)
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($$"""
+            public uint128 Shift(uint128 value, {{countTypeName}} count) {
+                return value << count;
+            }
+            public uint128 ShiftCompound(uint128 value, {{countTypeName}} count) {
+                mut uint128 result = value;
+                result <<= count;
+                return result;
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var functions = compilation.Program!.Functions.ToDictionary(
+            static function => function.Name, StringComparer.Ordinal);
+        var shift = (BoundBinary)((BoundReturn)functions["Shift"]
+            .Body.Statements.Single()).Value!;
+        Assert.That(shift.Right.Type, Is.EqualTo(countType));
+
+        var compound = (BoundCompoundAssignment)((BoundExpressionStatement)
+            functions["ShiftCompound"].Body.Statements[1]).Expression;
+        Assert.That(compound.Right.Type, Is.EqualTo(countType));
+    }
+
     [TestCase(SourceArithmeticProfile.Development, false)]
     [TestCase(SourceArithmeticProfile.Release, true)]
     public void ResolvesWideIntegerOverflowPolicy(
@@ -58,6 +97,9 @@ internal sealed class WideIntegerOperatorSemanticsTests
             public int128 Add(int128 left, int128 right) { return left + right; }
             public int128 Negate(int128 value) { return -value; }
             public uint128 NegateUnsigned(uint128 value) { return -value; }
+            public nint AddNative(nint left, nint right) { return left + right; }
+            public nint NegateNative(nint value) { return -value; }
+            public nuint NegateUnsignedNative(nuint value) { return -value; }
             """), new CompilationOptions { SourceArithmeticProfile = profile });
 
         Assert.That(compilation.HasErrors, Is.False,
@@ -92,7 +134,7 @@ internal sealed class WideIntegerOperatorSemanticsTests
                 const int128 result = UpdateAndCompound();
                 return 42;
             }
-            """));
+            """), CoreEvaluationFormTestHelpers.Options());
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -114,7 +156,11 @@ internal sealed class WideIntegerOperatorSemanticsTests
                     int128(-170141183460469231731687303715884105728), int128(-1));
                 return 42;
             }
-            """), new CompilationOptions { SourceArithmeticProfile = SourceArithmeticProfile.Release });
+            """), CoreEvaluationFormTestHelpers.WithConstEval(
+                new CompilationOptions {
+                    SourceArithmeticProfile
+                        = SourceArithmeticProfile.Release,
+                }));
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -151,7 +197,8 @@ internal sealed class WideIntegerOperatorSemanticsTests
         """)]
     public void RequiredConstEvalReportsWideArithmeticFailures(string source)
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            CoreEvaluationFormTestHelpers.Options());
 
         Assert.That(compilation.Diagnostics.Any(static diagnostic =>
             diagnostic.Code == "TRM3024" && diagnostic.Message.Contains("ConstEval", StringComparison.Ordinal)),

@@ -133,10 +133,13 @@ internal sealed class WideIntegerFactsModuleTests
 
         foreach (var (function, arguments) in RejectedCalls())
         {
+            var outputType = function.EndsWith("UInt64", StringComparison.Ordinal)
+                ? "uint64" : "int64";
             var invalidConsumer = SyntaxTree.Parse(
                 "using Terrum.CodeAnalysis.Numerics64;\n"
                 + "int32 Main() {\n"
-                + $"    if (!{function}({arguments}, init var result)) {{ return int32(result); }}\n"
+                + $"    init {outputType} result;\n"
+                + $"    if (!{function}({arguments}, ref init result)) {{ return int32(result); }}\n"
                 + "    return 0;\n"
                 + "}",
                 "wide-integer-unpublished-" + function + ".terrum");
@@ -166,7 +169,7 @@ internal sealed class WideIntegerFactsModuleTests
                 "Terrum.CodeAnalysis.Numerics64.TryAccumulateBase",
             ]);
         var reference = ModuleCompiler.CreateReference(producer);
-        var consumerSource = new StringBuilder("using Terrum.CodeAnalysis.Numerics64;\nint32 Main() {\n");
+        var statements = new List<string>();
         var helpers = new StringBuilder();
         var checks = new List<string>();
         var failureCode = 1;
@@ -180,7 +183,7 @@ internal sealed class WideIntegerFactsModuleTests
                 foreach (var value in AccumulationInputs(maximum, digit, 10))
                 {
                     var succeeds = TryExpectedAccumulateDecimal(value, digit, maximum, out var result);
-                    AppendAccumulationCheck(consumerSource, checks, ref failureCode,
+                    AppendAccumulationCheck(statements, checks, ref failureCode,
                         "CheckTryAccumulateDecimal",
                         $"{UInt64Literal(value)}, {digit}, {UInt64Literal(maximum)}",
                         UInt64Literal(succeeds ? result : BigInteger.Zero), succeeds,
@@ -199,7 +202,7 @@ internal sealed class WideIntegerFactsModuleTests
                     foreach (var value in AccumulationInputs(maximum, digit, radix))
                     {
                         var succeeds = TryExpectedAccumulateBase(value, digit, radix, maximum, out var result);
-                        AppendAccumulationCheck(consumerSource, checks, ref failureCode,
+                        AppendAccumulationCheck(statements, checks, ref failureCode,
                             "CheckTryAccumulateBase",
                             $"{UInt64Literal(value)}, {digit}, {radix}, {UInt64Literal(maximum)}",
                             UInt64Literal(succeeds ? result : BigInteger.Zero), succeeds,
@@ -222,7 +225,7 @@ internal sealed class WideIntegerFactsModuleTests
                 {
                     foreach (var value in values)
                     {
-                        AppendAccumulationCheck(consumerSource, checks, ref failureCode,
+                        AppendAccumulationCheck(statements, checks, ref failureCode,
                             "CheckTryAccumulateBase",
                             $"{UInt64Literal(value)}, {digit}, {radix}, {UInt64Literal(maximum)}",
                             "0", false,
@@ -233,23 +236,43 @@ internal sealed class WideIntegerFactsModuleTests
         }
 
         Assert.That(checks.Count, Is.EqualTo(2442));
-        _ = consumerSource.AppendLine("return 0;");
-        _ = consumerSource.AppendLine("}");
-        _ = consumerSource.Append(helpers);
-        var consumerTree = SyntaxTree.Parse(consumerSource.ToString(), "wide-accumulation-consumer.terrum");
-        Assert.That(consumerTree.HasErrors, Is.False, string.Join(Environment.NewLine, consumerTree.Diagnostics));
-        var consumerCompilation = Compilation.Create(consumerTree, reference, policy);
-        Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => {
-                var __nunitActual3 = consumerCompilation.Program;
-                Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
-                return (BoundProgram)__nunitActual3!;
-            }))(), producer);
-        var actual = NativeJit.Execute(ModuleCompiler.Link(consumer, producer), (NativeRuntimePolicy)policy);
-        Assert.That(actual == 0, Is.True, actual > 0 && actual <= checks.Count
+        const int ChecksPerConsumer = 256;
+        var helperSource = helpers.ToString();
+        for (var start = 0; start < statements.Count; start += ChecksPerConsumer)
+        {
+            var consumerSource = new StringBuilder(
+                "using Terrum.CodeAnalysis.Numerics64;\nint32 Main() {\n");
+            var end = Math.Min(start + ChecksPerConsumer, statements.Count);
+            for (var index = start; index < end; index++)
+            {
+                _ = consumerSource.Append("    ").AppendLine(statements[index]);
+            }
+            _ = consumerSource.AppendLine("    return 0;");
+            _ = consumerSource.AppendLine("}");
+            _ = consumerSource.Append(helperSource);
+            var consumerTree = SyntaxTree.Parse(consumerSource.ToString(),
+                "wide-accumulation-consumer-" + start.ToString(
+                    CultureInfo.InvariantCulture) + ".terrum");
+            Assert.That(consumerTree.HasErrors, Is.False,
+                string.Join(Environment.NewLine, consumerTree.Diagnostics));
+            var consumerCompilation = Compilation.Create(consumerTree,
+                reference, policy);
+            Assert.That(consumerCompilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+            var consumer = ModuleCompiler.CreateConsumer(
+                ((global::System.Func<BoundProgram>)(() => {
+                    var __nunitActual3 = consumerCompilation.Program;
+                    Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+                    return (BoundProgram)__nunitActual3!;
+                }))(), producer);
+            var actual = NativeJit.Execute(
+                ModuleCompiler.Link(consumer, producer),
+                (NativeRuntimePolicy)policy);
+            Assert.That(actual == 0, Is.True, actual > 0
+                    && actual <= checks.Count
                 ? $"Wide accumulation boundary {actual} failed: {checks[actual - 1]}."
                 : $"Expected all wide accumulation checks to pass, got consumer result {actual}.");
+        }
 
         foreach (var (function, arguments) in new[] {
             ("TryAccumulateDecimal", "0, 10, uint64.MaxValue"),
@@ -259,7 +282,8 @@ internal sealed class WideIntegerFactsModuleTests
             var invalidConsumer = SyntaxTree.Parse(
                 "using Terrum.CodeAnalysis.Numerics64;\n"
                 + "int32 Main() {\n"
-                + $"    if (!{function}({arguments}, init var result)) {{ return int32(result); }}\n"
+                + "    init uint64 result;\n"
+                + $"    if (!{function}({arguments}, ref init result)) {{ return int32(result); }}\n"
                 + "    return 0;\n"
                 + "}",
                 "wide-accumulation-unpublished-" + function + ".terrum");
@@ -290,32 +314,34 @@ internal sealed class WideIntegerFactsModuleTests
         _ = source.AppendLine("""
             bool CheckTryAccumulateDecimal(
                 uint64 value, uint32 digit, uint64 maximum, uint64 expected, bool shouldSucceed) {
+                init uint64 result;
                 if (shouldSucceed) {
-                    if (!TryAccumulateDecimal(value, digit, maximum, init var actual)) { return false; }
-                    return actual == expected;
+                    if (!TryAccumulateDecimal(value, digit, maximum, ref init result)) { return false; }
+                    return result == expected;
                 }
-                return !TryAccumulateDecimal(value, digit, maximum, init var unpublished);
+                return !TryAccumulateDecimal(value, digit, maximum, ref init result);
             }
             bool CheckTryAccumulateBase(
                 uint64 value, uint32 digit, uint32 radix, uint64 maximum,
                 uint64 expected, bool shouldSucceed) {
+                init uint64 result;
                 if (shouldSucceed) {
-                    if (!TryAccumulateBase(value, digit, radix, maximum, init var actual)) { return false; }
-                    return actual == expected;
+                    if (!TryAccumulateBase(value, digit, radix, maximum, ref init result)) { return false; }
+                    return result == expected;
                 }
-                return !TryAccumulateBase(value, digit, radix, maximum, init var unpublished);
+                return !TryAccumulateBase(value, digit, radix, maximum, ref init result);
             }
             """);
     }
 
-    private static void AppendAccumulationCheck(StringBuilder source, List<string> checks,
+    private static void AppendAccumulationCheck(List<string> statements,
+        List<string> checks,
         ref int failureCode, string function, string arguments, string expected, bool succeeds,
         string description)
     {
-        _ = source.Append("if (!").Append(function).Append('(').Append(arguments).Append(", ")
-            .Append(expected).Append(", ").Append(succeeds ? "true" : "false")
-            .Append(")) { return ")
-            .Append(failureCode.ToString(CultureInfo.InvariantCulture)).AppendLine("; }");
+        statements.Add("if (!" + function + "(" + arguments + ", " + expected
+            + ", " + (succeeds ? "true" : "false") + ")) { return "
+            + failureCode.ToString(CultureInfo.InvariantCulture) + "; }");
         checks.Add(description);
         failureCode++;
     }
@@ -381,13 +407,14 @@ internal sealed class WideIntegerFactsModuleTests
         _ = source.Append("bool Check").Append(operation.Name).Append('(')
             .Append(operation.Type).Append(" left, ").Append(operation.Type).Append(' ')
             .AppendLine("right, " + operation.Type + " expected, bool shouldSucceed) {")
+            .Append("    init ").Append(operation.Type).AppendLine(" result;")
             .AppendLine("    if (shouldSucceed) {")
             .Append("        if (!").Append(operation.Name)
-            .AppendLine("(left, right, init var actual)) { return false; }")
-            .AppendLine("        return actual == expected;")
+            .AppendLine("(left, right, ref init result)) { return false; }")
+            .AppendLine("        return result == expected;")
             .AppendLine("    }")
             .Append("    return !").Append(operation.Name)
-            .AppendLine("(left, right, init var unpublished);")
+            .AppendLine("(left, right, ref init result);")
             .AppendLine("}");
     }
 
@@ -397,13 +424,14 @@ internal sealed class WideIntegerFactsModuleTests
         {
             _ = source.Append("bool Check").Append(function)
                 .AppendLine("(int64 value, int64 expected, bool shouldSucceed) {")
+                .AppendLine("    init int64 result;")
                 .AppendLine("    if (shouldSucceed) {")
                 .Append("        if (!").Append(function)
-                .AppendLine("(value, init var actual)) { return false; }")
-                .AppendLine("        return actual == expected;")
+                .AppendLine("(value, ref init result)) { return false; }")
+                .AppendLine("        return result == expected;")
                 .AppendLine("    }")
                 .Append("    return !").Append(function)
-                .AppendLine("(value, init var unpublished);")
+                .AppendLine("(value, ref init result);")
                 .AppendLine("}");
         }
         _ = source.AppendLine("""

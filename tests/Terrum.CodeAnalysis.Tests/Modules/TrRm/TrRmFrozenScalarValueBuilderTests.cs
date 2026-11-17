@@ -51,9 +51,9 @@ internal sealed class TrRmFrozenScalarValueBuilderTests
         var sources = new TrRmConstantSourceTableReader(tables.ConstantSourceSection,
             tables.ConstantSourceCount, tables.FrozenValueNodeCount, 0, 0);
 
-        Assert.That(zeroValues, Has.Count.EqualTo(24));
-        Assert.That(tables.FrozenValueNodeCount, Is.EqualTo(26));
-        Assert.That(tables.ConstantSourceCount, Is.EqualTo(26));
+        Assert.That(zeroValues, Has.Count.EqualTo(26));
+        Assert.That(tables.FrozenValueNodeCount, Is.EqualTo(28));
+        Assert.That(tables.ConstantSourceCount, Is.EqualTo(28));
         Assert.That(tables.BlobCount, Is.EqualTo(6));
         foreach (var (typeCode, reference) in zeroValues)
         {
@@ -70,7 +70,7 @@ internal sealed class TrRmFrozenScalarValueBuilderTests
                     0x01 or 0x02 or 0x06 or 0x0B => 1,
                     0x03 or 0x07 or 0x0C or 0x12 or 0x13 => 2,
                     0x04 or 0x05 or 0x08 or 0x0D or 0x14 or 0x17 => 3,
-                    0x09 or 0x0E or 0x15 or 0x18 => 4,
+                    0x09 or 0x0E or 0x10 or 0x11 or 0x15 or 0x18 => 4,
                     _ => 5,
                 })));
         }

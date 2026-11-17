@@ -203,16 +203,22 @@ internal sealed class SourceArithmeticProfileTests
                 return result == int32.MinValue ? 42 : 0;
             }
             """;
-        var release = Compilation.Create(SyntaxTree.Parse(source), new CompilationOptions {
-            SourceArithmeticProfile = SourceArithmeticProfile.Release,
-        });
+        var release = Compilation.Create(SyntaxTree.Parse(source),
+            CoreEvaluationFormTestHelpers.WithConstEval(
+                new CompilationOptions {
+                    SourceArithmeticProfile
+                        = SourceArithmeticProfile.Release,
+                }));
         Assert.That(release.HasErrors, Is.False, string.Join(Environment.NewLine, release.Diagnostics));
         Assert.That(NativeJit.Execute(GetProgram(release, BoundRuntimePolicy.FailFast),
             NativeRuntimePolicy.FailFast), Is.EqualTo(42));
 
-        var development = Compilation.Create(SyntaxTree.Parse(source), new CompilationOptions {
-            RuntimePolicy = BoundRuntimePolicy.CheckedExceptions,
-        });
+        var development = Compilation.Create(SyntaxTree.Parse(source),
+            CoreEvaluationFormTestHelpers.WithConstEval(
+                new CompilationOptions {
+                    RuntimePolicy
+                        = BoundRuntimePolicy.CheckedExceptions,
+                }));
         Assert.That(global::System.Linq.Enumerable.Any(development.Diagnostics,
             static diagnostic => diagnostic.Code == "TRM3024"
                 && diagnostic.Message.Contains("checked arithmetic", StringComparison.Ordinal)), Is.True);
@@ -329,7 +335,7 @@ internal sealed class SourceArithmeticProfileTests
         var producer = ModuleCompiler.CreateProducer(GetProgram(provider,
             BoundRuntimePolicy.CheckedExceptions), ["Compute"]);
         Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(sizeof(int), sizeof(int))),
-            Is.EqualTo(100));
+            Is.EqualTo(104));
 
         var reference = ModuleCompiler.CreateReference(producer);
         var consumer = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Compute(); }"),

@@ -133,16 +133,29 @@ internal sealed class TrRmFrozenValueNodeTableTests
     }
 
     [Test]
-    public void ScalarCodecRejectsNativeWidthAndNominalTypesAsUnsupported()
+    public void ScalarCodecSupportsNativeWidthAndRejectsNominalTypes()
     {
-        _ = Assert.Throws<NotSupportedException>(() =>
-            CreateScalarTable(0x10, new byte[8]));
-        var (Nodes, Blobs, BlobCount) = CreateRawScalarTable(0x10, new byte[8]);
-        var nativeWidthTypes = CreateTypeSpecs(0x10);
-        var nativeWidthBlobs = CreateBlobs(Blobs, BlobCount);
-        var nativeWidthNodes = new TrRmFrozenValueNodeTableReader(Nodes,
-            1, nativeWidthTypes, BlobCount, 0, 0);
-        AssertUnsupportedScalar(nativeWidthNodes, nativeWidthBlobs);
+        byte[] nativeIntPayload = [1, 2, 3, 4, 5, 6, 7, 8];
+        var (nativeIntRows, nativeIntBlobRows, nativeIntBlobCount)
+            = CreateScalarTable(0x10, nativeIntPayload);
+        var nativeIntTypes = CreateTypeSpecs(0x10);
+        var nativeIntBlobs = CreateBlobs(nativeIntBlobRows,
+            nativeIntBlobCount);
+        var nativeIntNodes = new TrRmFrozenValueNodeTableReader(
+            nativeIntRows, 1, nativeIntTypes, nativeIntBlobCount, 0, 0);
+        Assert.That(nativeIntNodes.GetScalarPayload(1, nativeIntBlobs)
+            .ToArray(), Is.EqualTo(nativeIntPayload));
+
+        byte[] nativeUIntPayload = [8, 7, 6, 5, 4, 3, 2, 1];
+        var (nativeUIntRows, nativeUIntBlobRows, nativeUIntBlobCount)
+            = CreateScalarTable(0x11, nativeUIntPayload);
+        var nativeUIntTypes = CreateTypeSpecs(0x11);
+        var nativeUIntBlobs = CreateBlobs(nativeUIntBlobRows,
+            nativeUIntBlobCount);
+        var nativeUIntNodes = new TrRmFrozenValueNodeTableReader(
+            nativeUIntRows, 1, nativeUIntTypes, nativeUIntBlobCount, 0, 0);
+        Assert.That(nativeUIntNodes.GetScalarPayload(1, nativeUIntBlobs)
+            .ToArray(), Is.EqualTo(nativeUIntPayload));
 
         var nominalTypeBytes = TrRmTypeSpecTableWriter.Encode(
             [new ReadOnlyMemory<byte>(TrRmTypeSpecTableWriter.Reference(0x02, 1))],

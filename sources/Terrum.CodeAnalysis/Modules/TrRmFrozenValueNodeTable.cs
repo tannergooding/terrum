@@ -4,6 +4,7 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
+using Terrum.CodeAnalysis.Semantics;
 
 namespace Terrum.CodeAnalysis.Modules;
 
@@ -193,7 +194,8 @@ public readonly ref struct TrRmFrozenValueNodeTableReader
             || Read(data, 12) != 0
             || Read(data, 16) != 0
             || Read(data, 20) != 0
-            || !reference.IsRow || reference.Form is not (0x02 or 0x03)
+            || !reference.IsRow
+            || reference.Form is not (0x02 or 0x03 or 0x05)
             || reference.Qualifiers != 0
             || !_typeSpecs.AreEquivalentTypeSpecRefs(
                 expectedTypeSpecRef, typeSpecRef)
@@ -204,7 +206,32 @@ public readonly ref struct TrRmFrozenValueNodeTableReader
             throw InvalidFrozenValueNode();
         }
 
-        _ = enumDefs.GetRowForTypeDef(expectedTypeDefRow);
+        var enumRow = enumDefs.GetRowForTypeDef(expectedTypeDefRow);
+        PrimitiveType underlyingType;
+        if (_typeSpecs.Schema.SupportsNominalEnums())
+        {
+            underlyingType = PrimitiveType.Int32;
+        }
+        else if (_typeSpecs.Schema.UsesTypedEnumMemberValues())
+        {
+            var underlying = _typeSpecs.GetTypeSpecRef(
+                enumDefs.GetUnderlyingTypeSpecRef(enumRow));
+            if (underlying.Form != 0x01 || underlying.Qualifiers != 0
+                || underlying.ArgumentCode != 0
+                || !_typeSpecs.Schema.SupportsEnumUnderlyingTypeCode(
+                    underlying.TypeCode)
+                || !TrRmConstantSourceValueValidator.TryGetBoundScalarType(
+                    underlying.TypeCode, out underlyingType)
+                || !PrimitiveTypeFacts.IsIntegerOrWide(underlyingType))
+            {
+                throw InvalidFrozenValueNode();
+            }
+        }
+        else
+        {
+            throw InvalidFrozenValueNode();
+        }
+
         var scalarBlobRef = Read(data, 8);
         if (scalarBlobRef == 0 || scalarBlobRef > (uint)_blobCount
             || scalarBlobRef > 0xFF_FFFF)
@@ -213,7 +240,85 @@ public readonly ref struct TrRmFrozenValueNodeTableReader
         }
 
         var payload = blobs.GetRow(checked((int)scalarBlobRef));
-        if (payload.Length != sizeof(int))
+        if (payload.Length != PrimitiveTypeFacts.ScalarWidth(underlyingType))
+        {
+            throw InvalidFrozenValueNode();
+        }
+
+        return payload;
+    }
+
+    internal ReadOnlySpan<byte> GetTransparentWrapperScalarPayload(int row,
+        TrRmBlobTableReader blobs, uint expectedTypeSpecRef,
+        int expectedTypeDefRow, TrRmTypeDefTableReader typeDefs,
+        TrRmFieldDefTableReader fields,
+        TrRmTransparentConstantDomainTableReader transparentConstantDomains,
+        TrRmImportTableReader imports)
+    {
+        if (blobs.Count != _blobCount
+            || _typeSpecs.Schema != TrRmArtifactSchema.GenericConstantMethodsDraft)
+        {
+            throw InvalidFrozenValueNode();
+        }
+
+        var data = GetRow(row);
+        var typeSpecRef = Read(data, 0);
+        var reference = _typeSpecs.GetTypeSpecRef(typeSpecRef);
+        if (ReadByte(data, 4) != 1
+            || ReadByte(data, 5) != 0
+            || ReadUInt16(data, 6) != 0
+            || Read(data, 12) != 0
+            || Read(data, 16) != 0
+            || Read(data, 20) != 0
+            || !reference.IsRow
+            || reference.Form is not (0x02 or 0x03 or 0x05)
+            || reference.Qualifiers != 0
+            || !_typeSpecs.AreEquivalentTypeSpecRefs(
+                expectedTypeSpecRef, typeSpecRef)
+            || _typeSpecs.GetNominalTypeDefRow(
+                typeSpecRef, typeDefs, imports) != expectedTypeDefRow
+            || typeDefs.GetKind(expectedTypeDefRow) != 1
+            || !transparentConstantDomains.TryGetForOwner(
+                expectedTypeDefRow, out var carrierTypeSpecRef,
+                out var carrierFieldDefRow))
+        {
+            throw InvalidFrozenValueNode();
+        }
+
+        var (fieldStart, fieldEnd) = typeDefs.GetFieldRange(expectedTypeDefRow);
+        if (carrierFieldDefRow < fieldStart
+            || carrierFieldDefRow >= fieldEnd
+            || fields.GetOwnerTypeDef(carrierFieldDefRow)
+                != expectedTypeDefRow
+            || !_typeSpecs.AreEquivalentTypeSpecRefs(
+                carrierTypeSpecRef,
+                fields.GetTypeSpecRef(carrierFieldDefRow)))
+        {
+            throw InvalidFrozenValueNode();
+        }
+
+        var carrierType = _typeSpecs.GetTypeSpecRef(carrierTypeSpecRef);
+        if (carrierType.Form != 0x01 || carrierType.Qualifiers != 0
+            || !TrRmConstantSourceValueValidator.TryGetBoundScalarType(
+                carrierType.TypeCode, out var carrierPrimitiveType)
+            || !(PrimitiveTypeFacts.IsIntegerOrWide(carrierPrimitiveType)
+                || carrierPrimitiveType == PrimitiveType.Bool))
+        {
+            throw InvalidFrozenValueNode();
+        }
+
+        var scalarBlobRef = Read(data, 8);
+        if (scalarBlobRef == 0 || scalarBlobRef > (uint)_blobCount
+            || scalarBlobRef > 0xFF_FFFF)
+        {
+            throw InvalidFrozenValueNode();
+        }
+
+        var payload = blobs.GetRow(checked((int)scalarBlobRef));
+        if (payload.Length != PrimitiveTypeFacts.ScalarWidth(
+                carrierPrimitiveType)
+            || (carrierPrimitiveType == PrimitiveType.Bool
+                && payload[0] > 1))
         {
             throw InvalidFrozenValueNode();
         }
@@ -240,7 +345,7 @@ public readonly ref struct TrRmFrozenValueNodeTableReader
     }
 
     private static bool IsRegisteredScalar(byte typeCode)
-        => typeCode is <= 0x0F or (>= 0x12 and <= 0x19);
+        => typeCode is <= 0x11 or (>= 0x12 and <= 0x19);
 
     private static int ScalarWidth(byte typeCode) => typeCode switch
     {
@@ -248,7 +353,7 @@ public readonly ref struct TrRmFrozenValueNodeTableReader
         0x01 or 0x02 or 0x06 or 0x0B => 1,
         0x03 or 0x07 or 0x0C or 0x12 or 0x13 => 2,
         0x04 or 0x05 or 0x08 or 0x0D or 0x14 or 0x17 => 4,
-        0x09 or 0x0E or 0x15 or 0x18 => 8,
+        0x09 or 0x0E or 0x10 or 0x11 or 0x15 or 0x18 => 8,
         0x0A or 0x0F or 0x16 or 0x19 => 16,
         _ => throw new NotSupportedException("Frozen value is outside the registered scalar type domain."),
     };
@@ -325,13 +430,57 @@ public static class TrRmFrozenValueNodeTableWriter
         int childCount, int unionCaseDefCount,
         TrRmTypeDefTableReader typeDefs, TrRmEnumDefTableReader enumDefs,
         TrRmImportTableReader imports)
+        => EncodeWithNominalEnums(rows, typeSpecs, blobs, childCount,
+            unionCaseDefCount, typeDefs, enumDefs, imports,
+            TrRmArtifactSchema.NominalEnumsDraft, requireExactSchema: false);
+
+    internal static byte[] EncodeGenericConstantMethodsDraft(
+        IReadOnlyList<TrRmFrozenValueNodeRow> rows,
+        TrRmTypeSpecTableReader typeSpecs, TrRmBlobTableReader blobs,
+        int childCount, int unionCaseDefCount,
+        TrRmTypeDefTableReader typeDefs, TrRmEnumDefTableReader enumDefs,
+        TrRmFieldDefTableReader fields,
+        TrRmTransparentConstantDomainTableReader transparentConstantDomains,
+        TrRmImportTableReader imports)
+        => EncodeWithNominalEnums(rows, typeSpecs, blobs, childCount,
+            unionCaseDefCount, typeDefs, enumDefs, imports,
+            TrRmArtifactSchema.GenericConstantMethodsDraft,
+            requireExactSchema: true, fields: fields,
+            transparentConstantDomains: transparentConstantDomains);
+
+    internal static byte[] EncodeTypedEnumMemberValues(
+        IReadOnlyList<TrRmFrozenValueNodeRow> rows,
+        TrRmTypeSpecTableReader typeSpecs, TrRmBlobTableReader blobs,
+        int childCount, int unionCaseDefCount,
+        TrRmTypeDefTableReader typeDefs, TrRmEnumDefTableReader enumDefs,
+        TrRmImportTableReader imports)
+    {
+        if (!typeSpecs.Schema.UsesC1EnumClosure())
+        {
+            throw new ArgumentOutOfRangeException(nameof(typeSpecs));
+        }
+
+        return EncodeWithNominalEnums(rows, typeSpecs, blobs, childCount,
+            unionCaseDefCount, typeDefs, enumDefs, imports,
+            typeSpecs.Schema, requireExactSchema: true);
+    }
+
+    private static byte[] EncodeWithNominalEnums(
+        IReadOnlyList<TrRmFrozenValueNodeRow> rows,
+        TrRmTypeSpecTableReader typeSpecs, TrRmBlobTableReader blobs,
+        int childCount, int unionCaseDefCount,
+        TrRmTypeDefTableReader typeDefs, TrRmEnumDefTableReader enumDefs,
+        TrRmImportTableReader imports, TrRmArtifactSchema schema,
+        bool requireExactSchema,
+        TrRmFieldDefTableReader fields = default,
+        TrRmTransparentConstantDomainTableReader transparentConstantDomains = default)
     {
         ArgumentNullException.ThrowIfNull(rows);
-        if (typeSpecs.Schema != TrRmArtifactSchema.NominalEnumsDraft
-            && typeSpecs.Count != 0)
+        if (typeSpecs.Schema != schema
+            && (requireExactSchema || typeSpecs.Count != 0))
         {
             throw new NotSupportedException(
-                "NominalEnumsDraft values require the exact candidate TypeSpec profile.");
+                "The selected enum-value writer requires its exact TypeSpec profile.");
         }
         if (rows.Count > 0xFF_FFFF)
         {
@@ -357,7 +506,8 @@ public static class TrRmFrozenValueNodeTableWriter
                 continue;
             }
 
-            if (!type.IsRow || type.Form is not (0x02 or 0x03)
+            if (!type.IsRow
+                || type.Form is not (0x02 or 0x03 or 0x05)
                 || type.Qualifiers != 0)
             {
                 throw new NotSupportedException(
@@ -366,15 +516,25 @@ public static class TrRmFrozenValueNodeTableWriter
 
             var typeDefRow = typeSpecs.GetNominalTypeDefRow(typeSpecRef,
                 typeDefs, imports);
-            if (typeDefs.GetKind(typeDefRow) != 4)
+            var typeKind = typeDefs.GetKind(typeDefRow);
+            if (typeKind == 4)
             {
-                throw new NotSupportedException(
-                    "NominalEnumsDraft frozen scalar values support only builtin scalars and nominal enums.");
+                _ = enumDefs.GetRowForTypeDef(typeDefRow);
+                _ = reader.GetNominalEnumScalarPayload(row, blobs,
+                    typeSpecRef, typeDefRow, typeDefs, enumDefs, imports);
+                continue;
             }
 
-            _ = enumDefs.GetRowForTypeDef(typeDefRow);
-            _ = reader.GetNominalEnumScalarPayload(row, blobs, typeSpecRef,
-                typeDefRow, typeDefs, enumDefs, imports);
+            if (schema.UsesGenericConstantMethods() && typeKind == 1)
+            {
+                _ = reader.GetTransparentWrapperScalarPayload(row, blobs,
+                    typeSpecRef, typeDefRow, typeDefs, fields,
+                    transparentConstantDomains, imports);
+                continue;
+            }
+
+            throw new NotSupportedException(
+                "The selected enum-value writer supports only builtin, enum and admitted CG1 transparent-wrapper types.");
         }
 
         return result;

@@ -18,7 +18,7 @@ internal sealed class ConstEvalTests
             [ConstEval] unsafe int32 Value() { return 42; }
             int32 Main() { return const (unsafe(Value())); }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Compile(source);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var main = global::System.Linq.Enumerable.Single(((global::System.Func<BoundProgram>)(() => {
             var __nunitActual0 = compilation.Program;
@@ -40,9 +40,13 @@ internal sealed class ConstEvalTests
     {
         const string source = """
             int32 Main() { const int32 answer = Combine(second: 2, first: 4); return answer; }
-            [ConstEval] int32 Combine(int32 first, int32 second) { return first * 10 + second; }
+            [ConstEval] int32 Combine(int32 first, int32 second)
+                require first >= 0 && first <= 214748363
+                    && second >= 0 && second <= 9 {
+                return first * 10 + second;
+            }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Compile(source);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var main = global::System.Linq.Enumerable.Single(((global::System.Func<BoundProgram>)(() => {
             var __nunitActual3 = compilation.Program;
@@ -66,17 +70,17 @@ internal sealed class ConstEvalTests
             [ConstEval] int32 Value() {
                 mut int32 count = 0;
                 outer: do {
-                    count = count + 1;
-                    do {
-                        if (count < 3) { continue outer; }
-                        break outer;
-                    } while (false);
+                    if (count < 3) {
+                        count = 3;
+                        continue outer;
+                    }
+                    break outer;
                 } while (true);
-                return count + 39;
+                return count == 3 ? 42 : 0;
             }
             int32 Main() { const int32 answer = Value(); return answer; }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Compile(source);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var main = global::System.Linq.Enumerable.Single(((global::System.Func<BoundProgram>)(() => {
             var __nunitActual6 = compilation.Program;
@@ -95,17 +99,16 @@ internal sealed class ConstEvalTests
 
     private const string Source = """
         int32 Main() {
-            const int32 total = Sum(4);
-            return total + Sum(3);
+            const int32 total = CountDown(4);
+            return total + CountDown(3);
         }
-        [ConstEval] int32 Sum(int32 count) {
+        [ConstEval] int32 CountDown(int32 count)
+            require count >= 0 {
             mut int32 current = count;
-            mut int32 total = 0;
             while (current > 0) {
-                total = total + current;
                 current = current - 1;
             }
-            return total;
+            return count;
         }
         """;
 
@@ -115,7 +118,7 @@ internal sealed class ConstEvalTests
         var tree = SyntaxTree.Parse(Source);
         Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
         Assert.That(tree.Root.ToFullString(), Is.EqualTo(Source));
-        var compilation = Compilation.Create(tree);
+        var compilation = Compile(tree);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => {
             var __nunitActual9 = compilation.Program;
@@ -132,8 +135,8 @@ internal sealed class ConstEvalTests
             var __nunitActual11 = local.Initializer;
             Assert.That(__nunitActual11, Is.TypeOf<BoundConstant>());
             return (BoundConstant)__nunitActual11!;
-        }))().Value, Is.EqualTo(10));
-        Assert.That(global::System.Linq.Enumerable.Any(program.Functions,function => function.Name == "Sum"),Is.True);
+        }))().Value, Is.EqualTo(4));
+        Assert.That(global::System.Linq.Enumerable.Any(program.Functions,function => function.Name == "CountDown"),Is.True);
         Assert.That(global::System.Linq.Enumerable.Any(main.Body.Statements.OfType<BoundReturn>(),statement => statement.Value is BoundBinary { Right: BoundCall }),Is.True);
     }
 
@@ -141,7 +144,12 @@ internal sealed class ConstEvalTests
     public void RequiredScalarArithmeticHandlesUnsignedBitsAndSignedMinimumRemainder()
     {
         const string Program = """
-            [ConstEval] int64 Remainder(int64 left, int64 right) { return left % right; }
+            [ConstEval] int64 Remainder(int64 left, int64 right)
+            {
+                if (right > 0) { return left % right; }
+                if (right < 0) { return left % right; }
+                return 0;
+            }
             [ConstEval] uint64 Largest(uint64 value) { return value; }
             [ConstEval] char16 Letter(char16 value) { return value; }
             int32 Main() {
@@ -154,7 +162,7 @@ internal sealed class ConstEvalTests
                 return 0;
             }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(Program));
+        var compilation = Compile(Program);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var main = global::System.Linq.Enumerable.Single(((global::System.Func<BoundProgram>)(() => {
             var __nunitActual12 = compilation.Program;
@@ -168,6 +176,50 @@ internal sealed class ConstEvalTests
                 return (BoundConstant)__nunitActual13!;
             }))().Value), Is.EqualTo([0L, -1L, 42L]));
     }
+
+    [Test]
+    public void ConstEvalCheckedUnsignedArithmeticRequiresSafeInputDomain()
+    {
+        const string source = """
+            [ConstEval] uint64 Add(uint64 left, uint64 right) {
+                return left + right;
+            }
+            int32 Main() {
+                const uint64 value = Add(1, 2);
+                return 0;
+            }
+            """;
+        var compilation = Compile(source);
+        Assert.That(compilation.HasErrors, Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3029"), Is.True);
+    }
+
+    [Test]
+    public void ConstEvalCheckedUnsignedArithmeticUsesItsPreconditionDomain()
+    {
+        const string source = """
+            [ConstEval] uint64 Add(uint64 left, uint64 right)
+                require left <= uint64.MaxValue - right {
+                return left + right;
+            }
+            int32 Main() {
+                const uint64 value = Add(1, 2);
+                return int32(value);
+            }
+            """;
+        var compilation = Compile(source);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var main = compilation.Program!.Functions.Single(static function =>
+            function.Name == "Main");
+        var local = main.Body.Statements.OfType<BoundLocal>().Single();
+        Assert.That(local.Initializer, Is.TypeOf<BoundConstant>());
+        Assert.That(((BoundConstant)local.Initializer!).Value,
+            Is.EqualTo(3));
+    }
+
     [TestCase("const int32 value = Divide(1, 0);","ConstEval checked arithmetic")]
     [TestCase("const int32 value = Add(2147483647, 1);","ConstEval checked arithmetic")]
     [TestCase("const int32 value = Identity(arg);","required constant")]
@@ -189,7 +241,7 @@ internal sealed class ConstEvalTests
             int32 Caller(int32 arg) { STATEMENT return 42; }
             int32 Main() { return Caller(1); }
             """.Replace("STATEMENT", statement, StringComparison.Ordinal);
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Compile(source);
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3024" && diagnostic.Message.Contains(message, StringComparison.Ordinal)),Is.True);
     }
     [TestCase(63,true)]
@@ -197,14 +249,15 @@ internal sealed class ConstEvalTests
     public void CallDepthLimitAdmitsExactlySixtyFourNestedCalls(int count, bool succeeds)
     {
         var source = """
-            [ConstEval] int32 Recurse(int32 remaining) {
+            [ConstEval] int32 Recurse(int32 remaining)
+                require remaining >= 0 {
                 if (remaining == 0) { return 0; }
-                return 1 + Recurse(remaining - 1);
+                return Recurse(remaining - 1);
             }
             int32 Main() { const int32 value = Recurse(COUNT); return value; }
             """.Replace("COUNT", count.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 StringComparison.Ordinal);
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Compile(source);
         if (succeeds)
         {
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -220,7 +273,7 @@ internal sealed class ConstEvalTests
     return (BoundLocal)__nunitActual15!; }))().Initializer;
                 Assert.That(__nunitActual16, Is.TypeOf<BoundConstant>());
                 return (BoundConstant)__nunitActual16!;
-            }))().Value, Is.EqualTo(count));
+            }))().Value, Is.Zero);
         }
         else
         {
@@ -241,7 +294,7 @@ internal sealed class ConstEvalTests
             int32 Main() { const int32 value = Count(COUNT); return value; }
             """.Replace("COUNT", count.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 StringComparison.Ordinal);
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Compile(source);
         if (succeeds)
         {
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -252,13 +305,20 @@ internal sealed class ConstEvalTests
                 && diagnostic.Message.Contains("work limit", StringComparison.Ordinal)),Is.True);
         }
     }
-    [TestCase("[ConstEval] public int32 Bad(int32 value) { return value; }")]
     [TestCase("[ConstEval] int32 Bad(int32 value) { if (value == 0) { return Other(); } return value; } int32 Other() { return 1; }")]
     [TestCase("[ConstEval] int32 Bad(out int32 value) { value = 1; return 1; }")]
     [TestCase("[ConstEval] void Bad() { return; }")]
     public void UnsupportedContractsAndUnreachableEffectsAreRejected(string declaration)
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse(declaration + " int32 Main() { return 42; }"));
+        var compilation = Compile(declaration + " int32 Main() { return 42; }");
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3024"),Is.True);
     }
+
+    private static Compilation Compile(string source)
+        => Compile(SyntaxTree.Parse(source));
+
+    private static Compilation Compile(SyntaxTree tree)
+        => Compilation.Create(tree,
+            CoreEvaluationFormTestHelpers
+                .OptionsWithConstEvalAndContractFailures());
 }

@@ -343,8 +343,8 @@ internal sealed class StaticProtocolCompositionTests
                  public Pair(Inner nested, float64 wide) { Nested = nested; Wide = wide; }
                  public float32 ReadSingle() { return Nested.Single; }
             }
-             bool TryCreatePair(init ref<Pair> result) {
-                result = new Pair(new Inner(float32(1), 42), float64(2));
+             bool TryCreatePair(ref<init Pair> result) {
+                *result = new Pair(new Inner(float32(1), 42), float64(2));
                 return true;
             }
              bool TryCreatePairOut(out Pair result) {
@@ -353,7 +353,8 @@ internal sealed class StaticProtocolCompositionTests
             }
              float32 CopyFloat(float32 value) { return value; }
              T Forward<T>(T value)  {
-                if (!TryCreatePair(init var pair)) { return value; }
+                init Pair pair;
+                if (!TryCreatePair(ref init pair)) { return value; }
                 if (!TryCreatePairOut(out var copiedPair)) { return value; }
                 if (CopyFloat(pair.ReadSingle()) != float32(1) || pair.Wide != float64(2)
                     || copiedPair.Wide != float64(2)) { return value; }

@@ -36,13 +36,13 @@ internal sealed class StaticUnaryProtocolTests
                 return new Value(left.Number);
             }
         }
-        R Negate<T, R>(T value) where T : UnaryNot<T, R>, [Copy] where R : [Copy] {
+        R Negate<T, R>(T value) where T : UnaryNot<T, R>  {
             return !value;
         }
-         T Plus<T>(T value) where T : UnaryPlus<T, T>, [Copy] {
+         T Plus<T>(T value) where T : UnaryPlus<T, T> {
             return +value;
         }
-        T Compose<T>(T value) where T : UnaryPlus<T, T>, [Copy] {
+        T Compose<T>(T value) where T : UnaryPlus<T, T> {
             return Plus<T>(value);
         }
         """;
@@ -60,13 +60,13 @@ internal sealed class StaticUnaryProtocolTests
             """;
 
         var unauthorized = Compilation.CreateLibrary(SyntaxTree.Parse(protocol + """
-            T Plus<T>(T value) where T : UnaryPlus<T, T>, [Copy] { return +value; }
+            T Plus<T>(T value) where T : UnaryPlus<T, T> { return +value; }
             """));
         Assert.That(unauthorized.Program, Is.Null);
         Assert.That(global::System.Linq.Enumerable.Any(unauthorized.Diagnostics,static diagnostic => diagnostic.Code == "TRM3028"),Is.True);
 
         var authorized = Compilation.Create(SyntaxTree.Parse(protocol + """
-            T Plus<T>(T value) where T : UnaryPlus<T, T>, [Copy] { return unsafe(+value); }
+            T Plus<T>(T value) where T : UnaryPlus<T, T> { return unsafe(+value); }
             int32 Main() { return Plus<Value>(new Value(42)).Number; }
             """));
         Assert.That(authorized.HasErrors, Is.False, string.Join(Environment.NewLine, authorized.Diagnostics));
@@ -124,8 +124,8 @@ internal sealed class StaticUnaryProtocolTests
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3003"),Is.True);
         Assert.That(compilation.Program, Is.Null);
     }
-    [TestCase("where T : UnaryPlus<T, T>, [Copy]","where T : UnaryMinus<T, T>, [Copy]")]
-    [TestCase("where T : UnaryPlus<T, T>, [Copy]","where T : [Copy]")]
+    [TestCase("where T : UnaryPlus<T, T>","where T : UnaryMinus<T, T>")]
+    [TestCase("where T : UnaryPlus<T, T>","")]
     public void DefinitionSiteProofCannotBorrowConcreteOrOtherWitnesses(string before, string after)
     {
         var source = Source.Replace(before, after, StringComparison.Ordinal) + "int32 Main() { return 42; }";
@@ -232,10 +232,10 @@ internal sealed class StaticUnaryProtocolTests
                 public Input(int32 n) { Number = n; }
                 public static Result operator ~(Input value) { return new Result(value.Number); }
             }
-            R Apply<T, R>(T value) where T : Wrap<T, R>, [Copy] where R : [Copy] {
+            R Apply<T, R>(T value) where T : Wrap<T, R>  {
                 return ~value;
             }
-            T Fixed<T>(T value) where T : Wrap<T, Result>, [Copy] {
+            T Fixed<T>(T value) where T : Wrap<T, Result> {
                 Result result = ~value;
                 if (result.Number != 42) { return value; }
                 return value;

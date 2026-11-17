@@ -17,7 +17,10 @@ namespace Terrum.CodeAnalysis.Tests.Semantics;
 internal sealed class ConstEvalModuleTests
 {
     private const string Library = """
-        [ConstEval] int32 Offset(int32 input) { return input + 1; }
+        [ConstEval] int32 Offset(int32 input) {
+            if (input < 100) { return input + 1; }
+            return input;
+        }
         public int32 Compute(int32 input) {
             const int32 bias = Offset(40);
             return bias + Offset(input);
@@ -65,7 +68,10 @@ internal sealed class ConstEvalModuleTests
     public async Task ExpressionRequirementServicesUnchangedConsumersAsync(NativeRuntimePolicy policy)
     {
         const string Source = """
-            [ConstEval] int32 Offset(int32 input) { return input + 1; }
+            [ConstEval] int32 Offset(int32 input) {
+                if (input < 100) { return input + 1; }
+                return input;
+            }
             public int32 Compute(int32 input) {
                 return Offset(input) + const Offset(40);
             }
@@ -103,9 +109,19 @@ internal sealed class ConstEvalModuleTests
         Assert.That(SHA256.HashData(nativeConsumer), Is.EqualTo(nativeSnapshot));
     }
 
-    private static BoundProgram CompileLibrary(string source, NativeRuntimePolicy policy)
+    private static BoundProgram CompileLibrary(string source,
+        NativeRuntimePolicy policy, bool withConstEval = true)
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
+        var options = new CompilationOptions {
+            RuntimePolicy = (BoundRuntimePolicy)policy,
+        };
+        if (withConstEval)
+        {
+            options = CoreEvaluationFormTestHelpers.WithConstEval(options);
+        }
+
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            options);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         return ((global::System.Func<BoundProgram>)(() => {
             var __nunitActual0 = compilation.Program;
@@ -128,13 +144,17 @@ internal sealed class ConstEvalModuleTests
     public void NonexportedEligibilityDoesNotSelectANewSemanticContract()
     {
         const string Source = """
-            [ConstEval] int32 Helper(int32 input) { return input + 1; }
+            [ConstEval] int32 Helper(int32 input) {
+                if (input < 100) { return input + 1; }
+                return input;
+            }
             public int32 Compute(int32 input) { return Helper(input); }
             """;
         var marked = ModuleCompiler.CreateProducer(CompileLibrary(Source, NativeRuntimePolicy.FailFast),
             ["Compute"]);
         var ordinary = ModuleCompiler.CreateProducer(CompileLibrary(
-            Source.Replace("[ConstEval] ", "", StringComparison.Ordinal), NativeRuntimePolicy.FailFast),
+            Source.Replace("[ConstEval] ", "", StringComparison.Ordinal),
+            NativeRuntimePolicy.FailFast, withConstEval: false),
             ["Compute"]);
         Assert.That(BinaryPrimitives.ReadInt32LittleEndian(marked.AsSpan(4, 4)), Is.EqualTo(BinaryPrimitives.ReadInt32LittleEndian(ordinary.AsSpan(4, 4))));
         var markedFunction = global::System.Linq.Enumerable.Single(ModuleCompiler.CreateReference(marked).Functions);

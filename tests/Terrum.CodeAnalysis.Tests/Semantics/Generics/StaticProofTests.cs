@@ -5,6 +5,7 @@ using NUnit.Framework;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
+using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Generics;
 
@@ -36,7 +37,8 @@ internal sealed class StaticProofTests
         }))();
         Assert.That(version.GetRawConstantValue(), Is.EqualTo("syntax-47"));
 
-        var compilation = Compilation.Create(tree);
+        var compilation = Compilation.Create(tree,
+            CoreEvaluationFormTestHelpers.Options());
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var main = global::System.Linq.Enumerable.Single(((global::System.Func<BoundProgram>)(() => {
             var __nunitActual1 = compilation.Program;
@@ -1334,7 +1336,8 @@ internal sealed class StaticProofTests
             int32 Verify(int32 input) { STATEMENT return 42; }
             int32 Main() { return Verify(42); }
             """.Replace("STATEMENT", statement, StringComparison.Ordinal);
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            CoreEvaluationFormTestHelpers.Options());
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == code
             && diagnostic.Message.Contains(text, StringComparison.Ordinal)),Is.True);
     }
@@ -1362,13 +1365,15 @@ internal sealed class StaticProofTests
     public void RuntimeParametersInGenericTemplatesDoNotBecomeProofs()
     {
         const string Source = """
-            T Forward<T>(T value) where T : [Copy] {
+            T Forward<T>(T value)  {
                 static require true;
                 return value;
             }
             int32 Main() { return Forward(int32(42)); }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source));
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3026"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,
+            diagnostic => diagnostic.Code == "TRM3026"), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
     }
 }

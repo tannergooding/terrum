@@ -45,7 +45,7 @@ internal readonly ref struct TrRmConstantExecutionTableReader
         if (!TrRmConstantExecutionTableValidation.ValidCount(recordCount)
             || !TrRmConstantExecutionTableValidation.ValidCount(bodyCount)
             || (long)recordCount * RowSize != section.Length
-            || schema != TrRmArtifactSchema.GeneralPredicateGraphsDraft)
+            || !schema.UsesGeneralPredicateGraphs())
         {
             throw TrRmConstantExecutionTableValidation.InvalidTable(
                 "ConstantExecution");

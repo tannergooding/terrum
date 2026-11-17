@@ -13,6 +13,7 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Tests.Native.Jit;
+using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
@@ -41,6 +42,10 @@ internal sealed class TrRmFrozenScalarMaterializationTests
             (0x0E, PrimitiveType.UInt64,
                 [0x10, 0x32, 0x54, 0x76, 0x98, 0xBA, 0xDC, 0xFE],
                 unchecked((long)0xFEDC_BA98_7654_3210)),
+            (0x10, PrimitiveType.NativeInt,
+                [0, 0, 0, 0, 0, 0, 0, 0x80], long.MinValue),
+            (0x11, PrimitiveType.NativeUInt,
+                [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF], -1),
             (0x14, PrimitiveType.Float32, [1, 0, 0x80, 0x7F], 0x7F80_0001),
             (0x15, PrimitiveType.Float64, [1, 0, 0, 0, 0, 0, 0xF0, 0xFF],
                 unchecked((long)0xFFF0_0000_0000_0001)),
@@ -64,6 +69,8 @@ internal sealed class TrRmFrozenScalarMaterializationTests
 
             Assert.That(constant.Type, Is.EqualTo(value.Type));
             Assert.That(constant.Value, Is.EqualTo(value.Value));
+            Assert.That(constant.Bits,
+                Is.EqualTo(ScalarBits.FromPayload(value.Type, value.Payload)));
         }
     }
 
@@ -78,6 +85,10 @@ internal sealed class TrRmFrozenScalarMaterializationTests
             (0x0F, PrimitiveType.UInt128,
                 [0x21, 0x43, 0x65, 0x87, 0xA9, 0xCB, 0xED, 0x0F,
                     0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10], 0),
+            (0x10, PrimitiveType.NativeInt,
+                [0, 0, 0, 0, 0, 0, 0, 0x80], long.MinValue),
+            (0x11, PrimitiveType.NativeUInt,
+                [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF], -1),
             (0x12, PrimitiveType.Float16, [0x01, 0x7C], 0x7C01),
             (0x13, PrimitiveType.BFloat16, [0x81, 0x7F], 0x7F81),
             (0x16, PrimitiveType.Float128,
@@ -98,8 +109,16 @@ internal sealed class TrRmFrozenScalarMaterializationTests
                 schema: TrRmArtifactSchema.ScalarFrozenValuesDraft);
             var loaded = TrRmExecutableCompiler.LoadScalarFrozenValuesDraft(artifact);
             var constant = (BoundConstant)((BoundReturn)loaded.Functions[0].Body.Statements.Single()).Value!;
+            var standardLoaded = TrRmExecutableCompiler.LoadStandardScalarReturn(
+                TrRmRegisterBodyTestData.StandardScalarConstantEntryArtifact(
+                    value.TypeCode, value.Payload, isEntryPoint: false,
+                    methodName: "Value"));
+            var standardConstant = (BoundConstant)((BoundReturn)standardLoaded
+                .Functions[0].Body.Statements.Single()).Value!;
 
             Assert.That(constant.Type, Is.EqualTo(value.Type));
+            Assert.That(standardConstant.Type, Is.EqualTo(value.Type));
+            Assert.That(standardConstant.Bits, Is.EqualTo(constant.Bits));
             if (value.Payload.Length > sizeof(ulong))
             {
                 _ = Assert.Throws<InvalidOperationException>(() => _ = constant.Value);
@@ -143,7 +162,7 @@ internal sealed class TrRmFrozenScalarMaterializationTests
                 return result;
             }
             int32 Main() { return 42; }
-            """));
+            """), CoreEvaluationFormTestHelpers.Options());
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = compilation.Program!;
@@ -412,6 +431,9 @@ internal sealed class TrRmFrozenScalarMaterializationTests
                     0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10]),
             (0x12, PrimitiveType.Float16, [0x00, 0x3C]),
             (0x13, PrimitiveType.BFloat16, [0x80, 0x3F]),
+            (0x14, PrimitiveType.Float32, [0x00, 0x00, 0xC0, 0x3F]),
+            (0x15, PrimitiveType.Float64,
+                [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF8, 0x3F]),
             (0x16, PrimitiveType.Float128,
                 [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xFF, 0x3F]),
             (0x17, PrimitiveType.Decimal32, [0x78, 0x00, 0x80, 0x31]),
@@ -458,6 +480,41 @@ internal sealed class TrRmFrozenScalarMaterializationTests
                 executable, 42, NativeRuntimePolicy.FailFast).ConfigureAwait(true);
             await JitTests.AssertProgramExecutionAsync(
                 executable, 42, NativeRuntimePolicy.CheckedExceptions).ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public void StandardConstantMapPreservesFloatingSignedZeroAndNaNPayloads()
+    {
+        var values = new (byte TypeCode, PrimitiveType Type, byte[] Payload)[]
+        {
+            (0x12, PrimitiveType.Float16, [0x00, 0x80]),
+            (0x12, PrimitiveType.Float16, [0x01, 0x7E]),
+            (0x13, PrimitiveType.BFloat16, [0x00, 0x80]),
+            (0x13, PrimitiveType.BFloat16, [0xC1, 0x7F]),
+            (0x14, PrimitiveType.Float32, [0x00, 0x00, 0x00, 0x80]),
+            (0x14, PrimitiveType.Float32, [0x01, 0x00, 0xC0, 0x7F]),
+            (0x15, PrimitiveType.Float64,
+                [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80]),
+            (0x15, PrimitiveType.Float64,
+                [0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF8, 0x7F]),
+            (0x16, PrimitiveType.Float128,
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x80]),
+            (0x16, PrimitiveType.Float128,
+                [0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x80, 0xFF, 0x7F]),
+        };
+
+        foreach (var value in values)
+        {
+            var artifact = TrRmRegisterBodyTestData.StandardScalarConstantEntryArtifact(
+                value.TypeCode, value.Payload, isEntryPoint: false, methodName: "Value");
+            var program = TrRmExecutableCompiler.LoadStandardScalarReturn(artifact);
+            var constant = (BoundConstant)((BoundReturn)program.Functions[0]
+                .Body.Statements.Single()).Value!;
+
+            Assert.That(constant.Type, Is.EqualTo(value.Type));
+            Assert.That(constant.Bits,
+                Is.EqualTo(ScalarBits.FromPayload(value.Type, value.Payload)));
         }
     }
 

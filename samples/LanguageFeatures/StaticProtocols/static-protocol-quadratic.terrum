@@ -21,7 +21,7 @@ struct Seconds : Addition<Seconds, Seconds, Seconds>, Multiplication<Seconds, Se
 }
 
 T EvaluateQuadratic<T>(T x, T a, T b, T c)
-    where T : Addition<T, T, T>, Multiplication<T, T, T>, [Copy] => (a * x + b) * x + c;
+    where T : Addition<T, T, T>, Multiplication<T, T, T> => (a * x + b) * x + c;
 
 int32 Main() {
     Meters distance = EvaluateQuadratic<Meters>(
