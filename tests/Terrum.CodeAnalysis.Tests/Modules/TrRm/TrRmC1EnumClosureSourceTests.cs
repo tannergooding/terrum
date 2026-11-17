@@ -1269,6 +1269,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
 
         Assert.That(NativeJit.Execute(executable,
             NativeRuntimePolicy.FailFast), Is.EqualTo(2));
+        Assert.That(NativeEmitter.Emit(executable,
+            NativeRuntimePolicy.FailFast), Is.Not.Empty);
         Assert.That(NativeEmitter.EmitLibrary(loaded, ["Offset"],
             NativeRuntimePolicy.FailFast), Is.Not.Empty);
         Assert.That(query!.Subject.RequiresUnsafe, Is.True);
