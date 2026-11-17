@@ -3656,12 +3656,19 @@ public static partial class TrRmExecutableCompiler
                 && rootMethodStart == rootMethodEnd
                 && rootTypeStart < rootTypeEnd
                 && tables.Modules.GetEntryMethod(rootModuleRow) == 0;
+            var rootIsC1EnumClosureTypeLibrary = index == 0
+                && IsSelectedC1EnumClosureSchemaIdentity(
+                    schemaIdentities[0])
+                && rootMethodStart == rootMethodEnd
+                && rootTypeStart < rootTypeEnd
+                && tables.Modules.GetEntryMethod(rootModuleRow) == 0;
             if ((populatedModuleCount == 0
                     && !includesFProviderClosure)
                 || (index == 0 && rootMethodEnd == rootMethodStart
                     && !rootIsA2TypeLibrary
                     && !rootIsLayoutQueriesTypeLibrary
-                    && !rootIsC1M1ClassTypeLibrary))
+                    && !rootIsC1M1ClassTypeLibrary
+                    && !rootIsC1EnumClosureTypeLibrary))
             {
                 throw Unsupported(
                     "The selected F artifact must contain a supported populated Module.");

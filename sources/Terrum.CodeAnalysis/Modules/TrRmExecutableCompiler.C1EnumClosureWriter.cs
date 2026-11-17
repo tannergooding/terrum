@@ -37,13 +37,25 @@ public static partial class TrRmExecutableCompiler
         C1EnumClosureSourceEnumExports? sourceEnumExports)
     {
         var hasSourceTypeExports = sourceTypeExports is { Count: > 0 };
+        var hasStandardStructViews = !program.Structures.IsEmpty
+            && program.Structures.All(static structure =>
+                structure.StandardLayoutOnly
+                && structure.StandardTypeOrigin is
+                    BoundStandardTypeOrigin {
+                        Provider.SchemaIdentity: var schemaIdentity,
+                    }
+                    && IsSelectedC1EnumClosureSchemaIdentity(
+                        schemaIdentity));
+        BoundSourceTypeProviderSnapshot? rootSnapshot = null;
         if ((sourceEnumExports is not null
                 && !ReferenceEquals(sourceEnumExports.Program, program))
             || sourceGenericMethodExports?.Exports.IsEmpty == false
             || sourceClassExports?.Exports.IsEmpty == false
             || (hasSourceTypeExports && sourceEnumExports is null)
+            || (hasSourceTypeExports && hasStandardStructViews)
             || program.EntryPoint != -1 || !program.Functions.IsEmpty
-            || (!program.Structures.IsEmpty && !hasSourceTypeExports)
+            || (!program.Structures.IsEmpty && !hasSourceTypeExports
+                && !hasStandardStructViews)
             || !program.Classes.IsEmpty
             || !program.Interfaces.IsEmpty
             || !program.InterfaceWitnesses.IsEmpty
@@ -120,6 +132,75 @@ public static partial class TrRmExecutableCompiler
             }
 
             SemanticVerifier.VerifyLibraryReferences(program);
+        }
+        else if (hasStandardStructViews)
+        {
+            SemanticVerifier.VerifyLibraryReferences(program);
+            foreach (var structure in program.Structures)
+            {
+                var origin = structure.StandardTypeOrigin
+                    ?? throw Invalid(
+                        "A mixed EN1 struct re-emission lost its TypeDef origin.");
+                var provider = origin.Provider;
+                var sourceSchema = provider.SchemaIdentity;
+                if (!StringComparer.Ordinal.Equals(
+                        provider.ModuleIdentity, moduleIdentity)
+                    || !IsSelectedC1EnumClosureSchemaIdentity(
+                        sourceSchema)
+                    || origin.DefinitionId >> 24 != 0x13
+                    || !origin.Expectations.IsDefaultOrEmpty
+                    || origin.ExportKeys.IsDefault
+                    || origin.SelectedExportKeys.IsDefault
+                    || origin.ExpectedDeclaration is null
+                    || (origin.IsLookupRoot
+                        && origin.SelectedExportKeys.IsEmpty)
+                    || (!origin.IsLookupRoot
+                        && !origin.SelectedExportKeys.IsEmpty)
+                    || origin.SelectedExportKeys.Any(key =>
+                        !origin.ExportKeys.Contains(key,
+                            StringComparer.Ordinal))
+                    || !structure.StandardLayoutOnly)
+                {
+                    throw Unsupported(
+                        "Mixed EN1 struct re-emission requires local exact TypeDef snapshots without provider Imports.");
+                }
+
+                if (rootSnapshot is not null
+                    && !SameA2SourceTypeProviderSnapshot(rootSnapshot,
+                        provider))
+                {
+                    throw Unsupported(
+                        "Mixed EN1 struct re-emission cannot combine root Modules.");
+                }
+
+                if (origin.IsLookupRoot)
+                {
+                    rootSnapshot = provider;
+                }
+
+                var expected = origin.ExpectedDeclaration;
+                var actual = structure with {
+                    Fields = [.. structure.Fields.Select(
+                        static field => field with {
+                            StandardFieldOrigin = null,
+                        })],
+                    StandardTypeOrigin = null,
+                    StandardLayoutOnly = false,
+                };
+                if (actual != expected)
+                {
+                    throw Unsupported(
+                        "Mixed EN1 struct re-emission cannot weaken its retained declaration snapshot.");
+                }
+            }
+            if (program.EnumDefinitions.Any(static definition =>
+                    definition.Identity
+                        is BoundEnumDeclarationIdentity.Standard standard
+                    && !standard.Value.Expectations.IsEmpty))
+            {
+                throw Unsupported(
+                    "Mixed EN1 struct re-emission requires local enum declarations without provider Imports.");
+            }
         }
 
         ArgumentException.ThrowIfNullOrEmpty(moduleIdentity);
@@ -229,7 +310,25 @@ public static partial class TrRmExecutableCompiler
         }
         else
         {
-            BoundSourceTypeProviderSnapshot? rootSnapshot = null;
+            if (hasStandardStructViews)
+            {
+                foreach (var structure in program.Structures)
+                {
+                    var origin = structure.StandardTypeOrigin!;
+                    if (rootSnapshot is not null
+                        && !SameA2SourceTypeProviderSnapshot(rootSnapshot,
+                            origin.Provider))
+                    {
+                        throw Unsupported(
+                            "Mixed EN1 struct and enum re-emission cannot combine root Modules.");
+                    }
+                    if (origin.IsLookupRoot)
+                    {
+                        rootSnapshot = origin.Provider;
+                    }
+                }
+            }
+
             foreach (var definition in program.EnumDefinitions)
             {
                 var occurrence
@@ -354,6 +453,43 @@ public static partial class TrRmExecutableCompiler
                 ? new Dictionary<int, BoundSourceTypeDeclaration>()
                 : program.SourceTypeDeclarations.ToDictionary(
                     static declaration => declaration.StructureIndex);
+        bool IsSupportedSourceStruct(BoundStruct structure)
+            => hasStandardStructViews
+                ? structure.StandardLayoutOnly
+                    && structure.StandardTypeOrigin is not null
+                    && !structure.IsUnique
+                    && structure.CleanupMethod is null
+                    && structure.SourceGenericTypeDefinitionIndex < 0
+                    && structure.LayoutKind == 0
+                    && structure.BlittableTargetRequirement == 0
+                    && structure.Packing == 0
+                    && structure.DeclaredAlignment is null
+                : IsC1M1SourceStructLayoutSupported(structure);
+
+        bool TryGetEN1SourceStructFieldType(PrimitiveType type,
+            out int structureIndex)
+        {
+            if (TryGetC1M1SourceStructFieldType(type,
+                    sourceStructDeclarationsByIndex,
+                    out structureIndex))
+            {
+                return true;
+            }
+
+            var candidate = (int)type - 100;
+            if (hasStandardStructViews && candidate >= 0
+                && candidate < program.Structures.Length
+                && candidate < ManagedClassTypes.First - 100
+                && !BoundEnumTypes.IsType(type))
+            {
+                structureIndex = candidate;
+                return true;
+            }
+
+            structureIndex = -1;
+            return false;
+        }
+
         var usedExportKeys = new HashSet<string>(StringComparer.Ordinal);
         foreach (var emittedEnum in emittedEnums)
         {
@@ -493,7 +629,92 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
+        if (hasStandardStructViews)
+        {
+            for (var structureIndex = 0;
+                structureIndex < program.Structures.Length;
+                structureIndex++)
+            {
+                var structure = program.Structures[structureIndex];
+                var origin = structure.StandardTypeOrigin
+                    ?? throw Invalid(
+                        "A mixed EN1 struct re-emission lost its TypeDef origin.");
+                if (rootSnapshot is null
+                    || !SameA2SourceTypeProviderSnapshot(rootSnapshot,
+                        origin.Provider)
+                    || (origin.DefinitionId & 0x00FF_FFFF) == 0
+                    || origin.ExportKeys.IsDefault)
+                {
+                    throw Invalid(
+                        "A mixed EN1 struct re-emission changed its provider or ExportKey snapshot.");
+                }
+
+                var typeKeys = origin.ExportKeys.ToList();
+                foreach (var exportKey in typeKeys)
+                {
+                    if (!BoundEnumTypes.IsValidModuleDeclarationKey(
+                            exportKey)
+                        || !usedExportKeys.Add(exportKey))
+                    {
+                        throw Invalid(
+                            "Mixed EN1 struct TypeDef ExportKeys are invalid or duplicated.");
+                    }
+                }
+                sourceStructExportsByIndex.Add(structureIndex, typeKeys);
+
+                for (var fieldIndex = 0;
+                    fieldIndex < structure.Fields.Length; fieldIndex++)
+                {
+                    if (structure.Fields[fieldIndex].StandardFieldOrigin
+                        is not BoundStandardFieldOrigin fieldOrigin)
+                    {
+                        continue;
+                    }
+                    if (!SameA2SourceTypeProviderSnapshot(rootSnapshot,
+                            fieldOrigin.Provider)
+                        || (fieldOrigin.DefinitionId >> 24) != 0x14
+                        || (fieldOrigin.DefinitionId & 0x00FF_FFFF) == 0
+                        || fieldOrigin.IsLookupRoot
+                        || fieldOrigin.ExportKeys.IsDefault
+                        || fieldOrigin.ExportKeys.IsEmpty
+                        || fieldOrigin.ExpectedDeclaration is null)
+                    {
+                        throw Invalid(
+                            "A mixed EN1 struct FieldDef origin changed its provider or declaration identity.");
+                    }
+
+                    var actualField = structure.Fields[fieldIndex] with {
+                            StandardFieldOrigin = null,
+                        };
+                    if (actualField != fieldOrigin.ExpectedDeclaration)
+                    {
+                        throw Unsupported(
+                            "Mixed EN1 struct re-emission cannot weaken its retained FieldDef snapshot.");
+                    }
+
+                    foreach (var exportKey in fieldOrigin.ExportKeys)
+                    {
+                        if (!BoundEnumTypes.IsValidModuleDeclarationKey(
+                                exportKey)
+                            || !usedExportKeys.Add(exportKey))
+                        {
+                            throw Invalid(
+                                "Mixed EN1 struct FieldDef ExportKeys are invalid or duplicated.");
+                        }
+                    }
+                    sourceStructFieldExportsByIndex.Add(
+                        (structureIndex, fieldIndex),
+                        [.. fieldOrigin.ExportKeys]);
+                }
+            }
+        }
+
         var retainedStructureIndexes = new SortedSet<int>();
+        if (hasStandardStructViews)
+        {
+            retainedStructureIndexes.UnionWith(
+                Enumerable.Range(0, program.Structures.Length));
+        }
         var pendingStructureIndexes = new Queue<int>(
             sourceStructExportsByIndex.Keys);
         while (pendingStructureIndexes.TryDequeue(
@@ -505,7 +726,7 @@ public static partial class TrRmExecutableCompiler
             }
 
             var structure = program.Structures[structureIndex];
-            if (!IsC1M1SourceStructLayoutSupported(structure))
+            if (!IsSupportedSourceStruct(structure))
             {
                 throw Unsupported(
                     "EN1 source struct closure supports only non-generic local structs with auto layout and no ownership or cleanup contract.");
@@ -513,13 +734,12 @@ public static partial class TrRmExecutableCompiler
 
             foreach (var field in structure.Fields)
             {
-                if (TryGetC1M1SourceStructFieldType(field.Type,
-                        sourceStructDeclarationsByIndex,
+                if (TryGetEN1SourceStructFieldType(field.Type,
                         out var dependencyStructureIndex))
                 {
                     if ((uint)dependencyStructureIndex
                             >= (uint)program.Structures.Length
-                        || !IsC1M1SourceStructLayoutSupported(
+                        || !IsSupportedSourceStruct(
                             program.Structures[dependencyStructureIndex]))
                     {
                         throw Unsupported(
@@ -533,6 +753,16 @@ public static partial class TrRmExecutableCompiler
                             dependencyStructureIndex);
                     }
                     continue;
+                }
+
+                if ((field.Type is PrimitiveType.NativeInt
+                        or PrimitiveType.NativeUInt)
+                    && moduleTargetRequirement
+                        != TrRmModuleTableReader
+                            .WindowsX64NativeTargetRequirement)
+                {
+                    throw Unsupported(
+                        "EN1 native-width struct fields require the selected Windows x64 target.");
                 }
 
                 if (BoundEnumTypes.IsType(field.Type))
@@ -605,8 +835,7 @@ public static partial class TrRmExecutableCompiler
 
         uint FieldTypeSpecReference(PrimitiveType type)
         {
-            if (TryGetC1M1SourceStructFieldType(type,
-                    sourceStructDeclarationsByIndex,
+            if (TryGetEN1SourceStructFieldType(type,
                     out var structureIndex))
             {
                 if (!typeDefRowByStructure.TryGetValue(structureIndex,
@@ -838,10 +1067,22 @@ public static partial class TrRmExecutableCompiler
         foreach (var structureIndex in retainedStructureIndexes)
         {
             var structure = program.Structures[structureIndex];
-            var declaration
-                = sourceStructDeclarationsByIndex[structureIndex];
-            var namespaceName = declaration.Namespace;
-            var typeName = declaration.Name;
+            string namespaceName;
+            string typeName;
+            if (sourceStructDeclarationsByIndex.TryGetValue(structureIndex,
+                    out var declaration))
+            {
+                namespaceName = declaration.Namespace;
+                typeName = declaration.Name;
+            }
+            else
+            {
+                var separator = structure.Name.LastIndexOf(
+                    '.', StringComparison.Ordinal);
+                namespaceName = separator < 0 ? "" : structure.Name[..separator];
+                typeName = separator < 0 ? structure.Name
+                    : structure.Name[(separator + 1)..];
+            }
 
             var typeDefRow = typeDefRowByStructure[structureIndex];
             var typeDefFlags = (structure.IsPrivate ? 0u

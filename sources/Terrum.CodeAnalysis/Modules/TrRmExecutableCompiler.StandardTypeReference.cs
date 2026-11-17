@@ -754,13 +754,31 @@ public static partial class TrRmExecutableCompiler
         var (typeDefStart, typeDefEnd)
             = rootTables.Modules.GetTypeDefRange(rootModuleRow);
         var typeDefCount = typeDefEnd - typeDefStart;
+        var typeDefRows = Enumerable.Range(typeDefStart, typeDefCount)
+            .ToArray();
+        var structTypeDefRows = typeDefRows.Where(typeDefRow =>
+            rootTables.TypeDefs.GetKind(typeDefRow) == 1).ToArray();
+        var enumTypeDefCount = typeDefRows.Count(typeDefRow =>
+            rootTables.TypeDefs.GetKind(typeDefRow) == 4);
         if (rootTables.Modules.GetEntryMethod(rootModuleRow) != 0
             || methodStart != methodEnd
             || typeDefCount == 0
-            || typeDefCount > BoundEnumTypes.MaximumCount)
+            || typeDefCount > SemanticVerifier.MaximumAnalysisVisits
+            || structTypeDefRows.Length
+                > ManagedClassTypes.First - 100
+            || enumTypeDefCount > BoundEnumTypes.MaximumCount
+            || typeDefRows.Any(typeDefRow =>
+                rootTables.TypeDefs.GetKind(typeDefRow) is not (1 or 4)))
         {
             throw Unsupported(
-                "The bounded EN1 source-reference route requires an enum-only declaration Module within the supported type limit.");
+                "The bounded EN1 source-reference route requires an enum and non-generic struct declaration Module within the supported limits.");
+        }
+        if (structTypeDefRows.Length != 0
+            && (rootTables.Imports.Count != 0
+                || rootTables.ModuleRefs.Count != 0))
+        {
+            throw Unsupported(
+                "The bounded EN1 mixed struct/enum reference route currently requires a local TypeDef and FieldDef closure.");
         }
 
         var selectedByTypeDef = new Dictionary<int, List<string>>();
@@ -785,11 +803,18 @@ public static partial class TrRmExecutableCompiler
                 || typeDefRow >= typeDefEnd
                 || rootTables.TypeDefs.GetOwnerModule(typeDefRow)
                     != rootModuleRow
-                || rootTables.TypeDefs.GetKind(typeDefRow) != 4
+                || rootTables.TypeDefs.GetKind(typeDefRow) is not (1 or 4)
                 || (rootTables.TypeDefs.GetFlags(typeDefRow) & 3) != 2)
             {
                 throw Invalid(
-                    "A selected EN1 TypeDef Export does not identify a local public enum.");
+                    "A selected EN1 TypeDef Export does not identify a local public enum or struct.");
+            }
+            if (rootTables.TypeDefs.GetKind(typeDefRow) == 1
+                && (rootTables.TypeDefs.GetGenericRange(typeDefRow).Count != 0
+                    || rootTables.TypeDefs.GetContractRange(typeDefRow).Count != 0))
+            {
+                throw Unsupported(
+                    "The bounded EN1 struct type-reference route supports only non-generic, uncontracted local TypeDefs.");
             }
 
             if (!selectedByTypeDef.TryGetValue(typeDefRow,
@@ -886,16 +911,35 @@ public static partial class TrRmExecutableCompiler
         var definitions
             = ImmutableArray.CreateBuilder<BoundEnumDefinition>(
                 checked(typeDefCount + importedViewsByActual.Count));
+        var enumIndexByTypeDefRow = new Dictionary<int, int>();
         var rootSnapshot = GetSnapshot(0, rootModuleRow);
         for (var offset = 0; offset < typeDefCount; offset++)
         {
             var typeDefRow = typeDefStart + offset;
             if (rootTables.TypeDefs.GetOwnerModule(typeDefRow)
-                    != rootModuleRow
-                || rootTables.TypeDefs.GetKind(typeDefRow) != 4)
+                    != rootModuleRow)
             {
                 throw Unsupported(
-                    "The bounded EN1 source-reference route does not yet admit non-enum TypeDefs.");
+                    "The bounded EN1 source-reference route cannot root a TypeDef owned by another Module.");
+            }
+            if (rootTables.TypeDefs.GetKind(typeDefRow) == 1)
+            {
+                if (rootTables.Imports.IsExpectedDefinition(
+                        0x1300_0000u | checked((uint)typeDefRow))
+                    || rootTables.TypeDefs.GetGenericRange(typeDefRow).Count
+                        != 0
+                    || rootTables.TypeDefs.GetContractRange(typeDefRow).Count
+                        != 0)
+                {
+                    throw Unsupported(
+                        "The bounded EN1 struct type-reference route requires local non-generic TypeDefs without contracts.");
+                }
+                continue;
+            }
+            if (rootTables.TypeDefs.GetKind(typeDefRow) != 4)
+            {
+                throw Unsupported(
+                    "The bounded EN1 source-reference route does not support this TypeDef kind.");
             }
 
             var definitionId = 0x1300_0000u
@@ -923,6 +967,7 @@ public static partial class TrRmExecutableCompiler
                     : ImmutableArray<string>.Empty;
             var occurrence = new BoundStandardEnumOccurrence(view, [view],
                 [], exportKeys, selectedKeysForType);
+            enumIndexByTypeDefRow.Add(typeDefRow, definitions.Count);
             definitions.Add(CreateStandardEnumDefinition(view, occurrence));
         }
 
@@ -947,10 +992,391 @@ public static partial class TrRmExecutableCompiler
                 "The EN1 enum declaration closure cannot be reconstructed as a checked type table.");
         }
 
-        return new CompilationReference([], [],
+        var structures = structTypeDefRows.Length == 0
+            ? ImmutableArray<BoundStruct>.Empty
+            : CreateC1EnumClosureStructSourceTypes(rootTables,
+                rootSnapshot, rootModuleRow, structTypeDefRows,
+                selectedByTypeDef, enumIndexByTypeDefRow,
+                enumDefinitions);
+        if (!structures.IsEmpty)
+        {
+            var program = new BoundProgram([], -1) {
+                Structures = structures,
+                EnumDefinitions = enumDefinitions,
+            };
+            SemanticVerifier.VerifyLibraryReferences(program);
+        }
+        return new CompilationReference(structures, [],
             (BoundRuntimePolicy)rootTables.Modules
                 .GetRequirements(rootModuleRow).RuntimePolicy,
             enumDefinitions: enumDefinitions);
+    }
+
+    private static ImmutableArray<BoundStruct>
+        CreateC1EnumClosureStructSourceTypes(
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+        BoundSourceTypeProviderSnapshot provider, int moduleRow,
+        int[] typeDefRows, Dictionary<int, List<string>> selectedByTypeDef,
+        Dictionary<int, int> enumIndexByTypeDefRow,
+        ImmutableArray<BoundEnumDefinition> enumDefinitions)
+    {
+        var structureIndexByTypeDefRow = new Dictionary<int, int>(
+            typeDefRows.Length);
+        for (var rowIndex = 0; rowIndex < typeDefRows.Length; rowIndex++)
+        {
+            var typeDefRow = typeDefRows[rowIndex];
+            var flags = tables.TypeDefs.GetFlags(typeDefRow);
+            if (tables.TypeDefs.GetKind(typeDefRow) != 1
+                || tables.TypeDefs.GetOwnerModule(typeDefRow) != moduleRow
+                || (flags & ~0x07u) != 0
+                || (flags & 3) == 3
+                || tables.TypeDefs.GetGenericRange(typeDefRow).Count != 0
+                || tables.TypeDefs.GetContractRange(typeDefRow).Count != 0
+                || !tables.TypeDefs.HasDeclaredCopy(typeDefRow)
+                || tables.Imports.IsExpectedDefinition(
+                    0x1300_0000u | checked((uint)typeDefRow)))
+            {
+                throw Unsupported(
+                    "The bounded EN1 source struct reference requires local non-generic Copy TypeDefs without contracts.");
+            }
+
+            var (layoutFirst, layoutCount)
+                = tables.TypeDefs.GetLayoutRange(typeDefRow);
+            if (layoutCount != 1)
+            {
+                throw Unsupported(
+                    "The bounded EN1 source struct reference supports one default Auto Layout variant.");
+            }
+
+            var layout = layoutFirst;
+            if (tables.Layouts.GetTargetProfileRef(layout) != 0
+                || tables.Layouts.GetLayoutKind(layout) != 0
+                || tables.Layouts.GetFlags(layout) != 0
+                || tables.Layouts.GetAlignment(layout) != 0
+                || tables.Layouts.GetPack(layout) != 0)
+            {
+                throw Unsupported(
+                    "The bounded EN1 source struct reference supports only the default Auto Layout variant.");
+            }
+
+            structureIndexByTypeDefRow.Add(typeDefRow, rowIndex);
+        }
+
+        var exportsByField = new Dictionary<int, List<string>>();
+        foreach (var (definition, exportKey) in tables.Exports
+            .GetExportsForModule(moduleRow))
+        {
+            if ((definition >> 24) != 0x14)
+            {
+                continue;
+            }
+
+            var fieldRow = checked((int)(definition & 0x00FF_FFFF));
+            if (!structureIndexByTypeDefRow.ContainsKey(
+                    tables.Fields.GetOwnerTypeDef(fieldRow)))
+            {
+                throw Invalid(
+                    "An EN1 FieldDef Export is outside the retained struct closure.");
+            }
+            if (!exportsByField.TryGetValue(fieldRow, out var keys))
+            {
+                keys = [];
+                exportsByField.Add(fieldRow, keys);
+            }
+            keys.Add(exportKey);
+        }
+
+        PrimitiveType DecodeFieldType(uint typeSpecReference)
+        {
+            var type = tables.TypeSpecs.GetTypeSpecRef(typeSpecReference);
+            if (type.Form == 0xF2 && type.Qualifiers == 0
+                && TrRmConstantSourceValueValidator.TryGetBoundScalarType(
+                    type.TypeCode, out var scalarType)
+                && scalarType != PrimitiveType.Void)
+            {
+                if (type.TypeCode is 0x10 or 0x11
+                    && tables.Modules.GetRequirements(moduleRow)
+                        .TargetRequirement
+                        != TrRmModuleTableReader
+                            .WindowsX64NativeTargetRequirement)
+                {
+                    throw Unsupported(
+                        "EN1 native-width struct fields require the selected Windows x64 target.");
+                }
+
+                return scalarType;
+            }
+
+            if (type.Form == 0x02 && type.Qualifiers == 0
+                && structureIndexByTypeDefRow.TryGetValue(type.Row,
+                    out var structureIndex))
+            {
+                return (PrimitiveType)(100 + structureIndex);
+            }
+
+            if (type.Form == 0x02 && type.Qualifiers == 0
+                && enumIndexByTypeDefRow.TryGetValue(type.Row,
+                    out var enumIndex))
+            {
+                var definition = enumDefinitions[enumIndex];
+                if ((definition.UnderlyingType is PrimitiveType.NativeInt
+                        or PrimitiveType.NativeUInt)
+                    && tables.Modules.GetRequirements(moduleRow)
+                        .TargetRequirement
+                        != TrRmModuleTableReader
+                            .WindowsX64NativeTargetRequirement)
+                {
+                    throw Unsupported(
+                        "EN1 native-width enum fields require the selected Windows x64 target.");
+                }
+
+                return BoundEnumTypes.Type(enumIndex);
+            }
+
+            throw Unsupported(
+                "The bounded EN1 struct reference supports only local scalar, enum and non-generic struct FieldDefs.");
+        }
+
+        var structures = new List<BoundStruct>(typeDefRows.Length);
+        for (var rowIndex = 0; rowIndex < typeDefRows.Length; rowIndex++)
+        {
+            var typeDefRow = typeDefRows[rowIndex];
+            var typeDefId = 0x1300_0000u
+                | checked((uint)typeDefRow);
+            var (fieldStart, fieldEnd)
+                = tables.TypeDefs.GetFieldRange(typeDefRow);
+            var fields = ImmutableArray.CreateBuilder<BoundStructField>(
+                fieldEnd - fieldStart);
+            for (var fieldRow = fieldStart; fieldRow < fieldEnd;
+                fieldRow++)
+            {
+                var flags = tables.Fields.GetFlags(fieldRow);
+                if ((flags & ~0x07u) != 0 || (flags & 3) == 3)
+                {
+                    throw Unsupported(
+                        "The bounded EN1 source struct reference cannot discard FieldDef access or ownership flags.");
+                }
+
+                fields.Add(new BoundStructField(
+                    tables.Fields.GetName(fieldRow),
+                    DecodeFieldType(
+                        tables.Fields.GetTypeSpecRef(fieldRow)), 0, 0) {
+                    IsPrivate = (flags & 3) == 0,
+                    IsInternal = (flags & 3) == 1,
+                    IsMutable = (flags & 0x04) != 0,
+                });
+            }
+
+            var (layoutStart, layoutCount)
+                = tables.TypeDefs.GetLayoutRange(typeDefRow);
+            var (layoutFieldFirst, layoutFieldCount)
+                = tables.Layouts.GetLayoutFieldRange(layoutStart);
+            if (layoutFieldCount != fields.Count)
+            {
+                throw Invalid(
+                    "An EN1 source struct Layout does not describe its complete FieldDef order.");
+            }
+            for (var ordinal = 0; ordinal < layoutFieldCount; ordinal++)
+            {
+                var layoutFieldRow = layoutFieldFirst + ordinal;
+                if (tables.LayoutFields.GetOwnerLayout(layoutFieldRow)
+                        != layoutStart
+                    || tables.LayoutFields.GetOrdinal(layoutFieldRow)
+                        != ordinal
+                    || tables.LayoutFields.GetFieldDef(layoutFieldRow)
+                        != fieldStart + ordinal)
+                {
+                    throw Invalid(
+                        "An EN1 source struct Layout does not preserve declaration field order.");
+                }
+            }
+
+            var typeDefFlags = tables.TypeDefs.GetFlags(typeDefRow);
+            var namespaceName = tables.TypeDefs.GetNamespace(typeDefRow);
+            var typeName = tables.TypeDefs.GetName(typeDefRow);
+            var exportKeys = GetStandardTypeExportKeys(
+                tables, moduleRow, typeDefRow);
+            var selectedKeys = selectedByTypeDef.TryGetValue(typeDefRow,
+                out var keys) ? keys.ToImmutableArray()
+                : ImmutableArray<string>.Empty;
+            var origin = new BoundStandardTypeOrigin(provider, typeDefId,
+                exportKeys, selectedByTypeDef.ContainsKey(typeDefRow),
+                ReferenceRoot: provider) {
+                SelectedExportKeys = selectedKeys,
+            };
+            structures.Add(new BoundStruct(
+                namespaceName.Length == 0 ? typeName
+                    : namespaceName + "." + typeName,
+                fields.MoveToImmutable(), 1) {
+                IsPrivate = (typeDefFlags & 3) == 0,
+                IsInternal = (typeDefFlags & 3) == 1,
+                StandardTypeOrigin = origin,
+                StandardLayoutOnly = true,
+            });
+        }
+
+        var states = new byte[structures.Count];
+        var remaining = SemanticVerifier.MaximumAnalysisVisits;
+        for (var structureIndex = 0;
+            structureIndex < structures.Count; structureIndex++)
+        {
+            ComputeLayout(structureIndex, 0);
+        }
+
+        return [.. structures];
+
+        void ComputeLayout(int structureIndex, int depth)
+        {
+            if (--remaining < 0)
+            {
+                throw new NotSupportedException(
+                    "The EN1 struct layout closure exceeds the analysis limit.");
+            }
+            if (depth > SemanticVerifier.MaximumDepth)
+            {
+                throw new NotSupportedException(
+                    "The EN1 struct layout closure exceeds the nesting limit.");
+            }
+            if (states[structureIndex] == 2)
+            {
+                return;
+            }
+            if (states[structureIndex] == 1)
+            {
+                throw Invalid(
+                    "The EN1 source struct FieldDef graph is recursive.");
+            }
+            states[structureIndex] = 1;
+
+            var structure = structures[structureIndex];
+            var fields = ImmutableArray.CreateBuilder<BoundStructField>(
+                structure.Fields.Length);
+            ulong offset = 0;
+            var alignment = 1;
+            var requiredAlignment = 1;
+            foreach (var field in structure.Fields)
+            {
+                if (--remaining < 0)
+                {
+                    throw new NotSupportedException(
+                        "The EN1 struct layout closure exceeds the analysis limit.");
+                }
+
+                var nestedIndex = (int)field.Type - 100;
+                if (!BoundEnumTypes.IsType(field.Type)
+                    && nestedIndex >= 0
+                    && nestedIndex < structures.Count)
+                {
+                    ComputeLayout(nestedIndex, depth + 1);
+                }
+
+                var width = ValueLayout.Size(field.Type, structures,
+                    enumDefinitions: enumDefinitions);
+                var fieldAlignment = ValueLayout.Alignment(field.Type,
+                    structures, enumDefinitions: enumDefinitions);
+                var fieldRequiredAlignment
+                    = ValueLayout.RequiredAlignment(field.Type, structures,
+                        enumDefinitions: enumDefinitions);
+                if (width == 0 || fieldAlignment <= 0
+                    || fieldRequiredAlignment <= 0)
+                {
+                    throw Invalid(
+                        "An EN1 source struct field has no complete Auto Layout.");
+                }
+
+                var fieldOffset = Align(offset, fieldAlignment);
+                if (fieldOffset > ulong.MaxValue - width)
+                {
+                    throw Invalid(
+                        "An EN1 source struct layout exceeds its representable extent.");
+                }
+
+                fields.Add(field with {
+                    Offset = fieldOffset,
+                    Size = width,
+                });
+                offset = fieldOffset + width;
+                alignment = Math.Max(alignment, fieldAlignment);
+                requiredAlignment = Math.Max(requiredAlignment,
+                    fieldRequiredAlignment);
+            }
+
+            if (offset == 0)
+            {
+                offset = 1;
+            }
+            var size = Align(offset, alignment);
+            if (size > ValueLayout.MaximumStructureSize)
+            {
+                throw new NotSupportedException(
+                    "An EN1 source struct exceeds the supported local layout size.");
+            }
+
+            var laidOut = structure with {
+                Fields = fields.MoveToImmutable(),
+                Size = size,
+                Alignment = alignment,
+                RequiredAlignment = requiredAlignment,
+            };
+            var (fieldStart, _) = tables.TypeDefs.GetFieldRange(
+                typeDefRows[structureIndex]);
+            var fieldsWithOrigins = laidOut.Fields.ToBuilder();
+            for (var fieldOrdinal = 0;
+                fieldOrdinal < fieldsWithOrigins.Count; fieldOrdinal++)
+            {
+                var fieldRow = fieldStart + fieldOrdinal;
+                if (!exportsByField.TryGetValue(fieldRow,
+                        out var exportKeys))
+                {
+                    continue;
+                }
+
+                var field = fieldsWithOrigins[fieldOrdinal];
+                var expectedField = field with {
+                    StandardFieldOrigin = null,
+                };
+                fieldsWithOrigins[fieldOrdinal] = field with {
+                    StandardFieldOrigin = new BoundStandardFieldOrigin(
+                        provider, 0x1400_0000u
+                            | checked((uint)fieldRow),
+                        [.. exportKeys], false, expectedField),
+                };
+            }
+            laidOut = laidOut with {
+                Fields = fieldsWithOrigins.MoveToImmutable(),
+            };
+            var expected = laidOut with {
+                Fields = [.. laidOut.Fields.Select(static field => field with {
+                    StandardFieldOrigin = null,
+                })],
+                StandardTypeOrigin = null,
+                StandardLayoutOnly = false,
+            };
+            var origin = laidOut.StandardTypeOrigin
+                ?? throw Invalid(
+                    "An EN1 source struct has no retained TypeDef origin.");
+            structures[structureIndex] = laidOut with {
+                StandardTypeOrigin = origin with {
+                    ExpectedDeclaration = expected,
+                },
+            };
+            states[structureIndex] = 2;
+        }
+
+        static ulong Align(ulong value, int alignment)
+        {
+            var alignmentValue = checked((ulong)alignment);
+            var remainder = value % alignmentValue;
+            var padding = remainder == 0 ? 0
+                : alignmentValue - remainder;
+            if (value > ulong.MaxValue - padding)
+            {
+                throw Invalid(
+                    "An EN1 source struct alignment exceeds its representable extent.");
+            }
+
+            return value + padding;
+        }
     }
 
     private static BoundStandardEnumView CreateStandardEnumView(

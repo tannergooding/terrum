@@ -233,6 +233,47 @@ internal sealed class TrRmC1EnumClosureSourceTests
             Assert.That(enumFieldType.Row, Is.EqualTo(enumTypeDefRow));
             Assert.That(payloadFieldEnd - payloadFieldStart,
                 Is.EqualTo(1));
+
+            var reference = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, artifact),
+                "MixedSourceTypes", [], ["type.packet"]);
+            Assert.That(reference.Structures, Has.Length.EqualTo(2));
+            Assert.That(reference.EnumDefinitions, Has.Length.EqualTo(1));
+            var sourceFreeCompilation = Compilation.CreateLibrary(
+                SyntaxTree.Parse(string.Empty), reference);
+            Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    sourceFreeCompilation.Diagnostics));
+            var reemitted = TrRmExecutableCompiler.EmitStandard(
+                sourceFreeCompilation.Program!, "MixedSourceTypes",
+                schemaIdentity, 1);
+            var reemittedTables = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                    reemitted, SchemaFor(schemaIdentity)));
+            Assert.That(reemittedTables.TypeDefs.Count, Is.EqualTo(3));
+            Assert.That(reemittedTables.Fields.Count, Is.EqualTo(3));
+            Assert.That(reemittedTables.Exports.TryGetDefinitionForKey(1,
+                "type.shade", out _), Is.True);
+            Assert.That(reemittedTables.Exports.TryGetDefinitionForKey(1,
+                "type.packet", out _), Is.True);
+            Assert.That(reemittedTables.Exports.TryGetDefinitionForKey(1,
+                "field.packet.id", out _), Is.True);
+            Assert.That(reemittedTables.Exports.TryGetDefinitionForKey(1,
+                "field.packet.payload", out _), Is.True);
+
+            var reemittedReference
+                = TrRmExecutableCompiler.CreateStandardReference(
+                    new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+                    "MixedSourceTypes", [], ["type.packet"]);
+            Assert.That(reemittedReference.Structures,
+                Has.Length.EqualTo(2));
+            Assert.That(reemittedReference.EnumDefinitions,
+                Has.Length.EqualTo(1));
+            var reemittedCompilation = Compilation.CreateLibrary(
+                SyntaxTree.Parse(string.Empty), reemittedReference);
+            Assert.That(reemittedCompilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    reemittedCompilation.Diagnostics));
         }
     }
 
