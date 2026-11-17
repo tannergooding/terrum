@@ -15,9 +15,12 @@ source decision needed alongside that host extension.
 Reuse `DE` kinds 3/4, FieldMap, FieldPath and Feature `13/1`. Select **one
 complete EN1 literal**, identically for root, every supplied provider
 (including unused inputs), retained origins and re-emission. This does not
-compose EN1 with LayoutQueries or the nested-initialization profile. No new
-syntax, schema, Feature, ID, flag, CLI transport or compatibility reader is
-selected.
+compose EN1 with LayoutQueries or the nested-initialization profile. This
+selection contract adds no syntax, API, wire field, Feature, row ID, flag, CLI
+transport or compatibility reader. The separate
+[class instance-field layout proposal](standard-trrm-en1-class-field-layout.md)
+recommends exact whole-schema successors for numeric class-layout use; base
+EN1 identities retain symbolic queries only.
 
 The [class publication proposal](standard-trrm-c1-class-source-publication.md)
 continues to own class/member export input and complete retained declarations.
@@ -30,6 +33,9 @@ safe-Blittable eligibility rule.
 On adoption, add the explicit class-offset subject rule below to
 [registered queries](../specs/language/registered-queries.md#layout-observation-and-authorization)
 and [value-layout observations](../specs/data-layout-and-abi.md#value-layout-observations).
+The physical class field-storage recipe and numeric support boundary are
+separately proposed in the
+[EN1 class instance-field layout proposal](standard-trrm-en1-class-field-layout.md).
 It is a narrow exception to their complete-value/handle subject wording,
 **not a claim that that wording already selects class payloads**. Preserve
 their other query rules. The existing
