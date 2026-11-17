@@ -22,8 +22,16 @@
 
   <!-- Settings that are only set for libraries -->
   <PropertyGroup Condition="'$(OutputType)' == 'Library' AND '$(IsTestProject)' != 'true'">
-    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
     <IsTrimmable>true</IsTrimmable>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
+    <EnableAotAnalyzer>false</EnableAotAnalyzer>
+    <EnableSingleFileAnalyzer>false</EnableSingleFileAnalyzer>
+    <NoWarn>$(NoWarn);CA5360</NoWarn>
+    <RunAnalyzers>false</RunAnalyzers>
+    <UseSharedCompilation>false</UseSharedCompilation>
   </PropertyGroup>
 
 </Project>
