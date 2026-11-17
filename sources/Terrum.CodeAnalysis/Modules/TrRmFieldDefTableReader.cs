@@ -16,6 +16,7 @@ public readonly ref struct TrRmFieldDefTableReader
     private readonly TrRmTypeDefTableReader _types;
     private readonly TrRmTypeSpecTableReader _typeSpecs;
     private readonly int _recordCount;
+    private readonly TrRmArtifactSchema _schema;
     private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     /// <summary>Gets the number of validated FieldDef rows.</summary>
@@ -38,6 +39,15 @@ public readonly ref struct TrRmFieldDefTableReader
         TrRmStringTableReader strings, TrRmTypeDefTableReader types,
         TrRmTypeSpecTableReader typeSpecs,
         TrRmA3LayoutResourceLedger? resourceLedger)
+        : this(section, recordCount, strings, types, typeSpecs,
+            TrRmArtifactSchema.Standard, resourceLedger)
+    {
+    }
+
+    internal TrRmFieldDefTableReader(ReadOnlySpan<byte> section, int recordCount,
+        TrRmStringTableReader strings, TrRmTypeDefTableReader types,
+        TrRmTypeSpecTableReader typeSpecs, TrRmArtifactSchema schema,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
         resourceLedger?.ConsumeWork(4);
         if (recordCount <= 0 || recordCount > 0xFF_FFFF
@@ -51,6 +61,7 @@ public readonly ref struct TrRmFieldDefTableReader
         _types = types;
         _typeSpecs = typeSpecs;
         _recordCount = recordCount;
+        _schema = schema;
         _resourceLedger = resourceLedger;
         for (var row = 1; row <= recordCount; row++)
         {
@@ -59,17 +70,26 @@ public readonly ref struct TrRmFieldDefTableReader
             var name = Read(row - 1, 4);
             var spec = Read(row - 1, 8);
             var flags = Read(row - 1, 12);
+            var propertyBacking = (flags & 0x10) != 0;
+            var permitsPropertyBacking = schema.UsesPropertyInitializedState();
             _resourceLedger?.ConsumeWork(6);
             if (owner == 0 || owner > types.Count || owner != types.GetFieldOwner(row)
-                || name is 0 or > 0xFF_FFFF
-                || (flags & ~15u) != 0 || (flags & 3) == 3)
+                || (propertyBacking
+                    ? !permitsPropertyBacking || name != 0
+                        || (flags & 0x0Bu) != 0
+                    : name is 0 or > 0xFF_FFFF)
+                || (flags & (permitsPropertyBacking ? ~31u : ~15u)) != 0
+                || (flags & 3) == 3)
             {
                 throw InvalidField();
             }
 
             _ = typeSpecs.GetTypeSpecRef(spec);
-            _resourceLedger?.ConsumeWork();
-            _ = _strings.DecodeName((int)name);
+            if (!propertyBacking)
+            {
+                _resourceLedger?.ConsumeWork();
+                _ = _strings.DecodeName((int)name);
+            }
         }
     }
 
@@ -80,17 +100,18 @@ public readonly ref struct TrRmFieldDefTableReader
         return _types.GetFieldOwner(row);
     }
 
-    /// <summary>Gets the decoded name for a FieldDef row.</summary>
+    /// <summary>Gets the decoded source name for a FieldDef row.</summary>
+    /// <remarks>Returns an empty string for a PropertyBacking FieldDef.</remarks>
     public string GetName(int row)
     {
         _resourceLedger?.ConsumeWork();
-        if (row <= 0 || row > _recordCount)
-        {
-            throw InvalidField();
-        }
-
+        CheckRow(row);
         var name = Read(row - 1, 4);
-        if (name is 0 or > 0xFF_FFFF)
+        if (name == 0 && IsPropertyBackingField(row))
+        {
+            return string.Empty;
+        }
+        if (name == 0 || name > 0xFF_FFFF)
         {
             throw InvalidField();
         }
@@ -123,6 +144,14 @@ public readonly ref struct TrRmFieldDefTableReader
     {
         CheckRow(row);
         return Read(row - 1, 12);
+    }
+
+    /// <summary>Gets whether a FieldDef is the hidden backing field of a property.</summary>
+    public bool IsPropertyBackingField(int row)
+    {
+        CheckRow(row);
+        return _schema.UsesPropertyInitializedState()
+            && (Read(row - 1, 12) & 0x10) != 0;
     }
 
     private void CheckRow(int row)

@@ -78,7 +78,8 @@ internal sealed class TrRmFieldDefTableWriterTests
         Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(8)), Is.EqualTo(typeSpecRef));
     }
 
-    private static byte[] Encode(TrRmFieldDefRow[] rows)
+    [Test]
+    public void PI1AllowsUnnamedPrivateInstancePropertyBackingField()
     {
         var stringBytes = Names();
         var strings = new TrRmStringTableReader(stringBytes, 6);
@@ -88,7 +89,80 @@ internal sealed class TrRmFieldDefTableWriterTests
         var types = new TrRmTypeDefTableReader(typeBytes, 2, strings, modules, 1, 0, 2, 0);
         var specBytes = TrRmTypeSpecTableWriter.Encode([new byte[] { 1, 0, 8 }], 2, 0, 0, 0);
         var specs = new TrRmTypeSpecTableReader(specBytes, 1, 2, 0, 0, 0);
-        return TrRmFieldDefTableWriter.Encode(rows, strings, types, specs);
+        var schema = TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft;
+        var fieldBytes = TrRmFieldDefTableWriter.Encode([
+            new TrRmFieldDefRow(2, 0, 1, 0x10),
+        ], strings, types, specs, schema);
+        var fields = new TrRmFieldDefTableReader(fieldBytes, 1,
+            strings, types, specs, schema);
+
+        Assert.That(fields.IsPropertyBackingField(1), Is.True);
+        Assert.That(fields.GetName(1), Is.Empty);
+    }
+
+    [Test]
+    public void PI1PropertyBackingFieldCannotBeReferencedAsADefinition()
+    {
+        var stringBytes = Names();
+        var strings = new TrRmStringTableReader(stringBytes, 6);
+        var moduleBytes = Modules(strings);
+        var modules = new TrRmModuleTableReader(moduleBytes, 2, strings, 0, 2, 0, 0);
+        var typeBytes = Types(strings, modules);
+        var types = new TrRmTypeDefTableReader(typeBytes, 2, strings, modules, 1, 0, 2, 0);
+        var specBytes = TrRmTypeSpecTableWriter.Encode([new byte[] { 1, 0, 8 }], 2, 0, 0, 0);
+        var specs = new TrRmTypeSpecTableReader(specBytes, 1, 2, 0, 0, 0);
+        var schema = TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft;
+        var fieldBytes = TrRmFieldDefTableWriter.Encode([
+            new TrRmFieldDefRow(2, 0, 1, 0x10),
+        ], strings, types, specs, schema);
+        var fields = new TrRmFieldDefTableReader(fieldBytes, 1,
+            strings, types, specs, schema);
+
+        var rejected = false;
+        try
+        {
+            _ = TrRmDefinitionResolver.Resolve(0x14000001, types, fields,
+                default, default, default, default, default, schema);
+        }
+        catch (InvalidDataException)
+        {
+            rejected = true;
+        }
+
+        Assert.That(rejected, Is.True);
+    }
+
+    [Test]
+    public void PI1RejectsNamedOrStaticPropertyBackingFields()
+    {
+        var schema = TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft;
+        _ = Assert.Throws<InvalidDataException>(() =>
+            EncodeForSchema(new TrRmFieldDefRow(2, 6, 1, 0x10), schema));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            EncodeForSchema(new TrRmFieldDefRow(2, 0, 1, 0x18), schema));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            EncodeForSchema(new TrRmFieldDefRow(2, 0, 1, 0), schema));
+    }
+
+    private static byte[] Encode(TrRmFieldDefRow[] rows)
+        => EncodeForSchema(rows, TrRmArtifactSchema.Standard);
+
+    private static byte[] EncodeForSchema(TrRmFieldDefRow row,
+        TrRmArtifactSchema schema)
+        => EncodeForSchema([row], schema);
+
+    private static byte[] EncodeForSchema(TrRmFieldDefRow[] rows,
+        TrRmArtifactSchema schema)
+    {
+        var stringBytes = Names();
+        var strings = new TrRmStringTableReader(stringBytes, 6);
+        var moduleBytes = Modules(strings);
+        var modules = new TrRmModuleTableReader(moduleBytes, 2, strings, 0, 2, 0, 0);
+        var typeBytes = Types(strings, modules);
+        var types = new TrRmTypeDefTableReader(typeBytes, 2, strings, modules, 1, 0, 2, 0);
+        var specBytes = TrRmTypeSpecTableWriter.Encode([new byte[] { 1, 0, 8 }], 2, 0, 0, 0);
+        var specs = new TrRmTypeSpecTableReader(specBytes, 1, 2, 0, 0, 0);
+        return TrRmFieldDefTableWriter.Encode(rows, strings, types, specs, schema);
     }
 
     private static byte[] Names()

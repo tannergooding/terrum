@@ -11,10 +11,14 @@ namespace Terrum.CodeAnalysis.Modules;
 public readonly ref struct TrRmPropertyDefTableReader
 {
     private const int RowSize = 20;
+    private const int PropertyInitializedStateRowSize = 32;
     private readonly ReadOnlySpan<byte> _rows;
     private readonly TrRmStringTableReader _strings;
     private readonly int _recordCount;
+    private readonly int _rowSize;
+    private readonly TrRmArtifactSchema _schema;
     private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
+    private readonly int[]? _propertyRowsByBackingField;
 
     /// <summary>Validates PropertyDef rows and their getter method references.</summary>
     /// <param name="section">The borrowed PropertyDef section bytes.</param>
@@ -39,10 +43,26 @@ public readonly ref struct TrRmPropertyDefTableReader
         TrRmTypeSpecTableReader typeSpecs, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, bool deferGetterTypeIdentity,
         TrRmA3LayoutResourceLedger? resourceLedger = null)
+        : this(section, recordCount, strings, types, typeSpecs, methods,
+            signatures, deferGetterTypeIdentity, resourceLedger,
+            TrRmArtifactSchema.Standard, default, default)
+    {
+    }
+
+    internal TrRmPropertyDefTableReader(ReadOnlySpan<byte> section, int recordCount,
+        TrRmStringTableReader strings, TrRmTypeDefTableReader types,
+        TrRmTypeSpecTableReader typeSpecs, TrRmMethodDefTableReader methods,
+        TrRmMethodSigTableReader signatures, bool deferGetterTypeIdentity,
+        TrRmA3LayoutResourceLedger? resourceLedger, TrRmArtifactSchema schema,
+        TrRmFieldDefTableReader fields, TrRmParamTableReader parameters)
     {
         resourceLedger?.ConsumeWork(3);
+        var usesPropertyInitializedState = schema.UsesPropertyInitializedState();
+        var rowSize = usesPropertyInitializedState
+            ? PropertyInitializedStateRowSize
+            : RowSize;
         if (recordCount <= 0 || recordCount > 0xFF_FFFF
-            || (long)recordCount * RowSize != section.Length)
+            || (long)recordCount * rowSize != section.Length)
         {
             throw InvalidProperty();
         }
@@ -50,7 +70,24 @@ public readonly ref struct TrRmPropertyDefTableReader
         _rows = section;
         _strings = strings;
         _recordCount = recordCount;
+        _rowSize = rowSize;
+        _schema = schema;
         _resourceLedger = resourceLedger;
+        var backingFieldCount = usesPropertyInitializedState ? fields.Count : 0;
+        var accessorMethodCount = usesPropertyInitializedState ? methods.Count : 0;
+        if (usesPropertyInitializedState)
+        {
+            resourceLedger?.ConsumeWork(checked((ulong)backingFieldCount
+                + (ulong)accessorMethodCount + 2UL));
+        }
+
+        var propertyRowsByBackingField = usesPropertyInitializedState
+            ? new int[backingFieldCount + 1]
+            : [];
+        var accessorMethods = usesPropertyInitializedState
+            ? new bool[accessorMethodCount + 1]
+            : [];
+
         for (var row = 1; row <= recordCount; row++)
         {
             resourceLedger?.ConsumeWork();
@@ -60,8 +97,12 @@ public readonly ref struct TrRmPropertyDefTableReader
             var type = Read(data, 8);
             var getter = Read(data, 12);
             var flags = Read(data, 16);
+            var setter = usesPropertyInitializedState ? Read(data, 20) : 0;
+            var initializer = usesPropertyInitializedState ? Read(data, 24) : 0;
+            var backingField = usesPropertyInitializedState ? Read(data, 28) : 0;
             resourceLedger?.ConsumeWork(6);
             if (owner == 0 || owner > types.Count
+                || (usesPropertyInitializedState && types.GetKind((int)owner) != 2)
                 || name is 0 or > 0xFF_FFFF
                 || flags > 2
                 || getter == 0 || getter > methods.Count
@@ -77,9 +118,34 @@ public readonly ref struct TrRmPropertyDefTableReader
             _ = typeSpecs.GetTypeSpecRef(type);
             _ = typeSpecs.GetTypeSpecRef(signatures.GetResultTypeSpec(
                 methods.GetSignature((int)getter)));
+            if (usesPropertyInitializedState)
+            {
+                ValidatePropertyInitializedState(row, (int)owner, type,
+                    (int)getter,
+                    (int)setter, (int)initializer, (int)backingField, fields,
+                    methods, signatures, typeSpecs, parameters,
+                    propertyRowsByBackingField, accessorMethods);
+            }
+
             resourceLedger?.ConsumeWork();
             _ = _strings.DecodeName((int)name);
         }
+
+        if (usesPropertyInitializedState)
+        {
+            for (var row = 1; row <= fields.Count; row++)
+            {
+                resourceLedger?.ConsumeWork();
+                if (fields.IsPropertyBackingField(row)
+                    && propertyRowsByBackingField[row] == 0)
+                {
+                    throw InvalidProperty();
+                }
+            }
+        }
+
+        _propertyRowsByBackingField = usesPropertyInitializedState
+            ? propertyRowsByBackingField : null;
     }
 
     internal void ValidateGetterTypeIdentity(
@@ -150,6 +216,37 @@ public readonly ref struct TrRmPropertyDefTableReader
     public int GetGetterMethod(int row)
         => (int)Read(GetRow(row), 12);
 
+    internal int GetSetterMethod(int row)
+        => _schema.UsesPropertyInitializedState()
+            ? (int)Read(GetRow(row), 20)
+            : 0;
+
+    internal int GetInitMethod(int row)
+        => _schema.UsesPropertyInitializedState()
+            ? (int)Read(GetRow(row), 24)
+            : 0;
+
+    internal int GetBackingFieldDef(int row)
+        => _schema.UsesPropertyInitializedState()
+            ? (int)Read(GetRow(row), 28)
+            : 0;
+
+    internal int GetPropertyDefForBackingField(int fieldRow)
+    {
+        _resourceLedger?.ConsumeWork();
+        if (!_schema.UsesPropertyInitializedState()
+            || _propertyRowsByBackingField is null
+            || fieldRow <= 0 || fieldRow >= _propertyRowsByBackingField.Length)
+        {
+            throw InvalidProperty();
+        }
+
+        return _propertyRowsByBackingField[fieldRow];
+    }
+
+    internal uint GetTypeSpecRef(int row)
+        => Read(GetRow(row), 8);
+
     private ReadOnlySpan<byte> GetRow(int row)
     {
         _resourceLedger?.ConsumeWork();
@@ -158,7 +255,7 @@ public readonly ref struct TrRmPropertyDefTableReader
             throw InvalidProperty();
         }
 
-        return _rows.Slice((row - 1) * RowSize, RowSize);
+        return _rows.Slice((row - 1) * _rowSize, _rowSize);
     }
 
     private uint Read(ReadOnlySpan<byte> data, int offset)
@@ -170,4 +267,94 @@ public readonly ref struct TrRmPropertyDefTableReader
 
     private static InvalidDataException InvalidProperty()
         => new("Invalid TRRM PropertyDef table.");
+
+    private void ValidatePropertyInitializedState(int propertyRow, int owner,
+        uint propertyType,
+        int getter, int setter, int initializer,
+        int backingField, TrRmFieldDefTableReader fields,
+        TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
+        TrRmTypeSpecTableReader typeSpecs, TrRmParamTableReader parameters,
+        int[] propertyRowsByBackingField, bool[] accessorMethods)
+    {
+        _resourceLedger?.ConsumeWork(6);
+        if ((setter != 0 && initializer != 0)
+            || (backingField == 0 && (setter != 0 || initializer != 0))
+            || (backingField != 0 && (backingField > fields.Count
+                || !fields.IsPropertyBackingField(backingField)
+                || fields.GetOwnerTypeDef(backingField) != owner
+                || !typeSpecs.AreEquivalentTypeSpecRefs(propertyType,
+                    fields.GetTypeSpecRef(backingField))
+                || propertyRowsByBackingField[backingField] != 0)))
+        {
+            throw InvalidProperty();
+        }
+
+        if (backingField != 0)
+        {
+            propertyRowsByBackingField[backingField] = propertyRow;
+        }
+
+        ValidateAccessor(getter, owner, propertyType, 0, false, methods,
+            signatures, typeSpecs, parameters, accessorMethods);
+        if (setter != 0)
+        {
+            ValidateAccessor(setter, owner, propertyType, 1, false, methods,
+                signatures, typeSpecs, parameters, accessorMethods);
+        }
+
+        if (initializer != 0)
+        {
+            ValidateAccessor(initializer, owner, propertyType, 1, true, methods,
+                signatures, typeSpecs, parameters, accessorMethods);
+        }
+
+    }
+
+    private void ValidateAccessor(int methodRow, int owner, uint propertyType,
+        int expectedParamCount, bool isInitializer,
+        TrRmMethodDefTableReader methods,
+        TrRmMethodSigTableReader signatures, TrRmTypeSpecTableReader typeSpecs,
+        TrRmParamTableReader parameters, bool[] accessorMethods)
+    {
+        _resourceLedger?.ConsumeWork(5);
+        if (methodRow <= 0 || methodRow > methods.Count
+            || accessorMethods[methodRow]
+            || methods.GetOwnerType(methodRow) != owner)
+        {
+            throw InvalidProperty();
+        }
+
+        var signature = methods.GetSignature(methodRow);
+        var (paramStart, paramCount) = signatures.GetParamRange(signature);
+        if (signatures.GetReceiverTypeSpec(signature) == 0
+            || signatures.GetGenericCount(signature) != 0
+            || paramCount != expectedParamCount
+            || (isInitializer && (methods.GetFlags(methodRow) & 4) != 0))
+        {
+            throw InvalidProperty();
+        }
+
+        if (expectedParamCount == 0)
+        {
+            if (!typeSpecs.AreEquivalentTypeSpecRefs(propertyType,
+                    signatures.GetResultTypeSpec(signature)))
+            {
+                throw InvalidProperty();
+            }
+        }
+        else
+        {
+            var valueType = parameters.GetTypeSpec(paramStart);
+            if (!typeSpecs.AreEquivalentTypeSpecRefs(valueType, propertyType)
+                || parameters.GetMode(paramStart) != 0
+                || parameters.GetFlags(paramStart) != 0
+                || !typeSpecs.AreEquivalentTypeSpecRefs(
+                    signatures.GetResultTypeSpec(signature), 0xF200_0000))
+            {
+                throw InvalidProperty();
+            }
+        }
+
+        accessorMethods[methodRow] = true;
+    }
 }

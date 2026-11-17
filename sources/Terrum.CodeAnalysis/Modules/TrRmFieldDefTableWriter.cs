@@ -27,6 +27,11 @@ public static class TrRmFieldDefTableWriter
     public static byte[] Encode(IReadOnlyList<TrRmFieldDefRow> rows,
         TrRmStringTableReader strings, TrRmTypeDefTableReader types,
         TrRmTypeSpecTableReader typeSpecs)
+        => Encode(rows, strings, types, typeSpecs, TrRmArtifactSchema.Standard);
+
+    internal static byte[] Encode(IReadOnlyList<TrRmFieldDefRow> rows,
+        TrRmStringTableReader strings, TrRmTypeDefTableReader types,
+        TrRmTypeSpecTableReader typeSpecs, TrRmArtifactSchema schema)
     {
         ArgumentNullException.ThrowIfNull(rows);
         if (rows.Count is <= 0 or > 0xFF_FFFF)
@@ -45,7 +50,8 @@ public static class TrRmFieldDefTableWriter
             Write(result, offset + 12, row.Flags);
         }
 
-        _ = new TrRmFieldDefTableReader(result, rows.Count, strings, types, typeSpecs);
+        _ = new TrRmFieldDefTableReader(result, rows.Count, strings, types,
+            typeSpecs, schema);
         return result;
     }
 

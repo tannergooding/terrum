@@ -23,6 +23,7 @@ internal static class TrRmDefinitionResolver
             0x13 when row > 0 && row <= types.Count
                 => (types.GetOwnerModule(row), types.GetFlags(row) & 3, 0, 0),
             0x14 when row > 0 && row <= fields.Count
+                && !fields.IsPropertyBackingField(row)
                 => ResolveField(row, types, fields),
             0x20 when row > 0 && row <= associatedTypeDefs.Count
                 => ResolveAssociatedType(row, types, interfaces, associatedTypeDefs),
@@ -42,11 +43,36 @@ internal static class TrRmDefinitionResolver
                 => (methods.GetOwnerModule(row), methods.GetFlags(row) & 3,
                     methods.GetOwnerType(row), methods.GetBodyRow(row)),
             0x1E when row > 0 && row <= properties.Count
-                => (types.GetOwnerModule(properties.GetOwnerType(row)),
-                    properties.GetFlags(row) & 3, properties.GetOwnerType(row),
-                    methods.GetBodyRow(properties.GetGetterMethod(row))),
+                => ResolveProperty(row, types, methods, properties, schema),
             _ => throw new InvalidDataException("Invalid TRRM definition reference."),
         };
+    }
+
+    private static (int Module, uint Visibility, int OwnerType, int Body)
+        ResolveProperty(int row, TrRmTypeDefTableReader types,
+            TrRmMethodDefTableReader methods,
+            TrRmPropertyDefTableReader properties,
+            TrRmArtifactSchema schema)
+    {
+        var ownerType = properties.GetOwnerType(row);
+        var body = methods.GetBodyRow(properties.GetGetterMethod(row));
+        if (body == 0 && schema.UsesPropertyInitializedState())
+        {
+            var setter = properties.GetSetterMethod(row);
+            if (setter != 0)
+            {
+                body = methods.GetBodyRow(setter);
+            }
+
+            var initializer = properties.GetInitMethod(row);
+            if (body == 0 && initializer != 0)
+            {
+                body = methods.GetBodyRow(initializer);
+            }
+        }
+
+        return (types.GetOwnerModule(ownerType),
+            properties.GetFlags(row) & 3, ownerType, body);
     }
 
     private static (int Module, uint Visibility, int OwnerType, int Body)

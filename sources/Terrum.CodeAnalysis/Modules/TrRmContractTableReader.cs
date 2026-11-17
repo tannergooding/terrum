@@ -32,6 +32,9 @@ internal readonly record struct TrRmStaticInitializationRoleContract(
     byte RoleTag, int EagerGroupRow, uint OwnerTypeSpecRef);
 internal readonly record struct TrRmStaticInitializationDemandContract(
     int EagerGroupRow, uint OwnerTypeSpecRef);
+internal readonly record struct TrRmConstructionClauseContract(
+    byte RoleTag, uint InitializerMethodDefRow,
+    ImmutableArray<uint> InitializedMemberDefIds, uint PropertyDefRow = 0);
 internal readonly record struct TrRmReturnCoverageRepetition(
     ulong Count, ulong Stride);
 internal readonly record struct TrRmReturnCoverageRegion(
@@ -49,6 +52,10 @@ public readonly ref struct TrRmContractTableReader
     private readonly TrRmMethodSigTableReader _signatures;
     private readonly TrRmParamTableReader _parameters;
     private readonly TrRmTypeSpecTableReader _typeSpecs;
+    private readonly TrRmTypeDefTableReader _types;
+    private readonly TrRmFieldDefTableReader _fields;
+    private readonly TrRmPropertyDefTableReader _properties;
+    private readonly TrRmImportTableReader _imports;
     private readonly TrRmArtifactSchema _schema;
     private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
     private readonly ImmutableArray<TrRmNativeParameterContract>[] _nativeParameters;
@@ -62,6 +69,7 @@ public readonly ref struct TrRmContractTableReader
         _staticInitializationRoles;
     private readonly ImmutableArray<TrRmStaticInitializationDemandContract>[]
         _staticInitializationDemands;
+    private readonly TrRmConstructionClauseContract[] _constructionClauses;
     private readonly ImmutableArray<TrRmReturnCoverageContract>[]
         _returnCoverageContracts;
     private readonly byte[] _nativeCallableConventions;
@@ -105,7 +113,8 @@ public readonly ref struct TrRmContractTableReader
             typeSpecs, fieldPathCount: 0, default, default,
             developmentProfile ? TrRmArtifactSchema.Development
                 : TrRmArtifactSchema.Standard, profileAware: false,
-            predicateGraphCount: 0, resourceLedger: null)
+            predicateGraphCount: 0, resourceLedger: null,
+            fields: default, properties: default, imports: default)
     {
     }
 
@@ -117,7 +126,8 @@ public readonly ref struct TrRmContractTableReader
         : this(section, recordCount, types, methods, signatures, parameters,
             typeSpecs, fieldPathCount: 0, default, default, schema,
             profileAware: false, predicateGraphCount: 0,
-            resourceLedger: resourceLedger)
+            resourceLedger: resourceLedger, fields: default,
+            properties: default, imports: default)
     {
     }
 
@@ -132,11 +142,15 @@ public readonly ref struct TrRmContractTableReader
         TrRmStaticFieldContractTableReader staticFieldContracts = default,
         TrRmEagerInitializerTableReader eagerInitializers = default,
         TrRmLazyUnitTableReader lazyUnits = default,
-        TrRmA3LayoutResourceLedger? resourceLedger = null)
+        TrRmA3LayoutResourceLedger? resourceLedger = null,
+        TrRmFieldDefTableReader fields = default,
+        TrRmPropertyDefTableReader properties = default,
+        TrRmImportTableReader imports = default)
         : this(section, recordCount, types, methods, signatures, parameters,
             typeSpecs, fieldPathCount, features, modules, schema, profileAware: true,
             predicateGraphCount, eagerGroups, staticFields, staticFieldContracts,
-            eagerInitializers, lazyUnits, resourceLedger)
+            eagerInitializers, lazyUnits, resourceLedger, fields, properties,
+            imports)
     {
     }
 
@@ -151,7 +165,10 @@ public readonly ref struct TrRmContractTableReader
         TrRmStaticFieldContractTableReader staticFieldContracts = default,
         TrRmEagerInitializerTableReader eagerInitializers = default,
         TrRmLazyUnitTableReader lazyUnits = default,
-        TrRmA3LayoutResourceLedger? resourceLedger = null)
+        TrRmA3LayoutResourceLedger? resourceLedger = null,
+        TrRmFieldDefTableReader fields = default,
+        TrRmPropertyDefTableReader properties = default,
+        TrRmImportTableReader imports = default)
     {
         resourceLedger?.ConsumeWork(8);
         if (recordCount is < 0 or > 0xFF_FFFF
@@ -160,6 +177,8 @@ public readonly ref struct TrRmContractTableReader
             || fieldPathCount is < 0 or > 0xFF_FFFF
             || predicateGraphCount is < 0 or > 0xFF_FFFF
             || schema is not (TrRmArtifactSchema.Standard or TrRmArtifactSchema.Development
+                or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
+                or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft
                 or TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft
                 or TrRmArtifactSchema.DevelopmentNativeConventionsDraft
                 or TrRmArtifactSchema.CopyOriginDraft
@@ -177,8 +196,26 @@ public readonly ref struct TrRmContractTableReader
                 or TrRmArtifactSchema.NominalEnumsDraft
                 or TrRmArtifactSchema.RootPinRuntimeDraft
                 or TrRmArtifactSchema.GeneralPredicateGraphsDraft
+                or TrRmArtifactSchema.InitializationReferencePointerLoadNativeParameterDraft
+                or TrRmArtifactSchema.InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft
                 or TrRmArtifactSchema.RegisterExceptionRegionsDraft
                 or TrRmArtifactSchema.GenericMethodCallsDraft
+                or TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft
+                or TrRmArtifactSchema.GenericMethodCallsParameterLabelsReceiverAccessDraft
+                or TrRmArtifactSchema.C1Draft
+                or TrRmArtifactSchema.C1ParameterLabelsReceiverAccessDraft
+                or TrRmArtifactSchema.C1M1Draft
+                or TrRmArtifactSchema.C1M1ParameterLabelsReceiverAccessDraft
+                or TrRmArtifactSchema.C1M1ConstructionDraft
+                or TrRmArtifactSchema.C1M1ConstructionParameterLabelsReceiverAccessDraft
+                or TrRmArtifactSchema.C1M1Construction2Draft
+                or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessDraft
+                or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft
+                or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateDraft
+                or TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft
+                or TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft
+                or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft
+                or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft
                 or TrRmArtifactSchema.GenericConstantMethodsDraft)
             || (schema.UsesCopyOrigin() && !profileAware))
         {
@@ -193,6 +230,10 @@ public readonly ref struct TrRmContractTableReader
         _signatures = signatures;
         _parameters = parameters;
         _typeSpecs = typeSpecs;
+        _types = types;
+        _fields = fields;
+        _properties = properties;
+        _imports = imports;
         _schema = schema;
         _resourceLedger = resourceLedger;
         var methodArrayWork
@@ -215,6 +256,8 @@ public readonly ref struct TrRmContractTableReader
             new ImmutableArray<TrRmStaticInitializationRoleContract>[methods.Count + 1];
         _staticInitializationDemands =
             new ImmutableArray<TrRmStaticInitializationDemandContract>[methods.Count + 1];
+        _constructionClauses =
+            new TrRmConstructionClauseContract[methods.Count + 1];
         _returnCoverageContracts =
             new ImmutableArray<TrRmReturnCoverageContract>[methods.Count + 1];
         _nativeCallableConventions = new byte[methods.Count + 1];
@@ -420,10 +463,32 @@ public readonly ref struct TrRmContractTableReader
                             : methodOutputStates.Add(outputState);
                     break;
                 case 3:
-                    if (data.Length != 16 || data[14] != 0 || data[15] != 0)
+                    if (!schema.UsesConstructionContracts())
+                    {
+                        if (data.Length != 16 || data[14] != 0
+                            || data[15] != 0)
+                        {
+                            throw InvalidContract();
+                        }
+
+                        break;
+                    }
+
+                    if (owner >> 24 != 0x16)
                     {
                         throw InvalidContract();
                     }
+
+                    var constructionMethod = checked((int)(owner & 0xFF_FFFF));
+                    var constructionClause = ReadConstructionClause(data,
+                        constructionMethod);
+                    if (_constructionClauses[constructionMethod].RoleTag != 0)
+                    {
+                        throw InvalidContract();
+                    }
+
+                    _constructionClauses[constructionMethod] =
+                        constructionClause;
                     break;
                 case 4:
                     if (data.Length != 20)
@@ -697,7 +762,7 @@ public readonly ref struct TrRmContractTableReader
                             checked((int)targetProfile), coverageRegions.ToImmutable())];
                     break;
                 case 0x0E:
-                    if (!schema.UsesForeignInvocationContracts()
+                    if (!schema.UsesNativeParameterContracts()
                         || !profileAware || data.Length != 20 || owner >> 24 != 0x16
                         || data[12] is < 1 or > 3 || data[13] != 1
                         || data[14] is not (0 or 1) || data[15] != 0
@@ -841,7 +906,7 @@ public readonly ref struct TrRmContractTableReader
                     }
                     break;
                 case 0x13:
-                    if (schema != TrRmArtifactSchema.GeneralPredicateGraphsDraft
+                    if (!schema.UsesGeneralPredicateGraphs()
                         || !profileAware || data.Length != 20 || owner >> 24 != 0x16
                         || data[8] is < 1 or > 5 || data[9] != 0
                         || BinaryPrimitives.ReadUInt16LittleEndian(data[10..]) != 0)
@@ -882,7 +947,7 @@ public readonly ref struct TrRmContractTableReader
                     _staticInitializationRoles[roleMethod] = [roleContract];
                     break;
                 case 0x14:
-                    if (schema != TrRmArtifactSchema.GeneralPredicateGraphsDraft
+                    if (!schema.UsesGeneralPredicateGraphs()
                         || !profileAware || data.Length != 16 || owner >> 24 != 0x16)
                     {
                         throw InvalidContract();
@@ -943,6 +1008,70 @@ public readonly ref struct TrRmContractTableReader
                     != expectedRole.Group)
             {
                 throw InvalidContract();
+            }
+        }
+
+        for (var method = 1; method <= methods.Count; method++)
+        {
+            resourceLedger?.ConsumeWork();
+            var construction = _constructionClauses[method];
+            if (construction.RoleTag != 2)
+            {
+                continue;
+            }
+
+            var initializerMethod = checked(
+                (int)construction.InitializerMethodDefRow);
+            if (_constructionClauses[initializerMethod].RoleTag != 1
+                || methods.GetOwnerType(initializerMethod)
+                    != methods.GetOwnerType(method)
+                || methods.GetOwnerModule(initializerMethod)
+                    != methods.GetOwnerModule(method))
+            {
+                throw InvalidContract();
+            }
+        }
+
+        if (schema.UsesPropertyInitializedState())
+        {
+            for (var propertyRow = 1; propertyRow <= properties.Count;
+                propertyRow++)
+            {
+                resourceLedger?.ConsumeWork();
+                var initializerMethod = properties.GetInitMethod(propertyRow);
+                if (initializerMethod == 0)
+                {
+                    continue;
+                }
+
+                var construction = _constructionClauses[initializerMethod];
+                if (construction.RoleTag != 3
+                    || construction.PropertyDefRow != (uint)propertyRow)
+                {
+                    throw InvalidContract();
+                }
+            }
+
+            for (var method = 1; method <= methods.Count; method++)
+            {
+                resourceLedger?.ConsumeWork();
+                var construction = _constructionClauses[method];
+                if (construction.RoleTag != 3)
+                {
+                    continue;
+                }
+
+                var propertyRow = checked((int)construction.PropertyDefRow);
+                if (propertyRow <= 0 || propertyRow > properties.Count
+                    || properties.GetInitMethod(propertyRow) != method
+                    || properties.GetOwnerType(propertyRow)
+                        != methods.GetOwnerType(method)
+                    || methods.GetOwnerModule(
+                        properties.GetGetterMethod(propertyRow))
+                        != methods.GetOwnerModule(method))
+                {
+                    throw InvalidContract();
+                }
             }
         }
 
@@ -1242,6 +1371,41 @@ public readonly ref struct TrRmContractTableReader
             && !_staticInitializationRoles[methodRow].IsDefaultOrEmpty;
     }
 
+    internal bool HasConstructionClause(int methodRow)
+    {
+        ConsumeWork();
+        return methodRow > 0 && methodRow < _constructionClauses.Length
+            && _constructionClauses[methodRow].RoleTag != 0;
+    }
+
+    internal TrRmConstructionClauseContract GetConstructionClause(
+        int methodRow)
+    {
+        ConsumeWork();
+        if (methodRow <= 0 || methodRow >= _constructionClauses.Length
+            || _constructionClauses[methodRow].RoleTag == 0)
+        {
+            throw InvalidContract();
+        }
+
+        return _constructionClauses[methodRow];
+    }
+
+    internal int GetConstructionPropertyBackingFieldDef(int methodRow)
+    {
+        var construction = GetConstructionClause(methodRow);
+        if (construction.RoleTag != 3 || construction.PropertyDefRow == 0)
+        {
+            throw InvalidContract();
+        }
+
+        return _properties.GetBackingFieldDef(
+            checked((int)construction.PropertyDefRow));
+    }
+
+    internal int GetPropertyDefForBackingField(int fieldRow)
+        => _properties.GetPropertyDefForBackingField(fieldRow);
+
     internal TrRmStaticInitializationRoleContract GetStaticInitializationRole(
         int methodRow)
     {
@@ -1283,6 +1447,255 @@ public readonly ref struct TrRmContractTableReader
             ? _nativeParameters[methodDefRow].IsDefault
                 ? [] : _nativeParameters[methodDefRow]
             : throw InvalidContract();
+    }
+
+    private TrRmConstructionClauseContract ReadConstructionClause(
+        ReadOnlySpan<byte> data, int methodRow)
+    {
+        ConsumeWork(8);
+        if (data.Length < 16 || data[9] != 0
+            || BinaryPrimitives.ReadUInt16LittleEndian(data[10..]) != 0)
+        {
+            throw InvalidContract();
+        }
+
+        var ownerType = _methods.GetOwnerType(methodRow);
+        if (ownerType == 0 || _types.GetKind(ownerType) != 2
+            || _types.GetGenericRange(ownerType).Count != 0)
+        {
+            throw InvalidContract();
+        }
+        var isExpectedMethod = IsExpectedMethodRow(methodRow);
+        if (isExpectedMethod
+                ? _methods.GetBodyRow(methodRow) != 0
+                : _methods.GetBodyRow(methodRow) == 0)
+        {
+            throw InvalidContract();
+        }
+
+        var signature = _methods.GetSignature(methodRow);
+        var (_, methodFormalCount) = _signatures.GetGenericRange(signature);
+        if (methodFormalCount != 0)
+        {
+            throw InvalidContract();
+        }
+
+        if (data[8] == 1)
+        {
+            var resultType = _typeSpecs.GetTypeSpecRef(
+                _signatures.GetResultTypeSpec(signature));
+            var receiverType = _signatures.GetReceiverTypeSpec(signature);
+            if (data.Length < 16 || resultType.Form != 1
+                || resultType.TypeCode != 0 || resultType.Qualifiers != 0
+                || !IsClassHandleTypeSpec(receiverType, ownerType)
+                || (_schema.UsesMethodReceiverAccess()
+                    && (_methods.GetFlags(methodRow) & 4) != 0))
+            {
+                throw InvalidContract();
+            }
+
+            var memberCount = Read(data, 12);
+            var expectedLength = 16UL + ((ulong)memberCount * sizeof(uint));
+            if (expectedLength != (ulong)data.Length)
+            {
+                throw InvalidContract();
+            }
+
+            var members = ImmutableArray.CreateBuilder<uint>(
+                checked((int)memberCount));
+            var uniqueMembers = new HashSet<uint>();
+            ConsumeWork(checked((ulong)memberCount + 2UL));
+            for (var index = 0; index < checked((int)memberCount); index++)
+            {
+                ConsumeWork(2);
+                var memberDefId = Read(data, 16 + (index * sizeof(uint)));
+                var memberKind = memberDefId >> 24;
+                var memberRow = checked((int)(memberDefId & 0x00FF_FFFF));
+                if (memberRow == 0 || !uniqueMembers.Add(memberDefId))
+                {
+                    throw InvalidContract();
+                }
+
+                switch (memberKind)
+                {
+                    case 0x14:
+                        if (memberRow > _fields.Count
+                            || _fields.GetOwnerTypeDef(memberRow) != ownerType
+                            || (_fields.GetFlags(memberRow) & 0x08) != 0)
+                        {
+                            throw InvalidContract();
+                        }
+
+                        break;
+                    case 0x1E:
+                        if (memberRow > _properties.Count
+                            || _properties.GetOwnerType(memberRow) != ownerType)
+                        {
+                            throw InvalidContract();
+                        }
+
+                        if (!_schema.UsesPropertyInitializedState())
+                        {
+                            throw new NotSupportedException(
+                                "C1M1 construction guarantees for PropertyDef rows require an initialized-place and accessor contract.");
+                        }
+
+                        if (_properties.GetBackingFieldDef(memberRow) == 0)
+                        {
+                            throw InvalidContract();
+                        }
+                    default:
+                        throw InvalidContract();
+                }
+
+                members.Add(memberDefId);
+            }
+
+            return new TrRmConstructionClauseContract(1, 0,
+                members.ToImmutable());
+        }
+
+        if (data[8] == 3 && _schema.UsesPropertyInitializedState())
+        {
+            if (data.Length != 16)
+            {
+                throw InvalidContract();
+            }
+
+            var propertyRow = Read(data, 12);
+            if (propertyRow is 0 or > 0x00FF_FFFF
+                || propertyRow > _properties.Count)
+            {
+                throw InvalidContract();
+            }
+
+            var property = checked((int)propertyRow);
+            var resultType = _typeSpecs.GetTypeSpecRef(
+                _signatures.GetResultTypeSpec(signature));
+            var receiverType = _signatures.GetReceiverTypeSpec(signature);
+            if (resultType.Form != 1 || resultType.TypeCode != 0
+                || resultType.Qualifiers != 0
+                || !IsClassHandleTypeSpec(receiverType, ownerType)
+                || (_methods.GetFlags(methodRow) & 4) != 0
+                || _properties.GetOwnerType(property) != ownerType
+                || _properties.GetInitMethod(property) != methodRow
+                || _methods.GetOwnerModule(methodRow)
+                    != _methods.GetOwnerModule(
+                        _properties.GetGetterMethod(property)))
+            {
+                throw InvalidContract();
+            }
+
+            return new TrRmConstructionClauseContract(3, 0, [], propertyRow);
+        }
+
+        if (data[8] != 2 || data.Length != 16)
+        {
+            throw InvalidContract();
+        }
+
+        var initializerMethod = Read(data, 12);
+        if (initializerMethod is 0 or > 0x00FF_FFFF
+            || initializerMethod > _methods.Count
+            || _signatures.GetReceiverTypeSpec(signature) != 0
+            || !IsClassHandleTypeSpec(
+                _signatures.GetResultTypeSpec(signature), ownerType))
+        {
+            throw InvalidContract();
+        }
+
+        var initializerRow = checked((int)initializerMethod);
+        var initializerSignature = _methods.GetSignature(initializerRow);
+        if (_methods.GetOwnerType(initializerRow) != ownerType
+            || _methods.GetOwnerModule(initializerRow)
+                != _methods.GetOwnerModule(methodRow)
+            || _constructionClauses[initializerRow].RoleTag == 2
+            || !HasEquivalentExplicitParameters(
+                signature, initializerSignature))
+        {
+            throw InvalidContract();
+        }
+
+        return new TrRmConstructionClauseContract(2, initializerMethod, []);
+    }
+
+    private bool IsClassHandleTypeSpec(uint typeSpecRef, int typeDefRow)
+    {
+        if (typeSpecRef == 0)
+        {
+            return false;
+        }
+
+        var type = _typeSpecs.GetTypeSpecBytes(typeSpecRef);
+        if (type.Length != 7 || type[0] != 0x0C
+            || type[2] != 0x8A || type[1] is not (0 or 1))
+        {
+            return false;
+        }
+
+        var classTypeSpecRef = Read(type, 3);
+        var classTypeSpec = _typeSpecs.GetTypeSpecRef(classTypeSpecRef);
+        if (!classTypeSpec.IsRow || classTypeSpec.Form != 0x02
+            || classTypeSpec.Qualifiers != 0)
+        {
+            return false;
+        }
+
+        var classType = _typeSpecs.GetRow(classTypeSpec.Row);
+        if (classType.Length != 6
+            || Read(classType, 2) != (uint)typeDefRow
+            || !_types.TryGetDeclaredClassMutability(typeDefRow,
+                out var isMutable))
+        {
+            return false;
+        }
+
+        return type[1] == (isMutable ? 1 : 0);
+    }
+
+    private bool IsExpectedMethodRow(int methodRow)
+    {
+        var expectedDefinition = 0x1600_0000u | (uint)methodRow;
+        for (var importRow = 1; importRow <= _imports.Count; importRow++)
+        {
+            ConsumeWork();
+            if (_imports.GetExpectedDefinitionForImportRow(importRow)
+                == expectedDefinition)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool HasEquivalentExplicitParameters(int leftSignature,
+        int rightSignature)
+    {
+        var (leftFirst, leftCount)
+            = _signatures.GetParamRange(leftSignature);
+        var (rightFirst, rightCount)
+            = _signatures.GetParamRange(rightSignature);
+        if (leftCount != rightCount)
+        {
+            return false;
+        }
+
+        ConsumeWork(checked((ulong)leftCount + 1UL));
+        for (var index = 0; index < leftCount; index++)
+        {
+            var left = leftFirst + index;
+            var right = rightFirst + index;
+            if (_parameters.GetMode(left) != _parameters.GetMode(right)
+                || !_typeSpecs.AreEquivalentTypeSpecRefs(
+                    _parameters.GetTypeSpec(left),
+                    _parameters.GetTypeSpec(right)))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static bool IsStaticInitializationUnitSignature(int methodRow,
@@ -1347,22 +1760,7 @@ public readonly ref struct TrRmContractTableReader
 
     private static bool IsInitializationDestinationType(
         TrRmTypeSpecTableReader typeSpecs, uint typeSpecRef)
-    {
-        var type = typeSpecs.GetTypeSpecBytes(typeSpecRef);
-        if (type.Length == 6 && type[0] == 0x0E)
-        {
-            return true;
-        }
-
-        if (type.Length == 7 && type[0] == 0x0C && type[2] == 0x8A)
-        {
-            var argument = typeSpecs.GetTypeSpecRef(Read(type, 3),
-                allowInitQualifier: true);
-            return (argument.Qualifiers & 0x04) != 0;
-        }
-
-        return false;
-    }
+        => typeSpecs.IsInitializationDestinationType(typeSpecRef);
 
     private static bool IsNativeOutputCellType(
         TrRmTypeSpecTableReader typeSpecs, uint typeSpecRef)
