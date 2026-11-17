@@ -4357,7 +4357,7 @@ internal sealed class TrRmStandardInitializationReferenceBodyTests
     }
 
     [Test]
-    public void GeneralPredicateGraphCodecRoundTripsProjectedUnconditionalVacantOutput()
+    public void GeneralPredicateGraphProjectsUnconditionalVacantOutput()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
             void KeepVacant(ref<init int32> destination)
@@ -4379,85 +4379,63 @@ internal sealed class TrRmStandardInitializationReferenceBodyTests
         Assert.That(((BoundConstant)function
                 .CheckedOutputStatePredicates[0].Predicate).Value,
             Is.EqualTo(1));
+    }
 
-        // Phase-2 clause and failure-selection persistence is tested separately.
-        var graphProgram = CreatePhaseThreeGraphCodecInput(program);
-        const string moduleIdentity = "unconditional-vacant-output";
+    [Test]
+    public void GeneralPredicateGraphCodecRoundTripsRootlessPredicatesForBothStates()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            void KeepVacant(ref<init int32> destination) {}
+            void AlwaysFill(ref<init int32> destination) {
+                *destination = 42;
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = (BoundProgram)compilation.Program!;
+        var graphProgram = program with {
+            Functions = program.Functions.Select(function =>
+                function.Name switch {
+                    "KeepVacant" => function with {
+                        CheckedOutputStatePredicates = [
+                            new BoundOutputStatePredicate(0, 0, 0,
+                                new BoundConstant(1, PrimitiveType.Bool,
+                                    default)),
+                        ],
+                        HasStandardCheckedOutputStateMetadata = true,
+                    },
+                    "AlwaysFill" => function with {
+                        CheckedOutputStatePredicates = [
+                            new BoundOutputStatePredicate(0, 0, 1,
+                                new BoundConstant(1, PrimitiveType.Bool,
+                                    default)),
+                        ],
+                        HasStandardCheckedOutputStateMetadata = true,
+                    },
+                    _ => function,
+                }).ToImmutableArray(),
+        };
+        const string moduleIdentity = "rootless-output-state";
         var artifact = TrRmExecutableCompiler.EmitStandard(graphProgram,
             moduleIdentity, GeneralPredicateGraphsSchemaIdentity, 1);
         var tables = TrRmStructuralMetadataValidator
             .ValidateGeneralPredicateGraphsDraftAndGetExecutionTables(
                 TrRmArtifactIndex.ForGeneralPredicateGraphsDraft(artifact));
-        var graphRow = tables.Contracts.GetOutputStateContracts(1)[0]
-            .PredicateGraphRow;
-        var footprintRow
-            = tables.PredicateGraphs.GetReadFootprintRow(
-                checked((int)graphRow));
-        Assert.That(tables.PredicateReadFootprints.GetRootFirstRow(
-            footprintRow), Is.Zero);
-        Assert.That(tables.PredicateReadFootprints.GetRootRowCount(
-            footprintRow), Is.Zero);
-        Assert.That(tables.Features.TryGetFeature(11, out _), Is.True);
-
-        var artifactIndex = TrRmArtifactIndex
-            .ForGeneralPredicateGraphsDraft(artifact);
-        var claimedCompleteSections = new List<TrRmSection>(
-            artifactIndex.SectionCount);
-        for (var sectionIndex = 0;
-            sectionIndex < artifactIndex.SectionCount; sectionIndex++)
+        for (var methodRow = 1; methodRow <= 2; methodRow++)
         {
-            artifactIndex.GetSection(sectionIndex, out var kind,
-                out var flags, out var bytes, out var recordCount);
-            if (kind != 0x0005)
-            {
-                claimedCompleteSections.Add(new TrRmSection(kind, flags,
-                    checked((uint)recordCount), bytes.ToArray()));
-                continue;
-            }
-
-            var contractBytes = bytes.ToArray();
-            var indexLength = checked((recordCount + 1) * sizeof(uint));
-            for (var row = 0; row < recordCount; row++)
-            {
-                var rowOffset = checked(indexLength + (int)
-                    BinaryPrimitives.ReadUInt32LittleEndian(
-                        contractBytes.AsSpan(row * sizeof(uint))));
-                if (BinaryPrimitives.ReadUInt16LittleEndian(
-                        contractBytes.AsSpan(rowOffset + 4))
-                    == 0x0002)
-                {
-                    contractBytes[rowOffset + 16] = 1;
-                }
-            }
-
-            claimedCompleteSections.Add(new TrRmSection(kind, flags,
-                checked((uint)recordCount), contractBytes));
+            var output = tables.Contracts.GetOutputStateContracts(methodRow)
+                .Single();
+            Assert.That(output.State,
+                Is.EqualTo(methodRow == 1 ? (byte)0 : (byte)1));
+            var footprintRow
+                = tables.PredicateGraphs.GetReadFootprintRow(
+                    checked((int)output.PredicateGraphRow));
+            Assert.That(tables.PredicateReadFootprints.GetRootFirstRow(
+                footprintRow), Is.Zero);
+            Assert.That(tables.PredicateReadFootprints.GetRootRowCount(
+                footprintRow), Is.Zero);
         }
-
-        var claimedCompleteArtifact = TrRmArtifactWriter.Encode(
-            claimedCompleteSections,
-            TrRmArtifactSchema.GeneralPredicateGraphsDraft);
-        // The deliberately false fact is loaded and re-emitted, never run.
-        var claimedComplete = TrRmExecutableCompiler.LoadStandard(
-            new TrRmStandardArtifactInput(
-                GeneralPredicateGraphsSchemaIdentity,
-                claimedCompleteArtifact),
-            moduleIdentity, []);
-        Assert.That(claimedComplete.Functions.Single(
-                static candidate => candidate.Name == "KeepVacant")
-            .CheckedOutputStatePredicates[0].State, Is.EqualTo(1));
-        var claimedCompleteArtifactReemitted
-            = TrRmExecutableCompiler.EmitStandard(claimedComplete,
-                "claimed-complete-output-reemitted",
-                GeneralPredicateGraphsSchemaIdentity, 1);
-        var claimedCompleteReloaded = TrRmExecutableCompiler.LoadStandard(
-            new TrRmStandardArtifactInput(
-                GeneralPredicateGraphsSchemaIdentity,
-                claimedCompleteArtifactReemitted),
-            "claimed-complete-output-reemitted", []);
-        Assert.That(claimedCompleteReloaded.Functions.Single(
-                static candidate => candidate.Name == "KeepVacant")
-            .CheckedOutputStatePredicates[0].State, Is.EqualTo(1));
 
         var loaded = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(
@@ -4465,20 +4443,24 @@ internal sealed class TrRmStandardInitializationReferenceBodyTests
             moduleIdentity, []);
         Assert.That(loaded.Functions.Single(
                 static candidate => candidate.Name == "KeepVacant")
-            .CheckedOutputStatePredicates[0].State, Is.Zero);
+            .CheckedOutputStatePredicates.Single().State, Is.Zero);
+        Assert.That(loaded.Functions.Single(
+                static candidate => candidate.Name == "AlwaysFill")
+            .CheckedOutputStatePredicates.Single().State, Is.EqualTo(1));
+
         var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(loaded,
-            "unconditional-vacant-output-reemitted",
+            "rootless-output-state-reemitted",
             GeneralPredicateGraphsSchemaIdentity, 1);
-        var reemitted = TrRmStructuralMetadataValidator
-            .ValidateGeneralPredicateGraphsDraftAndGetExecutionTables(
-                TrRmArtifactIndex.ForGeneralPredicateGraphsDraft(
-                    reemittedArtifact));
-        var reemittedGraph = reemitted.Contracts
-            .GetOutputStateContracts(1)[0].PredicateGraphRow;
-        var reemittedFootprint = reemitted.PredicateGraphs
-            .GetReadFootprintRow(checked((int)reemittedGraph));
-        Assert.That(reemitted.PredicateReadFootprints.GetRootRowCount(
-            reemittedFootprint), Is.Zero);
+        var reloaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(
+                GeneralPredicateGraphsSchemaIdentity, reemittedArtifact),
+            "rootless-output-state-reemitted", []);
+        Assert.That(reloaded.Functions.Single(
+                static candidate => candidate.Name == "KeepVacant")
+            .CheckedOutputStatePredicates.Single().State, Is.Zero);
+        Assert.That(reloaded.Functions.Single(
+                static candidate => candidate.Name == "AlwaysFill")
+            .CheckedOutputStatePredicates.Single().State, Is.EqualTo(1));
     }
 
     [Test]
