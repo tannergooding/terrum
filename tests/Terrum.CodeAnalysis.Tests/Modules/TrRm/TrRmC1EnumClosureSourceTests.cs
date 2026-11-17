@@ -1185,6 +1185,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var providerArtifact = TrRmExecutableCompiler.EmitStandard(
             providerProgram, "ClassLayoutProvider", schemaIdentity, 1,
             [], [], [classExport], []);
+        providerArtifact = AsSequentialClassLayout(providerArtifact,
+            SchemaFor(schemaIdentity));
         var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
             providerArtifact);
         var reference = TrRmExecutableCompiler.CreateStandardReference(
@@ -1266,7 +1268,7 @@ internal sealed class TrRmC1EnumClosureSourceTests
         };
 
         Assert.That(NativeJit.Execute(executable,
-            NativeRuntimePolicy.FailFast), Is.EqualTo(8));
+            NativeRuntimePolicy.FailFast), Is.EqualTo(2));
         Assert.That(NativeEmitter.EmitLibrary(loaded, ["Offset"],
             NativeRuntimePolicy.FailFast), Is.Not.Empty);
         Assert.That(query!.Subject.RequiresUnsafe, Is.True);
@@ -2546,6 +2548,53 @@ internal sealed class TrRmC1EnumClosureSourceTests
         {
             throw new InvalidDataException(
                 "The C1 field fixture has no TypeSpec section.");
+        }
+
+        var result = TrRmArtifactWriter.Encode(sections, schema);
+        _ = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                new TrRmArtifactIndex(result, schema));
+        return result;
+    }
+
+    private static byte[] AsSequentialClassLayout(byte[] artifact,
+        TrRmArtifactSchema schema)
+    {
+        var index = new TrRmArtifactIndex(artifact, schema);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(index);
+        if (tables.Layouts.Count != 1
+            || tables.LayoutFields.Count == 0)
+        {
+            throw new InvalidDataException(
+                "The sequential class fixture requires one complete Layout variant.");
+        }
+
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var entry = 0; entry < index.SectionCount; entry++)
+        {
+            index.GetSection(entry, out var kind, out var flags,
+                out var section, out var recordCount);
+            if (kind == 0x0015)
+            {
+                var layoutBytes = section.ToArray();
+                if (layoutBytes.Length != 28)
+                {
+                    throw new InvalidDataException(
+                        "The sequential class fixture has an invalid Layout row.");
+                }
+
+                layoutBytes[8] = 1;
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteUInt32LittleEndian(layoutBytes.AsSpan(16), 1);
+                sections.Add(new TrRmSection(kind, flags, recordCount,
+                    layoutBytes));
+            }
+            else
+            {
+                sections.Add(new TrRmSection(kind, flags, recordCount,
+                    section.ToArray()));
+            }
         }
 
         var result = TrRmArtifactWriter.Encode(sections, schema);
