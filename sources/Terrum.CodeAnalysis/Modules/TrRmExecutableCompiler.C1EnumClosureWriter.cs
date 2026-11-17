@@ -72,9 +72,11 @@ public static partial class TrRmExecutableCompiler
             || !program.NativeUtf16ZLiterals.IsEmpty
             || !program.NativeUtf8ZLiterals.IsEmpty
             || program.StandardMethodProviderClosure is not null
-            || program.StandardFieldProviderClosure is not null
+            || (program.StandardFieldProviderClosure is not null
+                && !hasStandardStructViews)
             || !program.StandardClassDeclarations.IsEmpty
-            || program.StandardQuerySourceAssociation is not null
+            || (program.StandardQuerySourceAssociation is not null
+                && !hasStandardStructViews)
             || program.NativeCoreRegistration is not null
             || program.NativeOutputCoreRegistration is not null
             || program.LayoutCoreRegistration is not null
@@ -553,8 +555,13 @@ public static partial class TrRmExecutableCompiler
             = new SortedDictionary<int, List<string>>();
         var sourceStructImportsByIndex
             = new Dictionary<int, List<C1EnumClosureImport>>();
+        var rootTypeDefRowByStructureIndex
+            = new Dictionary<int, int>();
         var sourceStructFieldExportsByIndex = new Dictionary<
             (int StructureIndex, int FieldIndex), List<string>>();
+        var sourceStructFieldImportsByIndex = new Dictionary<
+            (int StructureIndex, int FieldIndex),
+            List<C1EnumClosureImport>>();
         var sourceStructDeclarationsByIndex
             = program.SourceTypeDeclarations.IsDefault
                 ? new Dictionary<int, BoundSourceTypeDeclaration>()
@@ -822,6 +829,9 @@ public static partial class TrRmExecutableCompiler
                             "Mixed EN1 struct re-emission requires at least one root-owned TypeDef Import edge.");
                     }
 
+                    rootTypeDefRowByStructureIndex.Add(structureIndex,
+                        checked((int)(expectedDefinitionId
+                            & 0x00FF_FFFF)));
                     sourceStructImportsByIndex.Add(structureIndex,
                         typeImports);
                     sourceStructExportsByIndex.Add(structureIndex, []);
@@ -849,6 +859,9 @@ public static partial class TrRmExecutableCompiler
                     }
                     sourceStructExportsByIndex.Add(structureIndex,
                         typeKeys);
+                    rootTypeDefRowByStructureIndex.Add(structureIndex,
+                        checked((int)(origin.DefinitionId
+                            & 0x00FF_FFFF)));
                 }
 
                 for (var fieldIndex = 0;
@@ -859,14 +872,9 @@ public static partial class TrRmExecutableCompiler
                     {
                         continue;
                     }
-                    if (!SameA2SourceTypeProviderSnapshot(rootSnapshot,
-                            fieldOrigin.Provider)
-                        || !origin.Expectations.IsDefaultOrEmpty
-                        || (fieldOrigin.DefinitionId >> 24) != 0x14
+                    if ((fieldOrigin.DefinitionId >> 24) != 0x14
                         || (fieldOrigin.DefinitionId & 0x00FF_FFFF) == 0
                         || fieldOrigin.IsLookupRoot
-                        || fieldOrigin.ExportKeys.IsDefault
-                        || fieldOrigin.ExportKeys.IsEmpty
                         || fieldOrigin.ExpectedDeclaration is null)
                     {
                         throw Invalid(
@@ -882,21 +890,346 @@ public static partial class TrRmExecutableCompiler
                             "Mixed EN1 struct re-emission cannot weaken its retained FieldDef snapshot.");
                     }
 
-                    foreach (var exportKey in fieldOrigin.ExportKeys)
+                    if (SameA2SourceTypeProviderSnapshot(rootSnapshot,
+                            fieldOrigin.Provider))
                     {
-                        if (!BoundEnumTypes.IsValidModuleDeclarationKey(
-                                exportKey)
-                            || !usedExportKeys.Add(exportKey))
+                        if (!origin.Expectations.IsDefaultOrEmpty
+                            || fieldOrigin.ExportKeys.IsDefault
+                            || fieldOrigin.ExportKeys.IsEmpty)
                         {
                             throw Invalid(
-                                "Mixed EN1 struct FieldDef ExportKeys are invalid or duplicated.");
+                                "A root-owned FieldDef Export has an invalid local owner or key set.");
                         }
+
+                        foreach (var exportKey in fieldOrigin.ExportKeys)
+                        {
+                            if (!BoundEnumTypes.IsValidModuleDeclarationKey(
+                                    exportKey)
+                                || !usedExportKeys.Add(exportKey))
+                            {
+                                throw Invalid(
+                                    "Mixed EN1 struct FieldDef ExportKeys are invalid or duplicated.");
+                            }
+                        }
+                        sourceStructFieldExportsByIndex.Add(
+                            (structureIndex, fieldIndex),
+                            [.. fieldOrigin.ExportKeys]);
                     }
-                    sourceStructFieldExportsByIndex.Add(
-                        (structureIndex, fieldIndex),
-                        [.. fieldOrigin.ExportKeys]);
+                    else if (!origin.Expectations.IsDefaultOrEmpty
+                        && SameA2SourceTypeProviderSnapshot(
+                            origin.Provider, fieldOrigin.Provider)
+                        && !fieldOrigin.ExportKeys.IsDefaultOrEmpty
+                        && fieldOrigin.SelectedExportKeys.IsDefaultOrEmpty)
+                    {
+                        continue;
+                    }
+                    else
+                    {
+                        throw Invalid(
+                            "An EN1 FieldDef origin is neither a local Export nor a provider Import.");
+                    }
                 }
             }
+        }
+
+        BoundStandardFieldProviderClosure? fieldProviderClosure
+            = program.StandardFieldProviderClosure;
+        if (program.StandardQuerySourceAssociation is
+            BoundStandardQuerySourceAssociation fieldAssociation)
+        {
+            if (fieldAssociation.ProviderClosures.IsDefaultOrEmpty
+                || fieldAssociation.ProviderClosures.Length != 1
+                || (fieldProviderClosure is not null
+                    && !ReferenceEquals(fieldProviderClosure,
+                        fieldAssociation.ProviderClosures[0])))
+            {
+                throw Unsupported(
+                    "Mixed EN1 struct re-emission requires one exact FieldDef provider closure.");
+            }
+
+            fieldProviderClosure ??= fieldAssociation.ProviderClosures[0];
+        }
+
+        if (fieldProviderClosure is not null)
+        {
+            var selectedRootSnapshot = rootSnapshot
+                ?? throw Invalid(
+                    "An EN1 FieldDef provider closure has no selected root Module.");
+            if (!hasStandardStructViews
+                || !IsSelectedC1EnumClosureSchemaIdentity(
+                    fieldProviderClosure.SchemaIdentity)
+                || !StringComparer.Ordinal.Equals(
+                    fieldProviderClosure.SchemaIdentity,
+                    selectedRootSnapshot.SchemaIdentity)
+                || !StringComparer.Ordinal.Equals(
+                    fieldProviderClosure.RootModuleIdentity,
+                    moduleIdentity)
+                || fieldProviderClosure.RootModuleRow
+                    != selectedRootSnapshot.ModuleRow
+                || fieldProviderClosure.TargetRequirement
+                    != moduleTargetRequirement
+                || fieldProviderClosure.RuntimePolicy
+                    != (uint)program.RuntimePolicy
+                || fieldProviderClosure.Artifacts.IsDefaultOrEmpty
+                || fieldProviderClosure.Modules.IsDefaultOrEmpty
+                || fieldProviderClosure.FieldEdges.IsDefault
+                || fieldProviderClosure.Artifacts[0].ArtifactIndex != 0
+                || !StringComparer.Ordinal.Equals(
+                    fieldProviderClosure.Artifacts[0].SchemaIdentity,
+                    selectedRootSnapshot.SchemaIdentity)
+                || !fieldProviderClosure.Artifacts[0].ArtifactSnapshot
+                    .AsSpan().SequenceEqual(
+                        selectedRootSnapshot.ArtifactSnapshot.AsSpan()))
+            {
+                throw Unsupported(
+                    "Mixed EN1 struct re-emission cannot change its FieldDef provider root or artifact snapshot.");
+            }
+
+            var rootTables = ValidateForeignInvocationArtifact(
+                CreateForeignInvocationIndex(
+                    fieldProviderClosure.Artifacts[0].ArtifactSnapshot
+                        .ToArray(),
+                    fieldProviderClosure.SchemaIdentity),
+                fieldProviderClosure.SchemaIdentity, null,
+                createA3ResourceLedger: false);
+            var structureIndexByExpectedTypeDef
+                = new Dictionary<int, int>(program.Structures.Length);
+            for (var structureIndex = 0;
+                structureIndex < program.Structures.Length;
+                structureIndex++)
+            {
+                var origin = program.Structures[structureIndex]
+                    .StandardTypeOrigin
+                    ?? throw Invalid(
+                        "An EN1 FieldDef provider closure has an unoriginated struct.");
+                var rootDefinitionIds = origin.Expectations
+                    .Where(expectation =>
+                        BoundStandardEnumDeclarationContract.SnapshotsMatch(
+                            expectation.UsingModule,
+                            selectedRootSnapshot))
+                    .Select(static expectation =>
+                        expectation.ExpectedDefinitionId)
+                    .Distinct()
+                    .ToArray();
+                uint rootDefinitionId;
+                if (rootDefinitionIds.Length != 0)
+                {
+                    if (rootDefinitionIds.Length != 1)
+                    {
+                        throw Invalid(
+                            "An EN1 struct origin has multiple root TypeDef stubs.");
+                    }
+                    rootDefinitionId = rootDefinitionIds[0];
+                }
+                else if (SameA2SourceTypeProviderSnapshot(origin.Provider,
+                             selectedRootSnapshot))
+                {
+                    rootDefinitionId = origin.DefinitionId;
+                }
+                else
+                {
+                    throw Invalid(
+                        "An EN1 struct origin lost its root TypeDef identity.");
+                }
+
+                if ((rootDefinitionId >> 24) != 0x13
+                    || (rootDefinitionId & 0x00FF_FFFF) == 0
+                    || !structureIndexByExpectedTypeDef.TryAdd(
+                        checked((int)(rootDefinitionId & 0x00FF_FFFF)),
+                        structureIndex))
+                {
+                    throw Invalid(
+                        "An EN1 struct origin has an invalid or duplicate root TypeDef identity.");
+                }
+            }
+
+            foreach (var edge in fieldProviderClosure.FieldEdges)
+            {
+                if (edge.ConsumerArtifactIndex != 0
+                    || edge.ConsumerModuleRow
+                        != fieldProviderClosure.RootModuleRow)
+                {
+                    continue;
+                }
+
+                if ((edge.ExpectedDefinitionId >> 24) != 0x14
+                    || (edge.ActualDefinitionId >> 24) != 0x14
+                    || edge.ImportRow <= 0
+                    || edge.ModuleRefRow <= 0
+                    || edge.OwnerImportRow <= 0
+                    || !structureIndexByExpectedTypeDef.TryGetValue(
+                        edge.ExpectedOwnerTypeDefRow,
+                        out var structureIndex))
+                {
+                    throw Invalid(
+                        "An EN1 FieldDef provider edge has an invalid root or definition identity.");
+                }
+
+                var expectedFieldRow = checked((int)(
+                    edge.ExpectedDefinitionId & 0x00FF_FFFF));
+                var (fieldStart, fieldEnd) = rootTables.TypeDefs
+                    .GetFieldRange(edge.ExpectedOwnerTypeDefRow);
+                if (expectedFieldRow < fieldStart
+                    || expectedFieldRow >= fieldEnd
+                    || rootTables.Fields.GetOwnerTypeDef(expectedFieldRow)
+                        != edge.ExpectedOwnerTypeDefRow
+                    || rootTables.Imports
+                        .GetExpectedDefinitionForImportRow(edge.OwnerImportRow)
+                        != (0x1300_0000u
+                            | checked((uint)edge.ExpectedOwnerTypeDefRow))
+                    || rootTables.Imports
+                        .GetExpectedDefinitionForImportRow(edge.ImportRow)
+                        != edge.ExpectedDefinitionId)
+                {
+                    throw Invalid(
+                        "An EN1 FieldDef provider edge lost its expected owner or stub.");
+                }
+
+                var structure = program.Structures[structureIndex];
+                var fieldOrdinal = expectedFieldRow - fieldStart;
+                if ((uint)fieldOrdinal >= (uint)structure.Fields.Length
+                    || structure.StandardTypeOrigin
+                        is not BoundStandardTypeOrigin typeOrigin
+                    || (typeOrigin.DefinitionId >> 24) != 0x13
+                    || typeOrigin.DefinitionId
+                        != (0x1300_0000u
+                            | checked((uint)edge.ProviderTypeDefRow))
+                    || !StringComparer.Ordinal.Equals(
+                        typeOrigin.Provider.ModuleIdentity,
+                        edge.ProducerIdentity)
+                    || typeOrigin.Provider.TargetRequirement
+                        != edge.TargetRequirement
+                    || typeOrigin.Provider.RuntimePolicy
+                        != edge.RuntimePolicy
+                    || !typeOrigin.Expectations.Any(expectation =>
+                        expectation.ImportRow == edge.OwnerImportRow
+                        && expectation.ExpectedDefinitionId
+                            == (0x1300_0000u
+                                | checked((uint)edge.ExpectedOwnerTypeDefRow))
+                        && expectation.ProviderDefinitionId
+                            == (0x1300_0000u
+                                | checked((uint)edge.ProviderTypeDefRow))
+                        && BoundStandardEnumDeclarationContract
+                            .SnapshotsMatch(expectation.UsingModule,
+                                selectedRootSnapshot)))
+                {
+                    throw Invalid(
+                        "An EN1 FieldDef provider edge does not match its imported owner.");
+                }
+
+                var field = structure.Fields[fieldOrdinal];
+                var providerArtifact
+                    = fieldProviderClosure.Artifacts.FirstOrDefault(
+                        artifact => artifact.ArtifactIndex
+                            == edge.ProviderArtifactIndex);
+                var providerModule
+                    = fieldProviderClosure.Modules.FirstOrDefault(
+                        module => module.ArtifactIndex
+                                == edge.ProviderArtifactIndex
+                            && module.ModuleRow == edge.ProviderModuleRow);
+                var fieldBinding = rootTables.Imports
+                    .GetBindingForImportRow(edge.ImportRow);
+                if (field.StandardFieldOrigin
+                    is not BoundStandardFieldOrigin fieldOrigin
+                    || providerArtifact is null
+                    || providerModule is null
+                    || !StringComparer.Ordinal.Equals(
+                        providerArtifact.SchemaIdentity,
+                        fieldOrigin.Provider.SchemaIdentity)
+                    || !providerArtifact.ArtifactSnapshot.AsSpan()
+                        .SequenceEqual(
+                            fieldOrigin.Provider.ArtifactSnapshot.AsSpan())
+                    || providerModule.Identity
+                        != fieldOrigin.Provider.ModuleIdentity
+                    || providerModule.ModuleRow
+                        != fieldOrigin.Provider.ModuleRow
+                    || providerModule.TargetRequirement
+                        != fieldOrigin.Provider.TargetRequirement
+                    || providerModule.RuntimePolicy
+                        != fieldOrigin.Provider.RuntimePolicy
+                    || fieldOrigin.DefinitionId != edge.ActualDefinitionId
+                    || fieldOrigin.Provider.ModuleRow
+                        != edge.ProviderModuleRow
+                    || fieldOrigin.Provider.TargetRequirement
+                        != edge.TargetRequirement
+                    || fieldOrigin.Provider.RuntimePolicy
+                        != edge.RuntimePolicy
+                    || !StringComparer.Ordinal.Equals(
+                        fieldOrigin.Provider.ModuleIdentity,
+                        edge.ProducerIdentity)
+                    || fieldBinding.ExportKey != edge.ExportKey
+                    || fieldBinding.ProducerIdentity
+                        != edge.ProducerIdentity
+                    || fieldBinding.TargetRequirement
+                        != edge.TargetRequirement
+                    || fieldBinding.RuntimePolicy != edge.RuntimePolicy
+                    || rootTables.Imports.GetModuleRefForImportRow(
+                        edge.ImportRow) != edge.ModuleRefRow
+                    || !fieldOrigin.ExportKeys.Contains(edge.ExportKey,
+                        StringComparer.Ordinal))
+                {
+                    throw Invalid(
+                        "An EN1 FieldDef provider edge lost its checked field origin.");
+                }
+
+                var fieldImports = sourceStructFieldImportsByIndex.GetValueOrDefault(
+                    (structureIndex, fieldOrdinal));
+                if (fieldImports is null)
+                {
+                    fieldImports = [];
+                    sourceStructFieldImportsByIndex.Add(
+                        (structureIndex, fieldOrdinal), fieldImports);
+                }
+                fieldImports.Add(new C1EnumClosureImport(
+                    edge.ProducerIdentity, edge.ExportKey,
+                    edge.TargetRequirement, edge.RuntimePolicy));
+            }
+
+            for (var structureIndex = 0;
+                structureIndex < program.Structures.Length;
+                structureIndex++)
+            {
+                var structure = program.Structures[structureIndex];
+                for (var fieldIndex = 0;
+                    fieldIndex < structure.Fields.Length; fieldIndex++)
+                {
+                    if (structure.Fields[fieldIndex].StandardFieldOrigin
+                            is not BoundStandardFieldOrigin fieldOrigin
+                        || SameA2SourceTypeProviderSnapshot(
+                            fieldOrigin.Provider, selectedRootSnapshot))
+                    {
+                        continue;
+                    }
+
+                    if (!sourceStructFieldImportsByIndex.TryGetValue(
+                            (structureIndex, fieldIndex),
+                            out var fieldImports)
+                        || fieldImports.Any(fieldImport =>
+                            !fieldOrigin.ExportKeys.Contains(
+                                fieldImport.ExportKey,
+                                StringComparer.Ordinal))
+                        || fieldOrigin.ExportKeys.Any(exportKey =>
+                            !fieldImports.Any(fieldImport =>
+                                StringComparer.Ordinal.Equals(
+                                    fieldImport.ExportKey, exportKey))))
+                    {
+                        throw Invalid(
+                            "An EN1 imported FieldDef origin has no complete retained provider edge set.");
+                    }
+                }
+            }
+        }
+        else if (hasStandardStructViews
+            && program.Structures.Any(structure =>
+                structure.Fields.Any(field =>
+                    field.StandardFieldOrigin is
+                        BoundStandardFieldOrigin fieldOrigin
+                    && rootSnapshot is not null
+                    && !SameA2SourceTypeProviderSnapshot(rootSnapshot,
+                        fieldOrigin.Provider))))
+        {
+            throw Invalid(
+                "A mixed EN1 imported FieldDef lost its provider closure.");
         }
 
         var retainedStructureIndexes = new SortedSet<int>();
@@ -1372,6 +1705,53 @@ public static partial class TrRmExecutableCompiler
                             AddString(exportKey)));
                     }
                 }
+
+                if (sourceStructFieldImportsByIndex.TryGetValue(
+                        (structureIndex, fieldOrdinal),
+                        out var fieldImports))
+                {
+                    if (sourceStructFieldExportsByIndex.ContainsKey(
+                            (structureIndex, fieldOrdinal))
+                        || !sourceStructImportsByIndex.TryGetValue(
+                            structureIndex, out var ownerImports)
+                        || ownerImports.Count != 1
+                        || fieldImports.Any(fieldImport =>
+                            !ownerImports.Any(ownerImport =>
+                                StringComparer.Ordinal.Equals(
+                                    ownerImport.ProducerIdentity,
+                                    fieldImport.ProducerIdentity)
+                                && ownerImport.TargetRequirement
+                                    == fieldImport.TargetRequirement
+                                && ownerImport.RuntimePolicy
+                                    == fieldImport.RuntimePolicy)))
+                    {
+                        throw Invalid(
+                            "An EN1 FieldDef Import does not retain one matching owner TypeDef Import.");
+                    }
+
+                    foreach (var fieldImport in fieldImports)
+                    {
+                        var providerKey = (fieldImport.ProducerIdentity,
+                            fieldImport.TargetRequirement,
+                            fieldImport.RuntimePolicy);
+                        if (!moduleRefRowsByProvider.TryGetValue(
+                                providerKey, out var moduleRefRow))
+                        {
+                            moduleRefRow = moduleRefRows.Count + 1;
+                            moduleRefRows.Add(new TrRmModuleRefRow(
+                                AddString(fieldImport.ProducerIdentity),
+                                fieldImport.TargetRequirement,
+                                fieldImport.RuntimePolicy));
+                            moduleRefRowsByProvider.Add(providerKey,
+                                moduleRefRow);
+                        }
+
+                        importRows.Add(new TrRmImportRow(moduleRefRow,
+                            AddString(fieldImport.ExportKey),
+                            0x1400_0000u
+                                | checked((uint)fieldDefRow)));
+                    }
+                }
             }
 
             var layoutRow = layoutRows.Count + 1;
@@ -1429,7 +1809,8 @@ public static partial class TrRmExecutableCompiler
             featureRows.Add(TrRmFeatureRow.TypedFrozenValues);
             featureRows.Add(new TrRmFeatureRow(18, 1));
         }
-        if (sourceStructFieldExportsByIndex.Count != 0)
+        if (sourceStructFieldExportsByIndex.Count != 0
+            || sourceStructFieldImportsByIndex.Count != 0)
         {
             featureRows.Add(TrRmFeatureRow.LayoutQueries);
         }

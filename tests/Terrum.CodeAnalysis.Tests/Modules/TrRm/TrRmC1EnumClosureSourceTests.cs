@@ -409,10 +409,15 @@ internal sealed class TrRmC1EnumClosureSourceTests
             string.Join(Environment.NewLine,
                 providerCompilation.Diagnostics));
         var providerProgram = (BoundProgram)providerCompilation.Program!;
+        var providerTypeExport = new TrRmSourceTypeExport("Demo", "Marker",
+            "type.marker") {
+            FieldExports = [
+                new TrRmSourceFieldExport("Id", "field.marker.id"),
+            ],
+        };
         var providerArtifact = TrRmExecutableCompiler.EmitStandard(
             providerProgram, "StructProvider", schemaIdentity, 1,
-            [new TrRmSourceTypeExport("Demo", "Marker", "type.marker")],
-            [], [], [
+            [providerTypeExport], [], [], [
                 CreateExport(providerProgram, providerTree, 0, "Shade",
                     [], "shade"),
             ]);
@@ -433,10 +438,15 @@ internal sealed class TrRmC1EnumClosureSourceTests
             string.Join(Environment.NewLine,
                 consumerCompilation.Diagnostics));
         var consumerProgram = (BoundProgram)consumerCompilation.Program!;
+        var packetExport = new TrRmSourceTypeExport("Demo", "Packet",
+            "type.packet") {
+            FieldExports = [
+                new TrRmSourceFieldExport("Value", "field.packet.value"),
+            ],
+        };
         var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
             consumerProgram, "StructConsumer", schemaIdentity, 1,
-            [new TrRmSourceTypeExport("Demo", "Packet", "type.packet")],
-            [], [], [
+            [packetExport], [], [], [
                 CreateExport(consumerProgram, consumerTree, 0, "Shade",
                     [], "shade"),
             ]);
@@ -448,6 +458,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var markerTypeDefRow = Enumerable.Range(1,
                 consumerTables.TypeDefs.Count)
             .Single(row => consumerTables.TypeDefs.GetName(row) == "Marker");
+        var (markerFieldStart, _) = consumerTables.TypeDefs
+            .GetFieldRange(markerTypeDefRow);
         var packetTypeDefRow = Enumerable.Range(1,
                 consumerTables.TypeDefs.Count)
             .Single(row => consumerTables.TypeDefs.GetName(row) == "Packet");
@@ -455,7 +467,9 @@ internal sealed class TrRmC1EnumClosureSourceTests
             .GetFieldRange(packetTypeDefRow);
         consumerArtifact = AddEnumTypeImport(consumerArtifact,
             schemaIdentity, "StructProvider", "type.marker",
-            0x1300_0000u | checked((uint)markerTypeDefRow));
+            0x1300_0000u | checked((uint)markerTypeDefRow),
+            "field.marker.id",
+            0x1400_0000u | checked((uint)markerFieldStart));
         consumerArtifact = RewriteFieldTypeSpecAsImport(
             consumerArtifact, schemaIdentity, packetFieldStart, 1);
 
@@ -486,7 +500,11 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 .ValidateC1AndGetExecutionTables(
                     new TrRmArtifactIndex(reemitted,
                         SchemaFor(schemaIdentity)));
-        Assert.That(reemittedTables.Imports.Count, Is.EqualTo(1));
+        Assert.That(reemittedTables.Imports.Count, Is.EqualTo(2));
+        Assert.That(Enumerable.Range(1, reemittedTables.Imports.Count)
+                .Select(row => reemittedTables.Imports
+                    .GetExpectedDefinitionForImportRow(row) >> 24),
+            Does.Contain(0x14u));
         var reemittedPacketRow = Enumerable.Range(1,
                 reemittedTables.TypeDefs.Count)
             .Single(row =>
@@ -513,7 +531,7 @@ internal sealed class TrRmC1EnumClosureSourceTests
             namespace Demo {
                 public enum Shade : int8 { Dark = -1 }
                 public struct Marker {
-                    public int64 Id;
+                    public int32 Id;
                 }
             }
             """, "incompatible-struct-provider.terrum");
@@ -529,7 +547,12 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 incompatibleProviderProgram, "StructProvider",
                 schemaIdentity, 1, [
                     new TrRmSourceTypeExport("Demo", "Marker",
-                        "type.marker"),
+                        "type.marker") {
+                        FieldExports = [
+                            new TrRmSourceFieldExport("Id",
+                                "field.marker.other"),
+                        ],
+                    },
                 ], [], [], [
                     CreateExport(incompatibleProviderProgram,
                         incompatibleProviderTree, 0, "Shade", [], "shade"),
@@ -902,8 +925,19 @@ internal sealed class TrRmC1EnumClosureSourceTests
 
     private static byte[] AddEnumTypeImport(byte[] artifact,
         string schemaIdentity, string providerIdentity, string exportKey,
-        uint expectedDefinitionId)
+        uint expectedDefinitionId, string? fieldImportExportKey = null,
+        uint? expectedFieldDefinitionId = null)
     {
+        if ((fieldImportExportKey is null)
+            != (expectedFieldDefinitionId is null)
+            || (expectedFieldDefinitionId is uint fieldDefinition
+                && ((fieldDefinition >> 24) != 0x14
+                    || (fieldDefinition & 0x00FF_FFFF) == 0)))
+        {
+            throw new ArgumentException(
+                "The optional FieldDef Import must identify one expected field.");
+        }
+
         var schema = SchemaFor(schemaIdentity);
         var index = new TrRmArtifactIndex(artifact, schema);
         var tables
@@ -941,6 +975,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
 
         var providerIdentityRow = AddString(providerIdentity);
         var exportKeyRow = AddString(exportKey);
+        var fieldImportExportKeyRow = fieldImportExportKey is null
+            ? 0 : AddString(fieldImportExportKey);
         var stringBytes = TrRmStringTableWriter.EncodeTextRows(textRows);
         var strings = new TrRmStringTableReader(stringBytes,
             textRows.Count);
@@ -978,10 +1014,17 @@ internal sealed class TrRmC1EnumClosureSourceTests
 
         var features = new TrRmFeatureTableReader(featureBytes,
             featureCount, schema);
-        var importBytes = TrRmImportTableWriter.Encode([
-            new TrRmImportRow(1, exportKeyRow, expectedDefinitionId),
-        ], strings, moduleRefs, typeDefs, default, default, default, default,
-            default, features, modules, schema);
+        var importRows = new List<TrRmImportRow> {
+            new(1, exportKeyRow, expectedDefinitionId),
+        };
+        if (expectedFieldDefinitionId is uint fieldDefinitionId)
+        {
+            importRows.Add(new TrRmImportRow(1,
+                fieldImportExportKeyRow, fieldDefinitionId));
+        }
+        var importBytes = TrRmImportTableWriter.Encode(importRows, strings,
+            moduleRefs, typeDefs, default, default, default, default, default,
+            features, modules, schema);
 
         for (var entry = 0; entry < index.SectionCount; entry++)
         {
@@ -1001,7 +1044,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
         }
 
         sections.Add(new TrRmSection(0x0010, 0, 1, moduleRefBytes));
-        sections.Add(new TrRmSection(0x001C, 0, 1, importBytes));
+        sections.Add(new TrRmSection(0x001C, 0,
+            checked((uint)importRows.Count), importBytes));
         sections.Sort(static (left, right)
             => left.Kind.CompareTo(right.Kind));
         var result = TrRmArtifactWriter.Encode(sections, schema);

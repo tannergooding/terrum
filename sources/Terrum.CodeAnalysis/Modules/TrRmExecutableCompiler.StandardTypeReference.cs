@@ -666,11 +666,12 @@ public static partial class TrRmExecutableCompiler
                 "The bounded EN1 source-reference route requires an exact EN1 Module.");
         }
 
-        var typeProviderBindings
+        var fieldProviderValidation
             = TrRmFixedArrayProviderBindingValidator
-                .ValidateC1M1TypeDefImports(rootTables, artifacts,
+                .ValidateFieldDefImports(rootTables, artifacts,
                     schemaIdentities, moduleValidation.Modules,
                     rootModuleRow);
+        var typeProviderBindings = fieldProviderValidation.TypeBindings;
         var tablesByArtifact
             = new Dictionary<int,
                 TrRmStructuralMetadataValidator.ValidatedExecutionTables> {
@@ -1080,19 +1081,37 @@ public static partial class TrRmExecutableCompiler
                 rootSnapshot, rootModuleRow, structTypeDefRows,
                 selectedByTypeDef, enumIndexByTypeDefRow,
                 enumIndexByImportRow, structureIndexByImportRow,
-                enumDefinitions, typeProviderBindings, GetTables,
+                enumDefinitions, typeProviderBindings,
+                fieldProviderValidation.FieldBindings, GetTables,
                 GetSnapshot, GetExportKeys);
+        var program = new BoundProgram([], -1) {
+            RuntimePolicy = (BoundRuntimePolicy)rootTables.Modules
+                .GetRequirements(rootModuleRow).RuntimePolicy,
+            Structures = structures,
+            EnumDefinitions = enumDefinitions,
+        };
         if (!structures.IsEmpty)
         {
-            var program = new BoundProgram([], -1) {
-                Structures = structures,
-                EnumDefinitions = enumDefinitions,
-            };
             SemanticVerifier.VerifyLibraryReferences(program);
         }
+        if (!fieldProviderValidation.FieldBindings.IsEmpty)
+        {
+            program = RetainStandardFieldProviderClosure(program,
+                fieldProviderValidation, artifacts, schemaIdentities,
+                moduleValidation.Modules, rootModuleRow, moduleIdentity);
+        }
+        var standardQuerySourceAssociation
+            = program.StandardFieldProviderClosure is
+                BoundStandardFieldProviderClosure fieldProviderClosure
+                ? new BoundStandardQuerySourceAssociation([
+                    fieldProviderClosure,
+                ])
+                : null;
         return new CompilationReference(structures, [],
             (BoundRuntimePolicy)rootTables.Modules
                 .GetRequirements(rootModuleRow).RuntimePolicy,
+            standardQuerySourceAssociation:
+                standardQuerySourceAssociation,
             enumDefinitions: enumDefinitions);
     }
 
@@ -1106,6 +1125,8 @@ public static partial class TrRmExecutableCompiler
         Dictionary<int, int> structureIndexByImportRow,
         ImmutableArray<BoundEnumDefinition> enumDefinitions,
         ImmutableArray<TrRmStandardTypeProviderBinding> typeProviderBindings,
+        ImmutableArray<TrRmStandardFieldProviderBinding>
+            fieldProviderBindings,
         Func<int,
             TrRmStructuralMetadataValidator.ValidatedExecutionTables>
             getTables,
@@ -1116,6 +1137,9 @@ public static partial class TrRmExecutableCompiler
             typeDefRows.Length);
         var typeBindingsByExpectedTypeDef = new Dictionary<int,
             List<TrRmStandardTypeProviderBinding>>();
+        var fieldBindingsByExpectedField = new Dictionary<
+            (int TypeDefRow, int FieldOrdinal),
+            List<TrRmStandardFieldProviderBinding>>();
         for (var rowIndex = 0; rowIndex < typeDefRows.Length; rowIndex++)
         {
             var typeDefRow = typeDefRows[rowIndex];
@@ -1174,6 +1198,46 @@ public static partial class TrRmExecutableCompiler
                 bindings = [];
                 typeBindingsByExpectedTypeDef.Add(
                     binding.ExpectedTypeDefRow, bindings);
+            }
+            bindings.Add(binding);
+        }
+
+        foreach (var binding in fieldProviderBindings)
+        {
+            if (binding.ConsumerArtifactIndex != 0
+                || binding.ConsumerModuleRow != moduleRow)
+            {
+                continue;
+            }
+
+            var expectedOwnerTypeDefRow
+                = binding.ExpectedOwnerTypeDefRow;
+            if (!structureIndexByTypeDefRow.ContainsKey(
+                    expectedOwnerTypeDefRow))
+            {
+                throw Invalid(
+                    "An EN1 FieldDef Import has an owner outside the retained struct closure.");
+            }
+
+            var (fieldStart, fieldEnd)
+                = tables.TypeDefs.GetFieldRange(expectedOwnerTypeDefRow);
+            if (binding.ExpectedFieldDefRow < fieldStart
+                || binding.ExpectedFieldDefRow >= fieldEnd
+                || tables.Fields.GetOwnerTypeDef(
+                    binding.ExpectedFieldDefRow)
+                    != expectedOwnerTypeDefRow)
+            {
+                throw Invalid(
+                    "An EN1 FieldDef Import is outside its expected owner.");
+            }
+
+            var key = (expectedOwnerTypeDefRow,
+                binding.ExpectedFieldDefRow - fieldStart);
+            if (!fieldBindingsByExpectedField.TryGetValue(key,
+                    out var bindings))
+            {
+                bindings = [];
+                fieldBindingsByExpectedField.Add(key, bindings);
             }
             bindings.Add(binding);
         }
@@ -1557,13 +1621,88 @@ public static partial class TrRmExecutableCompiler
                 fieldOrdinal < fieldsWithOrigins.Count; fieldOrdinal++)
             {
                 var fieldRow = fieldStart + fieldOrdinal;
+                var field = fieldsWithOrigins[fieldOrdinal];
+                if (fieldBindingsByExpectedField.TryGetValue(
+                        (typeDefRows[structureIndex], fieldOrdinal),
+                        out var fieldBindings))
+                {
+                    if (exportsByField.ContainsKey(fieldRow))
+                    {
+                        throw Invalid(
+                            "An EN1 expected FieldDef cannot also be exported by its consumer Module.");
+                    }
+
+                    var firstBinding = fieldBindings[0];
+                    if (fieldBindings.Any(binding =>
+                            binding.ProviderArtifactIndex
+                                != firstBinding.ProviderArtifactIndex
+                            || binding.ProviderModuleRow
+                                != firstBinding.ProviderModuleRow
+                            || binding.ProviderTypeDefRow
+                                != firstBinding.ProviderTypeDefRow
+                            || binding.ProviderFieldDefRow
+                                != firstBinding.ProviderFieldDefRow
+                            || !StringComparer.Ordinal.Equals(
+                                binding.ProducerIdentity,
+                                firstBinding.ProducerIdentity)
+                            || binding.TargetRequirement
+                                != firstBinding.TargetRequirement
+                            || binding.RuntimePolicy
+                                != firstBinding.RuntimePolicy))
+                    {
+                        throw Invalid(
+                            "One EN1 expected FieldDef has conflicting provider origins.");
+                    }
+
+                    var providerSnapshot = getSnapshot(
+                        firstBinding.ProviderArtifactIndex,
+                        firstBinding.ProviderModuleRow);
+                    var typeOrigin = laidOut.StandardTypeOrigin
+                        ?? throw Invalid(
+                            "An EN1 imported FieldDef owner has no TypeDef origin.");
+                    if (!SameA2SourceTypeProviderSnapshot(
+                            providerSnapshot, typeOrigin.Provider)
+                        || typeOrigin.DefinitionId
+                            != (0x1300_0000u
+                                | checked((uint)firstBinding.ProviderTypeDefRow))
+                        || !StringComparer.Ordinal.Equals(
+                            providerSnapshot.ModuleIdentity,
+                            firstBinding.ProducerIdentity)
+                        || firstBinding.TargetRequirement
+                            != providerSnapshot.TargetRequirement
+                        || firstBinding.RuntimePolicy
+                            != providerSnapshot.RuntimePolicy)
+                    {
+                        throw Invalid(
+                            "An EN1 FieldDef Import does not bind through its exact owner TypeDef provider.");
+                    }
+
+                    var exportKeys = fieldBindings.Select(
+                            static binding => binding.ExportKey)
+                        .Distinct(StringComparer.Ordinal)
+                        .ToImmutableArray();
+                    var expectedField = field with {
+                        StandardFieldOrigin = null,
+                    };
+                    fieldsWithOrigins[fieldOrdinal] = field with {
+                        StandardFieldOrigin = new BoundStandardFieldOrigin(
+                            providerSnapshot,
+                            0x1400_0000u
+                                | checked((uint)
+                                    firstBinding.ProviderFieldDefRow),
+                            exportKeys, false, expectedField) {
+                            SelectedExportKeys = [],
+                        },
+                    };
+                    continue;
+                }
+
                 if (!exportsByField.TryGetValue(fieldRow,
                         out var exportKeys))
                 {
                     continue;
                 }
 
-                var field = fieldsWithOrigins[fieldOrdinal];
                 var expectedField = field with {
                     StandardFieldOrigin = null,
                 };

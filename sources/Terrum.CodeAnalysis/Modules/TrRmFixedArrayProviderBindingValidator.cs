@@ -143,10 +143,19 @@ internal static class TrRmFixedArrayProviderBindingValidator
         ImmutableArray<TrRmStandardModuleSelection> modules,
         int rootModuleRow)
     {
+        var isEN1ProviderSchema = schemaIdentities.Length != 0
+            && TrRmExecutableCompiler
+                .IsSelectedC1EnumClosureSchemaIdentity(
+                    schemaIdentities[0])
+            && schemaIdentities.All(schemaIdentity =>
+                StringComparer.Ordinal.Equals(schemaIdentity,
+                    schemaIdentities[0]));
         if (consumer.Schema is not (TrRmArtifactSchema.Standard
                 or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft
                 or TrRmArtifactSchema.C1Draft
                 or TrRmArtifactSchema.C1M1Draft)
+            && !(consumer.Schema.UsesC1EnumClosure()
+                && isEN1ProviderSchema)
             || artifacts.Length != schemaIdentities.Length
             || artifacts.Length == 0)
         {
@@ -158,13 +167,28 @@ internal static class TrRmFixedArrayProviderBindingValidator
             && schemaIdentities.All(static schemaIdentity =>
                 StringComparer.Ordinal.Equals(schemaIdentity,
                     InitializationReferenceNestedFieldDestinationsSchemaIdentity));
+        var layoutQueries = schemaIdentities.Length != 0
+            && schemaIdentities.All(static schemaIdentity =>
+                StringComparer.Ordinal.Equals(schemaIdentity,
+                    LayoutQueriesSchemaIdentity));
+        if (!layoutQueries && !nestedFieldDestinations
+            && !isEN1ProviderSchema)
+        {
+            throw new InvalidDataException(
+                "Invalid TRRM Standard FieldDef provider binding.");
+        }
+
         foreach (var schemaIdentity in schemaIdentities)
         {
             if (!StringComparer.Ordinal.Equals(schemaIdentity,
                     LayoutQueriesSchemaIdentity)
                 && !(nestedFieldDestinations
                     && StringComparer.Ordinal.Equals(schemaIdentity,
-                        InitializationReferenceNestedFieldDestinationsSchemaIdentity)))
+                        InitializationReferenceNestedFieldDestinationsSchemaIdentity))
+                && !(isEN1ProviderSchema
+                    && TrRmExecutableCompiler
+                        .IsSelectedC1EnumClosureSchemaIdentity(
+                            schemaIdentity)))
             {
                 throw new InvalidDataException(
                     "Invalid TRRM Standard FieldDef provider binding.");
@@ -501,6 +525,27 @@ internal static class TrRmFixedArrayProviderBindingValidator
             foreach (var module in _modules)
             {
                 var moduleTables = GetTables(module.ArtifactIndex);
+                if (TrRmExecutableCompiler
+                    .IsSelectedC1EnumClosureSchemaIdentity(
+                        _schemaIdentities[module.ArtifactIndex]))
+                {
+                    var (typeDefStart, typeDefEnd)
+                        = moduleTables.Modules.GetTypeDefRange(
+                            module.ModuleRow);
+                    for (var typeDefRow = typeDefStart;
+                        typeDefRow < typeDefEnd; typeDefRow++)
+                    {
+                        var (fieldStart, fieldEnd)
+                            = moduleTables.TypeDefs.GetFieldRange(typeDefRow);
+                        for (var fieldRow = fieldStart;
+                            fieldRow < fieldEnd; fieldRow++)
+                        {
+                            ValidateC1TypeSpecImportUses(moduleTables,
+                                moduleTables.Fields.GetTypeSpecRef(fieldRow));
+                        }
+                    }
+                }
+
                 for (var importRow = 1;
                     importRow <= moduleTables.Imports.Count; importRow++)
                 {
@@ -537,6 +582,9 @@ internal static class TrRmFixedArrayProviderBindingValidator
                     = new bool[moduleTables.ModuleRefs.Count + 1];
                 var isRootModule = module.ArtifactIndex == 0
                     && module.ModuleRow == rootModuleRow;
+                var isEN1 = TrRmExecutableCompiler
+                    .IsSelectedC1EnumClosureSchemaIdentity(
+                        _schemaIdentities[module.ArtifactIndex]);
                 for (var importRow = 1;
                     importRow <= moduleTables.Imports.Count; importRow++)
                 {
@@ -590,6 +638,10 @@ internal static class TrRmFixedArrayProviderBindingValidator
                         }
 
                         default:
+                            if (isEN1)
+                            {
+                                throw InvalidFieldBinding();
+                            }
                             if (!isRootModule
                                 && nestedFieldDestinations
                                 && (expectedDefinition >> 24) == 0x16)
@@ -597,7 +649,7 @@ internal static class TrRmFixedArrayProviderBindingValidator
                                 usedModuleRefs[moduleRefRow] = true;
                                 break;
                             }
-                            if (!isRootModule)
+                            if (!isRootModule || isEN1)
                             {
                                 throw new NotSupportedException(
                                     "A Standard FieldDef provider Module may retain only the selected profile's provider Imports.");
