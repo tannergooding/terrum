@@ -1032,9 +1032,20 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 consumerTables.Methods.GetBodyRow(1),
                 consumerTables.Contracts.Count);
             Assert.That(queryBody.HasLayoutQueryOperation, Is.True);
+            var unusedProviderArtifact = TrRmExecutableCompiler.EmitStandard(
+                program, "UnusedClassLayoutProvider", schemaIdentity, 1, [],
+                [], [classExport], []);
+            var unusedProviderInput = new TrRmStandardArtifactInput(
+                schemaIdentity, unusedProviderArtifact);
+            var providerInputs = new[] { unusedProviderInput, input };
             var loadedClassQuery = TrRmExecutableCompiler.LoadStandard(
                 new TrRmStandardArtifactInput(schemaIdentity,
-                    emittedConsumer), "ClassLayoutConsumer", [input]);
+                    emittedConsumer), "ClassLayoutConsumer", providerInputs);
+            Assert.That(loadedClassQuery.StandardClassDeclarations
+                .Single(static declaration =>
+                    !declaration.SelectedExportKeys.IsEmpty)
+                .Declaration.Provider.ModuleIdentity,
+                Is.EqualTo("ClassLayoutProvider"));
             BoundLayoutQuery? loadedQuery = null;
             Assert.That(BoundTreeTraversal.VisitExpressions(
                 loadedClassQuery.Functions.Single().Body,
@@ -1066,7 +1077,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 .GetFieldRange(1).Count, Is.EqualTo(1));
             var reloadedClassQuery = TrRmExecutableCompiler.LoadStandard(
                 new TrRmStandardArtifactInput(schemaIdentity,
-                    reemittedClassQuery), "ClassLayoutConsumer", [input]);
+                    reemittedClassQuery), "ClassLayoutConsumer",
+                providerInputs);
             Assert.That(reloadedClassQuery.Functions.Single().Body
                 .Statements.Single(), Is.TypeOf<BoundReturn>());
 
