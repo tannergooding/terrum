@@ -4379,56 +4379,6 @@ internal sealed class TrRmStandardInitializationReferenceBodyTests
             footprintRow), Is.Zero);
         Assert.That(tables.Features.TryGetFeature(11, out _), Is.True);
 
-        var artifactIndex = TrRmArtifactIndex
-            .ForGeneralPredicateGraphsDraft(artifact);
-        var malformedSections = new List<TrRmSection>(
-            artifactIndex.SectionCount);
-        var changedOutputState = false;
-        for (var sectionIndex = 0;
-            sectionIndex < artifactIndex.SectionCount; sectionIndex++)
-        {
-            artifactIndex.GetSection(sectionIndex, out var kind,
-                out var flags, out var bytes, out var recordCount);
-            if (kind != 0x0005)
-            {
-                malformedSections.Add(new TrRmSection(kind, flags,
-                    checked((uint)recordCount), bytes.ToArray()));
-                continue;
-            }
-
-            var contractBytes = bytes.ToArray();
-            var indexLength = checked((recordCount + 1) * sizeof(uint));
-            for (var row = 0; row < recordCount; row++)
-            {
-                var rowOffset = checked(indexLength + (int)
-                    BinaryPrimitives.ReadUInt32LittleEndian(
-                        contractBytes.AsSpan(row * sizeof(uint))));
-                if (BinaryPrimitives.ReadUInt16LittleEndian(
-                        contractBytes.AsSpan(rowOffset + 4))
-                    != 0x0002)
-                {
-                    continue;
-                }
-
-                contractBytes[rowOffset + 16] = 1;
-                changedOutputState = true;
-            }
-
-            malformedSections.Add(new TrRmSection(kind, flags,
-                checked((uint)recordCount), contractBytes));
-        }
-
-        Assert.That(changedOutputState, Is.True);
-        var malformedArtifact = TrRmArtifactWriter.Encode(
-            malformedSections,
-            TrRmArtifactSchema.GeneralPredicateGraphsDraft);
-        _ = Assert.Throws<NotSupportedException>(() =>
-            TrRmExecutableCompiler.LoadStandard(
-                new TrRmStandardArtifactInput(
-                    GeneralPredicateGraphsSchemaIdentity,
-                    malformedArtifact),
-                moduleIdentity, []));
-
         var loaded = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(
                 GeneralPredicateGraphsSchemaIdentity, artifact),
@@ -4449,6 +4399,68 @@ internal sealed class TrRmStandardInitializationReferenceBodyTests
             .GetReadFootprintRow(checked((int)reemittedGraph));
         Assert.That(reemitted.PredicateReadFootprints.GetRootRowCount(
             reemittedFootprint), Is.Zero);
+    }
+
+    [Test]
+    public void GeneralPredicateGraphEmitsUnconditionalCompleteOutput()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            void AlwaysFill(ref<init int32> destination)
+                ensure *destination is init
+            {
+                *destination = 42;
+            }
+            """), CreateDeclarationContractOptions());
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = (BoundProgram)compilation.Program!;
+        var function = program.Functions.Single(
+            static candidate => candidate.Name == "AlwaysFill");
+        Assert.That(function.CheckedOutputStatePredicates, Has.Length.EqualTo(1));
+        Assert.That(function.CheckedOutputStatePredicates[0].State, Is.EqualTo(1));
+        Assert.That(function.CheckedOutputStatePredicates[0].Predicate,
+            Is.TypeOf<BoundConstant>());
+        Assert.That(((BoundConstant)function
+                .CheckedOutputStatePredicates[0].Predicate).Value,
+            Is.EqualTo(1));
+
+        const string moduleIdentity = "unconditional-complete-output";
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            moduleIdentity, GeneralPredicateGraphsSchemaIdentity, 1);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateGeneralPredicateGraphsDraftAndGetExecutionTables(
+                TrRmArtifactIndex.ForGeneralPredicateGraphsDraft(artifact));
+        var output = tables.Contracts.GetOutputStateContracts(1).Single();
+        Assert.That(output.State, Is.EqualTo(1));
+        var footprintRow
+            = tables.PredicateGraphs.GetReadFootprintRow(
+                checked((int)output.PredicateGraphRow));
+        Assert.That(tables.PredicateReadFootprints.GetRootFirstRow(
+            footprintRow), Is.Zero);
+        Assert.That(tables.PredicateReadFootprints.GetRootRowCount(
+            footprintRow), Is.Zero);
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(
+                GeneralPredicateGraphsSchemaIdentity, artifact),
+            moduleIdentity, []);
+        var loadedPredicate = loaded.Functions.Single(
+            static candidate => candidate.Name == "AlwaysFill")
+            .CheckedOutputStatePredicates.Single();
+        Assert.That(loadedPredicate.State, Is.EqualTo(1));
+        Assert.That(loadedPredicate.Predicate, Is.TypeOf<BoundConstant>());
+
+        var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(loaded,
+            "unconditional-complete-output-reemitted",
+            GeneralPredicateGraphsSchemaIdentity, 1);
+        var reloaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(
+                GeneralPredicateGraphsSchemaIdentity, reemittedArtifact),
+            "unconditional-complete-output-reemitted", []);
+        Assert.That(reloaded.Functions.Single(
+                static candidate => candidate.Name == "AlwaysFill")
+            .CheckedOutputStatePredicates.Single().State, Is.EqualTo(1));
     }
 
     [Test]
