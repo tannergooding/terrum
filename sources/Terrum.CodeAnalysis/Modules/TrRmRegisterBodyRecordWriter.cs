@@ -12,6 +12,9 @@ internal readonly record struct TrRmRegisterBodyCallInput(
 internal readonly record struct TrRmRegisterBodyGenericCallArgument(
     byte Kind, uint Reference);
 
+internal readonly record struct TrRmRegisterBodyConstructorBinding(
+    byte BindingKind, byte SourceUse, ushort ConstantMapIndex);
+
 internal static class TrRmRegisterBodyRecordWriter
 {
     private const int RecordHeaderSize = 4;
@@ -156,11 +159,22 @@ internal static class TrRmRegisterBodyRecordWriter
         ushort destinationIndex, ushort baseIndex, byte indexKind,
         byte targetRefKind, ushort indexIndex, uint targetRef,
         ushort referentTypeMapIndex, TrRmArtifactSchema schema,
-        TrRmA3LayoutResourceLedger? resourceLedger = null)
+        TrRmA3LayoutResourceLedger? resourceLedger = null,
+        ushort flags = 0,
+        bool generalPredicateGraphsInitializationReferenceBodies = false)
     {
         if (targetKind is < 1 or > 4 || accessKind is < 1 or > 5
             || destinationKind > 2 || baseKind > 2 || indexKind > 2
-            || targetRefKind > 3
+            || targetRefKind > (schema
+                .UsesNestedInitializationReferenceFieldDestinations()
+                    ? 4 : 3)
+            || (flags != 0
+                && (!((schema is TrRmArtifactSchema.Standard
+                        or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
+                        or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft)
+                        || (schema.UsesGeneralPredicateGraphs()
+                            && generalPredicateGraphsInitializationReferenceBodies))
+                    || flags is not (1 or 3) || accessKind != 3))
             || (targetRefKind == 3
                 && (!schema.UsesForeignInvocationStorageFixedArrays()
                     || targetKind != 3 || targetRef is 0 or > 0xFF_FFFF))
@@ -187,6 +201,7 @@ internal static class TrRmRegisterBodyRecordWriter
         Write(result, RecordHeaderSize + 10, indexIndex);
         Write(result, RecordHeaderSize + 12, targetRef);
         Write(result, RecordHeaderSize + 16, referentTypeMapIndex);
+        Write(result, RecordHeaderSize + 18, flags);
         return result;
     }
 
@@ -248,14 +263,15 @@ internal static class TrRmRegisterBodyRecordWriter
         byte sourceKind, byte transition, byte sourceUse, ushort placeIndex,
         ushort sourceIndex, TrRmArtifactSchema schema)
     {
-        if (placeKind != 1 || sourceKind is not (1 or 2)
-            || transition is not (1 or 2) || sourceUse is not (1 or 6)
-            || placeIndex > 13
+        if (placeKind is not (1 or 2) || sourceKind is not (1 or 2)
+            || transition is not (1 or 2)
+            || sourceUse is not (1 or 2 or 6)
+            || (placeKind == 1 && placeIndex > 13)
             || (sourceKind == 1 && sourceIndex > 15)
-            || ((transition == 2 || sourceUse == 6)
+            || (sourceUse == 6
                 && !schema
                     .UsesForeignInvocationStorageFixedArrayRepeatInitialization())
-            || (sourceUse == 6 && transition != 1)
+            || (sourceUse == 6 && (transition != 1 || placeKind != 1))
             )
         {
             throw new ArgumentOutOfRangeException(nameof(placeKind));
@@ -426,6 +442,71 @@ internal static class TrRmRegisterBodyRecordWriter
             payloadOffset += sizeof(ushort);
         }
 
+        return result;
+    }
+
+    internal static byte[] EncodeConstructorBinding(ushort methodMapIndex,
+        ushort exceptionTypeMapIndex,
+        IReadOnlyList<TrRmRegisterBodyConstructorBinding> bindings,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
+    {
+        ArgumentNullException.ThrowIfNull(bindings);
+        var payloadLength = 16L + ((long)bindings.Count * 8);
+        if (payloadLength > int.MaxValue - RecordHeaderSize)
+        {
+            throw new ArgumentOutOfRangeException(nameof(bindings));
+        }
+
+        resourceLedger?.ConsumeWork(checked((ulong)bindings.Count + 9UL
+            + (ulong)payloadLength));
+        var result = new byte[RecordHeaderSize + (int)payloadLength];
+        result[0] = 0x0B;
+        Write(result, RecordHeaderSize, methodMapIndex);
+        Write(result, RecordHeaderSize + 2, exceptionTypeMapIndex);
+        Write(result, RecordHeaderSize + 4, 0u);
+        Write(result, RecordHeaderSize + 8, checked((uint)bindings.Count));
+        Write(result, RecordHeaderSize + 12, checked((uint)bindings.Count));
+
+        for (var index = 0; index < bindings.Count; index++)
+        {
+            resourceLedger?.ConsumeWork();
+            var binding = bindings[index];
+            if (binding.BindingKind is not (1 or 2)
+                || binding.SourceUse > 5)
+            {
+                throw new ArgumentOutOfRangeException(nameof(bindings));
+            }
+
+            var offset = RecordHeaderSize + 16 + (index * 8);
+            Write(result, offset, checked((uint)index));
+            result[offset + 4] = binding.BindingKind;
+            result[offset + 5] = binding.SourceUse;
+            Write(result, offset + 6, binding.ConstantMapIndex);
+        }
+
+        return result;
+    }
+
+    internal static byte[] EncodeRequirementFailure(
+        ushort exceptionTypeMapIndex, ushort constructorBindingRecordIndex,
+        byte conditionKind, byte conditionRegister, byte predicateMask,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
+    {
+        if (conditionKind is not (1 or 2) || conditionRegister > 15
+            || predicateMask > 15
+            || (conditionKind == 1 && predicateMask != 0))
+        {
+            throw new ArgumentOutOfRangeException(nameof(conditionKind));
+        }
+
+        resourceLedger?.ConsumeWork(1 + 8UL);
+        var result = new byte[RecordHeaderSize + 8];
+        result[0] = 0x08;
+        Write(result, RecordHeaderSize, exceptionTypeMapIndex);
+        Write(result, RecordHeaderSize + 2, constructorBindingRecordIndex);
+        result[RecordHeaderSize + 4] = conditionKind;
+        result[RecordHeaderSize + 5] = conditionRegister;
+        result[RecordHeaderSize + 6] = predicateMask;
         return result;
     }
 

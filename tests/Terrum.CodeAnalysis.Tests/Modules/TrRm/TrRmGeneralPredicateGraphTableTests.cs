@@ -68,6 +68,22 @@ internal sealed class TrRmGeneralPredicateGraphTableTests
     }
 
     [Test]
+    public void PropertyInitializedNodeRequiresPI1Schema()
+    {
+        var node = new byte[16];
+        BinaryPrimitives.WriteUInt32LittleEndian(node, 0x37);
+        BinaryPrimitives.WriteUInt32LittleEndian(node.AsSpan(4), 0xF200_0001);
+        BinaryPrimitives.WriteUInt32LittleEndian(node.AsSpan(8), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(node.AsSpan(12), 1);
+        var schema
+            = TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft;
+
+        Assert.DoesNotThrow(() => CreatePropertyInitializedNode(node, schema));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            CreatePropertyInitializedNode(node, s_schema));
+    }
+
+    [Test]
     public void ReadsMixedConstantExecutionSubstitutionSlots()
     {
         var typeSpecBytes = TrRmTypeSpecTableWriter.Encode([
@@ -766,6 +782,17 @@ internal sealed class TrRmGeneralPredicateGraphTableTests
         => CreatePredicateGraphArtifact(nodeKind, capturedTypePattern: false,
             duplicateBinder: false, omitBinder: false);
 
+    private static void CreatePropertyInitializedNode(byte[] bytes,
+        TrRmArtifactSchema schema)
+    {
+        var typeSpecBytes = TrRmTypeSpecTableWriter.Encode([
+            TrRmTypeSpecTableWriter.Builtin(1),
+        ], typeDefCount: 0, importCount: 0, genericParamCount: 0);
+        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes, 1,
+            typeDefCount: 0, importCount: 0, genericParamCount: 0);
+        _ = new TrRmPredicateNodeTableReader(bytes, 1, 1, typeSpecs, schema);
+    }
+
     private static byte[] CreateCapturedTypePatternGraphArtifact(
         bool duplicateBinder, bool omitBinder)
         => CreatePredicateGraphArtifact(0x34, capturedTypePattern: true,
@@ -821,9 +848,10 @@ internal sealed class TrRmGeneralPredicateGraphTableTests
             => left.FeatureId.CompareTo(right.FeatureId));
         var featureBytes = TrRmFeatureTableWriter.Encode(featureRows, s_schema);
         var featureCount = featureRows.Count;
+        var includeStaticInitialization = !generalOutputSelector;
         var typeDefCount = includeConstantExecution ? 2 : 1;
         var moduleBytes = TrRmModuleTableWriter.Encode([
-            new TrRmModuleRow(2, 0, 0, 0, 1, 1, 1, 1, 1, featureCount),
+            new TrRmModuleRow(2, 1, 0, 0, 1, 1, 1, 1, 1, featureCount),
         ], strings, moduleRefCount: includeConstantExecution ? 1 : 0,
             typeDefCount, methodDefCount: 2,
             sourceFileCount: 0, featureCount);
@@ -832,7 +860,8 @@ internal sealed class TrRmGeneralPredicateGraphTableTests
             typeDefCount, 2, 0, featureCount);
         var predicateContractCount = generalOutputSelector
             && includeGeneralOutputState ? 2 : 1;
-        var contractCount = predicateContractCount + 2
+        var contractCount = predicateContractCount
+            + (includeStaticInitialization ? 2 : 0)
             + (duplicateInitializationDemand ? 1 : 0);
         var typeDefRows = new List<TrRmTypeDefRow> {
             new TrRmTypeDefRow(1, 3, 4, 0, 0, 0, 0, 1, 1, 0, 0),
@@ -926,32 +955,43 @@ internal sealed class TrRmGeneralPredicateGraphTableTests
         var methodBytes = TrRmMethodDefTableWriter.Encode([
             new TrRmMethodDefRow(1, 4, 1, 0, 1, predicateContractCount, 0),
             new TrRmMethodDefRow(1, 6, 2, 0,
-                predicateContractCount + 1,
+                includeStaticInitialization ? predicateContractCount + 1 : 0,
                 contractCount - predicateContractCount, 0),
         ], strings, modules, typeDefs, signatures, contractCount, bodyCount: 0);
         var methods = new TrRmMethodDefTableReader(
             methodBytes, 2, strings, modules, typeDefs, signatures,
             contractCount, 0);
-        var eagerGroupBytes = TrRmEagerGroupTableWriter.Encode([
-            new TrRmEagerGroupRow(1, 1, 1, 0, 0, 2),
-        ], typeDefCount: 1, initializerCount: 0, methodDefCount: 2, s_schema);
-        var eagerGroups = new TrRmEagerGroupTableReader(eagerGroupBytes, 1,
+        var eagerGroupRows = includeStaticInitialization
+            ? new[] { new TrRmEagerGroupRow(1, 1, 1, 0, 0, 2) }
+            : [];
+        var eagerGroupBytes = TrRmEagerGroupTableWriter.Encode(eagerGroupRows,
             typeDefCount: 1, initializerCount: 0, methodDefCount: 2, s_schema);
-        var staticFieldBytes = TrRmStaticFieldTableWriter.Encode([
-            new TrRmStaticFieldRow(1, 5, 0xF200_0008, 0, 1),
-        ], strings, typeDefs, typeSpecs, eagerGroups, s_schema);
-        var staticFields = new TrRmStaticFieldTableReader(staticFieldBytes, 1,
+        var eagerGroups = new TrRmEagerGroupTableReader(eagerGroupBytes,
+            eagerGroupRows.Length,
+            typeDefCount: 1, initializerCount: 0, methodDefCount: 2, s_schema);
+        var staticFieldRows = includeStaticInitialization
+            ? new[] { new TrRmStaticFieldRow(1, 5, 0xF200_0008, 0, 1) }
+            : [];
+        var staticFieldBytes = TrRmStaticFieldTableWriter.Encode(
+            staticFieldRows, strings, typeDefs, typeSpecs, eagerGroups, s_schema);
+        var staticFields = new TrRmStaticFieldTableReader(staticFieldBytes,
+            staticFieldRows.Length,
             strings, typeDefs, typeSpecs, eagerGroups, s_schema);
-        var staticPublicationCount = includeConstantExecution ? 1 : 0;
+        var staticPublicationCount
+            = includeStaticInitialization && includeConstantExecution ? 1 : 0;
         var staticFieldContractBytes =
-            TrRmStaticFieldContractTableWriter.Encode([
-                new TrRmStaticFieldContractRow(1, 1, 0, 0, 0, 0,
-                    staticPublicationCount),
-            ], staticFieldCount: 1, lazyUnitCount: 0,
+            TrRmStaticFieldContractTableWriter.Encode(
+                includeStaticInitialization
+                    ? [new TrRmStaticFieldContractRow(1, 1, 0, 0, 0, 0,
+                        staticPublicationCount)]
+                    : [], staticFieldCount: staticFieldRows.Length,
+                lazyUnitCount: 0,
             publicationCount: staticPublicationCount,
             staticFields, s_schema);
         var staticFieldContracts = new TrRmStaticFieldContractTableReader(
-            staticFieldContractBytes, 1, 1, 0, staticPublicationCount,
+            staticFieldContractBytes,
+            includeStaticInitialization ? 1 : 0,
+            staticFieldRows.Length, 0, staticPublicationCount,
             staticFields, s_schema);
         var eagerInitializerBytes = TrRmEagerInitializerTableWriter.Encode(
             Array.Empty<TrRmEagerInitializerRow>(), eagerGroups, staticFields,
@@ -986,10 +1026,13 @@ internal sealed class TrRmGeneralPredicateGraphTableTests
             contractRows.Add(new TrRmContractRow(0x1600_0001, 0x0002,
                 outputStatePayload));
         }
-        contractRows.Add(new TrRmContractRow(
-            0x1600_0002, 0x13, initializationRolePayload));
-        contractRows.Add(new TrRmContractRow(
-            0x1600_0002, 0x14, initializationDemandPayload));
+        if (includeStaticInitialization)
+        {
+            contractRows.Add(new TrRmContractRow(
+                0x1600_0002, 0x13, initializationRolePayload));
+            contractRows.Add(new TrRmContractRow(
+                0x1600_0002, 0x14, initializationDemandPayload));
+        }
         if (duplicateInitializationDemand)
         {
             contractRows.Add(new TrRmContractRow(
@@ -1297,10 +1340,14 @@ internal sealed class TrRmGeneralPredicateGraphTableTests
             new TrRmSection(0x0016, 0, 2, methodBytes),
             new TrRmSection(0x0017, 0, 2, signatureBytes),
             new TrRmSection(0x001B, 0, (uint)contractCount, contracts),
-            new TrRmSection(0x0055, 0, 1, staticFieldBytes),
-            new TrRmSection(0x0056, 0, 1, staticFieldContractBytes),
-            new TrRmSection(0x0057, 0, 1, eagerGroupBytes),
         };
+        if (includeStaticInitialization)
+        {
+            sections.Add(new TrRmSection(0x0055, 0, 1, staticFieldBytes));
+            sections.Add(new TrRmSection(0x0056, 0, 1,
+                staticFieldContractBytes));
+            sections.Add(new TrRmSection(0x0057, 0, 1, eagerGroupBytes));
+        }
         if (generalOutputSelector)
         {
             sections.Add(new TrRmSection(0x0018, 0,

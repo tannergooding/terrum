@@ -29,10 +29,28 @@ public static class TrRmContractTableWriter
         TrRmTypeDefTableReader types, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
         TrRmTypeSpecTableReader typeSpecs, bool developmentProfile = false)
-        => EncodeCore(rows, types, methods, signatures, parameters, typeSpecs,
+        => EncodeStandardProfile(rows, types, methods, signatures, parameters,
+            typeSpecs, developmentProfile
+                ? TrRmArtifactSchema.Development : TrRmArtifactSchema.Standard);
+
+    internal static byte[] EncodeStandardProfile(
+        IReadOnlyList<TrRmContractRow> rows, TrRmTypeDefTableReader types,
+        TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
+        TrRmParamTableReader parameters, TrRmTypeSpecTableReader typeSpecs,
+        TrRmArtifactSchema schema)
+    {
+        if (schema is not (TrRmArtifactSchema.Standard
+            or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
+            or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft
+            or TrRmArtifactSchema.Development))
+        {
+            throw new ArgumentOutOfRangeException(nameof(schema));
+        }
+
+        return EncodeCore(rows, types, methods, signatures, parameters, typeSpecs,
             fieldPathCount: 0, predicateGraphCount: 0, default, default,
-            developmentProfile ? TrRmArtifactSchema.Development
-                : TrRmArtifactSchema.Standard, profileAware: false);
+            schema, profileAware: false);
+    }
 
     internal static byte[] EncodeCopyOriginDraft(IReadOnlyList<TrRmContractRow> rows,
         TrRmTypeDefTableReader types, TrRmMethodDefTableReader methods,
@@ -58,10 +76,11 @@ public static class TrRmContractTableWriter
         TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
         TrRmParamTableReader parameters, TrRmTypeSpecTableReader typeSpecs,
         TrRmFeatureTableReader features, TrRmModuleTableReader modules,
-        int predicateGraphCount)
+        int predicateGraphCount,
+        TrRmArtifactSchema schema = TrRmArtifactSchema.Standard)
         => EncodeCore(rows, types, methods, signatures, parameters, typeSpecs,
             fieldPathCount: 0, predicateGraphCount, features, modules,
-            TrRmArtifactSchema.Standard, profileAware: true);
+            schema, profileAware: true);
 
     internal static byte[] EncodeForeignInvocationDraft(
         IReadOnlyList<TrRmContractRow> rows, TrRmTypeDefTableReader types,
@@ -83,7 +102,9 @@ public static class TrRmContractTableWriter
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft
             or TrRmArtifactSchema.LocalAggregateLayoutDraft
-            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft))
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
+            or TrRmArtifactSchema.InitializationReferencePointerLoadNativeParameterDraft
+            or TrRmArtifactSchema.InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft))
         {
             throw new ArgumentOutOfRangeException(nameof(schema));
         }
@@ -107,14 +128,74 @@ public static class TrRmContractTableWriter
         TrRmStaticFieldTableReader staticFields = default,
         TrRmStaticFieldContractTableReader staticFieldContracts = default,
         TrRmEagerInitializerTableReader eagerInitializers = default,
-        TrRmLazyUnitTableReader lazyUnits = default)
+        TrRmLazyUnitTableReader lazyUnits = default,
+        TrRmArtifactSchema schema =
+            TrRmArtifactSchema.GeneralPredicateGraphsDraft)
         => EncodeCore(CanonicalizeEvaluationFormRows(rows), types, methods,
             signatures, parameters, typeSpecs, fieldPathCount,
             predicateGraphCount, features, modules,
-            TrRmArtifactSchema.GeneralPredicateGraphsDraft, profileAware: true,
+            schema, profileAware: true,
             eagerGroups: eagerGroups, staticFields: staticFields,
             staticFieldContracts: staticFieldContracts,
             eagerInitializers: eagerInitializers, lazyUnits: lazyUnits);
+
+    internal static byte[] EncodeC1M1ConstructionDraft(
+        IReadOnlyList<TrRmContractRow> rows,
+        TrRmTypeDefTableReader types, TrRmMethodDefTableReader methods,
+        TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
+        TrRmTypeSpecTableReader typeSpecs, TrRmFieldDefTableReader fields,
+        TrRmPropertyDefTableReader properties,
+        TrRmImportTableReader imports,
+        TrRmFeatureTableReader features, TrRmModuleTableReader modules,
+        int predicateGraphCount,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
+        => EncodeCore(CanonicalizeConstructionRows(rows, resourceLedger),
+            types, methods, signatures, parameters, typeSpecs,
+            fieldPathCount: 0, predicateGraphCount, features, modules,
+            TrRmArtifactSchema.C1M1ConstructionDraft, profileAware: true,
+            resourceLedger: resourceLedger, fields: fields,
+            properties: properties, imports: imports);
+
+    internal static byte[] EncodeC1M1Construction2Draft(
+        IReadOnlyList<TrRmContractRow> rows,
+        TrRmTypeDefTableReader types, TrRmMethodDefTableReader methods,
+        TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
+        TrRmTypeSpecTableReader typeSpecs, TrRmFieldDefTableReader fields,
+        TrRmPropertyDefTableReader properties,
+        TrRmImportTableReader imports,
+        TrRmFeatureTableReader features, TrRmModuleTableReader modules,
+        int predicateGraphCount,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
+        => EncodeCore(CanonicalizeConstructionRows(rows, resourceLedger),
+            types, methods, signatures, parameters, typeSpecs,
+            fieldPathCount: 0, predicateGraphCount, features, modules,
+            TrRmArtifactSchema.C1M1Construction2Draft, profileAware: true,
+            resourceLedger: resourceLedger, fields: fields,
+            properties: properties, imports: imports);
+
+    internal static byte[] EncodeConstructionDraftForSchema(
+        IReadOnlyList<TrRmContractRow> rows,
+        TrRmTypeDefTableReader types, TrRmMethodDefTableReader methods,
+        TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
+        TrRmTypeSpecTableReader typeSpecs, TrRmFieldDefTableReader fields,
+        TrRmPropertyDefTableReader properties,
+        TrRmImportTableReader imports,
+        TrRmFeatureTableReader features, TrRmModuleTableReader modules,
+        int predicateGraphCount, TrRmArtifactSchema schema,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
+    {
+        if (!schema.UsesConstructionContracts())
+        {
+            throw new ArgumentOutOfRangeException(nameof(schema));
+        }
+
+        return EncodeCore(CanonicalizeConstructionRows(rows, resourceLedger),
+            types, methods, signatures, parameters, typeSpecs,
+            fieldPathCount: 0, predicateGraphCount, features, modules,
+            schema, profileAware: true,
+            resourceLedger: resourceLedger, fields: fields,
+            properties: properties, imports: imports);
+    }
 
     internal static byte[] EncodeDevelopmentFunctionPointerEffectsDraft(
         IReadOnlyList<TrRmContractRow> rows, TrRmTypeDefTableReader types,
@@ -152,6 +233,61 @@ public static class TrRmContractTableWriter
                         row.Payload, fieldPaths, resourceLedger),
                 }
                 : row;
+        }
+
+        return result;
+    }
+
+    private static TrRmContractRow[] CanonicalizeConstructionRows(
+        IReadOnlyList<TrRmContractRow> rows,
+        TrRmA3LayoutResourceLedger? resourceLedger)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+        resourceLedger?.ConsumeWork(checked((ulong)rows.Count + 1UL));
+        var result = new TrRmContractRow[rows.Count];
+        for (var index = 0; index < rows.Count; index++)
+        {
+            resourceLedger?.ConsumeWork();
+            var row = rows[index];
+            if (row.Kind != 3 || row.Payload.Length < 8
+                || row.Payload.Span[0] != 1)
+            {
+                result[index] = row;
+                continue;
+            }
+
+            var payload = row.Payload.Span;
+            var memberCount = BinaryPrimitives.ReadUInt32LittleEndian(
+                payload[4..]);
+            var expectedLength = 8UL + ((ulong)memberCount * sizeof(uint));
+            if (expectedLength != (ulong)payload.Length)
+            {
+                throw InvalidConstruction();
+            }
+
+            var memberIds = new uint[checked((int)memberCount)];
+            resourceLedger?.ConsumeWork(
+                checked((ulong)memberIds.Length + 1UL));
+            for (var memberIndex = 0; memberIndex < memberIds.Length;
+                memberIndex++)
+            {
+                memberIds[memberIndex] = BinaryPrimitives
+                    .ReadUInt32LittleEndian(
+                        payload[(8 + (memberIndex * sizeof(uint)))..]);
+            }
+
+            Array.Sort(memberIds);
+            var canonical = new byte[payload.Length];
+            payload[..8].CopyTo(canonical);
+            for (var memberIndex = 0; memberIndex < memberIds.Length;
+                memberIndex++)
+            {
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    canonical.AsSpan(8 + (memberIndex * sizeof(uint))),
+                    memberIds[memberIndex]);
+            }
+
+            result[index] = row with { Payload = canonical };
         }
 
         return result;
@@ -616,6 +752,9 @@ public static class TrRmContractTableWriter
     private static InvalidDataException InvalidReturnCoverage()
         => new("Invalid TRRM ReturnCoverage contract.");
 
+    private static InvalidDataException InvalidConstruction()
+        => new("Invalid TRRM Construction contract.");
+
     private static InvalidDataException InvalidContract()
         => new("Invalid TRRM Contract table.");
 
@@ -645,7 +784,10 @@ public static class TrRmContractTableWriter
         TrRmStaticFieldContractTableReader staticFieldContracts = default,
         TrRmEagerInitializerTableReader eagerInitializers = default,
         TrRmLazyUnitTableReader lazyUnits = default,
-        TrRmA3LayoutResourceLedger? resourceLedger = null)
+        TrRmA3LayoutResourceLedger? resourceLedger = null,
+        TrRmFieldDefTableReader fields = default,
+        TrRmPropertyDefTableReader properties = default,
+        TrRmImportTableReader imports = default)
     {
         ArgumentNullException.ThrowIfNull(rows);
         var rowCount = rows.Count;
@@ -698,7 +840,7 @@ public static class TrRmContractTableWriter
                 signatures, parameters, typeSpecs, fieldPathCount, features,
                 modules, schema, predicateGraphCount, eagerGroups,
                 staticFields, staticFieldContracts, eagerInitializers, lazyUnits,
-                resourceLedger);
+                resourceLedger, fields, properties, imports);
         }
         else
         {

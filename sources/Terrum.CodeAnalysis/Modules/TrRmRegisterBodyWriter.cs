@@ -21,7 +21,9 @@ internal static class TrRmRegisterBodyWriter
         IReadOnlyList<ReadOnlyMemory<byte>> records, ReadOnlyMemory<byte> code,
         int contractCount = 0,
         TrRmArtifactSchema schema = TrRmArtifactSchema.Standard,
-        TrRmA3LayoutResourceLedger? resourceLedger = null)
+        TrRmA3LayoutResourceLedger? resourceLedger = null,
+        bool generalPredicateGraphsInitializationReferenceBodies = false,
+        bool usesNativePointerLoads = false)
     {
         ArgumentNullException.ThrowIfNull(blocks);
         ArgumentNullException.ThrowIfNull(records);
@@ -31,6 +33,8 @@ internal static class TrRmRegisterBodyWriter
             throw new ArgumentOutOfRangeException(nameof(contractCount));
         }
         if (schema is not (TrRmArtifactSchema.Standard
+            or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
+            or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft
             or TrRmArtifactSchema.Development
             or TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft
             or TrRmArtifactSchema.DevelopmentNativeConventionsDraft
@@ -49,12 +53,41 @@ internal static class TrRmRegisterBodyWriter
             or TrRmArtifactSchema.NominalEnumsDraft
             or TrRmArtifactSchema.RootPinRuntimeDraft
             or TrRmArtifactSchema.GeneralPredicateGraphsDraft
+            or TrRmArtifactSchema.InitializationReferencePointerLoadNativeParameterDraft
+            or TrRmArtifactSchema.InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft
             or TrRmArtifactSchema.RegisterExceptionRegionsDraft
             or TrRmArtifactSchema.GenericMethodCallsDraft
+            or TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft
+            or TrRmArtifactSchema.GenericMethodCallsParameterLabelsReceiverAccessDraft
+            or TrRmArtifactSchema.C1Draft
+            or TrRmArtifactSchema.C1ParameterLabelsReceiverAccessDraft
+            or TrRmArtifactSchema.C1M1Draft
+            or TrRmArtifactSchema.C1M1ParameterLabelsReceiverAccessDraft
+            or TrRmArtifactSchema.C1M1ConstructionDraft
+            or TrRmArtifactSchema.C1M1ConstructionParameterLabelsReceiverAccessDraft
+            or TrRmArtifactSchema.C1M1Construction2Draft
+            or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft
             or TrRmArtifactSchema.GenericConstantMethodsDraft))
         {
             throw new ArgumentOutOfRangeException(nameof(schema));
         }
+        if (usesNativePointerLoads
+            && (schema is not (TrRmArtifactSchema.Standard
+                or TrRmArtifactSchema.GeneralPredicateGraphsDraft
+                or TrRmArtifactSchema.InitializationReferencePointerLoadNativeParameterDraft
+                or TrRmArtifactSchema.InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft)
+                || (schema.UsesGeneralPredicateGraphs()
+                    && !generalPredicateGraphsInitializationReferenceBodies)))
+        {
+            throw new ArgumentOutOfRangeException(nameof(usesNativePointerLoads));
+        }
+
         if (blocks.Count is < 1 or > 65_536)
         {
             throw new ArgumentOutOfRangeException(nameof(blocks));
@@ -111,16 +144,30 @@ internal static class TrRmRegisterBodyWriter
         recordOffsets[^1] = checked((uint)recordDataLength);
 
         var codeCursor = 0u;
-        foreach (var block in blocks)
+        for (var blockIndex = 0; blockIndex < blocks.Count; blockIndex++)
         {
-            resourceLedger?.ConsumeWork(3);
+            var block = blocks[blockIndex];
+            resourceLedger?.ConsumeWork(2);
             if (codeCursor > (uint)code.Length || block.CodeOffset != codeCursor
                 || block.CodeLength == 0
-                || block.CodeLength > (uint)code.Length - codeCursor
-                || block.EntryStateRecordIndex >= records.Count
-                || records[block.EntryStateRecordIndex].Span[0] != 0x01)
+                || block.CodeLength > (uint)code.Length - codeCursor)
             {
-                throw new ArgumentException("A register Body Block has an invalid code or entry-state range.", nameof(blocks));
+                throw new ArgumentException(
+                    $"Register Body Block {blockIndex} has invalid code range offset {block.CodeOffset}, length {block.CodeLength}, expected offset {codeCursor}, total length {code.Length}.",
+                    nameof(blocks));
+            }
+            if (block.EntryStateRecordIndex >= records.Count)
+            {
+                throw new ArgumentException(
+                    $"Register Body Block {blockIndex} has an out-of-range entry-state record.",
+                    nameof(blocks));
+            }
+            var entryState = records[block.EntryStateRecordIndex].Span;
+            if (entryState.IsEmpty || entryState[0] != 0x01)
+            {
+                throw new ArgumentException(
+                    $"Register Body Block {blockIndex} entry-state record {block.EntryStateRecordIndex} is not a BlockEntryState.",
+                    nameof(blocks));
             }
 
             resourceLedger?.ConsumeWork();
@@ -189,7 +236,9 @@ internal static class TrRmRegisterBodyWriter
         }
 
         _ = new TrRmRegisterBodyReader(result, contractCount, schema,
-            resourceLedger);
+            resourceLedger,
+            generalPredicateGraphsInitializationReferenceBodies,
+            usesNativePointerLoads);
         return result;
     }
 

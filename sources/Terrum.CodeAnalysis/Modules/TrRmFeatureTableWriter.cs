@@ -28,6 +28,7 @@ public static class TrRmFeatureTableWriter
         resourceLedger?.ConsumeWork();
         if (schema is not (TrRmArtifactSchema.Standard
             or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
+            or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft
             or TrRmArtifactSchema.CopyOriginDraft
             or TrRmArtifactSchema.ForeignInvocationDraft
             or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
@@ -48,10 +49,21 @@ public static class TrRmFeatureTableWriter
             or TrRmArtifactSchema.RegisterExceptionRegionsDraft
             or TrRmArtifactSchema.GenericMethodCallsDraft
             or TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft
+            or TrRmArtifactSchema.GenericMethodCallsParameterLabelsReceiverAccessDraft
             or TrRmArtifactSchema.C1Draft
+            or TrRmArtifactSchema.C1ParameterLabelsReceiverAccessDraft
             or TrRmArtifactSchema.C1M1Draft
+            or TrRmArtifactSchema.C1M1ParameterLabelsReceiverAccessDraft
             or TrRmArtifactSchema.C1M1ConstructionDraft
+            or TrRmArtifactSchema.C1M1ConstructionParameterLabelsReceiverAccessDraft
             or TrRmArtifactSchema.C1M1Construction2Draft
+            or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft
             or TrRmArtifactSchema.GenericConstantMethodsDraft))
         {
             throw InvalidFeature();

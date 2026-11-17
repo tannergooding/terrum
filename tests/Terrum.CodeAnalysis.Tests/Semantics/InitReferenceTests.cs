@@ -16,30 +16,32 @@ namespace Terrum.CodeAnalysis.Tests.Semantics;
 internal sealed class InitReferenceTests
 {
     internal const string ScalarSource = """
-        bool Fill(bool publish, init ref<int32> value) {
+        bool Fill(bool publish, ref<init int32> value) {
             if (*value is init) { return false; }
             if (!publish) { return false; }
             *value = 42;
             return true;
         }
         int32 Main() {
-            if (Fill(false, init var value)) { return 1; }
-            require Fill(true, init value);
+            init int32 value;
+            if (Fill(false, ref init value)) { return 1; }
+            require Fill(true, ref init value);
             return value;
         }
         """;
 
     internal const string ManagedSource = """
-        bool Fill(bool publish, init ref<write ManagedNode> value) {
+        bool Fill(bool publish, ref<init write ManagedNode> value) {
             if (!publish) { return false; }
             require ManagedNode.TryCreate(42, out var created);
             *value = created;
             return true;
         }
         int32 Main() {
-            if (Fill(false, init var node)) { return 1; }
+            init write ManagedNode node;
+            if (Fill(false, ref init node)) { return 1; }
             if (ManagedHeap.Collect() != 0) { return 2; }
-            require Fill(true, init node);
+            require Fill(true, ref init node);
             if (ManagedHeap.Collect() != 0) { return 3; }
             return node.Value;
         }
@@ -52,8 +54,8 @@ internal sealed class InitReferenceTests
         NativeRuntimePolicy policy, bool selectTrueArm)
     {
         var source = new StringBuilder("""
-             bool Fill(bool publish, out int32 value) {
-                if (publish) { value = 42; return true; }
+             bool Fill(bool publish, ref<init int32> value) {
+                if (publish) { *value = 42; return true; }
                 return false;
             }
             int32 Main() {
@@ -61,20 +63,20 @@ internal sealed class InitReferenceTests
         for (var group = 0; group < 6; group++)
         {
             var live = $"live{group}";
-            _ = source.Append("    mut int32 ").Append(live).AppendLine(" = 0;");
+            _ = source.Append("    init int32 ").Append(live).AppendLine(";");
             var deadCalls = new StringBuilder();
             for (var index = 0; index < 24; index++)
             {
                 var dead = $"dead{group}_{index}";
-                _ = source.Append("    mut int32 ").Append(dead).AppendLine(" = 0;");
+                _ = source.Append("    init int32 ").Append(dead).AppendLine(";");
                 if (index != 0)
                 {
                     _ = deadCalls.Append(" && ");
                 }
-                _ = deadCalls.Append("Fill(false, out ").Append(dead).Append(')');
+                _ = deadCalls.Append("Fill(false, ref init ").Append(dead).Append(')');
             }
 
-            var selected = $"Fill(true, out {live})";
+            var selected = $"Fill(true, ref init {live})";
             var deadExpression = deadCalls.ToString();
             _ = source.Append("    if (").Append(selectTrueArm ? "true" : "false").Append(" ? ")
                 .Append(selectTrueArm ? selected : deadExpression)
@@ -100,21 +102,21 @@ internal sealed class InitReferenceTests
     public void ConstantDisjunctionKeepsLeftOutputPublication(NativeRuntimePolicy policy)
     {
         var source = new StringBuilder("""
-             bool Fill(bool publish, out int32 value) {
-                if (publish) { value = 42; return true; }
+             bool Fill(bool publish, ref<init int32> value) {
+                if (publish) { *value = 42; return true; }
                 return false;
             }
             int32 Main() {
-                mut int32 live = 0;
+                init int32 live;
             """);
         var deadCalls = new StringBuilder("true");
         for (var index = 0; index < 24; index++)
         {
             var dead = $"dead{index}";
-            _ = source.Append("    mut int32 ").Append(dead).AppendLine(" = 0;");
-            _ = deadCalls.Append(" || Fill(false, out ").Append(dead).Append(')');
+            _ = source.Append("    init int32 ").Append(dead).AppendLine(";");
+            _ = deadCalls.Append(" || Fill(false, ref init ").Append(dead).Append(')');
         }
-        _ = source.Append("    if (Fill(true, out live) && (").Append(deadCalls)
+        _ = source.Append("    if (Fill(true, ref init live) && (").Append(deadCalls)
             .AppendLine(")) { return live; }");
         _ = source.AppendLine("    return 0;");
         _ = source.AppendLine("}");
@@ -143,12 +145,12 @@ internal sealed class InitReferenceTests
         bool conditionalInitializationTest)
     {
         var source = new StringBuilder("""
-             bool Fill(bool publish, init ref<int32> value) {
+             bool Fill(bool publish, ref<init int32> value) {
                 if (!publish) { return false; }
                 *value = 42;
                 return true;
             }
-             bool Identity(bool value, init ref<int32> result) {
+             bool Identity(bool value, ref<init int32> result) {
                 if (!value) { return false; }
                 *result = 42;
                 return true;
@@ -158,7 +160,7 @@ internal sealed class InitReferenceTests
             """);
         if (!negateInitializationTest)
         {
-            _ = source.AppendLine("    require Fill(true, init ready);");
+            _ = source.AppendLine("    require Fill(true, ref init ready);");
         }
         for (var index = 0; index < 24; index++)
         {
@@ -173,6 +175,7 @@ internal sealed class InitReferenceTests
         {
             initializationTest = "(" + initializationTest + " ? true : false)";
         }
+        _ = source.AppendLine("    init int32 live;");
         _ = source.Append("    if (Identity(").Append(initializationTest).Append(" || (");
         for (var index = 0; index < 24; index++)
         {
@@ -180,10 +183,10 @@ internal sealed class InitReferenceTests
             {
                 _ = source.Append(" || ");
             }
-            _ = source.Append("Fill(false, init dead").Append(index).Append(')');
+            _ = source.Append("Fill(false, ref init dead").Append(index).Append(')');
         }
-        _ = source.AppendLine("), init var live)) {");
-        _ = source.AppendLine("        require Fill(true, init dead0);");
+        _ = source.AppendLine("), ref init live)) {");
+        _ = source.AppendLine("        require Fill(true, ref init dead0);");
         _ = source.AppendLine("        return live + dead0;");
         _ = source.AppendLine("    }");
         _ = source.AppendLine("    return 0;");
@@ -204,12 +207,12 @@ internal sealed class InitReferenceTests
     public void InfeasibleConditionalOutputsRemainVacant(NativeRuntimePolicy policy)
     {
         var source = new StringBuilder("""
-             bool Fill(bool publish, init ref<int32> value) {
+             bool Fill(bool publish, ref<init int32> value) {
                 if (!publish) { return false; }
                 *value = 42;
                 return true;
             }
-             bool Identity(bool value, init ref<int32> result) {
+             bool Identity(bool value, ref<init int32> result) {
                 if (!value) { return false; }
                 *result = 42;
                 return true;
@@ -217,11 +220,12 @@ internal sealed class InitReferenceTests
             int32 Main() {
                 init int32 ready;
             """);
-        _ = source.AppendLine("    require Fill(true, init ready);");
+        _ = source.AppendLine("    require Fill(true, ref init ready);");
         for (var index = 0; index < 24; index++)
         {
             _ = source.Append("    init int32 dead").Append(index).AppendLine(";");
         }
+        _ = source.AppendLine("    init int32 live;");
         _ = source.Append("    if (Identity((ready is init) ? true : (");
         for (var index = 0; index < 24; index++)
         {
@@ -229,10 +233,10 @@ internal sealed class InitReferenceTests
             {
                 _ = source.Append(" || ");
             }
-            _ = source.Append("Fill(false, init dead").Append(index).Append(')');
+            _ = source.Append("Fill(false, ref init dead").Append(index).Append(')');
         }
-        _ = source.AppendLine("), init var live)) {");
-        _ = source.AppendLine("        require Fill(true, init dead0);");
+        _ = source.AppendLine("), ref init live)) {");
+        _ = source.AppendLine("        require Fill(true, ref init dead0);");
         _ = source.AppendLine("        return live + dead0;");
         _ = source.AppendLine("    }");
         _ = source.AppendLine("    return 0;");
@@ -260,22 +264,27 @@ internal sealed class InitReferenceTests
             return (BoundProgram)__nunitActual4!;
         }))();
         var fill = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "Fill");
-        Assert.That(fill.Variables[1].IsOut, Is.True);
+        Assert.That(fill.Variables[1].IsOut, Is.False);
         Assert.That(fill.Variables[1].IsInit, Is.True);
-        Assert.That(ManagedClassTypes.IsManaged(fill.Variables[1].Type), Is.True);
+        var referenceType = program.CheckedReferenceTypes[
+            CheckedReferenceTypes.Index(fill.Variables[1].Type)];
+        Assert.That(referenceType.ReferentType,
+            Is.EqualTo(PrimitiveType.WriteManagedNode));
         var forged = fill with { IsInternal = false, IsPrivate = false };
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program with {
             Functions = program.Functions.SetItem(0, forged),
         }))!;
     }
     [TestCase("return node.Value;","TRM3016")]
-    [TestCase("require Fill(true, out node); return 42;","TRM3011")]
-    [TestCase("require Fill(true, init node); require Fill(true, init node); return 42;","TRM3016")]
+    [TestCase("require Fill(true, ref node); return 42;","TRM3030")]
+    [TestCase("require Fill(true, ref init node); require Fill(true, ref init node); return 42;","TRM3030")]
     public void ManagedInitCannotReadVacancyOrReusePublishedStorage(string replacement, string diagnostic)
     {
-        var source = ManagedSource.Replace("require Fill(true, init node);", replacement, StringComparison.Ordinal);
+        var source = ManagedSource.Replace("require Fill(true, ref init node);", replacement, StringComparison.Ordinal);
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,item => item.Code == diagnostic),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,
+            item => item.Code == diagnostic), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
     }
 
     [Test]
@@ -292,20 +301,22 @@ internal sealed class InitReferenceTests
             return (BoundProgram)__nunitActual5!;
         }))();
         var fill = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "Fill");
-        Assert.That(fill.Variables[1].IsOut, Is.True);
+        Assert.That(fill.Variables[1].IsOut, Is.False);
         Assert.That(fill.Variables[1].IsInit, Is.True);
         Assert.That(SyntaxTree.LanguageVersion, Is.EqualTo("syntax-47"));
     }
-    [TestCase("if (Fill(false, init var value)) { return 1; }","require Fill(true, init var value);","TRM3016")]
-    [TestCase("require Fill(true, init value);","require Fill(true, out value);","TRM3011")]
-    [TestCase("require Fill(true, init value);","return value;","TRM3016")]
-    [TestCase("require Fill(true, init value);","require Fill(true, init value); require Fill(true, init value);","TRM3016")]
-    [TestCase("if (Fill(false, init var value)) { return 1; }","if (Fill(false, init var value)) { return 1; } return value;","TRM3016")]
+    [TestCase("require Fill(true, ref init value);","require Fill(true, ref init value); require Fill(true, ref init value);","TRM3030")]
+    [TestCase("if (Fill(false, ref init value)) { return 1; }","return value;","TRM3016")]
+    [TestCase("if (Fill(false, ref init value)) { return 1; }","if (Fill(false, ref init value)) { return 1; } return value;","TRM3016")]
     public void InitReferencesRejectInvalidSource(string before, string after, string diagnostic)
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse(ScalarSource.Replace(before, after,
-            StringComparison.Ordinal)));
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,item => item.Code == diagnostic),Is.True);
+        var source = ScalarSource[..ScalarSource.IndexOf("int32 Main()",
+            StringComparison.Ordinal)] + "int32 Main() { init int32 value; "
+            + before + " " + after + " return 42; }";
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,
+            item => item.Code == diagnostic), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
     }
 
     [Test]
@@ -330,34 +341,38 @@ internal sealed class InitReferenceTests
             " bool Fill(", StringComparison.Ordinal)));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
     }
-    [TestCase("int32 value = 1; require Fill(true, init value);")]
-    [TestCase("if (Fill(true, init var value)) { require Fill(true, init value); }")]
-    [TestCase("if (Fill(true, init var value)) { return value; } return value;")]
-    public void AnInitializedOrPossiblyVacantDestinationCannotBeReinitializedOrRead(string body)
+    [TestCase("int32 value = 1; require Fill(true, ref init value);", "TRM3030")]
+    [TestCase("init int32 value; if (Fill(true, ref init value)) { require Fill(true, ref init value); }", "TRM3030")]
+    [TestCase("init int32 value; if (Fill(true, ref init value)) { return value; } return value;", "TRM3016")]
+    public void AnInitializedOrPossiblyVacantDestinationCannotBeReinitializedOrRead(
+        string body, string expectedDiagnostic)
     {
         var source = ScalarSource[..ScalarSource.IndexOf("int32 Main()", StringComparison.Ordinal)]
             + "int32 Main() { " + body + " return 42; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3016"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,
+            diagnostic => diagnostic.Code == expectedDiagnostic), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
     }
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void IsInitTracksScalarPublicationAndLifetime(NativeRuntimePolicy policy)
     {
         const string Source = """
-            bool Fill(bool publish, init ref<int32> value) {
+            bool Fill(bool publish, ref<init int32> value) {
                 if (*value is init) { return false; }
                 if (!publish) { return false; }
                 *value = 42;
                 return true;
             }
-            void Write(out int32 value) { value = 17; }
+            void Write(ref<init int32> value) { *value = 17; }
             int32 Main() {
                 int32 ready = 7;
                 if (!(ready is init)) { return 1; }
-                Fill(false, init var value);
+                init int32 value;
+                Fill(false, ref init value);
                 if (value is init) { return 2; }
-                require Fill(true, init value);
+                require Fill(true, ref init value);
                 if (!(value is init)) { return 3; }
                 init int32 local;
                 if (local is init) { return 4; }
@@ -367,7 +382,8 @@ internal sealed class InitReferenceTests
                 if (local is init) { return 6; }
                 local = 42;
                 if (!(local is init)) { return 7; }
-                Write(out var written);
+                init int32 written;
+                Write(ref init written);
                 if (!(written is init)) { return 8; }
                 return value + written;
             }
@@ -387,18 +403,20 @@ internal sealed class InitReferenceTests
     public void InitReferenceSeparatesDescriptorDestinationAndForwarding(NativeRuntimePolicy policy)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
-             bool Write(init ref<int32> destination) {
+             bool Write(ref<init int32> destination) {
                 if (!(destination is init) || *destination is init) { return false; }
                 *destination = 42;
                 return true;
             }
-             bool Forward(init ref<int32> destination) {
+             bool Forward(ref<init int32> destination) {
                 if (!(destination is init)) { return false; }
-                return Write(init *destination) && *destination is init && *destination == 42;
+               bool written = Write(ref init *destination);
+               if (!written) { return false; }
+               return *destination is init;
             }
             int32 Main() {
                 init int32 value;
-                require Forward(init value);
+                require Forward(ref init value);
                 return value;
             }
             """), runtimePolicy: (BoundRuntimePolicy)policy);
@@ -416,13 +434,13 @@ internal sealed class InitReferenceTests
     public void InitDestinationRemainsVacantWhenLaterArgumentEvaluationFails()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
-             void Fill(init ref<int32> value, int32 ignored) { *value = 42; }
+             void Fill(ref<init int32> value, int32 ignored) { *value = 42; }
             int32 Fail() { require false; return 0; }
             int32 Main() {
                 init int32 value;
                 unsafe {
                     try {
-                        Fill(init value, Fail());
+                        Fill(ref init value, Fail());
                     } catch {
                         if (value is init) { return 1; }
                         return 42;
@@ -454,15 +472,16 @@ internal sealed class InitReferenceTests
     public void IsInitDistinguishesInitializedManagedNullFromVacancy(NativeRuntimePolicy policy)
     {
         const string Source = """
-            bool Store(bool publish, init ref<ManagedNode?> value) {
+            bool Store(bool publish, ref<init ManagedNode?> value) {
                 if (!publish) { return false; }
                 *value = null;
                 return true;
             }
             int32 Main() {
-                if (Store(false, init var value)) { return 1; }
+                init ManagedNode? value;
+                if (Store(false, ref init value)) { return 1; }
                 if (value is init) { return 2; }
-                require Store(true, init value);
+                require Store(true, ref init value);
                 if (!(value is init)) { return 3; }
                 if (!(value is null)) { return 4; }
                 return 0;
@@ -482,7 +501,8 @@ internal sealed class InitReferenceTests
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(0, out var buffer);
+                init OwnedInt32Buffer buffer;
+                require OwnedInt32Buffer.TryCreate(0, ref init buffer);
                 if (!(buffer is init)) { return 1; }
                 buffer = _;
                 if (buffer is init) { return 2; }
@@ -501,46 +521,95 @@ internal sealed class InitReferenceTests
     public void RepeatedInitAliasInOneCallIsRejected()
     {
         const string Source = """
-            bool Split(init ref<int32> first, init ref<int32> second) {
+            bool Split(ref<init int32> first, ref<init int32> second) {
                 *first = 40;
                 *second = 2;
                 return true;
             }
             int32 Main() {
-                require Split(init var result, init result);
+                init int32 result;
+                require Split(ref init result, ref init result);
                 return result;
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source));
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code is "TRM3023" or "TRM3016"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,
+            diagnostic => diagnostic.Code is "TRM3023" or "TRM3016" or "TRM3030"), Is.True);
     }
-    [TestCase("bool Fill(init ref<int32> value) { return true; }","TRM3016")]
-    [TestCase("bool Fill(out int32 value) { value = 42; return true; } int32 Main() { require Fill(init var item); return item; }","TRM3011")]
+    [TestCase("bool Fill(ref<init int32> value) { return true; }","TRM3016")]
+    [TestCase("bool Fill(ref<int32> value) { return true; } int32 Main() { init int32 item; require Fill(ref init item); return item; }","TRM3030")]
     public void InitModeRequiresNormalReturnPublicationAndMatchingCall(string source, string code)
     {
         ArgumentNullException.ThrowIfNull(source);
         var compilation = Compilation.Create(SyntaxTree.Parse(source.Contains("int32 Main()", StringComparison.Ordinal)
             ? source : source + "int32 Main() { return 42; }"));
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == code),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,
+            diagnostic => diagnostic.Code == code), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
     }
+
+    [Test]
+    public void BooleanInitReferenceCannotReturnFalseAfterInitialization()
+    {
+        const string source = """
+            bool Fill(bool publish, ref<init int32> value) {
+                *value = 42;
+                return publish;
+            }
+            int32 Main() {
+                init int32 value;
+                return Fill(false, ref init value) ? value : 0;
+            }
+            """;
+
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,
+            diagnostic => diagnostic.Code == "TRM3016"), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
+    public void BooleanInitReferenceCannotReturnFalseWithPartialAggregate()
+    {
+        const string source = """
+            struct Pair {
+                public int32 First;
+                public int32 Second;
+            }
+            bool Fill(ref<init Pair> value) {
+                value->First = 42;
+                return false;
+            }
+            int32 Main() {
+                init Pair value;
+                return Fill(ref init value) ? 1 : 0;
+            }
+            """;
+
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,
+            diagnostic => diagnostic.Code == "TRM3016"), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void InitReferencePublishesOnEveryNonBooleanCompletion(NativeRuntimePolicy policy)
     {
         foreach (var (source, expected) in new (string Source, int Expected)[] {
             ("""
-             int32 Fill(init ref<int32> value) { *value = 42; return 7; }
+             int32 Fill(ref<init int32> value) { *value = 42; return 7; }
              int32 Main() {
                  init int32 value;
-                 int32 status = Fill(init value);
+                 int32 status = Fill(ref init value);
                  return status + value;
              }
              """, 49),
             ("""
-             void Fill(init ref<int32> value) { *value = 42; }
+             void Fill(ref<init int32> value) { *value = 42; }
              int32 Main() {
                  init int32 value;
-                 Fill(init value);
+                 Fill(ref init value);
                  return value;
              }
              """, 42),
@@ -558,8 +627,8 @@ internal sealed class InitReferenceTests
             Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
         }
     }
-    [TestCase("int32 Fill(init ref<int32> value) { return 42; } int32 Main() { init int32 value; return Fill(init value); }")]
-    [TestCase("void Fill(init ref<int32> value) { } int32 Main() { init int32 value; Fill(init value); return 42; }")]
+    [TestCase("int32 Fill(ref<init int32> value) { return 42; } int32 Main() { init int32 value; return Fill(ref init value); }")]
+    [TestCase("void Fill(ref<init int32> value) { } int32 Main() { init int32 value; Fill(ref init value); return 42; }")]
     public void NonBooleanInitReferenceStillRequiresPublicationOnEveryNormalReturn(string source)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
@@ -570,14 +639,15 @@ internal sealed class InitReferenceTests
     public void PrivateManagedInitReferencePublishesOnNonBooleanCompletion(NativeRuntimePolicy policy)
     {
         const string source = """
-            int32 Create(init ref<write ManagedNode> value) {
+            int32 Create(ref<init write ManagedNode> value) {
                 require ManagedNode.TryCreate(42, out var created);
                 *value = created;
                 return 7;
             }
             int32 Main() {
                 if (ManagedHeap.Collect() != 0) { return 1; }
-                int32 status = Create(init var node);
+                init write ManagedNode node;
+                int32 status = Create(ref init node);
                 if (ManagedHeap.Collect() != 0) { return 2; }
                 return status + node.Value;
             }
@@ -600,14 +670,15 @@ internal sealed class InitReferenceTests
         var sourcePolicy = policy == NativeRuntimePolicy.FailFast
             ? BoundRuntimePolicy.FailFast : BoundRuntimePolicy.CheckedExceptions;
         const string Library = """
-            bool Fill(bool publish, init ref<int32> value) {
+            bool Fill(bool publish, ref<init int32> value) {
                 if (!publish) { return false; }
                 *value = 42;
                 return true;
             }
             public int32 Read() {
-                if (Fill(false, init var result)) { return 1; }
-                require Fill(true, init result);
+                init int32 result;
+                if (Fill(false, ref init result)) { return 1; }
+                require Fill(true, ref init result);
                 return result;
             }
             """;
@@ -620,7 +691,7 @@ internal sealed class InitReferenceTests
             return (BoundProgram)__nunitActual14!;
         }))();
         var producer = ModuleCompiler.CreateProducer(producerProgram, ["Read"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(104));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(106));
         var compilation = Compilation.Create(SyntaxTree.Parse(Consumer),
             ModuleCompiler.CreateReference(producer), runtimePolicy: sourcePolicy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -653,25 +724,27 @@ internal sealed class InitReferenceTests
     public async Task ManagedInitStaysPrivateBehindAnUnchangedScalarConsumerAsync(NativeRuntimePolicy policy)
     {
         const string Library = """
-             bool Copy<T>(T value, init ref<T> result) where T : [Copy] {
+             bool Copy<T>(T value, ref<init T> result)  {
                 *result = value;
                 return true;
             }
-             int32 Publish<T>(T value, int32 status, init ref<T> result) where T : [Copy] {
+             int32 Publish<T>(T value, int32 status, ref<init T> result)  {
                 *result = value;
                 return status;
             }
-            bool Fill(init ref<write ManagedNode> result) {
+            bool Fill(ref<init write ManagedNode> result) {
                 require ManagedNode.TryCreate(41, out var created);
-                return Copy(created, init *result);
+                return Copy(created, ref init *result);
             }
-            int32 Make(init ref<write ManagedNode> result) {
+            int32 Make(ref<init write ManagedNode> result) {
                 require ManagedNode.TryCreate(41, out var created);
-                return Publish(created, 7, init *result);
+                return Publish(created, 7, ref init *result);
             }
             public int32 Read() {
-                require Fill(init var node);
-                int32 status = Make(init var copy);
+                init write ManagedNode node;
+                init write ManagedNode copy;
+                require Fill(ref init node);
+                int32 status = Make(ref init copy);
                 if (status != 7 || copy.Value != node.Value) { return 1; }
                 return node.Value + 1;
             }
@@ -755,15 +828,16 @@ internal sealed class InitReferenceTests
     public void PrivateInitModeRoundTripsInCurrentSemanticFormat()
     {
         var library = Compilation.CreateLibrary(SyntaxTree.Parse("""
-            bool Fill(bool publish, init ref<int32> value) {
+            bool Fill(bool publish, ref<init int32> value) {
                 if (!publish) { return false; }
                 *value = 42;
                 return true;
             }
             public int32 Read() {
-                if (Fill(false, init var result)) { return 1; }
+                init int32 result;
+                if (Fill(false, ref init result)) { return 1; }
                 if (result is init) { return 2; }
-                require Fill(true, init result);
+                require Fill(true, ref init result);
                 if (!(result is init)) { return 3; }
                 return result;
             }
@@ -774,7 +848,7 @@ internal sealed class InitReferenceTests
             Assert.That(__nunitActual21, Is.TypeOf<BoundProgram>());
             return (BoundProgram)__nunitActual21!;
         }))(), ["Read"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(104));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(106));
         BinaryPrimitives.WriteInt32LittleEndian(producer.AsSpan(4, 4), 48);
         _ = Assert.Throws<ModuleFormatException>(() => _ = ModuleCompiler.CreateReference(producer))!;
     }
@@ -783,13 +857,14 @@ internal sealed class InitReferenceTests
     public void PrivateGenericInitKeepsManagedOutputRooted(NativeRuntimePolicy policy)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
-             bool Copy<T>(T value, init ref<T> result) where T : [Copy] {
+             bool Copy<T>(T value, ref<init T> result)  {
                 *result = value;
                 return true;
             }
             int32 Main() {
                 require ManagedNode.TryCreate(42, out var created);
-                require Copy(created, init var node);
+                init write ManagedNode node;
+                require Copy(created, ref init node);
                 if (!(node is init)) { return 1; }
                 if (ManagedHeap.Collect() != 0) { return 2; }
                 return node.Value;

@@ -13,6 +13,7 @@ internal static class TrRmGeneralPredicateGraphValidator
         TrRmFeatureTableReader features, TrRmModuleTableReader modules,
         TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
         TrRmParamTableReader parameters, TrRmContractTableReader contracts,
+        TrRmPropertyDefTableReader properties,
         TrRmTypeSpecTableReader typeSpecs,
         TrRmTypeDefTableReader typeDefs,
         TrRmEnumDefTableReader enumDefs,
@@ -191,8 +192,10 @@ internal static class TrRmGeneralPredicateGraphValidator
             var rootNode = graphs.GetRootNodeRow(graph);
             if (!typeSpecs.AreEquivalentTypeSpecRefs(
                     nodes.GetResultTypeSpecRef(rootNode), 0xF200_0001)
-                || !ValidateGraphShape(graph, phase, rootNode, nodeCountsByGraph[graph],
-                    method, methods, footprint, graphForNode, graphMethods,
+                || !ValidateGraphShape(schema, graph, phase, rootNode,
+                    nodeCountsByGraph[graph],
+                    method, methods, contracts, properties, footprint,
+                    graphForNode, graphMethods,
                     graphPhases, graphOrdinals, parentNodes, parentOrdinals,
                     footprints, roots, dependencies, anchorMethods, immutableData,
                     usedRoots, usedDependencies,
@@ -268,7 +271,7 @@ internal static class TrRmGeneralPredicateGraphValidator
                     RequireFeature(features, modules,
                         methods.GetOwnerModule(method),
                         TrRmFeatureTableReader.ImmutableDataIdentitiesFeatureId,
-                        TrRmArtifactSchema.GeneralPredicateGraphsDraft);
+                        schema);
                 }
                 usedRoots[root] = 1;
             }
@@ -332,8 +335,11 @@ internal static class TrRmGeneralPredicateGraphValidator
         return selectorKinds;
     }
 
-    private static bool ValidateGraphShape(int graph, byte phase, int rootNode,
+    private static bool ValidateGraphShape(TrRmArtifactSchema schema,
+        int graph, byte phase, int rootNode,
         int nodeCount, int method, TrRmMethodDefTableReader methods,
+        TrRmContractTableReader contracts,
+        TrRmPropertyDefTableReader properties,
         int footprint, int[] graphForNode, int[] graphMethods,
         byte[] graphPhases, uint[] graphOrdinals,
         int[] parentNodes, uint[] parentOrdinals,
@@ -395,7 +401,7 @@ internal static class TrRmGeneralPredicateGraphValidator
 
                 RequireFeature(features, modules, ownerModule,
                     TrRmFeatureTableReader.ImmutableDataIdentitiesFeatureId,
-                    TrRmArtifactSchema.GeneralPredicateGraphsDraft);
+                    schema);
             }
             if (kind == 8)
             {
@@ -457,7 +463,9 @@ internal static class TrRmGeneralPredicateGraphValidator
             return false;
         }
 
-        var isExpressionKind = selectorKind is >= 0x10 and <= 0x36;
+        var isExpressionKind = (selectorKind is >= 0x10 and <= 0x36)
+            || (schema.UsesPropertyInitializedState()
+                && selectorKind == 0x37);
         if (!isExpressionKind)
         {
             return false;
@@ -473,9 +481,17 @@ internal static class TrRmGeneralPredicateGraphValidator
             var nodeKind = nodes.GetNodeKind(node);
             var childCount = edges.GetChildCount(node);
             if ((phase == 3 && nodeKind is >= 1 and <= 6)
-                || !ValidateNodeShape(node, nodeKind, childCount, nodes, operands,
-                    calls, graph, operations, typeUses,
+                || !ValidateNodeShape(schema, node, nodeKind, childCount,
+                    nodes, operands, calls, graph, operations, typeUses,
                     controls, typePatterns, captures))
+            {
+                return false;
+            }
+            if (nodeKind == 0x37
+                && !ValidatePropertyInitializedNode(schema, phase, method,
+                    node, rootFirst, rootCount, methods, signatures,
+                    contracts, properties, nodes, operands, edges, roots,
+                    typeSpecs))
             {
                 return false;
             }
@@ -503,7 +519,7 @@ internal static class TrRmGeneralPredicateGraphValidator
             {
                 RequireFeature(features, modules, ownerModule,
                     TrRmFeatureTableReader.LayoutQueriesFeatureId,
-                    TrRmArtifactSchema.GeneralPredicateGraphsDraft);
+                    schema);
             }
 
             var firstOperand = nodes.GetOperandFirstRow(node);
@@ -530,7 +546,7 @@ internal static class TrRmGeneralPredicateGraphValidator
                     case 2:
                         RequireFeature(features, modules, ownerModule,
                             TrRmFeatureTableReader.TypedFrozenValuesFeatureId,
-                            TrRmArtifactSchema.GeneralPredicateGraphsDraft);
+                            schema);
                         break;
                     case 3:
                         if (captures.GetGraphRow(checked((int)operandRef)) != graph)
@@ -615,12 +631,12 @@ internal static class TrRmGeneralPredicateGraphValidator
                     case 7:
                         RequireFeature(features, modules, ownerModule,
                             TrRmFeatureTableReader.LayoutQueriesFeatureId,
-                            TrRmArtifactSchema.GeneralPredicateGraphsDraft);
+                            schema);
                         break;
                     case 9:
                         RequireFeature(features, modules, ownerModule,
                             TrRmFeatureTableReader.NominalUnionMetadataFeatureId,
-                            TrRmArtifactSchema.GeneralPredicateGraphsDraft);
+                            schema);
                         break;
                     case 6:
                         var typeSpecRef = typeUses.GetTypeSpecRef(
@@ -724,7 +740,66 @@ internal static class TrRmGeneralPredicateGraphValidator
     private static bool IsPatternParent(uint kind)
         => kind is 0x4A or 0x4B or 0x4C or 0x4D or 0x4E or 0x4F;
 
-    private static bool ValidateNodeShape(int node, uint kind, int childCount,
+    private static bool ValidatePropertyInitializedNode(
+        TrRmArtifactSchema schema, byte phase, int method, int node,
+        int rootFirst, int rootCount, TrRmMethodDefTableReader methods,
+        TrRmMethodSigTableReader signatures,
+        TrRmContractTableReader contracts,
+        TrRmPropertyDefTableReader properties,
+        TrRmPredicateNodeTableReader nodes,
+        TrRmPredicateNodeOperandTableReader operands,
+        TrRmPredicateChildEdgeTableReader edges,
+        TrRmPredicateReadRootTableReader roots,
+        TrRmTypeSpecTableReader typeSpecs)
+    {
+        if (!schema.UsesPropertyInitializedState()
+            || phase is not (1 or 2)
+            || !contracts.HasConstructionClause(method))
+        {
+            return false;
+        }
+
+        var construction = contracts.GetConstructionClause(method);
+        var propertyRow = GetOperandRef(node, 0, nodes, operands);
+        var ownerType = methods.GetOwnerType(method);
+        var receiverTypeSpec = signatures.GetReceiverTypeSpec(
+            methods.GetSignature(method));
+        if (!typeSpecs.AreEquivalentTypeSpecRefs(
+                nodes.GetResultTypeSpecRef(node), 0xF200_0001)
+            || construction.RoleTag is not (1 or 3)
+            || ownerType == 0
+            || propertyRow == 0 || propertyRow > (uint)properties.Count
+            || properties.GetOwnerType(checked((int)propertyRow)) != ownerType
+            || properties.GetBackingFieldDef(
+                checked((int)propertyRow)) == 0
+            || (construction.RoleTag == 3
+                && construction.PropertyDefRow != propertyRow)
+            || receiverTypeSpec == 0)
+        {
+            return false;
+        }
+
+        var subjectNode = edges.GetChildNodeRowByOrdinal(node, 0);
+        if (nodes.GetNodeKind(subjectNode) != 0x10
+            || edges.GetChildCount(subjectNode) != 0
+            || nodes.GetOperandCount(subjectNode) != 1)
+        {
+            return false;
+        }
+
+        var rootRow = GetOperandRef(subjectNode, 0, nodes, operands);
+        var operandRow = checked((int)nodes.GetOperandFirstRow(subjectNode));
+        return rootRow >= (uint)rootFirst
+            && rootRow < (uint)(rootFirst + rootCount)
+            && operands.GetOperandKind(operandRow) == 1
+            && roots.GetRootKind(checked((int)rootRow)) == 1
+            && roots.GetRootIdentity(checked((int)rootRow)) == 0
+            && typeSpecs.AreEquivalentTypeSpecRefs(
+                nodes.GetResultTypeSpecRef(subjectNode), receiverTypeSpec);
+    }
+
+    private static bool ValidateNodeShape(TrRmArtifactSchema schema,
+        int node, uint kind, int childCount,
         TrRmPredicateNodeTableReader nodes,
         TrRmPredicateNodeOperandTableReader operands,
         TrRmPredicateCallTableReader calls, int graph,
@@ -800,6 +875,9 @@ internal static class TrRmGeneralPredicateGraphValidator
                 && HasOperandKinds(node, nodes, operands, 6, 10)
                 && TypeUseOperandsValid(node, nodes, operands, typeUses)
                 && ControlHasKind(node, nodes, operands, controls, 1, 2),
+            0x37 => schema.UsesPropertyInitializedState()
+                && childCount == 1
+                && HasOperandKinds(node, nodes, operands, 8),
             0x40 or 0x41 or 0x42 => childCount == 0 && HasNoOperands(node, nodes),
             0x43 => childCount == 0
                 && HasOperandKinds(node, nodes, operands, 2),

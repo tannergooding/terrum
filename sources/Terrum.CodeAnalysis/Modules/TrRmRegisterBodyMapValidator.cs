@@ -157,6 +157,9 @@ internal static class TrRmRegisterBodyMapValidator
         int PlaceSelectionRecordIndex, int RootHomeIndex,
         int DefinitionCodeOffset);
 
+    private readonly record struct ConstructionContextState(
+        byte Phase, int InitializerMethodDefRow);
+
     private readonly record struct RegisterTypeState(int TypeMapIndex,
         uint TypeSpecRef, int PlaceSelectionRecordIndex, int RootHomeIndex,
         byte AccessKind, PlaceHandleOrigin[] PlaceOrigins)
@@ -334,6 +337,8 @@ internal static class TrRmRegisterBodyMapValidator
         TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
         TrRmParamTableReader parameters,
         TrRmFieldDefTableReader fields, TrRmFieldPathTableReader fieldPaths,
+        TrRmInterfaceDefTableReader interfaces,
+        TrRmInterfaceMethodTableReader interfaceMethods,
         TrRmInterfaceWitnessTableReader interfaceWitnesses,
         TrRmConstantSourceTableReader constantSources,
         TrRmFrozenValueNodeTableReader frozenValueNodes,
@@ -386,6 +391,7 @@ internal static class TrRmRegisterBodyMapValidator
         }
 
         var constructionRole = body.Schema.UsesObjectConstruction()
+            && contracts.HasConstructionClause(methodDefRow)
             ? contracts.GetConstructionClause(methodDefRow).RoleTag
             : (byte)0;
         if ((body.HasConstructionContextHome
@@ -434,9 +440,9 @@ internal static class TrRmRegisterBodyMapValidator
             visitedTypeSpecRows, nativeFunctionPointerAnchors);
         ConsumeWork(body);
         ValidateGenericCallTargets(body, methodDefRow, ownerModule, types,
-            typeSpecs, genericParams, constraints, methods, signatures,
-            parameters, imports, moduleRefs, contracts, constantValues,
-            visitedTypeSpecRows);
+            interfaces, interfaceMethods, typeSpecs, genericParams,
+            constraints, methods, signatures, parameters, imports,
+            moduleRefs, contracts, constantValues, visitedTypeSpecRows);
         ConsumeWork(body);
         ValidateFieldMap(body, ownerModule, types, typeSpecs, genericParams,
             methods, fields, fieldPaths, imports, moduleRefs, constantValues,
@@ -448,20 +454,23 @@ internal static class TrRmRegisterBodyMapValidator
         var initializationReferenceTypes
             = new InitializationReferenceTypeMap();
         var registerTypeEntries = ValidateCallSiteEffects(body, methodDefRow,
-            types, fields, typeSpecs, methods, signatures,
-            parameters, genericParams, contracts, imports,
+            types, fields, ref typeSpecs, methods, signatures,
+            parameters, genericParams, constraints, contracts, imports,
             nativeFunctionPointerAnchors,
             constantValues, initializationReferenceTypes);
         ConsumeWork(body);
         ValidateCallSiteHomeTypes(body, methodDefRow, ownerModule, types, typeSpecs,
-            fields, genericParams, methods, signatures, parameters, imports,
+            fields, fieldPaths, layouts, genericParams, constraints,
+            methods, signatures,
+            parameters, imports,
             constantValues, contracts, features, modules, standardNativeImports,
             nativeFunctionPointerAnchors,
             registerTypeEntries, initializationReferenceTypes);
         ConsumeWork(body);
         ValidateObjectConstructionLifecycle(body, methodDefRow, ownerModule,
             types, fields, methods, signatures, parameters, genericParams,
-            imports, typeSpecs, constantValues, initializationReferenceTypes,
+            constraints, imports, ref typeSpecs, constantValues,
+            initializationReferenceTypes,
             nativeFunctionPointerAnchors, registerTypeEntries, contracts);
         ConsumeWork(body);
         ValidateNativeOutputReservationFlow(body);
@@ -586,6 +595,7 @@ internal static class TrRmRegisterBodyMapValidator
         var hasReceiver = receiverType != 0;
         var isConstructionInitializer
             = body.Schema.UsesObjectConstruction()
+                && contracts.HasConstructionClause(methodDefRow)
                 && contracts.GetConstructionClause(methodDefRow).RoleTag
                     == 1;
         ConsumeWork(body);
@@ -678,7 +688,7 @@ internal static class TrRmRegisterBodyMapValidator
                 var opcode = code[position];
                 var instructionLength
                     = TrRmRegisterBodyReader.InstructionLength(opcode,
-                        body.Schema);
+                        body.Schema, body.UsesNativePointerLoads);
                 ConsumeWork(body);
                 ConsumeWork(body, checked((ulong)instructionLength));
                 var instruction = code.Slice(position, instructionLength);
@@ -792,13 +802,17 @@ internal static class TrRmRegisterBodyMapValidator
         TrRmContractTableReader contracts)
     {
         var ownerType = methods.GetOwnerType(methodDefRow);
+        var callerRole = contracts.HasConstructionClause(methodDefRow)
+            ? contracts.GetConstructionClause(methodDefRow).RoleTag
+            : (byte)0;
+        var allowsCallerEntry = body.Schema.UsesPropertyInitializedState()
+            && body.Schema.UsesObjectConstruction();
         if (!body.Schema.UsesObjectConstruction()
-            || ownerType <= 0
             || methods.GetOwnerModule(methodDefRow) != ownerModule
-            || contracts.GetConstructionClause(methodDefRow).RoleTag != 2
-            || types.GetOwnerModule(ownerType) != ownerModule
-            || !types.TryGetDeclaredClassMutability(ownerType,
-                out var isMutable))
+            || (!allowsCallerEntry && callerRole != 2)
+            || (callerRole == 2 && ownerType <= 0)
+            || (callerRole == 2
+                && types.GetOwnerModule(ownerType) != ownerModule))
         {
             throw InvalidMap();
         }
@@ -806,7 +820,7 @@ internal static class TrRmRegisterBodyMapValidator
         var typeSpec = typeSpecs.GetTypeSpecBytes(
             GetTypeMapTypeSpecRef(body, typeMapIndex));
         if (typeSpec.Length != 7 || typeSpec[0] != 0x0C
-            || typeSpec[1] != (isMutable ? 1 : 0)
+            || (typeSpec[1] & 0x06) != 0
             || typeSpec[2] != 0x8A)
         {
             throw InvalidMap();
@@ -821,8 +835,19 @@ internal static class TrRmRegisterBodyMapValidator
         }
 
         var classTypeRow = typeSpecs.GetRow(classType.Row);
-        if (classTypeRow.Length != 6
-            || ReadUInt32(body, classTypeRow, 2) != (uint)ownerType)
+        if (classTypeRow.Length != 6 || classTypeRow[0] != 0x02)
+        {
+            throw InvalidMap();
+        }
+
+        var contextTypeDef = checked((int)ReadUInt32(body, classTypeRow, 2));
+        if (contextTypeDef <= 0 || contextTypeDef > types.Count
+            || types.GetKind(contextTypeDef) != 2
+            || types.GetOwnerModule(contextTypeDef) != ownerModule
+            || (callerRole == 2 && contextTypeDef != ownerType)
+            || !types.TryGetDeclaredClassMutability(contextTypeDef,
+                out var isMutable)
+            || typeSpec[1] != (isMutable ? 1 : 0))
         {
             throw InvalidMap();
         }
@@ -865,8 +890,9 @@ internal static class TrRmRegisterBodyMapValidator
         TrRmMethodSigTableReader signatures,
         TrRmParamTableReader parameters,
         TrRmGenericParamTableReader genericParams,
+        TrRmConstraintTableReader constraints,
         TrRmImportTableReader imports,
-        TrRmTypeSpecTableReader typeSpecs,
+        ref TrRmTypeSpecTableReader typeSpecs,
         ConstantSourceValueContext constantValues,
         InitializationReferenceTypeMap initializationReferenceTypes,
         TrRmNativeFunctionPointerAnchorTableReader
@@ -879,7 +905,8 @@ internal static class TrRmRegisterBodyMapValidator
             return;
         }
 
-        var construction = contracts.GetConstructionClause(methodDefRow);
+        var construction = contracts.HasConstructionClause(methodDefRow)
+            ? contracts.GetConstructionClause(methodDefRow) : default;
         var isProjection = construction.RoleTag == 2;
         var hasConstructionFacts = isProjection
             || body.HasConstructionContextHome
@@ -916,28 +943,33 @@ internal static class TrRmRegisterBodyMapValidator
         }
 
         ConsumeWork(body, checked((ulong)blockCount * 4UL + 1UL));
-        var entryStates = new ImmutableDictionary<int, byte>[blockCount];
+        var entryStates = new ImmutableDictionary<int,
+            ConstructionContextState>[blockCount];
         var entryPublished = new bool[blockCount];
-        var entryBegun = new bool[blockCount];
         var hasEntry = new bool[blockCount];
-        var outputStates = new ImmutableDictionary<int, byte>[blockCount];
+        var outputStates = new ImmutableDictionary<int,
+            ConstructionContextState>[blockCount];
         var outputPublished = new bool[blockCount];
-        var outputBegun = new bool[blockCount];
         var hasOutput = new bool[blockCount];
         var queued = new bool[blockCount];
-        Array.Fill(entryStates, ImmutableDictionary<int, byte>.Empty);
-        Array.Fill(outputStates, ImmutableDictionary<int, byte>.Empty);
+        Array.Fill(entryStates,
+            ImmutableDictionary<int, ConstructionContextState>.Empty);
+        Array.Fill(outputStates,
+            ImmutableDictionary<int, ConstructionContextState>.Empty);
         var worklist = new Queue<int>(blockCount);
 
         hasEntry[0] = true;
-        entryStates[0] = ImmutableDictionary<int, byte>.Empty;
+        entryStates[0]
+            = ImmutableDictionary<int, ConstructionContextState>.Empty;
         EnqueueConstructionLifecycleBlock(body, worklist, queued, 0);
         ProcessConstructionLifecycleWorklist(body, successors, worklist,
-            queued, entryStates, entryPublished, entryBegun, hasEntry,
-            outputStates, outputPublished, outputBegun, hasOutput,
+            queued, entryStates, entryPublished, hasEntry,
+            outputStates, outputPublished, hasOutput,
             requiresPublishedResult,
             methodDefRow, ownerModule, types, fields, methods, signatures,
-            contracts, parameters, genericParams, imports, typeSpecs, constantValues,
+            contracts, parameters, genericParams, constraints, imports,
+            ref typeSpecs,
+            constantValues,
             initializationReferenceTypes, nativeFunctionPointerAnchors,
             registerTypeEntries);
 
@@ -992,16 +1024,18 @@ internal static class TrRmRegisterBodyMapValidator
             }
 
             hasEntry[seed] = true;
-            entryStates[seed] = ImmutableDictionary<int, byte>.Empty;
+            entryStates[seed]
+                = ImmutableDictionary<int, ConstructionContextState>.Empty;
             entryPublished[seed] = false;
-            entryBegun[seed] = false;
             EnqueueConstructionLifecycleBlock(body, worklist, queued, seed);
             ProcessConstructionLifecycleWorklist(body, successors, worklist,
-                queued, entryStates, entryPublished, entryBegun, hasEntry,
-                outputStates, outputPublished, outputBegun, hasOutput,
+                queued, entryStates, entryPublished, hasEntry,
+                outputStates, outputPublished, hasOutput,
                 requiresPublishedResult,
                 methodDefRow, ownerModule, types, fields, methods, signatures,
-                contracts, parameters, genericParams, imports, typeSpecs, constantValues,
+                contracts, parameters, genericParams, constraints, imports,
+                ref typeSpecs,
+                constantValues,
                 initializationReferenceTypes, nativeFunctionPointerAnchors,
                 registerTypeEntries);
         }
@@ -1023,7 +1057,8 @@ internal static class TrRmRegisterBodyMapValidator
 
     private static void ValidateConstructionContextPlaceAccess(
         TrRmRegisterBodyReader body, ReadOnlySpan<byte> instruction,
-        byte opcode, ImmutableDictionary<int, byte> state)
+        byte opcode,
+        ImmutableDictionary<int, ConstructionContextState> state)
     {
         var selectionRecordIndex = opcode switch
         {
@@ -1054,10 +1089,15 @@ internal static class TrRmRegisterBodyMapValidator
             return;
         }
 
-        if (targetKind != 2 || ReadByte(body, selection, 1) != 1
+        var accessKind = ReadByte(body, selection, 1);
+        var validContextAccess = accessKind == 1
+            || (body.Schema.UsesPropertyInitializedState()
+                && accessKind == 3);
+        if (targetKind != 2 || !validContextAccess
             || !state.TryGetValue(contextHomeIndex,
                 out var contextState)
-            || contextState != 2)
+            || contextState.Phase != 2
+            || contextState.InitializerMethodDefRow <= 0)
         {
             throw InvalidMap();
         }
@@ -1092,11 +1132,10 @@ internal static class TrRmRegisterBodyMapValidator
     private static void ProcessConstructionLifecycleWorklist(
         TrRmRegisterBodyReader body, List<int>?[] successors,
         Queue<int> worklist, bool[] queued,
-        ImmutableDictionary<int, byte>[] entryStates,
-        bool[] entryPublished, bool[] entryBegun, bool[] hasEntry,
-        ImmutableDictionary<int, byte>[] outputStates,
-        bool[] outputPublished, bool[] outputBegun,
-        bool[] hasOutput,
+        ImmutableDictionary<int, ConstructionContextState>[] entryStates,
+        bool[] entryPublished, bool[] hasEntry,
+        ImmutableDictionary<int, ConstructionContextState>[] outputStates,
+        bool[] outputPublished, bool[] hasOutput,
         bool requiresPublishedResult, int methodDefRow, int ownerModule,
         TrRmTypeDefTableReader types, TrRmFieldDefTableReader fields,
         TrRmMethodDefTableReader methods,
@@ -1104,8 +1143,9 @@ internal static class TrRmRegisterBodyMapValidator
         TrRmContractTableReader contracts,
         TrRmParamTableReader parameters,
         TrRmGenericParamTableReader genericParams,
+        TrRmConstraintTableReader constraints,
         TrRmImportTableReader imports,
-        TrRmTypeSpecTableReader typeSpecs,
+        ref TrRmTypeSpecTableReader typeSpecs,
         ConstantSourceValueContext constantValues,
         InitializationReferenceTypeMap initializationReferenceTypes,
         TrRmNativeFunctionPointerAnchorTableReader
@@ -1118,7 +1158,6 @@ internal static class TrRmRegisterBodyMapValidator
             queued[blockIndex] = false;
             var state = entryStates[blockIndex];
             var published = entryPublished[blockIndex];
-            var begun = entryBegun[blockIndex];
             var registerTypes = CopyRegisterTypeStates(body,
                 registerTypeEntries[blockIndex]);
             var block = body.GetBlock(blockIndex);
@@ -1131,7 +1170,7 @@ internal static class TrRmRegisterBodyMapValidator
                 var opcode = ReadByte(body, code, position);
                 var instructionLength
                     = TrRmRegisterBodyReader.InstructionLength(opcode,
-                        body.Schema);
+                        body.Schema, body.UsesNativePointerLoads);
                 ConsumeWork(body,
                     checked((ulong)instructionLength));
                 var instruction = code.Slice(position,
@@ -1150,15 +1189,16 @@ internal static class TrRmRegisterBodyMapValidator
                     switch (ReadByte(body, record, 0))
                     {
                         case 1:
-                            if (contextState != 0 || begun)
+                            if (contextState.Phase != 0)
                             {
                                 throw InvalidMap();
                             }
-                            state = state.SetItem(contextHome, 1);
-                            begun = true;
+                            state = state.SetItem(contextHome,
+                                new ConstructionContextState(1, 0));
                             break;
                         case 2:
-                            if (contextState != 2)
+                            if (contextState.Phase != 2
+                                || contextState.InitializerMethodDefRow <= 0)
                             {
                                 throw InvalidMap();
                             }
@@ -1166,7 +1206,12 @@ internal static class TrRmRegisterBodyMapValidator
                             published = true;
                             break;
                         case 3:
-                            if (contextState != 1)
+                            if (contextState.Phase != 1
+                                && (!body.Schema
+                                        .UsesPropertyInitializedState()
+                                    || contextState.Phase != 2
+                                    || contextState
+                                        .InitializerMethodDefRow <= 0))
                             {
                                 throw InvalidMap();
                             }
@@ -1195,13 +1240,43 @@ internal static class TrRmRegisterBodyMapValidator
                         if (ReadByte(body, GetHomeMapEntry(body,
                                 contextHome), 0) == 4)
                         {
+                            var targetMethod = GetCallSiteTargetMethod(body,
+                                callSite, registerTypes, typeSpecs, methods,
+                                imports, nativeFunctionPointerAnchors);
+                            var targetRole = contracts.HasConstructionClause(
+                                    targetMethod)
+                                ? contracts.GetConstructionClause(
+                                    targetMethod).RoleTag : (byte)0;
                             if (!state.TryGetValue(contextHome,
-                                    out var contextState)
-                                || contextState != 1)
+                                    out var contextState))
                             {
                                 throw InvalidMap();
                             }
-                            state = state.SetItem(contextHome, 2);
+
+                            if (targetRole == 1)
+                            {
+                                if (contextState.Phase != 1
+                                    || contextState.InitializerMethodDefRow != 0)
+                                {
+                                    throw InvalidMap();
+                                }
+                                state = state.SetItem(contextHome,
+                                    new ConstructionContextState(2,
+                                        targetMethod));
+                            }
+                            else if (targetRole == 3
+                                && body.Schema.UsesPropertyInitializedState())
+                            {
+                                if (contextState.Phase != 2
+                                    || contextState.InitializerMethodDefRow <= 0)
+                                {
+                                    throw InvalidMap();
+                                }
+                            }
+                            else
+                            {
+                                throw InvalidMap();
+                            }
                         }
                     }
                 }
@@ -1211,8 +1286,8 @@ internal static class TrRmRegisterBodyMapValidator
                         ? ReadByte(body, instruction, 1)
                         : ReadUInt16(body, instruction, 2);
                     UpdateCallSiteRegisterTypes(body, callSiteRecord,
-                        registerTypes, typeSpecs, methods, signatures,
-                        genericParams, imports,
+                        registerTypes, ref typeSpecs, methods, signatures,
+                        genericParams, constraints, imports,
                         nativeFunctionPointerAnchors);
                 }
                 else
@@ -1234,8 +1309,7 @@ internal static class TrRmRegisterBodyMapValidator
             if (hasOutput[blockIndex]
                 && ConstructionStatesEqual(body,
                     outputStates[blockIndex], state)
-                && outputPublished[blockIndex] == published
-                && outputBegun[blockIndex] == begun)
+                && outputPublished[blockIndex] == published)
             {
                 continue;
             }
@@ -1243,7 +1317,6 @@ internal static class TrRmRegisterBodyMapValidator
             ConsumeWork(body);
             outputStates[blockIndex] = state;
             outputPublished[blockIndex] = published;
-            outputBegun[blockIndex] = begun;
             hasOutput[blockIndex] = true;
             if (successors[blockIndex] is not { } blockSuccessors)
             {
@@ -1264,7 +1337,6 @@ internal static class TrRmRegisterBodyMapValidator
                 {
                     entryStates[successor] = state;
                     entryPublished[successor] = published;
-                    entryBegun[successor] = begun;
                     hasEntry[successor] = true;
                     EnqueueConstructionLifecycleBlock(body, worklist,
                         queued, successor);
@@ -1286,21 +1358,14 @@ internal static class TrRmRegisterBodyMapValidator
                         queued, successor);
                 }
 
-                var mergedBegun = entryBegun[successor] || begun;
-                if (mergedBegun != entryBegun[successor])
-                {
-                    entryBegun[successor] = mergedBegun;
-                    EnqueueConstructionLifecycleBlock(body, worklist,
-                        queued, successor);
-                }
             }
         }
     }
 
     private static bool ConstructionStatesEqual(
         TrRmRegisterBodyReader body,
-        ImmutableDictionary<int, byte> left,
-        ImmutableDictionary<int, byte> right)
+        ImmutableDictionary<int, ConstructionContextState> left,
+        ImmutableDictionary<int, ConstructionContextState> right)
     {
         if (ReferenceEquals(left, right))
         {
@@ -1336,7 +1401,7 @@ internal static class TrRmRegisterBodyMapValidator
             ConsumeWork(body);
             opcode = ReadByte(body, code, position);
             position += TrRmRegisterBodyReader.InstructionLength(opcode,
-                body.Schema);
+                body.Schema, body.UsesNativePointerLoads);
         }
 
         return opcode;
@@ -1901,6 +1966,8 @@ internal static class TrRmRegisterBodyMapValidator
     private static void ValidateGenericCallTargets(
         TrRmRegisterBodyReader body, int callerMethodRow, int ownerModule,
         TrRmTypeDefTableReader types,
+        TrRmInterfaceDefTableReader interfaces,
+        TrRmInterfaceMethodTableReader interfaceMethods,
         TrRmTypeSpecTableReader typeSpecs,
         TrRmGenericParamTableReader genericParams,
         TrRmConstraintTableReader constraints,
@@ -1940,6 +2007,28 @@ internal static class TrRmRegisterBodyMapValidator
             var ownerTypeSpec = ReadUInt32(body, payload, 4);
             var evidenceReference = ReadUInt32(body, payload, 8);
             var argumentCount = ReadUInt32(body, payload, 12);
+            if (targetRole == 2)
+            {
+                if (evidenceKind is 2 or 3)
+                {
+                    throw new NotSupportedException(
+                        "The G1 consumer currently supports open Constraint evidence for interface-requirement GenericCalls only.");
+                }
+                if (evidenceKind != 1
+                    || ownerTypeSpec == 0 || evidenceReference == 0)
+                {
+                    throw InvalidMap();
+                }
+
+                ValidateGenericInterfaceRequirementTarget(body,
+                    callerMethodRow, ownerModule, methodMapIndex,
+                    ownerTypeSpec, evidenceReference, argumentCount,
+                    types, interfaces, interfaceMethods, typeSpecs,
+                    genericParams, constraints, methods, signatures,
+                    parameters, imports, contracts);
+                continue;
+            }
+
             if (targetRole != 1 || evidenceKind != 0
                 || ownerTypeSpec != 0 || evidenceReference != 0)
             {
@@ -1973,6 +2062,7 @@ internal static class TrRmRegisterBodyMapValidator
 
             var targetDefinitionId = 0x1600_0000u
                 | checked((uint)targetMethodRow);
+            var argumentTypeSpecRefs = new uint[targetFormalCount];
             for (var ordinal = 0; ordinal < targetFormalCount; ordinal++)
             {
                 ConsumeWork(body);
@@ -1988,18 +2078,6 @@ internal static class TrRmRegisterBodyMapValidator
 
                 var (constraintFirst, constraintCount)
                     = genericParams.GetConstraintRange(targetFormal);
-                for (var constraintOffset = 0;
-                    constraintOffset < constraintCount; constraintOffset++)
-                {
-                    var constraintRow = constraintFirst + constraintOffset;
-                    if (constraints.GetKind(constraintRow) != 2
-                        || constraints.GetPayload(constraintRow) is not (2 or 3))
-                    {
-                        throw new NotSupportedException(
-                            "The G1 consumer currently supports Write and Blittable property constraints on direct GenericCall targets only.");
-                    }
-                }
-
                 var argumentOffset = checked(16 + (ordinal * 8));
                 if (ReadByte(body, payload, argumentOffset) != 1)
                 {
@@ -2009,12 +2087,62 @@ internal static class TrRmRegisterBodyMapValidator
 
                 var argumentTypeSpec = ReadUInt32(body, payload,
                     argumentOffset + 4);
-                ValidateGenericCallTypeActual(argumentTypeSpec,
+                argumentTypeSpecRefs[ordinal] = argumentTypeSpec;
+                var actualFormal = ValidateGenericCallTypeActual(
+                    argumentTypeSpec,
                     targetFormal, callerDefinitionId,
                     callerFormalFirst, callerFormalCount, ownerModule,
                     types, typeSpecs, genericParams, constraints, methods,
                     imports, moduleRefs, constantValues,
                     visitedTypeSpecRows);
+                for (var constraintOffset = 0;
+                    constraintOffset < constraintCount; constraintOffset++)
+                {
+                    var constraintRow = constraintFirst + constraintOffset;
+                    var constraintKind = constraints.GetKind(constraintRow);
+                    var constraintPayload
+                        = constraints.GetPayload(constraintRow);
+                    if (constraintKind == 2
+                        && constraintPayload is 2 or 3)
+                    {
+                        continue;
+                    }
+                    if (constraintKind != 1)
+                    {
+                        throw new NotSupportedException(
+                            "The G1 consumer currently supports interface-instance, Write, and Blittable constraints on direct GenericCall targets.");
+                    }
+                    if (actualFormal == 0)
+                    {
+                        throw new NotSupportedException(
+                            "The G1 consumer requires a closed witness provider for a constrained direct GenericCall TypeActual.");
+                    }
+
+                    var satisfied = false;
+                    var (firstActualConstraint, actualConstraintCount)
+                        = genericParams.GetConstraintRange(actualFormal);
+                    for (var actualConstraintOffset = 0;
+                        actualConstraintOffset < actualConstraintCount;
+                        actualConstraintOffset++)
+                    {
+                        var actualConstraintRow
+                            = firstActualConstraint + actualConstraintOffset;
+                        if (constraints.GetKind(actualConstraintRow) == 1
+                            && GenericCallConstraintTypeSpecsMatch(
+                                body, constraintPayload,
+                                constraints.GetPayload(actualConstraintRow),
+                                targetMethodRow, argumentTypeSpecRefs,
+                                typeSpecs, genericParams))
+                        {
+                            satisfied = true;
+                            break;
+                        }
+                    }
+                    if (!satisfied)
+                    {
+                        throw InvalidMap();
+                    }
+                }
             }
 
             var (firstParameter, parameterCount)
@@ -2033,15 +2161,330 @@ internal static class TrRmRegisterBodyMapValidator
                 ValidateGenericCallSignatureType(
                     parameters.GetTypeSpec(parameter), targetDefinitionId,
                     targetFormalFirst, targetFormalCount,
-                    typeSpecs, genericParams);
+                    typeSpecs, genericParams, constraints);
             }
 
             ValidateGenericCallSignatureType(
                 signatures.GetResultTypeSpec(targetSignature),
                 targetDefinitionId, targetFormalFirst,
                 targetFormalCount, typeSpecs, genericParams,
+                constraints,
                 allowUnit: true);
         }
+    }
+
+    private static void ValidateGenericInterfaceRequirementTarget(
+        TrRmRegisterBodyReader body, int callerMethodRow, int ownerModule,
+        ushort methodMapIndex, uint ownerTypeSpec, uint evidenceReference,
+        uint argumentCount, TrRmTypeDefTableReader types,
+        TrRmInterfaceDefTableReader interfaces,
+        TrRmInterfaceMethodTableReader interfaceMethods,
+        TrRmTypeSpecTableReader typeSpecs,
+        TrRmGenericParamTableReader genericParams,
+        TrRmConstraintTableReader constraints,
+        TrRmMethodDefTableReader methods,
+        TrRmMethodSigTableReader signatures,
+        TrRmParamTableReader parameters,
+        TrRmImportTableReader imports,
+        TrRmContractTableReader contracts)
+    {
+        if (!body.Schema.UsesMethodParameterLabels()
+            || methods.GetOwnerType(callerMethodRow) != 0
+            || argumentCount != 0)
+        {
+            throw new NotSupportedException(
+                "Open interface-requirement GenericCall targets require G1L1 module-level methods with no requirement method formals.");
+        }
+
+        var callerDefinitionId = 0x1600_0000u
+            | checked((uint)callerMethodRow);
+        var callerSignature = methods.GetSignature(callerMethodRow);
+        var (callerFormalFirst, callerFormalCount)
+            = signatures.GetGenericRange(callerSignature);
+        var evidenceRow = checked((int)evidenceReference);
+        var evidenceOwner
+            = constraints.GetOwnerGenericParam(evidenceRow);
+        var (firstEvidenceConstraint, evidenceConstraintCount)
+            = genericParams.GetConstraintRange(evidenceOwner);
+        var evidenceOrdinal = genericParams.GetOrdinal(evidenceOwner);
+        if (genericParams.GetOwnerDefId(evidenceOwner)
+                != callerDefinitionId
+            || genericParams.GetFormalKind(evidenceOwner) != 1
+            || evidenceOrdinal >= (uint)callerFormalCount
+            || evidenceOwner < callerFormalFirst
+            || evidenceOwner >= callerFormalFirst + callerFormalCount
+            || evidenceRow < firstEvidenceConstraint
+            || evidenceRow >= firstEvidenceConstraint
+                + evidenceConstraintCount
+            || constraints.GetKind(evidenceRow) != 1)
+        {
+            throw InvalidMap();
+        }
+
+        var methodToken = ReadUInt32(body, body.MethodMap,
+            checked(methodMapIndex * sizeof(uint)));
+        var targetMethodRow = GetMethodMapTarget(body, methodMapIndex,
+            methods, imports);
+        var targetDefinitionId = 0x1600_0000u
+            | checked((uint)targetMethodRow);
+        if (((methodToken >> 24) == 0x16
+                && imports.IsExpectedDefinition(targetDefinitionId))
+            || methods.GetOwnerModule(targetMethodRow) != ownerModule)
+        {
+            throw InvalidMap();
+        }
+
+        var ownerTypeDef = methods.GetOwnerType(targetMethodRow);
+        if (ownerTypeDef == 0 || types.GetKind(ownerTypeDef) != 3
+            || types.GetOwnerModule(ownerTypeDef) != ownerModule)
+        {
+            throw new NotSupportedException(
+                "The G1 interface-requirement target must be an interface MethodDef in the owning Module.");
+        }
+
+        var interfaceDef
+            = interfaces.GetInterfaceDefForTypeDef(ownerTypeDef);
+        if (interfaceDef == 0
+            || interfaceMethods.GetOwnerInterfaceDefForMethod(
+                targetMethodRow) != interfaceDef)
+        {
+            throw InvalidMap();
+        }
+        if (interfaces.GetBaseRange(interfaceDef).Count != 0
+            || interfaces.GetAssociatedTypeRange(interfaceDef).Count != 0
+            || interfaces.GetAssociatedConstRange(interfaceDef).Count != 0
+            || interfaces.GetInterfaceConstRange(interfaceDef).Count != 0)
+        {
+            throw new NotSupportedException(
+                "The G1 interface-requirement target has an unsupported interface closure.");
+        }
+
+        var ownerType = typeSpecs.GetTypeSpecRef(ownerTypeSpec);
+        if (!ownerType.IsRow || ownerType.Qualifiers != 0
+            || ownerType.Form is not (0x02 or 0x03 or 0x05)
+            || typeSpecs.GetNominalTypeDefRow(ownerTypeSpec, types,
+                imports) != ownerTypeDef)
+        {
+            throw InvalidMap();
+        }
+
+        var (firstOwnerFormal, ownerFormalCount)
+            = types.GetGenericRange(ownerTypeDef);
+        if (ownerFormalCount == 0
+            ? ownerType.Form is not (0x02 or 0x03)
+            : ownerType.Form != 0x05)
+        {
+            throw InvalidMap();
+        }
+        if (ownerFormalCount != 0)
+        {
+            var ownerTypeRow = typeSpecs.GetRow(ownerType.Row);
+            if ((ownerTypeRow.Length - 6) / sizeof(uint)
+                != ownerFormalCount)
+            {
+                throw InvalidMap();
+            }
+        }
+        var ownerDefinitionId = 0x1300_0000u
+            | checked((uint)ownerTypeDef);
+        for (var ordinal = 0; ordinal < ownerFormalCount; ordinal++)
+        {
+            var formal = firstOwnerFormal + ordinal;
+            if (genericParams.GetOwnerDefId(formal)
+                    != ownerDefinitionId
+                || genericParams.GetFormalKind(formal) != 1
+                || genericParams.GetOrdinal(formal) != (uint)ordinal
+                || genericParams.GetOwnershipDomain(formal) != 1
+                || genericParams.GetNullabilityDomain(formal) != 1
+                || genericParams.GetConstraintRange(formal).Count != 0
+                || genericParams.GetDefaultArgumentRef(formal) != 0)
+            {
+                throw new NotSupportedException(
+                    "The G1 interface-requirement target has an unsupported owner formal contract.");
+            }
+        }
+
+        var evidenceTypeSpec = constraints.GetPayload(evidenceRow);
+        if (!typeSpecs.AreEquivalentTypeSpecRefs(ownerTypeSpec,
+                evidenceTypeSpec))
+        {
+            throw InvalidMap();
+        }
+
+        var targetSignature = methods.GetSignature(targetMethodRow);
+        var (_, targetFormalCount)
+            = signatures.GetGenericRange(targetSignature);
+        var (firstParameter, parameterCount)
+            = signatures.GetParamRange(targetSignature);
+        var (_, contractCount)
+            = methods.GetContractRange(targetMethodRow);
+        if (targetFormalCount != 0
+            || signatures.GetReceiverTypeSpec(targetSignature) == 0
+            || methods.GetBodyRow(targetMethodRow) != 0
+            || (methods.GetFlags(targetMethodRow) & 3) != 2
+            || contractCount != 0)
+        {
+            throw new NotSupportedException(
+                "The G1 interface-requirement MethodDef is outside the bodyless value-callable subset.");
+        }
+        for (var ordinal = 0; ordinal < parameterCount; ordinal++)
+        {
+            var parameter = firstParameter + ordinal;
+            if (parameters.GetMode(parameter) != 0
+                || parameters.GetFlags(parameter) != 0)
+            {
+                throw new NotSupportedException(
+                    "The G1 interface-requirement MethodDef has an unsupported parameter mode.");
+            }
+            ValidateGenericInterfaceRequirementSignatureType(
+                parameters.GetTypeSpec(parameter), ownerDefinitionId,
+                firstOwnerFormal, ownerFormalCount, allowVoid: false,
+                typeSpecs, genericParams);
+        }
+        ValidateGenericInterfaceRequirementSignatureType(
+            signatures.GetResultTypeSpec(targetSignature),
+            ownerDefinitionId, firstOwnerFormal, ownerFormalCount,
+            allowVoid: true, typeSpecs, genericParams);
+    }
+
+    private static void ValidateGenericCallInterfaceReceiverInput(
+        TrRmRegisterBodyReader body, int callerMethodRow,
+        int targetMethodRow, ReadOnlySpan<byte> callSitePayload,
+        int inputOffset, TrRmTypeSpecTableReader typeSpecs,
+        TrRmGenericParamTableReader genericParams,
+        TrRmConstraintTableReader constraints,
+        TrRmMethodDefTableReader methods,
+        TrRmMethodSigTableReader signatures,
+        TrRmParamTableReader parameters)
+    {
+        var targetRecordIndex = ReadUInt16(body, callSitePayload, 4);
+        var target = GetRecordPayload(body, targetRecordIndex);
+        var evidenceRow = checked((int)ReadUInt32(body, target, 8));
+        if (ReadByte(body, target, 0) != 2
+            || ReadByte(body, target, 1) != 1
+            || constraints.GetKind(evidenceRow) != 1
+            || ReadByte(body, callSitePayload, 0) != 4
+            || methods.GetOwnerType(targetMethodRow) == 0
+            || signatures.GetReceiverTypeSpec(
+                methods.GetSignature(targetMethodRow)) == 0)
+        {
+            throw InvalidMap();
+        }
+
+        var evidenceOwner = constraints.GetOwnerGenericParam(evidenceRow);
+        var callerDefinitionId = 0x1600_0000u
+            | checked((uint)callerMethodRow);
+        var (callerFormalFirst, callerFormalCount)
+            = signatures.GetGenericRange(
+                methods.GetSignature(callerMethodRow));
+        if (genericParams.GetOwnerDefId(evidenceOwner)
+                != callerDefinitionId
+            || genericParams.GetFormalKind(evidenceOwner) != 1
+            || genericParams.GetOwnershipDomain(evidenceOwner) != 1
+            || evidenceOwner < callerFormalFirst
+            || evidenceOwner >= callerFormalFirst + callerFormalCount)
+        {
+            throw InvalidMap();
+        }
+
+        var requiresWritableReceiver
+            = (methods.GetFlags(targetMethodRow) & 4) != 0;
+        if (requiresWritableReceiver
+            && !HasGenericMethodPropertyConstraint(evidenceOwner, 2,
+                genericParams, constraints))
+        {
+            throw InvalidMap();
+        }
+
+        var expectedReceiverSourceUse = (byte)1;
+        if (body.Schema.UsesMethodReceiverAccess())
+        {
+            expectedReceiverSourceUse = requiresWritableReceiver
+                ? (byte)4 : (byte)3;
+        }
+        if (ReadByte(body, callSitePayload, inputOffset) != 2
+            || ReadByte(body, callSitePayload, inputOffset + 1)
+                != expectedReceiverSourceUse)
+        {
+            throw InvalidMap();
+        }
+
+        var homeIndex = ReadUInt16(body, callSitePayload, inputOffset + 2);
+        var home = GetHomeMapEntry(body, homeIndex);
+        var parameterOrdinal = ReadUInt16(body, home, 4);
+        if (ReadByte(body, home, 0) != 2)
+        {
+            throw InvalidMap();
+        }
+
+        var homeTypeSpecRef = GetTypeMapTypeSpecRef(body,
+            GetHomeTypeMapIndex(body, homeIndex));
+        var homeType = typeSpecs.GetTypeSpecRef(homeTypeSpecRef);
+        if (!homeType.IsRow || homeType.Form != 0x04
+            || homeType.Qualifiers != 0)
+        {
+            throw new NotSupportedException(
+                "The G1 interface-requirement receiver must be an in-scope type formal.");
+        }
+
+        var homeFormal = checked((int)ReadUInt32(
+            typeSpecs.GetRow(homeType.Row), 2));
+        var signature = methods.GetSignature(callerMethodRow);
+        var (firstParameter, parameterCount)
+            = signatures.GetParamRange(signature);
+        if (homeFormal != evidenceOwner
+            || parameterOrdinal >= parameterCount
+            || parameters.GetMode(firstParameter + parameterOrdinal) != 0
+            || !typeSpecs.AreEquivalentTypeSpecRefs(homeTypeSpecRef,
+                parameters.GetTypeSpec(firstParameter + parameterOrdinal)))
+        {
+            throw InvalidMap();
+        }
+    }
+
+    private static void ValidateGenericInterfaceRequirementSignatureType(
+        uint typeSpecRef, uint ownerDefinitionId, int firstOwnerFormal,
+        int ownerFormalCount, bool allowVoid,
+        TrRmTypeSpecTableReader typeSpecs,
+        TrRmGenericParamTableReader genericParams)
+    {
+        var type = typeSpecs.GetTypeSpecRef(typeSpecRef);
+        if (type.Qualifiers != 0)
+        {
+            throw new NotSupportedException(
+                "The G1 interface-requirement signature has qualified types.");
+        }
+
+        if (type.Form == 0x01
+            && (type.IsRow
+                ? typeSpecs.GetRow(type.Row).Length == 3
+                : (type.Value & 0xFF00_0000) == 0xF200_0000)
+            && (allowVoid || type.TypeCode != 0))
+        {
+            return;
+        }
+
+        if (type.Form == 0x04 && type.IsRow
+            && typeSpecs.GetRow(type.Row).Length == 6)
+        {
+            var formalRow = checked((int)ReadUInt32(
+                typeSpecs.GetRow(type.Row), 2));
+            var ordinal = genericParams.GetOrdinal(formalRow);
+            if (genericParams.GetOwnerDefId(formalRow)
+                    == ownerDefinitionId
+                && genericParams.GetFormalKind(formalRow) == 1
+                && ordinal < (uint)ownerFormalCount
+                && formalRow >= firstOwnerFormal
+                && formalRow < firstOwnerFormal + ownerFormalCount
+                && ordinal == checked((uint)(formalRow
+                    - firstOwnerFormal)))
+            {
+                return;
+            }
+        }
+
+        throw new NotSupportedException(
+            "The G1 interface-requirement signature is outside the scalar/owner-formal subset.");
     }
 
     private static void ValidateGenericDirectReturnHomeBody(
@@ -2105,7 +2548,12 @@ internal static class TrRmRegisterBodyMapValidator
         }
     }
 
-    private static void ValidateGenericCallTypeActual(
+    private readonly record struct GenericCallTypeActualFacts(
+        byte? OwnershipDomain, byte NullabilityDomain,
+        bool RequiresWritable, bool RequiresBlittable, int FormalRow,
+        bool IsWritableQualifier, bool IsInitializationQualifier);
+
+    private static int ValidateGenericCallTypeActual(
         uint typeSpecRef, int targetFormal, uint callerDefinitionId,
         int callerFormalFirst, int callerFormalCount, int ownerModule,
         TrRmTypeDefTableReader types,
@@ -2118,17 +2566,104 @@ internal static class TrRmRegisterBodyMapValidator
         ConstantSourceValueContext constantValues,
         HashSet<int> visitedTypeSpecRows)
     {
-        var reference = typeSpecs.GetTypeSpecRef(typeSpecRef);
-        if (reference.Qualifiers != 0)
+        var actual = ResolveGenericCallTypeActualFacts(typeSpecRef,
+            callerDefinitionId, callerFormalFirst, callerFormalCount,
+            typeSpecs, genericParams, constraints, allowInitQualifier: false,
+            depth: 0);
+        if (actual.OwnershipDomain is not byte actualOwnership)
         {
-            throw new NotSupportedException(
-                "The G1 consumer currently supports unqualified scalar or caller-formal TypeActual arguments only.");
+            throw InvalidMap();
         }
 
-        if (reference.Form == 0x04)
+        if (!SemanticVerifier.IsGenericMethodFormalContractSatisfied(
+                genericParams.GetOwnershipDomain(targetFormal),
+                genericParams.GetNullabilityDomain(targetFormal),
+                HasGenericMethodPropertyConstraint(targetFormal, 2,
+                    genericParams, constraints),
+                HasGenericMethodPropertyConstraint(targetFormal, 3,
+                    genericParams, constraints),
+                actualOwnership, actual.NullabilityDomain,
+                actual.RequiresWritable, actual.RequiresBlittable))
         {
-            var formalRow = checked((int)ReadUInt32(
-                typeSpecs.GetRow(reference.Row), 2));
+            throw InvalidMap();
+        }
+
+        ValidateTypeSpecModuleContext(typeSpecRef, ownerModule, types,
+            typeSpecs, genericParams, methods, imports, moduleRefs,
+            constantValues, visitedTypeSpecRows);
+        return actual.FormalRow;
+    }
+
+    private static GenericCallTypeActualFacts ResolveGenericCallTypeActualFacts(
+        uint typeSpecRef, uint callerDefinitionId,
+        int callerFormalFirst, int callerFormalCount,
+        TrRmTypeSpecTableReader typeSpecs,
+        TrRmGenericParamTableReader genericParams,
+        TrRmConstraintTableReader constraints, bool allowInitQualifier,
+        int depth)
+    {
+        ConsumeWork(typeSpecs);
+        if (depth > SemanticVerifier.MaximumDepth)
+        {
+            throw new NotSupportedException(
+                "The G1 GenericCall TypeActual exceeds the supported depth.");
+        }
+
+        var reference = typeSpecs.GetTypeSpecRef(typeSpecRef,
+            allowInitQualifier: allowInitQualifier);
+        var isWritable = (reference.Qualifiers & 0x01) != 0;
+        var isGarbageCollected = (reference.Qualifiers & 0x02) != 0;
+        var isInitialization = (reference.Qualifiers & 0x04) != 0;
+        if (isGarbageCollected)
+        {
+            throw new NotSupportedException(
+                "G1 GenericCall TypeActuals do not support GC-backed types.");
+        }
+
+        if (reference.Form == 0x01 && !reference.IsRow)
+        {
+            if (reference.TypeCode == 0 || isInitialization
+                || isGarbageCollected)
+            {
+                throw InvalidMap();
+            }
+            if (reference.TypeCode == 0x8A
+                && reference.ArgumentCode != 0)
+            {
+                return new GenericCallTypeActualFacts(1, 1, isWritable,
+                    false, 0, false, false);
+            }
+            if (reference.TypeCode >= 0x80 || isWritable)
+            {
+                throw new NotSupportedException(
+                    "G1 GenericCall TypeActuals use an unsupported inline family.");
+            }
+            return new GenericCallTypeActualFacts(1, 1, false, true, 0,
+                false, false);
+        }
+
+        if (!reference.IsRow)
+        {
+            throw new NotSupportedException(
+                "G1 GenericCall TypeActuals use an unsupported inline TypeSpec.");
+        }
+
+        var row = typeSpecs.GetRow(reference.Row);
+        if (reference.Form == 0x01)
+        {
+            if (reference.TypeCode == 0 || reference.TypeCode >= 0x80
+                || row.Length != 3 || isWritable || isInitialization)
+            {
+                throw new NotSupportedException(
+                    "G1 GenericCall TypeActuals use an unsupported built-in TypeSpec.");
+            }
+            return new GenericCallTypeActualFacts(1, 1, false, true, 0,
+                false, false);
+        }
+
+        if (reference.Form == 0x04 && row.Length == 6)
+        {
+            var formalRow = checked((int)ReadUInt32(row, 2));
             if (genericParams.GetOwnerDefId(formalRow)
                     != callerDefinitionId
                 || formalRow < callerFormalFirst
@@ -2138,61 +2673,155 @@ internal static class TrRmRegisterBodyMapValidator
                 throw InvalidMap();
             }
 
-            var targetOwnership
-                = genericParams.GetOwnershipDomain(targetFormal);
-            var actualOwnership = genericParams.GetOwnershipDomain(formalRow);
-            var targetNullability
-                = genericParams.GetNullabilityDomain(targetFormal);
-            var actualNullability
-                = genericParams.GetNullabilityDomain(formalRow);
-            var targetRequiresWrite
-                = HasGenericMethodPropertyConstraint(targetFormal, 2,
-                    genericParams, constraints);
-            var targetRequiresBlittable
-                = HasGenericMethodPropertyConstraint(targetFormal, 3,
-                    genericParams, constraints);
-            var actualRequiresWrite
-                = HasGenericMethodPropertyConstraint(formalRow, 2,
-                    genericParams, constraints);
-            var actualRequiresBlittable
-                = HasGenericMethodPropertyConstraint(formalRow, 3,
-                    genericParams, constraints);
-            if (!SemanticVerifier.IsGenericMethodFormalContractSatisfied(
-                    targetOwnership, targetNullability,
-                    targetRequiresWrite, targetRequiresBlittable,
-                    actualOwnership, actualNullability,
-                    actualRequiresWrite, actualRequiresBlittable))
+            var requiresWritable = HasGenericMethodPropertyConstraint(
+                formalRow, 2, genericParams, constraints);
+            if (isWritable && !requiresWritable)
             {
                 throw InvalidMap();
             }
-        }
-        else if (reference.Form != 0x01 || reference.TypeCode == 0)
-        {
-            throw new NotSupportedException(
-                "The G1 consumer currently supports scalar or caller-formal TypeActual arguments only.");
-        }
-        else
-        {
-            var targetOwnership
-                = genericParams.GetOwnershipDomain(targetFormal);
-            var targetRequiresWrite
-                = HasGenericMethodPropertyConstraint(targetFormal, 2,
-                    genericParams, constraints);
-            var targetRequiresBlittable
-                = HasGenericMethodPropertyConstraint(targetFormal, 3,
-                    genericParams, constraints);
-            if (!SemanticVerifier.IsGenericMethodFormalContractSatisfied(
-                    targetOwnership, targetNullability,
-                    targetRequiresWrite, targetRequiresBlittable,
-                    1, 1, false, true))
+            if (isInitialization && !allowInitQualifier)
             {
                 throw InvalidMap();
+            }
+
+            return new GenericCallTypeActualFacts(
+                genericParams.GetOwnershipDomain(formalRow),
+                genericParams.GetNullabilityDomain(formalRow),
+                requiresWritable,
+                HasGenericMethodPropertyConstraint(formalRow, 3,
+                    genericParams, constraints),
+                formalRow, isWritable
+                    && (allowInitQualifier || !requiresWritable),
+                isInitialization);
+        }
+
+        if ((reference.Form is 0x07 or 0x0E) && row.Length == 6)
+        {
+            if (isInitialization)
+            {
+                throw InvalidMap();
+            }
+
+            var referentTypeSpecRef = ReadUInt32(row, 2);
+            var referent = ResolveGenericCallTypeActualFacts(
+                referentTypeSpecRef, callerDefinitionId,
+                callerFormalFirst, callerFormalCount, typeSpecs,
+                genericParams, constraints, allowInitQualifier: false,
+                depth + 1);
+            var ownershipDomain = referent.OwnershipDomain == 1
+                ? (byte?)1 : null;
+            return new GenericCallTypeActualFacts(ownershipDomain, 1,
+                isWritable, false, 0, false, false);
+        }
+
+        if (reference.Form == 0x0C && row.Length == 7
+            && reference.TypeCode == 0x8A)
+        {
+            if (isInitialization)
+            {
+                throw InvalidMap();
+            }
+
+            var elementTypeSpecRef = ReadUInt32(row, 3);
+            var element = ResolveGenericCallTypeActualFacts(
+                elementTypeSpecRef, callerDefinitionId,
+                callerFormalFirst, callerFormalCount, typeSpecs,
+                genericParams, constraints, allowInitQualifier: true,
+                depth + 1);
+            if (element.IsWritableQualifier && element.FormalRow == 0)
+            {
+                throw InvalidMap();
+            }
+
+            return new GenericCallTypeActualFacts(
+                element.IsInitializationQualifier ? null : (byte)1,
+                1, isWritable, false, 0, false, false);
+        }
+
+        throw new NotSupportedException(
+            "G1 GenericCall TypeActuals use an unsupported TypeSpec form.");
+    }
+
+    private static bool GenericCallConstraintTypeSpecsMatch(
+        TrRmRegisterBodyReader body, uint targetConstraintTypeSpecRef,
+        uint callerConstraintTypeSpecRef, int targetMethodRow,
+        uint[] targetArgumentTypeSpecRefs,
+        TrRmTypeSpecTableReader typeSpecs,
+        TrRmGenericParamTableReader genericParams, int depth = 0)
+    {
+        ConsumeWork(body);
+        if (depth > SemanticVerifier.MaximumDepth)
+        {
+            throw new NotSupportedException(
+                "The G1 GenericCall interface constraint exceeds the supported depth.");
+        }
+
+        var target = typeSpecs.GetTypeSpecRef(
+            targetConstraintTypeSpecRef);
+        if (target.Form == 0x04 && target.IsRow
+            && target.Qualifiers == 0)
+        {
+            var formalRow = checked((int)ReadUInt32(
+                typeSpecs.GetRow(target.Row), 2));
+            var targetDefinitionId = 0x1600_0000u
+                | checked((uint)targetMethodRow);
+            if (genericParams.GetOwnerDefId(formalRow)
+                    == targetDefinitionId
+                && genericParams.GetFormalKind(formalRow) == 1)
+            {
+                var ordinal = genericParams.GetOrdinal(formalRow);
+                return ordinal < (uint)targetArgumentTypeSpecRefs.Length
+                    && typeSpecs.AreEquivalentTypeSpecRefs(
+                        targetArgumentTypeSpecRefs[checked((int)ordinal)],
+                        callerConstraintTypeSpecRef);
             }
         }
 
-        ValidateTypeSpecModuleContext(typeSpecRef, ownerModule, types,
-            typeSpecs, genericParams, methods, imports, moduleRefs,
-            constantValues, visitedTypeSpecRows);
+        if (target.Form == 0x05 && target.IsRow)
+        {
+            var caller = typeSpecs.GetTypeSpecRef(
+                callerConstraintTypeSpecRef);
+            if (!caller.IsRow || caller.Form != 0x05
+                || caller.Qualifiers != target.Qualifiers)
+            {
+                return false;
+            }
+
+            var targetRow = typeSpecs.GetRow(target.Row);
+            var callerRow = typeSpecs.GetRow(caller.Row);
+            if (targetRow.Length != callerRow.Length
+                || targetRow.Length < 6
+                || (targetRow.Length - 6) % sizeof(uint) != 0)
+            {
+                return false;
+            }
+
+            if (!GenericCallConstraintTypeSpecsMatch(body,
+                    ReadUInt32(targetRow, 2), ReadUInt32(callerRow, 2),
+                    targetMethodRow, targetArgumentTypeSpecRefs,
+                    typeSpecs, genericParams, depth + 1))
+            {
+                return false;
+            }
+
+            for (var offset = 6; offset < targetRow.Length;
+                offset += sizeof(uint))
+            {
+                if (!GenericCallConstraintTypeSpecsMatch(body,
+                        ReadUInt32(targetRow, offset),
+                        ReadUInt32(callerRow, offset), targetMethodRow,
+                        targetArgumentTypeSpecRefs, typeSpecs,
+                        genericParams, depth + 1))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        return typeSpecs.AreEquivalentTypeSpecRefs(
+            targetConstraintTypeSpecRef, callerConstraintTypeSpecRef);
     }
 
     private static bool HasGenericMethodPropertyConstraint(int formalRow,
@@ -2216,39 +2845,144 @@ internal static class TrRmRegisterBodyMapValidator
     private static void ValidateGenericCallSignatureType(
         uint typeSpecRef, uint ownerDefinitionId, int formalFirst,
         int formalCount, TrRmTypeSpecTableReader typeSpecs,
-        TrRmGenericParamTableReader genericParams, bool allowUnit = false)
+        TrRmGenericParamTableReader genericParams,
+        TrRmConstraintTableReader constraints, bool allowUnit = false)
     {
-        var reference = typeSpecs.GetTypeSpecRef(typeSpecRef);
-        if (reference.Qualifiers != 0)
+        ValidateGenericCallSignatureTypeCore(typeSpecRef,
+            ownerDefinitionId, formalFirst, formalCount, typeSpecs,
+            genericParams, constraints, allowUnit,
+            allowInitQualifier: false, depth: 0);
+    }
+
+    private static void ValidateGenericCallSignatureTypeCore(
+        uint typeSpecRef, uint ownerDefinitionId, int formalFirst,
+        int formalCount, TrRmTypeSpecTableReader typeSpecs,
+        TrRmGenericParamTableReader genericParams,
+        TrRmConstraintTableReader constraints, bool allowUnit,
+        bool allowInitQualifier, int depth)
+    {
+        ConsumeWork(typeSpecs);
+        if (depth > SemanticVerifier.MaximumDepth)
         {
             throw new NotSupportedException(
-                "The G1 consumer currently supports unqualified scalar and direct-formal GenericCall signatures only.");
+                "The G1 GenericCall signature TypeSpec exceeds the supported depth.");
         }
 
-        if (reference.Form == 0x01)
+        var reference = typeSpecs.GetTypeSpecRef(typeSpecRef,
+            allowInitQualifier: allowInitQualifier);
+        var isWritable = (reference.Qualifiers & 0x01) != 0;
+        var isGarbageCollected = (reference.Qualifiers & 0x02) != 0;
+        var isInitialization = (reference.Qualifiers & 0x04) != 0;
+        if (isGarbageCollected)
         {
-            if (!allowUnit && reference.TypeCode == 0)
+            throw new NotSupportedException(
+                "G1 GenericCall signatures do not support GC-backed types.");
+        }
+
+        if (!reference.IsRow)
+        {
+            if (reference.Form == 0x01
+                && reference.TypeCode is > 0 and < 0x80
+                && !isWritable && !isInitialization)
+            {
+                return;
+            }
+            if (allowUnit && reference.Form == 0x01
+                && reference.TypeCode == 0
+                && !isWritable && !isInitialization)
+            {
+                return;
+            }
+            if (reference.Form == 0x01
+                && reference.TypeCode == 0x8A
+                && reference.ArgumentCode != 0
+                && !isInitialization)
+            {
+                return;
+            }
+
+            throw new NotSupportedException(
+                "The G1 consumer uses an unsupported inline GenericCall signature TypeSpec.");
+        }
+
+        var row = typeSpecs.GetRow(reference.Row);
+        if (reference.Form == 0x01 && row.Length is 3 or 4)
+        {
+            if (reference.TypeCode == 0 && allowUnit
+                && !isWritable && !isInitialization)
+            {
+                return;
+            }
+            if (reference.TypeCode is > 0 and < 0x80
+                && !isWritable && !isInitialization)
+            {
+                return;
+            }
+            throw InvalidMap();
+        }
+
+        if (reference.Form == 0x04 && row.Length == 6)
+        {
+            var formalRow = checked((int)ReadUInt32(row, 2));
+            if (genericParams.GetOwnerDefId(formalRow)
+                    != ownerDefinitionId
+                || formalRow < formalFirst
+                || formalRow >= formalFirst + formalCount
+                || genericParams.GetFormalKind(formalRow) != 1)
+            {
+                throw InvalidMap();
+            }
+            if (isWritable
+                && !HasGenericMethodPropertyConstraint(formalRow, 2,
+                    genericParams, constraints))
+            {
+                throw InvalidMap();
+            }
+            if (isInitialization && !allowInitQualifier)
             {
                 throw InvalidMap();
             }
             return;
         }
 
-        if (reference.Form != 0x04)
+        if ((reference.Form is >= 0x06 and <= 0x0B
+                || reference.Form == 0x0E)
+            && row.Length == 6)
         {
-            throw new NotSupportedException(
-                "The G1 consumer currently supports scalar and direct-formal GenericCall signatures only.");
+            if (reference.Form == 0x06)
+            {
+                throw new NotSupportedException(
+                    "G1 GenericCall signatures do not support optional TypeSpecs.");
+            }
+            if ((reference.Form is 0x07 or 0x0E) && isInitialization)
+            {
+                throw InvalidMap();
+            }
+            ValidateGenericCallSignatureTypeCore(
+                ReadUInt32(row, 2), ownerDefinitionId, formalFirst,
+                formalCount, typeSpecs, genericParams, constraints,
+                allowUnit: false, allowInitQualifier: false,
+                depth + 1);
+            return;
         }
 
-        var formalRow = checked((int)ReadUInt32(
-            typeSpecs.GetRow(reference.Row), 2));
-        if (genericParams.GetOwnerDefId(formalRow) != ownerDefinitionId
-            || formalRow < formalFirst
-            || formalRow >= formalFirst + formalCount
-            || genericParams.GetFormalKind(formalRow) != 1)
+        if (reference.Form == 0x0C && row.Length == 7
+            && reference.TypeCode == 0x8A)
         {
-            throw InvalidMap();
+            if (isInitialization)
+            {
+                throw InvalidMap();
+            }
+            ValidateGenericCallSignatureTypeCore(
+                ReadUInt32(row, 3), ownerDefinitionId, formalFirst,
+                formalCount, typeSpecs, genericParams, constraints,
+                allowUnit: false, allowInitQualifier: true,
+                depth + 1);
+            return;
         }
+
+        throw new NotSupportedException(
+            "The G1 consumer uses an unsupported GenericCall signature TypeSpec.");
     }
 
     private static void ValidateMethodSignatureTypeContexts(int methodRow,
@@ -2390,17 +3124,19 @@ internal static class TrRmRegisterBodyMapValidator
         TrRmRegisterBodyReader body,
         int methodDefRow,
         TrRmTypeDefTableReader types, TrRmFieldDefTableReader fields,
-        TrRmTypeSpecTableReader typeSpecs, TrRmMethodDefTableReader methods,
+        ref TrRmTypeSpecTableReader typeSpecs,
+        TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
         TrRmGenericParamTableReader genericParams,
+        TrRmConstraintTableReader constraints,
         TrRmContractTableReader contracts, TrRmImportTableReader imports,
         TrRmNativeFunctionPointerAnchorTableReader nativeFunctionPointerAnchors,
         ConstantSourceValueContext constantValues,
         InitializationReferenceTypeMap initializationReferenceTypes)
     {
         var registerTypeEntries = ComputeBlockRegisterTypeStates(body,
-            methodDefRow, types, fields, typeSpecs, methods, signatures,
-            parameters, genericParams, contracts, imports,
+            methodDefRow, types, fields, ref typeSpecs, methods, signatures,
+            parameters, genericParams, constraints, contracts, imports,
             nativeFunctionPointerAnchors,
             constantValues, initializationReferenceTypes);
         for (var blockIndex = 0; blockIndex < body.BlockCount; blockIndex++)
@@ -2418,7 +3154,7 @@ internal static class TrRmRegisterBodyMapValidator
                 var opcode = code[position];
                 ConsumeWork(body);
                 var instructionLength = TrRmRegisterBodyReader.InstructionLength(
-                    opcode, body.Schema);
+                    opcode, body.Schema, body.UsesNativePointerLoads);
                 ConsumeWork(body, checked((ulong)instructionLength));
                 var instruction = code.Slice(position, instructionLength);
                 switch (opcode)
@@ -2440,11 +3176,12 @@ internal static class TrRmRegisterBodyMapValidator
                         ValidateCallSiteEffects(body, methodDefRow,
                             callSiteRecordIndex, blockIndex,
                             registerTypes,
-                            typeSpecs, methods, signatures, parameters,
-                            genericParams, contracts, imports,
+                            ref typeSpecs, methods, signatures, parameters,
+                            genericParams, constraints, contracts, imports,
                             nativeFunctionPointerAnchors);
-                        UpdateCallSiteRegisterTypes(body, callSiteRecordIndex, registerTypes,
-                            typeSpecs, methods, signatures, genericParams, imports,
+                        UpdateCallSiteRegisterTypes(body, callSiteRecordIndex,
+                            registerTypes, ref typeSpecs, methods,
+                            signatures, genericParams, constraints, imports,
                             nativeFunctionPointerAnchors);
                         break;
                     case 0xE0:
@@ -2452,12 +3189,13 @@ internal static class TrRmRegisterBodyMapValidator
                             methodDefRow,
                             ReadUInt16(body, instruction, 2),
                             blockIndex, registerTypes,
-                            typeSpecs, methods, signatures,
-                            parameters, genericParams, contracts, imports,
+                            ref typeSpecs, methods, signatures,
+                            parameters, genericParams, constraints, contracts, imports,
                             nativeFunctionPointerAnchors);
                         UpdateCallSiteRegisterTypes(body,
                             ReadUInt16(body, instruction, 2), registerTypes,
-                            typeSpecs, methods, signatures, genericParams, imports,
+                            ref typeSpecs, methods, signatures,
+                            genericParams, constraints, imports,
                             nativeFunctionPointerAnchors);
                         break;
                     case 0xE1:
@@ -2557,9 +3295,10 @@ internal static class TrRmRegisterBodyMapValidator
     private static void UpdateCallSiteRegisterTypes(
         TrRmRegisterBodyReader body, int recordIndex,
         RegisterTypeState[] registerTypes,
-        TrRmTypeSpecTableReader typeSpecs,
+        ref TrRmTypeSpecTableReader typeSpecs,
         TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
         TrRmGenericParamTableReader genericParams,
+        TrRmConstraintTableReader constraints,
         TrRmImportTableReader imports,
         TrRmNativeFunctionPointerAnchorTableReader nativeFunctionPointerAnchors)
     {
@@ -2594,17 +3333,19 @@ internal static class TrRmRegisterBodyMapValidator
                 RegisterTypeState.FromTypeSpecRef(
                     GetGenericCallTypeSpecRef(body, payload,
                         signatures.GetResultTypeSpec(signature),
-                        targetMethod, typeSpecs, genericParams)));
+                    targetMethod, methods, ref typeSpecs, genericParams,
+                    constraints)));
         }
     }
 
     private static void ValidateCallSiteEffects(TrRmRegisterBodyReader body,
         int callerMethodDefRow, int recordIndex, int blockIndex,
         RegisterTypeState[] registerTypes,
-        TrRmTypeSpecTableReader typeSpecs,
+        ref TrRmTypeSpecTableReader typeSpecs,
         TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
         TrRmParamTableReader parameters,
         TrRmGenericParamTableReader genericParams,
+        TrRmConstraintTableReader constraints,
         TrRmContractTableReader contracts,
         TrRmImportTableReader imports,
         TrRmNativeFunctionPointerAnchorTableReader nativeFunctionPointerAnchors)
@@ -2617,9 +3358,17 @@ internal static class TrRmRegisterBodyMapValidator
         var (firstParameter, parameterCount) = signatures.GetParamRange(signature);
         var inputCount = ReadUInt32(body, payload, 8);
         var receiverTypeSpec = signatures.GetReceiverTypeSpec(signature);
-        var hasReceiver
-            = body.Schema.UsesObjectConstruction()
-                && receiverTypeSpec != 0;
+        var isGenericInterfaceRequirement
+            = ReadByte(body, payload, 0) == 4
+                && ReadByte(body, GetRecordPayload(body,
+                    ReadUInt16(body, payload, 4)), 0) == 2;
+        var targetConstructionRole = contracts.HasConstructionClause(targetMethod)
+            ? contracts.GetConstructionClause(targetMethod).RoleTag : (byte)0;
+
+        var hasReceiver = receiverTypeSpec != 0
+            && (body.Schema.UsesObjectConstruction()
+                || body.Schema.UsesMethodReceiverAccess()
+                || isGenericInterfaceRequirement);
         if (inputCount != (uint)(parameterCount
                 + (hasReceiver ? 1 : 0)))
         {
@@ -2629,9 +3378,26 @@ internal static class TrRmRegisterBodyMapValidator
         var inputOffset = 16;
         if (hasReceiver)
         {
-            if (contracts.HasConstructionClause(targetMethod)
-                && contracts.GetConstructionClause(targetMethod).RoleTag
-                    == 1)
+            if (body.Schema.UsesPropertyInitializedState()
+                && targetConstructionRole is 1 or 3)
+            {
+                ValidatePropertyInitializerReceiverInput(body,
+                    callerMethodDefRow, targetMethod, payload,
+                    receiverTypeSpec, ref typeSpecs, methods, signatures,
+                    contracts);
+            }
+            else if (targetConstructionRole == 3)
+            {
+                throw InvalidMap();
+            }
+            else if (isGenericInterfaceRequirement)
+            {
+                ValidateGenericCallInterfaceReceiverInput(body,
+                    callerMethodDefRow, targetMethod, payload,
+                    inputOffset, typeSpecs, genericParams, constraints,
+                    methods, signatures, parameters);
+            }
+            else if (targetConstructionRole == 1)
             {
                 ValidateConstructionReceiverInput(body,
                     callerMethodDefRow, targetMethod, payload,
@@ -2647,7 +3413,8 @@ internal static class TrRmRegisterBodyMapValidator
             var isUnitInput = selectorKind == 0;
             var formalType = GetGenericCallTypeSpecRef(body, payload,
                 parameters.GetTypeSpec(firstParameter + ordinal),
-                targetMethod, typeSpecs, genericParams);
+                targetMethod, methods, ref typeSpecs, genericParams,
+                constraints);
             var isUnitFormal = typeSpecs.AreEquivalentTypeSpecRefs(
                 formalType, UnitTypeSpecRef);
             if (isUnitInput != isUnitFormal)
@@ -2660,7 +3427,7 @@ internal static class TrRmRegisterBodyMapValidator
 
         var resultType = GetGenericCallTypeSpecRef(body, payload,
             signatures.GetResultTypeSpec(signature), targetMethod,
-            typeSpecs, genericParams);
+            methods, ref typeSpecs, genericParams, constraints);
         var unitResult = typeSpecs.AreEquivalentTypeSpecRefs(
             resultType, UnitTypeSpecRef);
         var doesNotReturn = (contracts.GetEffectsMask(targetMethod) & 2) != 0;
@@ -2668,6 +3435,111 @@ internal static class TrRmRegisterBodyMapValidator
         if (doesNotReturn
             ? resultKind != 0 || !body.IsCallSiteAtBlockEnd(blockIndex, recordIndex)
             : unitResult ? resultKind != 0 : resultKind == 0)
+        {
+            throw InvalidMap();
+        }
+    }
+
+    private static void ValidatePropertyInitializerReceiverInput(
+        TrRmRegisterBodyReader body, int callerMethod, int targetMethod,
+        ReadOnlySpan<byte> callSitePayload, uint receiverTypeSpec,
+        ref TrRmTypeSpecTableReader typeSpecs,
+        TrRmMethodDefTableReader methods,
+        TrRmMethodSigTableReader signatures,
+        TrRmContractTableReader contracts)
+    {
+        var targetConstruction = contracts.GetConstructionClause(targetMethod);
+        var targetSignature = methods.GetSignature(targetMethod);
+        var (_, parameterCount) = signatures.GetParamRange(targetSignature);
+        var expectedInputCount = parameterCount + 1;
+        if (!body.Schema.UsesPropertyInitializedState()
+            || ReadByte(body, callSitePayload, 0) != 1
+            || ReadByte(body, callSitePayload, 1) != 0
+            || ReadUInt16(body, callSitePayload, 2) != 0
+            || ReadUInt16(body, callSitePayload, 6) != 0
+            || ReadUInt32(body, callSitePayload, 8)
+                != (uint)expectedInputCount
+            || ReadByte(body, callSitePayload, 16) != 2
+            || ReadByte(body, callSitePayload, 17) != 5
+            || receiverTypeSpec == 0
+            || (methods.GetFlags(targetMethod) & 4) != 0
+            || !typeSpecs.AreEquivalentTypeSpecRefs(
+                receiverTypeSpec,
+                signatures.GetReceiverTypeSpec(targetSignature))
+            || targetConstruction.RoleTag is not (1 or 3))
+        {
+            throw InvalidMap();
+        }
+
+        if (targetConstruction.RoleTag == 3
+            && (parameterCount != 1 || expectedInputCount != 2))
+        {
+            throw InvalidMap();
+        }
+
+        var homeIndex = ReadUInt16(body, callSitePayload, 18);
+        if (homeIndex >= body.HomeCount)
+        {
+            throw InvalidMap();
+        }
+
+        var home = GetHomeMapEntry(body, homeIndex);
+        var homeRole = ReadByte(body, home, 0);
+        if (ReadByte(body, home, 1) != 0
+            || ReadUInt16(body, home, 4) != 0
+            || ReadUInt16(body, home, 6) != 0
+            || !typeSpecs.AreEquivalentTypeSpecRefs(
+                GetTypeMapTypeSpecRef(body, ReadUInt16(body, home, 2)),
+                receiverTypeSpec))
+        {
+            throw InvalidMap();
+        }
+
+        var callerRole = contracts.HasConstructionClause(callerMethod)
+            ? contracts.GetConstructionClause(callerMethod).RoleTag
+            : (byte)0;
+        if (homeRole == 4)
+        {
+            if (!body.Schema.UsesObjectConstruction())
+            {
+                throw InvalidMap();
+            }
+
+            if (callerRole == 2 && targetConstruction.RoleTag == 1)
+            {
+                var callerConstruction
+                    = contracts.GetConstructionClause(callerMethod);
+                if (callerConstruction.InitializerMethodDefRow
+                    != (uint)targetMethod
+                    || methods.GetOwnerType(callerMethod)
+                        != methods.GetOwnerType(targetMethod)
+                    || methods.GetOwnerModule(callerMethod)
+                        != methods.GetOwnerModule(targetMethod))
+                {
+                    throw InvalidMap();
+                }
+            }
+
+            return;
+        }
+
+        if (homeRole != 1 || callerRole is not (1 or 3)
+            || methods.GetOwnerType(callerMethod)
+                != methods.GetOwnerType(targetMethod)
+            || methods.GetOwnerModule(callerMethod)
+                != methods.GetOwnerModule(targetMethod)
+            || !typeSpecs.AreEquivalentTypeSpecRefs(
+                signatures.GetReceiverTypeSpec(
+                    methods.GetSignature(callerMethod)),
+                receiverTypeSpec)
+            || targetConstruction.RoleTag != 3)
+        {
+            throw InvalidMap();
+        }
+
+        if (callerRole == 3
+            && contracts.GetConstructionClause(callerMethod).PropertyDefRow
+                != targetConstruction.PropertyDefRow)
         {
             throw InvalidMap();
         }
@@ -2743,13 +3615,22 @@ internal static class TrRmRegisterBodyMapValidator
             throw InvalidMap();
         }
 
-        var expectedWritable = (receiverQualifiers & 1) != 0;
+        var typeRequiresWritable = (receiverQualifiers & 1) != 0;
+        var expectedWritable = body.Schema.UsesMethodReceiverAccess()
+            ? (methods.GetFlags(targetMethod) & 4) != 0
+            : typeRequiresWritable;
         var hasOwnerMutability = types.TryGetDeclaredClassMutability(
             receiverOwnerType, out var ownerIsMutable);
-        if (!body.Schema.UsesObjectConstruction()
+        var requiresDeclaredClassMutability
+            = !body.Schema.UsesMethodReceiverAccess();
+        if ((!body.Schema.UsesObjectConstruction()
+                && !body.Schema.UsesMethodReceiverAccess())
             || types.GetGenericRange(receiverOwnerType).Count != 0
-            || !hasOwnerMutability
-            || (expectedWritable && !ownerIsMutable)
+            || (requiresDeclaredClassMutability
+                && (!hasOwnerMutability
+                    || (expectedWritable && !ownerIsMutable)))
+            || (body.Schema.UsesMethodReceiverAccess()
+                && expectedWritable != typeRequiresWritable)
             || methods.GetOwnerType(targetMethod) != receiverOwnerType
             || methods.GetOwnerModule(targetMethod) != ownerModule
             || sourceUse != (expectedWritable ? 4 : 3)
@@ -2798,7 +3679,8 @@ internal static class TrRmRegisterBodyMapValidator
         var actualWritable = (actualQualifiers & 1) != 0;
         if (actualOwnerType != receiverOwnerType
             || (expectedWritable && !actualWritable)
-            || (actualWritable && !ownerIsMutable))
+            || (requiresDeclaredClassMutability
+                && actualWritable && !ownerIsMutable))
         {
             throw InvalidMap();
         }
@@ -3055,7 +3937,7 @@ internal static class TrRmRegisterBodyMapValidator
                 var instruction = code[position..];
                 var opcode = ReadByte(body, instruction, 0);
                 var length = TrRmRegisterBodyReader.InstructionLength(
-                    opcode, body.Schema);
+                    opcode, body.Schema, body.UsesNativePointerLoads);
                 if (opcode == 0x90)
                 {
                     _ = referencedCallSites.Add(
@@ -3102,7 +3984,7 @@ internal static class TrRmRegisterBodyMapValidator
                 var instruction = code[position..];
                 var opcode = ReadByte(body, instruction, 0);
                 var length = TrRmRegisterBodyReader.InstructionLength(
-                    opcode, body.Schema);
+                    opcode, body.Schema, body.UsesNativePointerLoads);
                 if (opcode == 0xDF)
                 {
                     var action = ReadByte(body, instruction, 1);
@@ -3213,8 +4095,10 @@ internal static class TrRmRegisterBodyMapValidator
     private static uint GetGenericCallTypeSpecRef(
         TrRmRegisterBodyReader body, ReadOnlySpan<byte> callSitePayload,
         uint signatureTypeSpecRef, int targetMethodRow,
-        TrRmTypeSpecTableReader typeSpecs,
-        TrRmGenericParamTableReader genericParams)
+        TrRmMethodDefTableReader methods,
+        ref TrRmTypeSpecTableReader typeSpecs,
+        TrRmGenericParamTableReader genericParams,
+        TrRmConstraintTableReader constraints)
     {
         if (ReadByte(body, callSitePayload, 0) != 4)
         {
@@ -3223,17 +4107,119 @@ internal static class TrRmRegisterBodyMapValidator
 
         var targetRecordIndex = ReadUInt16(body, callSitePayload, 4);
         var target = GetRecordPayload(body, targetRecordIndex);
+        if (ReadByte(body, target, 0) == 1)
+        {
+            var actualCount = checked((int)ReadUInt32(body, target, 12));
+            var actualTypeSpecRefs = new uint[actualCount];
+            for (var ordinal = 0; ordinal < actualCount; ordinal++)
+            {
+                var argumentOffset = checked(16 + (ordinal * 8));
+                if (ReadByte(body, target, argumentOffset) != 1)
+                {
+                    throw new NotSupportedException(
+                        "G1 GenericCall type substitution requires TypeActual arguments.");
+                }
+                actualTypeSpecRefs[ordinal] = ReadUInt32(body, target,
+                    argumentOffset + 4);
+            }
+
+            var actualAdditions = new List<ReadOnlyMemory<byte>>();
+            for (var ordinal = 0; ordinal < actualTypeSpecRefs.Length;
+                ordinal++)
+            {
+                actualTypeSpecRefs[ordinal]
+                    = NormalizeGenericCallTypeSpecRef(body,
+                        actualTypeSpecRefs[ordinal], typeSpecs,
+                        genericParams, constraints, actualAdditions, 0);
+            }
+            if (actualAdditions.Count != 0)
+            {
+                typeSpecs = typeSpecs.WithAdditionalRows(actualAdditions);
+            }
+
+            var substitutionAdditions
+                = new List<ReadOnlyMemory<byte>>();
+            var substitutedTypeSpecRef
+                = SubstituteGenericCallTypeSpecRef(body,
+                    signatureTypeSpecRef, targetMethodRow,
+                    actualTypeSpecRefs, typeSpecs, genericParams,
+                    substitutionAdditions, 0);
+            if (substitutionAdditions.Count != 0)
+            {
+                typeSpecs = typeSpecs.WithAdditionalRows(
+                    substitutionAdditions);
+            }
+
+            var normalizedAdditions
+                = new List<ReadOnlyMemory<byte>>();
+            var normalizedTypeSpecRef
+                = NormalizeGenericCallTypeSpecRef(body,
+                    substitutedTypeSpecRef, typeSpecs, genericParams,
+                    constraints, normalizedAdditions, 0);
+            if (normalizedAdditions.Count != 0)
+            {
+                typeSpecs = typeSpecs.WithAdditionalRows(
+                    normalizedAdditions);
+            }
+            return normalizedTypeSpecRef;
+        }
+
         var signatureType = typeSpecs.GetTypeSpecRef(signatureTypeSpecRef);
         if (signatureType.Form != 0x04)
         {
             return signatureTypeSpecRef;
         }
 
-        var targetDefinitionId = 0x1600_0000u
-            | checked((uint)targetMethodRow);
         var formalRow = checked((int)ReadUInt32(
             typeSpecs.GetRow(signatureType.Row), 2));
-        if (genericParams.GetOwnerDefId(formalRow) != targetDefinitionId
+        var formalOwner = genericParams.GetOwnerDefId(formalRow);
+        if (ReadByte(body, target, 0) == 2)
+        {
+            var ownerTypeDef = methods.GetOwnerType(targetMethodRow);
+            var ownerDefinitionId = 0x1300_0000u
+                | checked((uint)ownerTypeDef);
+            if (ownerTypeDef == 0
+                || formalOwner != ownerDefinitionId
+                || genericParams.GetFormalKind(formalRow) != 1)
+            {
+                throw InvalidMap();
+            }
+
+            var ownerTypeSpecRef = ReadUInt32(body, target, 4);
+            var ownerType = typeSpecs.GetTypeSpecRef(ownerTypeSpecRef);
+            if (!ownerType.IsRow || ownerType.Form != 0x05
+                || ownerType.Qualifiers != 0)
+            {
+                throw InvalidMap();
+            }
+            var ownerTypeBytes = typeSpecs.GetRow(ownerType.Row);
+            var ownerOrdinal = genericParams.GetOrdinal(formalRow);
+            var ownerArgumentCount
+                = (ownerTypeBytes.Length - 6) / sizeof(uint);
+            if (ownerOrdinal >= (uint)ownerArgumentCount)
+            {
+                throw InvalidMap();
+            }
+
+            var ownerArgumentOffset = checked(
+                6 + (checked((int)ownerOrdinal) * sizeof(uint)));
+            var ownerArgumentTypeSpecRef = ReadUInt32(body,
+                ownerTypeBytes, ownerArgumentOffset);
+            var additions = new List<ReadOnlyMemory<byte>>();
+            var normalizedTypeSpecRef
+                = NormalizeGenericCallTypeSpecRef(body,
+                    ownerArgumentTypeSpecRef, typeSpecs, genericParams,
+                    constraints, additions, 0);
+            if (additions.Count != 0)
+            {
+                typeSpecs = typeSpecs.WithAdditionalRows(additions);
+            }
+            return normalizedTypeSpecRef;
+        }
+
+        var targetDefinitionId = 0x1600_0000u
+            | checked((uint)targetMethodRow);
+        if (formalOwner != targetDefinitionId
             || genericParams.GetFormalKind(formalRow) != 1)
         {
             throw InvalidMap();
@@ -3253,7 +4239,228 @@ internal static class TrRmRegisterBodyMapValidator
                 "The G1 consumer currently supports TypeActual substitution for GenericCall signatures only.");
         }
 
-        return ReadUInt32(body, target, argumentOffset + 4);
+        var typeActual = ReadUInt32(body, target, argumentOffset + 4);
+        var normalizedAdditions
+            = new List<ReadOnlyMemory<byte>>();
+        var normalizedActual = NormalizeGenericCallTypeSpecRef(body,
+            typeActual, typeSpecs, genericParams, constraints,
+            normalizedAdditions, 0);
+        if (normalizedAdditions.Count != 0)
+        {
+            typeSpecs = typeSpecs.WithAdditionalRows(normalizedAdditions);
+        }
+        return normalizedActual;
+    }
+
+    private static uint NormalizeGenericCallTypeSpecRef(
+        TrRmRegisterBodyReader body, uint typeSpecRef,
+        TrRmTypeSpecTableReader typeSpecs,
+        TrRmGenericParamTableReader genericParams,
+        TrRmConstraintTableReader constraints,
+        List<ReadOnlyMemory<byte>> additions, int depth,
+        bool isSpanElement = false)
+    {
+        ConsumeWork(body);
+        if (depth > SemanticVerifier.MaximumDepth)
+        {
+            throw new NotSupportedException(
+                "The G1 GenericCall TypeSpec normalization exceeds the supported depth.");
+        }
+
+        var reference = typeSpecs.GetTypeSpecRef(typeSpecRef,
+            allowInitQualifier: true);
+        if (!reference.IsRow)
+        {
+            return typeSpecRef;
+        }
+
+        var row = typeSpecs.GetRow(reference.Row);
+        if (reference.Form == 0x04 && row.Length == 6
+            && (reference.Qualifiers & 0x01) != 0)
+        {
+            var formalRow = checked((int)ReadUInt32(row, 2));
+            if (!HasGenericMethodPropertyConstraint(formalRow, 2,
+                    genericParams, constraints))
+            {
+                throw InvalidMap();
+            }
+            if (isSpanElement)
+            {
+                return typeSpecRef;
+            }
+
+            var normalizedFormal = row.ToArray();
+            normalizedFormal[1] &= 0xFE;
+            return AddGenericCallTypeSpecRow(typeSpecs, additions,
+                normalizedFormal);
+        }
+
+        var childOffset = reference.Form switch {
+            0x07 or 0x0E => 2,
+            0x0C when row.Length == 7
+                && reference.TypeCode == 0x8A => 3,
+            _ => -1,
+        };
+        if (childOffset < 0)
+        {
+            return typeSpecRef;
+        }
+        if (row.Length < childOffset + sizeof(uint))
+        {
+            throw InvalidMap();
+        }
+
+        var childTypeSpecRef = ReadUInt32(row, childOffset);
+        var normalizedChild = NormalizeGenericCallTypeSpecRef(body,
+            childTypeSpecRef, typeSpecs, genericParams, constraints,
+            additions, depth + 1, reference.Form == 0x0C);
+        if (normalizedChild == childTypeSpecRef)
+        {
+            return typeSpecRef;
+        }
+
+        var normalizedRow = row.ToArray();
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            normalizedRow.AsSpan(childOffset, sizeof(uint)),
+            normalizedChild);
+        return AddGenericCallTypeSpecRow(typeSpecs, additions,
+            normalizedRow);
+    }
+
+    private static uint SubstituteGenericCallTypeSpecRef(
+        TrRmRegisterBodyReader body, uint typeSpecRef, int targetMethodRow,
+        uint[] actualTypeSpecRefs, TrRmTypeSpecTableReader typeSpecs,
+        TrRmGenericParamTableReader genericParams,
+        List<ReadOnlyMemory<byte>> additions, int depth)
+    {
+        ConsumeWork(body);
+        if (depth > SemanticVerifier.MaximumDepth)
+        {
+            throw new NotSupportedException(
+                "The G1 GenericCall signature substitution exceeds the supported depth.");
+        }
+
+        var reference = typeSpecs.GetTypeSpecRef(typeSpecRef,
+            allowInitQualifier: true);
+        if (reference.IsRow && reference.Form == 0x04)
+        {
+            var formalRow = checked((int)ReadUInt32(
+                typeSpecs.GetRow(reference.Row), 2));
+            var targetDefinitionId = 0x1600_0000u
+                | checked((uint)targetMethodRow);
+            if (genericParams.GetOwnerDefId(formalRow)
+                    == targetDefinitionId
+                && genericParams.GetFormalKind(formalRow) == 1)
+            {
+                var ordinal = checked((int)genericParams.GetOrdinal(
+                    formalRow));
+                if ((uint)ordinal >= (uint)actualTypeSpecRefs.Length)
+                {
+                    throw InvalidMap();
+                }
+
+                return AddGenericCallTypeSpecQualifiers(body,
+                    actualTypeSpecRefs[ordinal], reference.Qualifiers,
+                    typeSpecs, additions);
+            }
+        }
+
+        if (!reference.IsRow)
+        {
+            return typeSpecRef;
+        }
+
+        var row = typeSpecs.GetRow(reference.Row);
+        var childOffset = reference.Form switch {
+            >= 0x06 and <= 0x0B => 2,
+            0x0E => 2,
+            0x0C => 3,
+            _ => -1,
+        };
+        if (childOffset < 0 || row.Length < childOffset + sizeof(uint))
+        {
+            return typeSpecRef;
+        }
+
+        var childTypeSpecRef = ReadUInt32(row, childOffset);
+        var substitutedChild = SubstituteGenericCallTypeSpecRef(body,
+            childTypeSpecRef, targetMethodRow, actualTypeSpecRefs,
+            typeSpecs, genericParams, additions, depth + 1);
+        if (substitutedChild == childTypeSpecRef)
+        {
+            return typeSpecRef;
+        }
+
+        var substitutedRow = row.ToArray();
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            substitutedRow.AsSpan(childOffset, sizeof(uint)),
+            substitutedChild);
+        return AddGenericCallTypeSpecRow(typeSpecs, additions,
+            substitutedRow);
+    }
+
+    private static uint AddGenericCallTypeSpecQualifiers(
+        TrRmRegisterBodyReader body, uint typeSpecRef, byte qualifiers,
+        TrRmTypeSpecTableReader typeSpecs,
+        List<ReadOnlyMemory<byte>> additions)
+    {
+        if (qualifiers == 0)
+        {
+            return typeSpecRef;
+        }
+
+        var reference = typeSpecs.GetTypeSpecRef(typeSpecRef,
+            allowInitQualifier: true);
+        if ((reference.Qualifiers & qualifiers) == qualifiers)
+        {
+            return typeSpecRef;
+        }
+
+        byte[] qualifiedRow;
+        if (reference.IsRow)
+        {
+            qualifiedRow = typeSpecs.GetRow(reference.Row).ToArray();
+            qualifiedRow[1] |= qualifiers;
+        }
+        else if (reference.Form == 0x01)
+        {
+            qualifiedRow = reference.TypeCode >= 0x80
+                ? TrRmTypeSpecTableWriter.InlineFamily(
+                    reference.TypeCode, reference.ArgumentCode,
+                    (byte)(reference.Qualifiers | qualifiers))
+                : TrRmTypeSpecTableWriter.Builtin(reference.TypeCode,
+                    (byte)(reference.Qualifiers | qualifiers));
+        }
+        else
+        {
+            throw InvalidMap();
+        }
+
+        return AddGenericCallTypeSpecRow(typeSpecs, additions,
+            qualifiedRow);
+    }
+
+    private static uint AddGenericCallTypeSpecRow(
+        TrRmTypeSpecTableReader typeSpecs,
+        List<ReadOnlyMemory<byte>> additions, byte[] row)
+    {
+        if (typeSpecs.TryFindAppendedRow(row, out var existingRow))
+        {
+            return existingRow;
+        }
+        for (var index = 0; index < additions.Count; index++)
+        {
+            if (additions[index].Span.SequenceEqual(row))
+            {
+                return checked((uint)typeSpecs.Count
+                    + (uint)index + 1);
+            }
+        }
+
+        var rowRef = checked((uint)typeSpecs.Count
+            + (uint)additions.Count + 1);
+        additions.Add(row);
+        return rowRef;
     }
 
     private static int GetHomeFunctionPointerAnchorMethod(
@@ -3337,10 +4544,11 @@ internal static class TrRmRegisterBodyMapValidator
     private static RegisterTypeState[][] ComputeBlockRegisterTypeStates(
         TrRmRegisterBodyReader body, int methodDefRow,
         TrRmTypeDefTableReader types, TrRmFieldDefTableReader fields,
-        TrRmTypeSpecTableReader typeSpecs,
+        ref TrRmTypeSpecTableReader typeSpecs,
         TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
         TrRmParamTableReader parameters,
         TrRmGenericParamTableReader genericParams,
+        TrRmConstraintTableReader constraints,
         TrRmContractTableReader contracts,
         TrRmImportTableReader imports,
         TrRmNativeFunctionPointerAnchorTableReader nativeFunctionPointerAnchors,
@@ -3383,7 +4591,7 @@ internal static class TrRmRegisterBodyMapValidator
                 var opcode = ReadByte(body, code, position);
                 var instructionLength
                     = TrRmRegisterBodyReader.InstructionLength(opcode,
-                        body.Schema);
+                        body.Schema, body.UsesNativePointerLoads);
                 ConsumeWork(body,
                     checked((ulong)instructionLength));
                 var instruction = code.Slice(position, instructionLength);
@@ -3391,14 +4599,18 @@ internal static class TrRmRegisterBodyMapValidator
                 {
                     UpdateCallSiteRegisterTypes(body,
                         ReadByte(body, instruction, 1), registerTypes,
-                        typeSpecs, methods, signatures, genericParams, imports,
+                        ref typeSpecs, methods, signatures, genericParams,
+                        constraints,
+                        imports,
                         nativeFunctionPointerAnchors);
                 }
                 else if (opcode == 0xE0)
                 {
                     UpdateCallSiteRegisterTypes(body,
                         ReadUInt16(body, instruction, 2), registerTypes,
-                        typeSpecs, methods, signatures, genericParams, imports,
+                        ref typeSpecs, methods, signatures, genericParams,
+                        constraints,
+                        imports,
                         nativeFunctionPointerAnchors);
                 }
                 else
@@ -3560,7 +4772,7 @@ internal static class TrRmRegisterBodyMapValidator
                 var opcode = ReadByte(body, code, position);
                 var instructionLength
                     = TrRmRegisterBodyReader.InstructionLength(opcode,
-                        body.Schema);
+                        body.Schema, body.UsesNativePointerLoads);
                 ConsumeWork(body);
                 terminalInstruction = code.Slice(position,
                     instructionLength);
@@ -3834,16 +5046,23 @@ internal static class TrRmRegisterBodyMapValidator
             {
                 var destination = ReadUInt16(body, construction, 4);
                 var contextHomeIndex = ReadUInt16(body, construction, 2);
+                var callerRole = contracts.HasConstructionClause(
+                        methodDefRow)
+                    ? contracts.GetConstructionClause(methodDefRow).RoleTag
+                    : (byte)0;
+                var callerEntry = body.Schema
+                        .UsesPropertyInitializedState()
+                    && callerRole != 2;
                 if (destination >= 14
-                    || contracts.GetConstructionClause(methodDefRow)
-                        .RoleTag != 2)
+                    || (callerRole != 2 && !callerEntry))
                 {
                     throw InvalidMap();
                 }
 
                 var contextTypeMapIndex
                     = GetHomeTypeMapIndex(body, contextHomeIndex);
-                if (!MatchesTypeMapEntry(body, contextTypeMapIndex,
+                if (!callerEntry && !MatchesTypeMapEntry(body,
+                        contextTypeMapIndex,
                         signatures.GetResultTypeSpec(
                             methods.GetSignature(methodDefRow)),
                         methods.GetOwnerModule(methodDefRow), types,
@@ -3862,7 +5081,9 @@ internal static class TrRmRegisterBodyMapValidator
         if (opcode == 0xDD)
         {
             UpdateInitializationReferenceRegister(body, instruction,
-                registerTypes, typeSpecs, initializationReferenceTypes);
+                registerTypes, methodDefRow, ownerModule, methods, types,
+                fields, fieldPaths, layouts, imports, typeSpecs,
+                constantValues, initializationReferenceTypes);
             return;
         }
 
@@ -3879,7 +5100,7 @@ internal static class TrRmRegisterBodyMapValidator
         {
             UpdateFixedArrayPlaceLoadRegister(body, instruction,
                 registerTypes, methodDefRow, methods, contracts, types, fields,
-                imports,
+                fieldPaths, layouts, imports,
                 methods.GetOwnerModule(methodDefRow), typeSpecs, constantValues,
                 codeOffset,
                 allowIncompletePlaceFlow);
@@ -3945,7 +5166,9 @@ internal static class TrRmRegisterBodyMapValidator
             if (body.Schema.UsesObjectConstruction())
             {
                 var constructionRole
-                    = contracts.GetConstructionClause(methodDefRow).RoleTag;
+                    = contracts.HasConstructionClause(methodDefRow)
+                        ? contracts.GetConstructionClause(methodDefRow).RoleTag
+                        : (byte)0;
                 var placeKind = ReadByte(body, store, 0);
                 var sourceKind = ReadByte(body, store, 1);
                 if (placeKind == 2)
@@ -4143,6 +5366,43 @@ internal static class TrRmRegisterBodyMapValidator
 
             SetRegisterTypeState(body, registerTypes, destination,
                 RegisterTypeState.FromTypeSpecRef(typeSpecRef));
+            return;
+        }
+
+        if (opcode == 0x1B)
+        {
+            var destination = operand & 0x0F;
+            var source = operand >> 4;
+            if (!body.UsesNativePointerLoads || destination >= 14
+                || source >= 14)
+            {
+                throw InvalidMap();
+            }
+
+            var sourceState = GetRegisterTypeState(body, registerTypes,
+                source);
+            if (sourceState.IsPlaceHandle)
+            {
+                throw InvalidMap();
+            }
+
+            var pointerTypeSpecRef = GetRegisterTypeSpecRef(body,
+                sourceState);
+            if (!typeSpecs.TryGetNativePointerPointeeTypeSpecRef(
+                    pointerTypeSpecRef, out var pointeeTypeSpecRef)
+                || !IsCopyableRegisterValueType(typeSpecs,
+                    pointeeTypeSpecRef, constantValues, body.Schema)
+                || !TrRmFeatureManifestValidator.Requires(
+                    constantValues.Features, constantValues.Modules,
+                    methods.GetOwnerModule(methodDefRow),
+                    TrRmFeatureTableReader.RootlessNativeValuesFeatureId,
+                    body.Schema))
+            {
+                throw InvalidMap();
+            }
+
+            SetRegisterTypeState(body, registerTypes, destination,
+                RegisterTypeState.FromTypeSpecRef(pointeeTypeSpecRef));
             return;
         }
 
@@ -4815,7 +6075,9 @@ internal static class TrRmRegisterBodyMapValidator
         TrRmNativeFunctionPointerAnchorTableReader
             nativeFunctionPointerAnchors)
     {
-        if (body.Schema != TrRmArtifactSchema.Standard
+        if (body.Schema is not (TrRmArtifactSchema.Standard
+                or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
+                or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft)
             || ReadByte(body, store, 0) is not (1 or 2))
         {
             return false;
@@ -4983,7 +6245,10 @@ internal static class TrRmRegisterBodyMapValidator
         var fieldRow = checked((int)fieldRowValue);
         var contextHomeIndex = ReadUInt16(body, selection, 6);
         var contextHome = GetHomeMapEntry(body, contextHomeIndex);
-        var construction = contracts.GetConstructionClause(methodDefRow);
+        var construction = contracts.HasConstructionClause(methodDefRow)
+            ? contracts.GetConstructionClause(methodDefRow) : default;
+        var isPropertyInitializedState
+            = body.Schema.UsesPropertyInitializedState();
         var fieldTypeSpecRef = fields.GetTypeSpecRef(fieldRow);
         var sourceKind = ReadByte(body, store, 1);
         var sourceIndex = ReadUInt16(body, store, 6);
@@ -5121,10 +6386,265 @@ internal static class TrRmRegisterBodyMapValidator
             nativeFunctionPointerAnchors);
     }
 
+    private static void ValidateStandardInitializationFieldSelection(
+        TrRmRegisterBodyReader body, ReadOnlySpan<byte> selection,
+        int destination, byte accessKind, bool allowInitializationFlags,
+        int methodDefRow, TrRmMethodDefTableReader methods,
+        TrRmTypeDefTableReader types, TrRmFieldDefTableReader fields,
+        TrRmImportTableReader imports, TrRmTypeSpecTableReader typeSpecs,
+        out int baseHomeIndex, out int fieldRow,
+        out uint fieldTypeSpecRef, out uint fieldFlags,
+        out byte baseHomeFlags)
+    {
+        baseHomeIndex = -1;
+        fieldRow = -1;
+        fieldTypeSpecRef = 0;
+        fieldFlags = 0;
+        baseHomeFlags = 0;
+        var flags = ReadUInt16(body, selection, 18);
+        var fieldRowValue = ReadUInt32(body, selection, 12);
+        var referentTypeMapIndex = ReadUInt16(body, selection, 16);
+        if (selection.Length != 20 || destination >= 14
+            || ReadByte(body, selection, 0) != 2
+            || ReadByte(body, selection, 1) != accessKind
+            || ReadByte(body, selection, 2) != 1
+            || ReadUInt16(body, selection, 4) != destination
+            || ReadByte(body, selection, 3) != 2
+            || ReadByte(body, selection, 8) != 0
+            || ReadByte(body, selection, 9) != 1
+            || ReadUInt16(body, selection, 10) != 0
+            || (allowInitializationFlags
+                ? flags is not (1 or 3) : flags != 0)
+            || fieldRowValue is 0 or > 0x00FF_FFFF
+            || fieldRowValue > (uint)fields.Count
+            || referentTypeMapIndex >= body.TypeCount)
+        {
+            throw InvalidMap();
+        }
+
+        baseHomeIndex = ReadUInt16(body, selection, 6);
+        if (baseHomeIndex >= body.HomeCount)
+        {
+            throw InvalidMap();
+        }
+
+        var baseHome = GetHomeMapEntry(body, baseHomeIndex);
+        baseHomeFlags = ReadByte(body, baseHome, 1);
+        var baseTypeSpecRef = GetTypeMapTypeSpecRef(body,
+            ReadUInt16(body, baseHome, 2));
+        var baseType = typeSpecs.GetTypeSpecRef(baseTypeSpecRef);
+        fieldRow = checked((int)fieldRowValue);
+        fieldTypeSpecRef = fields.GetTypeSpecRef(fieldRow);
+        fieldFlags = fields.GetFlags(fieldRow);
+        var fieldOwnerTypeDef = fields.GetOwnerTypeDef(fieldRow);
+        var fieldVisibility = fieldFlags & 3;
+        var fieldOwnerModule = types.GetOwnerModule(fieldOwnerTypeDef);
+        var methodOwnerModule = methods.GetOwnerModule(methodDefRow);
+        if (ReadByte(body, baseHome, 0) != 3
+            || !baseType.IsRow || baseType.Form != 0x02
+            || baseType.Qualifiers != 0
+            || typeSpecs.GetNominalTypeDefRow(baseTypeSpecRef, types,
+                imports) != fieldOwnerTypeDef
+            || types.GetKind(fieldOwnerTypeDef) != 1
+            || fieldOwnerModule != methodOwnerModule
+            || types.GetGenericRange(fieldOwnerTypeDef).Count != 0
+            || (fieldFlags & 0x08) != 0
+            || (fieldVisibility == 0
+                && methods.GetOwnerType(methodDefRow) != fieldOwnerTypeDef)
+            || (fieldVisibility == 1
+                && fieldOwnerModule != methodOwnerModule)
+            || !typeSpecs.AreEquivalentTypeSpecRefs(fieldTypeSpecRef,
+                GetTypeMapTypeSpecRef(body, referentTypeMapIndex)))
+        {
+            throw InvalidMap();
+        }
+    }
+
+    private static bool ValidateStandardInitializationFieldPathSelection(
+        TrRmRegisterBodyReader body, ReadOnlySpan<byte> selection,
+        int destination, byte accessKind, bool allowInitializationFlags,
+        int methodDefRow, int ownerModule,
+        TrRmMethodDefTableReader methods, TrRmTypeDefTableReader types,
+        TrRmFieldDefTableReader fields,
+        TrRmFieldPathTableReader fieldPaths,
+        TrRmLayoutTableReader layouts, TrRmImportTableReader imports,
+        TrRmTypeSpecTableReader typeSpecs,
+        ConstantSourceValueContext constantValues,
+        uint referentTypeSpecRef, out byte baseHomeFlags)
+    {
+        baseHomeFlags = 0;
+        var targetRef = ReadUInt32(body, selection, 12);
+        var referentTypeMapIndex = ReadUInt16(body, selection, 16);
+        var flags = ReadUInt16(body, selection, 18);
+        if (!body.Schema
+                .UsesNestedInitializationReferenceFieldDestinations()
+            || selection.Length != 20
+            || ReadByte(body, selection, 0) != 2
+            || ReadByte(body, selection, 1) != accessKind
+            || ReadByte(body, selection, 2) != 1
+            || ReadUInt16(body, selection, 4) != destination
+            || ReadByte(body, selection, 3) != 2
+            || ReadByte(body, selection, 8) != 0
+            || ReadByte(body, selection, 9) != 4
+            || ReadUInt16(body, selection, 10) != 0
+            || targetRef is 0 or > 0x00FF_FFFF
+            || targetRef > (uint)fieldPaths.Count
+            || (allowInitializationFlags
+                ? flags is not (1 or 3) : flags != 0)
+            || referentTypeMapIndex >= body.TypeCount
+            || !TrRmFeatureManifestValidator.Requires(
+                constantValues.Features, constantValues.Modules,
+                ownerModule, TrRmFeatureTableReader.LayoutQueriesFeatureId,
+                body.Schema))
+        {
+            throw InvalidMap();
+        }
+
+        var baseHomeIndex = ReadUInt16(body, selection, 6);
+        if (baseHomeIndex >= body.HomeCount)
+        {
+            throw InvalidMap();
+        }
+
+        var baseHome = GetHomeMapEntry(body, baseHomeIndex);
+        baseHomeFlags = ReadByte(body, baseHome, 1);
+        var baseTypeSpecRef = GetTypeMapTypeSpecRef(body,
+            ReadUInt16(body, baseHome, 2));
+        var rootTypeSpecRef
+            = fieldPaths.GetRootTypeSpecRef(checked((int)targetRef));
+        if (ReadByte(body, baseHome, 0) != 3
+            || !typeSpecs.AreEquivalentTypeSpecRefs(
+                rootTypeSpecRef, baseTypeSpecRef)
+            || !TryGetSupportedInlineOwner(rootTypeSpecRef,
+                out var currentOwnerTypeDef))
+        {
+            throw InvalidMap();
+        }
+
+        var fieldCount = fieldPaths.GetFieldCount(
+            checked((int)targetRef));
+        var fieldWritable = true;
+        for (var ordinal = 0; ordinal < fieldCount; ordinal++)
+        {
+            ConsumeWork(body);
+            var fieldReference = fieldPaths.GetFieldReference(
+                checked((int)targetRef), ordinal);
+            var fieldReferenceKind = fieldReference >> 24;
+            var fieldReferenceRow
+                = checked((int)(fieldReference & 0x00FF_FFFF));
+            int fieldRow;
+            if (fieldReferenceKind == 0x14)
+            {
+                fieldRow = fieldReferenceRow;
+            }
+            else if (fieldReferenceKind == 0x1C)
+            {
+                var expectedDefinition
+                    = imports.GetExpectedDefinitionForImportRow(
+                        fieldReferenceRow);
+                if (expectedDefinition >> 24 != 0x14)
+                {
+                    throw InvalidMap();
+                }
+                fieldRow = checked((int)(
+                    expectedDefinition & 0x00FF_FFFF));
+            }
+            else
+            {
+                throw InvalidMap();
+            }
+
+            var fieldOwnerTypeDef = fields.GetOwnerTypeDef(fieldRow);
+            var fieldFlags = fields.GetFlags(fieldRow);
+            var fieldVisibility = fieldFlags & 3;
+            if (fieldOwnerTypeDef != currentOwnerTypeDef
+                || (fieldFlags & 0x08) != 0
+                || fieldVisibility > 2
+                || (fieldReferenceKind == 0x1C
+                    && fieldVisibility != 2)
+                || (fieldVisibility == 0
+                    && methods.GetOwnerType(methodDefRow)
+                        != fieldOwnerTypeDef)
+                || (fieldVisibility == 1
+                    && types.GetOwnerModule(fieldOwnerTypeDef)
+                        != ownerModule))
+            {
+                throw InvalidMap();
+            }
+
+            fieldWritable &= (fieldFlags & 4) != 0;
+            var fieldTypeSpecRef = fields.GetTypeSpecRef(fieldRow);
+            if (ordinal + 1 == fieldCount)
+            {
+                if (!typeSpecs.AreEquivalentTypeSpecRefs(
+                    fieldTypeSpecRef, referentTypeSpecRef))
+                {
+                    throw InvalidMap();
+                }
+                continue;
+            }
+
+            if (!TryGetSupportedInlineOwner(fieldTypeSpecRef,
+                out currentOwnerTypeDef))
+            {
+                throw InvalidMap();
+            }
+        }
+
+        return fieldWritable;
+
+        bool TryGetSupportedInlineOwner(uint typeSpecRef,
+            out int typeDefRow)
+        {
+            ConsumeWork(body, 4);
+            var type = typeSpecs.GetTypeSpecRef(typeSpecRef);
+            if (!type.IsRow || type.Form is not (0x02 or 0x03)
+                || type.Qualifiers != 0)
+            {
+                typeDefRow = 0;
+                return false;
+            }
+
+            typeDefRow = typeSpecs.GetNominalTypeDefRow(typeSpecRef,
+                types, imports);
+            if (types.GetKind(typeDefRow) != 1
+                || types.GetGenericRange(typeDefRow).Count != 0
+                || !types.HasDeclaredCopy(typeDefRow)
+                || !constantValues.TargetProfiles.TryGetProfile(
+                    TrRmTargetProfileTableReader.WindowsX64NativeProfileId,
+                    TrRmTargetProfileTableReader
+                        .WindowsX64NativeProfileRuleRevision,
+                    out var profileRow))
+            {
+                return false;
+            }
+
+            if (!layouts.HasBlittableLayout(typeDefRow,
+                TrRmTargetProfileTableReader.WindowsX64NativeProfileId,
+                TrRmTargetProfileTableReader
+                    .WindowsX64NativeProfileRuleRevision))
+            {
+                return false;
+            }
+
+            var layoutRow = layouts.GetLayoutForProfile(typeDefRow,
+                checked((uint)profileRow));
+            return layouts.GetTargetProfileRef(layoutRow)
+                    == checked((uint)profileRow)
+                && layouts.GetLayoutKind(layoutRow) is 1 or 3;
+        }
+    }
+
     private static void UpdateInitializationReferenceRegister(
         TrRmRegisterBodyReader body, ReadOnlySpan<byte> instruction,
-        RegisterTypeState[] registerTypes,
+        RegisterTypeState[] registerTypes, int methodDefRow, int ownerModule,
+        TrRmMethodDefTableReader methods, TrRmTypeDefTableReader types,
+        TrRmFieldDefTableReader fields,
+        TrRmFieldPathTableReader fieldPaths,
+        TrRmLayoutTableReader layouts,
+        TrRmImportTableReader imports,
         TrRmTypeSpecTableReader typeSpecs,
+        ConstantSourceValueContext constantValues,
         InitializationReferenceTypeMap initializationReferenceTypes)
     {
         var control = ReadByte(body, instruction, 1);
@@ -5136,8 +6656,18 @@ internal static class TrRmRegisterBodyMapValidator
         }
 
         var selectionRecord = body.GetRecord(recordIndex);
+        if (ReadByte(body, selectionRecord, 0) != 0x04)
+        {
+            throw InvalidMap();
+        }
+
         var selection = selectionRecord[4..];
         var flags = ReadUInt16(body, selection, 18);
+        if (ReadByte(body, selection, 9) == 4
+            && (ReadByte(body, selection, 0) != 2 || flags == 0))
+        {
+            throw InvalidMap();
+        }
         if (flags == 0)
         {
             SetRegisterTypeState(body, registerTypes, destination,
@@ -5146,35 +6676,71 @@ internal static class TrRmRegisterBodyMapValidator
         }
 
         if (flags is not (1 or 3)
-            || ReadByte(body, selection, 0) != 1
             || ReadByte(body, selection, 1) != 3
             || ReadByte(body, selection, 2) != 1
-            || ReadUInt16(body, selection, 4) != destination
-            || ReadByte(body, selection, 3) != 0
-            || ReadUInt16(body, selection, 6) != 0
-            || ReadByte(body, selection, 8) != 0
-            || ReadByte(body, selection, 9) != 0
-            || ReadUInt16(body, selection, 10) != 0)
+            || ReadUInt16(body, selection, 4) != destination)
         {
             throw InvalidMap();
         }
 
-        var homeIndex = ReadUInt32(body, selection, 12);
-        if (homeIndex >= (uint)body.HomeCount)
-        {
-            throw InvalidMap();
-        }
-
-        var home = GetHomeMapEntry(body, checked((int)homeIndex));
         var referentTypeMapIndex = ReadUInt16(body, selection, 16);
         var referentTypeSpecRef = GetTypeMapTypeSpecRef(body,
             referentTypeMapIndex);
-        var homeTypeSpecRef = GetTypeMapTypeSpecRef(body,
-            ReadUInt16(body, home, 2));
-        if (ReadByte(body, home, 0) != 3
-            || !typeSpecs.AreEquivalentTypeSpecRefs(
-                referentTypeSpecRef, homeTypeSpecRef)
-            || (flags == 3 && (ReadByte(body, home, 1) & 1) == 0)
+        var targetKind = ReadByte(body, selection, 0);
+        var fieldWritable = true;
+        if (targetKind == 1)
+        {
+            var homeIndex = ReadUInt32(body, selection, 12);
+            if (ReadByte(body, selection, 3) != 0
+                || ReadUInt16(body, selection, 6) != 0
+                || ReadByte(body, selection, 8) != 0
+                || ReadByte(body, selection, 9) != 0
+                || ReadUInt16(body, selection, 10) != 0
+                || homeIndex >= (uint)body.HomeCount)
+            {
+                throw InvalidMap();
+            }
+
+            var home = GetHomeMapEntry(body, checked((int)homeIndex));
+            var homeTypeSpecRef = GetTypeMapTypeSpecRef(body,
+                ReadUInt16(body, home, 2));
+            if (ReadByte(body, home, 0) != 3
+                || !typeSpecs.AreEquivalentTypeSpecRefs(
+                    referentTypeSpecRef, homeTypeSpecRef))
+            {
+                throw InvalidMap();
+            }
+
+            fieldWritable = (ReadByte(body, home, 1) & 1) != 0;
+        }
+        else if (targetKind == 2
+            && ReadByte(body, selection, 9) == 1)
+        {
+            ValidateStandardInitializationFieldSelection(body, selection,
+                destination, 3, allowInitializationFlags: true,
+                methodDefRow, methods, types, fields, imports, typeSpecs,
+                out _, out _, out _, out var fieldFlags,
+                out var baseHomeFlags);
+            fieldWritable = (baseHomeFlags & 1) != 0
+                && (fieldFlags & 4) != 0;
+        }
+        else if (targetKind == 2
+            && ReadByte(body, selection, 9) == 4)
+        {
+            var pathWritable
+                = ValidateStandardInitializationFieldPathSelection(body,
+                    selection, destination, 3, true, methodDefRow, ownerModule,
+                    methods, types, fields, fieldPaths, layouts, imports,
+                    typeSpecs, constantValues, referentTypeSpecRef,
+                    out var baseHomeFlags);
+            fieldWritable = (baseHomeFlags & 1) != 0 && pathWritable;
+        }
+        else
+        {
+            throw InvalidMap();
+        }
+
+        if ((flags == 3 && !fieldWritable)
             || !initializationReferenceTypes.TryGetTypeSpecRef(body,
                 typeSpecs, referentTypeSpecRef, flags == 3,
                 out var initializationReferenceTypeSpecRef))
@@ -5193,7 +6759,9 @@ internal static class TrRmRegisterBodyMapValidator
         TrRmMethodDefTableReader methods,
         TrRmContractTableReader contracts,
         TrRmTypeDefTableReader types,
-        TrRmFieldDefTableReader fields, TrRmImportTableReader imports,
+        TrRmFieldDefTableReader fields,
+        TrRmFieldPathTableReader fieldPaths,
+        TrRmLayoutTableReader layouts, TrRmImportTableReader imports,
         int ownerModule,
         TrRmTypeSpecTableReader typeSpecs,
         ConstantSourceValueContext constantValues, int codeOffset,
@@ -5202,14 +6770,40 @@ internal static class TrRmRegisterBodyMapValidator
         var operand = ReadByte(body, instruction, 1);
         var destination = operand & 0x0F;
         var selectionIndex = ReadUInt16(body, instruction, 2);
-        Span<byte> placeInstruction = stackalloc byte[4];
-        instruction.CopyTo(placeInstruction);
-        placeInstruction[0] = 0xD8;
-        UpdateFixedArrayPlaceRegister(body, placeInstruction,
-            registerTypes, methodDefRow, methods, contracts, types, fields,
-            imports,
-            ownerModule, typeSpecs, constantValues, codeOffset,
-            allowIncompletePlaceFlow);
+        var selectionRecord = body.GetRecord(selectionIndex);
+        if (selectionRecord[0] != 0x04)
+        {
+            throw InvalidMap();
+        }
+
+        var selection = selectionRecord[4..];
+        if (ReadByte(body, selection, 9) == 4)
+        {
+            var referentTypeSpecRef = GetTypeMapTypeSpecRef(body,
+                ReadUInt16(body, selection, 16));
+            _ = ValidateStandardInitializationFieldPathSelection(body,
+                selection, destination, 1, false, methodDefRow, ownerModule,
+                methods, types, fields, fieldPaths, layouts, imports,
+                typeSpecs, constantValues, referentTypeSpecRef, out _);
+            var baseHomeIndex = ReadUInt16(body, selection, 6);
+            SetRegisterTypeState(body, registerTypes, destination,
+                RegisterTypeState.FromPlace(referentTypeSpecRef,
+                    selectionIndex, 1, [
+                        new PlaceHandleOrigin(selectionIndex,
+                            baseHomeIndex, codeOffset),
+                    ]));
+        }
+        else
+        {
+            Span<byte> placeInstruction = stackalloc byte[4];
+            instruction.CopyTo(placeInstruction);
+            placeInstruction[0] = 0xD8;
+            UpdateFixedArrayPlaceRegister(body, placeInstruction,
+                registerTypes, methodDefRow, methods, contracts, types,
+                fields, imports,
+                ownerModule, typeSpecs, constantValues, codeOffset,
+                allowIncompletePlaceFlow);
+        }
         var place = GetRegisterTypeState(body, registerTypes, destination);
         var matchesSelection = false;
         foreach (var origin in place.PlaceOrigins)
@@ -5227,12 +6821,6 @@ internal static class TrRmRegisterBodyMapValidator
             throw InvalidMap();
         }
 
-        var selectionRecord = body.GetRecord(selectionIndex);
-        if (ReadByte(body, selectionRecord, 0) != 0x04)
-        {
-            throw InvalidMap();
-        }
-        var selection = selectionRecord[4..];
         var typeMapIndex = ReadUInt16(body, selection, 16);
         var selectedTypeSpecRef = GetTypeMapTypeSpecRef(body, typeMapIndex);
         var placeTypeSpecRef = GetRegisterTypeSpecRef(body, place);
@@ -5299,6 +6887,25 @@ internal static class TrRmRegisterBodyMapValidator
                     registerTypes, methodDefRow, methods, types, fields,
                     imports, ownerModule, typeSpecs, recordIndex,
                     destination, codeOffset, allowIncompletePlaceFlow);
+                return;
+            }
+
+            if ((body.Schema is TrRmArtifactSchema.Standard
+                    or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
+                    or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft)
+                && ReadByte(body, payload, 0) == 2
+                && ReadByte(body, payload, 1) == 1
+                && ReadByte(body, payload, 9) == 1
+                && TrRmFeatureManifestValidator.Requires(
+                    constantValues.Features, constantValues.Modules,
+                    ownerModule,
+                    TrRmFeatureTableReader.NativeBoundaryContractsFeatureId,
+                    body.Schema))
+            {
+                UpdateStandardInitializationFieldPlaceRegister(body,
+                    payload, registerTypes, methodDefRow, methods, types,
+                    fields, imports, ownerModule, typeSpecs, recordIndex,
+                    destination, codeOffset);
                 return;
             }
 
@@ -5433,6 +7040,25 @@ internal static class TrRmRegisterBodyMapValidator
                 accessKind, placeOrigins));
     }
 
+    private static void UpdateStandardInitializationFieldPlaceRegister(
+        TrRmRegisterBodyReader body, ReadOnlySpan<byte> payload,
+        RegisterTypeState[] registerTypes, int methodDefRow,
+        TrRmMethodDefTableReader methods, TrRmTypeDefTableReader types,
+        TrRmFieldDefTableReader fields, TrRmImportTableReader imports,
+        int ownerModule, TrRmTypeSpecTableReader typeSpecs,
+        int recordIndex, int destination, int codeOffset)
+    {
+        ValidateStandardInitializationFieldSelection(body, payload,
+            destination, 1, allowInitializationFlags: false, methodDefRow,
+            methods, types, fields, imports, typeSpecs,
+            out var baseHomeIndex, out _, out var fieldTypeSpecRef,
+            out _, out _);
+        SetRegisterTypeState(body, registerTypes, destination,
+            RegisterTypeState.FromPlace(fieldTypeSpecRef, recordIndex, 1,
+                [new PlaceHandleOrigin(recordIndex, baseHomeIndex,
+                    codeOffset)]));
+    }
+
     private static void UpdateFixedArrayFieldPlaceRegister(
         TrRmRegisterBodyReader body, ReadOnlySpan<byte> payload,
         RegisterTypeState[] registerTypes, int methodDefRow,
@@ -5562,8 +7188,12 @@ internal static class TrRmRegisterBodyMapValidator
         var indexIndex = ReadUInt16(body, payload, 10);
         var fieldRow = ReadUInt32(body, payload, 12);
         var referentTypeMapIndex = ReadUInt16(body, payload, 16);
-        var construction = contracts.GetConstructionClause(methodDefRow);
-        if (!body.Schema.UsesObjectConstruction()
+        var construction = contracts.HasConstructionClause(methodDefRow)
+            ? contracts.GetConstructionClause(methodDefRow) : default;
+        var isPropertyInitializedState
+            = body.Schema.UsesPropertyInitializedState();
+        if ((!body.Schema.UsesObjectConstruction()
+                && !body.Schema.UsesPropertyInitializedState())
             || payload.Length != 20 || accessKind is not (1 or 3)
             || destinationKind != 1 || destinationIndex != destination
             || destination >= 14 || baseKind != 2
@@ -5590,19 +7220,24 @@ internal static class TrRmRegisterBodyMapValidator
         if (contextRole is not (1 or 4)
             || (contextRole == 4
                 && (!body.Schema.UsesObjectConstruction()
-                    || construction.RoleTag != 2))
+                    || (!isPropertyInitializedState
+                        && construction.RoleTag != 2)))
             || (accessKind == 3
-                && (contextRole != 1 || construction.RoleTag != 1))
+                && (contextRole != 1
+                    && !(contextRole == 4 && isPropertyInitializedState)))
             || ReadByte(body, contextHome, 1) != 0
             || ReadUInt16(body, contextHome, 4) != 0
             || ReadUInt16(body, contextHome, 6) != 0
-            || ownerType <= 0 || ownerType != fieldOwnerType
-            || types.GetKind(ownerType) != 2
-            || types.GetOwnerModule(ownerType) != ownerModule
+            || types.GetKind(fieldOwnerType) != 2
+            || types.GetOwnerModule(fieldOwnerType) != ownerModule
             || (fieldFlags & 0x08) != 0
             || (fieldFlags & 3) > 2
             || ((fieldFlags & 3) == 1
                 && types.GetOwnerModule(fieldOwnerType) != ownerModule)
+            || (contextRole == 4
+                && ((fieldFlags & 0x10) != 0
+                    || ((fieldFlags & 3) == 0
+                        && ownerType != fieldOwnerType)))
             || contextTypeSpec.Length != 7
             || contextTypeSpec[0] != 0x0C
             || contextTypeSpec[2] != 0x8A)
@@ -5615,28 +7250,51 @@ internal static class TrRmRegisterBodyMapValidator
         if (!classType.IsRow || classType.Form != 0x02
             || classType.Qualifiers != 0
             || typeSpecs.GetNominalTypeDefRow(classTypeRef, types, imports)
-                != fieldOwnerType)
+                != fieldOwnerType
+            || (contextRole == 1
+                && (ownerType != fieldOwnerType
+                    || construction.RoleTag is not (1 or 3))))
         {
             throw InvalidMap();
         }
 
-        if (accessKind == 3)
+        if (contextRole == 1 && construction.RoleTag == 3)
         {
-            var initializedFieldId = 0x1400_0000u
-                | checked((uint)fieldDefRow);
-            var isInitializedMember = false;
-            foreach (var memberDefId
-                in construction.InitializedMemberDefIds)
-            {
-                ConsumeWork(body);
-                isInitializedMember |= memberDefId == initializedFieldId;
-            }
-            if (!isInitializedMember)
+            if (!isPropertyInitializedState
+                || !fields.IsPropertyBackingField(fieldDefRow)
+                || contracts.GetConstructionPropertyBackingFieldDef(
+                    methodDefRow) != fieldDefRow)
             {
                 throw InvalidMap();
             }
         }
-        else if (contextRole == 4)
+        else if (contextRole == 1 && construction.RoleTag == 1
+            && accessKind == 3)
+        {
+            if (isPropertyInitializedState
+                && fields.IsPropertyBackingField(fieldDefRow))
+            {
+                _ = contracts.GetPropertyDefForBackingField(fieldDefRow);
+            }
+            else
+            {
+                var initializedFieldId = 0x1400_0000u
+                    | checked((uint)fieldDefRow);
+                var isInitializedMember = false;
+                foreach (var memberDefId
+                    in construction.InitializedMemberDefIds)
+                {
+                    ConsumeWork(body);
+                    isInitializedMember |= memberDefId == initializedFieldId;
+                }
+                if (!isInitializedMember)
+                {
+                    throw InvalidMap();
+                }
+            }
+        }
+        else if (contextRole == 1 && construction.RoleTag != 1
+            || contextRole == 4 && !isPropertyInitializedState)
         {
             var initializerMethodDefRow
                 = checked((int)construction.InitializerMethodDefRow);
@@ -6596,7 +8254,8 @@ internal static class TrRmRegisterBodyMapValidator
         }
 
         var isAtomicValueType = type.TypeCode is > 0 and < 0x80;
-        var isPointerFamily = type.TypeCode == 0x8C;
+        var isPointerFamily = typeSpecs
+            .TryGetNativePointerPointeeTypeSpecRef(typeSpecRef, out _);
         if ((type.Form is 0x02 or 0x03) && type.Qualifiers == 0)
         {
             var typeDefRow = typeSpecs.GetNominalTypeDefRow(typeSpecRef,
@@ -6611,14 +8270,17 @@ internal static class TrRmRegisterBodyMapValidator
 
         return type.Form == 0x0D
             || (type.Form == 0x01 && (isAtomicValueType || isPointerFamily))
-            || (type.Form == 0x0C && isPointerFamily);
+            || (type.Form is 0x08 or 0x0C && isPointerFamily);
     }
 
     private static void ValidateCallSiteHomeTypes(TrRmRegisterBodyReader body,
         int methodDefRow, int ownerModule, TrRmTypeDefTableReader types,
         TrRmTypeSpecTableReader typeSpecs,
         TrRmFieldDefTableReader fields,
+        TrRmFieldPathTableReader fieldPaths,
+        TrRmLayoutTableReader layouts,
         TrRmGenericParamTableReader genericParams,
+        TrRmConstraintTableReader constraints,
         TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
         TrRmParamTableReader parameters, TrRmImportTableReader imports,
         ConstantSourceValueContext constantValues, TrRmContractTableReader contracts,
@@ -6630,6 +8292,7 @@ internal static class TrRmRegisterBodyMapValidator
     {
         var isConstructionInitializer
             = body.Schema.UsesObjectConstruction()
+                && contracts.HasConstructionClause(methodDefRow)
                 && contracts.GetConstructionClause(methodDefRow).RoleTag
                     == 1;
         for (var blockIndex = 0; blockIndex < body.BlockCount; blockIndex++)
@@ -6647,7 +8310,7 @@ internal static class TrRmRegisterBodyMapValidator
                 var opcode = code[position];
                 var instructionLength
                     = TrRmRegisterBodyReader.InstructionLength(opcode,
-                        body.Schema);
+                        body.Schema, body.UsesNativePointerLoads);
                 ConsumeWork(body);
                 var instruction = code.Slice(position,
                     instructionLength);
@@ -6683,13 +8346,24 @@ internal static class TrRmRegisterBodyMapValidator
                         var nativeParameters = contracts.GetNativeParameters(targetMethod);
                         var receiverTypeSpec
                             = signatures.GetReceiverTypeSpec(signature);
-                        var hasReceiver
-                            = body.Schema.UsesObjectConstruction()
-                                && receiverTypeSpec != 0;
+                        var isGenericInterfaceRequirement
+                            = ReadByte(body, payload, 0) == 4
+                                && ReadByte(body, GetRecordPayload(body,
+                                    ReadUInt16(body, payload, 4)), 0) == 2;
                         var targetConstructionRole
                             = contracts.HasConstructionClause(targetMethod)
                                 ? contracts.GetConstructionClause(
                                     targetMethod).RoleTag : (byte)0;
+                        if (targetConstructionRole == 3
+                            && !body.Schema.UsesPropertyInitializedState())
+                        {
+                            throw InvalidMap();
+                        }
+
+                        var hasReceiver = receiverTypeSpec != 0
+                            && (body.Schema.UsesObjectConstruction()
+                                || body.Schema.UsesMethodReceiverAccess()
+                                || isGenericInterfaceRequirement);
                         if (ReadUInt32(body, payload, 8)
                             != (uint)(parameterCount
                                 + (hasReceiver ? 1 : 0)))
@@ -6700,7 +8374,23 @@ internal static class TrRmRegisterBodyMapValidator
                         var inputOffset = 16;
                         if (hasReceiver)
                         {
-                            if (targetConstructionRole == 1)
+                            if (body.Schema.UsesPropertyInitializedState()
+                                && targetConstructionRole is 1 or 3)
+                            {
+                                ValidatePropertyInitializerReceiverInput(
+                                    body, methodDefRow, targetMethod, payload,
+                                    receiverTypeSpec, ref typeSpecs, methods,
+                                    signatures, contracts);
+                            }
+                            else if (isGenericInterfaceRequirement)
+                            {
+                                ValidateGenericCallInterfaceReceiverInput(
+                                    body, methodDefRow, targetMethod,
+                                    payload, inputOffset,
+                                    typeSpecs, genericParams, constraints,
+                                    methods, signatures, parameters);
+                            }
+                            else if (targetConstructionRole == 1)
                             {
                                 ValidateConstructionReceiverInput(body,
                                     methodDefRow, targetMethod, payload,
@@ -6764,7 +8454,8 @@ internal static class TrRmRegisterBodyMapValidator
                                     body, payload,
                                     parameters.GetTypeSpec(
                                         firstParameter + ordinal),
-                                    targetMethod, typeSpecs, genericParams);
+                                    targetMethod, methods, ref typeSpecs,
+                                    genericParams, constraints);
                                 var isInitializationDestination
                                     = typeSpecs.IsInitializationDestinationType(
                                         formalType);
@@ -6926,7 +8617,8 @@ internal static class TrRmRegisterBodyMapValidator
                             var resultType = GetGenericCallTypeSpecRef(body,
                                 payload,
                                 signatures.GetResultTypeSpec(signature),
-                                targetMethod, typeSpecs, genericParams);
+                                targetMethod, methods, ref typeSpecs,
+                                genericParams, constraints);
                             if (!MatchesTypeMapEntry(body, typeMapIndex,
                                 resultType,
                                 ownerModule, types, typeSpecs, genericParams,
@@ -6941,8 +8633,8 @@ internal static class TrRmRegisterBodyMapValidator
                 if (recordIndex >= 0)
                 {
                     UpdateCallSiteRegisterTypes(body, recordIndex,
-                        registerTypes, typeSpecs, methods, signatures,
-                        genericParams, imports,
+                        registerTypes, ref typeSpecs, methods, signatures,
+                        genericParams, constraints, imports,
                         nativeFunctionPointerAnchors);
                 }
                 else
@@ -6966,7 +8658,8 @@ internal static class TrRmRegisterBodyMapValidator
         TrRmRegisterBodyReader body, ReadOnlySpan<byte> instruction,
         byte opcode, RegisterTypeState[] registerTypes)
     {
-        if (!body.Schema.UsesObjectConstruction())
+        if (!body.Schema.UsesObjectConstruction()
+            && !body.Schema.UsesPropertyInitializedState())
         {
             return;
         }
@@ -7004,9 +8697,14 @@ internal static class TrRmRegisterBodyMapValidator
                 var placeOpcode = opcode is 0xD8 or 0xDA or 0x61 or 0x91;
                 var validContextRead = placeOpcode
                     && targetKind == 2 && accessKind == 1;
+                var validPropertyContextAccess = placeOpcode
+                    && targetKind == 2
+                    && body.Schema.UsesPropertyInitializedState()
+                    && accessKind == 3;
                 var validInitializerPlace = placeOpcode
                     && targetKind == 2 && accessKind is 1 or 3;
-                if ((baseHomeRole == 4 && !validContextRead)
+                if ((baseHomeRole == 4
+                        && !validContextRead && !validPropertyContextAccess)
                     || (baseHomeRole == 1 && !validInitializerPlace))
                 {
                     throw InvalidMap();

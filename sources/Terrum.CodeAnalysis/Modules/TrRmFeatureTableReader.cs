@@ -168,6 +168,7 @@ public readonly ref struct TrRmFeatureTableReader
             || (long)recordCount * RowSize != section.Length
             || schema is not (TrRmArtifactSchema.Standard
                 or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
+                or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft
                 or TrRmArtifactSchema.Development
                 or TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft
                 or TrRmArtifactSchema.DevelopmentNativeConventionsDraft
@@ -191,10 +192,21 @@ public readonly ref struct TrRmFeatureTableReader
                 or TrRmArtifactSchema.RegisterExceptionRegionsDraft
                 or TrRmArtifactSchema.GenericMethodCallsDraft
                 or TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft
+                or TrRmArtifactSchema.GenericMethodCallsParameterLabelsReceiverAccessDraft
                 or TrRmArtifactSchema.C1Draft
+                or TrRmArtifactSchema.C1ParameterLabelsReceiverAccessDraft
                 or TrRmArtifactSchema.C1M1Draft
+                or TrRmArtifactSchema.C1M1ParameterLabelsReceiverAccessDraft
                 or TrRmArtifactSchema.C1M1ConstructionDraft
+                or TrRmArtifactSchema.C1M1ConstructionParameterLabelsReceiverAccessDraft
                 or TrRmArtifactSchema.C1M1Construction2Draft
+                or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessDraft
+                or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft
+                or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateDraft
+                or TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft
+                or TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft
+                or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft
+                or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft
                 or TrRmArtifactSchema.GenericConstantMethodsDraft))
         {
             throw InvalidFeature();
@@ -296,9 +308,7 @@ public readonly ref struct TrRmFeatureTableReader
             return true;
         }
 
-        if ((schema.SupportsNominalEnums()
-                || schema.UsesGenericConstantMethods())
-            && featureId == 18)
+        if (schema.SupportsNominalEnumDeclarations() && featureId == 18)
         {
             ruleRevision = 1;
             return true;
@@ -369,6 +379,7 @@ public readonly ref struct TrRmFeatureTableReader
 
         if (schema is not (TrRmArtifactSchema.Standard
             or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
+            or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft
             or TrRmArtifactSchema.CopyOriginDraft
             or TrRmArtifactSchema.ForeignInvocationDraft
             or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
@@ -389,10 +400,21 @@ public readonly ref struct TrRmFeatureTableReader
             or TrRmArtifactSchema.RegisterExceptionRegionsDraft
             or TrRmArtifactSchema.GenericMethodCallsDraft
             or TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft
+            or TrRmArtifactSchema.GenericMethodCallsParameterLabelsReceiverAccessDraft
             or TrRmArtifactSchema.C1Draft
+            or TrRmArtifactSchema.C1ParameterLabelsReceiverAccessDraft
             or TrRmArtifactSchema.C1M1Draft
+            or TrRmArtifactSchema.C1M1ParameterLabelsReceiverAccessDraft
             or TrRmArtifactSchema.C1M1ConstructionDraft
+            or TrRmArtifactSchema.C1M1ConstructionParameterLabelsReceiverAccessDraft
             or TrRmArtifactSchema.C1M1Construction2Draft
+            or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft
             or TrRmArtifactSchema.GenericConstantMethodsDraft))
         {
             ruleRevision = 0;
@@ -436,6 +458,7 @@ internal static class TrRmFeatureManifestValidator
         resourceLedger?.ConsumeWork();
         if (schema is not (TrRmArtifactSchema.Standard
             or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
+            or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft
             or TrRmArtifactSchema.CopyOriginDraft
             or TrRmArtifactSchema.ForeignInvocationDraft
             or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
@@ -456,10 +479,21 @@ internal static class TrRmFeatureManifestValidator
             or TrRmArtifactSchema.RegisterExceptionRegionsDraft
             or TrRmArtifactSchema.GenericMethodCallsDraft
             or TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft
+            or TrRmArtifactSchema.GenericMethodCallsParameterLabelsReceiverAccessDraft
             or TrRmArtifactSchema.C1Draft
+            or TrRmArtifactSchema.C1ParameterLabelsReceiverAccessDraft
             or TrRmArtifactSchema.C1M1Draft
+            or TrRmArtifactSchema.C1M1ParameterLabelsReceiverAccessDraft
             or TrRmArtifactSchema.C1M1ConstructionDraft
+            or TrRmArtifactSchema.C1M1ConstructionParameterLabelsReceiverAccessDraft
             or TrRmArtifactSchema.C1M1Construction2Draft
+            or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft
             or TrRmArtifactSchema.GenericConstantMethodsDraft))
         {
             throw InvalidManifest();
@@ -488,6 +522,7 @@ internal static class TrRmFeatureManifestValidator
         resourceLedger?.ConsumeWork();
         if (schema is not (TrRmArtifactSchema.Standard
             or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
+            or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft
             or TrRmArtifactSchema.CopyOriginDraft
             or TrRmArtifactSchema.ForeignInvocationDraft
             or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
@@ -508,10 +543,21 @@ internal static class TrRmFeatureManifestValidator
             or TrRmArtifactSchema.RegisterExceptionRegionsDraft
             or TrRmArtifactSchema.GenericMethodCallsDraft
             or TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft
+            or TrRmArtifactSchema.GenericMethodCallsParameterLabelsReceiverAccessDraft
             or TrRmArtifactSchema.C1Draft
+            or TrRmArtifactSchema.C1ParameterLabelsReceiverAccessDraft
             or TrRmArtifactSchema.C1M1Draft
+            or TrRmArtifactSchema.C1M1ParameterLabelsReceiverAccessDraft
             or TrRmArtifactSchema.C1M1ConstructionDraft
+            or TrRmArtifactSchema.C1M1ConstructionParameterLabelsReceiverAccessDraft
             or TrRmArtifactSchema.C1M1Construction2Draft
+            or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft
             or TrRmArtifactSchema.GenericConstantMethodsDraft))
         {
             throw InvalidManifest();
@@ -614,8 +660,7 @@ internal static class TrRmFeatureManifestValidator
             10 => 0,
             11 when !schema.UsesScalarFrozenValues() => 1,
             17 when schema.UsesGeneralPredicateGraphs() => 1,
-            18 when schema.SupportsNominalEnums()
-                || schema.UsesGenericConstantMethods() => 1,
+            18 when schema.SupportsNominalEnumDeclarations() => 1,
             19 when schema.UsesGeneralPredicateGraphs() => 0,
             14 when schema.UsesRootPinRuntime() => 0,
             20 when schema.UsesForeignInvocationStorageFixedArrays() => 1,
@@ -640,8 +685,7 @@ internal static class TrRmFeatureManifestValidator
                 => index == 0 ? 11u : 17u,
             12 => index == 0 ? 10u : 11u,
             17 when schema.UsesGeneralPredicateGraphs() => 10,
-            18 when schema.SupportsNominalEnums()
-                || schema.UsesGenericConstantMethods() => 11,
+            18 when schema.SupportsNominalEnumDeclarations() => 11,
             20 when schema.UsesForeignInvocationStorageFixedArrays() => 2,
             22 when schema.UsesRawUnionValueCoverage() => 2,
             _ => throw InvalidManifest(),

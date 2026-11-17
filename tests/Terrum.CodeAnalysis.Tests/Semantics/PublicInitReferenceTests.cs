@@ -17,17 +17,18 @@ namespace Terrum.CodeAnalysis.Tests.Semantics;
 internal sealed class PublicInitReferenceTests
 {
     private const string ScalarLibrary = """
-        public bool TryFill(bool available, init ref<int32> result) {
+        public bool TryFill(bool available, ref<init int32> result) {
             if (!available) { return false; }
-            result = 42;
+            *result = 42;
             return true;
         }
         """;
 
     private const string ScalarConsumer = """
         int32 Main() {
-            if (TryFill(false, init var result)) { return 1; }
-            require TryFill(true, init result);
+            init int32 result;
+            if (TryFill(false, ref init result)) { return 1; }
+            require TryFill(true, ref init result);
             return result;
         }
         """;
@@ -38,14 +39,14 @@ internal sealed class PublicInitReferenceTests
         var boundPolicy = (BoundRuntimePolicy)policy;
         var program = CompileLibrary(ScalarLibrary, policy);
         var producer = ModuleCompiler.CreateProducer(program, ["TryFill"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(104));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(106));
         var reference = ModuleCompiler.CreateReference(producer);
         Assert.That(global::System.Linq.Enumerable.Single(reference.Functions).Variables[1].IsInit, Is.True);
         var consumerProgram = CompileConsumer(ScalarConsumer, reference, policy);
         var consumer = ModuleCompiler.CreateConsumer(consumerProgram, producer);
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
 
-        var replacementProgram = CompileLibrary(ScalarLibrary.Replace("result = 42", "result = 43",
+        var replacementProgram = CompileLibrary(ScalarLibrary.Replace("*result = 42", "*result = 43",
             StringComparison.Ordinal), policy);
         var replacement = ModuleCompiler.CreateProducer(replacementProgram, ["TryFill"]);
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, replacement), policy), Is.EqualTo(43));
@@ -69,15 +70,24 @@ internal sealed class PublicInitReferenceTests
         Assert.That(await NativeModuleCompiler.RunGraphJitAsync(nativeConsumer, [nativeReplacement],
             apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true), Is.EqualTo(43));
 
-        var outLibrary = ScalarLibrary.Replace("init ref<int32>", "out int32", StringComparison.Ordinal);
+        var outLibrary = ScalarLibrary
+            .Replace("ref<init int32>", "out int32", StringComparison.Ordinal)
+            .Replace("*result = 42;", "result = 42;", StringComparison.Ordinal);
         var outProgram = CompileLibrary(outLibrary, policy);
         var outProducer = ModuleCompiler.CreateProducer(outProgram, ["TryFill"]);
         _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(consumer, outProducer))!;
         var nativeOut = NativeModuleCompiler.CreateProducer(outProgram, ["TryFill"], "NodeB", policy);
         _ = Assert.Throws<ModuleContractException>(() =>
             NativeModuleCompiler.ValidateGraph(nativeConsumer, [nativeOut]))!;
-        var badCall = Compilation.Create(SyntaxTree.Parse(ScalarConsumer.Replace("init var result", "out var result",
-            StringComparison.Ordinal)), reference, boundPolicy);
+        const string BadCall = """
+            int32 Main() {
+                if (TryFill(false, out var result)) { return 1; }
+                require TryFill(true, out result);
+                return result;
+            }
+            """;
+        var badCall = Compilation.Create(SyntaxTree.Parse(BadCall),
+            reference, boundPolicy);
         Assert.That(global::System.Linq.Enumerable.Any(badCall.Diagnostics,diagnostic => diagnostic.Code == "TRM3011"),Is.True);
         var mismatchedInit = Compilation.Create(SyntaxTree.Parse(ScalarConsumer),
             ModuleCompiler.CreateReference(outProducer), boundPolicy);
@@ -98,10 +108,10 @@ internal sealed class PublicInitReferenceTests
                 public Ticket(int32 value) { Value = value; }
                  [Cleanup] public void Close() {}
             }
-            public int32 Make(init ref<int32> result) { result = 40; return 2; }
-            public void Fill(init ref<int32> result) { result = 41; }
-            public int32 MakePair(init ref<Pair> result) { result = new Pair(40, 2); return 0; }
-            public int32 MakeTicket(init ref<Ticket> result) { result = new Ticket(3); return 0; }
+            public int32 Make(ref<init int32> result) { *result = 40; return 2; }
+            public void Fill(ref<init int32> result) { *result = 41; }
+            public int32 MakePair(ref<init Pair> result) { *result = new Pair(40, 2); return 0; }
+            public int32 MakeTicket(ref<init Ticket> result) { *result = new Ticket(3); return 0; }
             public int32 Consume(Ticket ticket) { return ticket.Value; }
             """;
         const string Consumer = """
@@ -110,10 +120,10 @@ internal sealed class PublicInitReferenceTests
                 init int32 second;
                 init Pair pair;
                 init Ticket ticket;
-                int32 status = Make(init first);
-                Fill(init second);
-                int32 pairStatus = MakePair(init pair);
-                int32 ticketStatus = MakeTicket(init ticket);
+                int32 status = Make(ref init first);
+                Fill(ref init second);
+                int32 pairStatus = MakePair(ref init pair);
+                int32 ticketStatus = MakeTicket(ref init ticket);
                 int32 ticketValue = Consume(move ticket);
                 return first + status + second + pair.First + pair.Second + pairStatus
                     + ticketStatus + ticketValue;
@@ -121,7 +131,9 @@ internal sealed class PublicInitReferenceTests
             """;
         var program = CompileLibrary(Library, policy);
         var exports = new[] { "Make", "Fill", "MakePair", "MakeTicket", "Consume", "Ticket.Close" };
-        var producer = ModuleCompiler.CreateProducer(program, exports);
+            var producer = ModuleCompiler.CreateProducer(program, exports,
+                CreateIdentityInputs(program, "PublicInitNonBoolean",
+                    "Pair", "Ticket"));
         var reference = ModuleCompiler.CreateReference(producer);
         var checkedInitFunctions = 0;
         foreach (var function in reference.Functions)
@@ -137,7 +149,9 @@ internal sealed class PublicInitReferenceTests
         var consumer = ModuleCompiler.CreateConsumer(consumerProgram, producer);
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(128));
 
-        var nativeProducer = NativeModuleCompiler.CreateProducer(program, exports, "NodeB", policy);
+        var nativeProducer = NativeModuleCompiler.CreateProducer(program,
+            exports, "NodeB", policy,
+            CreateIdentityInputs(program, "NodeB", "Pair", "Ticket"));
         var nativeConsumerProgram = CompileConsumer(Consumer,
             NativeModuleCompiler.CreateGraphReference([nativeProducer]), policy);
         var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(nativeConsumerProgram,
@@ -149,14 +163,23 @@ internal sealed class PublicInitReferenceTests
     [Test]
     public void CorruptPublicInitModeCannotMasqueradeAsOut()
     {
-        var producer = ModuleCompiler.CreateProducer(
-            CompileLibrary(ScalarLibrary, NativeRuntimePolicy.FailFast), ["TryFill"]);
-        var mode = new byte[] { 6, 0, 0, 0, (byte)'r', (byte)'e', (byte)'s', (byte)'u',
-            (byte)'l', (byte)'t', (byte)PrimitiveType.Int32, 0, 0, 0, 1, 1, 1 };
+        var program = CompileLibrary(ScalarLibrary,
+            NativeRuntimePolicy.FailFast);
+        var variable = program.Functions[0].Variables[1];
+        var mode = new byte[18];
+        BinaryPrimitives.WriteInt32LittleEndian(mode, 6);
+        System.Text.Encoding.ASCII.GetBytes("result").CopyTo(mode, 4);
+        BinaryPrimitives.WriteInt32LittleEndian(mode.AsSpan(10, 4),
+            (int)variable.Type);
+        mode[14] = variable.IsMutable ? (byte)1 : (byte)0;
+        mode[15] = variable.IsOut ? (byte)1 : (byte)0;
+        mode[16] = variable.IsInit ? (byte)1 : (byte)0;
+        mode[17] = 0;
+        var producer = ModuleCompiler.CreateProducer(program, ["TryFill"]);
         var location = producer.AsSpan().IndexOf(mode);
         Assert.That(location >= 0, Is.True);
         Assert.That(producer.AsSpan(location + 1).IndexOf(mode), Is.EqualTo(-1));
-        producer[location + mode.Length - 1] = 0;
+        producer[location + 15] = 1;
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(producer))!;
     }
 
@@ -167,19 +190,19 @@ internal sealed class PublicInitReferenceTests
             CompileLibrary(ScalarLibrary, NativeRuntimePolicy.FailFast), ["TryFill"]);
         var consumer = ModuleCompiler.CreateConsumer(CompileConsumer(ScalarConsumer,
             ModuleCompiler.CreateReference(producer), NativeRuntimePolicy.FailFast), producer);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(104));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(106));
         BinaryPrimitives.WriteInt32LittleEndian(consumer.AsSpan(4, 4), 32);
         var error = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(consumer, producer))!;
         Assert.That(error.Message, Is.EqualTo("Unknown module format or version."));
     }
 
     [Test]
-    public void ForgedPublicInitWithoutAnOutputSlotIsRejected()
+    public void ForgedPublicInitWithOutModeIsRejected()
     {
         var program = CompileLibrary(ScalarLibrary, NativeRuntimePolicy.FailFast);
         var function = global::System.Linq.Enumerable.Single(program.Functions);
         var forged = function with {
-            Variables = function.Variables.SetItem(1, function.Variables[1] with { IsOut = false }),
+            Variables = function.Variables.SetItem(1, function.Variables[1] with { IsOut = true }),
         };
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program with {
             Functions = program.Functions.SetItem(0, forged),
@@ -190,7 +213,7 @@ internal sealed class PublicInitReferenceTests
     public void PublicInitDoesNotAdmitManagedHandleOutputs()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
-            public bool Leak(init ref<ManagedNode> result) { return false; }
+            public bool Leak(ref<init ManagedNode> result) { return false; }
             """));
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3011"),Is.True);
     }
@@ -210,30 +233,35 @@ internal sealed class PublicInitReferenceTests
                 public Pair Data;
                 public Box(Pair value) { Data = value; }
             }
-            public bool TryRead(bool available, init ref<Pair> result) {
+            public bool TryRead(bool available, ref<init Pair> result) {
                 if (!available) { return false; }
                 require Box.TryCreate(new Pair(int64(Bias()), 2), out var box);
-                result = box.Data;
+                *result = box.Data;
                 return true;
             }
-            public int32 Read(init ref<Pair> result) {
+            public int32 Read(ref<init Pair> result) {
                 require Box.TryCreate(new Pair(int64(Bias()), 2), out var box);
-                result = box.Data;
+                *result = box.Data;
                 return 0;
             }
             """;
         const string Root = """
             int32 Main() {
-                if (TryRead(false, init var value)) { return 1; }
-                require TryRead(true, init value);
-                int32 status = Read(init var copy);
+                init Pair value;
+                init Pair copy;
+                if (TryRead(false, ref init value)) { return 1; }
+                require TryRead(true, ref init value);
+                int32 status = Read(ref init copy);
                 return int32(value.First + value.Second + copy.First + copy.Second) + status;
             }
             """;
         var leaf = NativeModuleCompiler.CreateProducer(CompileLibrary(Leaf, policy),
             ["Source.Bias"], "NodeB", policy);
-        var middle = NativeModuleCompiler.CreateGraphProducer(CompileLibrary(Middle, policy,
-            NativeModuleCompiler.CreateGraphReference([leaf])), ["TryRead", "Read"], "NodeA", [leaf], policy);
+            var middleProgram = CompileLibrary(Middle, policy,
+                NativeModuleCompiler.CreateGraphReference([leaf]));
+            var middle = NativeModuleCompiler.CreateGraphProducer(middleProgram,
+                ["TryRead", "Read"], "NodeA", [leaf], policy,
+                CreateIdentityInputs(middleProgram, "NodeA", "Pair", "Box"));
         var root = NativeModuleCompiler.CreateGraphConsumer(CompileConsumer(Root,
             NativeModuleCompiler.CreateGraphReference([middle, leaf]), policy),
             [middle, leaf], policy);
@@ -261,26 +289,31 @@ internal sealed class PublicInitReferenceTests
                 public Ticket(int32 value) { Value = value; }
                  [Cleanup] public void Close() {}
             }
-            public bool TryTicket(bool available, init ref<Ticket> ticket) {
-                ticket = new Ticket(42);
-                return available;
+            public bool TryTicket(bool available, ref<init Ticket> ticket) {
+                if (!available) { return false; }
+                *ticket = new Ticket(42);
+                return true;
             }
             public int32 Consume(Ticket ticket) { return ticket.Value; }
             """;
         const string Consumer = """
             int32 Main() {
-                if (TryTicket(false, init var ticket)) { return 1; }
-                require TryTicket(true, init ticket);
+                init Ticket ticket;
+                if (TryTicket(false, ref init ticket)) { return 1; }
+                require TryTicket(true, ref init ticket);
                 return Consume(move ticket);
             }
             """;
         string[] exports = ["TryTicket", "Consume", "Ticket.Close"];
         var program = CompileLibrary(Library, policy);
-        var producer = ModuleCompiler.CreateProducer(program, exports);
+            var producer = ModuleCompiler.CreateProducer(program, exports,
+                CreateIdentityInputs(program, "PublicUniqueInit", "Ticket"));
         var consumer = ModuleCompiler.CreateConsumer(CompileConsumer(Consumer,
             ModuleCompiler.CreateReference(producer), policy), producer);
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
-        var nativeProducer = NativeModuleCompiler.CreateProducer(program, exports, "NodeB", policy);
+        var nativeProducer = NativeModuleCompiler.CreateProducer(program,
+            exports, "NodeB", policy,
+            CreateIdentityInputs(program, "NodeB", "Ticket"));
         var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(CompileConsumer(Consumer,
             NativeModuleCompiler.CreateGraphReference([nativeProducer]), policy), [nativeProducer], policy);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeProducer],
@@ -300,15 +333,18 @@ internal sealed class PublicInitReferenceTests
                 public int32 Value;
                 public Cell(int32 value) { Value = value; }
             }
-            public bool TryTicket(init ref<Ticket> ticket) {
+            public bool TryTicket(ref<init Ticket> ticket) {
                 require Cell.TryCreate(42, out var cell);
-                ticket = new Ticket(cell.Value);
+                *ticket = new Ticket(cell.Value);
                 return true;
             }
             """;
         var program = CompileLibrary(Library, NativeRuntimePolicy.FailFast);
         _ = Assert.Throws<ModuleContractException>(() =>
-            ModuleCompiler.CreateProducer(program, ["TryTicket", "Ticket.Close"]))!;
+                ModuleCompiler.CreateProducer(program,
+                    ["TryTicket", "Ticket.Close"],
+                    CreateIdentityInputs(program, "UniqueInitRejected",
+                        "Ticket", "Cell")))!;
     }
 
     private static BoundProgram CompileLibrary(string source, NativeRuntimePolicy policy,
@@ -340,6 +376,71 @@ internal sealed class PublicInitReferenceTests
             Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
             return (BoundProgram)__nunitActual1!;
         }))();
+    }
+
+    private static PrivateModuleIdentityInputs CreateIdentityInputs(
+        BoundProgram program, string moduleIdentity,
+        params string[] declarationNames)
+    {
+        var definitions = new PrivateNominalDefinition[
+            declarationNames.Length];
+        for (var assignmentIndex = 0;
+            assignmentIndex < declarationNames.Length;
+            assignmentIndex++)
+        {
+            var name = declarationNames[assignmentIndex];
+            var found = false;
+            for (var structureIndex = 0;
+                structureIndex < program.Structures.Length;
+                structureIndex++)
+            {
+                var structure = program.Structures[structureIndex];
+                if (!string.Equals(structure.Name, name,
+                        StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                definitions[assignmentIndex]
+                    = new PrivateNominalDefinition(
+                        (PrimitiveType)(100 + structureIndex), name,
+                        !structure.IsPrivate && !structure.IsInternal);
+                found = true;
+                break;
+            }
+            if (found)
+            {
+                continue;
+            }
+
+            for (var classIndex = 0;
+                classIndex < program.Classes.Length;
+                classIndex++)
+            {
+                var @class = program.Classes[classIndex];
+                if (!string.Equals(@class.Name, name,
+                        StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                definitions[assignmentIndex]
+                    = new PrivateNominalDefinition(
+                        (PrimitiveType)(ManagedClassTypes.First + classIndex),
+                        name, !@class.IsInternal);
+                found = true;
+                break;
+            }
+            if (!found)
+            {
+                throw new InvalidOperationException(
+                    $"Nominal declaration '{name}' is not in the checked program.");
+            }
+        }
+
+        return PrivateModuleIdentityInputs.Create(program,
+            moduleIdentity, definitions,
+            Array.Empty<PrivateNominalImport>());
     }
 
     private static string RepositoryRoot() => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,

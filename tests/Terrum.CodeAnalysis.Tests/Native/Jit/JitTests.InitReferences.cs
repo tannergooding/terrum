@@ -27,18 +27,18 @@ internal sealed partial class JitTests
     public Task FloatingInitReferencePublishesOnSuccessAsync(bool checkedFailures)
     {
         const string Source = """
-            bool Publish64(init ref<float64> value) {
-                value = 0x1.fp+2;
+            bool Publish64(ref<init float64> value) {
+                *value = 0x1.fp+2;
                 return true;
             }
-            bool Publish32(init ref<float32> value) {
-                value = 3.5;
+            bool Publish32(ref<init float32> value) {
+                *value = 3.5;
                 return true;
             }
             int32 Main() {
                 init float64 value64;
                 init float32 value32;
-                if (!Publish64(init value64) || !Publish32(init value32)) { return 1; }
+                if (!Publish64(ref init value64) || !Publish32(ref init value32)) { return 1; }
                 return value64 == 7.75 && value32 == 3.5 ? 42 : 0;
             }
             """;
@@ -93,15 +93,16 @@ internal sealed partial class JitTests
     public Task CheckedInitReferenceFailurePropagatesWithoutPublicationAsync()
     {
         const string Source = """
-            bool Fail(init ref<int32> value) {
+            bool Fail(ref<init int32> value) {
                 require false;
-                value = 42;
+                *value = 42;
                 return true;
             }
             int32 Main() {
+                init int32 missing;
                 unsafe {
                     try {
-                        if (Fail(init var missing)) { return 1; }
+                        if (Fail(ref init missing)) { return 1; }
                         return 2;
                     }
                     catch { return 42; }
@@ -114,8 +115,8 @@ internal sealed partial class JitTests
     [Test]
     public Task CheckedEarlierArgumentFailureLeavesInitDestinationVacantAsync() =>
         AssertCheckedExecutionAsync("""
-            bool Fill(int32 ignored, init ref<int32> value) {
-                value = 42;
+            bool Fill(int32 ignored, ref<init int32> value) {
+                *value = 42;
                 return true;
             }
             int32 Fail() { require false; return 0; }
@@ -123,7 +124,7 @@ internal sealed partial class JitTests
                 init int32 value;
                 unsafe {
                     try {
-                        if (Fill(Fail(), init value)) { return 1; }
+                        if (Fill(Fail(), ref init value)) { return 1; }
                         return 2;
                     } catch {
                         return value is init ? 43 : 42;
@@ -135,8 +136,8 @@ internal sealed partial class JitTests
     [Test]
     public Task CheckedLaterArgumentFailureLeavesStagedInitDestinationVacantAsync() =>
         AssertCheckedExecutionAsync("""
-             bool Fill(init ref<int32> value, int32 ignored) {
-                value = 42;
+             bool Fill(ref<init int32> value, int32 ignored) {
+                *value = 42;
                 return true;
             }
             int32 Fail() { require false; return 0; }
@@ -144,7 +145,7 @@ internal sealed partial class JitTests
                 init int32 value;
                 unsafe {
                     try {
-                        Fill(init value, Fail());
+                        Fill(ref init value, Fail());
                         return 1;
                     } catch {
                         return value is init ? 43 : 42;
@@ -157,8 +158,8 @@ internal sealed partial class JitTests
     [Test]
     public Task CheckedReorderedNamedLaterArgumentFailureLeavesInitDestinationVacantAsync() =>
         AssertCheckedExecutionAsync("""
-             bool Fill(int32 ignored, init ref<int32> value) {
-                value = 42;
+             bool Fill(int32 ignored, ref<init int32> value) {
+                *value = 42;
                 return true;
             }
             int32 Fail() { require false; return 0; }
@@ -166,7 +167,7 @@ internal sealed partial class JitTests
                 init int32 value;
                 unsafe {
                     try {
-                        Fill(value: init value, ignored: Fail());
+                        Fill(value: ref init value, ignored: Fail());
                         return 1;
                     } catch {
                         return value is init ? 43 : 42;
@@ -196,7 +197,7 @@ internal sealed partial class JitTests
             """, 42);
 
     [Test]
-    public Task CheckedNonBooleanUniqueInitFailureDoesNotPublishAsync()
+    public Task CheckedNonBooleanUniqueInitFailureDoesNotPublishOutputAsync()
     {
         const string Source = """
             unique struct Owner {
@@ -204,8 +205,8 @@ internal sealed partial class JitTests
                 public Owner(int32 value) { Value = value; }
                  [Cleanup] public void Close() {}
             }
-            int32 Fail(init ref<Owner> value) {
-                value = new Owner(42);
+            int32 Fail(ref<init Owner> value) {
+                *value = new Owner(42);
                 require false;
                 return 0;
             }
@@ -213,7 +214,7 @@ internal sealed partial class JitTests
                 init Owner value;
                 unsafe {
                     try {
-                        int32 status = Fail(init value);
+                        int32 status = Fail(ref init value);
                         return status;
                     } catch {
                         return value is init ? 42 : 43;
@@ -236,14 +237,15 @@ internal sealed partial class JitTests
                     Second = second;
                 }
             }
-            bool Fill(bool publish, init ref<Pair> value) {
+            bool Fill(bool publish, ref<init Pair> value) {
                 if (!publish) { return false; }
-                value = new Pair(40, 2);
+                *value = new Pair(40, 2);
                 return true;
             }
             int32 Main() {
-                if (Fill(false, init var pair)) { return 1; }
-                require Fill(true, init pair);
+                init Pair pair;
+                if (Fill(false, ref init pair)) { return 1; }
+                require Fill(true, ref init pair);
                 return pair.First + pair.Second;
             }
             """;
@@ -264,19 +266,21 @@ internal sealed partial class JitTests
             unique struct Owner {
                 public mut OwnedInt32Buffer Buffer;
                 public Owner(int32 number) {
-                    require OwnedInt32Buffer.TryCreate(1, out var buffer);
+                    init OwnedInt32Buffer buffer;
+                    require OwnedInt32Buffer.TryCreate(1, ref init buffer);
                     Buffer = move buffer;
                     require Buffer.TryAppend(number);
                 }
             }
-            bool Create(bool publish, init ref<Owner> result) {
+            bool Create(bool publish, ref<init Owner> result) {
                 if (!publish) { return false; }
-                result = new Owner(42);
+                *result = new Owner(42);
                 return true;
             }
             int32 Main() {
-                if (Create(false, init var owner)) { return 1; }
-                require Create(true, init owner);
+                init Owner owner;
+                if (Create(false, ref init owner)) { return 1; }
+                require Create(true, ref init owner);
                 return owner.Buffer.Read(0);
             }
             """;
@@ -293,14 +297,15 @@ internal sealed partial class JitTests
     public Task ManagedInitPublishesAnInitializedNullDistinctFromVacancyAsync(bool checkedFailures)
     {
         const string Source = """
-            bool Fill(bool publish, init ref<ManagedNode?> value) {
+            bool Fill(bool publish, ref<init ManagedNode?> value) {
                 if (!publish) { return false; }
-                value = null;
+                *value = null;
                 return true;
             }
             int32 Main() {
-                if (Fill(false, init var node)) { return 1; }
-                require Fill(true, init node);
+                init ManagedNode? node;
+                if (Fill(false, ref init node)) { return 1; }
+                require Fill(true, ref init node);
                 if (node is some present) { return present.Value; }
                 return 42;
             }
@@ -310,20 +315,22 @@ internal sealed partial class JitTests
     }
 
     [Test]
-    public Task CheckedManagedInitFailureDoesNotPublishOrRetainTheScratchHandleAsync() =>
+    public Task CheckedManagedInitFailureRetiresThePublishedScratchHandleAsync() =>
         AssertCheckedExecutionAsync("""
-            bool Fail(init ref<write ManagedNode> value) {
+            bool Fail(ref<init write ManagedNode> value) {
                 require ManagedNode.TryCreate(42, out var created);
-                value = created;
+                *value = created;
                 require false;
                 return true;
             }
             int32 Main() {
+                init mut write ManagedNode missing;
                 unsafe {
                     try {
-                        if (Fail(init var missing)) { return 1; }
+                        if (Fail(ref init missing)) { return 1; }
                         return 2;
                     } catch {
+                        if (missing is init) { missing = _; }
                         if (ManagedHeap.Collect() != 1) { return 3; }
                         return 42;
                     }

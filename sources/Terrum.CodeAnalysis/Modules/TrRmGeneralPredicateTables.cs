@@ -169,7 +169,26 @@ internal readonly ref struct TrRmPredicateNodeTableReader
                 or TrRmArtifactSchema.NominalEnumsDraft
                 or TrRmArtifactSchema.RootPinRuntimeDraft
                 or TrRmArtifactSchema.GeneralPredicateGraphsDraft
+                or TrRmArtifactSchema.InitializationReferencePointerLoadNativeParameterDraft
+                or TrRmArtifactSchema.InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft
                 or TrRmArtifactSchema.RegisterExceptionRegionsDraft
+                or TrRmArtifactSchema.GenericMethodCallsDraft
+                or TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft
+                or TrRmArtifactSchema.GenericMethodCallsParameterLabelsReceiverAccessDraft
+                or TrRmArtifactSchema.C1Draft
+                or TrRmArtifactSchema.C1ParameterLabelsReceiverAccessDraft
+                or TrRmArtifactSchema.C1M1Draft
+                or TrRmArtifactSchema.C1M1ParameterLabelsReceiverAccessDraft
+                or TrRmArtifactSchema.C1M1ConstructionDraft
+                or TrRmArtifactSchema.C1M1ConstructionParameterLabelsReceiverAccessDraft
+                or TrRmArtifactSchema.C1M1Construction2Draft
+                or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessDraft
+                or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft
+                or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateDraft
+                or TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft
+                or TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft
+                or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft
+                or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft
                 or TrRmArtifactSchema.GenericConstantMethodsDraft))
         {
             throw TrRmPredicateTableValidation.Invalid("PredicateNode");
@@ -234,7 +253,11 @@ internal readonly ref struct TrRmPredicateNodeTableReader
         var isSelectorKind = nodeKind is >= 1 and <= 6;
         var isGeneralKind = nodeKind is (>= 0x10 and <= 0x36)
             or (>= 0x40 and <= 0x4F);
-        return isSelectorKind || (schema.UsesGeneralPredicateGraphs() && isGeneralKind);
+        var isPropertyInitialized = nodeKind == 0x37
+            && schema.UsesPropertyInitializedState();
+        return isSelectorKind
+            || (schema.UsesGeneralPredicateGraphs() && isGeneralKind)
+            || isPropertyInitialized;
     }
 }
 
@@ -309,7 +332,26 @@ internal readonly ref struct TrRmPredicateNodeOperandTableReader
                 or TrRmArtifactSchema.NominalEnumsDraft
                 or TrRmArtifactSchema.RootPinRuntimeDraft
                 or TrRmArtifactSchema.GeneralPredicateGraphsDraft
+                or TrRmArtifactSchema.InitializationReferencePointerLoadNativeParameterDraft
+                or TrRmArtifactSchema.InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft
                 or TrRmArtifactSchema.RegisterExceptionRegionsDraft
+                or TrRmArtifactSchema.GenericMethodCallsDraft
+                or TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft
+                or TrRmArtifactSchema.GenericMethodCallsParameterLabelsReceiverAccessDraft
+                or TrRmArtifactSchema.C1Draft
+                or TrRmArtifactSchema.C1ParameterLabelsReceiverAccessDraft
+                or TrRmArtifactSchema.C1M1Draft
+                or TrRmArtifactSchema.C1M1ParameterLabelsReceiverAccessDraft
+                or TrRmArtifactSchema.C1M1ConstructionDraft
+                or TrRmArtifactSchema.C1M1ConstructionParameterLabelsReceiverAccessDraft
+                or TrRmArtifactSchema.C1M1Construction2Draft
+                or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessDraft
+                or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft
+                or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateDraft
+                or TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft
+                or TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft
+                or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft
+                or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft
                 or TrRmArtifactSchema.GenericConstantMethodsDraft))
         {
             throw TrRmPredicateTableValidation.Invalid("PredicateNodeOperand");
@@ -445,7 +487,26 @@ internal readonly ref struct TrRmPredicateReadRootTableReader
                 or TrRmArtifactSchema.NominalEnumsDraft
                 or TrRmArtifactSchema.RootPinRuntimeDraft
                 or TrRmArtifactSchema.GeneralPredicateGraphsDraft
+                or TrRmArtifactSchema.InitializationReferencePointerLoadNativeParameterDraft
+                or TrRmArtifactSchema.InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft
                 or TrRmArtifactSchema.RegisterExceptionRegionsDraft
+                or TrRmArtifactSchema.GenericMethodCallsDraft
+                or TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft
+                or TrRmArtifactSchema.GenericMethodCallsParameterLabelsReceiverAccessDraft
+                or TrRmArtifactSchema.C1Draft
+                or TrRmArtifactSchema.C1ParameterLabelsReceiverAccessDraft
+                or TrRmArtifactSchema.C1M1Draft
+                or TrRmArtifactSchema.C1M1ParameterLabelsReceiverAccessDraft
+                or TrRmArtifactSchema.C1M1ConstructionDraft
+                or TrRmArtifactSchema.C1M1ConstructionParameterLabelsReceiverAccessDraft
+                or TrRmArtifactSchema.C1M1Construction2Draft
+                or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessDraft
+                or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft
+                or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateDraft
+                or TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft
+                or TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft
+                or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft
+                or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft
                 or TrRmArtifactSchema.GenericConstantMethodsDraft))
         {
             throw TrRmPredicateTableValidation.Invalid("PredicateReadRoot");
