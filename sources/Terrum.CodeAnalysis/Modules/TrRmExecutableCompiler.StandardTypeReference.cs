@@ -305,6 +305,8 @@ public static partial class TrRmExecutableCompiler
             selectedKeys.Add(exportKey);
         }
 
+        var fieldProviderBindings
+            = ImmutableArray<TrRmStandardFieldProviderBinding>.Empty;
         ImmutableArray<TrRmStandardTypeProviderBinding>
             typeProviderBindings;
         if (isEN1)
@@ -314,16 +316,7 @@ public static partial class TrRmExecutableCompiler
                     .ValidateFieldDefImports(rootTables, artifacts,
                         schemaIdentities, moduleValidation.Modules,
                         rootModuleRow);
-            if (fieldValidation.FieldBindings.Any(binding =>
-                    binding.ConsumerArtifactIndex == 0
-                    && binding.ConsumerModuleRow == rootModuleRow
-                    && rootTables.TypeDefs.GetKind(
-                        binding.ExpectedOwnerTypeDefRow) == 2))
-            {
-                throw Unsupported(
-                    "The EN1 class source-reference projection does not yet support imported class FieldDefs.");
-            }
-
+            fieldProviderBindings = fieldValidation.FieldBindings;
             typeProviderBindings = fieldValidation.TypeBindings;
         }
         else
@@ -418,6 +411,58 @@ public static partial class TrRmExecutableCompiler
                 var expectedView = CreateStandardClassTypeView(
                     consumerTables, expectedIdentity, consumerSnapshot,
                     binding.ExpectedTypeDefRow);
+                var fieldExpectations
+                    = ImmutableArray.CreateBuilder<
+                        BoundStandardClassFieldExpectation>();
+                foreach (var fieldBinding in fieldProviderBindings)
+                {
+                    if (fieldBinding.ConsumerArtifactIndex
+                            != binding.ConsumerArtifactIndex
+                        || fieldBinding.ConsumerModuleRow
+                            != binding.ConsumerModuleRow
+                        || fieldBinding.OwnerImportRow
+                            != binding.ImportRow
+                        || fieldBinding.ExpectedOwnerTypeDefRow
+                            != binding.ExpectedTypeDefRow)
+                    {
+                        continue;
+                    }
+
+                    if (fieldBinding.ProviderArtifactIndex
+                            != binding.ProviderArtifactIndex
+                        || fieldBinding.ProviderModuleRow
+                            != binding.ProviderModuleRow
+                        || fieldBinding.ProviderTypeDefRow
+                            != binding.ProviderTypeDefRow)
+                    {
+                        throw Invalid(
+                            "An EN1 class FieldDef Import resolved through a different provider than its owner TypeDef Import.");
+                    }
+
+                    var fieldProviderTables = GetC1M1Tables(artifacts,
+                        schemaIdentities,
+                        fieldBinding.ProviderArtifactIndex);
+                    var fieldProviderSnapshot
+                        = CreateA2SourceTypeProviderSnapshot(
+                            fieldProviderTables,
+                            artifacts[fieldBinding.ProviderArtifactIndex],
+                            schemaIdentities[
+                                fieldBinding.ProviderArtifactIndex],
+                            fieldBinding.ProviderModuleRow);
+                    fieldExpectations.Add(
+                        new BoundStandardClassFieldExpectation(
+                            fieldBinding.ImportRow,
+                            fieldBinding.OwnerImportRow,
+                            0x1400_0000u | checked((uint)
+                                fieldBinding.ExpectedFieldDefRow),
+                            expectedDefinitionId,
+                            0x1400_0000u | checked((uint)
+                                fieldBinding.ProviderFieldDefRow),
+                            providerDefinitionId,
+                            fieldBinding.ExportKey,
+                            fieldProviderSnapshot));
+                }
+
                 if (!classExpectationsByActualType.TryGetValue(
                         actualIdentity, out var classExpectations))
                 {
@@ -425,8 +470,11 @@ public static partial class TrRmExecutableCompiler
                     classExpectationsByActualType.Add(actualIdentity,
                         classExpectations);
                 }
-                classExpectations.Add(new BoundStandardClassExpectation(
-                    expectation, expectedView));
+                classExpectations.Add(
+                    new BoundStandardClassExpectation(expectation,
+                        expectedView) {
+                        FieldExpectations = fieldExpectations.ToImmutable(),
+                    });
             }
         }
 
@@ -828,15 +876,38 @@ public static partial class TrRmExecutableCompiler
         var typeDefId = 0x1300_0000u | checked((uint)typeDefRow);
         var (fieldStart, fieldEnd)
             = tables.TypeDefs.GetFieldRange(typeDefRow);
+        var exportKeysByField = new Dictionary<uint, List<string>>();
+        foreach (var (definitionId, exportKey) in tables.Exports
+            .GetExportsForModule(provider.ModuleRow))
+        {
+            if ((definitionId >> 24) != 0x14)
+            {
+                continue;
+            }
+
+            if (!exportKeysByField.TryGetValue(definitionId,
+                    out var exportKeys))
+            {
+                exportKeys = [];
+                exportKeysByField.Add(definitionId, exportKeys);
+            }
+            exportKeys.Add(exportKey);
+        }
+
         var fields = ImmutableArray.CreateBuilder<
             BoundStandardClassFieldDeclaration>(fieldEnd - fieldStart);
         for (var fieldRow = fieldStart; fieldRow < fieldEnd; fieldRow++)
         {
+            var definitionId = 0x1400_0000u
+                | checked((uint)fieldRow);
             fields.Add(new BoundStandardClassFieldDeclaration(
-                0x1400_0000u | checked((uint)fieldRow), typeDefId,
+                definitionId, typeDefId,
                 tables.Fields.GetName(fieldRow),
                 tables.Fields.GetFlags(fieldRow),
-                tables.Fields.GetTypeSpecRef(fieldRow)));
+                tables.Fields.GetTypeSpecRef(fieldRow)) {
+                ExportKeys = exportKeysByField.TryGetValue(definitionId,
+                    out var exportKeys) ? [.. exportKeys] : [],
+            });
         }
 
         var (layoutStart, layoutCount)

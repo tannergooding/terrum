@@ -19,7 +19,9 @@ public static partial class TrRmExecutableCompiler
 
     private sealed record C1EnumClosureStandardClassEmission(
         BoundStandardClassTypeView View, ImmutableArray<string> ExportKeys,
-        C1EnumClosureImport? Import, int RootTypeDefRow);
+        C1EnumClosureImport? Import, int RootTypeDefRow,
+        ImmutableArray<BoundStandardClassFieldExpectation>
+            FieldExpectations);
 
     private sealed record C1EnumClosureEmissionLayout(
         uint TargetProfileId, uint TargetProfileRuleRevision,
@@ -422,7 +424,7 @@ public static partial class TrRmExecutableCompiler
                         new C1EnumClosureStandardClassEmission(
                             classView, declaration.ExportKeys, null,
                             checked((int)(classView.Identity.DefinitionId
-                                & 0x00FF_FFFF))));
+                                & 0x00FF_FFFF)), []));
                     continue;
                 }
 
@@ -463,7 +465,8 @@ public static partial class TrRmExecutableCompiler
                                 binding.RuntimePolicy,
                                 binding.ImportRow),
                             checked((int)(binding.ExpectedDefinitionId
-                                & 0x00FF_FFFF))));
+                                & 0x00FF_FFFF),
+                            expectation.FieldExpectations));
                 }
             }
 
@@ -2573,6 +2576,55 @@ public static partial class TrRmExecutableCompiler
                             0x1400_0000u | checked((uint)fieldDefRow),
                             AddString(exportKey)));
                     }
+                }
+
+                foreach (var fieldExpectation in
+                    emission.FieldExpectations)
+                {
+                    if (fieldExpectation.ExpectedDefinitionId
+                        != field.DefinitionId)
+                    {
+                        continue;
+                    }
+
+                    if (emission.Import is not C1EnumClosureImport typeImport
+                        || fieldExpectation.ImportRow <= 0
+                        || fieldExpectation.OwnerImportRow
+                            != typeImport.RootImportRow
+                        || fieldExpectation.ExpectedOwnerDefinitionId
+                            != classView.Identity.DefinitionId
+                        || !StringComparer.Ordinal.Equals(
+                            fieldExpectation.Provider.ModuleIdentity,
+                            typeImport.ProducerIdentity)
+                        || fieldExpectation.Provider.TargetRequirement
+                            != typeImport.TargetRequirement
+                        || fieldExpectation.Provider.RuntimePolicy
+                            != typeImport.RuntimePolicy)
+                    {
+                        throw Invalid(
+                            "An EN1 class FieldDef Import lost its retained owner or provider identity.");
+                    }
+
+                    var fieldProviderKey = (
+                        fieldExpectation.Provider.ModuleIdentity,
+                        fieldExpectation.Provider.TargetRequirement,
+                        fieldExpectation.Provider.RuntimePolicy);
+                    if (!moduleRefRowsByProvider.TryGetValue(
+                            fieldProviderKey, out var fieldModuleRefRow))
+                    {
+                        fieldModuleRefRow = moduleRefRows.Count + 1;
+                        moduleRefRows.Add(new TrRmModuleRefRow(
+                            AddString(fieldExpectation.Provider
+                                .ModuleIdentity),
+                            fieldExpectation.Provider.TargetRequirement,
+                            fieldExpectation.Provider.RuntimePolicy));
+                        moduleRefRowsByProvider.Add(fieldProviderKey,
+                            fieldModuleRefRow);
+                    }
+
+                    importRows.Add(new TrRmImportRow(fieldModuleRefRow,
+                        AddString(fieldExpectation.ExportKey),
+                        0x1400_0000u | checked((uint)fieldDefRow)));
                 }
             }
 

@@ -9,7 +9,10 @@ namespace Terrum.CodeAnalysis.Semantics;
 
 internal sealed record BoundStandardClassFieldDeclaration(
     uint DefinitionId, uint OwnerDefinitionId, string Name, uint Flags,
-    uint TypeSpecReference);
+    uint TypeSpecReference)
+{
+    internal ImmutableArray<string> ExportKeys { get; init; } = [];
+}
 
 internal sealed record BoundStandardClassLayoutVariant(
     uint Row, uint OwnerDefinitionId, uint TargetProfileReference,
@@ -43,7 +46,17 @@ internal sealed record BoundStandardClassTypeView(
 
 internal sealed record BoundStandardClassExpectation(
     BoundSourceTypeExpectation Binding,
-    BoundStandardClassTypeView ExpectedDeclaration);
+    BoundStandardClassTypeView ExpectedDeclaration)
+{
+    internal ImmutableArray<BoundStandardClassFieldExpectation>
+        FieldExpectations { get; init; } = [];
+}
+
+internal sealed record BoundStandardClassFieldExpectation(
+    int ImportRow, int OwnerImportRow, uint ExpectedDefinitionId,
+    uint ExpectedOwnerDefinitionId, uint ProviderDefinitionId,
+    uint ProviderOwnerDefinitionId, string ExportKey,
+    BoundSourceTypeProviderSnapshot Provider);
 
 internal sealed record BoundStandardClassDeclaration(
     BoundStandardClassTypeView Declaration,
@@ -82,6 +95,8 @@ internal static class BoundStandardClassDeclarationContract
         var definitions = nominalTypes.ToDictionary(
             static definition => definition.Identity);
         var identities = new HashSet<BoundGenericNominalTypeIdentity>();
+        var fieldImportKeys = new HashSet<(
+            string SchemaIdentity, string ModuleIdentity, int ImportRow)>();
         var totalRows = 0L;
         foreach (var declaration in declarations)
         {
@@ -138,6 +153,7 @@ internal static class BoundStandardClassDeclarationContract
                         binding.UsingModule.SchemaIdentity,
                         binding.UsingModule.ModuleIdentity,
                         binding.ImportRow))
+                    || expectation.FieldExpectations.IsDefault
                     || (expectation.ExpectedDeclaration.TypeDefFlags & 3)
                         != 2
                     || (declaration.Declaration.TypeDefFlags & 3) != 2
@@ -162,11 +178,58 @@ internal static class BoundStandardClassDeclarationContract
                 }
 
                 totalRows += expectation.ExpectedDeclaration.Fields.Length
-                    + expectation.ExpectedDeclaration.Layouts.Length;
+                    + expectation.ExpectedDeclaration.Layouts.Length
+                    + expectation.FieldExpectations.Length;
                 if (totalRows > SemanticVerifier.MaximumAnalysisVisits)
                 {
                     return false;
                 }
+
+                var expectedFields = expectation.ExpectedDeclaration.Fields
+                    .ToDictionary(static field => field.DefinitionId);
+                var actualFields = declaration.Declaration.Fields
+                    .ToDictionary(static field => field.DefinitionId);
+                var fieldImportRows = new HashSet<int>();
+                foreach (var fieldExpectation in expectation.FieldExpectations)
+                {
+                    if (fieldExpectation is null
+                        || fieldExpectation.ImportRow <= 0
+                        || fieldExpectation.OwnerImportRow != binding.ImportRow
+                        || fieldExpectation.ExpectedOwnerDefinitionId
+                            != binding.ExpectedDefinitionId
+                        || fieldExpectation.ProviderOwnerDefinitionId
+                            != declaration.Declaration.Identity.DefinitionId
+                        || (fieldExpectation.ExpectedDefinitionId >> 24) != 0x14
+                        || (fieldExpectation.ExpectedDefinitionId
+                            & 0x00FF_FFFF) == 0
+                        || (fieldExpectation.ProviderDefinitionId >> 24)
+                            != 0x14
+                        || (fieldExpectation.ProviderDefinitionId
+                            & 0x00FF_FFFF) == 0
+                        || !fieldImportRows.Add(fieldExpectation.ImportRow)
+                        || !fieldImportKeys.Add((
+                            binding.UsingModule.SchemaIdentity,
+                            binding.UsingModule.ModuleIdentity,
+                            fieldExpectation.ImportRow))
+                        || !expectedFields.TryGetValue(
+                            fieldExpectation.ExpectedDefinitionId,
+                            out var expectedField)
+                        || expectedField.OwnerDefinitionId
+                            != fieldExpectation.ExpectedOwnerDefinitionId
+                        || !actualFields.TryGetValue(
+                            fieldExpectation.ProviderDefinitionId,
+                            out var actualField)
+                        || actualField.OwnerDefinitionId
+                            != fieldExpectation.ProviderOwnerDefinitionId
+                        || !actualField.ExportKeys.Contains(
+                            fieldExpectation.ExportKey, StringComparer.Ordinal)
+                        || !SnapshotsMatch(fieldExpectation.Provider,
+                            declaration.Declaration.Provider))
+                    {
+                        return false;
+                    }
+                }
+
             }
         }
 
@@ -216,6 +279,8 @@ internal static class BoundStandardClassDeclarationContract
                 || !IsValidText(field.Name)
                 || !BoundGenericNominalTypeContract.IsTypeSpecReference(
                     field.TypeSpecReference)
+                || field.ExportKeys.IsDefault
+                || !IsUniqueText(field.ExportKeys)
                 || !fields.TryAdd(field.DefinitionId, field))
             {
                 return false;

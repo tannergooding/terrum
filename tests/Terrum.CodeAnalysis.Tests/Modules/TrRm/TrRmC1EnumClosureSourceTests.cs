@@ -833,7 +833,7 @@ internal sealed class TrRmC1EnumClosureSourceTests
     }
 
     [Test]
-    public void ReemitsEN1ClassTypeDefImportsAndFieldTypeSpecs()
+    public void ReemitsEN1ClassTypeDefAndFieldImportsAndTypeSpecs()
     {
         var schemaIdentity = s_schemaIdentities[0];
         var providerTree = SyntaxTree.Parse("""
@@ -921,18 +921,22 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var expectedShelfTypeDefRow = Enumerable.Range(1,
                 consumerTables.TypeDefs.Count)
             .Single(row => consumerTables.TypeDefs.GetName(row) == "Shelf");
+        var (shelfFieldStart, _) = consumerTables.TypeDefs
+            .GetFieldRange(expectedShelfTypeDefRow);
         var shelfFieldRow = Enumerable.Range(1, consumerTables.Fields.Count)
             .Single(row => consumerTables.Fields.GetName(row)
                 == "ShelfValue");
         consumerArtifact = AddTypeDefImport(consumerArtifact,
             schemaIdentity, "ShelfProvider", "type.shelf",
-            0x1300_0000u | checked((uint)expectedShelfTypeDefRow));
+            0x1300_0000u | checked((uint)expectedShelfTypeDefRow),
+            "field.shelf.id",
+            0x1400_0000u | checked((uint)shelfFieldStart));
         consumerTables = TrRmStructuralMetadataValidator
             .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
                 consumerArtifact, SchemaFor(schemaIdentity)));
-        Assert.That(consumerTables.Imports.Count, Is.EqualTo(1));
+        Assert.That(consumerTables.Imports.Count, Is.EqualTo(2));
         consumerArtifact = RewriteFieldTypeSpecAsImport(consumerArtifact,
-            schemaIdentity, shelfFieldRow, consumerTables.Imports.Count);
+            schemaIdentity, shelfFieldRow, 1);
 
         var providers = new[] {
             new TrRmStandardArtifactInput(schemaIdentity, providerArtifact),
@@ -945,6 +949,10 @@ internal sealed class TrRmC1EnumClosureSourceTests
             declaration => declaration.Declaration.Name == "Shelf"
                 && !declaration.Expectations.IsEmpty);
         Assert.That(importedShelf.Expectations, Has.Length.EqualTo(1));
+        Assert.That(importedShelf.Expectations[0].FieldExpectations,
+            Has.Length.EqualTo(1));
+        Assert.That(importedShelf.Expectations[0].FieldExpectations[0]
+            .ExportKey, Is.EqualTo("field.shelf.id"));
 
         var sourceFreeCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(string.Empty), reference);
@@ -957,7 +965,7 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var reemittedTables = TrRmStructuralMetadataValidator
             .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
                 reemitted, SchemaFor(schemaIdentity)));
-        Assert.That(reemittedTables.Imports.Count, Is.EqualTo(1));
+        Assert.That(reemittedTables.Imports.Count, Is.EqualTo(2));
         var reemittedShelfTypeDefRow = Enumerable.Range(1,
                 reemittedTables.TypeDefs.Count)
             .Single(row => reemittedTables.TypeDefs.GetName(row) == "Shelf");
@@ -965,6 +973,13 @@ internal sealed class TrRmC1EnumClosureSourceTests
             .GetExpectedDefinitionForImportRow(1),
             Is.EqualTo(0x1300_0000u
                 | checked((uint)reemittedShelfTypeDefRow)));
+        var (reemittedShelfFieldStart, _)
+            = reemittedTables.TypeDefs.GetFieldRange(
+                reemittedShelfTypeDefRow);
+        Assert.That(reemittedTables.Imports
+            .GetExpectedDefinitionForImportRow(2),
+            Is.EqualTo(0x1400_0000u
+                | checked((uint)reemittedShelfFieldStart)));
         var reemittedShelfFieldRow = Enumerable.Range(1,
                 reemittedTables.Fields.Count)
             .Single(row => reemittedTables.Fields.GetName(row)
@@ -985,6 +1000,50 @@ internal sealed class TrRmC1EnumClosureSourceTests
             declaration => declaration.Declaration.Identity.DefinitionId
                 == (0x1300_0000u
                     | checked((uint)providerTypeDefRow))), Is.True);
+
+        var incompatibleProviderTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public class Shelf { public int32 Id; }
+            }
+            """);
+        var incompatibleProviderCompilation
+            = Compilation.CreateLibrary(incompatibleProviderTree);
+        Assert.That(incompatibleProviderCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                incompatibleProviderCompilation.Diagnostics));
+        var incompatibleProviderProgram
+            = (BoundProgram)incompatibleProviderCompilation.Program!;
+        var incompatibleClassDeclaration
+            = incompatibleProviderTree.Root.Children
+                .OfType<SyntaxNode>()
+                .Single(static node =>
+                    node.Kind == SyntaxKind.ClassDeclaration);
+        var incompatibleField = incompatibleClassDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.FieldDeclaration);
+        var incompatibleClassIndex = incompatibleProviderProgram
+            .SourceClassProgramAssociation!.Declarations.Single(
+                declaration => declaration.Span
+                    == incompatibleClassDeclaration.Span).ClassIndex;
+        var incompatibleClassExport = new TrRmSourceClassExport(
+            incompatibleProviderProgram, incompatibleClassIndex,
+            incompatibleClassDeclaration.Span, "type.shelf", [
+                new TrRmSourceClassMemberExport(0,
+                    incompatibleField.Span, "field.shelf.other"),
+            ]);
+        var incompatibleProviderArtifact
+            = TrRmExecutableCompiler.EmitStandard(
+                incompatibleProviderProgram, "ShelfProvider",
+                schemaIdentity, 1, [], [], [incompatibleClassExport], []);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    consumerArtifact),
+                "PaletteConsumer", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        incompatibleProviderArtifact),
+                ], ["type.palette"]));
     }
 
     [Test]
