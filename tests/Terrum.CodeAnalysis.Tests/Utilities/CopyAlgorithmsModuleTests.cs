@@ -42,22 +42,26 @@ internal sealed class CopyAlgorithmsModuleTests
                 char16 selectedCodeUnit = SelectCopy(true, char16(55296), char16(65));
                 if (selectedCodeUnit != char16(55296)) { return 3; }
 
-                if (TrySelectCopyInit(2, int64(40), int64(42), init var initialized)) { return 4; }
-                require TrySelectCopyInit(1, int64(40), int64(42), init initialized);
+                init int64 initialized;
+                if (TrySelectCopyInit(2, int64(40), int64(42), ref init initialized)) { return 4; }
+                require TrySelectCopyInit(1, int64(40), int64(42), ref init initialized);
                 if (initialized != int64(42)) { return 5; }
                 if (TrySelectCopy(-1, int64(40), int64(42), out var absentCopy)) { return 6; }
                 require TrySelectCopy(0, int64(40), int64(42), out var copied);
                 if (copied != int64(40)) { return 7; }
 
-                require SourceRange.TryCreate(12, 5, init var firstRange);
-                require SourceRange.TryCreate(42, 7, init var secondRange);
+                init SourceRange firstRange;
+                require SourceRange.TryCreate(12, 5, ref init firstRange);
+                init SourceRange secondRange;
+                require SourceRange.TryCreate(42, 7, ref init secondRange);
                 Token first = new Token(1, firstRange);
                 Token second = new Token(2, secondRange);
                 Token selectedToken = SelectCopy(false, first, second);
                 if (selectedToken.Kind != 2 || selectedToken.Range.Start != 42
                     || selectedToken.Range.Length != 7) { return 8; }
-                if (TrySelectCopyInit(2, first, second, init var initializedToken)) { return 9; }
-                require TrySelectCopyInit(0, first, second, init initializedToken);
+                init Token initializedToken;
+                if (TrySelectCopyInit(2, first, second, ref init initializedToken)) { return 9; }
+                require TrySelectCopyInit(0, first, second, ref init initializedToken);
                 if (initializedToken.Kind != 1 || initializedToken.Range.Start != 12
                     || initializedToken.Range.Length != 5) { return 10; }
                 return 0;
@@ -71,12 +75,24 @@ internal sealed class CopyAlgorithmsModuleTests
             .CreateRegisteredCompilationOptions(policy);
         var producerCompilation = Compilation.Create(trees, options);
         Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(
-            ((global::System.Func<BoundProgram>)(() => {
-                var __nunitActual0 = producerCompilation.Program;
-                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
-                return (BoundProgram)__nunitActual0!;
-            }))(), ["VerifyCopyAlgorithms"]);
+        var producerProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = producerCompilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
+        var definitions = new PrivateNominalDefinition[producerProgram.Structures.Length];
+        for (var index = 0; index < definitions.Length; index++)
+        {
+            var structure = producerProgram.Structures[index];
+            definitions[index] = new PrivateNominalDefinition(
+                (PrimitiveType)(100 + index),
+                $"copy_algorithms_{structure.Name.ToUpperInvariant()}",
+                IsExported: true);
+        }
+        var identityInputs = PrivateModuleIdentityInputs.Create(
+            producerProgram, "CopyAlgorithmsModule", definitions, []);
+        var producer = ModuleCompiler.CreateProducer(producerProgram,
+            ["VerifyCopyAlgorithms"], identityInputs);
 
         var consumerTree = SyntaxTree.Parse("""
             int32 Main() { return VerifyCopyAlgorithms(); }

@@ -1568,7 +1568,7 @@ internal sealed partial class CliTests
         }
     }
     [TestCase("public int32 Main() { bool success = Try(out var value); return success ? 42 : 0; } bool Try(out int32 value) { value = 42; return true; }",77,104)]
-    [TestCase("public int32 Main() { bool success = Fill(true, init var value); return success ? 42 : 0; } bool Fill(bool publish, init ref<int32> value) { if (publish) { value = 42; return true; } return false; }",78,108)]
+    [TestCase("public int32 Main() { init int32 value; bool success = Fill(true, ref init value); return success ? 42 : 0; } bool Fill(bool publish, ref<init int32> value) { if (publish) { *value = 42; return true; } return false; }",78,108)]
     public async Task ScalarFrontendOutputVariablesInInitializedLocalsRunAsync(
         string text, int projectionVersion, int operation)
     {
@@ -1712,7 +1712,7 @@ internal sealed partial class CliTests
     [Test]
     public async Task ScalarFrontendCrossFunctionInitReferencesCliUsesCurrentProjectionAsync()
     {
-        const string text = "public int32 Main() { require !Fill(false, init var value); return Fill(true, init value) ? value : 0; } bool Fill(bool publish, init ref<int32> value) { if (publish) { value = 42; return true; } return false; }";
+        const string text = "public int32 Main() { init int32 value; require !Fill(false, ref init value); return Fill(true, ref init value) ? value : 0; } bool Fill(bool publish, ref<init int32> value) { if (publish) { *value = 42; return true; } return false; }";
         var directory = TerrumProjectPaths.SourceDirectory(RepositoryRoot());
         var input = Encoding.UTF8.GetBytes(text);
         foreach (var runtime in new[] { "fail-fast", "checked-exceptions" })
@@ -1728,12 +1728,11 @@ internal sealed partial class CliTests
                     .GetProperty("initRefParameterMask").GetInt32(), Is.EqualTo(0));
                 Assert.That(result.GetProperty("functions")[1]
                     .GetProperty("initRefParameterMask").GetInt32(), Is.EqualTo(2));
-                Assert.That(global::System.Linq.Enumerable.Any(result.GetProperty("functions")[0].GetProperty("nodes")
-                    .EnumerateArray(),static node =>
-                    node.GetProperty("operation").GetInt32() == 107),Is.True);
-                Assert.That(global::System.Linq.Enumerable.Any(result.GetProperty("functions")[0].GetProperty("nodes")
-                    .EnumerateArray(),static node =>
-                    node.GetProperty("operation").GetInt32() == 108),Is.True);
+                Assert.That(global::System.Linq.Enumerable.Count(
+                    result.GetProperty("functions")[0].GetProperty("nodes")
+                        .EnumerateArray(),
+                    static node => node.GetProperty("operation").GetInt32() == 107),
+                    Is.EqualTo(2));
             }
             var (runExit, runOutput, runError) = await RunAsync(input, "frontend-run",
                 directory, "-", "--runtime", runtime, "--json").ConfigureAwait(false);
@@ -1746,7 +1745,7 @@ internal sealed partial class CliTests
     [Test]
     public async Task ScalarFrontendSingleInitReferencesCliUsesCurrentProjectionAsync()
     {
-        const string text = "public bool Fill(bool publish, init ref<int32> value) { if (publish) { value = 42; return true; } return Fill(true, init value); }";
+        const string text = "public bool Fill(bool publish, ref<init int32> value) { if (publish) { *value = 42; return true; } return Fill(true, ref init *value); }";
         var directory = TerrumProjectPaths.SourceDirectory(RepositoryRoot());
         var input = Encoding.UTF8.GetBytes(text);
         var outputDirectory = TestArtifactPaths.CreateDirectory("scanner-tests");
@@ -1792,7 +1791,7 @@ internal sealed partial class CliTests
     [Test]
     public async Task ScalarFrontendSingleNonBooleanInitReferenceCliUsesCurrentProjectionAsync()
     {
-        const string text = "public int32 Fill(int32 seed, init ref<int32> value) { if (seed == 0) { value = 40; return 0; } return Fill(seed - 1, init value); }";
+        const string text = "public int32 Fill(int32 seed, ref<init int32> value) { if (seed == 0) { *value = 40; return 0; } return Fill(seed - 1, ref init *value); }";
         var directory = TerrumProjectPaths.SourceDirectory(RepositoryRoot());
         var input = Encoding.UTF8.GetBytes(text);
         foreach (var runtime in new[] { "fail-fast", "checked-exceptions" })
@@ -1843,7 +1842,7 @@ internal sealed partial class CliTests
     [Test]
     public async Task ScalarFrontendCrossFunctionNonBooleanAndVoidInitReferenceCliUsesCurrentProjectionAsync()
     {
-        const string text = "public int32 Main() { _ = Fill(init var value); SetVoid(init var other); return value + other; } int32 Fill(init ref<int32> value) { value = 40; return 0; } void SetVoid(init ref<int32> value) { value = 2; }";
+        const string text = "public int32 Main() { init int32 value; init int32 other; _ = Fill(ref init value); SetVoid(ref init other); return value + other; } int32 Fill(ref<init int32> value) { *value = 40; return 0; } void SetVoid(ref<init int32> value) { *value = 2; }";
         var directory = TerrumProjectPaths.SourceDirectory(RepositoryRoot());
         var input = Encoding.UTF8.GetBytes(text);
         foreach (var runtime in new[] { "fail-fast", "checked-exceptions" })
@@ -2025,7 +2024,7 @@ internal sealed partial class CliTests
                 .Select(static parameter => parameter.GetInt32()), Is.EqualTo([3, 1, 0, 2]));
         await AssertFrontendBuiltExecutableMatchesHostedAndRunsAsync(source).ConfigureAwait(false);
     }
-    [TestCase("public int32 Main() { init int32 result; Initialize(third: 3, second: 2, first: 1, output: init result); return result; } int32 Initialize(int32 first, int32 second, int32 third, init ref<int32> output) { output = 42; return 6; }")]
+    [TestCase("public int32 Main() { init int32 result; Initialize(third: 3, second: 2, first: 1, output: ref init result); return result; } int32 Initialize(int32 first, int32 second, int32 third, ref<init int32> output) { *output = 42; return 6; }")]
     [TestCase("public int32 Main() { int32 status = Initialize(third: 3, second: 2, first: 1, output: out var result); return result + status; } int32 Initialize(int32 first, int32 second, int32 third, out int32 output) { output = 36; return 6; }")]
     public async Task ScalarFrontendFourParameterCliProjectsFourthOutputAndRunsAsync(string source)
     {
@@ -2106,12 +2105,11 @@ internal sealed partial class CliTests
     }
     [TestCase("int32 Set(out int32 trace, int32 value) { trace = value; return value; } int32 Main() { mut int32 trace = 0; return Set(value: 3, trace: out trace); }",3)]
     [TestCase("int32 Set(out int32 result, int32 value) { result = value; return value; } int32 Main() { return Set(value: 3, result: out var result) + result; }",6)]
-    [TestCase("int32 Initialize(int32 value, init ref<int32> result) { result = value; return 0; } int32 Main() { init int32 result; int32 status = Initialize(result: init result, value: 7); return result + status; }",7)]
-    [TestCase("int32 Initialize(int32 value, init ref<int32> result) { result = value; return 0; } int32 Main() { int32 status = Initialize(result: init var result, value: 7); return result + status; }",7)]
+    [TestCase("int32 Initialize(int32 value, ref<init int32> result) { *result = value; return 0; } int32 Main() { init int32 result; int32 status = Initialize(result: ref init result, value: 7); return result + status; }",7)]
     [TestCase("void Set(out int32 result, int32 value) { result = value; } int32 Main() { Set(value: 6, result: out var result); return result; }",6)]
-    [TestCase("void Initialize(int32 value, init ref<int32> result) { result = value; } int32 Main() { Initialize(result: init var result, value: 7); return result; }",7)]
+    [TestCase("void Initialize(int32 value, ref<init int32> result) { *result = value; } int32 Main() { init int32 result; Initialize(result: ref init result, value: 7); return result; }",7)]
     [TestCase("int32 Set(out int32 t, int32 v) { t = v; return v; } int32 Identity(int32 r) => r; int32 Main() { mut int32 t = 0; return Identity(r: Set(v: 3, t: out t)); }",3)]
-    [TestCase("int32 Initialize(int32 v, init ref<int32> r) { r = v; return 0; } int32 Identity(int32 x) => x; int32 Main() { init int32 r; return Identity(x: Initialize(r: init r, v: 7)) + r; }",7)]
+    [TestCase("int32 Initialize(int32 v, ref<init int32> r) { *r = v; return 0; } int32 Identity(int32 x) => x; int32 Main() { init int32 r; return Identity(x: Initialize(r: ref init r, v: 7)) + r; }",7)]
     public async Task ScalarFrontendNamedOutputCallsMatchHostedAsync(string text, int expected)
     {
         var directory = TerrumProjectPaths.SourceDirectory(RepositoryRoot());

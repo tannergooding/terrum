@@ -167,11 +167,18 @@ internal sealed class StringLiteralComponentTests
         var entry = SyntaxTree.Parse("""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
-                require SourceRange.TryCreate(0, Host.Source.Length, init var spelling);
-                require StringLiteral.TryCreate(spelling, init var literal);
+                init SourceRange spelling;
+                require SourceRange.TryCreate(0, Host.Source.Length, ref init spelling);
+                init StringLiteral literal;
+                require StringLiteral.TryCreate(spelling, ref init literal);
                 mut StringLiteralCursor cursor = StringLiteralCursor.Create(literal);
                 mut int32 count = 0;
-                while (cursor.TryRead(init var scalar, init var next)) {
+                while (true) {
+                    init int32 scalar;
+                    init StringLiteralCursor next;
+                    if (!cursor.TryRead(ref init scalar, ref init next)) {
+                        break;
+                    }
                     if (scalar != 65) { return 1; }
                     count = count + 1;
                     cursor = next;
@@ -208,17 +215,22 @@ internal sealed class StringLiteralComponentTests
         var entry = SyntaxTree.Parse($$"""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
-                require SourceRange.TryCreate(0, Host.Source.Length, init var spelling);
-                require StringLiteral.TryCreate(spelling, init var literal);
-                require literal.{{measure}}(init var unitLength);
+                init SourceRange spelling;
+                require SourceRange.TryCreate(0, Host.Source.Length, ref init spelling);
+                init StringLiteral literal;
+                require StringLiteral.TryCreate(spelling, ref init literal);
+                init int32 unitLength;
+                require literal.{{measure}}(ref init unitLength);
                 if (unitLength != {{expected.Length}}) { return 1; }
-                require OwnedInt32Buffer.TryCreate(unitLength - 1, out var small);
+                init OwnedInt32Buffer small;
+                require OwnedInt32Buffer.TryCreate(unitLength - 1, ref init small);
                 unsafe {
                     try {
                         OwnedInt32Buffer partial = literal.{{encode}}(move small);
                         return 2;
                     } catch {
-                        require OwnedInt32Buffer.TryCreate(unitLength, out var exact);
+                        init OwnedInt32Buffer exact;
+                        require OwnedInt32Buffer.TryCreate(unitLength, ref init exact);
                         OwnedInt32Buffer encoded = literal.{{encode}}(move exact);
                         if (encoded.Count != unitLength || encoded.Capacity != unitLength) { return 3; }
                         {{checks}}
@@ -249,16 +261,21 @@ internal sealed class StringLiteralComponentTests
         var entry = SyntaxTree.Parse($$"""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
-                require SourceRange.TryCreate(0, Host.Source.Length, init var spelling);
-                require StringLiteral.TryCreate(spelling, init var literal);
-                if (literal.{{measure}}(init var length)) { return 1; }
-                require OwnedInt32Buffer.TryCreate(2, out var workspace);
+                init SourceRange spelling;
+                require SourceRange.TryCreate(0, Host.Source.Length, ref init spelling);
+                init StringLiteral literal;
+                require StringLiteral.TryCreate(spelling, ref init literal);
+                init int32 length;
+                if (literal.{{measure}}(ref init length)) { return 1; }
+                init OwnedInt32Buffer workspace;
+                require OwnedInt32Buffer.TryCreate(2, ref init workspace);
                 unsafe {
                     try {
                         OwnedInt32Buffer invalid = literal.{{encode}}(move workspace);
                         return 2;
                     } catch {
-                        require OwnedInt32Buffer.TryCreate(1, out var created);
+                        init OwnedInt32Buffer created;
+                        require OwnedInt32Buffer.TryCreate(1, ref init created);
                         mut OwnedInt32Buffer recovered = move created;
                         if (!recovered.TryAppend(42) || recovered.Read(0) != 42) { return 3; }
                         return 0;
@@ -298,11 +315,15 @@ internal sealed class StringLiteralComponentTests
         var entry = SyntaxTree.Parse($$"""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
-                require SourceRange.TryCreate(0, Host.Source.Length, init var spelling);
-                require StringLiteral.TryCreate(spelling, init var literal);
-                require TryGetStringRowByteLength(literal, {{flags}}, init var byteLength);
+                init SourceRange spelling;
+                require SourceRange.TryCreate(0, Host.Source.Length, ref init spelling);
+                init StringLiteral literal;
+                require StringLiteral.TryCreate(spelling, ref init literal);
+                init int32 byteLength;
+                require TryGetStringRowByteLength(literal, {{flags}}, ref init byteLength);
                 if (byteLength != {{expected.Length}}) { return 1; }
-                require OwnedInt32Buffer.TryCreate(byteLength, out var workspace);
+                init OwnedInt32Buffer workspace;
+                require OwnedInt32Buffer.TryCreate(byteLength, ref init workspace);
                 mut OwnedInt32Buffer row = EncodeStringRow(literal, {{flags}}, move workspace);
                 if (row.Count != byteLength || row.Capacity != byteLength) { return 2; }
                 {{checks}}
@@ -342,11 +363,15 @@ internal sealed class StringLiteralComponentTests
         var entry = SyntaxTree.Parse($$"""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
-                require SourceRange.TryCreate(0, Host.Source.Length, init var spelling);
-                require StringLiteral.TryCreate(spelling, init var literal);
-                require TryGetStringNamespaceRowByteLength(literal, {{encoding}}, init var length);
+                init SourceRange spelling;
+                require SourceRange.TryCreate(0, Host.Source.Length, ref init spelling);
+                init StringLiteral literal;
+                require StringLiteral.TryCreate(spelling, ref init literal);
+                init int32 length;
+                require TryGetStringNamespaceRowByteLength(literal, {{encoding}}, ref init length);
                 if (length != {{expected.Length}}) { return 1; }
-                require OwnedInt32Buffer.TryCreate(length, out var workspace);
+                init OwnedInt32Buffer workspace;
+                require OwnedInt32Buffer.TryCreate(length, ref init workspace);
                 OwnedInt32Buffer row = EncodeStringNamespaceRow(literal, {{encoding}}, move workspace);
                 {{checks}}
                 return 0;
@@ -381,11 +406,15 @@ internal sealed class StringLiteralComponentTests
         var entry = SyntaxTree.Parse($$"""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
-                require SourceRange.TryCreate(0, Host.Source.Length, init var spelling);
-                require StringLiteral.TryCreate(spelling, init var literal);
-                require TryGetStringNameRowByteLength(literal, {{flags}}, init var byteLength);
+                init SourceRange spelling;
+                require SourceRange.TryCreate(0, Host.Source.Length, ref init spelling);
+                init StringLiteral literal;
+                require StringLiteral.TryCreate(spelling, ref init literal);
+                init int32 byteLength;
+                require TryGetStringNameRowByteLength(literal, {{flags}}, ref init byteLength);
                 if (byteLength != {{expected.Length}}) { return 1; }
-                require OwnedInt32Buffer.TryCreate(byteLength, out var workspace);
+                init OwnedInt32Buffer workspace;
+                require OwnedInt32Buffer.TryCreate(byteLength, ref init workspace);
                 OwnedInt32Buffer row = EncodeStringNameRow(literal, {{flags}}, move workspace);
                 if (row.Count != byteLength) { return 2; }
                 {{checks}}
@@ -437,23 +466,27 @@ internal sealed class StringLiteralComponentTests
                     {{checks.Replace("row.", "completed.", System.StringComparison.Ordinal)}}
                     """;
             var resultCheck = expected is null
-                ? $"if ({builder}(spelling, move workspace, init var row)) {{ return 1; }}"
+                ? $"if ({builder}(spelling, move workspace, ref init row)) {{ return 1; }}"
                 : capacity < expectedLength
                     ? $$"""
-                        if ({{builder}}(spelling, move workspace, init var row)) { return 1; }
-                        require OwnedInt32Buffer.TryCreate({{expectedLength}}, out var retryWorkspace);
-                        if (!{{builder}}(spelling, move retryWorkspace, init row)) { return 2; }
+                        if ({{builder}}(spelling, move workspace, ref init row)) { return 1; }
+                        init OwnedInt32Buffer retryWorkspace;
+                        require OwnedInt32Buffer.TryCreate({{expectedLength}}, ref init retryWorkspace);
+                        if (!{{builder}}(spelling, move retryWorkspace, ref init row)) { return 2; }
                         {{verifyRow}}
                         """
                     : $$"""
-                        if (!{{builder}}(spelling, move workspace, init var row)) { return 1; }
+                        if (!{{builder}}(spelling, move workspace, ref init row)) { return 1; }
                         {{verifyRow}}
                         """;
             var entry = SyntaxTree.Parse($$"""
                 namespace Terrum.CodeAnalysis;
                 int32 Main() {
-                    require SourceRange.TryCreate(0, Host.Source.Length, init var spelling);
-                    require OwnedInt32Buffer.TryCreate({{capacity}}, out var workspace);
+                    init SourceRange spelling;
+                    require SourceRange.TryCreate(0, Host.Source.Length, ref init spelling);
+                    init OwnedInt32Buffer workspace;
+                    require OwnedInt32Buffer.TryCreate({{capacity}}, ref init workspace);
+                    init OwnedInt32Buffer row;
                     {{resultCheck}}
                     return 0;
                 }
@@ -495,11 +528,15 @@ internal sealed class StringLiteralComponentTests
             namespace Terrum.CodeAnalysis;
             int32 Main() {
                 if (Host.Expected.Length != {{expectedRowLength}}) { return 1; }
-                require SourceRange.TryCreate(0, Host.Source.Length, init var spelling);
-                require OwnedInt32Buffer.TryCreate({{expectedRowLength - 1}}, out var undersized);
-                if ({{builder}}(spelling, move undersized, init var row)) { return 2; }
-                require OwnedInt32Buffer.TryCreate({{expectedRowLength}}, out var workspace);
-                if (!{{builder}}(spelling, move workspace, init row)) { return 3; }
+                init SourceRange spelling;
+                require SourceRange.TryCreate(0, Host.Source.Length, ref init spelling);
+                init OwnedInt32Buffer undersized;
+                require OwnedInt32Buffer.TryCreate({{expectedRowLength - 1}}, ref init undersized);
+                init OwnedInt32Buffer row;
+                if ({{builder}}(spelling, move undersized, ref init row)) { return 2; }
+                init OwnedInt32Buffer workspace;
+                require OwnedInt32Buffer.TryCreate({{expectedRowLength}}, ref init workspace);
+                if (!{{builder}}(spelling, move workspace, ref init row)) { return 3; }
                 if (row.Count != {{expectedRowLength}} || row.Capacity != {{expectedRowLength}}) { return 4; }
                 for (mut int32 index = 0; index < row.Count; index = index + 1) {
                     if (row.Read(index) != Host.Expected[index]) { return 5; }
@@ -530,12 +567,18 @@ internal sealed class StringLiteralComponentTests
         var entry = SyntaxTree.Parse("""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
-                require SourceRange.TryCreate(0, Host.Source.Length, init var spelling);
-                require StringLiteral.TryCreate(spelling, init var literal);
-                if (TryGetStringNameRowByteLength(literal, 0, init var ascii)
-                    || TryGetStringNameRowByteLength(literal, 1, init var utf8)
-                    || TryGetStringNameRowByteLength(literal, 2, init var utf16)
-                    || TryGetStringNameRowByteLength(literal, 3, init var utf32)) { return 1; }
+                init SourceRange spelling;
+                require SourceRange.TryCreate(0, Host.Source.Length, ref init spelling);
+                init StringLiteral literal;
+                require StringLiteral.TryCreate(spelling, ref init literal);
+                init int32 ascii;
+                init int32 utf8;
+                init int32 utf16;
+                init int32 utf32;
+                if (TryGetStringNameRowByteLength(literal, 0, ref init ascii)
+                    || TryGetStringNameRowByteLength(literal, 1, ref init utf8)
+                    || TryGetStringNameRowByteLength(literal, 2, ref init utf16)
+                    || TryGetStringNameRowByteLength(literal, 3, ref init utf32)) { return 1; }
                 return 0;
             }
             """, "invalid-name-row-entry.terrum");
@@ -566,12 +609,17 @@ internal sealed class StringLiteralComponentTests
         var entry = SyntaxTree.Parse($$"""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
-                require SourceRange.TryCreate(0, Host.Source.Length, init var spelling);
-                require StringLiteral.TryCreate(spelling, init var literal);
-                if (TryGetStringNameRowByteLength(literal, {{flags}}, init var nameLength)) { return 1; }
-                require TryGetStringNamespaceRowByteLength(literal, {{flags}}, init var length);
+                init SourceRange spelling;
+                require SourceRange.TryCreate(0, Host.Source.Length, ref init spelling);
+                init StringLiteral literal;
+                require StringLiteral.TryCreate(spelling, ref init literal);
+                init int32 nameLength;
+                if (TryGetStringNameRowByteLength(literal, {{flags}}, ref init nameLength)) { return 1; }
+                init int32 length;
+                require TryGetStringNamespaceRowByteLength(literal, {{flags}}, ref init length);
                 if (length != 8) { return 2; }
-                require OwnedInt32Buffer.TryCreate(length, out var workspace);
+                init OwnedInt32Buffer workspace;
+                require OwnedInt32Buffer.TryCreate(length, ref init workspace);
                 OwnedInt32Buffer row = EncodeStringNamespaceRow(literal, {{flags}}, move workspace);
                 if (row.Count != 8 || row.Read(0) != {{flags}}) { return 3; }
                 mut int32 index = 1;
@@ -602,12 +650,18 @@ internal sealed class StringLiteralComponentTests
         var entry = SyntaxTree.Parse("""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
-                require SourceRange.TryCreate(0, Host.Source.Length, init var spelling);
-                require StringLiteral.TryCreate(spelling, init var literal);
-                if (TryGetStringNamespaceRowByteLength(literal, 0, init var ascii)
-                    || TryGetStringNamespaceRowByteLength(literal, 1, init var utf8)
-                    || TryGetStringNamespaceRowByteLength(literal, 2, init var utf16)
-                    || TryGetStringNamespaceRowByteLength(literal, 3, init var utf32)) { return 1; }
+                init SourceRange spelling;
+                require SourceRange.TryCreate(0, Host.Source.Length, ref init spelling);
+                init StringLiteral literal;
+                require StringLiteral.TryCreate(spelling, ref init literal);
+                init int32 ascii;
+                init int32 utf8;
+                init int32 utf16;
+                init int32 utf32;
+                if (TryGetStringNamespaceRowByteLength(literal, 0, ref init ascii)
+                    || TryGetStringNamespaceRowByteLength(literal, 1, ref init utf8)
+                    || TryGetStringNamespaceRowByteLength(literal, 2, ref init utf16)
+                    || TryGetStringNamespaceRowByteLength(literal, 3, ref init utf32)) { return 1; }
                 return 0;
             }
             """, "invalid-namespace-row-entry.terrum");
@@ -640,15 +694,20 @@ internal sealed class StringLiteralComponentTests
     {
         var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
         var assertion = expected is bool equal
-            ? $"require TryCompareStringNames(first, second, init var same); if (same != {(equal ? "true" : "false")}) {{ return 1; }}"
-            : "if (TryCompareStringNames(first, second, init var same)) { return 1; }";
+            ? $"require TryCompareStringNames(first, second, ref init same); if (same != {(equal ? "true" : "false")}) {{ return 1; }}"
+            : "if (TryCompareStringNames(first, second, ref init same)) { return 1; }";
         var entry = SyntaxTree.Parse($$"""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
-                require SourceRange.TryCreate(0, {{left.Length}}, init var firstSpelling);
-                require SourceRange.TryCreate({{left.Length}}, {{right.Length}}, init var secondSpelling);
-                require StringLiteral.TryCreate(firstSpelling, init var first);
-                require StringLiteral.TryCreate(secondSpelling, init var second);
+                init SourceRange firstSpelling;
+                require SourceRange.TryCreate(0, {{left.Length}}, ref init firstSpelling);
+                init SourceRange secondSpelling;
+                require SourceRange.TryCreate({{left.Length}}, {{right.Length}}, ref init secondSpelling);
+                init StringLiteral first;
+                require StringLiteral.TryCreate(firstSpelling, ref init first);
+                init StringLiteral second;
+                require StringLiteral.TryCreate(secondSpelling, ref init second);
+                init bool same;
                 {{assertion}}
                 return 0;
             }
@@ -680,15 +739,20 @@ internal sealed class StringLiteralComponentTests
     {
         var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
         var assertion = expected is bool equal
-            ? $"require TryCompareStringNamespaces(first, second, init var same); if (same != {(equal ? "true" : "false")}) {{ return 1; }}"
-            : "if (TryCompareStringNamespaces(first, second, init var same)) { return 1; }";
+            ? $"require TryCompareStringNamespaces(first, second, ref init same); if (same != {(equal ? "true" : "false")}) {{ return 1; }}"
+            : "if (TryCompareStringNamespaces(first, second, ref init same)) { return 1; }";
         var entry = SyntaxTree.Parse($$"""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
-                require SourceRange.TryCreate(0, {{left.Length}}, init var firstSpelling);
-                require SourceRange.TryCreate({{left.Length}}, {{right.Length}}, init var secondSpelling);
-                require StringLiteral.TryCreate(firstSpelling, init var first);
-                require StringLiteral.TryCreate(secondSpelling, init var second);
+                init SourceRange firstSpelling;
+                require SourceRange.TryCreate(0, {{left.Length}}, ref init firstSpelling);
+                init SourceRange secondSpelling;
+                require SourceRange.TryCreate({{left.Length}}, {{right.Length}}, ref init secondSpelling);
+                init StringLiteral first;
+                require StringLiteral.TryCreate(firstSpelling, ref init first);
+                init StringLiteral second;
+                require StringLiteral.TryCreate(secondSpelling, ref init second);
+                init bool same;
                 {{assertion}}
                 return 0;
             }
@@ -714,17 +778,23 @@ internal sealed class StringLiteralComponentTests
         var entry = SyntaxTree.Parse($$"""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
-                require SourceRange.TryCreate(0, {{invalid.Length}}, init var badSpelling);
-                require StringLiteral.TryCreate(badSpelling, init var bad);
-                require SourceRange.TryCreate({{invalid.Length}}, 4, init var goodSpelling);
-                require StringLiteral.TryCreate(goodSpelling, init var good);
-                require OwnedInt32Buffer.TryCreate(8, out var workspace);
+                init SourceRange badSpelling;
+                require SourceRange.TryCreate(0, {{invalid.Length}}, ref init badSpelling);
+                init StringLiteral bad;
+                require StringLiteral.TryCreate(badSpelling, ref init bad);
+                init SourceRange goodSpelling;
+                require SourceRange.TryCreate({{invalid.Length}}, 4, ref init goodSpelling);
+                init StringLiteral good;
+                require StringLiteral.TryCreate(goodSpelling, ref init good);
+                init OwnedInt32Buffer workspace;
+                require OwnedInt32Buffer.TryCreate(8, ref init workspace);
                 unsafe {
                     try {
                         OwnedInt32Buffer invalidRow = EncodeStringNameRow(bad, 0, move workspace);
                         return 1;
                     } catch {
-                        require OwnedInt32Buffer.TryCreate(8, out var nextWorkspace);
+                        init OwnedInt32Buffer nextWorkspace;
+                        require OwnedInt32Buffer.TryCreate(8, ref init nextWorkspace);
                         OwnedInt32Buffer row = EncodeStringNameRow(good, 0, move nextWorkspace);
                         if (row.Count != 8 || row.Read(0) != 0 || row.Read(1) != 2
                             || row.Read(4) != 79 || row.Read(5) != 107
@@ -758,11 +828,15 @@ internal sealed class StringLiteralComponentTests
         var entry = SyntaxTree.Parse($$"""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
-                require SourceRange.TryCreate(0, Host.Source.Length, init var spelling);
-                require StringLiteral.TryCreate(spelling, init var literal);
-                require TryGetStringRowByteLength(literal, 0, init var length);
+                init SourceRange spelling;
+                require SourceRange.TryCreate(0, Host.Source.Length, ref init spelling);
+                init StringLiteral literal;
+                require StringLiteral.TryCreate(spelling, ref init literal);
+                init int32 length;
+                require TryGetStringRowByteLength(literal, 0, ref init length);
                 if (length != {{rowLength}}) { return 1; }
-                require OwnedInt32Buffer.TryCreate(length, out var workspace);
+                init OwnedInt32Buffer workspace;
+                require OwnedInt32Buffer.TryCreate(length, ref init workspace);
                 OwnedInt32Buffer row = EncodeStringRow(literal, 0, move workspace);
                 if (row.Count != length || row.Read(0) != 0
                     || row.Read(1) != {{low}} || row.Read(2) != {{middle}}
@@ -799,20 +873,29 @@ internal sealed class StringLiteralComponentTests
         var entry = SyntaxTree.Parse("""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
-                require SourceRange.TryCreate(0, Host.Source.Length, init var spelling);
-                require StringLiteral.TryCreate(spelling, init var literal);
-                if (TryGetStringRowByteLength(literal, -1, init var negative)
-                    || TryGetStringRowByteLength(literal, 4, init var reserved)
-                    || TryGetStringRowByteLength(literal, 255, init var extended)
-                    || TryGetStringRowByteLength(literal, 0, init var nonAscii)) { return 1; }
-                require TryGetStringRowByteLength(literal, 1, init var exactLength);
-                require OwnedInt32Buffer.TryCreate(exactLength - 1, out var small);
+                init SourceRange spelling;
+                require SourceRange.TryCreate(0, Host.Source.Length, ref init spelling);
+                init StringLiteral literal;
+                require StringLiteral.TryCreate(spelling, ref init literal);
+                init int32 negative;
+                init int32 reserved;
+                init int32 extended;
+                init int32 nonAscii;
+                if (TryGetStringRowByteLength(literal, -1, ref init negative)
+                    || TryGetStringRowByteLength(literal, 4, ref init reserved)
+                    || TryGetStringRowByteLength(literal, 255, ref init extended)
+                    || TryGetStringRowByteLength(literal, 0, ref init nonAscii)) { return 1; }
+                init int32 exactLength;
+                require TryGetStringRowByteLength(literal, 1, ref init exactLength);
+                init OwnedInt32Buffer small;
+                require OwnedInt32Buffer.TryCreate(exactLength - 1, ref init small);
                 unsafe {
                     try {
                         OwnedInt32Buffer partial = EncodeStringRow(literal, 1, move small);
                         return 2;
                     } catch {
-                        require OwnedInt32Buffer.TryCreate(exactLength, out var exact);
+                        init OwnedInt32Buffer exact;
+                        require OwnedInt32Buffer.TryCreate(exactLength, ref init exact);
                         OwnedInt32Buffer row = EncodeStringRow(literal, 1, move exact);
                         if (row.Count != exactLength || row.Read(0) != 1) { return 3; }
                         return 0;
@@ -861,18 +944,19 @@ internal sealed class StringLiteralComponentTests
             await TestFileCleanup.DeleteWithRetryAsync(path).ConfigureAwait(true);
         }
     }
-    [TestCase("bool success = StringLiteral.TryCreate(range, init var literal); return literal.ScalarCount;")]
-    [TestCase("require StringLiteral.TryCreate(range, init var literal); bool success = literal.TryReadScalar(0, init var scalar, init var next); return scalar;")]
-    [TestCase("require StringLiteral.TryCreate(range, init var literal); bool success = literal.TryReadScalar(0, init var scalar, init var next); return next;")]
-    [TestCase("require StringLiteral.TryCreate(range, init var literal); StringLiteralCursor cursor = StringLiteralCursor.Create(literal); bool success = cursor.TryRead(init var scalar, init var next); return next.Position;")]
-    [TestCase("require StringLiteral.TryCreate(range, init var literal); bool success = literal.TryGetAsciiLength(init var length); return length;")]
+    [TestCase("init StringLiteral literal; bool success = StringLiteral.TryCreate(range, ref init literal); return literal.ScalarCount;")]
+    [TestCase("init StringLiteral literal; require StringLiteral.TryCreate(range, ref init literal); init int32 scalar; init int32 next; bool success = literal.TryReadScalar(0, ref init scalar, ref init next); return scalar;")]
+    [TestCase("init StringLiteral literal; require StringLiteral.TryCreate(range, ref init literal); init int32 scalar; init int32 next; bool success = literal.TryReadScalar(0, ref init scalar, ref init next); return next;")]
+    [TestCase("init StringLiteral literal; require StringLiteral.TryCreate(range, ref init literal); StringLiteralCursor cursor = StringLiteralCursor.Create(literal); init int32 scalar; init StringLiteralCursor next; bool success = cursor.TryRead(ref init scalar, ref init next); return next.Position;")]
+    [TestCase("init StringLiteral literal; require StringLiteral.TryCreate(range, ref init literal); init int32 length; bool success = literal.TryGetAsciiLength(ref init length); return length;")]
     public async Task FailedValidationAndReadsDoNotPublishOutputsAsync(string body)
     {
         var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
         var entry = SyntaxTree.Parse($$"""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
-                require SourceRange.TryCreate(0, 2, init var range);
+                init SourceRange range;
+                require SourceRange.TryCreate(0, 2, ref init range);
                 {{body}}
             }
             """, "entry.terrum");
@@ -880,7 +964,10 @@ internal sealed class StringLiteralComponentTests
             [new HostBuffer("Source", PrimitiveType.Char16, [34, 34], false)]);
         Assert.That(compilation.HasErrors, Is.True);
         Assert.That(compilation.Program, Is.Null);
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.SourceDiagnostics,diagnostic => diagnostic.SyntaxTree == entry && diagnostic.Diagnostic.Code == "TRM3016"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.SourceDiagnostics,
+            diagnostic => diagnostic.SyntaxTree == entry
+                && diagnostic.Diagnostic.Code is "TRM3016" or "TRM3023"), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
     }
 
     private static Compilation CompileWithLayoutCore(

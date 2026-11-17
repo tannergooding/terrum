@@ -83,26 +83,36 @@ internal sealed class IntegerParsingRadixModuleTests
                     int32 textLength = int32(Host.Source[position + 2]);
                     int32 expectedSuccess = int32(Host.Source[position + 3]);
                     int32 textStart = position + 8;
+                    init uint64 parsedUInt64;
+                    init int64 parsedInt64;
+                    init uint32 parsedUInt32;
+                    init int32 parsedInt32;
+                    init char16 parsedChar16;
                     if (textLength > Host.Source.Length - textStart) { return -2; }
                     if (api == 0) {
-                        if (TryParseUInt64Base(textStart, textLength, radix, init var parsed)) {
-                            if (expectedSuccess != 1 || !MatchesUInt64(parsed, position + 4)) { return caseIndex + 1; }
+                        if (TryParseUInt64Base(textStart, textLength, radix,
+                            ref init parsedUInt64)) {
+                            if (expectedSuccess != 1 || !MatchesUInt64(parsedUInt64, position + 4)) { return caseIndex + 1; }
                         } else if (expectedSuccess != 0) { return caseIndex + 1; }
                     } else if (api == 1) {
-                        if (TryParseInt64Base(textStart, textLength, radix, init var parsed)) {
-                            if (expectedSuccess != 1 || !MatchesInt64(parsed, position + 4)) { return caseIndex + 1; }
+                        if (TryParseInt64Base(textStart, textLength, radix,
+                            ref init parsedInt64)) {
+                            if (expectedSuccess != 1 || !MatchesInt64(parsedInt64, position + 4)) { return caseIndex + 1; }
                         } else if (expectedSuccess != 0) { return caseIndex + 1; }
                     } else if (api == 2) {
-                        if (TryParseUInt32Base(textStart, textLength, radix, init var parsed)) {
-                            if (expectedSuccess != 1 || !MatchesUInt32(parsed, position + 4)) { return caseIndex + 1; }
+                        if (TryParseUInt32Base(textStart, textLength, radix,
+                            ref init parsedUInt32)) {
+                            if (expectedSuccess != 1 || !MatchesUInt32(parsedUInt32, position + 4)) { return caseIndex + 1; }
                         } else if (expectedSuccess != 0) { return caseIndex + 1; }
                     } else if (api == 3) {
-                        if (TryParseInt32Base(textStart, textLength, radix, init var parsed)) {
-                            if (expectedSuccess != 1 || !MatchesInt32(parsed, position + 4)) { return caseIndex + 1; }
+                        if (TryParseInt32Base(textStart, textLength, radix,
+                            ref init parsedInt32)) {
+                            if (expectedSuccess != 1 || !MatchesInt32(parsedInt32, position + 4)) { return caseIndex + 1; }
                         } else if (expectedSuccess != 0) { return caseIndex + 1; }
                     } else if (api == 4) {
-                        if (TryParseChar16Base(textStart, textLength, radix, init var parsed)) {
-                            if (expectedSuccess != 1 || !MatchesChar16(parsed, position + 4)) { return caseIndex + 1; }
+                        if (TryParseChar16Base(textStart, textLength, radix,
+                            ref init parsedChar16)) {
+                            if (expectedSuccess != 1 || !MatchesChar16(parsedChar16, position + 4)) { return caseIndex + 1; }
                         } else if (expectedSuccess != 0) { return caseIndex + 1; }
                     } else {
                         return -3;

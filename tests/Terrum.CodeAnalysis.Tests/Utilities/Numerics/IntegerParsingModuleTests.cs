@@ -35,29 +35,39 @@ internal sealed class IntegerParsingModuleTests
             namespace Terrum.CodeAnalysis.Numerics64;
             int32 Main() { return 0; }
             public int32 ParseUInt64() {
-                if (!TryParseUInt64Base(0, Host.Source.Length, 10, init var parsed)) { return -100; }
+                init uint64 parsed;
+                if (!TryParseUInt64Base(0, Host.Source.Length, 10,
+                    ref init parsed)) { return -100; }
                 if (parsed == uint64.MaxValue) { return -101; }
                 if (parsed > uint64(int32.MaxValue)) { return -102; }
                 return int32(parsed);
             }
             public int32 ParseInt64() {
-                if (!TryParseInt64Base(0, Host.Source.Length, 10, init var parsed)) { return -100; }
+                init int64 parsed;
+                if (!TryParseInt64Base(0, Host.Source.Length, 10,
+                    ref init parsed)) { return -100; }
                 if (parsed == int64.MinValue) { return -101; }
                 if (parsed < int64(int32.MinValue) || parsed > int64(int32.MaxValue)) { return -102; }
                 return int32(parsed);
             }
             public int32 ParseUInt32() {
-                if (!TryParseUInt32Base(0, Host.Source.Length, 10, init var parsed)) { return -100; }
+                init uint32 parsed;
+                if (!TryParseUInt32Base(0, Host.Source.Length, 10,
+                    ref init parsed)) { return -100; }
                 if (parsed == uint32.MaxValue) { return -101; }
                 if (parsed > uint32(int32.MaxValue)) { return -102; }
                 return int32(parsed);
             }
             public int32 ParseInt32() {
-                if (!TryParseInt32Base(0, Host.Source.Length, 10, init var parsed)) { return -100; }
+                init int32 parsed;
+                if (!TryParseInt32Base(0, Host.Source.Length, 10,
+                    ref init parsed)) { return -100; }
                 return parsed;
             }
             public int32 ParseChar16() {
-                if (!TryParseChar16Base(0, Host.Source.Length, 10, init var parsed)) { return -100; }
+                init char16 parsed;
+                if (!TryParseChar16Base(0, Host.Source.Length, 10,
+                    ref init parsed)) { return -100; }
                 return int32(parsed);
             }
             """, "integer-parsing-module.terrum");

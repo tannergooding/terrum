@@ -29,8 +29,10 @@ internal sealed class BodyTableValidationComponentTests
             }
             for (mut int32 row = 1; row <= recordCount; row = row + 1) {
                 int32 expectedRecord = 1 + (row - 1) * 2;
+                init int32 bodyStart;
+                init int32 bodyLength;
                 if (!TryGetValidatedBodyTableRowExtent(recordCount, row,
-                    init var bodyStart, init var bodyLength)
+                    ref init bodyStart, ref init bodyLength)
                     || bodyStart != Host.Expected[expectedRecord]
                     || bodyLength != Host.Expected[expectedRecord + 1]) {
                     return 2;
@@ -40,7 +42,7 @@ internal sealed class BodyTableValidationComponentTests
             init int32 vacantStart;
             init int32 vacantLength;
             if (TryGetValidatedBodyTableRowExtent(recordCount, 0,
-                init vacantStart, init vacantLength)
+                ref init vacantStart, ref init vacantLength)
                 || vacantStart is init || vacantLength is init) {
                 return 3;
             }
@@ -51,8 +53,10 @@ internal sealed class BodyTableValidationComponentTests
     private const string VerificationSource = """
         namespace Terrum.CodeAnalysis;
         int32 Main() {
+            init int32 bodyStart;
+            init int32 bodyLength;
             if (!TryGetBodyTableRowExtent(Host.Expected[0], Host.Expected[1],
-                init var bodyStart, init var bodyLength)) {
+                ref init bodyStart, ref init bodyLength)) {
                 return Host.Expected[2] == 0 ? 0 : 1;
             }
             if (Host.Expected[2] == 0) {

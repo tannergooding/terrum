@@ -28,9 +28,13 @@ internal sealed class StringTableIndexComponentTests
                 int32 row = Host.Expected[record + 1];
                 bool expectedSuccess = Host.Expected[record + 2] != 0;
                 if (expectedSuccess) {
+                    init int32 rowStart;
+                    init int32 rowLength;
+                    init int32 encoding;
+                    init int32 contentByteLength;
                     if (!TryGetStringTableRowLayout(count, row,
-                        init var rowStart, init var rowLength,
-                        init var encoding, init var contentByteLength)) {
+                        ref init rowStart, ref init rowLength,
+                        ref init encoding, ref init contentByteLength)) {
                         return 1;
                     }
                     if (rowStart != Host.Expected[record + 3]
@@ -39,10 +43,16 @@ internal sealed class StringTableIndexComponentTests
                         || contentByteLength != Host.Expected[record + 6]) {
                         return 2;
                     }
-                } else if (TryGetStringTableRowLayout(count, row,
-                    init var rejectedStart, init var rejectedLength,
-                    init var rejectedEncoding, init var rejectedContentLength)) {
-                    return 3;
+                } else {
+                    init int32 rejectedStart;
+                    init int32 rejectedLength;
+                    init int32 rejectedEncoding;
+                    init int32 rejectedContentLength;
+                    if (TryGetStringTableRowLayout(count, row,
+                        ref init rejectedStart, ref init rejectedLength,
+                        ref init rejectedEncoding, ref init rejectedContentLength)) {
+                        return 3;
+                    }
                 }
             }
             return 0;
@@ -58,9 +68,13 @@ internal sealed class StringTableIndexComponentTests
             }
             for (mut int32 row = 1; row <= count; row = row + 1) {
                 int32 expected = 1 + (row - 1) * 4;
+                init int32 rowStart;
+                init int32 rowLength;
+                init int32 encoding;
+                init int32 contentByteLength;
                 if (!TryGetValidatedStringTableRowLayout(count, row,
-                    init var rowStart, init var rowLength,
-                    init var encoding, init var contentByteLength)) {
+                    ref init rowStart, ref init rowLength,
+                    ref init encoding, ref init contentByteLength)) {
                     return 2;
                 }
                 if (rowStart != Host.Expected[expected]
@@ -70,9 +84,13 @@ internal sealed class StringTableIndexComponentTests
                     return 3;
                 }
                 if (row == 1 || row == count / 2 || row == count) {
+                    init int32 standaloneStart;
+                    init int32 standaloneLength;
+                    init int32 standaloneEncoding;
+                    init int32 standaloneContentLength;
                     if (!TryGetStringTableRowLayout(count, row,
-                        init var standaloneStart, init var standaloneLength,
-                        init var standaloneEncoding, init var standaloneContentLength)
+                        ref init standaloneStart, ref init standaloneLength,
+                        ref init standaloneEncoding, ref init standaloneContentLength)
                         || standaloneStart != rowStart
                         || standaloneLength != rowLength
                         || standaloneEncoding != encoding

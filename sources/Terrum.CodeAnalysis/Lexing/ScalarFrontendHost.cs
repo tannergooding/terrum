@@ -682,8 +682,8 @@ public static partial class ScalarFrontendHost
                     && (words[17] & (1 << parameter)) != 0;
                 if ((parameter != 0 && !Take(TokenKind.Comma))
                     || (isOut && !Take(TokenKind.OutKeyword))
-                    || (isInitRef && (!Take(TokenKind.Identifier) || tokens[at - 1].Text != "init"
-                        || !Take(TokenKind.RefKeyword) || !Take(TokenKind.Less)))
+                    || (isInitRef && (!Take(TokenKind.RefKeyword) || !Take(TokenKind.Less)
+                        || !Take(TokenKind.Identifier) || tokens[at - 1].Text != "init"))
                     || !Take(TokenKind.Identifier)
                     || (isInitRef && !Take(TokenKind.Greater))
                     || !Take(TokenKind.Identifier))
@@ -1385,9 +1385,14 @@ public static partial class ScalarFrontendHost
                         {
                             var parameterName = ParameterName(entry.Slot);
                             var parameterType = ParameterType(entry.Slot);
+                            var isInitRef = (words[17] & (1 << (entry.Slot - 1))) != 0;
+                            var targetMatches = isInitRef
+                                ? Take(TokenKind.Star) && Take(TokenKind.Identifier)
+                                    && tokens[at - 1].Name == SourceName(source, parameterName)
+                                : Take(TokenKind.Identifier)
+                                    && tokens[at - 1].Name == SourceName(source, parameterName);
                             if (tree[entry.Root].Type != parameterType
-                                || !Take(TokenKind.Identifier)
-                                || tokens[at - 1].Name != SourceName(source, parameterName)
+                                || !targetMatches
                                 || !Take(TokenKind.Equals) || !TakeTree(entry.Root)
                                 || (clause == 0 && !Take(TokenKind.Semicolon)))
                             {
@@ -1491,12 +1496,19 @@ public static partial class ScalarFrontendHost
                     }
                     else if (entry.Kind == 8)
                     {
-                        if (tree[entry.Root].Type != words[5]
-                            || !Take(TokenKind.ReturnKeyword)
-                            || !TakeTree(entry.Root) || !Take(TokenKind.Semicolon))
+                        if (tree[entry.Root].Type != words[5])
                         {
                             throw InvalidResult();
                         }
+                        if (!Take(TokenKind.ReturnKeyword))
+                        {
+                            throw InvalidResult();
+                        }
+                        if (!TakeTree(entry.Root))
+                        {
+                            throw InvalidResult();
+                        }
+                        if (!Take(TokenKind.Semicolon)) { throw InvalidResult(); }
                     }
                     else if (entry.Kind == 21)
                     {
@@ -1821,19 +1833,34 @@ public static partial class ScalarFrontendHost
                     }
                     var writable = isInit
                         ? node.Left > count
-                            || ((words[16] | words[17]) & (1 << (node.Left - 1))) != 0
+                            ? declaredLocals[node.Left - count - 1].IsInitialization
+                            : (words[17] & (1 << (node.Left - 1))) != 0
                         : node.Left <= count
                             ? (words[16] & (1 << (node.Left - 1))) != 0
                             : declaredLocals[node.Left - count - 1].IsMutable;
                     var spelling = node.Left > count
                         ? declaredLocals[node.Left - count - 1].Name
                         : ParameterName(node.Left);
-                    if (!writable
-                        || (isInit && (tokens[at].Kind != TokenKind.Identifier
-                            || tokens[at].Name != "init" || tokens[at].Span.Length != 4
-                            || !Take(TokenKind.Identifier)))
-                        || (!isInit && !Take(TokenKind.OutKeyword))
-                        || !Take(TokenKind.Identifier)
+                    if (!writable)
+                    {
+                        return false;
+                    }
+                    if (isInit)
+                    {
+                        if (!Take(TokenKind.RefKeyword)
+                            || !Take(TokenKind.Identifier)
+                            || tokens[at - 1].Name != "init"
+                            || tokens[at - 1].Span.Length != 4
+                            || (node.Left <= count && !Take(TokenKind.Star)))
+                        {
+                            return false;
+                        }
+                    }
+                    else if (!Take(TokenKind.OutKeyword))
+                    {
+                        return false;
+                    }
+                    if (!Take(TokenKind.Identifier)
                         || tokens[at - 1].Name != SourceName(source, spelling))
                     {
                         return false;
@@ -2113,10 +2140,13 @@ public static partial class ScalarFrontendHost
                 }
                 else if (isInitRef)
                 {
-                    if (tokens[at].Kind != TokenKind.Identifier || tokens[at].Name != "init"
-                        || tokens[at].Span.Length != 4 || tokens[at++].Kind != TokenKind.Identifier
+                    if (at >= tokens.Length
                         || tokens[at++].Kind != TokenKind.RefKeyword
-                        || tokens[at++].Kind != TokenKind.Less)
+                        || at >= tokens.Length || tokens[at++].Kind != TokenKind.Less
+                        || at >= tokens.Length
+                        || tokens[at].Kind != TokenKind.Identifier
+                        || tokens[at].Name != "init" || tokens[at].Span.Length != 4
+                        || tokens[at++].Kind != TokenKind.Identifier)
                     {
                         return false;
                     }
@@ -3298,40 +3328,61 @@ public static partial class ScalarFrontendHost
 
     private static BoundProgram BindLibraryCore(SourceText source, ScalarFrontendResult result,
         BoundRuntimePolicy policy, SourceArithmeticProfile sourceArithmeticProfile = SourceArithmeticProfile.Development,
-        bool verify = true, bool omitImplicitReturn = false)
+        bool verify = true, bool omitImplicitReturn = false,
+        ImmutableArray<CheckedReferenceTypeDefinition> referenceTypes = default)
     {
+        if (referenceTypes.IsDefault)
+        {
+            referenceTypes = CreateCheckedReferenceTypes(ImmutableArray.Create(result));
+        }
         var variables = ImmutableArray.CreateBuilder<BoundVariable>(result.ParameterCount);
         if (result.ParameterCount > 0)
         {
             var isOut = (result.OutParameterMask & 1) != 0;
             var isInit = (result.InitRefParameterMask & 1) != 0;
-            var isOutput = isOut || isInit;
-            variables.Add(new BoundVariable(Name(result.FirstName), Type(result.FirstType),
-                isOutput, result.FirstName) { IsOut = isOutput, IsInit = isInit });
+            var type = Type(result.FirstType);
+            if (isInit)
+            {
+                type = InitializationReferenceType(type, referenceTypes);
+            }
+            variables.Add(new BoundVariable(Name(result.FirstName), type,
+                isOut, result.FirstName) { IsOut = isOut, IsInit = isInit });
         }
         if (result.ParameterCount >= 2)
         {
             var isOut = (result.OutParameterMask & 2) != 0;
             var isInit = (result.InitRefParameterMask & 2) != 0;
-            var isOutput = isOut || isInit;
-            variables.Add(new BoundVariable(Name(result.SecondName), Type(result.SecondType),
-                isOutput, result.SecondName) { IsOut = isOutput, IsInit = isInit });
+            var type = Type(result.SecondType);
+            if (isInit)
+            {
+                type = InitializationReferenceType(type, referenceTypes);
+            }
+            variables.Add(new BoundVariable(Name(result.SecondName), type,
+                isOut, result.SecondName) { IsOut = isOut, IsInit = isInit });
         }
         if (result.ParameterCount >= 3)
         {
             var isOut = (result.OutParameterMask & 4) != 0;
             var isInit = (result.InitRefParameterMask & 4) != 0;
-            var isOutput = isOut || isInit;
-            variables.Add(new BoundVariable(Name(result.ThirdName), Type(result.ThirdType),
-                isOutput, result.ThirdName) { IsOut = isOutput, IsInit = isInit });
+            var type = Type(result.ThirdType);
+            if (isInit)
+            {
+                type = InitializationReferenceType(type, referenceTypes);
+            }
+            variables.Add(new BoundVariable(Name(result.ThirdName), type,
+                isOut, result.ThirdName) { IsOut = isOut, IsInit = isInit });
         }
         if (result.ParameterCount == 4)
         {
             var isOut = (result.OutParameterMask & 8) != 0;
             var isInit = (result.InitRefParameterMask & 8) != 0;
-            var isOutput = isOut || isInit;
-            variables.Add(new BoundVariable(Name(result.FourthName), Type(result.FourthType),
-                isOutput, result.FourthName) { IsOut = isOutput, IsInit = isInit });
+            var type = Type(result.FourthType);
+            if (isInit)
+            {
+                type = InitializationReferenceType(type, referenceTypes);
+            }
+            variables.Add(new BoundVariable(Name(result.FourthName), type,
+                isOut, result.FourthName) { IsOut = isOut, IsInit = isInit });
         }
         if (!result.Locals.IsDefault)
         {
@@ -3404,7 +3455,8 @@ public static partial class ScalarFrontendHost
                 }
                 else if (node.Operation == 0)
                 {
-                    bound = new BoundRead(node.Left - 1, type, node.Span);
+                    var variable = node.Left - 1;
+                    bound = new BoundRead(variable, types[variable].Type, node.Span);
                 }
                 else if (node.Operation is 20 or 21)
                 {
@@ -3425,12 +3477,25 @@ public static partial class ScalarFrontendHost
                 }
                 else if (node.Operation is 107 or 108)
                 {
-                    bound = new BoundOutArgument(node.Left - 1,
-                        node.Operation == 108, type, node.Span) { IsInit = true };
+                    var variable = node.Left - 1;
+                    var referenceType = InitializationReferenceType(type,
+                        referenceTypes);
+                    var place = new BoundRead(variable,
+                        IsInitRefParameter(result, variable)
+                            ? types[variable].Type : type,
+                        node.Span);
+                    bound = IsInitRefParameter(result, variable)
+                        ? new BoundReferenceReborrow(place, referenceType, node.Span)
+                        : new BoundReferenceFormation(place, referenceType, node.Span);
                 }
                 else if (node.Operation == 109)
                 {
-                    bound = new BoundIsInitialized(result.Nodes[node.Left].Left - 1, node.Span);
+                    var variable = result.Nodes[node.Left].Left - 1;
+                    var descriptor = new BoundRead(variable, types[variable].Type,
+                        node.Span);
+                    bound = IsInitRefParameter(result, variable)
+                        ? new BoundReferenceInitializationTest(descriptor, node.Span)
+                        : new BoundIsInitialized(variable, node.Span);
                 }
                 else if (node.Operation == 110)
                 {
@@ -3838,7 +3903,19 @@ public static partial class ScalarFrontendHost
                     }
                     else if (statement.Kind == 8)
                     {
-                        statements.Add(new BoundReturn(expressions[statement.Root], statement.Span));
+                        var value = expressions[statement.Root];
+                        statements.Add(returnType == PrimitiveType.Void
+                            && value.Type == PrimitiveType.Void
+                            ? value is BoundConstant {
+                                Type: PrimitiveType.Void,
+                            }
+                                ? new BoundReturn(null, statement.Span)
+                                : new BoundBlock([
+                                    new BoundExpressionStatement(value,
+                                        value.Span),
+                                    new BoundReturn(null, statement.Span),
+                                ], statement.Span)
+                            : new BoundReturn(value, statement.Span));
                     }
                     else if (statement.Kind == 21)
                     {
@@ -3885,12 +3962,27 @@ public static partial class ScalarFrontendHost
                         {
                             value = constant with { Span = value.Span };
                         }
-                        statements.Add(statement.Kind is 1 or 27 or 28
-                            ? new BoundLocal(statement.Slot - 1, value,
+                        if (statement.Kind is 1 or 27 or 28)
+                        {
+                            statements.Add(new BoundLocal(statement.Slot - 1, value,
                                 statement.Kind is 27 or 28
                                     ? ConstantLocalSpan(source, statement.Span)
-                                    : statement.Span)
-                            : new BoundAssignment(statement.Slot - 1, value, statement.Span));
+                                    : statement.Span));
+                        }
+                        else if (IsInitRefParameter(result, statement.Slot - 1))
+                        {
+                            var descriptor = new BoundRead(statement.Slot - 1,
+                                types[statement.Slot - 1].Type, statement.Span);
+                            statements.Add(new BoundExpressionStatement(
+                                new BoundReferenceWrite(descriptor, value,
+                                    statement.Span),
+                                statement.Span));
+                        }
+                        else
+                        {
+                            statements.Add(new BoundAssignment(statement.Slot - 1,
+                                value, statement.Span));
+                        }
                     }
                 }
                 return statements.ToImmutable();
@@ -3941,7 +4033,10 @@ public static partial class ScalarFrontendHost
                 IsInternal = !result.IsPublic,
                 RequiresUnsafeCaller = result.RequiresUnsafeCaller, DoesNotReturn = result.DoesNotReturn,
             };
-        var program = new BoundProgram([function], -1) { RuntimePolicy = policy };
+        var program = new BoundProgram([function], -1) {
+            RuntimePolicy = policy,
+            CheckedReferenceTypes = referenceTypes,
+        };
         if (verify)
         {
             SemanticVerifier.VerifyLibrary(program);
@@ -4367,8 +4462,8 @@ public static partial class ScalarFrontendHost
             }
             if (operation == 0)
             {
-                return new BoundRead(expression.LeftParameter - 1,
-                    types[expression.LeftParameter - 1].Type, expression.Span);
+                var variable = expression.LeftParameter - 1;
+                return new BoundRead(variable, types[variable].Type, expression.Span);
             }
             var operands = Lexer.Lex(SourceText.From(source.Text.Substring(
                 expression.Span.Start, expression.Span.Length))).Tokens;
@@ -4387,6 +4482,70 @@ public static partial class ScalarFrontendHost
             };
         }
     }
+
+    private static ImmutableArray<CheckedReferenceTypeDefinition>
+        CreateCheckedReferenceTypes(ImmutableArray<ScalarFrontendResult> functions)
+    {
+        var types = ImmutableArray.CreateBuilder<CheckedReferenceTypeDefinition>();
+        var seen = new HashSet<CheckedReferenceTypeDefinition>();
+        foreach (var function in functions)
+        {
+            for (var parameter = 0; parameter < function.ParameterCount; parameter++)
+            {
+                if (!IsInitRefParameter(function, parameter))
+                {
+                    continue;
+                }
+
+                var definition = new CheckedReferenceTypeDefinition(
+                    Type(ParameterTypeCode(function, parameter)),
+                    IsWritable: false,
+                    IsGarbageCollected: false,
+                    IsInitialization: true,
+                    IsOptional: false);
+                if (seen.Add(definition))
+                {
+                    types.Add(definition);
+                }
+            }
+        }
+
+        return types.ToImmutable();
+    }
+
+    private static PrimitiveType InitializationReferenceType(
+        PrimitiveType referentType,
+        ImmutableArray<CheckedReferenceTypeDefinition> referenceTypes)
+    {
+        var definition = new CheckedReferenceTypeDefinition(
+            referentType,
+            IsWritable: false,
+            IsGarbageCollected: false,
+            IsInitialization: true,
+            IsOptional: false);
+        for (var index = 0; index < referenceTypes.Length; index++)
+        {
+            if (referenceTypes[index] == definition)
+            {
+                return CheckedReferenceTypes.Type(index);
+            }
+        }
+
+        throw InvalidResult();
+    }
+
+    private static bool IsInitRefParameter(ScalarFrontendResult result, int parameter) =>
+        (uint)parameter < (uint)result.ParameterCount
+        && (result.InitRefParameterMask & (1 << parameter)) != 0;
+
+    private static int ParameterTypeCode(ScalarFrontendResult result, int parameter) =>
+        parameter switch {
+            0 => result.FirstType,
+            1 => result.SecondType,
+            2 => result.ThirdType,
+            3 => result.FourthType,
+            _ => throw InvalidResult(),
+        };
 
     private static PrimitiveType Type(int code) => code switch {
         0 => PrimitiveType.Void,
@@ -4457,8 +4616,8 @@ public static partial class ScalarFrontendHost
         return isPublic == expectedPublic && callerUnsafe == expectedCallerUnsafe;
     }
 
-    private static ArgumentException InvalidResult()
-        => new("Invalid scalar frontend projection.");
+    private static ArgumentException InvalidResult() =>
+        new("Invalid scalar frontend projection.");
 }
 
 /// <summary>A bounded scalar expression in the frontend projection.</summary>
@@ -4570,7 +4729,7 @@ public readonly record struct ScalarFrontendResult(
     public ImmutableArray<ScalarFrontendStatement> Statements { get; init; }
     /// <summary>Bitmask identifying scalar <c>out</c> parameters in the bounded projection.</summary>
     public int OutParameterMask { get; init; }
-    /// <summary>Bitmask identifying scalar <c>init ref</c> parameters in single or complete snapshots.</summary>
+    /// <summary>Bitmask identifying scalar <c>ref&lt;init T&gt;</c> parameters in single or complete snapshots.</summary>
     public int InitRefParameterMask { get; init; }
     /// <summary>Function indices called by projected expressions.</summary>
     public ImmutableArray<int> CallTargets { get; init; }

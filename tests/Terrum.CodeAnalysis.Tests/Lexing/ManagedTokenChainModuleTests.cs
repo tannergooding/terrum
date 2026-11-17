@@ -10,6 +10,7 @@ using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 using Terrum.CodeAnalysis.Tests.Semantics;
+using Terrum.CodeAnalysis.Tests.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Lexing;
 
@@ -42,9 +43,14 @@ internal sealed class ManagedTokenChainModuleTests
                 if (chain.TryAppend(-1, 13, 1) || chain.TryAppend(9, 11, 1)
                     || chain.TryAppend(9, 13, -1) || chain.TryAppend(9, int32.MaxValue, 1)) { return 4; }
                 if (chain.Count != 2 || chain.Version != 2) { return 5; }
-                if (chain.TryGet(-1, init var negative) || chain.TryGet(2, init var pastEnd)) { return 6; }
-                require chain.TryGet(0, init var firstCopy);
-                require chain.TryGet(1, init var secondCopy);
+                init Token negative;
+                init Token pastEnd;
+                init Token firstCopy;
+                init Token secondCopy;
+                if (chain.TryGet(-1, ref init negative)
+                    || chain.TryGet(2, ref init pastEnd)) { return 6; }
+                require chain.TryGet(0, ref init firstCopy);
+                require chain.TryGet(1, ref init secondCopy);
                 if (firstCopy.Kind != 7 || firstCopy.Range.Start != 10
                     || firstCopy.Range.Length != 2 || firstCopy.Range.End != 12) { return 7; }
                 if (secondCopy.Kind != 8 || secondCopy.Range.Start != 12
@@ -62,29 +68,46 @@ internal sealed class ManagedTokenChainModuleTests
                 require cursorChain.TryAppend(9, 2, 1);
                 {
                     require cursorChain.TryCreateCursor(out var cursor);
-                    if (cursor.TryPeekAhead(-1, init var negativeDistance)
-                        || cursor.TryPeekAhead(3, init var outside)) { return 12; }
-                    require cursor.TryPeekAhead(2, init var third);
-                    require cursor.TryPeekAhead(1, init var second);
+                    init Token negativeDistance;
+                    init Token outside;
+                    init Token third;
+                    init Token second;
+                    init Token mismatch;
+                    init Token first;
+                    init Token next;
+                    init Token remaining;
+                    init Token beyond;
+                    init Token lastRead;
+                    init Token atEnd;
+                    init Token invalidatedByAppend;
+                    init Token invalidatedByClear;
+                    if (cursor.TryPeekAhead(-1, ref init negativeDistance)
+                        || cursor.TryPeekAhead(3, ref init outside)) { return 12; }
+                    require cursor.TryPeekAhead(2, ref init third);
+                    require cursor.TryPeekAhead(1, ref init second);
                     if (third.Kind != 9 || second.Kind != 8) { return 13; }
-                    if (cursor.TryReadKind(8, init var mismatch)) { return 14; }
-                    require cursor.TryReadKind(7, init var first);
+                    if (cursor.TryReadKind(8, ref init mismatch)) { return 14; }
+                    require cursor.TryReadKind(7, ref init first);
                     if (first.Kind != 7 || first.Range.Start != 0) { return 15; }
-                    require cursor.TryRead(init var next);
+                    require cursor.TryRead(ref init next);
                     if (next.Kind != 8 || next.Range.Start != 1) { return 16; }
-                    require cursor.TryPeek(init var remaining);
-                    if (remaining.Kind != 9 || cursor.TryPeekAhead(2, init var beyond)) { return 17; }
-                    require cursor.TryReadKind(9, init var lastRead);
-                    if (lastRead.Kind != 9 || cursor.TryRead(init var atEnd) || !cursor.IsCurrent) { return 18; }
+                    require cursor.TryPeek(ref init remaining);
+                    if (remaining.Kind != 9
+                        || cursor.TryPeekAhead(2, ref init beyond)) { return 17; }
+                    require cursor.TryReadKind(9, ref init lastRead);
+                    if (lastRead.Kind != 9 || cursor.TryRead(ref init atEnd)
+                        || !cursor.IsCurrent) { return 18; }
 
                     require cursorChain.TryCreateCursor(out var staleByAppend);
                     require cursorChain.TryAppend(10, 3, 1);
-                    if (staleByAppend.IsCurrent || staleByAppend.TryPeek(init var invalidatedByAppend)) { return 19; }
+                    if (staleByAppend.IsCurrent
+                        || staleByAppend.TryPeek(ref init invalidatedByAppend)) { return 19; }
 
                     require cursorChain.TryCreateCursor(out var staleByClear);
                     require cursorChain.TryClear();
                     if (cursorChain.Count != 0 || cursorChain.Version != 5
-                        || staleByClear.IsCurrent || staleByClear.TryRead(init var invalidatedByClear)) { return 20; }
+                        || staleByClear.IsCurrent
+                        || staleByClear.TryRead(ref init invalidatedByClear)) { return 20; }
                 }
                 for (mut int32 index = 0; index < 64; index = index + 1) {
                     require cursorChain.TryAppend(index, index, 1);
@@ -100,20 +123,30 @@ internal sealed class ManagedTokenChainModuleTests
             .CreateRegisteredCompilationOptions(policy);
         var producerCompilation = Compilation.Create(trees, options);
         Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(
-            ((global::System.Func<BoundProgram>)(() => {
-                var __nunitActual0 = producerCompilation.Program;
-                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
-                return (BoundProgram)__nunitActual0!;
-            }))(),
-            ["Terrum.CodeAnalysis.VerifyManagedTokenChain"]);
+        var producerProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = producerCompilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
+        var producer = ModuleCompiler.CreateProducer(producerProgram,
+            ["Terrum.CodeAnalysis.VerifyManagedTokenChain"],
+            TextComponentTestHelpers.CreateIdentityInputs(producerProgram,
+                "ManagedTokenChainProvider"));
 
         var consumerTree = SyntaxTree.Parse("""
             namespace Terrum.CodeAnalysis;
             int32 Main() { return VerifyManagedTokenChain(); }
             """, "managed-token-chain-consumer.terrum");
+        var producerReference = ModuleCompiler.CreateReference(producer);
+        var declarationOnlyCompilation = Compilation.Create(SyntaxTree.Parse("""
+            namespace Terrum.CodeAnalysis;
+            int32 Main() { return 0; }
+            """, "managed-token-chain-declaration-only-consumer.terrum"),
+            producerReference, options);
+        Assert.That(declarationOnlyCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, declarationOnlyCompilation.Diagnostics));
         var consumerCompilation = Compilation.Create(
-            consumerTree, ModuleCompiler.CreateReference(producer), options);
+            consumerTree, producerReference, options);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(
             ((global::System.Func<BoundProgram>)(() => {

@@ -22,18 +22,22 @@ internal sealed class CompactIndexedBodyFramingComponentTests
         int32 Main() {
             int32 recordCount = Host.Expected[0];
             int32 typeSpecCount = Host.Expected[1];
+            init int32 blockCount;
+            init int32 operationCount;
             if (!TryValidateBodyTableIndex(recordCount)
                 || !TryGetValidatedCompactIndexedBodyFrame(recordCount, 1, typeSpecCount,
-                    init var blockCount, init var operationCount)
+                    ref init blockCount, ref init operationCount)
                 || blockCount != 2 || operationCount != 1) {
                 return 1;
             }
 
+            init int32 firstBlockOperations;
+            init int32 secondBlockOperations;
             if (!TryGetCompactIndexedBodyBlockOperationCount(recordCount, 1,
-                    typeSpecCount, 1, init var firstBlockOperations)
+                    typeSpecCount, 1, ref init firstBlockOperations)
                 || firstBlockOperations != 1
                 || !TryGetValidatedCompactIndexedBodyBlockOperationCount(recordCount,
-                    1, typeSpecCount, 2, init var secondBlockOperations)
+                    1, typeSpecCount, 2, ref init secondBlockOperations)
                 || secondBlockOperations != 0) {
                 return 2;
             }
@@ -41,17 +45,19 @@ internal sealed class CompactIndexedBodyFramingComponentTests
             init int32 zeroBlockOperations;
             init int32 outOfRangeOperations;
             if (TryGetValidatedCompactIndexedBodyBlockOperationCount(recordCount,
-                    1, typeSpecCount, 0, init zeroBlockOperations)
+                    1, typeSpecCount, 0, ref init zeroBlockOperations)
                 || zeroBlockOperations is init
                 || TryGetCompactIndexedBodyBlockOperationCount(recordCount, 1,
-                    typeSpecCount, 3, init outOfRangeOperations)
+                    typeSpecCount, 3, ref init outOfRangeOperations)
                 || outOfRangeOperations is init) {
                 return 3;
             }
 
+            init int32 writtenBlockCount;
+            init int32 writtenOperationCount;
             if (!TryWriteCompactIndexedBodyOperationCounts(recordCount, 1,
-                    typeSpecCount, 1, init var writtenBlockCount,
-                    init var writtenOperationCount)
+                    typeSpecCount, 1, ref init writtenBlockCount,
+                    ref init writtenOperationCount)
                 || writtenBlockCount != 2 || writtenOperationCount != 1
                 || Host.BodyBlockOperationCounts[1] != writtenBlockCount
                 || Host.BodyBlockOperationCounts[2] != 1
@@ -61,7 +67,7 @@ internal sealed class CompactIndexedBodyFramingComponentTests
 
             init int32 malformedBodyOperations;
             if (TryGetValidatedCompactIndexedBodyBlockOperationCount(recordCount,
-                    2, typeSpecCount, 1, init malformedBodyOperations)
+                    2, typeSpecCount, 1, ref init malformedBodyOperations)
                 || malformedBodyOperations is init) {
                 return 5;
             }
@@ -69,7 +75,7 @@ internal sealed class CompactIndexedBodyFramingComponentTests
             init int32 malformedBlocks;
             init int32 malformedOperations;
             if (TryWriteCompactIndexedBodyOperationCounts(recordCount, 2,
-                    typeSpecCount, 4, init malformedBlocks, init malformedOperations)
+                    typeSpecCount, 4, ref init malformedBlocks, ref init malformedOperations)
                 || malformedBlocks is init || malformedOperations is init
                 || Host.BodyBlockOperationCounts[4] != 0) {
                 return 6;
@@ -79,7 +85,7 @@ internal sealed class CompactIndexedBodyFramingComponentTests
             init int32 shortBufferOperations;
             if (TryWriteCompactIndexedBodyOperationCounts(recordCount, 1,
                     typeSpecCount, Host.BodyBlockOperationCounts.Length - 1,
-                    init shortBufferBlocks, init shortBufferOperations)
+                    ref init shortBufferBlocks, ref init shortBufferOperations)
                 || shortBufferBlocks is init || shortBufferOperations is init
                 || Host.BodyBlockOperationCounts[Host.BodyBlockOperationCounts.Length - 1] != 0) {
                 return 7;
@@ -93,25 +99,30 @@ internal sealed class CompactIndexedBodyFramingComponentTests
         int32 Main() {
             int32 recordCount = Host.Expected[0];
             int32 typeSpecCount = Host.Expected[1];
+            init int32 blockCount;
+            init int32 operationCount;
             if (!TryValidateBodyTableIndex(recordCount)
                 || !TryGetValidatedCompactIndexedBodyFrame(recordCount, 1, typeSpecCount,
-                    init var blockCount, init var operationCount)
+                    ref init blockCount, ref init operationCount)
                 || blockCount != Host.Expected[2]
                 || operationCount != Host.Expected[3]) {
                 return 1;
             }
 
             for (mut int32 block = 1; block <= blockCount; block = block + 1) {
+                init int32 blockOperations;
                 if (!TryGetValidatedCompactIndexedBodyBlockOperationCount(recordCount,
-                        1, typeSpecCount, block, init var blockOperations)
+                        1, typeSpecCount, block, ref init blockOperations)
                     || blockOperations != Host.Expected[3 + block]) {
                     return 2;
                 }
             }
 
+            init int32 writtenBlockCount;
+            init int32 writtenOperationCount;
             if (!TryWriteCompactIndexedBodyOperationCounts(recordCount, 1,
-                    typeSpecCount, 1, init var writtenBlockCount,
-                    init var writtenOperationCount)
+                    typeSpecCount, 1, ref init writtenBlockCount,
+                    ref init writtenOperationCount)
                 || writtenBlockCount != blockCount
                 || writtenOperationCount != operationCount
                 || Host.BodyBlockOperationCounts[1] != blockCount) {
@@ -133,7 +144,7 @@ internal sealed class CompactIndexedBodyFramingComponentTests
             init int32 blocks;
             init int32 operations;
             if (TryWriteCompactIndexedBodyOperationCounts(1, 1, 1, 1,
-                    init blocks, init operations)
+                    ref init blocks, ref init operations)
                 || blocks is init || operations is init
                 || Host.BodyBlockOperationCounts[1] != 0) {
                 return 1;
@@ -150,8 +161,10 @@ internal sealed class CompactIndexedBodyFramingComponentTests
                 return 1;
             }
             for (mut int32 row = 1; row <= recordCount; row = row + 1) {
+                init int32 blockCount;
+                init int32 operationCount;
                 if (!TryGetValidatedCompactIndexedBodyFrame(recordCount, row, 0,
-                    init var blockCount, init var operationCount)
+                    ref init blockCount, ref init operationCount)
                     || blockCount != 1 || operationCount != 0) {
                     return 2;
                 }
@@ -160,7 +173,7 @@ internal sealed class CompactIndexedBodyFramingComponentTests
             init int32 vacantBlocks;
             init int32 vacantOperations;
             if (TryGetValidatedCompactIndexedBodyFrame(recordCount, 0, 0,
-                init vacantBlocks, init vacantOperations)
+                ref init vacantBlocks, ref init vacantOperations)
                 || vacantBlocks is init || vacantOperations is init) {
                 return 3;
             }
@@ -171,9 +184,11 @@ internal sealed class CompactIndexedBodyFramingComponentTests
     private const string VerificationSource = """
         namespace Terrum.CodeAnalysis;
         int32 Main() {
+            init int32 blockCount;
+            init int32 operationCount;
             if (!TryGetCompactIndexedBodyFrame(
                 Host.Expected[0], Host.Expected[1], Host.Expected[2],
-                init var blockCount, init var operationCount)) {
+                ref init blockCount, ref init operationCount)) {
                 if (Host.Expected[3] != 0) {
                     return 1;
                 }
@@ -198,8 +213,10 @@ internal sealed class CompactIndexedBodyFramingComponentTests
             }
             for (mut int32 row = 1; row <= recordCount; row = row + 1) {
                 int32 expectedOffset = 1 + (row - 1) * 2;
+                init int32 blockCount;
+                init int32 operationCount;
                 if (!TryGetValidatedCompactIndexedBodyFrame(recordCount, row, 1,
-                    init var blockCount, init var operationCount)
+                    ref init blockCount, ref init operationCount)
                     || blockCount != Host.Expected[expectedOffset]
                     || operationCount != Host.Expected[expectedOffset + 1]) {
                     return 2;

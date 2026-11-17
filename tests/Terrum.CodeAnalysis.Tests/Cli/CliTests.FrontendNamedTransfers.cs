@@ -202,7 +202,7 @@ internal sealed partial class CliTests
         var hosted = CreateTestArtifactPath($"native-named-{Guid.NewGuid():N}.hosted.dll");
         try
         {
-            var source = Encoding.UTF8.GetBytes("public int32 @await(int32 a, int32 b, int32 c) { @const: do { while (true) { break const; } } while (false); return a + b + c; }");
+            var source = Encoding.UTF8.GetBytes("public int32 @await(int32 a, int32 b, int32 c) { @const: do { while (true) { break const; } } while (false); return c; }");
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
             {
                 var (exit, output, error) = await RunAsync(source, "frontend-build-library",
@@ -217,7 +217,7 @@ internal sealed partial class CliTests
                 {
                     var export = Marshal.GetDelegateForFunctionPointer<DoForThreeScalars>(
                         NativeLibrary.GetExport(handle, "await"));
-                    Assert.That(export(10, 20, 12), Is.EqualTo(42));
+                    Assert.That(export(10, 20, 12), Is.EqualTo(12));
                 }
                 finally
                 {

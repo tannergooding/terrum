@@ -20,7 +20,7 @@ namespace Terrum.CodeAnalysis.Tests.Lexing;
 internal sealed class KeywordEscapeTests
 {
     // Independent vocabulary fixture: do not derive expected permission from the implementation catalog.
-    private const string Vocabulary = "using namespace public internal private struct class interface enum union alias type partial extension extern static operator get set init field this where const void var unique own move mut ref write gc pin implicit params if else switch default when is some and or not while do for in break continue return yield async await require ensure try catch finally throw defer unsafe policy true false null new via";
+    private const string Vocabulary = "using namespace public internal private struct class interface enum union alias type partial extension extern static operator get set init field this where const void var unique own move mut ref write gc pin implicit params if else switch default when is some and or not while do for in break continue return yield async await require ensure try catch finally throw defer unsafe policy typeof true false null new via";
 
     public static IEnumerable<object[]> Keywords => Vocabulary.Split(' ').Select(word => new object[] { word });
     [TestCaseSource(nameof(Keywords))]

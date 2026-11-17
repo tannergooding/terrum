@@ -13,6 +13,7 @@ using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 using Terrum.CodeAnalysis.Tests.Semantics;
+using Terrum.CodeAnalysis.Tests.Text;
 using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Lexing;
@@ -24,7 +25,7 @@ internal sealed class StringLiteralEncodingModuleTests
         namespace Terrum.CodeAnalysis;
         int32 Main() { return 0; }
 
-        bool TryGetLiteral(init ref<StringLiteral> literal) {
+        bool TryGetLiteral(ref<init StringLiteral> literal) {
             if (Host.Source.Length < 2) { return false; }
             int32 expectedLength = int32(Host.Source[1]);
             mut int32 literalStart = 2;
@@ -32,23 +33,25 @@ internal sealed class StringLiteralEncodingModuleTests
                 if (expectedLength > Host.Source.Length - literalStart) { return false; }
                 literalStart = literalStart + expectedLength;
             }
-            if (!SourceRange.TryCreate(literalStart, Host.Source.Length - literalStart, init var spelling)) {
+            init SourceRange spelling;
+            if (!SourceRange.TryCreate(literalStart,
+                Host.Source.Length - literalStart, ref init spelling)) {
                 return false;
             }
-            return StringLiteral.TryCreate(spelling, init literal);
+            return StringLiteral.TryCreate(spelling, ref init *literal);
         }
 
         bool TryGetEncodedLength(
             StringLiteral literal,
             int32 encoding,
-            init ref<int32> length
+            ref<init int32> length
         ) {
-            if (encoding == 0) { return literal.TryGetUtf8Length(init length); }
-            if (encoding == 1) { return literal.TryGetUtf16Length(init length); }
-            if (encoding == 2 || encoding == 3) { return literal.TryGetUtf16ByteLength(init length); }
-            if (encoding == 4) { return literal.TryGetAsciiLength(init length); }
-            if (encoding == 5) { return literal.TryGetLatin1Length(init length); }
-            if (encoding == 6 || encoding == 7) { return literal.TryGetUtf32ByteLength(init length); }
+            if (encoding == 0) { return literal.TryGetUtf8Length(ref init *length); }
+            if (encoding == 1) { return literal.TryGetUtf16Length(ref init *length); }
+            if (encoding == 2 || encoding == 3) { return literal.TryGetUtf16ByteLength(ref init *length); }
+            if (encoding == 4) { return literal.TryGetAsciiLength(ref init *length); }
+            if (encoding == 5) { return literal.TryGetLatin1Length(ref init *length); }
+            if (encoding == 6 || encoding == 7) { return literal.TryGetUtf32ByteLength(ref init *length); }
             return false;
         }
 
@@ -79,12 +82,15 @@ internal sealed class StringLiteralEncodingModuleTests
 
         int32 VerifyEncoding(int32 encoding) {
             if (Host.Source.Length < 2 || int32(Host.Source[0]) != encoding) { return -1; }
-            if (!TryGetLiteral(init var literal)) { return -2; }
+            init StringLiteral literal;
+            if (!TryGetLiteral(ref init literal)) { return -2; }
 
             int32 expectedLength = int32(Host.Source[1]);
             if (expectedLength == 65535) {
                 if (encoding != 4 && encoding != 5) { return -3; }
-                if (TryGetEncodedLength(literal, encoding, init var rejectedLength)) { return -4; }
+                init int32 rejectedLength;
+                if (TryGetEncodedLength(literal, encoding,
+                    ref init rejectedLength)) { return -4; }
                 if (GetStringLiteralEncodedLengthOrMinusOne(
                     literal.Spelling.Start, literal.Spelling.Length, GetSourceGrantEncoding(encoding)) != -1) {
                     return -10;
@@ -92,12 +98,15 @@ internal sealed class StringLiteralEncodingModuleTests
                 return 0;
             }
 
-            if (!TryGetEncodedLength(literal, encoding, init var measuredLength)) { return -5; }
+            init int32 measuredLength;
+            if (!TryGetEncodedLength(literal, encoding,
+                ref init measuredLength)) { return -5; }
             if (measuredLength != expectedLength) { return -6; }
             if (GetStringLiteralEncodedLengthOrMinusOne(
                 literal.Spelling.Start, literal.Spelling.Length, GetSourceGrantEncoding(encoding))
                 != measuredLength) { return -10; }
-            if (!OwnedInt32Buffer.TryCreate(expectedLength, out var workspace)) { return -7; }
+            init OwnedInt32Buffer workspace;
+            if (!OwnedInt32Buffer.TryCreate(expectedLength, ref init workspace)) { return -7; }
             mut OwnedInt32Buffer encoded = Encode(literal, encoding, move workspace);
             if (encoded.Count != expectedLength || encoded.Capacity != expectedLength) { return -8; }
             mut int32 index = 0;
@@ -118,12 +127,16 @@ internal sealed class StringLiteralEncodingModuleTests
         public int32 VerifyUtf32BeBytes() { return VerifyEncoding(7); }
 
         public int32 VerifyMaximumAsciiLiteral() {
-            if (!SourceRange.TryCreate(0, Host.Source.Length, init var spelling)
-                || !StringLiteral.TryCreate(spelling, init var literal)) { return -1; }
+            init SourceRange spelling;
+            init StringLiteral literal;
+            if (!SourceRange.TryCreate(0, Host.Source.Length, ref init spelling)
+                || !StringLiteral.TryCreate(spelling, ref init literal)) { return -1; }
             int32 scalarCount = Host.Source.Length - 2;
             if (literal.ScalarCount != scalarCount) { return -2; }
             for (mut int32 encoding = 0; encoding < 8; encoding = encoding + 1) {
-                if (!TryGetEncodedLength(literal, encoding, init var measured)) { return -3; }
+                init int32 measured;
+                if (!TryGetEncodedLength(literal, encoding,
+                    ref init measured)) { return -3; }
                 mut int32 width = 1;
                 if (encoding == 2 || encoding == 3) { width = 2; }
                 if (encoding == 6 || encoding == 7) { width = 4; }
@@ -131,8 +144,9 @@ internal sealed class StringLiteralEncodingModuleTests
                 if (GetStringLiteralEncodedLengthOrMinusOne(
                     literal.Spelling.Start, literal.Spelling.Length, GetSourceGrantEncoding(encoding))
                     != expectedLength) { return -7; }
+                init OwnedInt32Buffer workspace;
                 if (measured != expectedLength
-                    || !OwnedInt32Buffer.TryCreate(expectedLength, out var workspace)) { return -4; }
+                    || !OwnedInt32Buffer.TryCreate(expectedLength, ref init workspace)) { return -4; }
                 mut OwnedInt32Buffer encoded = Encode(literal, encoding, move workspace);
                 if (encoded.Count != expectedLength || encoded.Capacity != expectedLength) { return -5; }
                 for (mut int32 index = 0; index < expectedLength; index = index + 1) {
@@ -149,15 +163,20 @@ internal sealed class StringLiteralEncodingModuleTests
         }
 
         public int32 VerifyMaximumUtf8Literal() {
-            if (!SourceRange.TryCreate(0, Host.Source.Length, init var spelling)
-                || !StringLiteral.TryCreate(spelling, init var literal)) { return -1; }
+            init SourceRange spelling;
+            init StringLiteral literal;
+            if (!SourceRange.TryCreate(0, Host.Source.Length, ref init spelling)
+                || !StringLiteral.TryCreate(spelling, ref init literal)) { return -1; }
             int32 scalarCount = Host.Source.Length - 2;
             if (literal.ScalarCount != scalarCount) { return -2; }
             int32 expectedLength = scalarCount * 3;
-            if (!literal.TryGetUtf8Length(init var measured) || measured != expectedLength) { return -3; }
+            init int32 measured;
+            if (!literal.TryGetUtf8Length(ref init measured)
+                || measured != expectedLength) { return -3; }
             if (GetStringLiteralEncodedLengthOrMinusOne(
                 literal.Spelling.Start, literal.Spelling.Length, 2) != expectedLength) { return -4; }
-            if (!OwnedInt32Buffer.TryCreate(expectedLength, out var workspace)) { return -5; }
+            init OwnedInt32Buffer workspace;
+            if (!OwnedInt32Buffer.TryCreate(expectedLength, ref init workspace)) { return -5; }
             mut OwnedInt32Buffer encoded = literal.EncodeUtf8(move workspace);
             if (encoded.Count != expectedLength || encoded.Capacity != expectedLength) { return -6; }
             for (mut int32 index = 0; index < expectedLength; index = index + 1) {
@@ -212,12 +231,15 @@ internal sealed class StringLiteralEncodingModuleTests
             "VerifyMaximumAsciiLiteral",
             "VerifyMaximumUtf8Literal",
         };
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+        var producerProgram = ((global::System.Func<BoundProgram>)(() => {
             var __nunitActual0 = producerCompilation.Program;
             Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
             return (BoundProgram)__nunitActual0!;
-        }))(),
-            [.. exports.Select(static name => "Terrum.CodeAnalysis." + name)]);
+        }))();
+        var producer = ModuleCompiler.CreateProducer(producerProgram,
+            [.. exports.Select(static name => "Terrum.CodeAnalysis." + name)],
+            TextComponentTestHelpers.CreateIdentityInputs(producerProgram,
+                "StringLiteralEncodingProvider"));
         var consumers = new BoundProgram[exports.Length];
         for (var index = 0; index < exports.Length; index++)
         {

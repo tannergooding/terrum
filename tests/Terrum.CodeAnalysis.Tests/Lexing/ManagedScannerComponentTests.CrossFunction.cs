@@ -325,7 +325,7 @@ internal sealed partial class ManagedScannerComponentTests
     [TestCase("public int32 Main() { mut int32 value = 0; int32 status = Set(out value); return value + status; } int32 Set(out int32 value) { value = 40; return 2; }",42)]
     [TestCase("public int32 Main() { mut int32 value = 0; return Set(out value) == 2 && value == 40 ? value : 0; } int32 Set(out int32 value) { value = 40; return 2; }",40)]
     [TestCase("public int32 Main() { mut int32 value = 0; Fill(out value); return value; } void Fill(out int32 value) { value = 42; }",42)]
-    [TestCase("public int32 Main() { require !Fill(false, init var value); return Fill(true, init value) ? value : 0; } bool Fill(bool publish, init ref<int32> value) { if (publish) { value = 42; return true; } return false; }",42)]
+    [TestCase("public int32 Main() { init int32 value; require !Fill(false, ref init value); return Fill(true, ref init value) ? value : 0; } bool Fill(bool publish, ref<init int32> value) { if (publish) { *value = 42; return true; } return false; }",42)]
     [TestCase("public int32 Main() { for (Sink(1); false; Sink(2)) { } return 42; } void Sink(int32 value) { }",42)]
     [TestCase("[DoesNotReturn] void Halt() { require false; } public int32 Main() { if (false) { Halt(); } return 42; }",42)]
     [TestCase(" public void Main() { Step(); }  void Step() { }",0)]
@@ -337,7 +337,7 @@ internal sealed partial class ManagedScannerComponentTests
     [TestCase("public int32 Main() => Sum(fourth: 12, second: 10, first: 10, third: 10); int32 Sum(int32 first, int32 second, int32 third, int32 fourth) => first + second + third + fourth;",42)]
     [TestCase("public int32 Main() => ReadFourth(0, 0, 0, 42); int32 ReadFourth(int32 first, int32 second, int32 third, int32 fourth) { int32 local = fourth; return local; }",42)]
     [TestCase("public int32 Main() { mut int32 result = 0; Fill(10, 10, 10, out result); return result; } void Fill(int32 first, int32 second, int32 third, out int32 fourth) { fourth = first + second + third + 12; }",42)]
-    [TestCase("public int32 Main() { Fill(10, 10, 10, init var result); return result; } void Fill(int32 first, int32 second, int32 third, init ref<int32> fourth) { fourth = first + second + third + 12; }",42)]
+    [TestCase("public int32 Main() { init int32 result; Fill(10, 10, 10, ref init result); return result; } void Fill(int32 first, int32 second, int32 third, ref<init int32> fourth) { *fourth = first + second + third + 12; }",42)]
     [TestCase("public int32 Main() { { int32 Next = 1; } return Next(); } int32 Next() => 42;",42)]
     [TestCase("public int32 Main() => @await(41); int32 @await(int32 value) => value + 1;",42)]
     [TestCase("public int32 Main() => int32(41); int32 int32(int32 value) => value + 1;",42)]
@@ -482,8 +482,10 @@ internal sealed partial class ManagedScannerComponentTests
         const string Entry = """
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TokenSnapshot.TryScan(init var tokens);
-                require TryParseScalarFrontend(move tokens, init var result);
+                init TokenSnapshot tokens;
+                init ScalarFrontendResult result;
+                require TokenSnapshot.TryScan(ref init tokens);
+                require TryParseScalarFrontend(move tokens, ref init result);
                 if (!result.IsValid || result.WhenTrue.Operation != 3
                     || result.WhenTrue.Type != 8
                     || result.WhenTrue.LeftParameter != -1717986918
@@ -509,8 +511,10 @@ internal sealed partial class ManagedScannerComponentTests
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TokenSnapshot.TryScan(init var tokens);
-                require TryParseScalarFrontend(move tokens, init var result);
+                init TokenSnapshot tokens;
+                init ScalarFrontendResult result;
+                require TokenSnapshot.TryScan(ref init tokens);
+                require TryParseScalarFrontend(move tokens, ref init result);
                 if (!result.IsValid || result.WhenTrue.Operation != 3
                     || result.WhenTrue.Type != {{type}}
                     || result.WhenTrue.LeftParameter != {{low}}
@@ -529,7 +533,7 @@ internal sealed partial class ManagedScannerComponentTests
         }
     }
     [TestCase("alias Scalar = Wide; alias Wide = int32; public Scalar Main() { const Wide value = 40; return Bump(int32(value)); } Scalar Bump(Scalar value) => value + 2;",2,42)]
-    [TestCase("public Number Main() { init Number value; Set(init value); return int32(value) + 2; } void Set(init ref<Scalar> value) { value = 40; } alias Number = Scalar; alias Scalar = int32;",2,42)]
+    [TestCase("public Number Main() { init Number value; Set(ref init value); return int32(value) + 2; } void Set(ref<init Scalar> value) { *value = 40; } alias Number = Scalar; alias Scalar = int32;",2,42)]
     [TestCase("alias Number = int32; public Number Main() => 42;",1,42)]
     [TestCase("alias A = int32; alias B = int32; alias C = int32; alias D = int32; alias E = int32; alias F = int32; alias G = int32; alias H = int32; alias I = int32; alias J = int32; alias K = int32; public K Main() => 42;",1,42)]
     [TestCase("alias Number = int32; void A() {} void B() {} void C() {} void D() {} void E() {} void F() {} void G() {} void H() {} public Number Main() => 42;",9,42)]
@@ -729,7 +733,7 @@ internal sealed partial class ManagedScannerComponentTests
     [Test]
     public async Task ScalarFrontendProgramProjectsCallerUnsafeCallsInsideExplicitScopesAsync()
     {
-        const string text = "public unsafe int32 Danger(int32 value) => value + 1; public int32 Main() { return Safe(41); } int32 Safe(int32 value) { unsafe { return Danger(value); } } int32 Fill(init ref<int32> value) { value = 40; return 0; }";
+        const string text = "public unsafe int32 Danger(int32 value) => value + 1; public int32 Main() { return Safe(41); } int32 Safe(int32 value) { unsafe { return Danger(value); } } int32 Fill(ref<init int32> value) { *value = 40; return 0; }";
         var source = SourceText.From(text);
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
@@ -837,7 +841,7 @@ internal sealed partial class ManagedScannerComponentTests
     }
     [TestCase("public int32 Main() => unsafe(42);",82,"Main",42)]
     [TestCase("public int32 Main() { init int32 value; return unsafe(value is init) ? 42 : 0; }",82,"Main",0)]
-    [TestCase("bool Init(init ref<int32> value) { if (unsafe(value is init)) { value = 42; return true; } return false; }",82,"Init",0)]
+    [TestCase("bool Init(ref<init int32> value) { if (unsafe(*value is init)) { *value = 42; return true; } return false; }",82,"Init",0)]
     [TestCase("public unsafe int32 Recur() { if (false) { return unsafe(Recur()); } return 42; }",83,"Recur",42)]
     [TestCase("public unsafe int32 Recur() { if (false) { unsafe { return Recur(); } } return 42; }",83,"Recur",42)]
     [TestCase("public unsafe void Recur() { if (false) { unsafe { Recur(); } } }",83,"Recur",0)]
@@ -917,7 +921,7 @@ internal sealed partial class ManagedScannerComponentTests
     [Test]
     public async Task ScalarFrontendProgramProjectsNonBooleanAndVoidInitReferenceCompletionAsync()
     {
-        const string text = "public int32 Main() { _ = Fill(init var value); SetVoid(init var other); return value + other; } int32 Fill(init ref<int32> value) { value = 40; return 0; } void SetVoid(init ref<int32> value) { value = 2; }";
+        const string text = "public int32 Main() { init int32 value; init int32 other; _ = Fill(ref init value); SetVoid(ref init other); return value + other; } int32 Fill(ref<init int32> value) { *value = 40; return 0; } void SetVoid(ref<init int32> value) { *value = 2; }";
         var source = SourceText.From(text);
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
@@ -951,8 +955,8 @@ internal sealed partial class ManagedScannerComponentTests
         }
 
         string[] incompleteTexts = [
-            "public int32 Main() { return Fill(init var value); } int32 Fill(init ref<int32> value) { return 0; }",
-            "public int32 Main() { Fill(init var value); return 42; } void Fill(init ref<int32> value) { }",
+            "public int32 Main() { init int32 value; return Fill(ref init value); } int32 Fill(ref<init int32> value) { return 0; }",
+            "public int32 Main() { init int32 value; Fill(ref init value); return 42; } void Fill(ref<init int32> value) { }",
         ];
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
@@ -1058,8 +1062,8 @@ internal sealed partial class ManagedScannerComponentTests
     [TestCase("int32 Main() { Set(42); return 0; } bool Set(out int32 value) { value = 42; return true; }")]
     [TestCase("int32 Main() { Set(out var value); return 0; } bool Set(int32 value) { return true; }")]
     [TestCase("bool Main() { mut int32 result = 0; if (Set(out result)) { return true; } return false; } int32 Set(out int32 value) { value = 42; return value; }")]
-    [TestCase("int32 Main() { if (Fill(true, out var value)) { return value; } return 0; } bool Fill(bool publish, init ref<int32> value) { value = 42; return true; }")]
-    [TestCase("int32 Main() { if (Fill(true, init var value)) { return value; } return 0; } bool Fill(bool publish, out int32 value) { value = 42; return true; }")]
+    [TestCase("int32 Main() { if (Fill(true, out var value)) { return value; } return 0; } bool Fill(bool publish, ref<init int32> value) { *value = 42; return true; }")]
+    [TestCase("int32 Main() { init int32 value; if (Fill(true, ref init value)) { return value; } return 0; } bool Fill(bool publish, out int32 value) { value = 42; return true; }")]
     [TestCase("int32 Main() => Next(1); int32 Next(out int32 value) => 42;")]
     [TestCase("int32 Main(uint32 value) => Next(value); int32 Next(int32 value) => value;")]
     [TestCase("[DoesNotReturn] int32 Halt() => 42; int32 Main() => 0;")]
@@ -1073,7 +1077,7 @@ internal sealed partial class ManagedScannerComponentTests
             programBytes, BoundRuntimePolicy.FailFast));
     }
     [TestCase("[DoesNotReturn] void Halt() { require false; } bool Fill(out int32 value) { value = 42; return true; } public int32 Main() { Halt(); }")]
-    [TestCase("[DoesNotReturn] void Halt() { require false; } bool Fill(init ref<int32> value) { value = 42; return true; } public int32 Main() { Halt(); }")]
+    [TestCase("[DoesNotReturn] void Halt() { require false; } bool Fill(ref<init int32> value) { *value = 42; return true; } public int32 Main() { Halt(); }")]
     [TestCase("[DoesNotReturn] unsafe void Halt() { require false; } public int32 Main() { unsafe { Halt(); } }")]
     public async Task ScalarFrontendNonReturningCompletionRetainsExistingInventoryConstraintsAsync(string text)
     {
@@ -1203,7 +1207,7 @@ internal sealed partial class ManagedScannerComponentTests
     [Test]
     public async Task ScalarFrontendCrossFunctionInitReferencesRequireCurrentTagAndExactModesAsync()
     {
-        const string text = "public int32 Main() { require !Fill(false, init var value); return Fill(true, init value) ? value : 0; } bool Fill(bool publish, init ref<int32> value) { if (publish) { value = 42; return true; } return false; }";
+        const string text = "public int32 Main() { init int32 value; require !Fill(false, ref init value); return Fill(true, ref init value) ? value : 0; } bool Fill(bool publish, ref<init int32> value) { if (publish) { *value = 42; return true; } return false; }";
         var source = SourceText.From(text);
         var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, NativeRuntimePolicy.FailFast).ConfigureAwait(false);
         Assert.That(BinaryPrimitives.ReadInt32LittleEndian(programBytes), Is.EqualTo(88));

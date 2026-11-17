@@ -254,6 +254,7 @@ public static partial class ScalarFrontendHost
         ImmutableArray<ProgramDeclaration> declarations, ImmutableArray<SourceText> functionSources,
         BoundRuntimePolicy policy, SourceArithmeticProfile sourceArithmeticProfile)
     {
+        var referenceTypes = CreateCheckedReferenceTypes(results);
         var functions = ImmutableArray.CreateBuilder<BoundFunction>(results.Length);
         for (var i = 0; i < results.Length; i++)
         {
@@ -271,14 +272,18 @@ public static partial class ScalarFrontendHost
             var omitImplicitReturn = hasDoesNotReturnCallStatement && results[i].TrueRoot < 0;
             var function = BindLibraryCore(functionSources[i],
                 results[i], policy, sourceArithmeticProfile, verify: false,
-                omitImplicitReturn: omitImplicitReturn).Functions[0];
+                omitImplicitReturn: omitImplicitReturn,
+                referenceTypes: referenceTypes).Functions[0];
             functions.Add(function with {
                 Name = declarations[i].QualifiedName,
                 Span = declarations[i].Span,
                 Body = function.Body with { Span = declarations[i].BodySpan },
             });
         }
-        var program = new BoundProgram(functions.MoveToImmutable(), -1) { RuntimePolicy = policy };
+        var program = new BoundProgram(functions.MoveToImmutable(), -1) {
+            RuntimePolicy = policy,
+            CheckedReferenceTypes = referenceTypes,
+        };
         return program;
     }
 
@@ -499,15 +504,18 @@ public static partial class ScalarFrontendHost
                         throw InvalidResult();
                     }
                     var isOut = tokens[at].Kind == TokenKind.OutKeyword;
-                    var isInitRef = tokens[at].Kind == TokenKind.Identifier
-                        && tokens[at].Name == "init" && tokens[at].Span.Length == 4;
+                    var isInitRef = tokens[at].Kind == TokenKind.RefKeyword
+                        && at + 2 < scopeEnd
+                        && tokens[at + 1].Kind == TokenKind.Less
+                        && tokens[at + 2].Kind == TokenKind.Identifier
+                        && tokens[at + 2].Name == "init";
                     if (isOut)
                     {
                         at++;
                     }
                     if (isInitRef
-                        && (!Take(TokenKind.Identifier) || tokens[at - 1].Name != "init"
-                            || !Take(TokenKind.RefKeyword) || !Take(TokenKind.Less)))
+                        && (!Take(TokenKind.RefKeyword) || !Take(TokenKind.Less)
+                            || !Take(TokenKind.Identifier) || tokens[at - 1].Name != "init"))
                     {
                         throw InvalidResult();
                     }

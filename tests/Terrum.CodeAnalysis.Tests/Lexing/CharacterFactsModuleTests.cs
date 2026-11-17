@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Immutable;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
@@ -29,14 +30,15 @@ internal sealed class CharacterFactsModuleTests
             int32 Main() { return VerifyBatch(); }
 
             int32 VerifyHexDigit(char16 value, int32 expected) {
-                bool success = TryGetHexDigit(value, init var digit);
+                init int32 digit;
+                bool success = TryGetHexDigit(value, ref init digit);
                 if (success != (expected >= 0)) { return 1; }
                 if (success) {
                     if (!(digit is init)) { return 2; }
                     if (digit != expected) { return 3; }
                 } else {
                     if (digit is init) { return 4; }
-                    if (!TryGetHexDigit(char16(48), init digit)) { return 5; }
+                    if (!TryGetHexDigit(char16(48), ref init digit)) { return 5; }
                     if (!(digit is init)) { return 6; }
                     if (digit != 0) { return 7; }
                 }
@@ -49,15 +51,16 @@ internal sealed class CharacterFactsModuleTests
                     char16 value = Host.Source[index];
                     bool isDigit = value >= 48 && value <= 57;
                     if (IsAsciiDigit(value) != isDigit) { return index + 1; }
-                    if (isDigit && GetDecimalDigit(value) != int32(value) - 48) { return index + 1; }
+                    if (isDigit && GetDecimalDigit(value) != int32(value) - 48) { return 100_000 + index + 1; }
                     bool expectedLineBreak = value == 10 || value == 13 || value == 133
                         || value == 8232 || value == 8233;
-                    if (IsLineBreak(value) != expectedLineBreak) { return index + 1; }
+                    if (IsLineBreak(value) != expectedLineBreak) { return 200_000 + index + 1; }
                     mut int32 expectedHexDigit = -1;
                     if (value >= 48 && value <= 57) { expectedHexDigit = int32(value) - 48; }
                     else if (value >= 65 && value <= 70) { expectedHexDigit = int32(value) - 55; }
                     else if (value >= 97 && value <= 102) { expectedHexDigit = int32(value) - 87; }
-                    if (VerifyHexDigit(value, expectedHexDigit) != 0) { return index + 1; }
+                    int32 hexResult = VerifyHexDigit(value, expectedHexDigit);
+                    if (hexResult != 0) { return 300_000 + hexResult * 100_000 + index + 1; }
                     index = index + 1;
                 }
                 return 0;
@@ -90,6 +93,19 @@ internal sealed class CharacterFactsModuleTests
                 return (BoundProgram)__nunitActual1!;
             }))(), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
+        var linkedHexDigit = linked.Functions.Single(static function =>
+            function.Name.EndsWith("TryGetHexDigit", StringComparison.Ordinal));
+        var linkedOutput = linkedHexDigit.Variables[1];
+        Assert.That(linkedOutput.IsInit, Is.True);
+        Assert.That(linkedOutput.IsOut, Is.False);
+        Assert.That(CheckedReferenceTypes.IsType(linkedOutput.Type), Is.True);
+        Assert.That(linked.CheckedReferenceTypes[
+            CheckedReferenceTypes.Index(linkedOutput.Type)].IsInitialization,
+            Is.True);
+        var linkedVerifier = linked.Functions.Single(static function =>
+            function.Name.EndsWith("VerifyHexDigit", StringComparison.Ordinal));
+        Assert.That(linkedVerifier.Variables.Single(static variable =>
+            variable.Name == "digit").IsInitializationLocal, Is.True);
 
         for (var start = 0; start < char.MaxValue + 1; start += BatchSize)
         {
@@ -101,6 +117,9 @@ internal sealed class CharacterFactsModuleTests
             var grant = new HostBuffer("Source", PrimitiveType.Char16, values.MoveToImmutable(), false) {
                 IsInvocationScoped = true,
             };
+            Assert.That(NativeJit.ExecuteWithSourceGrant(
+                producerCompilation.Program!, [grant],
+                (NativeRuntimePolicy)policy), Is.EqualTo(0));
             Assert.That(NativeJit.ExecuteWithSourceGrant(linked, [grant], (NativeRuntimePolicy)policy), Is.EqualTo(0));
         }
     }

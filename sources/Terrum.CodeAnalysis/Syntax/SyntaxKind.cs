@@ -145,6 +145,8 @@ public enum SyntaxKind
     IsSomeExpression,
     /// <summary>A general source pattern test.</summary>
     IsPatternExpression,
+    /// <summary>A test of the generic type-formal uniqueness property.</summary>
+    UniqueTypePropertyPattern,
     /// <summary>Exits an enclosing loop.</summary>
     BreakStatement,
     /// <summary>Continues an enclosing loop.</summary>
@@ -225,6 +227,14 @@ public enum SyntaxKind
     AssociatedTypeRequirement,
     /// <summary>A nominal interface compile-time constant declaration.</summary>
     InterfaceConstantDeclaration,
+    /// <summary>A type's explicit interface associated-type binding.</summary>
+    AssociatedTypeBinding,
+    /// <summary>A type's explicit interface associated-constant binding.</summary>
+    AssociatedConstantBinding,
+    /// <summary>The qualified interface owner and member of an explicit implementation.</summary>
+    ExplicitInterfaceMemberName,
+    /// <summary>An explicit projection through an existing interface witness.</summary>
+    InterfaceWitnessProjectionExpression,
     /// <summary>A nominal interface indexer requirement.</summary>
     IndexerDeclaration,
     /// <summary>An interface property setter accessor.</summary>
@@ -249,4 +259,26 @@ public enum SyntaxKind
     EnumDeclaration,
     /// <summary>A named enum member and its optional constant expression.</summary>
     EnumMemberDeclaration,
+    /// <summary>An inference hole in a generic call argument list.</summary>
+    GenericInferenceArgument,
+    /// <summary>An explicit selection of a generic formal's declared default.</summary>
+    GenericDefaultArgument,
+    /// <summary>A complete type-identity query.</summary>
+    TypeOfQueryExpression,
+    /// <summary>A selected-target size query.</summary>
+    SizeOfQueryExpression,
+    /// <summary>A selected-target alignment query.</summary>
+    AlignOfQueryExpression,
+    /// <summary>A cumulative type-and-field-path offset query.</summary>
+    OffsetOfTypeQueryExpression,
+    /// <summary>An immediate-containing-type Place offset query.</summary>
+    OffsetOfPlaceQueryExpression,
+    /// <summary>A fixed-shape or live-Place count query.</summary>
+    CountOfQueryExpression,
+    /// <summary>An ordered field path used by a type offset query.</summary>
+    FieldPath,
+    /// <summary>A comma-separated list of index and slice arguments.</summary>
+    IndexArgumentList,
+    /// <summary>The whole-range initialization type argument admitted only by Span.</summary>
+    SpanInitializationTypeArgument,
 }

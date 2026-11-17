@@ -11,6 +11,7 @@ using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 using Terrum.CodeAnalysis.Tests.Semantics;
+using Terrum.CodeAnalysis.Tests.Text;
 using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.Strings;
@@ -22,30 +23,33 @@ internal sealed class StringRowModuleTests
         namespace Terrum.CodeAnalysis;
         int32 Main() { return 0; }
 
-        bool TryGetLiteral(init ref<StringLiteral> literal) {
+        bool TryGetLiteral(ref<init StringLiteral> literal) {
             if (Host.Source.Length < 3) { return false; }
             int32 expectedLength = int32(Host.Source[2]);
             if (expectedLength != 65535 && expectedLength > Host.Source.Length - 3) { return false; }
             mut int32 literalStart = 3;
             if (expectedLength != 65535) { literalStart = literalStart + expectedLength; }
-            if (!SourceRange.TryCreate(literalStart, Host.Source.Length - literalStart, init var spelling)) {
+            init SourceRange spelling;
+            if (!SourceRange.TryCreate(literalStart, Host.Source.Length - literalStart, ref init spelling)) {
                 return false;
             }
-            return StringLiteral.TryCreate(spelling, init literal);
+            return StringLiteral.TryCreate(spelling, ref init *literal);
         }
 
-        bool TryMeasure(StringLiteral literal, int32 kind, int32 encoding, init ref<int32> length) {
-            if (kind == 0) { return TryGetStringNameRowByteLength(literal, encoding, init length); }
-            return TryGetStringNamespaceRowByteLength(literal, encoding, init length);
+        bool TryMeasure(StringLiteral literal, int32 kind, int32 encoding, ref<init int32> length) {
+            if (kind == 0) { return TryGetStringNameRowByteLength(literal, encoding, ref init *length); }
+            return TryGetStringNamespaceRowByteLength(literal, encoding, ref init *length);
         }
 
         OwnedInt32Buffer Encode(StringLiteral literal, int32 kind, int32 encoding, OwnedInt32Buffer workspace) {
             if (encoding == 1) {
                 if (kind == 0) {
-                    require TryBuildStringNameRowUtf8(literal.Spelling, move workspace, init var row);
+                    init OwnedInt32Buffer row;
+                    require TryBuildStringNameRowUtf8(literal.Spelling, move workspace, ref init row);
                     return move row;
                 }
-                require TryBuildStringNamespaceRowUtf8(literal.Spelling, move workspace, init var row);
+                init OwnedInt32Buffer row;
+                require TryBuildStringNamespaceRowUtf8(literal.Spelling, move workspace, ref init row);
                 return move row;
             }
             if (kind == 0) { return EncodeStringNameRow(literal, encoding, move workspace); }
@@ -55,17 +59,21 @@ internal sealed class StringRowModuleTests
         int32 VerifyRow(int32 kind, int32 encoding) {
             if (Host.Source.Length < 3 || int32(Host.Source[0]) != kind
                 || int32(Host.Source[1]) != encoding) { return -1; }
-            if (!TryGetLiteral(init var literal)) { return -2; }
+            init StringLiteral literal;
+            if (!TryGetLiteral(ref init literal)) { return -2; }
 
             int32 expectedLength = int32(Host.Source[2]);
             if (expectedLength == 65535) {
-                if (TryMeasure(literal, kind, encoding, init var rejectedLength)) { return -3; }
+                init int32 rejectedLength;
+                if (TryMeasure(literal, kind, encoding, ref init rejectedLength)) { return -3; }
                 return 0;
             }
 
-            if (!TryMeasure(literal, kind, encoding, init var measuredLength)) { return -4; }
+            init int32 measuredLength;
+            if (!TryMeasure(literal, kind, encoding, ref init measuredLength)) { return -4; }
             if (measuredLength != expectedLength) { return -5; }
-            if (!OwnedInt32Buffer.TryCreate(expectedLength, out var workspace)) { return -6; }
+            init OwnedInt32Buffer workspace;
+            if (!OwnedInt32Buffer.TryCreate(expectedLength, ref init workspace)) { return -6; }
             mut OwnedInt32Buffer row = Encode(literal, kind, encoding, move workspace);
             if (row.Count != expectedLength || row.Capacity != expectedLength) { return -7; }
             mut int32 index = 0;
@@ -87,9 +95,12 @@ internal sealed class StringRowModuleTests
 
         public int32 VerifyMaximumUtf8Name() {
             if (Host.Source.Length != 16384) { return -1; }
-            if (!SourceRange.TryCreate(0, Host.Source.Length, init var spelling)) { return -2; }
-            if (!OwnedInt32Buffer.TryCreate(49152, out var workspace)) { return -3; }
-            if (!TryBuildStringNameRowUtf8(spelling, move workspace, init var row)) { return -4; }
+            init SourceRange spelling;
+            if (!SourceRange.TryCreate(0, Host.Source.Length, ref init spelling)) { return -2; }
+            init OwnedInt32Buffer workspace;
+            if (!OwnedInt32Buffer.TryCreate(49152, ref init workspace)) { return -3; }
+            init OwnedInt32Buffer row;
+            if (!TryBuildStringNameRowUtf8(spelling, move workspace, ref init row)) { return -4; }
             if (row.Count != 49152 || row.Capacity != 49152) { return -5; }
             if (row.Read(0) != 1 || row.Read(1) != 250 || row.Read(2) != 191 || row.Read(3) != 0) {
                 return -6;
@@ -143,12 +154,16 @@ internal sealed class StringRowModuleTests
             "VerifyNamespaceUtf32Le",
             "VerifyMaximumUtf8Name",
         };
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+        var producerProgram = ((global::System.Func<BoundProgram>)(() => {
             var __nunitActual0 = producerCompilation.Program;
             Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
             return (BoundProgram)__nunitActual0!;
-        }))(),
-            [.. exports.Select(static name => "Terrum.CodeAnalysis." + name)]);
+        }))();
+        var identityInputs = TextComponentTestHelpers.CreateIdentityInputs(
+            producerProgram, "StringRowProvider");
+        var producer = ModuleCompiler.CreateProducer(producerProgram,
+            [.. exports.Select(static name => "Terrum.CodeAnalysis." + name)],
+            identityInputs);
         var consumers = new BoundProgram[exports.Length];
         for (var index = 0; index < exports.Length; index++)
         {

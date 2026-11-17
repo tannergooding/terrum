@@ -10,6 +10,7 @@ using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 using Terrum.CodeAnalysis.Tests.Semantics;
+using Terrum.CodeAnalysis.Tests.Text;
 using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Lexing;
@@ -44,18 +45,31 @@ internal sealed class TokenDiagnosticLocationSnapshotModuleTests
             public int32 VerifyDiagnosticLocations() {
                 int32 tokenCount = Scan();
                 if (tokenCount < 1) { return -1; }
-                if (!TokenDiagnosticLocationSnapshot.TryBuild(init var diagnostics)
-                    || !TokenDiagnosticSnapshot.TryBuild(init var expected)) { return -2; }
+                init TokenDiagnosticLocationSnapshot diagnostics;
+                init TokenDiagnosticSnapshot expected;
+                if (!TokenDiagnosticLocationSnapshot.TryBuild(ref init diagnostics)
+                    || !TokenDiagnosticSnapshot.TryBuild(ref init expected)) { return -2; }
                 if (diagnostics.GetCount() != expected.GetCount()) { return -3; }
                 mut int32 index = 0;
                 while (index < expected.GetCount()) {
-                    if (!expected.TryGet(index, init var expectedCode, init var expectedSpan)
-                        || !diagnostics.TryGet(index, init var code, init var span,
-                            init var line, init var column)) { return -4; }
+                    init int32 expectedCode;
+                    init SourceRange expectedSpan;
+                    init int32 code;
+                    init SourceRange span;
+                    init int32 line;
+                    init int32 column;
+                    init int32 expectedLine;
+                    init int32 expectedColumn;
+                    if (!expected.TryGet(index, ref init expectedCode,
+                            ref init expectedSpan)
+                        || !diagnostics.TryGet(index, ref init code,
+                            ref init span, ref init line, ref init column)) {
+                        return -4;
+                    }
                     if (code != expectedCode || span.Start != expectedSpan.Start
                         || span.Length != expectedSpan.Length
                         || !TryGetSourceDiagnosticLocation(span.Start,
-                            init var expectedLine, init var expectedColumn)
+                            ref init expectedLine, ref init expectedColumn)
                         || line != expectedLine || column != expectedColumn) { return -5; }
                     index = index + 1;
                 }
@@ -69,13 +83,15 @@ internal sealed class TokenDiagnosticLocationSnapshotModuleTests
         var producerCompilation = Compilation.Create(trees,
             ScannerHost.CreateInvocationProfileBuffers(seed), options);
         Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(
-            ((global::System.Func<BoundProgram>)(() => {
-                var __nunitActual0 = producerCompilation.Program;
-                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
-                return (BoundProgram)__nunitActual0!;
-            }))(),
-            ["Terrum.CodeAnalysis.VerifyDiagnosticLocations"]);
+        var producerProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = producerCompilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
+        var producer = ModuleCompiler.CreateProducer(producerProgram,
+            ["Terrum.CodeAnalysis.VerifyDiagnosticLocations"],
+            TextComponentTestHelpers.CreateIdentityInputs(producerProgram,
+                "TokenDiagnosticLocationProvider"));
 
         var consumerCompilation = Compilation.Create(
             SyntaxTree.Parse("""

@@ -37,6 +37,8 @@ internal sealed partial class ManagedScannerComponentTests
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
+                init TokenSnapshot owned;
+                init write ManagedTokenChain managed;
                 Host.Diagnostics[0] = 0;
                 Host.Tokens[0] = 2;
                 Host.Tokens[1] = 0;
@@ -44,8 +46,8 @@ internal sealed partial class ManagedScannerComponentTests
                 Host.Tokens[3] = 0;
                 Host.Tokens[4] = {{text.Length}};
                 Host.Tokens[5] = 0;
-                if (TokenSnapshot.TryBuild(2, init var owned) != {{(valid ? "true" : "false")}}) { return 1; }
-                if (TryBuildManagedTokenChain(2, init var managed) != {{(valid ? "true" : "false")}}) { return 2; }
+                if (TokenSnapshot.TryBuild(2, ref init owned) != {{(valid ? "true" : "false")}}) { return 1; }
+                if (TryBuildManagedTokenChain(2, ref init managed) != {{(valid ? "true" : "false")}}) { return 2; }
                 return 42;
             }
             """;
@@ -73,7 +75,8 @@ internal sealed partial class ManagedScannerComponentTests
         var source = new StringBuilder("""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                if (!TryScanManaged(init var chain)) {
+                init write ManagedTokenChain chain;
+                if (!TryScanManaged(ref init chain)) {
                     return EXPECTED_FAILURE;
                 }
             """.Replace("EXPECTED_FAILURE", fails ? "42" : "1", StringComparison.Ordinal));
@@ -87,11 +90,11 @@ internal sealed partial class ManagedScannerComponentTests
             for (var index = 0; index < expected.Length; index++)
             {
                 _ = source.Append(CultureInfo.InvariantCulture,
-                    $"if (!chain.TryGet({index}, init var token{index}) || token{index}.Kind != {(int)expected[index].Kind} || token{index}.Range.Start != {expected[index].Span.Start} || token{index}.Range.Length != {expected[index].Span.Length}) {{ return 4; }}");
+                    $"init Token token{index}; if (!chain.TryGet({index}, ref init token{index}) || token{index}.Kind != {(int)expected[index].Kind} || token{index}.Range.Start != {expected[index].Span.Start} || token{index}.Range.Length != {expected[index].Span.Length}) {{ return 4; }}");
             }
             _ = source.Append(CultureInfo.InvariantCulture,
-                $"if (chain.TryGet({expected.Length}, init var copied)) {{ return 9; }}"
-                + $" require chain.TryGet(0, init copied);"
+                $"init Token copied; if (chain.TryGet({expected.Length}, ref init copied)) {{ return 9; }}"
+                + $" require chain.TryGet(0, ref init copied);"
                 + $" if (copied.Kind != {(int)expected[0].Kind} || copied.Range.Start != {expected[0].Span.Start}) {{ return 10; }}");
             _ = source.Append(CultureInfo.InvariantCulture,
                 $"if (!chain.TryClear() || ManagedHeap.Collect() != {expected.Length}) {{ return 5; }}");
@@ -103,7 +106,7 @@ internal sealed partial class ManagedScannerComponentTests
             _ = source.Append(CultureInfo.InvariantCulture,
                 $"if (copied.Kind != {(int)expected[0].Kind} || copied.Range.Start != {expected[0].Span.Start}) {{ return 11; }}");
             _ = source.Append(CultureInfo.InvariantCulture,
-                $"if (!TryScanManaged(init var again) || again.Count != {expected.Length}) {{ return 7; }}");
+                $"init write ManagedTokenChain again; if (!TryScanManaged(ref init again) || again.Count != {expected.Length}) {{ return 7; }}");
             _ = source.Append(CultureInfo.InvariantCulture,
                 $"if (!again.TryClear() || ManagedHeap.Collect() != {expected.Length}) {{ return 8; }}");
             _ = source.Append("return 42; }");
@@ -135,20 +138,21 @@ internal sealed partial class ManagedScannerComponentTests
         var entry = new StringBuilder("""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TokenDiagnosticSnapshot.TryScan(init var diagnostics);
+                init TokenDiagnosticSnapshot diagnostics;
+                require TokenDiagnosticSnapshot.TryScan(ref init diagnostics);
             """);
         _ = entry.Append(CultureInfo.InvariantCulture,
-            $"if (diagnostics.GetCount() != {expected.Length} || diagnostics.TryGet(-1, init var invalidCode, init var invalidSpan) || diagnostics.TryGet({expected.Length}, init var beyondCode, init var beyondSpan)) {{ return 1; }}");
+            $"init int32 invalidCode; init SourceRange invalidSpan; init int32 beyondCode; init SourceRange beyondSpan; if (diagnostics.GetCount() != {expected.Length} || diagnostics.TryGet(-1, ref init invalidCode, ref init invalidSpan) || diagnostics.TryGet({expected.Length}, ref init beyondCode, ref init beyondSpan)) {{ return 1; }}");
         if (expected.Length != 0)
         {
-            _ = entry.Append("if (TokenSnapshot.TryBuild(1, init var invalidTokens)) { return 3; } Host.Diagnostics[1] = -1;");
+            _ = entry.Append("init TokenSnapshot invalidTokens; if (TokenSnapshot.TryBuild(1, ref init invalidTokens)) { return 3; } Host.Diagnostics[1] = -1;");
         }
         for (var index = 0; index < expected.Length; index++)
         {
             var diagnostic = expected[index];
             var code = int.Parse(diagnostic.Code.AsSpan(3), CultureInfo.InvariantCulture);
             _ = entry.Append(CultureInfo.InvariantCulture,
-                $"require diagnostics.TryGet({index}, init var code{index}, init var span{index});"
+                $"init int32 code{index}; init SourceRange span{index}; require diagnostics.TryGet({index}, ref init code{index}, ref init span{index});"
                 + $" if (code{index} != {code} || span{index}.Start != {diagnostic.Span.Start}"
                 + $" || span{index}.Length != {diagnostic.Span.Length}) {{ return 2; }}");
         }
@@ -173,7 +177,8 @@ internal sealed partial class ManagedScannerComponentTests
         var entry = new StringBuilder("""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                if (!TokenDiagnosticLocationSnapshot.TryScan(init var diagnostics)
+                init TokenDiagnosticLocationSnapshot diagnostics;
+                if (!TokenDiagnosticLocationSnapshot.TryScan(ref init diagnostics)
                     || diagnostics.GetCount() !=
             """);
         _ = entry.Append(CultureInfo.InvariantCulture, $" {expected.Length}) {{ return 1; }}\n");
@@ -183,8 +188,12 @@ internal sealed partial class ManagedScannerComponentTests
             var code = int.Parse(diagnostic.Code.AsSpan(3), CultureInfo.InvariantCulture);
             var location = SourceText.From(text).GetLinePosition(diagnostic.Span.Start);
             _ = entry.Append(FormattableString.Invariant($$"""
-                require diagnostics.TryGet({{index}}, init var code{{index}}, init var span{{index}},
-                    init var line{{index}}, init var column{{index}});
+                init int32 code{{index}};
+                init SourceRange span{{index}};
+                init int32 line{{index}};
+                init int32 column{{index}};
+                require diagnostics.TryGet({{index}}, ref init code{{index}}, ref init span{{index}},
+                    ref init line{{index}}, ref init column{{index}});
                 if (code{{index}} != {{code}} || span{{index}}.Start != {{diagnostic.Span.Start}}
                     || span{{index}}.Length != {{diagnostic.Span.Length}}
                     || line{{index}} != {{location.Line + 1}}
@@ -192,12 +201,20 @@ internal sealed partial class ManagedScannerComponentTests
                 """));
         }
         _ = entry.Append("""
-                if (diagnostics.TryGet(-1, init var invalidCode, init var invalidSpan,
-                    init var invalidLine, init var invalidColumn)
+                init int32 invalidCode;
+                init SourceRange invalidSpan;
+                init int32 invalidLine;
+                init int32 invalidColumn;
+                init int32 beyondCode;
+                init SourceRange beyondSpan;
+                init int32 beyondLine;
+                init int32 beyondColumn;
+                if (diagnostics.TryGet(-1, ref init invalidCode, ref init invalidSpan,
+                    ref init invalidLine, ref init invalidColumn)
                     || invalidCode is init || invalidSpan is init
                     || invalidLine is init || invalidColumn is init) { return 3; }
-                if (diagnostics.TryGet(diagnostics.GetCount(), init var beyondCode,
-                    init var beyondSpan, init var beyondLine, init var beyondColumn)
+                if (diagnostics.TryGet(diagnostics.GetCount(), ref init beyondCode,
+                    ref init beyondSpan, ref init beyondLine, ref init beyondColumn)
                     || beyondCode is init || beyondSpan is init
                     || beyondLine is init || beyondColumn is init) { return 4; }
                 return 42;
@@ -222,12 +239,17 @@ internal sealed partial class ManagedScannerComponentTests
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                if (!TokenDiagnosticLocationSnapshot.TryScan(init var diagnostics)
+                init TokenDiagnosticLocationSnapshot diagnostics;
+                if (!TokenDiagnosticLocationSnapshot.TryScan(ref init diagnostics)
                     || diagnostics.GetCount() != {{diagnosticCount}}) { return 1; }
                 mut int32 index = 0;
                 while (index < {{diagnosticCount}}) {
-                    if (!diagnostics.TryGet(index, init var code, init var span,
-                        init var line, init var column)
+                    init int32 code;
+                    init SourceRange span;
+                    init int32 line;
+                    init int32 column;
+                    if (!diagnostics.TryGet(index, ref init code, ref init span,
+                        ref init line, ref init column)
                         || code != 1 || span.Start != index * 2 || span.Length != 1
                         || line != index + 1 || column != 1) { return 2; }
                     index = index + 1;
@@ -255,9 +277,10 @@ internal sealed partial class ManagedScannerComponentTests
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
+                init TokenDiagnosticSnapshot diagnostics;
                 int32 tokenCount = Scan();
                 Host.Diagnostics[{{word}}] = {{value}};
-                if (TokenDiagnosticSnapshot.TryBuild(init var diagnostics)) { return 1; }
+                if (TokenDiagnosticSnapshot.TryBuild(ref init diagnostics)) { return 1; }
                 return 42;
             }
             """;
@@ -311,17 +334,22 @@ internal sealed partial class ManagedScannerComponentTests
         const string Entry = """
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TokenSnapshot.TryScan(init var tokens);
-                if (tokens.GetCount() != 129 || tokens.TryGet(-1, init var negative)
-                    || tokens.TryGet(129, init var beyond)) { return 1; }
+                init TokenSnapshot tokens;
+                init Token negative;
+                init Token beyond;
+                init Token eof;
+                require TokenSnapshot.TryScan(ref init tokens);
+                if (tokens.GetCount() != 129 || tokens.TryGet(-1, ref init negative)
+                    || tokens.TryGet(129, ref init beyond)) { return 1; }
                 mut int32 index = 0;
                 while (index < 128) {
-                    require tokens.TryGet(index, init var token);
+                    init Token token;
+                    require tokens.TryGet(index, ref init token);
                     if (token.Kind != 2 || token.Range.Start != index * 2
                         || token.Range.Length != 1) { return 2; }
                     index = index + 1;
                 }
-                require tokens.TryGet(128, init var eof);
+                require tokens.TryGet(128, ref init eof);
                 if (eof.Kind != 0 || eof.Range.Start != 255
                     || eof.Range.Length != 0) { return 3; }
                 return 42;
@@ -343,18 +371,23 @@ internal sealed partial class ManagedScannerComponentTests
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TokenSnapshot.TryScan(init var tokens);
+                init TokenSnapshot tokens;
+                init Token negative;
+                init Token beyond;
+                init Token eof;
+                require TokenSnapshot.TryScan(ref init tokens);
                 if (tokens.GetCount() != {{expectedTokenCount}}
-                    || tokens.TryGet(-1, init var negative)
-                    || tokens.TryGet({{expectedTokenCount}}, init var beyond)) { return 1; }
+                    || tokens.TryGet(-1, ref init negative)
+                    || tokens.TryGet({{expectedTokenCount}}, ref init beyond)) { return 1; }
                 mut int32 index = 0;
                 while (index < {{identifierCount}}) {
-                    require tokens.TryGet(index, init var token);
+                    init Token token;
+                    require tokens.TryGet(index, ref init token);
                     if (token.Kind != 2 || token.Range.Start != index * 2
                         || token.Range.Length != 1) { return 2; }
                     index = index + 1;
                 }
-                require tokens.TryGet({{identifierCount}}, init var eof);
+                require tokens.TryGet({{identifierCount}}, ref init eof);
                 if (eof.Kind != 0 || eof.Range.Start != {{ScannerHost.MaximumSourceLength}}
                     || eof.Range.Length != 0) { return 3; }
                 return 42;
@@ -375,7 +408,11 @@ internal sealed partial class ManagedScannerComponentTests
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                if (!TryScanCompilerInput(init var tokens, init var trivia, init var integers)) {
+                init TokenSnapshot tokens;
+                init TokenTriviaSnapshot trivia;
+                init TokenIntegerSnapshot integers;
+                init Token eof;
+                if (!TryScanCompilerInput(ref init tokens, ref init trivia, ref init integers)) {
                     return 1;
                 }
                 if (tokens.GetCount() != {{tokenCount}}
@@ -383,21 +420,31 @@ internal sealed partial class ManagedScannerComponentTests
                     || integers.GetCount() != {{integerCount}}) { return 2; }
                 mut int32 index = 0;
                 while (index < {{integerCount}}) {
-                    if (!tokens.TryGet(index, init var token)
+                    init Token token;
+                    init Token whitespace;
+                    init int32 owner;
+                    init int32 tokenIndex;
+                    init bool overflow;
+                    init int32 low;
+                    init int32 high;
+                    init bool foundOverflow;
+                    init int32 foundLow;
+                    init int32 foundHigh;
+                    if (!tokens.TryGet(index, ref init token)
                         || token.Kind != 3 || token.Range.Start != index * 2
                         || token.Range.Length != 1) { return 3; }
-                    if (!trivia.TryGet(index, init var whitespace, init var owner)
+                    if (!trivia.TryGet(index, ref init whitespace, ref init owner)
                         || whitespace.Kind != 0 || whitespace.Range.Start != index * 2 + 1
                         || whitespace.Range.Length != 1 || owner != index + 1) { return 4; }
-                    if (!integers.TryGet(index, init var tokenIndex, init var overflow,
-                        init var low, init var high)
+                    if (!integers.TryGet(index, ref init tokenIndex, ref init overflow,
+                        ref init low, ref init high)
                         || tokenIndex != index || overflow || low != 1 || high != 0) { return 5; }
-                    if (!integers.TryFind(index, init var foundOverflow,
-                        init var foundLow, init var foundHigh)
+                    if (!integers.TryFind(index, ref init foundOverflow,
+                        ref init foundLow, ref init foundHigh)
                         || foundOverflow || foundLow != 1 || foundHigh != 0) { return 6; }
                     index = index + 1;
                 }
-                if (!tokens.TryGet({{integerCount}}, init var eof)
+                if (!tokens.TryGet({{integerCount}}, ref init eof)
                     || eof.Kind != 0 || eof.Range.Start != {{ScannerHost.MaximumSourceLength}}
                     || eof.Range.Length != 0) { return 7; }
                 return 42;
@@ -415,19 +462,26 @@ internal sealed partial class ManagedScannerComponentTests
         const string Entry = """
             using Terrum.CodeAnalysis;
             int32 Main() {
+                init TokenSnapshot oversized;
+                init TokenSnapshot snapshot;
+                init Token first;
+                init TokenSnapshot invalid;
+                init TokenSnapshot invalidTokens;
+                init TokenTriviaSnapshot invalidTrivia;
+                init Token second;
                 int32 count = Scan();
-                if (TokenSnapshot.TryBuild(int32.MaxValue, init var oversized)) { return 4; }
-                require TokenSnapshot.TryBuild(count, init var snapshot);
+                if (TokenSnapshot.TryBuild(int32.MaxValue, ref init oversized)) { return 4; }
+                require TokenSnapshot.TryBuild(count, ref init snapshot);
                 Host.Tokens[0] = -1;
-                require snapshot.TryGet(0, init var first);
+                require snapshot.TryGet(0, ref init first);
                 if (first.Kind != 2 || first.Range.Start != 0) { return 1; }
                 Host.Tokens[0] = 2;
                 Host.Tokens[3] = -1;
-                if (TokenSnapshot.TryBuild(count, init var invalid)) { return 2; }
-                if (TryBuildLossless(count, init var invalidTokens, init var invalidTrivia)) {
+                if (TokenSnapshot.TryBuild(count, ref init invalid)) { return 2; }
+                if (TryBuildLossless(count, ref init invalidTokens, ref init invalidTrivia)) {
                     return 4;
                 }
-                if (!snapshot.TryGet(1, init var second) || second.Kind != 2
+                if (!snapshot.TryGet(1, ref init second) || second.Kind != 2
                     || second.Range.Start != 6) { return 3; }
                 return 42;
             }
@@ -443,9 +497,10 @@ internal sealed partial class ManagedScannerComponentTests
         const string Entry = """
             using Terrum.CodeAnalysis;
             int32 Main() {
+                init TokenTriviaSnapshot invalid;
                 int32 count = Scan();
                 Host.Tokens[0] = -1;
-                if (TokenTriviaSnapshot.TryBuild(count, init var invalid)) { return 1; }
+                if (TokenTriviaSnapshot.TryBuild(count, ref init invalid)) { return 1; }
                 return 42;
             }
             """;
@@ -460,7 +515,8 @@ internal sealed partial class ManagedScannerComponentTests
         const string Entry = """
             using Terrum.CodeAnalysis;
             int32 Main() {
-                if (TokenSnapshot.TryScan(init var tokens)) { return 1; }
+                init TokenSnapshot tokens;
+                if (TokenSnapshot.TryScan(ref init tokens)) { return 1; }
                 return 42;
             }
             """;
@@ -475,15 +531,23 @@ internal sealed partial class ManagedScannerComponentTests
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                if (TokenSnapshot.TryScan(init var tokens)) { return 1; }
-                if (!TokenDiagnosticSnapshot.TryScan(init var diagnostics)
+                init TokenSnapshot tokens;
+                init TokenDiagnosticSnapshot diagnostics;
+                init int32 negativeCode;
+                init SourceRange negativeSpan;
+                init int32 beyondCode;
+                init SourceRange beyondSpan;
+                if (TokenSnapshot.TryScan(ref init tokens)) { return 1; }
+                if (!TokenDiagnosticSnapshot.TryScan(ref init diagnostics)
                     || diagnostics.GetCount() != {{ScannerHost.MaximumSourceLength}}
-                    || diagnostics.TryGet(-1, init var negativeCode, init var negativeSpan)
+                    || diagnostics.TryGet(-1, ref init negativeCode, ref init negativeSpan)
                     || diagnostics.TryGet({{ScannerHost.MaximumSourceLength}},
-                        init var beyondCode, init var beyondSpan)) { return 2; }
+                        ref init beyondCode, ref init beyondSpan)) { return 2; }
                 mut int32 index = 0;
                 while (index < {{ScannerHost.MaximumSourceLength}}) {
-                    if (!diagnostics.TryGet(index, init var code, init var span)
+                    init int32 code;
+                    init SourceRange span;
+                    if (!diagnostics.TryGet(index, ref init code, ref init span)
                         || code != 1 || span.Start != index || span.Length != 1) { return 3; }
                     index = index + 1;
                 }
@@ -508,10 +572,12 @@ internal sealed partial class ManagedScannerComponentTests
         var entry = new StringBuilder("""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TryScanLossless(init var tokens, init var trivia);
+                init TokenSnapshot tokens;
+                init TokenTriviaSnapshot trivia;
+                require TryScanLossless(ref init tokens, ref init trivia);
             """);
         _ = entry.Append(CultureInfo.InvariantCulture,
-            $"if (trivia.GetCount() != {expected.Length} || trivia.TryGet(-1, init var negative, init var negativeOwner) || trivia.TryGet({expected.Length}, init var beyond, init var beyondOwner)) {{ return 1; }}");
+            $"init Token negative; init int32 negativeOwner; init Token beyond; init int32 beyondOwner; if (trivia.GetCount() != {expected.Length} || trivia.TryGet(-1, ref init negative, ref init negativeOwner) || trivia.TryGet({expected.Length}, ref init beyond, ref init beyondOwner)) {{ return 1; }}");
         if (expected.Length > 0)
         {
             _ = entry.Append("Host.Trivia[1] = -1;");
@@ -520,7 +586,7 @@ internal sealed partial class ManagedScannerComponentTests
         {
             var (kind, start, length, owner) = expected[index];
             _ = entry.Append(CultureInfo.InvariantCulture,
-                $"require trivia.TryGet({index}, init var part{index}, init var owner{index});"
+                $"init Token part{index}; init int32 owner{index}; require trivia.TryGet({index}, ref init part{index}, ref init owner{index});"
                 + $" if (part{index}.Kind != {kind} || part{index}.Range.Start != {start}"
                 + $" || part{index}.Range.Length != {length} || owner{index} != {owner}) {{ return 2; }}");
         }
@@ -540,20 +606,28 @@ internal sealed partial class ManagedScannerComponentTests
         const string Entry = """
             using Terrum.CodeAnalysis;
             int32 Main() {
+                init TokenSnapshot standalone;
+                init TokenSnapshot tokens;
+                init TokenTriviaSnapshot trivia;
+                init Token first;
+                init Token firstTrivia;
+                init int32 firstOwner;
                 int32 count = Scan();
-                require TokenSnapshot.TryBuild(count, init var standalone);
-                require TryBuildLossless(count, init var tokens, init var trivia);
+                require TokenSnapshot.TryBuild(count, ref init standalone);
+                require TryBuildLossless(count, ref init tokens, ref init trivia);
                 if (tokens.GetCount() != standalone.GetCount()) { return 1; }
                 for (mut int32 index = 0; index < count; index = index + 1) {
-                    require standalone.TryGet(index, init var expected);
-                    require tokens.TryGet(index, init var actual);
+                    init Token expected;
+                    init Token actual;
+                    require standalone.TryGet(index, ref init expected);
+                    require tokens.TryGet(index, ref init actual);
                     if (actual.Kind != expected.Kind || actual.Range.Start != expected.Range.Start
                         || actual.Range.Length != expected.Range.Length) { return 2; }
                 }
                 Host.Tokens[0] = -1;
                 Host.Trivia[1] = -1;
-                require tokens.TryGet(0, init var first);
-                require trivia.TryGet(0, init var firstTrivia, init var firstOwner);
+                require tokens.TryGet(0, ref init first);
+                require trivia.TryGet(0, ref init firstTrivia, ref init firstOwner);
                 if (first.Kind != 2 || first.Range.Start != 0
                     || firstTrivia.Range.Start != 5 || firstOwner != 1) { return 3; }
                 return 42;
@@ -570,11 +644,19 @@ internal sealed partial class ManagedScannerComponentTests
         const string Entry = """
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TryScanLossless(init var tokens, init var trivia);
+                init TokenSnapshot tokens;
+                init TokenTriviaSnapshot trivia;
+                init Token first;
+                init int32 firstOwner;
+                init Token middle;
+                init int32 middleOwner;
+                init Token last;
+                init int32 lastOwner;
+                require TryScanLossless(ref init tokens, ref init trivia);
                 if (tokens.GetCount() != 129 || trivia.GetCount() != 128) { return 1; }
-                require trivia.TryGet(0, init var first, init var firstOwner);
-                require trivia.TryGet(63, init var middle, init var middleOwner);
-                require trivia.TryGet(127, init var last, init var lastOwner);
+                require trivia.TryGet(0, ref init first, ref init firstOwner);
+                require trivia.TryGet(63, ref init middle, ref init middleOwner);
+                require trivia.TryGet(127, ref init last, ref init lastOwner);
                 if (first.Kind != 0 || first.Range.Start != 1 || first.Range.Length != 1
                     || firstOwner != 1 || middle.Range.Start != 127 || middleOwner != 64
                     || last.Range.Start != 255 || lastOwner != 128) { return 2; }
@@ -593,7 +675,9 @@ internal sealed partial class ManagedScannerComponentTests
         const string Entry = """
             using Terrum.CodeAnalysis;
             int32 Main() {
-                if (TryScanLossless(init var tokens, init var trivia)) { return 1; }
+                init TokenSnapshot tokens;
+                init TokenTriviaSnapshot trivia;
+                if (TryScanLossless(ref init tokens, ref init trivia)) { return 1; }
                 return 42;
             }
             """;
@@ -613,10 +697,13 @@ internal sealed partial class ManagedScannerComponentTests
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
+                init TokenSnapshot standalone;
+                init TokenSnapshot tokens;
+                init TokenTriviaSnapshot trivia;
                 int32 count = Scan();
-                require TokenSnapshot.TryBuild(count, init var standalone);
+                require TokenSnapshot.TryBuild(count, ref init standalone);
                 Host.Trivia[{{word}}] = {{value}};
-                if (TryBuildLossless(count, init var tokens, init var trivia)) { return 1; }
+                if (TryBuildLossless(count, ref init tokens, ref init trivia)) { return 1; }
                 if (standalone.GetCount() != count) { return 2; }
                 return 42;
             }
@@ -636,21 +723,48 @@ internal sealed partial class ManagedScannerComponentTests
         const string Entry = """
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TryScanCompilerInput(init var tokens, init var trivia, init var integers);
+                init TokenSnapshot tokens;
+                init TokenTriviaSnapshot trivia;
+                init TokenIntegerSnapshot integers;
+                init int32 negativeIndex;
+                init bool negativeOverflow;
+                init int32 negativeLow;
+                init int32 negativeHigh;
+                init int32 beyondIndex;
+                init bool beyondOverflow;
+                init int32 beyondLow;
+                init int32 beyondHigh;
+                init int32 first;
+                init bool firstOverflow;
+                init int32 firstLow;
+                init int32 firstHigh;
+                init int32 second;
+                init bool secondOverflow;
+                init int32 secondLow;
+                init int32 secondHigh;
+                init int32 third;
+                init bool thirdOverflow;
+                init int32 thirdLow;
+                init int32 thirdHigh;
+                init int32 fourth;
+                init bool fourthOverflow;
+                init int32 fourthLow;
+                init int32 fourthHigh;
+                require TryScanCompilerInput(ref init tokens, ref init trivia, ref init integers);
                 if (tokens.GetCount() != 5 || trivia.GetCount() != 3
-                    || integers.GetCount() != 4 || integers.TryGet(-1, init var negativeIndex,
-                        init var negativeOverflow, init var negativeLow, init var negativeHigh)
-                    || integers.TryGet(4, init var beyondIndex, init var beyondOverflow,
-                        init var beyondLow, init var beyondHigh)) { return 1; }
+                    || integers.GetCount() != 4 || integers.TryGet(-1, ref init negativeIndex,
+                        ref init negativeOverflow, ref init negativeLow, ref init negativeHigh)
+                    || integers.TryGet(4, ref init beyondIndex, ref init beyondOverflow,
+                        ref init beyondLow, ref init beyondHigh)) { return 1; }
                 Host.IntegerValues[3] = 0;
-                require integers.TryGet(0, init var first, init var firstOverflow,
-                    init var firstLow, init var firstHigh);
-                require integers.TryGet(1, init var second, init var secondOverflow,
-                    init var secondLow, init var secondHigh);
-                require integers.TryGet(2, init var third, init var thirdOverflow,
-                    init var thirdLow, init var thirdHigh);
-                require integers.TryGet(3, init var fourth, init var fourthOverflow,
-                    init var fourthLow, init var fourthHigh);
+                require integers.TryGet(0, ref init first, ref init firstOverflow,
+                    ref init firstLow, ref init firstHigh);
+                require integers.TryGet(1, ref init second, ref init secondOverflow,
+                    ref init secondLow, ref init secondHigh);
+                require integers.TryGet(2, ref init third, ref init thirdOverflow,
+                    ref init thirdLow, ref init thirdHigh);
+                require integers.TryGet(3, ref init fourth, ref init fourthOverflow,
+                    ref init fourthLow, ref init fourthHigh);
                 if (first != 0 || firstOverflow || firstLow != -1 || firstHigh != -1
                     || second != 1 || !secondOverflow || secondLow != 0 || secondHigh != 0
                     || third != 2 || thirdOverflow || thirdLow != 2 || thirdHigh != 0
@@ -672,16 +786,26 @@ internal sealed partial class ManagedScannerComponentTests
         const string Entry = """
             using Terrum.CodeAnalysis;
             int32 Main() {
+                init TokenSnapshot tokens;
+                init TokenTriviaSnapshot trivia;
+                init TokenIntegerSnapshot integers;
+                init Token firstToken;
+                init Token firstTrivia;
+                init int32 firstOwner;
+                init int32 integerIndex;
+                init bool overflow;
+                init int32 low;
+                init int32 high;
                 int32 count = Scan();
-                require TryBuildCompilerInput(count, init var tokens, init var trivia,
-                    init var integers);
+                require TryBuildCompilerInput(count, ref init tokens, ref init trivia,
+                    ref init integers);
                 Host.Tokens[0] = -1;
                 Host.Trivia[1] = -1;
                 Host.IntegerValues[1] = -1;
-                require tokens.TryGet(0, init var firstToken);
-                require trivia.TryGet(0, init var firstTrivia, init var firstOwner);
-                require integers.TryGet(0, init var integerIndex, init var overflow,
-                    init var low, init var high);
+                require tokens.TryGet(0, ref init firstToken);
+                require trivia.TryGet(0, ref init firstTrivia, ref init firstOwner);
+                require integers.TryGet(0, ref init integerIndex, ref init overflow,
+                    ref init low, ref init high);
                 if (firstToken.Kind != 2 || firstToken.Range.Start != 0
                     || firstTrivia.Range.Start != 5 || firstOwner != 1
                     || integerIndex != 1 || overflow || low != 42 || high != 0) {
@@ -703,10 +827,16 @@ internal sealed partial class ManagedScannerComponentTests
         const string Entry = """
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TryScanCompilerInput(init var tokens, init var trivia, init var integers);
+                init TokenSnapshot tokens;
+                init TokenTriviaSnapshot trivia;
+                init TokenIntegerSnapshot integers;
+                init bool overflow;
+                init int32 low;
+                init int32 high;
+                require TryScanCompilerInput(ref init tokens, ref init trivia, ref init integers);
                 if (tokens.GetCount() != 2 || trivia.GetCount() != 0
                     || integers.GetCount() != 0
-                    || integers.TryFind(0, init var overflow, init var low, init var high)) {
+                    || integers.TryFind(0, ref init overflow, ref init low, ref init high)) {
                     return 1;
                 }
                 return 42;
@@ -724,26 +854,56 @@ internal sealed partial class ManagedScannerComponentTests
         const string Entry = """
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TryScanCompilerInput(init var tokens, init var trivia, init var integers);
+                init TokenSnapshot tokens;
+                init TokenTriviaSnapshot trivia;
+                init TokenIntegerSnapshot integers;
+                init bool negativeOverflow;
+                init int32 negativeLow;
+                init int32 negativeHigh;
+                init bool floatingOverflow;
+                init int32 floatingLow;
+                init int32 floatingHigh;
+                init bool exponentOverflow;
+                init int32 exponentLow;
+                init int32 exponentHigh;
+                init bool hexFloatOverflow;
+                init int32 hexFloatLow;
+                init int32 hexFloatHigh;
+                init bool eofOverflow;
+                init int32 eofLow;
+                init int32 eofHigh;
+                init bool firstOverflow;
+                init int32 firstLow;
+                init int32 firstHigh;
+                init bool hexIntegerOverflow;
+                init int32 hexIntegerLow;
+                init int32 hexIntegerHigh;
+                init bool binaryIntegerOverflow;
+                init int32 binaryIntegerLow;
+                init int32 binaryIntegerHigh;
+                init bool lastOverflow;
+                init int32 lastLow;
+                init int32 lastHigh;
+                require TryScanCompilerInput(ref init tokens, ref init trivia, ref init integers);
                 if (tokens.GetCount() != 8 || integers.GetCount() != 4
-                    || integers.TryFind(-1, init var negativeOverflow, init var negativeLow,
-                        init var negativeHigh)
-                    || integers.TryFind(1, init var floatingOverflow, init var floatingLow,
-                        init var floatingHigh)
-                    || integers.TryFind(2, init var exponentOverflow, init var exponentLow,
-                        init var exponentHigh)
-                    || integers.TryFind(3, init var hexFloatOverflow, init var hexFloatLow,
-                        init var hexFloatHigh)
-                    || integers.TryFind(7, init var eofOverflow, init var eofLow,
-                        init var eofHigh)) { return 1; }
-                require integers.TryFind(0, init var firstOverflow, init var firstLow,
-                    init var firstHigh);
-                require integers.TryFind(4, init var hexIntegerOverflow,
-                    init var hexIntegerLow, init var hexIntegerHigh);
-                require integers.TryFind(5, init var binaryIntegerOverflow,
-                    init var binaryIntegerLow, init var binaryIntegerHigh);
-                require integers.TryFind(6, init var lastOverflow, init var lastLow,
-                    init var lastHigh);
+                    || integers.TryFind(-1, ref init negativeOverflow, ref init negativeLow,
+                        ref init negativeHigh)
+                    || integers.TryFind(1, ref init floatingOverflow, ref init floatingLow,
+                        ref init floatingHigh)
+                    || integers.TryFind(2, ref init exponentOverflow, ref init exponentLow,
+                        ref init exponentHigh)
+                    || integers.TryFind(3, ref init hexFloatOverflow, ref init hexFloatLow,
+                        ref init hexFloatHigh)
+                    || integers.TryFind(7, ref init eofOverflow, ref init eofLow,
+                        ref init eofHigh)) { return 1; }
+                require integers.TryFind(0, ref init firstOverflow, ref init firstLow,
+                    ref init firstHigh);
+                require integers.TryFind(4, ref init hexIntegerOverflow,
+                    ref init hexIntegerLow, ref init hexIntegerHigh);
+                require integers.TryFind(5, ref init binaryIntegerOverflow,
+                    ref init binaryIntegerLow, ref init binaryIntegerHigh);
+                require integers.TryFind(6, ref init lastOverflow, ref init lastLow,
+                    ref init lastHigh);
                 if (firstOverflow || firstLow != 1 || firstHigh != 0
                     || hexIntegerOverflow || hexIntegerLow != 0x1E2 || hexIntegerHigh != 0
                     || binaryIntegerOverflow || binaryIntegerLow != 2 || binaryIntegerHigh != 0
@@ -763,16 +923,31 @@ internal sealed partial class ManagedScannerComponentTests
         const string Entry = """
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TryScanCompilerInput(init var tokens, init var trivia, init var integers);
+                init TokenSnapshot tokens;
+                init TokenTriviaSnapshot trivia;
+                init TokenIntegerSnapshot integers;
+                init bool missingOverflow;
+                init int32 missingLow;
+                init int32 missingHigh;
+                init bool firstOverflow;
+                init int32 firstLow;
+                init int32 firstHigh;
+                init bool middleOverflow;
+                init int32 middleLow;
+                init int32 middleHigh;
+                init bool lastOverflow;
+                init int32 lastLow;
+                init int32 lastHigh;
+                require TryScanCompilerInput(ref init tokens, ref init trivia, ref init integers);
                 if (tokens.GetCount() != 129 || integers.GetCount() != 128
-                    || integers.TryFind(128, init var missingOverflow, init var missingLow,
-                        init var missingHigh)) { return 1; }
-                require integers.TryFind(0, init var firstOverflow, init var firstLow,
-                    init var firstHigh);
-                require integers.TryFind(64, init var middleOverflow, init var middleLow,
-                    init var middleHigh);
-                require integers.TryFind(127, init var lastOverflow, init var lastLow,
-                    init var lastHigh);
+                    || integers.TryFind(128, ref init missingOverflow, ref init missingLow,
+                        ref init missingHigh)) { return 1; }
+                require integers.TryFind(0, ref init firstOverflow, ref init firstLow,
+                    ref init firstHigh);
+                require integers.TryFind(64, ref init middleOverflow, ref init middleLow,
+                    ref init middleHigh);
+                require integers.TryFind(127, ref init lastOverflow, ref init lastLow,
+                    ref init lastHigh);
                 if (firstOverflow || middleOverflow || lastOverflow
                     || firstLow != 1 || middleLow != 1 || lastLow != 1
                     || firstHigh != 0 || middleHigh != 0 || lastHigh != 0) { return 2; }
@@ -794,10 +969,13 @@ internal sealed partial class ManagedScannerComponentTests
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
+                init TokenSnapshot tokens;
+                init TokenTriviaSnapshot trivia;
+                init TokenIntegerSnapshot integers;
                 int32 count = Scan();
                 Host.IntegerValues[{{word}}] = {{value}};
-                if (TryBuildCompilerInput(count, init var tokens, init var trivia,
-                    init var integers)) { return 1; }
+                if (TryBuildCompilerInput(count, ref init tokens, ref init trivia,
+                    ref init integers)) { return 1; }
                 return 42;
             }
             """;
@@ -815,10 +993,13 @@ internal sealed partial class ManagedScannerComponentTests
         const string Entry = """
             using Terrum.CodeAnalysis;
             int32 Main() {
+                init TokenSnapshot tokens;
+                init TokenTriviaSnapshot trivia;
+                init TokenIntegerSnapshot integers;
                 int32 count = Scan();
                 Host.IntegerValues[0] = 1;
-                if (TryBuildCompilerInput(count, init var tokens, init var trivia,
-                    init var integers)) { return 1; }
+                if (TryBuildCompilerInput(count, ref init tokens, ref init trivia,
+                    ref init integers)) { return 1; }
                 return 42;
             }
             """;
@@ -836,12 +1017,15 @@ internal sealed partial class ManagedScannerComponentTests
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
+                init TokenSnapshot tokens;
+                init TokenTriviaSnapshot trivia;
+                init TokenIntegerSnapshot integers;
                 int32 count = Scan();
                 Host.IntegerValues[2] = {{status}};
                 Host.IntegerValues[3] = {{low}};
                 Host.IntegerValues[4] = {{high}};
-                if (TryBuildCompilerInput(count, init var tokens, init var trivia,
-                    init var integers)) { return 1; }
+                if (TryBuildCompilerInput(count, ref init tokens, ref init trivia,
+                    ref init integers)) { return 1; }
                 return 42;
             }
             """;
@@ -860,9 +1044,11 @@ internal sealed partial class ManagedScannerComponentTests
         const string Entry = """
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TokenSnapshot.TryScan(init var tokens);
+                init TokenSnapshot tokens;
+                init ScalarFrontendResult result;
+                require TokenSnapshot.TryScan(ref init tokens);
                 Host.IntegerValues[3] = 43;
-                if (TryParseScalarFrontend(move tokens, init var result)) { return 1; }
+                if (TryParseScalarFrontend(move tokens, ref init result)) { return 1; }
                 return 42;
             }
             """;
@@ -879,12 +1065,15 @@ internal sealed partial class ManagedScannerComponentTests
         const string Entry = """
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TokenSnapshot.TryScan(init var tokens);
+                init TokenSnapshot tokens;
+                init SourceRange spacing;
+                init bool handled;
+                require TokenSnapshot.TryScan(ref init tokens);
                 Host.IntegerValues[3] = 43;
                 int32 count = tokens.GetCount();
                 Span<Token> tokenView = tokens.AsSpan();
-                require SourceRange.TryCreate(0, 0, init var spacing);
-                if (TryPublishScalarFrontendProgram(tokenView, count, spacing, init var handled)) {
+                require SourceRange.TryCreate(0, 0, ref init spacing);
+                if (TryPublishScalarFrontendProgram(tokenView, count, spacing, ref init handled)) {
                     return 1;
                 }
                 return 42;
@@ -903,9 +1092,11 @@ internal sealed partial class ManagedScannerComponentTests
         const string Entry = """
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TokenSnapshot.TryScan(init var tokens);
+                init TokenSnapshot tokens;
+                init ScalarFrontendResult result;
+                require TokenSnapshot.TryScan(ref init tokens);
                 Host.IntegerValues[0] = 0;
-                if (TryParseScalarFrontend(move tokens, init var result)) { return 1; }
+                if (TryParseScalarFrontend(move tokens, ref init result)) { return 1; }
                 return 42;
             }
             """;
@@ -922,12 +1113,15 @@ internal sealed partial class ManagedScannerComponentTests
         const string Entry = """
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TokenSnapshot.TryScan(init var tokens);
+                init TokenSnapshot tokens;
+                init SourceRange spacing;
+                init bool handled;
+                require TokenSnapshot.TryScan(ref init tokens);
                 Host.IntegerValues[0] = 0;
                 int32 count = tokens.GetCount();
                 Span<Token> tokenView = tokens.AsSpan();
-                require SourceRange.TryCreate(0, 0, init var spacing);
-                if (TryPublishScalarFrontendProgram(tokenView, count, spacing, init var handled)) {
+                require SourceRange.TryCreate(0, 0, ref init spacing);
+                if (TryPublishScalarFrontendProgram(tokenView, count, spacing, ref init handled)) {
                     return 1;
                 }
                 return 42;
@@ -945,11 +1139,14 @@ internal sealed partial class ManagedScannerComponentTests
         const string Entry = """
             using Terrum.CodeAnalysis;
             int32 Main() {
+                init TokenSnapshot tokens;
+                init TokenTriviaSnapshot trivia;
+                init TokenIntegerSnapshot integers;
                 int32 count = Scan();
                 Host.IntegerValues[2] = 1;
                 Host.IntegerValues[3] = 1;
-                if (TryBuildCompilerInput(count, init var tokens, init var trivia,
-                    init var integers)) { return 1; }
+                if (TryBuildCompilerInput(count, ref init tokens, ref init trivia,
+                    ref init integers)) { return 1; }
                 return 42;
             }
             """;
@@ -990,15 +1187,18 @@ internal sealed partial class ManagedScannerComponentTests
         var expression = ((SyntaxNode)result.Children[1]).Span;
         var assertion = accepted
             ? FormattableString.Invariant($$"""
-                require TryParseScalarReturnFunction(move tokens, init var name, init var value);
+                init SourceRange name;
+                init SourceRange value;
+                require TryParseScalarReturnFunction(move tokens, ref init name, ref init value);
                 if (name.Start != {{name.Start}} || name.Length != {{name.Length}}
                     || value.Start != {{expression.Start}} || value.Length != {{expression.Length}}) { return 1; }
                 """)
-            : "if (TryParseScalarReturnFunction(move tokens, init var name, init var value)) { return 1; }";
+            : "init SourceRange name; init SourceRange value; if (TryParseScalarReturnFunction(move tokens, ref init name, ref init value)) { return 1; }";
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TokenSnapshot.TryScan(init var tokens);
+                init TokenSnapshot tokens;
+                require TokenSnapshot.TryScan(ref init tokens);
                 {{assertion}}
                 return 42;
             }
@@ -1037,20 +1237,27 @@ internal sealed partial class ManagedScannerComponentTests
         var expression = ((SyntaxNode)result.Children[1]).Span;
         var assertion = type != 0
             ? FormattableString.Invariant($$"""
-                require TryParseScalarReturnFunctionTyped(move tokens, init var kind,
-                    init var name, init var expression);
+                init int32 kind;
+                init SourceRange name;
+                init SourceRange expression;
+                require TryParseScalarReturnFunctionTyped(move tokens, ref init kind,
+                    ref init name, ref init expression);
                 if (kind != {{type}} || name.Start != {{name.Start}} || name.Length != {{name.Length}}
                     || expression.Start != {{expression.Start}}
                     || expression.Length != {{expression.Length}}) { return 1; }
                 """)
             : """
-                if (TryParseScalarReturnFunctionTyped(move tokens, init var kind,
-                    init var name, init var expression)) { return 1; }
+                init int32 kind;
+                init SourceRange name;
+                init SourceRange expression;
+                if (TryParseScalarReturnFunctionTyped(move tokens, ref init kind,
+                    ref init name, ref init expression)) { return 1; }
                 """;
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TokenSnapshot.TryScan(init var tokens);
+                init TokenSnapshot tokens;
+                require TokenSnapshot.TryScan(ref init tokens);
                 {{assertion}}
                 return 42;
             }
@@ -1070,14 +1277,19 @@ internal sealed partial class ManagedScannerComponentTests
         const string Entry = """
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TokenSnapshot.TryScan(init var tokens);
-                if (TryParseScalarReturnFunction(move tokens, init var name, init var expression))
+                init TokenSnapshot tokens;
+                init SourceRange name;
+                init SourceRange expression;
+                init TokenSnapshot retryTokens;
+                init int32 scalarType;
+                require TokenSnapshot.TryScan(ref init tokens);
+                if (TryParseScalarReturnFunction(move tokens, ref init name, ref init expression))
                 {
                     return 1;
                 }
-                require TokenSnapshot.TryScan(init var retryTokens);
+                require TokenSnapshot.TryScan(ref init retryTokens);
                 require TryParseScalarReturnFunctionTyped(
-                    move retryTokens, init var scalarType, init name, init expression);
+                    move retryTokens, ref init scalarType, ref init name, ref init expression);
                 if (scalarType != 2 || name.Start != 7 || name.Length != 5
                     || expression.Length != 2)
                 {
@@ -1111,16 +1323,21 @@ internal sealed partial class ManagedScannerComponentTests
         var expected = value ? "true" : "false";
         var assertion = evaluable
             ? $$"""
-                require TryEvaluateBoolScalarReturn(move tokens, init var name, init var bound);
+                init SourceRange name;
+                init bool bound;
+                require TryEvaluateBoolScalarReturn(move tokens, ref init name, ref init bound);
                 if (name.Start != 5 || name.Length != 5 || bound != {{expected}}) { return 1; }
                 """
             : """
-                if (TryEvaluateBoolScalarReturn(move tokens, init var name, init var bound)) { return 1; }
+                init SourceRange name;
+                init bool bound;
+                if (TryEvaluateBoolScalarReturn(move tokens, ref init name, ref init bound)) { return 1; }
                 """;
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TokenSnapshot.TryScan(init var tokens);
+                init TokenSnapshot tokens;
+                require TokenSnapshot.TryScan(ref init tokens);
                 {{assertion}}
                 return 42;
             }
@@ -1178,16 +1395,20 @@ internal sealed partial class ManagedScannerComponentTests
         var text = $"bool Value() {{ return {expression}; }}";
         var assertion = evaluable
             ? $$"""
+                init SourceRange name;
+                init bool bound;
                 require TryEvaluateTypedScalarComparisonReturn(move tokens, move integers,
-                    init var name, init var bound);
+                    ref init name, ref init bound);
                 if (name.Start != 5 || name.Length != 5 || bound != {{(expected ? "true" : "false")}})
                 {
                     return 1;
                 }
                 """
             : """
+                init SourceRange name;
+                init bool bound;
                 if (TryEvaluateTypedScalarComparisonReturn(move tokens, move integers,
-                    init var name, init var bound))
+                    ref init name, ref init bound))
                 {
                     return 1;
                 }
@@ -1195,7 +1416,10 @@ internal sealed partial class ManagedScannerComponentTests
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TryScanCompilerInput(init var tokens, init var trivia, init var integers);
+                init TokenSnapshot tokens;
+                init TokenTriviaSnapshot trivia;
+                init TokenIntegerSnapshot integers;
+                require TryScanCompilerInput(ref init tokens, ref init trivia, ref init integers);
                 {{assertion}}
                 return 42;
             }
@@ -1249,19 +1473,26 @@ internal sealed partial class ManagedScannerComponentTests
         var text = $"{typeName} Value({typeName} x) {{ return {expression}; }}";
         var assertion = evaluable
             ? $$"""
+                init SourceRange name;
+                init {{typeName}} bound;
                 require {{evaluator}}(move tokens, move integers, {{parameter}},
-                    init var name, init var bound);
+                    ref init name, ref init bound);
                 if (name.Start != {{typeName.Length + 1}} || name.Length != 5
                     || bound != {{expected}}) { return 1; }
                 """
             : $$"""
+                init SourceRange name;
+                init {{typeName}} bound;
                 if ({{evaluator}}(move tokens, move integers, {{parameter}},
-                    init var name, init var bound)) { return 1; }
+                    ref init name, ref init bound)) { return 1; }
                 """;
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TryScanCompilerInput(init var tokens, init var trivia, init var integers);
+                init TokenSnapshot tokens;
+                init TokenTriviaSnapshot trivia;
+                init TokenIntegerSnapshot integers;
+                require TryScanCompilerInput(ref init tokens, ref init trivia, ref init integers);
                 {{assertion}}
                 return 42;
             }
@@ -1298,16 +1529,24 @@ internal sealed partial class ManagedScannerComponentTests
         const string Entry = """
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TryScanCompilerInput(init var tokens, init var trivia, init var integers);
+                init TokenSnapshot tokens;
+                init TokenTriviaSnapshot trivia;
+                init TokenIntegerSnapshot integers;
+                init SourceRange name;
+                init int32 value;
+                init TokenSnapshot retryTokens;
+                init TokenTriviaSnapshot retryTrivia;
+                init TokenIntegerSnapshot retryIntegers;
+                require TryScanCompilerInput(ref init tokens, ref init trivia, ref init integers);
                 if (TryEvaluateInt32ParameterAddReturn(
-                    move tokens, move integers, int32.MaxValue, init var name, init var value))
+                    move tokens, move integers, int32.MaxValue, ref init name, ref init value))
                 {
                     return 1;
                 }
-                require TryScanCompilerInput(init var retryTokens, init var retryTrivia,
-                    init var retryIntegers);
+                require TryScanCompilerInput(ref init retryTokens, ref init retryTrivia,
+                    ref init retryIntegers);
                 require TryEvaluateInt32ParameterAddReturn(
-                    move retryTokens, move retryIntegers, 20, init name, init value);
+                    move retryTokens, move retryIntegers, 20, ref init name, ref init value);
                 if (name.Start != 6 || name.Length != 5 || value != 42) { return 2; }
                 return 42;
             }
@@ -1347,8 +1586,10 @@ internal sealed partial class ManagedScannerComponentTests
         var text = $"{typeName} Value({typeName} x, {typeName} y) {{ return {expression}; }}";
         var assertion = evaluable
             ? $$"""
+                init SourceRange name;
+                init {{typeName}} bound;
                 require {{evaluator}}(move tokens, {{first}}, {{second}},
-                    init var name, init var bound);
+                    ref init name, ref init bound);
                 if (name.Start != {{typeName.Length + 1}} || name.Length != 5
                     || bound != {{expected}})
                 {
@@ -1356,8 +1597,10 @@ internal sealed partial class ManagedScannerComponentTests
                 }
                 """
             : $$"""
+                init SourceRange name;
+                init {{typeName}} bound;
                 if ({{evaluator}}(move tokens, {{first}}, {{second}},
-                    init var name, init var bound))
+                    ref init name, ref init bound))
                 {
                     return 1;
                 }
@@ -1365,7 +1608,8 @@ internal sealed partial class ManagedScannerComponentTests
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TokenSnapshot.TryScan(init var tokens);
+                init TokenSnapshot tokens;
+                require TokenSnapshot.TryScan(ref init tokens);
                 {{assertion}}
                 return 42;
             }
@@ -1407,9 +1651,12 @@ internal sealed partial class ManagedScannerComponentTests
         const string Entry = """
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TokenSnapshot.TryScan(init var tokens);
+                init TokenSnapshot tokens;
+                init SourceRange name;
+                init int32 value;
+                require TokenSnapshot.TryScan(ref init tokens);
                 if (TryEvaluateInt32TwoParameterAddReturn(move tokens, 1, 2,
-                    init var name, init var value)) { return 1; }
+                    ref init name, ref init value)) { return 1; }
                 return 42;
             }
             """;
@@ -1428,15 +1675,19 @@ internal sealed partial class ManagedScannerComponentTests
         const string Entry = """
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TokenSnapshot.TryScan(init var tokens);
+                init TokenSnapshot tokens;
+                init SourceRange name;
+                init int32 value;
+                init TokenSnapshot retryTokens;
+                require TokenSnapshot.TryScan(ref init tokens);
                 if (TryEvaluateInt32TwoParameterAddReturn(
-                    move tokens, int32.MaxValue, 1, init var name, init var value))
+                    move tokens, int32.MaxValue, 1, ref init name, ref init value))
                 {
                     return 1;
                 }
-                require TokenSnapshot.TryScan(init var retryTokens);
+                require TokenSnapshot.TryScan(ref init retryTokens);
                 require TryEvaluateInt32TwoParameterAddReturn(
-                    move retryTokens, 20, 22, init name, init value);
+                    move retryTokens, 20, 22, ref init name, ref init value);
                 if (name.Start != 6 || name.Length != 5 || value != 42) { return 2; }
                 return 42;
             }
@@ -1481,8 +1732,10 @@ internal sealed partial class ManagedScannerComponentTests
         var text = $"{typeName} Value({typeName} x, {typeName} y) {{ return {expression}; }}";
         var assertion = evaluable
             ? $$"""
+                init SourceRange name;
+                init {{typeName}} bound;
                 require {{evaluator}}(move tokens, {{first}}, {{second}},
-                    init var name, init var bound);
+                    ref init name, ref init bound);
                 if (name.Start != {{typeName.Length + 1}} || name.Length != 5
                     || bound != {{expected}})
                 {
@@ -1490,8 +1743,10 @@ internal sealed partial class ManagedScannerComponentTests
                 }
                 """
             : $$"""
+                init SourceRange name;
+                init {{typeName}} bound;
                 if ({{evaluator}}(move tokens, {{first}}, {{second}},
-                    init var name, init var bound))
+                    ref init name, ref init bound))
                 {
                     return 1;
                 }
@@ -1499,7 +1754,8 @@ internal sealed partial class ManagedScannerComponentTests
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TokenSnapshot.TryScan(init var tokens);
+                init TokenSnapshot tokens;
+                require TokenSnapshot.TryScan(ref init tokens);
                 {{assertion}}
                 return 42;
             }
@@ -1560,8 +1816,10 @@ internal sealed partial class ManagedScannerComponentTests
         var text = $"{typeName} Value(bool flag, {typeName} x, {typeName} y) {{ {body} }}";
         var assertion = evaluable
             ? $$"""
+                init SourceRange name;
+                init {{typeName}} bound;
                 require {{evaluator}}(move tokens, {{condition}}, {{first}}, {{second}},
-                    init var name, init var bound);
+                    ref init name, ref init bound);
                 if (name.Start != {{typeName.Length + 1}} || name.Length != 5
                     || bound != {{expected}})
                 {
@@ -1569,8 +1827,10 @@ internal sealed partial class ManagedScannerComponentTests
                 }
                 """
             : $$"""
+                init SourceRange name;
+                init {{typeName}} bound;
                 if ({{evaluator}}(move tokens, {{condition}}, {{first}}, {{second}},
-                    init var name, init var bound))
+                    ref init name, ref init bound))
                 {
                     return 1;
                 }
@@ -1578,7 +1838,8 @@ internal sealed partial class ManagedScannerComponentTests
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TokenSnapshot.TryScan(init var tokens);
+                init TokenSnapshot tokens;
+                require TokenSnapshot.TryScan(ref init tokens);
                 {{assertion}}
                 return 42;
             }
@@ -1637,8 +1898,10 @@ internal sealed partial class ManagedScannerComponentTests
         var text = $"{typeName} Value(bool flag, {typeName} x, {typeName} y) {{ {body} }}";
         var assertion = evaluable
             ? $$"""
+                init SourceRange name;
+                init {{typeName}} bound;
                 require {{evaluator}}(move tokens, {{condition}}, {{first}}, {{second}},
-                    init var name, init var bound);
+                    ref init name, ref init bound);
                 if (name.Start != {{typeName.Length + 1}} || name.Length != 5
                     || bound != {{expected}})
                 {
@@ -1646,8 +1909,10 @@ internal sealed partial class ManagedScannerComponentTests
                 }
                 """
             : $$"""
+                init SourceRange name;
+                init {{typeName}} bound;
                 if ({{evaluator}}(move tokens, {{condition}}, {{first}}, {{second}},
-                    init var name, init var bound))
+                    ref init name, ref init bound))
                 {
                     return 1;
                 }
@@ -1655,7 +1920,8 @@ internal sealed partial class ManagedScannerComponentTests
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TokenSnapshot.TryScan(init var tokens);
+                init TokenSnapshot tokens;
+                require TokenSnapshot.TryScan(ref init tokens);
                 {{assertion}}
                 return 42;
             }
@@ -1719,8 +1985,10 @@ internal sealed partial class ManagedScannerComponentTests
             """;
         var assertion = evaluable
             ? $$"""
+                init SourceRange name;
+                init {{typeName}} bound;
                 require {{evaluator}}(move tokens, {{first}}, {{second}},
-                    init var name, init var bound);
+                    ref init name, ref init bound);
                 if (name.Start != {{typeName.Length + 1}} || name.Length != 5
                     || bound != {{expected}})
                 {
@@ -1728,8 +1996,10 @@ internal sealed partial class ManagedScannerComponentTests
                 }
                 """
             : $$"""
+                init SourceRange name;
+                init {{typeName}} bound;
                 if ({{evaluator}}(move tokens, {{first}}, {{second}},
-                    init var name, init var bound))
+                    ref init name, ref init bound))
                 {
                     return 1;
                 }
@@ -1737,7 +2007,8 @@ internal sealed partial class ManagedScannerComponentTests
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TokenSnapshot.TryScan(init var tokens);
+                init TokenSnapshot tokens;
+                require TokenSnapshot.TryScan(ref init tokens);
                 {{assertion}}
                 return 42;
             }
@@ -1800,16 +2071,20 @@ internal sealed partial class ManagedScannerComponentTests
         var expectedValue = expected ? "true" : "false";
         var assertion = evaluable
             ? $$"""
+                init SourceRange name;
+                init bool bound;
                 require {{evaluator}}(move tokens, {{first}}, {{second}},
-                    init var name, init var bound);
+                    ref init name, ref init bound);
                 if (name.Start != 5 || name.Length != 5 || bound != {{expectedValue}})
                 {
                     return 1;
                 }
                 """
             : $$"""
+                init SourceRange name;
+                init bool bound;
                 if ({{evaluator}}(move tokens, {{first}}, {{second}},
-                    init var name, init var bound))
+                    ref init name, ref init bound))
                 {
                     return 1;
                 }
@@ -1817,7 +2092,8 @@ internal sealed partial class ManagedScannerComponentTests
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TokenSnapshot.TryScan(init var tokens);
+                init TokenSnapshot tokens;
+                require TokenSnapshot.TryScan(ref init tokens);
                 {{assertion}}
                 return 42;
             }
@@ -1887,9 +2163,11 @@ internal sealed partial class ManagedScannerComponentTests
         var text = $"{typeName} Value({typeName} x, {typeName} y) {{ return {expression}; }}";
         var assertion = evaluable
             ? $$"""
+                init SourceRange name;
+                init {{typeName}} bound;
                 require {{evaluator}}(
                     move tokens, move integers, {{first}}, {{second}},
-                    init var name, init var bound);
+                    ref init name, ref init bound);
                 if (name.Start != {{typeName.Length + 1}} || name.Length != 5
                     || bound != {{expected}})
                 {
@@ -1897,9 +2175,11 @@ internal sealed partial class ManagedScannerComponentTests
                 }
                 """
             : $$"""
+                init SourceRange name;
+                init {{typeName}} bound;
                 if ({{evaluator}}(
                     move tokens, move integers, {{first}}, {{second}},
-                    init var name, init var bound))
+                    ref init name, ref init bound))
                 {
                     return 1;
                 }
@@ -1907,7 +2187,10 @@ internal sealed partial class ManagedScannerComponentTests
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TryScanCompilerInput(init var tokens, init var trivia, init var integers);
+                init TokenSnapshot tokens;
+                init TokenTriviaSnapshot trivia;
+                init TokenIntegerSnapshot integers;
+                require TryScanCompilerInput(ref init tokens, ref init trivia, ref init integers);
                 {{assertion}}
                 return 42;
             }
@@ -1966,16 +2249,20 @@ internal sealed partial class ManagedScannerComponentTests
         var expectedValue = expected ? "true" : "false";
         var assertion = evaluable
             ? $$"""
+                init SourceRange name;
+                init bool bound;
                 require {{evaluator}}(move tokens, move integers, {{parameter}},
-                    init var name, init var bound);
+                    ref init name, ref init bound);
                 if (name.Start != 5 || name.Length != 5 || bound != {{expectedValue}})
                 {
                     return 1;
                 }
                 """
             : $$"""
+                init SourceRange name;
+                init bool bound;
                 if ({{evaluator}}(move tokens, move integers, {{parameter}},
-                    init var name, init var bound))
+                    ref init name, ref init bound))
                 {
                     return 1;
                 }
@@ -1983,7 +2270,10 @@ internal sealed partial class ManagedScannerComponentTests
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TryScanCompilerInput(init var tokens, init var trivia, init var integers);
+                init TokenSnapshot tokens;
+                init TokenTriviaSnapshot trivia;
+                init TokenIntegerSnapshot integers;
+                require TryScanCompilerInput(ref init tokens, ref init trivia, ref init integers);
                 {{assertion}}
                 return 42;
             }
@@ -2024,17 +2314,24 @@ internal sealed partial class ManagedScannerComponentTests
     {
         var assertion = evaluable
             ? FormattableString.Invariant($$"""
-                require TryEvaluateInt32AddReturn(move tokens, move integers, init var name, init var bound);
+                init SourceRange name;
+                init int32 bound;
+                require TryEvaluateInt32AddReturn(move tokens, move integers, ref init name, ref init bound);
                 if (name.Start != 6 || name.Length != 4 || bound != {{value}}) { return 1; }
                 """)
             : """
+                init SourceRange name;
+                init int32 bound;
                 if (TryEvaluateInt32AddReturn(move tokens, move integers,
-                    init var name, init var bound)) { return 1; }
+                    ref init name, ref init bound)) { return 1; }
                 """;
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TryScanCompilerInput(init var tokens, init var trivia, init var integers);
+                init TokenSnapshot tokens;
+                init TokenTriviaSnapshot trivia;
+                init TokenIntegerSnapshot integers;
+                require TryScanCompilerInput(ref init tokens, ref init trivia, ref init integers);
                 {{assertion}}
                 return 42;
             }
@@ -2067,17 +2364,24 @@ internal sealed partial class ManagedScannerComponentTests
     {
         var assertion = evaluable
             ? FormattableString.Invariant($$"""
-                require TryEvaluateUInt32AddReturn(move tokens, move integers, init var name, init var bound);
+                init SourceRange name;
+                init uint32 bound;
+                require TryEvaluateUInt32AddReturn(move tokens, move integers, ref init name, ref init bound);
                 if (name.Start != 7 || name.Length != 5 || bound != {{value}}) { return 1; }
                 """)
             : """
+                init SourceRange name;
+                init uint32 bound;
                 if (TryEvaluateUInt32AddReturn(move tokens, move integers,
-                    init var name, init var bound)) { return 1; }
+                    ref init name, ref init bound)) { return 1; }
                 """;
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TryScanCompilerInput(init var tokens, init var trivia, init var integers);
+                init TokenSnapshot tokens;
+                init TokenTriviaSnapshot trivia;
+                init TokenIntegerSnapshot integers;
+                require TryScanCompilerInput(ref init tokens, ref init trivia, ref init integers);
                 {{assertion}}
                 return 42;
             }
@@ -2115,17 +2419,24 @@ internal sealed partial class ManagedScannerComponentTests
             : value.ToString(CultureInfo.InvariantCulture);
         var assertion = evaluable
             ? $$"""
-                require TryEvaluateInt64AddReturn(move tokens, move integers, init var name, init var bound);
+                init SourceRange name;
+                init int64 bound;
+                require TryEvaluateInt64AddReturn(move tokens, move integers, ref init name, ref init bound);
                 if (name.Start != 6 || name.Length != 5 || bound != {{expected}}) { return 1; }
                 """
             : """
+                init SourceRange name;
+                init int64 bound;
                 if (TryEvaluateInt64AddReturn(move tokens, move integers,
-                    init var name, init var bound)) { return 1; }
+                    ref init name, ref init bound)) { return 1; }
                 """;
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TryScanCompilerInput(init var tokens, init var trivia, init var integers);
+                init TokenSnapshot tokens;
+                init TokenTriviaSnapshot trivia;
+                init TokenIntegerSnapshot integers;
+                require TryScanCompilerInput(ref init tokens, ref init trivia, ref init integers);
                 {{assertion}}
                 return 42;
             }
@@ -2164,17 +2475,24 @@ internal sealed partial class ManagedScannerComponentTests
     {
         var assertion = evaluable
             ? FormattableString.Invariant($$"""
-                require TryEvaluateUInt64AddReturn(move tokens, move integers, init var name, init var bound);
+                init SourceRange name;
+                init uint64 bound;
+                require TryEvaluateUInt64AddReturn(move tokens, move integers, ref init name, ref init bound);
                 if (name.Start != 7 || name.Length != 5 || bound != {{value}}) { return 1; }
                 """)
             : """
+                init SourceRange name;
+                init uint64 bound;
                 if (TryEvaluateUInt64AddReturn(move tokens, move integers,
-                    init var name, init var bound)) { return 1; }
+                    ref init name, ref init bound)) { return 1; }
                 """;
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TryScanCompilerInput(init var tokens, init var trivia, init var integers);
+                init TokenSnapshot tokens;
+                init TokenTriviaSnapshot trivia;
+                init TokenIntegerSnapshot integers;
+                require TryScanCompilerInput(ref init tokens, ref init trivia, ref init integers);
                 {{assertion}}
                 return 42;
             }
@@ -2230,18 +2548,25 @@ internal sealed partial class ManagedScannerComponentTests
         var text = $"{typeName} Value() {{ return {expression}; }}";
         var assertion = evaluable
             ? $$"""
-                require {{evaluator}}(move tokens, move integers, init var name, init var bound);
+                init SourceRange name;
+                init {{typeName}} bound;
+                require {{evaluator}}(move tokens, move integers, ref init name, ref init bound);
                 if (name.Start != {{typeName.Length + 1}} || name.Length != 5
                     || bound != {{expected}}) { return 1; }
                 """
             : $$"""
+                init SourceRange name;
+                init {{typeName}} bound;
                 if ({{evaluator}}(move tokens, move integers,
-                    init var name, init var bound)) { return 1; }
+                    ref init name, ref init bound)) { return 1; }
                 """;
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TryScanCompilerInput(init var tokens, init var trivia, init var integers);
+                init TokenSnapshot tokens;
+                init TokenTriviaSnapshot trivia;
+                init TokenIntegerSnapshot integers;
+                require TryScanCompilerInput(ref init tokens, ref init trivia, ref init integers);
                 {{assertion}}
                 return 42;
             }
@@ -2299,18 +2624,25 @@ internal sealed partial class ManagedScannerComponentTests
         var text = $"{typeName} Value() {{ return {expression}; }}";
         var assertion = evaluable
             ? $$"""
-                require {{evaluator}}(move tokens, move integers, init var name, init var bound);
+                init SourceRange name;
+                init {{typeName}} bound;
+                require {{evaluator}}(move tokens, move integers, ref init name, ref init bound);
                 if (name.Start != {{typeName.Length + 1}} || name.Length != 5
                     || bound != {{expected}}) { return 1; }
                 """
             : $$"""
+                init SourceRange name;
+                init {{typeName}} bound;
                 if ({{evaluator}}(move tokens, move integers,
-                    init var name, init var bound)) { return 1; }
+                    ref init name, ref init bound)) { return 1; }
                 """;
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TryScanCompilerInput(init var tokens, init var trivia, init var integers);
+                init TokenSnapshot tokens;
+                init TokenTriviaSnapshot trivia;
+                init TokenIntegerSnapshot integers;
+                require TryScanCompilerInput(ref init tokens, ref init trivia, ref init integers);
                 {{assertion}}
                 return 42;
             }
@@ -2371,18 +2703,25 @@ internal sealed partial class ManagedScannerComponentTests
         var text = $"{typeName} Value() {{ return {expression}; }}";
         var assertion = evaluable
             ? $$"""
-                require {{evaluator}}(move tokens, move integers, init var name, init var bound);
+                init SourceRange name;
+                init {{typeName}} bound;
+                require {{evaluator}}(move tokens, move integers, ref init name, ref init bound);
                 if (name.Start != {{typeName.Length + 1}} || name.Length != 5
                     || bound != {{expected}}) { return 1; }
                 """
             : $$"""
+                init SourceRange name;
+                init {{typeName}} bound;
                 if ({{evaluator}}(move tokens, move integers,
-                    init var name, init var bound)) { return 1; }
+                    ref init name, ref init bound)) { return 1; }
                 """;
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TryScanCompilerInput(init var tokens, init var trivia, init var integers);
+                init TokenSnapshot tokens;
+                init TokenTriviaSnapshot trivia;
+                init TokenIntegerSnapshot integers;
+                require TryScanCompilerInput(ref init tokens, ref init trivia, ref init integers);
                 {{assertion}}
                 return 42;
             }
@@ -2440,8 +2779,13 @@ internal sealed partial class ManagedScannerComponentTests
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TryScanCompilerInput(init var tokens, init var trivia, init var integers);
-                require {{evaluator}}(move tokens, move integers, init var name, init var bound);
+                init TokenSnapshot tokens;
+                init TokenTriviaSnapshot trivia;
+                init TokenIntegerSnapshot integers;
+                init SourceRange name;
+                init {{typeName}} bound;
+                require TryScanCompilerInput(ref init tokens, ref init trivia, ref init integers);
+                require {{evaluator}}(move tokens, move integers, ref init name, ref init bound);
                 if (name.Start != {{typeName.Length + 1}} || name.Length != 5
                     || bound != {{expected}}) { return 1; }
                 return 42;
@@ -2476,16 +2820,24 @@ internal sealed partial class ManagedScannerComponentTests
         const string Entry = """
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TryScanCompilerInput(init var tokens, init var trivia, init var integers);
+                init TokenSnapshot tokens;
+                init TokenTriviaSnapshot trivia;
+                init TokenIntegerSnapshot integers;
+                init SourceRange name;
+                init int32 value;
+                init TokenSnapshot retryTokens;
+                init TokenTriviaSnapshot retryTrivia;
+                init TokenIntegerSnapshot retryIntegers;
+                require TryScanCompilerInput(ref init tokens, ref init trivia, ref init integers);
                 if (TryEvaluateInt32SubtractReturn(
-                    move tokens, move integers, init var name, init var value))
+                    move tokens, move integers, ref init name, ref init value))
                 {
                     return 1;
                 }
-                require TryScanCompilerInput(init var retryTokens, init var retryTrivia,
-                    init var retryIntegers);
+                require TryScanCompilerInput(ref init retryTokens, ref init retryTrivia,
+                    ref init retryIntegers);
                 require TryEvaluateInt32AddReturn(
-                    move retryTokens, move retryIntegers, init name, init value);
+                    move retryTokens, move retryIntegers, ref init name, ref init value);
                 if (name.Start != 6 || name.Length != 5 || value != 42) { return 2; }
                 return 42;
             }
@@ -2517,20 +2869,31 @@ internal sealed partial class ManagedScannerComponentTests
         var expression = ((SyntaxNode)result.Children[1]).Span;
         var assertion = accepted
             ? FormattableString.Invariant($$"""
+                init SourceRange name;
+                init SourceRange expression;
+                init int32 low;
+                init int32 high;
                 require TryParseScalarReturnInteger(move tokens, move integers,
-                    init var name, init var expression, init var low, init var high);
+                    ref init name, ref init expression, ref init low, ref init high);
                 if (name.Start != {{name.Start}} || name.Length != {{name.Length}}
                     || expression.Start != {{expression.Start}} || expression.Length != {{expression.Length}}
                     || low != {{low}} || high != {{high}}) { return 1; }
                 """)
             : """
+                init SourceRange name;
+                init SourceRange expression;
+                init int32 low;
+                init int32 high;
                 if (TryParseScalarReturnInteger(move tokens, move integers,
-                    init var name, init var expression, init var low, init var high)) { return 1; }
+                    ref init name, ref init expression, ref init low, ref init high)) { return 1; }
                 """;
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TryScanCompilerInput(init var tokens, init var trivia, init var integers);
+                init TokenSnapshot tokens;
+                init TokenTriviaSnapshot trivia;
+                init TokenIntegerSnapshot integers;
+                require TryScanCompilerInput(ref init tokens, ref init trivia, ref init integers);
                 {{assertion}}
                 return 42;
             }
@@ -2568,17 +2931,24 @@ internal sealed partial class ManagedScannerComponentTests
     {
         var assertion = evaluable
             ? FormattableString.Invariant($$"""
-                require TryEvaluateInt32ScalarReturn(move tokens, move integers, init var name, init var bound);
+                init SourceRange name;
+                init int32 bound;
+                require TryEvaluateInt32ScalarReturn(move tokens, move integers, ref init name, ref init bound);
                 if (name.Start != 6 || name.Length != 4 || bound != {{value}}) { return 1; }
                 """)
             : """
+                init SourceRange name;
+                init int32 bound;
                 if (TryEvaluateInt32ScalarReturn(move tokens, move integers,
-                    init var name, init var bound)) { return 1; }
+                    ref init name, ref init bound)) { return 1; }
                 """;
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TryScanCompilerInput(init var tokens, init var trivia, init var integers);
+                init TokenSnapshot tokens;
+                init TokenTriviaSnapshot trivia;
+                init TokenIntegerSnapshot integers;
+                require TryScanCompilerInput(ref init tokens, ref init trivia, ref init integers);
                 {{assertion}}
                 return 42;
             }
@@ -2620,18 +2990,25 @@ internal sealed partial class ManagedScannerComponentTests
     {
         var assertion = evaluable
             ? FormattableString.Invariant($$"""
+                init SourceRange name;
+                init uint32 bound;
                 require TryEvaluateUInt32ScalarReturn(move tokens, move integers,
-                    init var name, init var bound);
+                    ref init name, ref init bound);
                 if (name.Start != 7 || name.Length != 5 || bound != {{value}}) { return 1; }
                 """)
             : """
+                init SourceRange name;
+                init uint32 bound;
                 if (TryEvaluateUInt32ScalarReturn(move tokens, move integers,
-                    init var name, init var bound)) { return 1; }
+                    ref init name, ref init bound)) { return 1; }
                 """;
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TryScanCompilerInput(init var tokens, init var trivia, init var integers);
+                init TokenSnapshot tokens;
+                init TokenTriviaSnapshot trivia;
+                init TokenIntegerSnapshot integers;
+                require TryScanCompilerInput(ref init tokens, ref init trivia, ref init integers);
                 {{assertion}}
                 return 42;
             }
@@ -2674,18 +3051,25 @@ internal sealed partial class ManagedScannerComponentTests
     {
         var assertion = evaluable
             ? FormattableString.Invariant($$"""
+                init SourceRange name;
+                init uint64 bound;
                 require TryEvaluateUInt64ScalarReturn(move tokens, move integers,
-                    init var name, init var bound);
+                    ref init name, ref init bound);
                 if (name.Start != 7 || name.Length != 5 || bound != {{value}}) { return 1; }
                 """)
             : """
+                init SourceRange name;
+                init uint64 bound;
                 if (TryEvaluateUInt64ScalarReturn(move tokens, move integers,
-                    init var name, init var bound)) { return 1; }
+                    ref init name, ref init bound)) { return 1; }
                 """;
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TryScanCompilerInput(init var tokens, init var trivia, init var integers);
+                init TokenSnapshot tokens;
+                init TokenTriviaSnapshot trivia;
+                init TokenIntegerSnapshot integers;
+                require TryScanCompilerInput(ref init tokens, ref init trivia, ref init integers);
                 {{assertion}}
                 return 42;
             }
@@ -2737,18 +3121,25 @@ internal sealed partial class ManagedScannerComponentTests
             : value.ToString(CultureInfo.InvariantCulture);
         var assertion = evaluable
             ? $$"""
+                init SourceRange name;
+                init int64 bound;
                 require TryEvaluateInt64ScalarReturn(move tokens, move integers,
-                    init var name, init var bound);
+                    ref init name, ref init bound);
                 if (name.Start != 6 || name.Length != 5 || bound != {{expected}}) { return 1; }
                 """
             : """
+                init SourceRange name;
+                init int64 bound;
                 if (TryEvaluateInt64ScalarReturn(move tokens, move integers,
-                    init var name, init var bound)) { return 1; }
+                    ref init name, ref init bound)) { return 1; }
                 """;
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TryScanCompilerInput(init var tokens, init var trivia, init var integers);
+                init TokenSnapshot tokens;
+                init TokenTriviaSnapshot trivia;
+                init TokenIntegerSnapshot integers;
+                require TryScanCompilerInput(ref init tokens, ref init trivia, ref init integers);
                 {{assertion}}
                 return 42;
             }
@@ -2785,7 +3176,8 @@ internal sealed partial class ManagedScannerComponentTests
         var source = new StringBuilder("""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TryScanManagedCursor(init var cursor);
+                init write ManagedTokenCursor cursor;
+                require TryScanManagedCursor(ref init cursor);
                 require cursor.IsCurrent;
             """);
         for (var index = 0; index < expected.Length; index++)
@@ -2793,15 +3185,18 @@ internal sealed partial class ManagedScannerComponentTests
             if (index == 0 || index == expected.Length / 2 || index == expected.Length - 1)
             {
                 _ = source.Append(CultureInfo.InvariantCulture,
-                    $"if (!cursor.TryPeek(init var peek{index}) || !cursor.TryPeek(init var repeated{index}) || peek{index}.Kind != {(int)expected[index].Kind} || repeated{index}.Range.Start != {expected[index].Span.Start}) {{ return 4; }}");
+                    $"init Token peek{index}; init Token repeated{index}; if (!cursor.TryPeek(ref init peek{index}) || !cursor.TryPeek(ref init repeated{index}) || peek{index}.Kind != {(int)expected[index].Kind} || repeated{index}.Range.Start != {expected[index].Span.Start}) {{ return 4; }}");
             }
             _ = source.Append(CultureInfo.InvariantCulture,
-                $"if (!cursor.TryRead(init var token{index}) || token{index}.Kind != {(int)expected[index].Kind} || token{index}.Range.Start != {expected[index].Span.Start} || token{index}.Range.Length != {expected[index].Span.Length}) {{ return 1; }}");
+                $"init Token token{index}; if (!cursor.TryRead(ref init token{index}) || token{index}.Kind != {(int)expected[index].Kind} || token{index}.Range.Start != {expected[index].Span.Start} || token{index}.Range.Length != {expected[index].Span.Length}) {{ return 1; }}");
         }
         _ = source.Append("""
-                if (cursor.TryPeek(init var pastPeek) || cursor.TryRead(init var pastEnd)
+                init Token pastPeek;
+                init Token pastEnd;
+                init Token again;
+                if (cursor.TryPeek(ref init pastPeek) || cursor.TryRead(ref init pastEnd)
                     || !cursor.IsCurrent) { return 2; }
-                if (cursor.TryRead(init var again)) { return 3; }
+                if (cursor.TryRead(ref init again)) { return 3; }
                 return 42;
             }
             """);
@@ -2825,24 +3220,35 @@ internal sealed partial class ManagedScannerComponentTests
         const string Entry = """
             using Terrum.CodeAnalysis;
             int32 Main() {
+                init Token negative;
+                init Token outside;
+                init Token beyond;
+                init Token last;
+                init Token middle;
+                init Token first;
+                init Token remaining;
+                init Token second;
+                init Token third;
+                init Token afterEnd;
+                init Token invalidated;
                 require ManagedTokenChain.TryCreate(out var chain);
                 require chain.TryAppend(7, 0, 1);
                 require chain.TryAppend(8, 1, 1);
                 require chain.TryAppend(9, 2, 1);
                 require chain.TryCreateCursor(out var cursor);
-                if (cursor.TryPeekAhead(-1, init var negative)
-                    || cursor.TryPeekAhead(3, init var outside)
-                    || cursor.TryPeekAhead(3, init var beyond)) { return 1; }
-                require cursor.TryPeekAhead(2, init var last) && last.Kind == 9;
-                require cursor.TryPeekAhead(1, init var middle) && middle.Kind == 8;
-                require cursor.TryRead(init var first) && first.Kind == 7;
-                require cursor.TryPeekAhead(1, init var remaining) && remaining.Kind == 9;
-                require cursor.TryRead(init var second) && second.Kind == 8;
-                require cursor.TryRead(init var third) && third.Kind == 9;
-                if (cursor.TryPeekAhead(0, init var afterEnd) || !cursor.IsCurrent) { return 2; }
+                if (cursor.TryPeekAhead(-1, ref init negative)
+                    || cursor.TryPeekAhead(3, ref init outside)
+                    || cursor.TryPeekAhead(3, ref init beyond)) { return 1; }
+                require cursor.TryPeekAhead(2, ref init last) && last.Kind == 9;
+                require cursor.TryPeekAhead(1, ref init middle) && middle.Kind == 8;
+                require cursor.TryRead(ref init first) && first.Kind == 7;
+                require cursor.TryPeekAhead(1, ref init remaining) && remaining.Kind == 9;
+                require cursor.TryRead(ref init second) && second.Kind == 8;
+                require cursor.TryRead(ref init third) && third.Kind == 9;
+                if (cursor.TryPeekAhead(0, ref init afterEnd) || !cursor.IsCurrent) { return 2; }
                 require chain.TryCreateCursor(out var stale);
                 require chain.TryClear();
-                if (stale.TryPeekAhead(1, init var invalidated) || stale.IsCurrent) { return 3; }
+                if (stale.TryPeekAhead(1, ref init invalidated) || stale.IsCurrent) { return 3; }
                 return 42;
             }
             """;
@@ -2857,21 +3263,30 @@ internal sealed partial class ManagedScannerComponentTests
         const string Entry = """
             using Terrum.CodeAnalysis;
             int32 Main() {
+                init write ManagedTokenCursor cursor;
+                init Token wrong;
+                init Token invalid;
+                init Token first;
+                init Token repeated;
+                init Token second;
+                init Token afterEnd;
+                init write ManagedTokenCursor stale;
+                init Token afterMutation;
                 require ManagedTokenChain.TryCreate(out var chain);
                 require chain.TryAppend(7, 0, 1);
                 require chain.TryAppend(8, 1, 1);
-                require chain.TryCreateCursorInit(init var cursor);
-                if (cursor.TryReadKind(8, init var wrong)
-                    || cursor.TryReadKind(-1, init var invalid)) { return 1; }
-                require cursor.TryReadKind(7, init var first);
+                require chain.TryCreateCursorInit(ref init cursor);
+                if (cursor.TryReadKind(8, ref init wrong)
+                    || cursor.TryReadKind(-1, ref init invalid)) { return 1; }
+                require cursor.TryReadKind(7, ref init first);
                 if (first.Kind != 7 || first.Range.Start != 0) { return 2; }
-                if (cursor.TryReadKind(7, init var repeated)) { return 3; }
-                require cursor.TryReadKind(8, init var second);
+                if (cursor.TryReadKind(7, ref init repeated)) { return 3; }
+                require cursor.TryReadKind(8, ref init second);
                 if (second.Kind != 8 || second.Range.Start != 1
-                    || cursor.TryReadKind(8, init var afterEnd)) { return 4; }
-                require chain.TryCreateCursorInit(init var stale);
+                    || cursor.TryReadKind(8, ref init afterEnd)) { return 4; }
+                require chain.TryCreateCursorInit(ref init stale);
                 require chain.TryClear();
-                if (stale.TryReadKind(7, init var afterMutation) || stale.IsCurrent) { return 5; }
+                if (stale.TryReadKind(7, ref init afterMutation) || stale.IsCurrent) { return 5; }
                 return 42;
             }
             """;
@@ -2888,9 +3303,11 @@ internal sealed partial class ManagedScannerComponentTests
         const string Entry = """
             using Terrum.CodeAnalysis;
             int32 Main() {
-                if (TryScanManaged(init var chain)) { return 1; }
+                init write ManagedTokenChain chain;
+                init write ManagedTokenCursor cursor;
+                if (TryScanManaged(ref init chain)) { return 1; }
                 if (chain is init) { return 2; }
-                if (TryScanManagedCursor(init var cursor)) { return 3; }
+                if (TryScanManagedCursor(ref init cursor)) { return 3; }
                 if (cursor is init) { return 4; }
                 return 42;
             }
@@ -2910,18 +3327,28 @@ internal sealed partial class ManagedScannerComponentTests
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
+                init write ManagedTokenCursor cursor;
+                init Token first;
+                init write ManagedTokenCursor stale;
+                init Token absent;
+                init Token missed;
+                init Token unread;
+                init Token ignored;
+                init write ManagedTokenCursor fresh;
                 require ManagedTokenChain.TryCreate(out var chain);
                 require chain.TryAppend(1, 0, 1);
-                require chain.TryCreateCursorInit(init var cursor);
-                require cursor.TryRead(init var first) && first.Kind == 1;
-                require chain.TryCreateCursorInit(init var stale);
+                require chain.TryCreateCursorInit(ref init cursor);
+                require cursor.TryRead(ref init first) && first.Kind == 1;
+                require chain.TryCreateCursorInit(ref init stale);
                 require {{mutation}};
                 if (cursor.IsCurrent || stale.IsCurrent
-                    || cursor.TryPeek(init var absent) || stale.TryPeek(init var missed)
-                    || cursor.TryRead(init var unread) || stale.TryRead(init var ignored)) { return 1; }
-                require chain.TryCreateCursorInit(init var fresh);
+                    || cursor.TryPeek(ref init absent) || stale.TryPeek(ref init missed)
+                    || cursor.TryRead(ref init unread) || stale.TryRead(ref init ignored)) { return 1; }
+                require chain.TryCreateCursorInit(ref init fresh);
                 if (!fresh.IsCurrent) { return 2; }
-                if ({{(clear ? "fresh.TryRead(init var cleared)" : "!fresh.TryRead(init var appended) || appended.Kind != 1")}}) { return 3; }
+                init Token cleared;
+                init Token appended;
+                if ({{(clear ? "fresh.TryRead(ref init cleared)" : "!fresh.TryRead(ref init appended) || appended.Kind != 1")}}) { return 3; }
                 return 42;
             }
             """;
@@ -2938,16 +3365,19 @@ internal sealed partial class ManagedScannerComponentTests
     {
         const string Entry = """
             using Terrum.CodeAnalysis;
-            bool MakeCursor(init ref<write ManagedTokenCursor> result) {
+            bool MakeCursor(ref<init write ManagedTokenCursor> result) {
                 require ManagedTokenChain.TryCreate(out var chain);
                 require chain.TryAppend(7, 0, 1);
-                return chain.TryCreateCursorInit(init result);
+                return chain.TryCreateCursorInit(ref init *result);
             }
             int32 Main() {
-                require MakeCursor(init var cursor);
+                init write ManagedTokenCursor cursor;
+                init Token token;
+                init Token pastEnd;
+                require MakeCursor(ref init cursor);
                 if (ManagedHeap.Collect() != 0) { return 1; }
-                if (!cursor.TryRead(init var token) || token.Kind != 7) { return 2; }
-                if (cursor.TryRead(init var pastEnd) || !cursor.IsCurrent) { return 3; }
+                if (!cursor.TryRead(ref init token) || token.Kind != 7) { return 2; }
+                if (cursor.TryRead(ref init pastEnd) || !cursor.IsCurrent) { return 3; }
                 if (ManagedHeap.Collect() != 0) { return 4; }
                 return 42;
             }
@@ -2963,16 +3393,21 @@ internal sealed partial class ManagedScannerComponentTests
         const string Entry = """
             using Terrum.CodeAnalysis;
             int32 Main() {
+                init write ManagedTokenCursor cursor;
+                init Token token;
+                init write ManagedTokenCursor stale;
+                init Token absent;
+                init Token afterClear;
                 require ManagedTokenChain.TryCreate(out var chain);
                 require chain.TryAppend(7, 0, 1);
-                require chain.TryCreateCursorInit(init var cursor);
+                require chain.TryCreateCursorInit(ref init cursor);
                 if (chain.TryAppend(-1, 1, 0) || !cursor.IsCurrent) { return 1; }
-                if (!cursor.TryRead(init var token) || token.Kind != 7) { return 2; }
-                require chain.TryCreateCursorInit(init var stale);
+                if (!cursor.TryRead(ref init token) || token.Kind != 7) { return 2; }
+                require chain.TryCreateCursorInit(ref init stale);
                 require chain.TryClear();
-                if (stale.TryRead(init var absent) || stale.IsCurrent) { return 3; }
+                if (stale.TryRead(ref init absent) || stale.IsCurrent) { return 3; }
                 if (ManagedHeap.Collect() != 1) { return 4; }
-                if (cursor.TryRead(init var afterClear) || cursor.IsCurrent) { return 5; }
+                if (cursor.TryRead(ref init afterClear) || cursor.IsCurrent) { return 5; }
                 return 42;
             }
             """;
@@ -2988,9 +3423,10 @@ internal sealed partial class ManagedScannerComponentTests
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
+                init write ManagedTokenChain chain;
                 int32 count = Scan();
                 Host.Tokens[{{word}}] = {{value}};
-                if (TryBuildManagedTokenChain(count, init var chain)) { return 1; }
+                if (TryBuildManagedTokenChain(count, ref init chain)) { return 1; }
                 if (chain is init) { return 3; }
                 if (ManagedHeap.Collect() != {{collected}}) { return 2; }
                 return 42;
@@ -3010,9 +3446,10 @@ internal sealed partial class ManagedScannerComponentTests
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
+                init write ManagedTokenChain chain;
                 int32 count = Scan();
                 Host.Tokens[{{word}}] = {{value}};
-                if (TryBuildManagedTokenChain(count, init var chain)) { return 1; }
+                if (TryBuildManagedTokenChain(count, ref init chain)) { return 1; }
                 if (chain is init) { return 3; }
                 if (ManagedHeap.Collect() != 2) { return 2; }
                 return 42;
@@ -3070,7 +3507,8 @@ internal sealed partial class ManagedScannerComponentTests
             _ => throw new InvalidOperationException(firstTypeText),
         };
         var assertion = $$"""
-            require TryScanScalarFrontend(init var result);
+            init ScalarFrontendResult result;
+            require TryScanScalarFrontend(ref init result);
             if (!result.IsValid || result.ErrorCode != 0
                 || result.ReturnType != {{returnType}} || result.ParameterCount != {{count}}
                 || result.Name.Start != {{functionName.Start}}
@@ -3120,10 +3558,10 @@ internal sealed partial class ManagedScannerComponentTests
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-    [TestCase("int32 Value() { return -#42; }",true,"ScalarFunctionParser",        "TryParseScalarReturnFunctionTyped(move tokens, init var scalarType, init var name, init var expression)")]
-    [TestCase("int32 Value(int32 x, int32 y) { return x#+#y; }",false,"ScalarParameterPairParser",        "TryEvaluateInt32TwoParameterAddReturn(move tokens, 20, 22, init var name, init var value)")]
-    [TestCase("int32 Value(bool c, int32 x, int32 y) { if (c) { return x#+#y; } else { return x; } }",        false,"ScalarConditionalAddParser",        "TryEvaluateInt32ScalarConditionalAddReturn(move tokens, true, 20, 22, init var name, init var value)")]
-    [TestCase("int32 Value(int32 x, int32 y) { if (x#<#y) { return x; } else { return y; } }",        false,"ScalarComparisonConditionalParser",        "TryEvaluateInt32ComparisonConditionalReturn(move tokens, 20, 22, init var name, init var value)")]
+    [TestCase("int32 Value() { return -#42; }",true,"ScalarFunctionParser",        "init int32 scalarType; init SourceRange name; init SourceRange expression; TryParseScalarReturnFunctionTyped(move tokens, ref init scalarType, ref init name, ref init expression)")]
+    [TestCase("int32 Value(int32 x, int32 y) { return x#+#y; }",false,"ScalarParameterPairParser",        "init SourceRange name; init int32 value; TryEvaluateInt32TwoParameterAddReturn(move tokens, 20, 22, ref init name, ref init value)")]
+    [TestCase("int32 Value(bool c, int32 x, int32 y) { if (c) { return x#+#y; } else { return x; } }",        false,"ScalarConditionalAddParser",        "init SourceRange name; init int32 value; TryEvaluateInt32ScalarConditionalAddReturn(move tokens, true, 20, 22, ref init name, ref init value)")]
+    [TestCase("int32 Value(int32 x, int32 y) { if (x#<#y) { return x; } else { return y; } }",        false,"ScalarComparisonConditionalParser",        "init SourceRange name; init int32 value; TryEvaluateInt32ComparisonConditionalReturn(move tokens, 20, 22, ref init name, ref init value)")]
     public async Task MaintainedScalarProbesRejectOperatorSpacingBeforeLegacyFallbackAsync(
         string form, bool prefix, string module, string invocation)
     {
@@ -3133,7 +3571,8 @@ internal sealed partial class ManagedScannerComponentTests
             var entry = $$"""
                 using Terrum.CodeAnalysis;
                 int32 Main() {
-                    require TokenSnapshot.TryScan(init var tokens);
+                    init TokenSnapshot tokens;
+                    require TokenSnapshot.TryScan(ref init tokens);
                     bool valid = {{invocation}};
                     if (valid != {{(prefix == (gap.Length == 0) ? "true" : "false")}}) { return 1; }
                     return 42;
@@ -3147,9 +3586,9 @@ internal sealed partial class ManagedScannerComponentTests
             }
         }
     }
-    [TestCase("int32 Value#(bool c, int32 x, int32 y) { if (c) { return x; } else { return y; } }",        "ScalarConditionalParser","TryEvaluateInt32ScalarConditionalReturn(move tokens, true, 20, 22, init var name, init var value)")]
-    [TestCase("int32 Value#(bool c, int32 x, int32 y) { if (c) { return x + y; } else { return x; } }",        "ScalarConditionalAddParser","TryEvaluateInt32ScalarConditionalAddReturn(move tokens, true, 20, 22, init var name, init var value)")]
-    [TestCase("int32 Value#(int32 x, int32 y) { if (x < y) { return x; } else { return y; } }",        "ScalarComparisonConditionalParser","TryEvaluateInt32ComparisonConditionalReturn(move tokens, 20, 22, init var name, init var value)")]
+    [TestCase("int32 Value#(bool c, int32 x, int32 y) { if (c) { return x; } else { return y; } }",        "ScalarConditionalParser","init SourceRange name; init int32 value; TryEvaluateInt32ScalarConditionalReturn(move tokens, true, 20, 22, ref init name, ref init value)")]
+    [TestCase("int32 Value#(bool c, int32 x, int32 y) { if (c) { return x + y; } else { return x; } }",        "ScalarConditionalAddParser","init SourceRange name; init int32 value; TryEvaluateInt32ScalarConditionalAddReturn(move tokens, true, 20, 22, ref init name, ref init value)")]
+    [TestCase("int32 Value#(int32 x, int32 y) { if (x < y) { return x; } else { return y; } }",        "ScalarComparisonConditionalParser","init SourceRange name; init int32 value; TryEvaluateInt32ComparisonConditionalReturn(move tokens, 20, 22, ref init name, ref init value)")]
     public async Task MaintainedScalarProbesEnforceAttachedHeadersAsync(string form, string module, string invocation)
     {
         foreach (var gap in new[] { "", " ", "\n", "/* boundary */", "/// boundary\n" })
@@ -3158,7 +3597,8 @@ internal sealed partial class ManagedScannerComponentTests
             var entry = $$"""
                 using Terrum.CodeAnalysis;
                 int32 Main() {
-                    require TokenSnapshot.TryScan(init var tokens);
+                    init TokenSnapshot tokens;
+                    require TokenSnapshot.TryScan(ref init tokens);
                     bool valid = {{invocation}};
                     if (valid != {{(gap.Length == 0 ? "true" : "false")}}) { return 1; }
                     return 42;
@@ -3207,10 +3647,10 @@ internal sealed partial class ManagedScannerComponentTests
             $"Host.Tokens[{kinds.Length * 3}] = 0;"
             + $" Host.Tokens[{(kinds.Length * 3) + 1}] = {text.Length};"
             + $" Host.Tokens[{(kinds.Length * 3) + 2}] = 0;"
-            + $" require TokenSnapshot.TryBuild({kinds.Length + 1}, init var tokens);"
+            + $" init TokenSnapshot tokens; require TokenSnapshot.TryBuild({kinds.Length + 1}, ref init tokens);"
             + " var error = tokens.GetScalarOperatorSpacingError();"
             + $" if (error.Start != 0 || error.Length != {text.Length}) {{ return 1; }}"
-            + " require TryParseScalarFrontend(move tokens, init var result);"
+            + " init ScalarFrontendResult result; require TryParseScalarFrontend(move tokens, ref init result);"
             + $" if (result.IsValid || result.ErrorSpan.Start != 0 || result.ErrorSpan.Length != {text.Length}) {{ return 2; }}"
             + " return 42; }");
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
@@ -3235,11 +3675,13 @@ internal sealed partial class ManagedScannerComponentTests
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TokenSnapshot.TryScan(init var tokens);
+                init TokenSnapshot tokens;
+                init ScalarFrontendResult result;
+                require TokenSnapshot.TryScan(ref init tokens);
                 var spacing = tokens.GetScalarOperatorSpacingError();
                 if (spacing.Start != {{expectedStart}}) { return 1; }
                 if (spacing.Length != {{offending.Length}}) { return 2; }
-                require TryParseScalarFrontend(move tokens, init var result);
+                require TryParseScalarFrontend(move tokens, ref init result);
                 if (result.IsValid != {{(offending.Length == 0 ? "true" : "false")}}) { return 3; }
                 if (result.ErrorSpan.Start != {{expectedStart}}) { return 4; }
                 if (result.ErrorSpan.Length != {{offending.Length}}) { return 5; }
@@ -3266,7 +3708,8 @@ internal sealed partial class ManagedScannerComponentTests
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TokenSnapshot.TryScan(init var tokens);
+                init TokenSnapshot tokens;
+                require TokenSnapshot.TryScan(ref init tokens);
                 var spacing = tokens.GetScalarOperatorSpacingError();
                 if (spacing.Start != {{expectedStart}} || spacing.Length != {{expectedLength}}) {
                     return 1;
@@ -3326,8 +3769,10 @@ internal sealed partial class ManagedScannerComponentTests
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TokenSnapshot.TryScan(init var tokens);
-                require TryParseScalarFrontend(move tokens, init var result);
+                init TokenSnapshot tokens;
+                init ScalarFrontendResult result;
+                require TokenSnapshot.TryScan(ref init tokens);
+                require TryParseScalarFrontend(move tokens, ref init result);
                 if (result.IsValid || result.ErrorCode != {{code}}
                     || result.ErrorSpan.Start != {{expectedStart}}
                     || result.ErrorSpan.Length != {{expectedLength}}
@@ -3355,8 +3800,10 @@ internal sealed partial class ManagedScannerComponentTests
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TokenSnapshot.TryScan(init var tokens);
-                require TryParseScalarFrontend(move tokens, init var result);
+                init TokenSnapshot tokens;
+                init ScalarFrontendResult result;
+                require TokenSnapshot.TryScan(ref init tokens);
+                require TryParseScalarFrontend(move tokens, ref init result);
                 if (result.IsValid) { return 1; }
                 if (result.ErrorCode != 1) { return 2; }
                 if (result.ErrorSpan.Start != {{excess.Start}}) { return 3; }
@@ -3379,10 +3826,14 @@ internal sealed partial class ManagedScannerComponentTests
         const string Entry = """
             using Terrum.CodeAnalysis;
             int32 Main() {
-                if (TryScanScalarFrontend(init var result)) { return 1; }
-                require TokenDiagnosticSnapshot.TryBuild(init var diagnostics);
+                init ScalarFrontendResult result;
+                init TokenDiagnosticSnapshot diagnostics;
+                init int32 code;
+                init SourceRange span;
+                if (TryScanScalarFrontend(ref init result)) { return 1; }
+                require TokenDiagnosticSnapshot.TryBuild(ref init diagnostics);
                 if (diagnostics.GetCount() != 1) { return 2; }
-                require diagnostics.TryGet(0, init var code, init var span);
+                require diagnostics.TryGet(0, ref init code, ref init span);
                 if (code == 0 || span.Start != 0 || span.Length != 1) { return 3; }
                 return 42;
             }
@@ -3409,8 +3860,10 @@ internal sealed partial class ManagedScannerComponentTests
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                if (!TokenSnapshot.TryScan(init var tokens)) { return 1; }
-                if (!TryParseScalarFrontend(move tokens, init var result)) { return 2; }
+                init TokenSnapshot tokens;
+                init ScalarFrontendResult result;
+                if (!TokenSnapshot.TryScan(ref init tokens)) { return 1; }
+                if (!TryParseScalarFrontend(move tokens, ref init result)) { return 2; }
                 if (result.IsValid != {{validLiteral}}) { return 3; }
                 return 42;
             }
@@ -3611,8 +4064,8 @@ internal sealed partial class ManagedScannerComponentTests
             await ExecuteAotAsync(executable, policy).ConfigureAwait(true);
         }
     }
-    [TestCase("public bool Fill(bool publish, init ref<int32> value) { if (publish) { value = 42; return true; } return Fill(true, init value); }",107)]
-    [TestCase("public bool Fill(bool publish, init ref<int32> value) { if (publish) { value = 42; return true; } if (Fill(true, init var nested)) { value = nested; return true; } return false; }",108)]
+    [TestCase("public bool Fill(bool publish, ref<init int32> value) { if (publish) { *value = 42; return true; } return Fill(true, ref init *value); }",107)]
+    [TestCase("public bool Fill(bool publish, ref<init int32> value) { init int32 nested; if (publish) { *value = 42; return true; } if (Fill(true, ref init nested)) { *value = nested; return true; } return false; }",108)]
     public async Task NativeScalarFrontendSingleInitReferenceUsesCurrentProjectionAsync(
         string text, int outputOperation)
     {
@@ -3704,7 +4157,7 @@ internal sealed partial class ManagedScannerComponentTests
     [Test]
     public async Task NativeScalarFrontendSingleNonBooleanInitRefUsesCurrentProjectionAsync()
     {
-        const string text = "public int32 Fill(int32 seed, init ref<int32> value) { if (seed == 0) { value = 40; return 0; } return Fill(seed - 1, init value); }";
+        const string text = "public int32 Fill(int32 seed, ref<init int32> value) { if (seed == 0) { *value = 40; return 0; } return Fill(seed - 1, ref init *value); }";
         var source = SourceText.From(text);
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {

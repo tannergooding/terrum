@@ -11,6 +11,7 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Utilities.Numerics;
 
@@ -73,7 +74,13 @@ internal sealed class IntegerFactsModuleTests
             """;
         var producerTree = SyntaxTree.Parse(producerSource, componentPath);
         Assert.That(producerTree.HasErrors, Is.False, string.Join(Environment.NewLine, producerTree.Diagnostics));
-        var producerCompilation = Compilation.Create(producerTree, policy);
+        var producerCompilation = Compilation.Create(producerTree,
+            new CompilationOptions {
+                RuntimePolicy = policy,
+                CoreEvaluationFormIdentitySelection
+                    = CoreEvaluationFormTestHelpers.ConstEvalSelection(
+                        policy),
+            });
         Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
 
         var exports = new[] {

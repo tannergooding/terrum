@@ -12,6 +12,7 @@ using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 using Terrum.CodeAnalysis.Tests.Semantics;
+using Terrum.CodeAnalysis.Tests.Text;
 using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Lexing;
@@ -42,18 +43,29 @@ internal sealed class StringLiteralModuleTests
             namespace Terrum.CodeAnalysis;
             int32 Main() { return 0; }
             public int32 ReadFirstStringScalar() {
-                if (!SourceRange.TryCreate(0, Host.Source.Length, init var spelling)) { return -1; }
-                if (!StringLiteral.TryCreate(spelling, init var literal)) { return -2; }
+                init SourceRange spelling;
+                init StringLiteral literal;
+                init int32 scalar;
+                init int32 next;
+                if (!SourceRange.TryCreate(0, Host.Source.Length, ref init spelling)) { return -1; }
+                if (!StringLiteral.TryCreate(spelling, ref init literal)) { return -2; }
                 if (literal.ScalarCount == 0) { return 0; }
-                if (!literal.TryReadScalar(spelling.Start + 1, init var scalar, init var next)) { return -3; }
+                if (!literal.TryReadScalar(spelling.Start + 1, ref init scalar,
+                    ref init next)) { return -3; }
                 return scalar;
             }
             public int32 ReadRequestedStringScalar() {
                 if (Host.Source.Length < 3) { return -1; }
-                if (!SourceRange.TryCreate(2, Host.Source.Length - 2, init var spelling)) { return -2; }
-                if (!StringLiteral.TryCreate(spelling, init var literal)) { return -3; }
+                init SourceRange spelling;
+                init StringLiteral literal;
+                init int32 scalar;
+                init int32 next;
+                if (!SourceRange.TryCreate(2, Host.Source.Length - 2,
+                    ref init spelling)) { return -2; }
+                if (!StringLiteral.TryCreate(spelling, ref init literal)) { return -3; }
                 int32 position = spelling.Start + int32(Host.Source[0]);
-                if (!literal.TryReadScalar(position, init var scalar, init var next)) { return -4; }
+                if (!literal.TryReadScalar(position, ref init scalar,
+                    ref init next)) { return -4; }
                 if (next != spelling.Start + int32(Host.Source[1])) { return -5; }
                 return scalar;
             }
@@ -69,26 +81,42 @@ internal sealed class StringLiteralModuleTests
                     int32 spellingLength = int32(Host.Source[at + 3]);
                     at = at + 4;
                     if (spellingLength < 2 || spellingLength > sourceLength - at) { return -2; }
-                    if (!SourceRange.TryCreate(at, spellingLength, init var spelling)) { return -3; }
-                    if (StringLiteral.TryCreate(spelling, init var literal)) {
+                    init SourceRange spelling;
+                    init StringLiteral literal;
+                    init int32 scalar;
+                    init int32 next;
+                    if (!SourceRange.TryCreate(at, spellingLength,
+                        ref init spelling)) { return -3; }
+                    if (StringLiteral.TryCreate(spelling, ref init literal)) {
                         if (!expectedValid || literal.ScalarCount != 1
-                            || !literal.TryReadScalar(at + 1, init var scalar, init var next)
+                            || !literal.TryReadScalar(at + 1, ref init scalar,
+                                ref init next)
                             || scalar != expectedScalar || next != at + spellingLength - 1
                             || GetStringLiteralScalarOrMinusOne(at, spellingLength, 0) != expectedScalar) {
                             return item + 1;
                         }
                         mut StringLiteralCursor cursor = StringLiteralCursor.Create(literal);
+                        init int32 cursorScalar;
+                        init StringLiteralCursor following;
+                        init int32 extraScalar;
+                        init StringLiteralCursor afterExtra;
                         if (cursor.Position != at + 1
-                            || !cursor.TryRead(init var cursorScalar, init var following)
+                            || !cursor.TryRead(ref init cursorScalar,
+                                ref init following)
                             || cursorScalar != expectedScalar
                             || following.Position != at + spellingLength - 1
-                            || following.TryRead(init var extraScalar, init var afterExtra)) {
+                            || following.TryRead(ref init extraScalar,
+                                ref init afterExtra)) {
                             return item + 1;
                         }
                         for (mut int32 position = at + 2;
                             position < at + spellingLength - 1;
                             position = position + 1) {
-                            if (literal.TryReadScalar(position, init var interiorScalar, init var interiorNext)) {
+                            init int32 interiorScalar;
+                            init int32 interiorNext;
+                            if (literal.TryReadScalar(position,
+                                ref init interiorScalar,
+                                ref init interiorNext)) {
                                 return item + 1;
                             }
                         }
@@ -116,9 +144,12 @@ internal sealed class StringLiteralModuleTests
                     int32 spellingLength = int32(Host.Source[at]);
                     at = at + 1;
                     if (spellingLength > sourceLength - at) { return -2; }
-                    if (!SourceRange.TryCreate(at, spellingLength, init var spelling)) { return -3; }
+                    init SourceRange spelling;
+                    init StringLiteral literal;
+                    if (!SourceRange.TryCreate(at, spellingLength,
+                        ref init spelling)) { return -3; }
                     mut int32 expectedScalarCount = -1;
-                    if (StringLiteral.TryCreate(spelling, init var literal)) {
+                    if (StringLiteral.TryCreate(spelling, ref init literal)) {
                         expectedScalarCount = literal.ScalarCount;
                         if (GetStringLiteralScalarCountOrMinusOne(at, spellingLength) != expectedScalarCount) {
                             return item + 1;
@@ -130,7 +161,10 @@ internal sealed class StringLiteralModuleTests
                                 mut int32 position = at + 1;
                                 mut int32 currentIndex = 0;
                                 while (currentIndex <= scalarIndex) {
-                                    if (!literal.TryReadScalar(position, init var value, init var next)) {
+                                    init int32 value;
+                                    init int32 next;
+                                    if (!literal.TryReadScalar(position,
+                                        ref init value, ref init next)) {
                                         return -4;
                                     }
                                     if (currentIndex == scalarIndex) { expectedScalar = value; }
@@ -167,17 +201,19 @@ internal sealed class StringLiteralModuleTests
             },
         ], options);
         Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+        var producerProgram = ((global::System.Func<BoundProgram>)(() => {
             var __nunitActual0 = producerCompilation.Program;
             Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
             return (BoundProgram)__nunitActual0!;
-        }))(),
+        }))();
+        var producer = ModuleCompiler.CreateProducer(producerProgram,
             [
                 "Terrum.CodeAnalysis.ReadFirstStringScalar",
                 "Terrum.CodeAnalysis.ReadRequestedStringScalar",
                 "Terrum.CodeAnalysis.VerifyLiteralScalarRecords",
                 "Terrum.CodeAnalysis.VerifyLiteralCountRecords",
-            ]);
+            ], TextComponentTestHelpers.CreateIdentityInputs(producerProgram,
+                "StringLiteralProvider"));
 
         var consumerTree = SyntaxTree.Parse("""
             namespace Terrum.CodeAnalysis;

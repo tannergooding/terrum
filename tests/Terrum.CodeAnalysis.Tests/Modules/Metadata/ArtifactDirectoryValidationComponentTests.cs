@@ -23,9 +23,14 @@ internal sealed class ArtifactDirectoryValidationComponentTests
     private const string VerificationSource = """
         namespace Terrum.CodeAnalysis;
         int32 Main() {
+            init int32 found;
+            init int32 sectionStart;
+            init int32 sectionLength;
+            init int32 recordCount;
+            init int32 sectionFlags;
             if (!TryGetArtifactSection(
-                Host.Expected[1], init var found, init var sectionStart,
-                init var sectionLength, init var recordCount, init var sectionFlags)) {
+                Host.Expected[1], ref init found, ref init sectionStart,
+                ref init sectionLength, ref init recordCount, ref init sectionFlags)) {
                 return Host.Expected[0] == 0 ? 0 : 1;
             }
             if (Host.Expected[0] == 0) { return 1; }

@@ -488,7 +488,8 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                     if (typeId == 0 || typeId > typeCount
                         || mappedTypes[typeId] != valueTypes[result]
                         || (opcode == 1 && !FitsBitPattern(valueTypes[result], bits))
-                        || (opcode == 2 && (valueTypes[result] is not (8 or 9 or 0x0D or 0x0E)
+                        || (opcode == 2 && (valueTypes[result] is not (8 or 9 or 0x0D or 0x0E
+                            or 0x10 or 0x11)
                             || !FitsSignedConstant(valueTypes[result], bits, dataWidth))))
                     {
                         throw InvalidBody();
@@ -950,7 +951,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                 {
                     var source = ReadCount(extent, ref cursor, referenceWidth);
                     Use(source, ordinal);
-                    if (valueTypes[source] is not (8 or 9)
+                    if (valueTypes[source] is not (8 or 9 or 0x10)
                         || valueTypes[result] != valueTypes[source])
                     {
                         throw InvalidBody();
@@ -1499,14 +1500,14 @@ public readonly ref struct TrRmCompactIndexedBodyReader
     }
 
     private static bool IsInteger(ushort type)
-        => type is 8 or 9 or 0x0D or 0x0E;
+        => type is 8 or 9 or 0x0D or 0x0E or 0x10 or 0x11;
 
     private static bool FitsBitPattern(ushort type, ulong bits)
         => type switch {
             1 => bits <= 1,
             3 => bits <= ushort.MaxValue,
             8 or 0x0D or 0x14 => bits <= uint.MaxValue,
-            9 or 0x0E or 0x15 => true,
+            9 or 0x0E or 0x10 or 0x11 or 0x15 => true,
             0x8C => bits == 0,
             _ => false,
         };
@@ -1585,7 +1586,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
         var value = unchecked((long)(bits << shift)) >> shift;
         return type switch {
             8 => value is >= int.MinValue and <= int.MaxValue,
-            9 => true,
+            9 or 0x10 => true,
             0x0D => value is >= 0 and <= uint.MaxValue,
             _ => value >= 0,
         };

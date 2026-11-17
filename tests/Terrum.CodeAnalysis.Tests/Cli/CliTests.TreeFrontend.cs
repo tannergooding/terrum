@@ -28,9 +28,9 @@ internal sealed partial class CliTests
     [TestCase("public char16 Value(char16 x) => x;")]
     [TestCase("public int32 Value(int32 x, int32 y, int32 z) { if ((x + y) > (z * 2)) { return (x - z) + y; } return z + (x * 2); }")]
     [TestCase("public int32 Value(out int32 result, int32 input) { if (input == 0) { result = 42; return 0; } return Value(input: 0, result: out result); }")]
-    [TestCase("public int32 Value(init ref<int32> result, int32 input) { if (input == 0) { result = 42; return 0; } return Value(input: 0, result: init result); }")]
+    [TestCase("public int32 Value(ref<init int32> result, int32 input) { if (input == 0) { *result = 42; return 0; } return Value(input: 0, result: ref init *result); }")]
     [TestCase("public int32 Value(out int32 result, int32 input) { if (input == 0) { result = 42; return 0; } int32 status = Value(input: 0, result: out var nested); result = nested; return status; }")]
-    [TestCase("public int32 Value(init ref<int32> result, int32 input) { if (input == 0) { result = 42; return 0; } int32 status = Value(input: 0, result: init var nested); result = nested; return status; }")]
+    [TestCase("public int32 Value(ref<init int32> result, int32 input) { if (input == 0) { *result = 42; return 0; } init int32 nested; int32 status = Value(input: 0, result: ref init nested); *result = nested; return status; }")]
     [TestCase("public int32 Value(int32 x) => x + (-2147483648);")]
     [TestCase("public int64 Value(int64 x) => x + -9223372036854775808;")]
     public async Task TreeFrontendLibraryMatchesHostedBytesAsync(string source)

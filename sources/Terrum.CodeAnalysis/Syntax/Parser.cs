@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
+using System.Linq;
 using System.Threading;
 using Terrum.CodeAnalysis.Diagnostics;
 using Terrum.CodeAnalysis.Lexing;
@@ -23,6 +24,7 @@ internal sealed class Parser
     private int _depth;
     private int _pendingGreater;
     private int _missingTokens;
+    private int _qualifiedTypeStopPosition = -1;
 
     internal Parser(SourceText source, ImmutableArray<SyntaxToken> tokens, CancellationToken cancellationToken)
     {
@@ -46,6 +48,16 @@ internal sealed class Parser
         }
         children.Add(ExpectTypeCloser(missing));
         return Node(SyntaxKind.TypeParameterList, children);
+    }
+
+    private SyntaxNode ParseInterfaceWitnessTypeArgument()
+    {
+        var missing = _missingTokens;
+        return Node(SyntaxKind.TypeParameterList, [
+            ExpectAttached(TokenKind.Less),
+            ParseType(),
+            ExpectTypeCloser(missing),
+        ]);
     }
 
     private void ParseGenericFormal(List<SyntaxElement> children, bool interfaceParameters)
@@ -194,7 +206,7 @@ internal sealed class Parser
         return Node(SyntaxKind.FriendTarget, children);
     }
 
-    private bool LooksLikeGenericName()
+    private bool LooksLikeGenericName(bool allowIndexer = false)
     {
         var depth = 0;
         var previous = TokenKind.Identifier;
@@ -216,29 +228,41 @@ internal sealed class Parser
             else if (kind == TokenKind.Greater)
             {
                 if (depth == 0 || previous is not (TokenKind.Identifier or TokenKind.VoidKeyword
-                    or TokenKind.Greater or TokenKind.Question or TokenKind.QuestionQuestion))
+                    or TokenKind.Greater or TokenKind.Question
+                    or TokenKind.QuestionQuestion or TokenKind.Underscore
+                    or TokenKind.DefaultKeyword or TokenKind.NumericLiteral
+                    or TokenKind.StringLiteral or TokenKind.CharacterLiteral
+                    or TokenKind.TrueKeyword or TokenKind.FalseKeyword
+                    or TokenKind.NullKeyword))
                 {
                     return false;
                 }
                 if (--depth == 0)
                 {
-                    return Peek(offset + 1).Kind is TokenKind.OpenParen
-                        or TokenKind.Dot;
+                    var next = Peek(offset + 1).Kind;
+                    return next is TokenKind.OpenParen or TokenKind.Dot
+                        || allowIndexer && next == TokenKind.OpenBracket;
                 }
             }
             else if (kind is TokenKind.ShiftRight or TokenKind.ShiftRightUnsigned)
             {
                 var count = kind == TokenKind.ShiftRight ? 2 : 3;
                 if (depth < count || previous is not (TokenKind.Identifier or TokenKind.VoidKeyword
-                    or TokenKind.Greater or TokenKind.Question or TokenKind.QuestionQuestion))
+                    or TokenKind.Greater or TokenKind.Question
+                    or TokenKind.QuestionQuestion or TokenKind.Underscore
+                    or TokenKind.DefaultKeyword or TokenKind.NumericLiteral
+                    or TokenKind.StringLiteral or TokenKind.CharacterLiteral
+                    or TokenKind.TrueKeyword or TokenKind.FalseKeyword
+                    or TokenKind.NullKeyword))
                 {
                     return false;
                 }
                 depth -= count;
                 if (depth == 0)
                 {
-                    return Peek(offset + 1).Kind is TokenKind.OpenParen
-                        or TokenKind.Dot;
+                    var next = Peek(offset + 1).Kind;
+                    return next is TokenKind.OpenParen or TokenKind.Dot
+                        || allowIndexer && next == TokenKind.OpenBracket;
                 }
                 kind = TokenKind.Greater;
             }
@@ -257,6 +281,68 @@ internal sealed class Parser
                     return false;
                 }
             }
+            else if (kind is TokenKind.Underscore
+                or TokenKind.DefaultKeyword)
+            {
+                if (previous is not (TokenKind.Less or TokenKind.Comma))
+                {
+                    return false;
+                }
+            }
+            else if (kind is TokenKind.NumericLiteral
+                or TokenKind.StringLiteral or TokenKind.CharacterLiteral
+                or TokenKind.TrueKeyword or TokenKind.FalseKeyword
+                or TokenKind.NullKeyword)
+            {
+                if (previous is not (TokenKind.Less or TokenKind.Comma
+                    or TokenKind.Plus or TokenKind.Minus))
+                {
+                    return false;
+                }
+            }
+            else if (kind is TokenKind.Plus or TokenKind.Minus)
+            {
+                if (previous is not (TokenKind.Less or TokenKind.Comma))
+                {
+                    return false;
+                }
+            }
+            else if (kind == TokenKind.OpenParen)
+            {
+                if (previous is not (TokenKind.Less or TokenKind.Comma))
+                {
+                    return false;
+                }
+
+                var parentheses = 1;
+                var nestedOffset = offset;
+                while (++nestedOffset < _tokens.Length - _position)
+                {
+                    if ((nestedOffset & 63) == 0)
+                    {
+                        _cancellationToken.ThrowIfCancellationRequested();
+                    }
+
+                    var nestedKind = Peek(nestedOffset).Kind;
+                    if (nestedKind == TokenKind.OpenParen)
+                    {
+                        parentheses++;
+                    }
+                    else if (nestedKind == TokenKind.CloseParen
+                        && --parentheses == 0)
+                    {
+                        offset = nestedOffset;
+                        previous = TokenKind.NumericLiteral;
+                        break;
+                    }
+                }
+
+                if (parentheses != 0)
+                {
+                    return false;
+                }
+                continue;
+            }
             else if (kind == TokenKind.Dot)
             {
                 if (previous != TokenKind.Identifier)
@@ -267,7 +353,12 @@ internal sealed class Parser
             else if (kind == TokenKind.Comma)
             {
                 if (depth == 0 || previous is not (TokenKind.Identifier or TokenKind.VoidKeyword
-                    or TokenKind.Greater or TokenKind.Question or TokenKind.QuestionQuestion))
+                    or TokenKind.Greater or TokenKind.Question
+                    or TokenKind.QuestionQuestion or TokenKind.Underscore
+                    or TokenKind.DefaultKeyword or TokenKind.NumericLiteral
+                    or TokenKind.StringLiteral or TokenKind.CharacterLiteral
+                    or TokenKind.TrueKeyword or TokenKind.FalseKeyword
+                    or TokenKind.NullKeyword))
                 {
                     return false;
                 }
@@ -292,14 +383,30 @@ internal sealed class Parser
     private SyntaxNode ParseTypeArguments()
     {
         var missing = _missingTokens;
-        var children = new List<SyntaxElement> { ExpectAttached(TokenKind.Less), ParseType() };
+        var children = new List<SyntaxElement> {
+            ExpectAttached(TokenKind.Less), ParseGenericMethodArgument(),
+        };
         while (Current.Kind == TokenKind.Comma)
         {
             children.Add(Take());
-            children.Add(ParseType());
+            children.Add(ParseGenericMethodArgument());
         }
         children.Add(ExpectTypeCloser(missing));
         return Node(SyntaxKind.TypeParameterList, children);
+    }
+
+    private SyntaxNode ParseGenericMethodArgument()
+    {
+        if (Current.Kind == TokenKind.Underscore)
+        {
+            return Node(SyntaxKind.GenericInferenceArgument, [Take()]);
+        }
+        if (Current.Kind == TokenKind.DefaultKeyword)
+        {
+            return Node(SyntaxKind.GenericDefaultArgument, [Take()]);
+        }
+
+        return ParseTypeArgument();
     }
 
     internal IReadOnlyList<Diagnostic> Diagnostics => _diagnostics;
@@ -469,6 +576,13 @@ internal sealed class Parser
             attribute.Add(Take());
         }
         else if (Current.Kind == TokenKind.Identifier && Current.Name == "method"
+            && Peek(1).Kind == TokenKind.Colon)
+        {
+            attribute.Add(Take());
+            attribute.Add(Take());
+        }
+        else if (Current.Kind == TokenKind.Identifier
+            && Current.Text == "get"
             && Peek(1).Kind == TokenKind.Colon)
         {
             attribute.Add(Take());
@@ -710,7 +824,7 @@ internal sealed class Parser
                 ? ParseFriendVisibility() : Take());
         }
 
-        SyntaxKind kind;
+        SyntaxKind kind = SyntaxKind.SkippedSyntax;
 
         if (isFileScope && Current.Kind == TokenKind.AliasKeyword)
         {
@@ -872,6 +986,45 @@ internal sealed class Parser
             children.Add(Expect(TokenKind.Semicolon));
             kind = SyntaxKind.InterfaceConstantDeclaration;
         }
+        else if (!isInterfaceMember
+            && Current.Kind == TokenKind.Identifier
+            && Current.Text == "type")
+        {
+            children.Add(Take());
+            if (TryParseAssociatedMemberName(children))
+            {
+                children.Add(Current.Kind == TokenKind.Equals
+                    ? TakeSeparated() : Expect(TokenKind.Equals));
+                children.Add(ParseType());
+                children.Add(Expect(TokenKind.Semicolon));
+                kind = SyntaxKind.AssociatedTypeBinding;
+            }
+            else
+            {
+                children.Add(SkipDeclaration());
+                kind = SyntaxKind.SkippedSyntax;
+            }
+        }
+        else if (!isInterfaceMember
+            && Current.Kind == TokenKind.Identifier
+            && Current.Text == "const")
+        {
+            children.Add(Take());
+            children.Add(ParseType());
+            if (TryParseAssociatedMemberName(children))
+            {
+                children.Add(Current.Kind == TokenKind.Equals
+                    ? TakeSeparated() : Expect(TokenKind.Equals));
+                children.Add(ParseExpression());
+                children.Add(Expect(TokenKind.Semicolon));
+                kind = SyntaxKind.AssociatedConstantBinding;
+            }
+            else
+            {
+                children.Add(SkipDeclaration());
+                kind = SyntaxKind.SkippedSyntax;
+            }
+        }
         else if (containingType is not null && Current.Kind == TokenKind.Identifier
             && Current.Name == containingType && Peek(1).Kind == TokenKind.OpenParen)
         {
@@ -898,35 +1051,45 @@ internal sealed class Parser
                 children.Add(Current.Kind == TokenKind.Semicolon ? Take() : ParseCallableBody());
                 kind = SyntaxKind.OperatorDeclaration;
             }
-            else if (isInterfaceMember && Current.Kind == TokenKind.Identifier && Current.Text == "this")
+            else if ((containingType is not null || isInterfaceMember)
+                && Current.Kind == TokenKind.Identifier && Current.Text == "this")
             {
                 children.Add(Take());
-                children.Add(ParseIndexParameters());
-                children.Add(Expect(TokenKind.OpenBrace));
-                children.Add(ParseInterfaceAccessor("get"));
-                var indexerAccessor = NextInterfaceAccessorName();
-                if (indexerAccessor is "set" or "init")
-                {
-                    children.Add(ParseInterfaceAccessor(indexerAccessor));
-                }
-                if (Current.Kind != TokenKind.CloseBrace)
-                {
-                    Report("TRM1002", "An interface indexer allows one getter and at most one setter or initializer.",
-                        Current.Span);
-                    children.Add(SkipDeclaration());
-                }
-                children.Add(Expect(TokenKind.CloseBrace));
+                ParseIndexerDefinition(children, isInterfaceMember);
                 kind = SyntaxKind.IndexerDeclaration;
             }
             else
             {
-                children.Add(Expect(TokenKind.Identifier));
+                var explicitInterfaceMember
+                    = !isInterfaceMember && containingType is not null
+                        && TryParseExplicitInterfaceMemberName(children);
+                if (!explicitInterfaceMember)
+                {
+                    children.Add(Expect(TokenKind.Identifier));
+                }
 
-                if (Current.Kind == TokenKind.Less)
+                var explicitMemberNameNode = explicitInterfaceMember
+                    ? children.OfType<SyntaxNode>().LastOrDefault(
+                        static child => child.Kind
+                            == SyntaxKind.ExplicitInterfaceMemberName)
+                    : null;
+                var explicitMemberNameToken = explicitMemberNameNode?
+                    .Children.OfType<SyntaxTokenElement>()
+                    .LastOrDefault(static token =>
+                        token.Token.Kind == TokenKind.Identifier)?.Token;
+                var explicitIndexer = explicitMemberNameToken?.Text == "this"
+                    && Current.Kind == TokenKind.OpenBracket;
+                if (explicitIndexer)
+                {
+                    ParseIndexerDefinition(children, isInterfaceMember: false);
+                    kind = SyntaxKind.IndexerDeclaration;
+                }
+
+                if (!explicitIndexer && Current.Kind == TokenKind.Less)
                 {
                     children.Add(ParseTypeParameters(interfaceMember: isInterfaceMember));
                 }
-                if (Current.Kind == TokenKind.OpenParen)
+                if (!explicitIndexer && Current.Kind == TokenKind.OpenParen)
                 {
                     children.Add(ParseParameters());
                     while (Current.Kind == TokenKind.WhereKeyword)
@@ -937,7 +1100,8 @@ internal sealed class Parser
                     children.Add(ParseCallableBody());
                     kind = SyntaxKind.FunctionDeclaration;
                 }
-                else if ((containingType is not null || isInterfaceMember) && children.TrueForAll(static child =>
+                else if (!explicitIndexer
+                    && (containingType is not null || isInterfaceMember) && children.TrueForAll(static child =>
                     child is not SyntaxNode { Kind: SyntaxKind.TypeParameterList }))
                 {
                     if (!isInterfaceMember && Current.Kind == TokenKind.Arrow)
@@ -948,68 +1112,20 @@ internal sealed class Parser
                     else if (Current.Kind == TokenKind.OpenBrace)
                     {
                         children.Add(Take());
-                        if (isInterfaceMember)
+                        children.Add(ParseAccessor("get", isInterfaceMember,
+                            "property"));
+                        var propertyAccessor = NextAccessorName();
+                        if (propertyAccessor is "set" or "init")
                         {
-                            children.Add(ParseInterfaceAccessor("get"));
-                            var propertyAccessor = NextInterfaceAccessorName();
-                            if (propertyAccessor is "set" or "init")
-                            {
-                                children.Add(ParseInterfaceAccessor(propertyAccessor));
-                            }
-                            if (Current.Kind != TokenKind.CloseBrace)
-                            {
-                                Report("TRM1002", "An interface property allows one getter and at most one setter or initializer.",
-                                    Current.Span);
-                                children.Add(SkipDeclaration());
-                            }
+                            children.Add(ParseAccessor(propertyAccessor,
+                                isInterfaceMember, "property"));
                         }
-                        else if (isInterfaceMember)
+                        if (Current.Kind != TokenKind.CloseBrace)
                         {
                             Report("TRM1002",
-                                "An interface member must be a callable, associated declaration, property, or indexer.",
+                                "A property allows one getter and at most one setter or initializer.",
                                 Current.Span);
                             children.Add(SkipDeclaration());
-                            kind = SyntaxKind.SkippedSyntax;
-                        }
-                        else
-                        {
-                            var accessor = new List<SyntaxElement>();
-                            while (Current.Kind == TokenKind.OpenBracket)
-                            {
-                                accessor.Add(ParseAttribute());
-                            }
-                            while (Current.Kind == TokenKind.UnsafeKeyword)
-                            {
-                                accessor.Add(Take());
-                            }
-                            if (Current.Kind != TokenKind.Identifier || Current.Text != "get")
-                            {
-                                Report("TRM1002", "A property requires an explicit get accessor.", Current.Span);
-                                children.Add(SkipDeclaration());
-                            }
-                            else
-                            {
-                                accessor.Add(Take());
-                                if (Current.Kind == TokenKind.Semicolon)
-                                {
-                                    accessor.Add(Take());
-                                }
-                                else if (Current.Kind is TokenKind.OpenBrace or TokenKind.Arrow)
-                                {
-                                    accessor.Add(ParseCallableBody());
-                                }
-                                else
-                                {
-                                    Report("TRM1002", "A getter requires a body.", Current.Span);
-                                    accessor.Add(SkipDeclaration());
-                                }
-                                children.Add(Node(SyntaxKind.GetAccessor, accessor));
-                            }
-                            if (Current.Kind != TokenKind.CloseBrace)
-                            {
-                                Report("TRM1002", "Only a single explicit getter is supported.", Current.Span);
-                                children.Add(SkipDeclaration());
-                            }
                         }
                         children.Add(Expect(TokenKind.CloseBrace));
                         if (Current.Kind == TokenKind.Equals)
@@ -1031,7 +1147,7 @@ internal sealed class Parser
                         kind = SyntaxKind.FieldDeclaration;
                     }
                 }
-                else
+                else if (!explicitIndexer)
                 {
                     Report("TRM1002", $"Expected a function declaration; this construct is outside {SyntaxTree.LanguageVersion}.", Current.Span);
                     children.Add(SkipDeclaration());
@@ -1049,6 +1165,194 @@ internal sealed class Parser
         _depth--;
 
         return Node(kind, children);
+    }
+
+    private bool TryParseAssociatedMemberName(
+        List<SyntaxElement> children)
+    {
+        var separator = FindAssociatedMemberSeparator();
+        if (separator <= _position)
+        {
+            return false;
+        }
+
+        var previousStopPosition = _qualifiedTypeStopPosition;
+        _qualifiedTypeStopPosition = separator;
+        try
+        {
+            children.Add(ParseType());
+        }
+        finally
+        {
+            _qualifiedTypeStopPosition = previousStopPosition;
+        }
+        if (_position != separator)
+        {
+            Report("TRM1002",
+                "An associated binding must name one interface member.",
+                Current.Span);
+            return false;
+        }
+        children.Add(TakeDot(qualified: true));
+        children.Add(Expect(TokenKind.Identifier));
+        return true;
+    }
+
+    private bool TryParseExplicitInterfaceMemberName(
+        List<SyntaxElement> children)
+    {
+        var separator = FindExplicitInterfaceMemberSeparator();
+        if (separator <= _position)
+        {
+            return false;
+        }
+
+        var memberChildren = new List<SyntaxElement>();
+        var previousStopPosition = _qualifiedTypeStopPosition;
+        _qualifiedTypeStopPosition = separator;
+        try
+        {
+            memberChildren.Add(ParseType());
+        }
+        finally
+        {
+            _qualifiedTypeStopPosition = previousStopPosition;
+        }
+        if (_position != separator)
+        {
+            Report("TRM1002",
+                "An explicit interface implementation must name one interface member.",
+                Current.Span);
+            return false;
+        }
+        memberChildren.Add(TakeDot(qualified: true));
+        memberChildren.Add(Expect(TokenKind.Identifier));
+        children.Add(Node(SyntaxKind.ExplicitInterfaceMemberName,
+            memberChildren));
+        return true;
+    }
+
+    private int FindExplicitInterfaceMemberSeparator()
+    {
+        var angleDepth = 0;
+        var bracketDepth = 0;
+        var parenthesisDepth = 0;
+        var lastDot = -1;
+        for (var index = _position; index < _tokens.Length; index++)
+        {
+            var kind = _tokens[index].Kind;
+            if (angleDepth == 0 && bracketDepth == 0
+                && parenthesisDepth == 0
+                && kind == TokenKind.OpenParen)
+            {
+                break;
+            }
+            if (kind == TokenKind.Less)
+            {
+                angleDepth++;
+            }
+            else if (kind == TokenKind.Greater && angleDepth > 0)
+            {
+                angleDepth--;
+            }
+            else if (kind == TokenKind.ShiftRight && angleDepth > 0)
+            {
+                angleDepth = Math.Max(0, angleDepth - 2);
+            }
+            else if (kind == TokenKind.ShiftRightUnsigned
+                && angleDepth > 0)
+            {
+                angleDepth = Math.Max(0, angleDepth - 3);
+            }
+            else if (kind == TokenKind.OpenBracket)
+            {
+                bracketDepth++;
+            }
+            else if (kind == TokenKind.CloseBracket && bracketDepth > 0)
+            {
+                bracketDepth--;
+            }
+            else if (kind == TokenKind.OpenParen)
+            {
+                parenthesisDepth++;
+            }
+            else if (kind == TokenKind.CloseParen
+                && parenthesisDepth > 0)
+            {
+                parenthesisDepth--;
+            }
+            else if (kind == TokenKind.Dot && angleDepth == 0
+                && bracketDepth == 0 && parenthesisDepth == 0)
+            {
+                lastDot = index;
+            }
+            else if (kind is TokenKind.Semicolon or TokenKind.OpenBrace)
+            {
+                break;
+            }
+        }
+        return lastDot;
+    }
+
+    private int FindAssociatedMemberSeparator()
+    {
+        var angleDepth = 0;
+        var bracketDepth = 0;
+        var parenthesisDepth = 0;
+        var lastDot = -1;
+        for (var index = _position; index < _tokens.Length; index++)
+        {
+            var kind = _tokens[index].Kind;
+            if (angleDepth == 0 && bracketDepth == 0
+                && parenthesisDepth == 0 && kind == TokenKind.Equals)
+            {
+                break;
+            }
+            if (kind == TokenKind.Less)
+            {
+                angleDepth++;
+            }
+            else if (kind == TokenKind.Greater && angleDepth > 0)
+            {
+                angleDepth--;
+            }
+            else if (kind == TokenKind.ShiftRight && angleDepth > 0)
+            {
+                angleDepth = Math.Max(0, angleDepth - 2);
+            }
+            else if (kind == TokenKind.ShiftRightUnsigned
+                && angleDepth > 0)
+            {
+                angleDepth = Math.Max(0, angleDepth - 3);
+            }
+            else if (kind == TokenKind.OpenBracket)
+            {
+                bracketDepth++;
+            }
+            else if (kind == TokenKind.CloseBracket && bracketDepth > 0)
+            {
+                bracketDepth--;
+            }
+            else if (kind == TokenKind.OpenParen)
+            {
+                parenthesisDepth++;
+            }
+            else if (kind == TokenKind.CloseParen
+                && parenthesisDepth > 0)
+            {
+                parenthesisDepth--;
+            }
+            else if (kind == TokenKind.Dot && angleDepth == 0
+                && bracketDepth == 0 && parenthesisDepth == 0)
+            {
+                lastDot = index;
+            }
+            else if (kind == TokenKind.Semicolon)
+            {
+                break;
+            }
+        }
+        return lastDot;
     }
 
     private SyntaxNode SkipDeclaration()
@@ -1136,7 +1440,8 @@ internal sealed class Parser
         {
             children.Add(Current.Kind == TokenKind.VoidKeyword ? Take() : Expect(TokenKind.Identifier));
 
-            while (Current.Kind == TokenKind.Dot)
+            while (Current.Kind == TokenKind.Dot
+                && _position != _qualifiedTypeStopPosition)
             {
                 children.Add(TakeDot(qualified: true));
                 children.Add(Expect(TokenKind.Identifier));
@@ -1145,12 +1450,13 @@ internal sealed class Parser
             if (Current.Kind == TokenKind.Less)
             {
                 children.Add(ExpectAttached(TokenKind.Less));
-                children.Add(ParseTypeArgument());
+                var spanType = IsSpanTypeName(children);
+                children.Add(ParseTypeArgument(spanType));
 
                 while (Current.Kind == TokenKind.Comma)
                 {
                     children.Add(Take());
-                    children.Add(ParseTypeArgument());
+                    children.Add(ParseTypeArgument(spanType));
                 }
 
                 children.Add(ExpectTypeCloser(missing));
@@ -1164,11 +1470,31 @@ internal sealed class Parser
         return Node(typeKind, children);
     }
 
-    private SyntaxNode ParseTypeArgument()
+    private SyntaxNode ParseTypeArgument(bool allowSpanInitialization = false)
     {
+        if (allowSpanInitialization
+            && Current.Kind == TokenKind.Identifier
+            && Current.Text == "init")
+        {
+            return Node(SyntaxKind.SpanInitializationTypeArgument,
+                [Take(), ParseType()]);
+        }
+        if (Current.Kind == TokenKind.DefaultKeyword)
+        {
+            return Node(SyntaxKind.GenericDefaultArgument, [Take()]);
+        }
         if (Current.Kind == TokenKind.Underscore)
         {
             return Node(SyntaxKind.ExistentialTypeArgument, [Take()]);
+        }
+
+        if (Current.Kind == TokenKind.OpenParen)
+        {
+            var children = new List<SyntaxElement> { Take() };
+            children.Add(ParseExpression(
+                allowGreaterAsTypeTerminator: true));
+            children.Add(Expect(TokenKind.CloseParen));
+            return Node(SyntaxKind.ConstantGenericArgument, children);
         }
 
         if (Current.Kind is TokenKind.NumericLiteral or TokenKind.StringLiteral
@@ -1185,6 +1511,30 @@ internal sealed class Parser
         }
 
         return ParseType();
+    }
+
+    private static bool IsSpanTypeName(List<SyntaxElement> typeName)
+    {
+        string? first = null;
+        string? last = null;
+        var identifierCount = 0;
+        foreach (var child in typeName)
+        {
+            if (child is not SyntaxTokenElement {
+                    Token.Kind: TokenKind.Identifier,
+                } identifier)
+            {
+                continue;
+            }
+
+            first ??= identifier.Token.Text;
+            last = identifier.Token.Text;
+            identifierCount++;
+        }
+
+        return (identifierCount == 1 && last == "Span")
+            || (identifierCount == 2 && first == "Terrum"
+                && last == "Span");
     }
 
     private void ParseOptionalTypeSuffix(List<SyntaxElement> children, int missing)
@@ -1257,6 +1607,12 @@ internal sealed class Parser
                 Report("TRM1001", "Expected an index parameter after ','.", Current.Span);
             }
         }
+        if (!children.OfType<SyntaxNode>().Any(
+                static child => child.Kind == SyntaxKind.Parameter))
+        {
+            Report("TRM1001", "An indexer requires at least one index parameter.",
+                Current.Span);
+        }
         children.Add(Expect(TokenKind.CloseBracket));
         return Node(SyntaxKind.IndexerParameterList, children);
     }
@@ -1300,13 +1656,18 @@ internal sealed class Parser
             parameter.Add(ParseType());
         }
         parameter.Add(Expect(TokenKind.Identifier));
+        if (Current.Kind == TokenKind.Equals)
+        {
+            parameter.Add(Take());
+            parameter.Add(ParseExpression());
+        }
         return Node(SyntaxKind.Parameter, parameter);
     }
 
     private bool IsInterfaceAccessor(string name) =>
         Current.Kind == TokenKind.Identifier && Current.Text == name;
 
-    private string? NextInterfaceAccessorName()
+    private string? NextAccessorName()
     {
         var offset = 0;
         while (Peek(offset).Kind == TokenKind.OpenBracket)
@@ -1336,7 +1697,8 @@ internal sealed class Parser
             ? token.Text : null;
     }
 
-    private SyntaxNode ParseInterfaceAccessor(string name)
+    private SyntaxNode ParseAccessor(string name, bool isInterfaceMember,
+        string ownerKind = "indexer")
     {
         var kind = name switch {
             "get" => SyntaxKind.GetAccessor,
@@ -1356,7 +1718,10 @@ internal sealed class Parser
         }
         if (!IsInterfaceAccessor(name))
         {
-            Report("TRM1002", $"Expected the interface '{name}' accessor.", Current.Span);
+            Report("TRM1002", isInterfaceMember
+                ? $"Expected the interface '{name}' accessor."
+                : $"Expected the {ownerKind} '{name}' accessor.",
+                Current.Span);
             children.Add(SkipDeclaration());
             return Node(kind, children);
         }
@@ -1364,6 +1729,43 @@ internal sealed class Parser
         ParseContractClauses(children);
         children.Add(ParseCallableBody());
         return Node(kind, children);
+    }
+
+    private void ParseIndexerDefinition(List<SyntaxElement> children,
+        bool isInterfaceMember)
+    {
+        children.Add(ParseIndexParameters());
+        if (Current.Kind == TokenKind.OpenBrace)
+        {
+            children.Add(Take());
+            children.Add(ParseAccessor("get", isInterfaceMember));
+            var accessorName = NextAccessorName();
+            if (accessorName is "set" or "init")
+            {
+                children.Add(ParseAccessor(accessorName, isInterfaceMember));
+            }
+            if (Current.Kind != TokenKind.CloseBrace)
+            {
+                Report("TRM1002",
+                    "An indexer allows one getter and at most one setter or initializer.",
+                    Current.Span);
+                children.Add(SkipDeclaration());
+            }
+            children.Add(Expect(TokenKind.CloseBrace));
+            return;
+        }
+
+        if (!isInterfaceMember && Current.Kind == TokenKind.Arrow)
+        {
+            ParseContractClauses(children);
+            children.Add(ParseCallableBody());
+            return;
+        }
+
+        Report("TRM1002",
+            "An indexer requires an accessor list or an expression body.",
+            Current.Span);
+        children.Add(SkipDeclaration());
     }
 
     private void ParseContractClauses(List<SyntaxElement> children)
@@ -2198,13 +2600,35 @@ internal sealed class Parser
         if (Peek(offset).Kind == TokenKind.Less)
         {
             var nesting = 0;
+            var parenthesisDepth = 0;
 
             do
             {
                 _cancellationToken.ThrowIfCancellationRequested();
                 var kind = Peek(offset++).Kind;
 
-                if (kind == TokenKind.Less)
+                if (parenthesisDepth != 0)
+                {
+                    if (kind == TokenKind.OpenParen)
+                    {
+                        parenthesisDepth++;
+                    }
+                    else if (kind == TokenKind.CloseParen)
+                    {
+                        parenthesisDepth--;
+                    }
+                    else if (kind == TokenKind.EndOfFile)
+                    {
+                        return false;
+                    }
+                    continue;
+                }
+
+                if (kind == TokenKind.OpenParen)
+                {
+                    parenthesisDepth = 1;
+                }
+                else if (kind == TokenKind.Less)
                 {
                     nesting++;
                 }
@@ -2221,8 +2645,13 @@ internal sealed class Parser
                     }
                 }
                 else if (kind is not (TokenKind.Identifier or TokenKind.VoidKeyword or TokenKind.RefKeyword
-                    or TokenKind.GcKeyword or TokenKind.WriteKeyword or TokenKind.Comma or TokenKind.Dot
-                    or TokenKind.Question or TokenKind.QuestionQuestion)
+                    or TokenKind.GcKeyword or TokenKind.WriteKeyword
+                    or TokenKind.Underscore or TokenKind.DefaultKeyword
+                    or TokenKind.TrueKeyword or TokenKind.FalseKeyword
+                    or TokenKind.NullKeyword or TokenKind.StringLiteral
+                    or TokenKind.CharacterLiteral or TokenKind.Comma
+                    or TokenKind.Dot or TokenKind.Question
+                    or TokenKind.QuestionQuestion)
                     && !(nesting == 1
                         && kind is TokenKind.NumericLiteral or TokenKind.Plus
                             or TokenKind.Minus))
@@ -2320,6 +2749,13 @@ internal sealed class Parser
                     var some = Expect(TokenKind.Identifier);
                     left = Node(SyntaxKind.IsSomeExpression, [left, keyword, some, Expect(TokenKind.Identifier)]);
                 }
+                else if (Current.Kind == TokenKind.UniqueKeyword)
+                {
+                    left = Node(SyntaxKind.IsPatternExpression,
+                        [left, keyword,
+                            Node(SyntaxKind.UniqueTypePropertyPattern,
+                                [Take()])]);
+                }
                 else
                 {
                     left = Node(SyntaxKind.IsPatternExpression,
@@ -2329,8 +2765,11 @@ internal sealed class Parser
             }
             var precedence = BinaryPrecedence(Current.Kind);
 
-            if ((allowGreaterAsTypeTerminator && Current.Kind == TokenKind.Greater
-                    && !CanStartExpression(Peek(1).Kind))
+            if ((allowGreaterAsTypeTerminator
+                    && Current.Kind == TokenKind.Greater
+                    && (!CanStartExpression(Peek(1).Kind)
+                        || (IsAttachedToPrevious()
+                            && Peek(1).Kind == TokenKind.OpenParen)))
                 || precedence == 0 || precedence < parentPrecedence
                 || (precedence == parentPrecedence && Current.Kind != TokenKind.QuestionQuestion))
             {
@@ -2359,7 +2798,17 @@ internal sealed class Parser
     {
         SyntaxNode expression;
 
-        if (Current.Kind == TokenKind.InterpolatedRawTextStart)
+        if (Current.Kind == TokenKind.TypeofKeyword)
+        {
+            expression = ParseTypeOfQuery();
+        }
+        else if (Current.Kind == TokenKind.Identifier
+            && Peek(1).Kind == TokenKind.OpenParen
+            && Current.Text is "sizeof" or "alignof" or "offsetof" or "countof")
+        {
+            expression = ParseNamedTypeLayoutQuery();
+        }
+        else if (Current.Kind == TokenKind.InterpolatedRawTextStart)
         {
             expression = ParseInterpolatedRawTextExpression();
         }
@@ -2451,7 +2900,36 @@ internal sealed class Parser
         {
             if (Current.Kind == TokenKind.Dot)
             {
-                expression = Node(SyntaxKind.MemberAccessExpression, [expression, TakeDot(qualified: false), Expect(TokenKind.Identifier)]);
+                var dot = TakeDot(qualified: false);
+                if (Current.Kind == TokenKind.Identifier
+                    && Current.Text == "via")
+                {
+                    var via = Take();
+                    if (Current.Kind == TokenKind.Less
+                        && LooksLikeGenericName(allowIndexer: true))
+                    {
+                        expression = Node(
+                            SyntaxKind.InterfaceWitnessProjectionExpression,
+                            [expression, dot, via,
+                                ParseInterfaceWitnessTypeArgument()]);
+                    }
+                    else
+                    {
+                        expression = Node(
+                            SyntaxKind.MemberAccessExpression,
+                            [expression, dot, via]);
+                    }
+                }
+                else
+                {
+                    var member = Expect(TokenKind.Identifier);
+                    expression = Current.Kind == TokenKind.Less
+                        && LooksLikeGenericName()
+                        ? Node(SyntaxKind.MemberAccessExpression,
+                            [expression, dot, member, ParseTypeArguments()])
+                        : Node(SyntaxKind.MemberAccessExpression,
+                            [expression, dot, member]);
+                }
             }
             else if (Current.Kind == TokenKind.OpenParen)
             {
@@ -2460,7 +2938,7 @@ internal sealed class Parser
             else if (Current.Kind == TokenKind.OpenBracket)
             {
                 expression = Node(SyntaxKind.IndexExpression, [expression, ExpectAttached(TokenKind.OpenBracket),
-                    ParseIndexArgument(), Expect(TokenKind.CloseBracket)]);
+                    ParseIndexArguments(), Expect(TokenKind.CloseBracket)]);
             }
             else if (Current.Kind is TokenKind.PlusPlus or TokenKind.MinusMinus)
             {
@@ -2483,6 +2961,80 @@ internal sealed class Parser
         }
 
         return expression;
+    }
+
+    private SyntaxNode ParseTypeOfQuery()
+    {
+        var children = new List<SyntaxElement> {
+            Take(), Expect(TokenKind.OpenParen),
+            ParseTypeQuerySubject(TokenKind.CloseParen),
+            Expect(TokenKind.CloseParen),
+        };
+        return Node(SyntaxKind.TypeOfQueryExpression, children);
+    }
+
+    private SyntaxNode ParseNamedTypeLayoutQuery()
+    {
+        var keyword = Take();
+        var children = new List<SyntaxElement> {
+            keyword, Expect(TokenKind.OpenParen),
+        };
+        if (keyword.Token.Text == "offsetof")
+        {
+            if (CanParseTypeQuerySubject(TokenKind.Comma))
+            {
+                children.Add(ParseType());
+                children.Add(Expect(TokenKind.Comma));
+                children.Add(ParseFieldPath());
+                children.Add(Expect(TokenKind.CloseParen));
+                return Node(SyntaxKind.OffsetOfTypeQueryExpression,
+                    children);
+            }
+
+            children.Add(ParseExpression());
+            children.Add(Expect(TokenKind.CloseParen));
+            return Node(SyntaxKind.OffsetOfPlaceQueryExpression,
+                children);
+        }
+
+        children.Add(ParseTypeQuerySubject(TokenKind.CloseParen));
+        children.Add(Expect(TokenKind.CloseParen));
+        var kind = keyword.Token.Text switch {
+            "sizeof" => SyntaxKind.SizeOfQueryExpression,
+            "alignof" => SyntaxKind.AlignOfQueryExpression,
+            "countof" => SyntaxKind.CountOfQueryExpression,
+            _ => throw new InvalidOperationException(
+                "The parser selected an unknown type/layout query."),
+        };
+        return Node(kind, children);
+    }
+
+    private SyntaxNode ParseTypeQuerySubject(TokenKind terminator)
+        => CanParseTypeQuerySubject(terminator)
+            ? ParseType() : ParseExpression();
+
+    private bool CanParseTypeQuerySubject(TokenKind terminator)
+    {
+        var probe = new Parser(_source, _tokens[_position..],
+            _cancellationToken);
+        _ = probe.ParseType();
+        return probe._missingTokens == 0
+            && probe.Diagnostics.Count == 0
+            && probe.Current.Kind == terminator;
+    }
+
+    private SyntaxNode ParseFieldPath()
+    {
+        var children = new List<SyntaxElement> {
+            Expect(TokenKind.Identifier),
+        };
+        while (Current.Kind == TokenKind.Dot)
+        {
+            children.Add(TakeDot(qualified: false));
+            children.Add(Expect(TokenKind.Identifier));
+        }
+
+        return Node(SyntaxKind.FieldPath, children);
     }
 
     private SyntaxNode ParseIndexArgument()
@@ -2515,6 +3067,34 @@ internal sealed class Parser
         }
 
         return Node(SyntaxKind.SliceRangeExpression, [start, connector, end]);
+    }
+
+    private SyntaxNode ParseIndexArguments()
+    {
+        var children = new List<SyntaxElement>();
+        while (Current.Kind is not (TokenKind.CloseBracket or TokenKind.EndOfFile))
+        {
+            var start = _position;
+            children.Add(ParseIndexArgument());
+            if (Current.Kind != TokenKind.Comma)
+            {
+                EnsureProgress(start, children);
+                break;
+            }
+
+            children.Add(Take());
+            if (Current.Kind == TokenKind.CloseBracket)
+            {
+                Report("TRM1001", "Expected an index argument after ','.", Current.Span);
+            }
+        }
+
+        if (children.Count == 0)
+        {
+            Report("TRM1001", "Expected an index argument.", Current.Span);
+        }
+
+        return Node(SyntaxKind.IndexArgumentList, children);
     }
 
     private SyntaxNode ParseIndexBound()

@@ -210,10 +210,12 @@ internal sealed class IntegerMathModuleTests
             ("TryAbsInt64", "int64.MinValue"),
         })
         {
+            var outputType = function == "TryAbsInt32" ? "int32" : "int64";
             var invalidConsumer = SyntaxTree.Parse(
                 "using Terrum.CodeAnalysis.Numerics64;\n"
                 + "int32 Main() {\n"
-                + $"    if (!{function}({argument}, init var result)) {{ return int32(result); }}\n"
+                + $"    init {outputType} result;\n"
+                + $"    if (!{function}({argument}, ref init result)) {{ return int32(result); }}\n"
                 + "    return 0;\n"
                 + "}",
                 "integer-math-unpublished-" + function + ".terrum");
@@ -232,13 +234,14 @@ internal sealed class IntegerMathModuleTests
         {
             _ = source.Append("bool Check").Append(function).Append('(').Append(type)
                 .Append(" value, ").Append(type).AppendLine(" expected, bool shouldSucceed) {")
+                .Append("    init ").Append(type).AppendLine(" result;")
                 .AppendLine("    if (shouldSucceed) {")
                 .Append("        if (!").Append(function)
-                .AppendLine("(value, init var actual)) { return false; }")
-                .AppendLine("        return actual == expected;")
+                .AppendLine("(value, ref init result)) { return false; }")
+                .AppendLine("        return result == expected;")
                 .AppendLine("    }")
                 .Append("    return !").Append(function)
-                .AppendLine("(value, init var unpublished);")
+                .AppendLine("(value, ref init result);")
                 .AppendLine("}");
         }
     }

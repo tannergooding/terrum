@@ -62,7 +62,12 @@ internal sealed class TypeSpecTableValidationComponentTests
             TrRmTypeSpecTableWriter.IndexedFamily(0x80, 0xF2000008),
             TrRmTypeSpecTableWriter.IndexedFamily(0x84, 0xF3008419),
             TrRmTypeSpecTableWriter.IndexedFamily(0x8A, 0xF3048A08),
-            new byte[] { 0x0E, 1, 0x08, 0, 0, 0xF2 },
+            TrRmTypeSpecTableWriter.InitializationReference(1),
+            TrRmTypeSpecTableWriter.InitializationReference(1,
+                isWritable: true),
+            TrRmTypeSpecTableWriter.InitializationReference(0xF2000008u),
+            TrRmTypeSpecTableWriter.InitializationReference(0xF2000008u,
+                isWritable: true),
             TrRmTypeSpecTableWriter.InlineFamily(0x8A, 8, 4),
             TrRmTypeSpecTableWriter.IndexedFamily(0x8A, 24),
             TrRmTypeSpecTableWriter.InlineFamily(0x8B, 8, 2),
@@ -220,6 +225,8 @@ internal sealed class TypeSpecTableValidationComponentTests
         AddInvalid(cases, [[0x0F, 1]], 1,
             typeDefCount, importCount, genericParamCount);
         AddInvalid(cases, [[0x0E, 2, 8, 0, 0, 0]], 1,
+            typeDefCount, importCount, genericParamCount);
+        AddInvalid(cases, [[0x0E, 4, 8, 0, 0, 0]], 1,
             typeDefCount, importCount, genericParamCount);
         AddInvalid(cases, [[0x0E, 0, 8, 0x8A, 4, 0xF3]], 1,
             typeDefCount, importCount, genericParamCount);

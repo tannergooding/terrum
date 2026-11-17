@@ -207,18 +207,20 @@ internal sealed partial class CliTests
                     if (selector == 1) { return value + 1; } else { return 0; }
                 }
                 """),
-            ("init-var", """
-                int32 Pick(init ref<int32> value) { value = 41; return 1; }
+            ("ref-init", """
+                int32 Pick(ref<init int32> value) { *value = 41; return 1; }
                 public int32 Main() {
-                    switch (Pick(init var value)) {
+                    init int32 value;
+                    switch (Pick(ref init value)) {
                         1 => { return value + 1; },
                         _ => { return 0; },
                     }
                 }
                 """, """
-                int32 Pick(init ref<int32> value) { value = 41; return 1; }
+                int32 Pick(ref<init int32> value) { *value = 41; return 1; }
                 public int32 Main() {
-                    int32 selector = Pick(init var value);
+                    init int32 value;
+                    int32 selector = Pick(ref init value);
                     if (selector == 1) { return value + 1; } else { return 0; }
                 }
                 """),

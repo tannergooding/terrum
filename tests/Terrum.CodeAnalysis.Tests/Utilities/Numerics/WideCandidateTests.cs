@@ -62,15 +62,24 @@ internal sealed class WideCandidateTests
         var consumerSource = SyntaxTree.Parse("""
             using Terrum.CodeAnalysis.Numerics64;
             int32 Main() {
-                if (TryGetUInt64BaseLength(0, 1, init var low)
-                    || TryGetInt64BaseLength(-1, 37, init var high)
-                    || TryGetUInt32BaseLength(0, 0, init var low32)
-                    || TryGetInt32BaseLength(0, 37, init var high32)) { return 1; }
-                require TryGetUInt64BaseLength(uint64.MaxValue, 2, init var unsigned64);
-                require TryGetInt64BaseLength(int64.MinValue, 2, init var signed64);
-                require TryGetUInt32BaseLength(uint32.MaxValue, 2, init var unsigned32);
-                require TryGetInt32BaseLength(int32.MinValue, 2, init var signed32);
-                require TryGetInt64BaseLength(0, 36, init var zero);
+                init int32 low;
+                init int32 high;
+                init int32 low32;
+                init int32 high32;
+                init int32 unsigned64;
+                init int32 signed64;
+                init int32 unsigned32;
+                init int32 signed32;
+                init int32 zero;
+                if (TryGetUInt64BaseLength(0, 1, ref init low)
+                    || TryGetInt64BaseLength(-1, 37, ref init high)
+                    || TryGetUInt32BaseLength(0, 0, ref init low32)
+                    || TryGetInt32BaseLength(0, 37, ref init high32)) { return 1; }
+                require TryGetUInt64BaseLength(uint64.MaxValue, 2, ref init unsigned64);
+                require TryGetInt64BaseLength(int64.MinValue, 2, ref init signed64);
+                require TryGetUInt32BaseLength(uint32.MaxValue, 2, ref init unsigned32);
+                require TryGetInt32BaseLength(int32.MinValue, 2, ref init signed32);
+                require TryGetInt64BaseLength(0, 36, ref init zero);
                 if (unsigned64 != 64 || signed64 != 65 || unsigned32 != 32
                     || signed32 != 33 || zero != 1) { return 2; }
                 return 42;
@@ -95,7 +104,8 @@ internal sealed class WideCandidateTests
         var compilation = Compilation.Create(SyntaxTree.Parse("""
             using Terrum.CodeAnalysis.Numerics64;
             int32 Main() {
-                bool valid = TryGetUInt64BaseLength(0, 1, init var length);
+                init int32 length;
+                bool valid = TryGetUInt64BaseLength(0, 1, ref init length);
                 return length;
             }
             """), ModuleCompiler.CreateReference(producer));
@@ -120,12 +130,28 @@ internal sealed class WideCandidateTests
     }
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
-    public Task BitOperationsUInt32MatchEveryBitPositionAcrossModulesAsync(NativeRuntimePolicy policy) =>
-        ExecuteBitOperationsPositionConsumerAsync(policy, includeUInt64: false);
+    public async Task BitOperationsUInt32MatchEveryBitPositionAcrossModulesAsync(
+        NativeRuntimePolicy policy)
+    {
+        await ExecuteBitOperationsPositionConsumerAsync(policy,
+            includeUInt64: false, firstBit: 0, endBit: 16).ConfigureAwait(true);
+        await ExecuteBitOperationsPositionConsumerAsync(policy,
+            includeUInt64: false, firstBit: 16, endBit: 32).ConfigureAwait(true);
+    }
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
-    public Task BitOperationsUInt64MatchEveryBitPositionAcrossModulesAsync(NativeRuntimePolicy policy) =>
-        ExecuteBitOperationsPositionConsumerAsync(policy, includeUInt64: true);
+    public async Task BitOperationsUInt64MatchEveryBitPositionAcrossModulesAsync(
+        NativeRuntimePolicy policy)
+    {
+        await ExecuteBitOperationsPositionConsumerAsync(policy,
+            includeUInt64: true, firstBit: 0, endBit: 16).ConfigureAwait(true);
+        await ExecuteBitOperationsPositionConsumerAsync(policy,
+            includeUInt64: true, firstBit: 16, endBit: 32).ConfigureAwait(true);
+        await ExecuteBitOperationsPositionConsumerAsync(policy,
+            includeUInt64: true, firstBit: 32, endBit: 48).ConfigureAwait(true);
+        await ExecuteBitOperationsPositionConsumerAsync(policy,
+            includeUInt64: true, firstBit: 48, endBit: 64).ConfigureAwait(true);
+    }
     [TestCase(BoundRuntimePolicy.FailFast,"UInt32","uint32.MaxValue")]
     [TestCase(BoundRuntimePolicy.CheckedExceptions,"UInt32","uint32.MaxValue")]
     [TestCase(BoundRuntimePolicy.FailFast,"UInt64","uint64.MaxValue")]
@@ -138,7 +164,8 @@ internal sealed class WideCandidateTests
         var invalidConsumer = SyntaxTree.Parse($$"""
             using Terrum.CodeAnalysis.Numerics64;
             int32 Main() {
-                if (!TryRoundUpToPowerOfTwo{{suffix}}({{input}}, init var rounded)) {
+                init {{(suffix == "UInt32" ? "uint32" : "uint64")}} rounded;
+                if (!TryRoundUpToPowerOfTwo{{suffix}}({{input}}, ref init rounded)) {
                     return int32(rounded);
                 }
                 return 0;
@@ -348,14 +375,22 @@ internal sealed class WideCandidateTests
         var consumerSource = SyntaxTree.Parse($$"""
             using Terrum.CodeAnalysis.Numerics64;
             int32 Main() {
-                if (TryNegate{{suffix}}({{type}}.MinValue, init var negationOverflow)
-                    || TryAbsolute{{suffix}}({{type}}.MinValue, init var absoluteOverflow)) { return 1; }
-                require TryNegate{{suffix}}({{type}}.MaxValue, init var negativeMaximum);
-                require TryNegate{{suffix}}(-1, init var positiveOne);
-                require TryNegate{{suffix}}(0, init var zero);
-                require TryAbsolute{{suffix}}(-42, init var positive);
-                require TryAbsolute{{suffix}}(42, init var unchanged);
-                require TryAbsolute{{suffix}}(0, init var absoluteZero);
+                init {{type}} negationOverflow;
+                init {{type}} absoluteOverflow;
+                init {{type}} negativeMaximum;
+                init {{type}} positiveOne;
+                init {{type}} zero;
+                init {{type}} positive;
+                init {{type}} unchanged;
+                init {{type}} absoluteZero;
+                if (TryNegate{{suffix}}({{type}}.MinValue, ref init negationOverflow)
+                    || TryAbsolute{{suffix}}({{type}}.MinValue, ref init absoluteOverflow)) { return 1; }
+                require TryNegate{{suffix}}({{type}}.MaxValue, ref init negativeMaximum);
+                require TryNegate{{suffix}}(-1, ref init positiveOne);
+                require TryNegate{{suffix}}(0, ref init zero);
+                require TryAbsolute{{suffix}}(-42, ref init positive);
+                require TryAbsolute{{suffix}}(42, ref init unchanged);
+                require TryAbsolute{{suffix}}(0, ref init absoluteZero);
                 if (negativeMaximum != -{{type}}.MaxValue || positiveOne != 1
                     || zero != 0 || positive != 42 || unchanged != 42
                     || absoluteZero != 0) { return 2; }
@@ -384,7 +419,8 @@ internal sealed class WideCandidateTests
         var compilation = Compilation.Create(SyntaxTree.Parse($$"""
             using Terrum.CodeAnalysis.Numerics64;
             int32 Main() {
-                bool valid = TryAbsolute{{suffix}}({{type}}.MinValue, init var result);
+                init {{type}} result;
+                bool valid = TryAbsolute{{suffix}}({{type}}.MinValue, ref init result);
                 return int32(result);
             }
             """), ModuleCompiler.CreateReference(producer));
@@ -438,20 +474,34 @@ internal sealed class WideCandidateTests
         var consumerSource = SyntaxTree.Parse("""
             using Terrum.CodeAnalysis.Numerics64;
             int32 Main() {
-                if (TryAddInt32(int32.MaxValue, 1, init var addOverflow)
-                    || TryAddInt32(int32.MinValue, -1, init var addUnderflow)
-                    || TrySubtractInt32(int32.MaxValue, -1, init var subOverflow)
-                    || TrySubtractInt32(int32.MinValue, 1, init var subUnderflow)
-                    || TryMultiplyInt32(int32.MaxValue, 2, init var mulOverflow)
-                    || TryMultiplyInt32(int32.MinValue, -1, init var mulNegOverflow)
-                    || TryMultiplyInt32(int32.MinValue, 2, init var mulUnderflow)) { return 1; }
-                require TryAddInt32(int32.MinValue, int32.MaxValue, init var negativeOne);
-                require TryAddInt32(40, 2, init var fortyTwo);
-                require TrySubtractInt32(-1, int32.MinValue, init var maximum);
-                require TrySubtractInt32(int32.MinValue, int32.MinValue, init var zero);
-                require TryMultiplyInt32(int32.MinValue, 1, init var minimum);
-                require TryMultiplyInt32(-1, int32.MaxValue, init var negativeMaximum);
-                require TryMultiplyInt32(46340, 46340, init var square);
+                init int32 addOverflow;
+                init int32 addUnderflow;
+                init int32 subOverflow;
+                init int32 subUnderflow;
+                init int32 mulOverflow;
+                init int32 mulNegOverflow;
+                init int32 mulUnderflow;
+                init int32 negativeOne;
+                init int32 fortyTwo;
+                init int32 maximum;
+                init int32 zero;
+                init int32 minimum;
+                init int32 negativeMaximum;
+                init int32 square;
+                if (TryAddInt32(int32.MaxValue, 1, ref init addOverflow)
+                    || TryAddInt32(int32.MinValue, -1, ref init addUnderflow)
+                    || TrySubtractInt32(int32.MaxValue, -1, ref init subOverflow)
+                    || TrySubtractInt32(int32.MinValue, 1, ref init subUnderflow)
+                    || TryMultiplyInt32(int32.MaxValue, 2, ref init mulOverflow)
+                    || TryMultiplyInt32(int32.MinValue, -1, ref init mulNegOverflow)
+                    || TryMultiplyInt32(int32.MinValue, 2, ref init mulUnderflow)) { return 1; }
+                require TryAddInt32(int32.MinValue, int32.MaxValue, ref init negativeOne);
+                require TryAddInt32(40, 2, ref init fortyTwo);
+                require TrySubtractInt32(-1, int32.MinValue, ref init maximum);
+                require TrySubtractInt32(int32.MinValue, int32.MinValue, ref init zero);
+                require TryMultiplyInt32(int32.MinValue, 1, ref init minimum);
+                require TryMultiplyInt32(-1, int32.MaxValue, ref init negativeMaximum);
+                require TryMultiplyInt32(46340, 46340, ref init square);
                 if (negativeOne != -1 || fortyTwo != 42 || maximum != int32.MaxValue
                     || zero != 0 || minimum != int32.MinValue
                     || negativeMaximum != -int32.MaxValue || square != 2147395600) { return 2; }
@@ -480,15 +530,24 @@ internal sealed class WideCandidateTests
         var consumerSource = SyntaxTree.Parse("""
             using Terrum.CodeAnalysis.Numerics64;
             int32 Main() {
-                if (TryAddUInt32(uint32.MaxValue, 1, init var addOverflow)
-                    || TrySubtractUInt32(0, 1, init var subUnderflow)
-                    || TryMultiplyUInt32(uint32.MaxValue, 2, init var mulOverflow)) { return 1; }
-                require TryAddUInt32(uint32.MaxValue - 1, 1, init var maximum);
-                require TryAddUInt32(0, 0, init var zero);
-                require TrySubtractUInt32(uint32.MaxValue, uint32.MaxValue, init var difference);
-                require TrySubtractUInt32(uint32.MaxValue, 1, init var almostMaximum);
-                require TryMultiplyUInt32(65535, 65537, init var product);
-                require TryMultiplyUInt32(uint32.MaxValue, 0, init var zeroProduct);
+                init uint32 addOverflow;
+                init uint32 subUnderflow;
+                init uint32 mulOverflow;
+                init uint32 maximum;
+                init uint32 zero;
+                init uint32 difference;
+                init uint32 almostMaximum;
+                init uint32 product;
+                init uint32 zeroProduct;
+                if (TryAddUInt32(uint32.MaxValue, 1, ref init addOverflow)
+                    || TrySubtractUInt32(0, 1, ref init subUnderflow)
+                    || TryMultiplyUInt32(uint32.MaxValue, 2, ref init mulOverflow)) { return 1; }
+                require TryAddUInt32(uint32.MaxValue - 1, 1, ref init maximum);
+                require TryAddUInt32(0, 0, ref init zero);
+                require TrySubtractUInt32(uint32.MaxValue, uint32.MaxValue, ref init difference);
+                require TrySubtractUInt32(uint32.MaxValue, 1, ref init almostMaximum);
+                require TryMultiplyUInt32(65535, 65537, ref init product);
+                require TryMultiplyUInt32(uint32.MaxValue, 0, ref init zeroProduct);
                 if (maximum != uint32.MaxValue || zero != 0 || difference != 0
                     || almostMaximum != uint32.MaxValue - 1 || product != uint32.MaxValue
                     || zeroProduct != 0) { return 2; }
@@ -520,23 +579,40 @@ internal sealed class WideCandidateTests
         var consumerSource = SyntaxTree.Parse("""
             using Terrum.CodeAnalysis.Numerics64;
             int32 Main() {
-                if (TryAddInt64(int64.MaxValue, 1, init var addOverflow)
-                    || TryAddInt64(int64.MinValue, -1, init var addUnderflow)
-                    || TrySubtractInt64(int64.MaxValue, -1, init var subOverflow)
-                    || TrySubtractInt64(int64.MinValue, 1, init var subUnderflow)
-                    || TryMultiplyInt64(int64.MinValue, -1, init var mulOverflow)
-                    || TryMultiplyInt64(int64.MaxValue, 2, init var mulOverflow2)
-                    || TryAddUInt64(uint64.MaxValue, 1, init var unsignedAddOverflow)
-                    || TrySubtractUInt64(0, 1, init var unsignedSubUnderflow)
-                    || TryMultiplyUInt64(uint64.MaxValue, 2, init var unsignedMulOverflow)) { return 1; }
-                require TryAddInt64(int64.MinValue, int64.MaxValue, init var negativeOne);
-                require TrySubtractInt64(-1, int64.MinValue, init var maximum);
-                require TryMultiplyInt64(int64.MinValue, 1, init var minimum);
-                require TryMultiplyInt64(3037000499, 3037000499, init var signedSquare);
-                require TryAddUInt64(uint64.MaxValue - 1, 1, init var unsignedMaximum);
-                require TrySubtractUInt64(uint64.MaxValue, uint64.MaxValue, init var unsignedZero);
-                require TryMultiplyUInt64(uint64.MaxValue, 0, init var zeroProduct);
-                require TryMultiplyUInt64(4294967295, 4294967297, init var unsignedProduct);
+                init int64 addOverflow;
+                init int64 addUnderflow;
+                init int64 subOverflow;
+                init int64 subUnderflow;
+                init int64 mulOverflow;
+                init int64 mulOverflow2;
+                init uint64 unsignedAddOverflow;
+                init uint64 unsignedSubUnderflow;
+                init uint64 unsignedMulOverflow;
+                init int64 negativeOne;
+                init int64 maximum;
+                init int64 minimum;
+                init int64 signedSquare;
+                init uint64 unsignedMaximum;
+                init uint64 unsignedZero;
+                init uint64 zeroProduct;
+                init uint64 unsignedProduct;
+                if (TryAddInt64(int64.MaxValue, 1, ref init addOverflow)
+                    || TryAddInt64(int64.MinValue, -1, ref init addUnderflow)
+                    || TrySubtractInt64(int64.MaxValue, -1, ref init subOverflow)
+                    || TrySubtractInt64(int64.MinValue, 1, ref init subUnderflow)
+                    || TryMultiplyInt64(int64.MinValue, -1, ref init mulOverflow)
+                    || TryMultiplyInt64(int64.MaxValue, 2, ref init mulOverflow2)
+                    || TryAddUInt64(uint64.MaxValue, 1, ref init unsignedAddOverflow)
+                    || TrySubtractUInt64(0, 1, ref init unsignedSubUnderflow)
+                    || TryMultiplyUInt64(uint64.MaxValue, 2, ref init unsignedMulOverflow)) { return 1; }
+                require TryAddInt64(int64.MinValue, int64.MaxValue, ref init negativeOne);
+                require TrySubtractInt64(-1, int64.MinValue, ref init maximum);
+                require TryMultiplyInt64(int64.MinValue, 1, ref init minimum);
+                require TryMultiplyInt64(3037000499, 3037000499, ref init signedSquare);
+                require TryAddUInt64(uint64.MaxValue - 1, 1, ref init unsignedMaximum);
+                require TrySubtractUInt64(uint64.MaxValue, uint64.MaxValue, ref init unsignedZero);
+                require TryMultiplyUInt64(uint64.MaxValue, 0, ref init zeroProduct);
+                require TryMultiplyUInt64(4294967295, 4294967297, ref init unsignedProduct);
                 if (negativeOne != -1 || maximum != int64.MaxValue
                     || minimum != int64.MinValue || signedSquare != 9223372030926249001
                     || unsignedMaximum != uint64.MaxValue || unsignedZero != 0
@@ -571,14 +647,19 @@ internal sealed class WideCandidateTests
             ? "IntegerCheckedArithmetic.terrum" : "WideIntegerFacts.terrum";
         var signedCases = suffix.StartsWith("Int", StringComparison.Ordinal)
             ? $$"""
-                if (TryDivide{{suffix}}({{type}}.MinValue, -1, init var overflow)) { return 3; }
-                require TryRemainder{{suffix}}({{type}}.MinValue, -1, init var minRemainder);
-                require TryDivide{{suffix}}(-7, 3, init var negativeQuotient);
-                require TryRemainder{{suffix}}(-7, 3, init var negativeRemainder);
+                init {{type}} overflow;
+                init {{type}} minRemainder;
+                init {{type}} negativeQuotient;
+                init {{type}} negativeRemainder;
+                if (TryDivide{{suffix}}({{type}}.MinValue, -1, ref init overflow)) { return 3; }
+                require TryRemainder{{suffix}}({{type}}.MinValue, -1, ref init minRemainder);
+                require TryDivide{{suffix}}(-7, 3, ref init negativeQuotient);
+                require TryRemainder{{suffix}}(-7, 3, ref init negativeRemainder);
                 if (minRemainder != 0 || negativeQuotient != -2 || negativeRemainder != -1) { return 4; }
                 """
             : $$"""
-                require TryDivide{{suffix}}({{type}}.MaxValue, 2, init var half);
+                init {{type}} half;
+                require TryDivide{{suffix}}({{type}}.MaxValue, 2, ref init half);
                 if (half != {{(suffix == "UInt32" ? "2147483647" : "9223372036854775807")}}) { return 4; }
                 """;
         var producer = CreateNumericsLibrary(library, policy,
@@ -587,12 +668,18 @@ internal sealed class WideCandidateTests
         var consumerSource = SyntaxTree.Parse($$"""
             using Terrum.CodeAnalysis.Numerics64;
             int32 Main() {
-                if (TryDivide{{suffix}}(42, 0, init var divideByZero)
-                    || TryRemainder{{suffix}}(42, 0, init var remainderByZero)) { return 1; }
-                require TryDivide{{suffix}}(84, 2, init var quotient);
-                require TryRemainder{{suffix}}(85, 2, init var remainder);
-                require TryDivide{{suffix}}({{type}}.MaxValue, {{type}}.MaxValue, init var one);
-                require TryRemainder{{suffix}}({{type}}.MaxValue, {{type}}.MaxValue, init var zero);
+                init {{type}} divideByZero;
+                init {{type}} remainderByZero;
+                init {{type}} quotient;
+                init {{type}} remainder;
+                init {{type}} one;
+                init {{type}} zero;
+                if (TryDivide{{suffix}}(42, 0, ref init divideByZero)
+                    || TryRemainder{{suffix}}(42, 0, ref init remainderByZero)) { return 1; }
+                require TryDivide{{suffix}}(84, 2, ref init quotient);
+                require TryRemainder{{suffix}}(85, 2, ref init remainder);
+                require TryDivide{{suffix}}({{type}}.MaxValue, {{type}}.MaxValue, ref init one);
+                require TryRemainder{{suffix}}({{type}}.MaxValue, {{type}}.MaxValue, ref init zero);
                 if (quotient != 42 || remainder != 1 || one != 1 || zero != 0) { return 2; }
                 {{signedCases}}
                 return 42;
@@ -629,29 +716,51 @@ internal sealed class WideCandidateTests
         var consumerSource = SyntaxTree.Parse("""
             using Terrum.CodeAnalysis.Numerics64;
             int32 Main() {
-                if (TryConvertInt32ToUInt64(-1, init var unsigned64FromNegative32)
-                    || TryConvertInt32ToUInt32(-1, init var unsigned32FromNegative32)
-                    || TryConvertUInt32ToInt32(uint32.MaxValue, init var int32FromLarge32)
-                    || TryConvertInt64ToInt32(int64.MinValue, init var int32FromSmall64)
-                    || TryConvertInt64ToInt32(int64.MaxValue, init var int32FromLarge64)
-                    || TryConvertInt64ToUInt32(-1, init var unsigned32FromNegative64)
-                    || TryConvertInt64ToUInt32(int64.MaxValue, init var unsigned32FromLarge64)
-                    || TryConvertUInt64ToInt32(uint64.MaxValue, init var int32FromLargeUnsigned)
-                    || TryConvertUInt64ToUInt32(uint64.MaxValue, init var unsigned32FromLargeUnsigned)
-                    || TryConvertUInt64ToInt64(uint64.MaxValue, init var int64FromLargeUnsigned)
-                    || TryConvertInt64ToUInt64(-1, init var unsigned64FromNegative64)) { return 1; }
-                require TryConvertInt32ToInt64(int32.MinValue, init var minInt64);
-                require TryConvertInt32ToUInt64(int32.MaxValue, init var unsigned64From32);
-                require TryConvertUInt32ToInt64(uint32.MaxValue, init var int64FromUnsigned32);
-                require TryConvertUInt32ToUInt64(uint32.MaxValue, init var unsigned64FromUInt32);
-                require TryConvertUInt32ToInt32(uint32(int32.MaxValue), init var int32From32);
-                require TryConvertInt32ToUInt32(int32.MaxValue, init var unsigned32From32);
-                require TryConvertInt64ToInt32(int64(int32.MinValue), init var int32From64);
-                require TryConvertInt64ToUInt32(int64(uint32.MaxValue), init unsigned32FromNegative64);
-                require TryConvertUInt64ToInt32(uint64(int32.MaxValue), init var int32FromUnsigned64);
-                require TryConvertUInt64ToUInt32(uint64(uint32.MaxValue), init var unsigned32FromUnsigned64);
-                require TryConvertUInt64ToInt64(uint64(int64.MaxValue), init var int64FromUnsigned64);
-                require TryConvertInt64ToUInt64(int64.MaxValue, init var unsigned64From64);
+                init uint64 unsigned64FromNegative32;
+                init uint32 unsigned32FromNegative32;
+                init int32 int32FromLarge32;
+                init int32 int32FromSmall64;
+                init int32 int32FromLarge64;
+                init uint32 unsigned32FromNegative64;
+                init uint32 unsigned32FromLarge64;
+                init int32 int32FromLargeUnsigned;
+                init uint32 unsigned32FromLargeUnsigned;
+                init int64 int64FromLargeUnsigned;
+                init uint64 unsigned64FromNegative64;
+                init int64 minInt64;
+                init uint64 unsigned64From32;
+                init int64 int64FromUnsigned32;
+                init uint64 unsigned64FromUInt32;
+                init int32 int32From32;
+                init uint32 unsigned32From32;
+                init int32 int32From64;
+                init int32 int32FromUnsigned64;
+                init uint32 unsigned32FromUnsigned64;
+                init int64 int64FromUnsigned64;
+                init uint64 unsigned64From64;
+                if (TryConvertInt32ToUInt64(-1, ref init unsigned64FromNegative32)
+                    || TryConvertInt32ToUInt32(-1, ref init unsigned32FromNegative32)
+                    || TryConvertUInt32ToInt32(uint32.MaxValue, ref init int32FromLarge32)
+                    || TryConvertInt64ToInt32(int64.MinValue, ref init int32FromSmall64)
+                    || TryConvertInt64ToInt32(int64.MaxValue, ref init int32FromLarge64)
+                    || TryConvertInt64ToUInt32(-1, ref init unsigned32FromNegative64)
+                    || TryConvertInt64ToUInt32(int64.MaxValue, ref init unsigned32FromLarge64)
+                    || TryConvertUInt64ToInt32(uint64.MaxValue, ref init int32FromLargeUnsigned)
+                    || TryConvertUInt64ToUInt32(uint64.MaxValue, ref init unsigned32FromLargeUnsigned)
+                    || TryConvertUInt64ToInt64(uint64.MaxValue, ref init int64FromLargeUnsigned)
+                    || TryConvertInt64ToUInt64(-1, ref init unsigned64FromNegative64)) { return 1; }
+                require TryConvertInt32ToInt64(int32.MinValue, ref init minInt64);
+                require TryConvertInt32ToUInt64(int32.MaxValue, ref init unsigned64From32);
+                require TryConvertUInt32ToInt64(uint32.MaxValue, ref init int64FromUnsigned32);
+                require TryConvertUInt32ToUInt64(uint32.MaxValue, ref init unsigned64FromUInt32);
+                require TryConvertUInt32ToInt32(uint32(int32.MaxValue), ref init int32From32);
+                require TryConvertInt32ToUInt32(int32.MaxValue, ref init unsigned32From32);
+                require TryConvertInt64ToInt32(int64(int32.MinValue), ref init int32From64);
+                require TryConvertInt64ToUInt32(int64(uint32.MaxValue), ref init unsigned32FromNegative64);
+                require TryConvertUInt64ToInt32(uint64(int32.MaxValue), ref init int32FromUnsigned64);
+                require TryConvertUInt64ToUInt32(uint64(uint32.MaxValue), ref init unsigned32FromUnsigned64);
+                require TryConvertUInt64ToInt64(uint64(int64.MaxValue), ref init int64FromUnsigned64);
+                require TryConvertInt64ToUInt64(int64.MaxValue, ref init unsigned64From64);
                 if (minInt64 != int64(int32.MinValue)
                     || unsigned64From32 != uint64(int32.MaxValue)
                     || int64FromUnsigned32 != int64(uint32.MaxValue)
@@ -694,25 +803,41 @@ internal sealed class WideCandidateTests
         var source = SyntaxTree.Parse("""
             using Terrum.CodeAnalysis.Numerics64;
             int32 Main() {
-                if (TryConvertInt32ToChar16(-1, init var negative32)
-                    || TryConvertInt32ToChar16(65536, init var large32)
-                    || TryConvertUInt32ToChar16(uint32.MaxValue, init var largeUnsigned32)
-                    || TryConvertInt64ToChar16(int64.MinValue, init var negative64)
-                    || TryConvertInt64ToChar16(int64.MaxValue, init var large64)
-                    || TryConvertUInt64ToChar16(uint64.MaxValue, init var largeUnsigned64)) { return 1; }
-                require TryConvertInt32ToChar16(0, init var zero);
-                require TryConvertInt32ToChar16(65535, init var max32);
-                require TryConvertUInt32ToChar16(55296, init var surrogate);
-                require TryConvertInt64ToChar16(65535, init var max64);
-                require TryConvertUInt64ToChar16(65535, init var maxUnsigned64);
+                init char16 negative32;
+                init char16 large32;
+                init char16 largeUnsigned32;
+                init char16 negative64;
+                init char16 large64;
+                init char16 largeUnsigned64;
+                init char16 zero;
+                init char16 max32;
+                init char16 surrogate;
+                init char16 max64;
+                init char16 maxUnsigned64;
+                init int32 widenedZero;
+                init int32 widenedSurrogate;
+                init uint32 widenedUnsigned32;
+                init int64 widenedSigned64;
+                init uint64 widenedUnsigned64;
+                if (TryConvertInt32ToChar16(-1, ref init negative32)
+                    || TryConvertInt32ToChar16(65536, ref init large32)
+                    || TryConvertUInt32ToChar16(uint32.MaxValue, ref init largeUnsigned32)
+                    || TryConvertInt64ToChar16(int64.MinValue, ref init negative64)
+                    || TryConvertInt64ToChar16(int64.MaxValue, ref init large64)
+                    || TryConvertUInt64ToChar16(uint64.MaxValue, ref init largeUnsigned64)) { return 1; }
+                require TryConvertInt32ToChar16(0, ref init zero);
+                require TryConvertInt32ToChar16(65535, ref init max32);
+                require TryConvertUInt32ToChar16(55296, ref init surrogate);
+                require TryConvertInt64ToChar16(65535, ref init max64);
+                require TryConvertUInt64ToChar16(65535, ref init maxUnsigned64);
                 if (zero != char16(0) || max32 != char16(65535)
                     || surrogate != char16(55296) || max64 != char16(65535)
                     || maxUnsigned64 != char16(65535)) { return 2; }
-                require TryConvertChar16ToInt32(zero, init var widenedZero);
-                require TryConvertChar16ToInt32(surrogate, init var widenedSurrogate);
-                require TryConvertChar16ToUInt32(max32, init var widenedUnsigned32);
-                require TryConvertChar16ToInt64(surrogate, init var widenedSigned64);
-                require TryConvertChar16ToUInt64(maxUnsigned64, init var widenedUnsigned64);
+                require TryConvertChar16ToInt32(zero, ref init widenedZero);
+                require TryConvertChar16ToInt32(surrogate, ref init widenedSurrogate);
+                require TryConvertChar16ToUInt32(max32, ref init widenedUnsigned32);
+                require TryConvertChar16ToInt64(surrogate, ref init widenedSigned64);
+                require TryConvertChar16ToUInt64(maxUnsigned64, ref init widenedUnsigned64);
                 if (widenedZero != 0 || widenedSurrogate != 55296
                     || widenedUnsigned32 != 65535 || widenedSigned64 != 55296
                     || widenedUnsigned64 != 65535) { return 3; }
@@ -739,7 +864,8 @@ internal sealed class WideCandidateTests
         var compilation = Compilation.Create(SyntaxTree.Parse("""
             using Terrum.CodeAnalysis.Numerics64;
             int32 Main() {
-                bool valid = TryConvertInt32ToChar16(-1, init var result);
+                init char16 result;
+                bool valid = TryConvertInt32ToChar16(-1, ref init result);
                 return int32(result);
             }
             """), ModuleCompiler.CreateReference(producer));
@@ -941,11 +1067,11 @@ internal sealed class WideCandidateTests
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
         await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
     }
-    [TestCase("TryAddInt64(int64.MaxValue, 1, init var value); return int32(value);")]
-    [TestCase("if (!TryAddInt64(int64.MaxValue, 1, init var value)) { return int32(value); } return 0;")]
-    [TestCase("uint32 value = 1; require TryAddInt64(value, 2, init var sum); return int32(sum);")]
-    [TestCase("TryAccumulateDecimal(1, 10, uint64.MaxValue, init var value); return int32(value);")]
-    [TestCase("TryAccumulateBase(1, 2, 2, uint64.MaxValue, init var value); return int32(value);")]
+    [TestCase("init int64 value; TryAddInt64(int64.MaxValue, 1, ref init value); return int32(value);")]
+    [TestCase("init int64 value; if (!TryAddInt64(int64.MaxValue, 1, ref init value)) { return int32(value); } return 0;")]
+    [TestCase("uint32 value = 1; init int64 sum; require TryAddInt64(value, 2, ref init sum); return int32(sum);")]
+    [TestCase("init uint64 value; TryAccumulateDecimal(1, 10, uint64.MaxValue, ref init value); return int32(value);")]
+    [TestCase("init uint64 value; TryAccumulateBase(1, 2, 2, uint64.MaxValue, ref init value); return int32(value);")]
     public void WideCandidateContractsRejectInvalidUse(string body)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(
@@ -1068,11 +1194,12 @@ internal sealed class WideCandidateTests
             "Terrum.CodeAnalysis.Numerics64.TryRoundUpToPowerOfTwoUInt64");
 
     private static async Task ExecuteBitOperationsPositionConsumerAsync(
-        NativeRuntimePolicy policy, bool includeUInt64)
+        NativeRuntimePolicy policy, bool includeUInt64, int firstBit, int endBit)
     {
         var producer = CreateBitOperationsLibrary(policy);
         var compilation = Compilation.Create(
-            SyntaxTree.Parse(BuildBitOperationsPositionConsumer(includeUInt64)),
+            SyntaxTree.Parse(BuildBitOperationsPositionConsumer(
+                includeUInt64, firstBit, endBit)),
             ModuleCompiler.CreateReference(producer), (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
@@ -1084,14 +1211,15 @@ internal sealed class WideCandidateTests
         await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
     }
 
-    private static string BuildBitOperationsPositionConsumer(bool includeUInt64)
+    private static string BuildBitOperationsPositionConsumer(
+        bool includeUInt64, int firstBit, int endBit)
     {
         var source = new StringBuilder("using Terrum.CodeAnalysis.Numerics64;\nint32 Main() {\n");
         var failureCode = 1;
         if (!includeUInt64)
         {
             int[] counts32 = [int.MinValue, -1, 1, int.MaxValue];
-            for (var bit = 0; bit < 32; bit++)
+            for (var bit = firstBit; bit < endBit; bit++)
             {
                 var oneBit = 1U << bit;
                 foreach (var value in new uint[] { oneBit, ~oneBit })
@@ -1122,17 +1250,20 @@ internal sealed class WideCandidateTests
                 foreach (var value in new uint[] { power - 1, power, power + 1 })
                 {
                     var expected = BitOperations.RoundUpToPowerOf2(value);
-                    AppendRoundUpCheck(source, "TryRoundUpToPowerOfTwoUInt32", Hex(value), Hex(expected),
+                    AppendRoundUpCheck(source, "TryRoundUpToPowerOfTwoUInt32", "uint32", Hex(value), Hex(expected),
                         expected != 0, ref failureCode);
                 }
             }
-            AppendRoundUpCheck(source, "TryRoundUpToPowerOfTwoUInt32", Hex(uint.MaxValue),
-                Hex(BitOperations.RoundUpToPowerOf2(uint.MaxValue)), false, ref failureCode);
+            if (endBit == 32)
+            {
+                AppendRoundUpCheck(source, "TryRoundUpToPowerOfTwoUInt32", "uint32", Hex(uint.MaxValue),
+                    Hex(BitOperations.RoundUpToPowerOf2(uint.MaxValue)), false, ref failureCode);
+            }
         }
         else
         {
             int[] counts64 = [int.MinValue, -1, 1, int.MaxValue];
-            for (var bit = 0; bit < 64; bit++)
+            for (var bit = firstBit; bit < endBit; bit++)
             {
                 var oneBit = 1UL << bit;
                 foreach (var value in new ulong[] { oneBit, ~oneBit })
@@ -1163,12 +1294,15 @@ internal sealed class WideCandidateTests
                 foreach (var value in new ulong[] { power - 1, power, power + 1 })
                 {
                     var expected = BitOperations.RoundUpToPowerOf2(value);
-                    AppendRoundUpCheck(source, "TryRoundUpToPowerOfTwoUInt64", Hex(value), Hex(expected),
+                    AppendRoundUpCheck(source, "TryRoundUpToPowerOfTwoUInt64", "uint64", Hex(value), Hex(expected),
                         expected != 0, ref failureCode);
                 }
             }
-            AppendRoundUpCheck(source, "TryRoundUpToPowerOfTwoUInt64", Hex(ulong.MaxValue),
-                Hex(BitOperations.RoundUpToPowerOf2(ulong.MaxValue)), false, ref failureCode);
+            if (endBit == 64)
+            {
+                AppendRoundUpCheck(source, "TryRoundUpToPowerOfTwoUInt64", "uint64", Hex(ulong.MaxValue),
+                    Hex(BitOperations.RoundUpToPowerOf2(ulong.MaxValue)), false, ref failureCode);
+            }
         }
 
         _ = source.AppendLine("return 42;").AppendLine("}");
@@ -1236,7 +1370,7 @@ internal sealed class WideCandidateTests
         foreach (var value in round32)
         {
             var expected = BitOperations.RoundUpToPowerOf2(value);
-            AppendRoundUpCheck(source, "TryRoundUpToPowerOfTwoUInt32", Hex(value), Hex(expected),
+            AppendRoundUpCheck(source, "TryRoundUpToPowerOfTwoUInt32", "uint32", Hex(value), Hex(expected),
                 expected != 0, ref failureCode);
         }
 
@@ -1245,7 +1379,7 @@ internal sealed class WideCandidateTests
         foreach (var value in round64)
         {
             var expected = BitOperations.RoundUpToPowerOf2(value);
-            AppendRoundUpCheck(source, "TryRoundUpToPowerOfTwoUInt64", Hex(value), Hex(expected),
+            AppendRoundUpCheck(source, "TryRoundUpToPowerOfTwoUInt64", "uint64", Hex(value), Hex(expected),
                 expected != 0, ref failureCode);
         }
 
@@ -1269,7 +1403,7 @@ internal sealed class WideCandidateTests
             {
                 AppendBitCheck(source, $"AbsInt32({literal})", SignedLiteral(Math.Abs(value)), ref failureCode);
             }
-            AppendTryAbsCheck(source, "TryAbsInt32", literal,
+            AppendTryAbsCheck(source, "TryAbsInt32", "int32", literal,
                 value == int.MinValue ? "0" : SignedLiteral(Math.Abs(value)), value != int.MinValue, ref failureCode);
             AppendBitCheck(source, $"SignInt32({literal})", Math.Sign(value).ToString(CultureInfo.InvariantCulture),
                 ref failureCode);
@@ -1304,7 +1438,7 @@ internal sealed class WideCandidateTests
             {
                 AppendBitCheck(source, $"AbsInt64({literal})", SignedLiteral(Math.Abs(value)), ref failureCode);
             }
-            AppendTryAbsCheck(source, "TryAbsInt64", literal,
+            AppendTryAbsCheck(source, "TryAbsInt64", "int64", literal,
                 value == long.MinValue ? "0" : SignedLiteral(Math.Abs(value)), value != long.MinValue, ref failureCode);
             AppendBitCheck(source, $"SignInt64({literal})", Math.Sign(value).ToString(CultureInfo.InvariantCulture),
                 ref failureCode);
@@ -1507,16 +1641,17 @@ internal sealed class WideCandidateTests
             .Append(") { return ").Append(failureCode++).AppendLine("; }");
     }
 
-    private static void AppendTryAbsCheck(StringBuilder source, string method, string value,
+    private static void AppendTryAbsCheck(StringBuilder source, string method, string outputType, string value,
         string expected, bool succeeds, ref int failureCode)
     {
         var code = failureCode++;
         var output = $"absolute{code}";
-        var call = $"{method}({value}, init var {output})";
+        _ = source.Append("init ").Append(outputType).Append(' ').Append(output).AppendLine(";");
+        var call = $"{method}({value}, ref init {output})";
         if (!succeeds)
         {
             _ = source.Append("if (").Append(call).Append(") { return ").Append(code).AppendLine("; }");
-            _ = source.Append("require ").Append(method).Append("(1, init ").Append(output).AppendLine(");");
+            _ = source.Append("require ").Append(method).Append("(1, ref init ").Append(output).AppendLine(");");
             AppendBitCheck(source, output, "1", ref failureCode);
             return;
         }
@@ -1525,16 +1660,17 @@ internal sealed class WideCandidateTests
         AppendBitCheck(source, output, expected, ref failureCode);
     }
 
-    private static void AppendRoundUpCheck(StringBuilder source, string method, string value,
+    private static void AppendRoundUpCheck(StringBuilder source, string method, string outputType, string value,
         string expected, bool succeeds, ref int failureCode)
     {
         var code = failureCode++;
         var output = $"rounded{code}";
-        var call = $"{method}({value}, init var {output})";
+        _ = source.Append("init ").Append(outputType).Append(' ').Append(output).AppendLine(";");
+        var call = $"{method}({value}, ref init {output})";
         if (!succeeds)
         {
             _ = source.Append("if (").Append(call).Append(") { return ").Append(code).AppendLine("; }");
-            _ = source.Append("require ").Append(method).Append("(1, init ").Append(output).AppendLine(");");
+            _ = source.Append("require ").Append(method).Append("(1, ref init ").Append(output).AppendLine(");");
             AppendBitCheck(source, output, "1", ref failureCode);
             return;
         }

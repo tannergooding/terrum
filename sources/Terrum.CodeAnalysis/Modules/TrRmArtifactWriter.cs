@@ -131,7 +131,12 @@ public static class TrRmArtifactWriter
             throw new InvalidOperationException("TRRM section offsets did not match the computed artifact size.");
         }
 
-        _ = new TrRmArtifactIndex(result, schema, resourceLedger);
+        var usesNativePointerLoads = schema is
+            TrRmArtifactSchema.InitializationReferencePointerLoadNativeParameterDraft
+                or TrRmArtifactSchema
+                    .InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft;
+        _ = new TrRmArtifactIndex(result, schema, resourceLedger,
+            usesNativePointerLoads);
         return result;
     }
 

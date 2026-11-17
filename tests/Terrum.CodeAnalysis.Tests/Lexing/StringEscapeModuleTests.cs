@@ -13,6 +13,7 @@ using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 using Terrum.CodeAnalysis.Tests.Semantics;
+using Terrum.CodeAnalysis.Tests.Text;
 using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Lexing;
@@ -42,8 +43,12 @@ internal sealed class StringEscapeModuleTests
             namespace Terrum.CodeAnalysis;
             int32 Main() { return 0; }
             public int32 AnalyzeFirstEscape() {
-                if (!SourceRange.TryCreate(0, Host.Source.Length, init var spelling)) { return -2; }
-                if (!StringEscapeDecodeResult.TryAnalyze(spelling, init var decoded)) { return -1; }
+                init SourceRange spelling;
+                init StringEscapeDecodeResult decoded;
+                if (!SourceRange.TryCreate(0, Host.Source.Length,
+                    ref init spelling)) { return -2; }
+                if (!StringEscapeDecodeResult.TryAnalyze(spelling,
+                    ref init decoded)) { return -1; }
                 return decoded.ErrorCode * 100_000_000 + (decoded.Scalar + 1) * 64
                     + decoded.ConsumedLength * 4 + decoded.ErrorLength;
             }
@@ -62,8 +67,12 @@ internal sealed class StringEscapeModuleTests
                     int32 spellingLength = int32(Host.Source[at + 6]);
                     at = at + 7;
                     if (spellingLength < 1 || spellingLength > sourceLength - at) { return -2; }
-                    if (!SourceRange.TryCreate(at, spellingLength, init var spelling)
-                        || !StringEscapeDecodeResult.TryAnalyze(spelling, init var decoded)) {
+                    init SourceRange spelling;
+                    init StringEscapeDecodeResult decoded;
+                    if (!SourceRange.TryCreate(at, spellingLength,
+                            ref init spelling)
+                        || !StringEscapeDecodeResult.TryAnalyze(spelling,
+                            ref init decoded)) {
                         return -3;
                     }
                     bool scalarMismatch = expectedUnpaired
@@ -94,12 +103,16 @@ internal sealed class StringEscapeModuleTests
             },
         ], options);
         Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+        var producerProgram = ((global::System.Func<BoundProgram>)(() => {
             var __nunitActual0 = producerCompilation.Program;
             Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
             return (BoundProgram)__nunitActual0!;
-        }))(),
-            ["Terrum.CodeAnalysis.AnalyzeFirstEscape", "Terrum.CodeAnalysis.VerifyEscapeRecords"]);
+        }))();
+        var producer = ModuleCompiler.CreateProducer(producerProgram,
+            ["Terrum.CodeAnalysis.AnalyzeFirstEscape",
+                "Terrum.CodeAnalysis.VerifyEscapeRecords"],
+            TextComponentTestHelpers.CreateIdentityInputs(producerProgram,
+                "StringEscapeProvider"));
 
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
             namespace Terrum.CodeAnalysis;

@@ -11,6 +11,7 @@ public readonly ref struct TrRmBodyTableReader
     private readonly TrRmVariableTableIndex _rows;
     private readonly TrRmArtifactSchema _schema;
     private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
+    private readonly bool _usesNativePointerLoads;
 
     /// <summary>Gets the number of validated Body rows.</summary>
     public int Count => _rows.Count;
@@ -25,9 +26,12 @@ public readonly ref struct TrRmBodyTableReader
 
     internal TrRmBodyTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmArtifactSchema schema,
-        TrRmA3LayoutResourceLedger? resourceLedger = null)
+        TrRmA3LayoutResourceLedger? resourceLedger = null,
+        bool usesNativePointerLoads = false)
     {
         if (schema is not (TrRmArtifactSchema.Standard
+            or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
+            or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft
             or TrRmArtifactSchema.Development
             or TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft
             or TrRmArtifactSchema.DevelopmentNativeConventionsDraft
@@ -46,8 +50,26 @@ public readonly ref struct TrRmBodyTableReader
             or TrRmArtifactSchema.NominalEnumsDraft
             or TrRmArtifactSchema.RootPinRuntimeDraft
             or TrRmArtifactSchema.GeneralPredicateGraphsDraft
+            or TrRmArtifactSchema.InitializationReferencePointerLoadNativeParameterDraft
+            or TrRmArtifactSchema.InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft
             or TrRmArtifactSchema.RegisterExceptionRegionsDraft
             or TrRmArtifactSchema.GenericMethodCallsDraft
+            or TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft
+            or TrRmArtifactSchema.GenericMethodCallsParameterLabelsReceiverAccessDraft
+            or TrRmArtifactSchema.C1Draft
+            or TrRmArtifactSchema.C1ParameterLabelsReceiverAccessDraft
+            or TrRmArtifactSchema.C1M1Draft
+            or TrRmArtifactSchema.C1M1ParameterLabelsReceiverAccessDraft
+            or TrRmArtifactSchema.C1M1ConstructionDraft
+            or TrRmArtifactSchema.C1M1ConstructionParameterLabelsReceiverAccessDraft
+            or TrRmArtifactSchema.C1M1Construction2Draft
+            or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft
+            or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft
+            or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft
             or TrRmArtifactSchema.GenericConstantMethodsDraft))
         {
             throw new ArgumentOutOfRangeException(nameof(schema));
@@ -57,6 +79,7 @@ public readonly ref struct TrRmBodyTableReader
             resourceLedger);
         _schema = schema;
         _resourceLedger = resourceLedger;
+        _usesNativePointerLoads = usesNativePointerLoads;
     }
 
     /// <summary>Gets the borrowed bytes of a one-based Body row without interpreting its instructions.</summary>
@@ -68,11 +91,15 @@ public readonly ref struct TrRmBodyTableReader
         return _rows.GetRow(row);
     }
 
-    internal TrRmRegisterBodyReader GetRegisterBody(int row, int contractCount = 0)
+    internal TrRmRegisterBodyReader GetRegisterBody(int row,
+        int contractCount = 0,
+        bool generalPredicateGraphsInitializationReferenceBodies = false)
     {
         _resourceLedger?.ConsumeWork();
         return new(_rows.GetRow(row), contractCount, _schema,
-            _resourceLedger);
+            _resourceLedger,
+            generalPredicateGraphsInitializationReferenceBodies,
+            _usesNativePointerLoads);
     }
 
     internal void ValidateSelectedImplementation(int row, int contractCount)

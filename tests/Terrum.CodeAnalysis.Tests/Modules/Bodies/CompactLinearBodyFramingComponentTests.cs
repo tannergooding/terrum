@@ -26,8 +26,10 @@ internal sealed class CompactLinearBodyFramingComponentTests
                 return 1;
             }
             for (mut int32 row = 1; row <= recordCount; row = row + 1) {
+                init int32 blockCount;
+                init int32 operationCount;
                 if (!TryGetValidatedCompactLinearBodyFrame(recordCount, row, typeSpecCount,
-                    init var blockCount, init var operationCount)
+                    ref init blockCount, ref init operationCount)
                     || blockCount != 1 || operationCount != 0) {
                     return 2;
                 }
@@ -36,7 +38,7 @@ internal sealed class CompactLinearBodyFramingComponentTests
             init int32 vacantBlocks;
             init int32 vacantOperations;
             if (TryGetValidatedCompactLinearBodyFrame(recordCount, 0, typeSpecCount,
-                init vacantBlocks, init vacantOperations)
+                ref init vacantBlocks, ref init vacantOperations)
                 || vacantBlocks is init || vacantOperations is init) {
                 return 3;
             }
@@ -51,8 +53,10 @@ internal sealed class CompactLinearBodyFramingComponentTests
             for (mut int32 row = 1; row <= bodyCount; row = row + 1) {
                 int32 expected = 1 + (row - 1) * 4;
                 bool expectedValid = Host.Expected[expected + 1] != 0;
+                init int32 blockCount;
+                init int32 operationCount;
                 if (TryGetCompactLinearBodyFrame(bodyCount, row,
-                    Host.Expected[expected], init var blockCount, init var operationCount)) {
+                    Host.Expected[expected], ref init blockCount, ref init operationCount)) {
                     if (!expectedValid) {
                         return 1;
                     }
@@ -68,7 +72,7 @@ internal sealed class CompactLinearBodyFramingComponentTests
             init int32 vacantBlocks;
             init int32 vacantOperations;
             if (TryGetCompactLinearBodyFrame(bodyCount, 0, 1,
-                init vacantBlocks, init vacantOperations)
+                ref init vacantBlocks, ref init vacantOperations)
                 || vacantBlocks is init || vacantOperations is init) {
                 return 4;
             }

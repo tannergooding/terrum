@@ -133,10 +133,13 @@ internal sealed class IntegerCheckedArithmeticModuleTests
 
         foreach (var (function, arguments) in RejectedCalls())
         {
+            var outputType = function.EndsWith("UInt32", StringComparison.Ordinal)
+                ? "uint32" : "int32";
             var invalidConsumer = SyntaxTree.Parse(
                 "using Terrum.CodeAnalysis.Numerics64;\n"
                 + "int32 Main() {\n"
-                + $"    if (!{function}({arguments}, init var result)) {{ return int32(result); }}\n"
+                + $"    init {outputType} result;\n"
+                + $"    if (!{function}({arguments}, ref init result)) {{ return int32(result); }}\n"
                 + "    return 0;\n"
                 + "}",
                 "integer-checked-arithmetic-unpublished-" + function + ".terrum");
@@ -181,13 +184,14 @@ internal sealed class IntegerCheckedArithmeticModuleTests
         _ = source.Append("bool Check").Append(operation.Name).Append('(')
             .Append(operation.Type).Append(" left, ").Append(operation.Type).Append(' ')
             .AppendLine("right, " + operation.Type + " expected, bool shouldSucceed) {")
+            .Append("    init ").Append(operation.Type).AppendLine(" result;")
             .AppendLine("    if (shouldSucceed) {")
             .Append("        if (!").Append(operation.Name)
-            .AppendLine("(left, right, init var actual)) { return false; }")
-            .AppendLine("        return actual == expected;")
+            .AppendLine("(left, right, ref init result)) { return false; }")
+            .AppendLine("        return result == expected;")
             .AppendLine("    }")
             .Append("    return !").Append(operation.Name)
-            .AppendLine("(left, right, init var unpublished);")
+            .AppendLine("(left, right, ref init result);")
             .AppendLine("}");
     }
 
@@ -197,13 +201,14 @@ internal sealed class IntegerCheckedArithmeticModuleTests
         {
             _ = source.Append("bool Check").Append(function)
                 .AppendLine("(int32 value, int32 expected, bool shouldSucceed) {")
+                .AppendLine("    init int32 result;")
                 .AppendLine("    if (shouldSucceed) {")
                 .Append("        if (!").Append(function)
-                .AppendLine("(value, init var actual)) { return false; }")
-                .AppendLine("        return actual == expected;")
+                .AppendLine("(value, ref init result)) { return false; }")
+                .AppendLine("        return result == expected;")
                 .AppendLine("    }")
                 .Append("    return !").Append(function)
-                .AppendLine("(value, init var unpublished);")
+                .AppendLine("(value, ref init result);")
                 .AppendLine("}");
         }
         _ = source.AppendLine("""

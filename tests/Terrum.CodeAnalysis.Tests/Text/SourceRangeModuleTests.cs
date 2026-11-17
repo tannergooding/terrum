@@ -26,27 +26,39 @@ internal sealed class SourceRangeModuleTests
         var producerTree = SyntaxTree.Parse(componentText + """
 
             public int32 VerifySourceRange() {
-                require SourceRange.TryCreate(0, 0, init var empty);
+                init SourceRange empty;
+                require SourceRange.TryCreate(0, 0, ref init empty);
                 if (empty.Start != 0 || empty.Length != 0 || empty.End != 0
                     || empty.GetEnd() != 0) { return 1; }
 
-                require SourceRange.TryCreate(int32.MaxValue, 0, init var atEnd);
+                init SourceRange atEnd;
+                require SourceRange.TryCreate(int32.MaxValue, 0, ref init atEnd);
                 if (atEnd.Start != int32.MaxValue || atEnd.Length != 0
                     || atEnd.End != int32.MaxValue || atEnd.GetEnd() != int32.MaxValue) { return 2; }
 
-                require SourceRange.TryCreate(int32.MaxValue - 1, 1, init var finalCodeUnit);
+                init SourceRange finalCodeUnit;
+                require SourceRange.TryCreate(int32.MaxValue - 1, 1,
+                    ref init finalCodeUnit);
                 if (finalCodeUnit.Start != int32.MaxValue - 1 || finalCodeUnit.Length != 1
                     || finalCodeUnit.End != int32.MaxValue
                     || finalCodeUnit.GetEnd() != int32.MaxValue) { return 3; }
 
-                require SourceRange.TryCreate(0, int32.MaxValue, init var fullExtent);
+                init SourceRange fullExtent;
+                require SourceRange.TryCreate(0, int32.MaxValue,
+                    ref init fullExtent);
                 if (fullExtent.Start != 0 || fullExtent.Length != int32.MaxValue
                     || fullExtent.End != int32.MaxValue) { return 4; }
 
-                if (SourceRange.TryCreate(-1, 0, init var negativeStart)
-                    || SourceRange.TryCreate(0, -1, init var negativeLength)
-                    || SourceRange.TryCreate(int32.MaxValue, 1, init var overflowingEnd)
-                    || SourceRange.TryCreate(1, int32.MaxValue, init var overflowingLength)) { return 5; }
+                init SourceRange negativeStart;
+                init SourceRange negativeLength;
+                init SourceRange overflowingEnd;
+                init SourceRange overflowingLength;
+                if (SourceRange.TryCreate(-1, 0, ref init negativeStart)
+                    || SourceRange.TryCreate(0, -1, ref init negativeLength)
+                    || SourceRange.TryCreate(int32.MaxValue, 1,
+                        ref init overflowingEnd)
+                    || SourceRange.TryCreate(1, int32.MaxValue,
+                        ref init overflowingLength)) { return 5; }
 
                 return 42;
             }
@@ -58,13 +70,15 @@ internal sealed class SourceRangeModuleTests
             .CreateRegisteredCompilationOptions(policy);
         var producerCompilation = Compilation.Create(producerTree, options);
         Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(
-            ((global::System.Func<BoundProgram>)(() => {
-                var __nunitActual0 = producerCompilation.Program;
-                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
-                return (BoundProgram)__nunitActual0!;
-            }))(),
-            ["Terrum.CodeAnalysis.VerifySourceRange"]);
+        var producerProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = producerCompilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
+        var producer = ModuleCompiler.CreateProducer(producerProgram,
+            ["Terrum.CodeAnalysis.VerifySourceRange"],
+            TextComponentTestHelpers.CreateIdentityInputs(producerProgram,
+                "SourceRangeProvider"));
 
         var consumerTree = SyntaxTree.Parse("""
             namespace Terrum.CodeAnalysis;

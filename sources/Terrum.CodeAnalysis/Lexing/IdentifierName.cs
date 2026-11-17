@@ -21,6 +21,7 @@ public static class IdentifierName
         "when", "is", "some", "and", "or", "not", "while", "do", "for", "in",
         "break", "continue", "return", "yield", "async", "await", "require",
         "ensure", "try", "catch", "finally", "throw", "defer", "unsafe", "policy",
+        "typeof",
         "true", "false", "null", "new", "via",
     ];
 

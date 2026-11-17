@@ -2,6 +2,7 @@
 
 using System;
 using System.Buffers.Binary;
+using System.Linq;
 using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Native;
@@ -41,21 +42,81 @@ internal sealed class VoidFrontendProjectionTests
             Assert.That(actual.Functions[0].Body.Statements.Length, Is.EqualTo(hosted.Functions[0].Body.Statements.Length));
             for (var i = 0; i < actual.Functions[0].Body.Statements.Length; i++)
             {
-                var expected = ((global::System.Func<BoundReturn>)(() => {
-                    var __nunitActual1 = hosted.Functions[0].Body.Statements[i];
-                    Assert.That(__nunitActual1, Is.TypeOf<BoundReturn>());
-                    return (BoundReturn)__nunitActual1!;
-                }))();
-                var returned = ((global::System.Func<BoundReturn>)(() => {
-                    var __nunitActual2 = actual.Functions[0].Body.Statements[i];
-                    Assert.That(__nunitActual2, Is.TypeOf<BoundReturn>());
-                    return (BoundReturn)__nunitActual2!;
-                }))();
+                var expectedStatement
+                    = hosted.Functions[0].Body.Statements[i];
+                var actualStatement = actual.Functions[0].Body.Statements[i];
+                Assert.That(actualStatement.GetType(),
+                    Is.EqualTo(expectedStatement.GetType()));
+                BoundReturn expected;
+                BoundReturn returned;
+                if (expectedStatement is BoundBlock expectedBlock)
+                {
+                    Assert.That(actualStatement,
+                        Is.TypeOf<BoundBlock>());
+                    var actualBlock = (BoundBlock)actualStatement;
+                    Assert.That(expectedBlock.Statements,
+                        Has.Length.EqualTo(2));
+                    Assert.That(actualBlock.Statements,
+                        Has.Length.EqualTo(2));
+                    Assert.That(expectedBlock.Statements[0],
+                        Is.TypeOf<BoundExpressionStatement>());
+                    Assert.That(actualBlock.Statements[0],
+                        Is.TypeOf<BoundExpressionStatement>());
+                    var expectedEvaluation
+                        = (BoundExpressionStatement)expectedBlock.Statements[0];
+                    var actualEvaluation
+                        = (BoundExpressionStatement)actualBlock.Statements[0];
+                    Assert.That(expectedEvaluation.Expression.Type,
+                        Is.EqualTo(PrimitiveType.Void));
+                    Assert.That(actualEvaluation.Expression.Type,
+                        Is.EqualTo(PrimitiveType.Void));
+                    Assert.That(actualEvaluation.Expression.Span,
+                        Is.EqualTo(expectedEvaluation.Expression.Span));
+                    Assert.That(expectedBlock.Statements[1],
+                        Is.TypeOf<BoundReturn>());
+                    Assert.That(actualBlock.Statements[1],
+                        Is.TypeOf<BoundReturn>());
+                    expected = (BoundReturn)expectedBlock.Statements[1];
+                    returned = (BoundReturn)actualBlock.Statements[1];
+                }
+                else
+                {
+                    Assert.That(expectedStatement,
+                        Is.TypeOf<BoundReturn>());
+                    Assert.That(actualStatement,
+                        Is.TypeOf<BoundReturn>());
+                    expected = (BoundReturn)expectedStatement;
+                    returned = (BoundReturn)actualStatement;
+                }
                 Assert.That(returned.Value, Is.Null);
                 Assert.That(returned.Span, Is.EqualTo(expected.Span));
             }
             Assert.That(NativeEmitter.EmitLibrary(actual, ["await"], (NativeRuntimePolicy)policy), Is.EqualTo(NativeEmitter.EmitLibrary(hosted, ["await"], (NativeRuntimePolicy)policy)));
         }
+    }
+
+    [Test]
+    public void HostedVoidReturnPreservesSideEffectingVoidExpression()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            void Effect() { }
+            public void Check() { return Effect(); }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var function = compilation.Program!.Functions.Single(static item =>
+            item.Name == "Check");
+        Assert.That(function.Body.Statements, Has.Length.GreaterThanOrEqualTo(1));
+        Assert.That(function.Body.Statements[0], Is.TypeOf<BoundBlock>());
+        var block = (BoundBlock)function.Body.Statements[0];
+        Assert.That(block.Statements, Has.Length.EqualTo(2));
+        Assert.That(block.Statements[0],
+            Is.TypeOf<BoundExpressionStatement>());
+        Assert.That(((BoundExpressionStatement)block.Statements[0]).Expression,
+            Is.TypeOf<BoundCall>());
+        Assert.That(block.Statements[1], Is.TypeOf<BoundReturn>());
+        Assert.That(((BoundReturn)block.Statements[1]).Value, Is.Null);
     }
 
     [Test]

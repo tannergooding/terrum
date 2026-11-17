@@ -27,13 +27,15 @@ internal sealed partial class SourceLineComponentTests
                 int32 length = GetSourceTextLength();
                 mut int32 position = 0;
                 while (position < length) {
-                    if (!TryReadSourceCodeUnit(position, init var codeUnit)
+                    init char16 codeUnit;
+                    if (!TryReadSourceCodeUnit(position, ref init codeUnit)
                         || int32(codeUnit) != expectedFirst + position) {
                         return position + 1;
                     }
                     position = position + 1;
                 }
-                if (TryReadSourceCodeUnit(length, init var outOfRange)) {
+                init char16 outOfRange;
+                if (TryReadSourceCodeUnit(length, ref init outOfRange)) {
                     return -1;
                 }
                 return 0;
@@ -43,13 +45,15 @@ internal sealed partial class SourceLineComponentTests
             [new HostBuffer("Source", PrimitiveType.Char16, [65], false) { IsInvocationScoped = true }],
             policy);
         Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(
-            ((global::System.Func<BoundProgram>)(() => {
-                var __nunitActual0 = producerCompilation.Program;
-                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
-                return (BoundProgram)__nunitActual0!;
-            }))(),
-            ["Terrum.CodeAnalysis.VerifySourceCodeUnits"]);
+        var producerProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = producerCompilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
+        var identityInputs = TextComponentTestHelpers.CreateIdentityInputs(
+            producerProgram, "SourceTextProvider");
+        var producer = ModuleCompiler.CreateProducer(producerProgram,
+            ["Terrum.CodeAnalysis.VerifySourceCodeUnits"], identityInputs);
 
         BoundProgram CreateConsumer(int expectedFirst)
         {
@@ -92,11 +96,12 @@ internal sealed partial class SourceLineComponentTests
     {
         var trees = await ReadComponentsAsync(includeTests: false, includeLines: false).ConfigureAwait(true);
         var codeUnitChecks = string.Join(Environment.NewLine, text.Select((unit, index) =>
-            $"if (!TryReadSourceCodeUnit({index}, init var codeUnit{index})) {{ return {index + 2}; }}" +
+            $"init char16 codeUnit{index};{Environment.NewLine}if (!TryReadSourceCodeUnit({index}, ref init codeUnit{index})) {{ return {index + 2}; }}" +
             $"{Environment.NewLine}if (int32(codeUnit{index}) != {(int)unit}) {{ return {index + 2}; }}"));
         var lines = SourceText.From(text).Lines;
         var lineChecks = string.Join(Environment.NewLine, lines.Select((line, index) =>
-            $"if (!TryReadSourceLine({line.Span.Start}, init var contentLine{index}, init var includingBreakLine{index})" +
+            $"init SourceRange contentLine{index};{Environment.NewLine}init SourceRange includingBreakLine{index};{Environment.NewLine}" +
+            $"if (!TryReadSourceLine({line.Span.Start}, ref init contentLine{index}, ref init includingBreakLine{index})" +
             $"{Environment.NewLine}    || contentLine{index}.Start != {line.Span.Start}" +
             $"{Environment.NewLine}    || contentLine{index}.Length != {line.Span.Length}" +
             $"{Environment.NewLine}    || includingBreakLine{index}.Start != {line.SpanIncludingLineBreak.Start}" +
@@ -108,32 +113,46 @@ internal sealed partial class SourceLineComponentTests
                 if (GetSourceTextLength() != {{text.Length}}) { return 1; }
                 {{codeUnitChecks}}
                 {{lineChecks}}
-                if (TryReadSourceLine(-1, init var beforeLine, init var beforeBreak)
-                    || TryReadSourceLine({{text.Length + 1}}, init var afterLine, init var afterBreak))
+                init SourceRange beforeLine;
+                init SourceRange beforeBreak;
+                init SourceRange afterLine;
+                init SourceRange afterBreak;
+                if (TryReadSourceLine(-1, ref init beforeLine, ref init beforeBreak)
+                    || TryReadSourceLine({{text.Length + 1}}, ref init afterLine, ref init afterBreak))
                 {
                     return 19;
                 }
-                if (TryReadSourceCodeUnit(-1, init var before)
-                    || TryReadSourceCodeUnit({{text.Length}}, init var after)
-                    || TryReadSourceCodeUnit(int32.MaxValue, init var maximum))
+                init char16 before;
+                init char16 after;
+                init char16 maximum;
+                if (TryReadSourceCodeUnit(-1, ref init before)
+                    || TryReadSourceCodeUnit({{text.Length}}, ref init after)
+                    || TryReadSourceCodeUnit(int32.MaxValue, ref init maximum))
                 {
                     return 10;
                 }
-                if (!TryGetSourceRange(0, {{text.Length}}, init var whole)
+                init SourceRange whole;
+                if (!TryGetSourceRange(0, {{text.Length}}, ref init whole)
                     || whole.Start != 0 || whole.Length != {{text.Length}})
                 {
                     return 11;
                 }
-                if (!TryGetSourceRange({{text.Length}}, 0, init var eof)
+                init SourceRange eof;
+                if (!TryGetSourceRange({{text.Length}}, 0, ref init eof)
                     || eof.Start != {{text.Length}} || eof.Length != 0)
                 {
                     return 12;
                 }
-                if (TryGetSourceRange(-1, 0, init var negativeStart)
-                    || TryGetSourceRange(0, -1, init var negativeLength)
-                    || TryGetSourceRange({{text.Length}}, 1, init var pastEnd)
-                    || TryGetSourceRange(int32.MaxValue, 1, init var maximumStart)
-                    || TryGetSourceRange(0, int32.MaxValue, init var maximumLength))
+                init SourceRange negativeStart;
+                init SourceRange negativeLength;
+                init SourceRange pastEnd;
+                init SourceRange maximumStart;
+                init SourceRange maximumLength;
+                if (TryGetSourceRange(-1, 0, ref init negativeStart)
+                    || TryGetSourceRange(0, -1, ref init negativeLength)
+                    || TryGetSourceRange({{text.Length}}, 1, ref init pastEnd)
+                    || TryGetSourceRange(int32.MaxValue, 1, ref init maximumStart)
+                    || TryGetSourceRange(0, int32.MaxValue, ref init maximumLength))
                 {
                     return 13;
                 }

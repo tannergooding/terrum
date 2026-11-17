@@ -305,6 +305,32 @@ internal sealed partial class CliTests
             var source = Encoding.UTF8.GetBytes("public int32 @await(int32 a, int32 b, int32 c) { require a + b + c == 42; return a + b + c; }");
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
             {
+                if (policy == "checked-exceptions")
+                {
+                    var nativeImage = await File.ReadAllBytesAsync(native)
+                        .ConfigureAwait(false);
+                    var hostedImage = await File.ReadAllBytesAsync(hosted)
+                        .ConfigureAwait(false);
+                    var (checkedNativeExit, checkedNativeOutput, checkedNativeError) = await RunAsync(
+                        source, "frontend-build-library",
+                        TerrumProjectPaths.SourceDirectory(RepositoryRoot()), "-",
+                        "-o", native, "--runtime", policy, "--json")
+                        .ConfigureAwait(false);
+                    Assert.That(checkedNativeExit, Is.EqualTo(1),
+                        $"{checkedNativeOutput}{checkedNativeError}");
+                    Assert.That(await File.ReadAllBytesAsync(native)
+                        .ConfigureAwait(false), Is.EqualTo(nativeImage));
+                    var (checkedHostExit, checkedHostOutput, checkedHostError) = await RunAsync(
+                        source, "build-library", "-", "--export", "await",
+                        "-o", hosted, "--runtime", policy, "--json")
+                        .ConfigureAwait(false);
+                    Assert.That(checkedHostExit, Is.EqualTo(1),
+                        $"{checkedHostOutput}{checkedHostError}");
+                    Assert.That(await File.ReadAllBytesAsync(hosted)
+                        .ConfigureAwait(false), Is.EqualTo(hostedImage));
+                    continue;
+                }
+
                 var (exit, output, error) = await RunAsync(source, "frontend-build-library",
                     TerrumProjectPaths.SourceDirectory(RepositoryRoot()), "-", "-o", native, "--runtime", policy, "--json").ConfigureAwait(false);
                 Assert.That(exit == 0, Is.True, $"{output}{error}");

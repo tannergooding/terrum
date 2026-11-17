@@ -73,23 +73,28 @@ internal sealed class IntegerCheckedConversionsModuleTests
                 .Append(conversion.Source.Name).Append("To").Append(conversion.Destination.Name)
                 .Append('(').Append(conversion.Source.Code).Append(" value, ")
                 .Append(conversion.Destination.Code).AppendLine(" expected, bool shouldSucceed) {")
+                .Append("    init ").Append(conversion.Destination.Code).AppendLine(" result;")
                 .AppendLine("    if (shouldSucceed) {")
                 .Append("        if (!").Append(conversion.FunctionName)
-                .AppendLine("(value, init var actual)) { return false; }")
-                .AppendLine("        return actual == expected;")
+                .AppendLine("(value, ref init result)) { return false; }")
+                .AppendLine("        return result == expected;")
                 .AppendLine("    }")
                 .Append("    return !").Append(conversion.FunctionName)
-                .AppendLine("(value, init var unpublished);")
+                .AppendLine("(value, ref init result);")
                 .AppendLine("}");
         }
         _ = consumerSource.AppendLine("bool CheckAllChar16Widenings() {")
             .AppendLine("    mut int32 codeUnit = 0;")
             .AppendLine("    while (codeUnit <= 65535) {")
             .AppendLine("        char16 value = char16(codeUnit);")
-            .AppendLine("        if (!TryConvertChar16ToInt32(value, init var actualInt32)) { return false; }")
-            .AppendLine("        if (!TryConvertChar16ToUInt32(value, init var actualUInt32)) { return false; }")
-            .AppendLine("        if (!TryConvertChar16ToInt64(value, init var actualInt64)) { return false; }")
-            .AppendLine("        if (!TryConvertChar16ToUInt64(value, init var actualUInt64)) { return false; }")
+            .AppendLine("        init int32 actualInt32;")
+            .AppendLine("        if (!TryConvertChar16ToInt32(value, ref init actualInt32)) { return false; }")
+            .AppendLine("        init uint32 actualUInt32;")
+            .AppendLine("        if (!TryConvertChar16ToUInt32(value, ref init actualUInt32)) { return false; }")
+            .AppendLine("        init int64 actualInt64;")
+            .AppendLine("        if (!TryConvertChar16ToInt64(value, ref init actualInt64)) { return false; }")
+            .AppendLine("        init uint64 actualUInt64;")
+            .AppendLine("        if (!TryConvertChar16ToUInt64(value, ref init actualUInt64)) { return false; }")
             .AppendLine("        if (actualInt32 != codeUnit || actualUInt32 != uint32(codeUnit)")
             .AppendLine("            || actualInt64 != int64(codeUnit) || actualUInt64 != uint64(codeUnit))")
             .AppendLine("        { return false; }")
@@ -117,7 +122,8 @@ internal sealed class IntegerCheckedConversionsModuleTests
         var invalidConsumer = SyntaxTree.Parse("""
             using Terrum.CodeAnalysis.Numerics64;
             int32 Main() {
-                if (!TryConvertInt32ToUInt64(-1, init var result)) { return int32(result); }
+                init uint64 result;
+                if (!TryConvertInt32ToUInt64(-1, ref init result)) { return int32(result); }
                 return 0;
             }
             """, "integer-conversion-unpublished-output.terrum");

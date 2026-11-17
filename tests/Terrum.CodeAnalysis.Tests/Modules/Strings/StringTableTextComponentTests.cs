@@ -28,19 +28,26 @@ internal sealed class StringTableTextComponentTests
             }
             mut int32 expectedRecord = 1;
             for (mut int32 row = 1; row <= recordCount; row = row + 1) {
+                init int32 rowStart;
+                init int32 rowLength;
                 if (!TryGetValidatedStringTableTextRow(recordCount, row,
-                    init var rowStart, init var rowLength)) {
+                    ref init rowStart, ref init rowLength)) {
                     return 2;
                 }
 
                 int32 expectedCount = Host.Expected[expectedRecord];
                 int32 scalarStart = Host.Expected[expectedRecord + 1];
-                if (!StringRowTextCursor.TryCreateName(rowStart, rowLength, init var created)) {
+                init StringRowTextCursor created;
+                if (!StringRowTextCursor.TryCreateName(rowStart, rowLength, ref init created)) {
                     return 3;
                 }
                 mut StringRowTextCursor cursor = move created;
                 mut int32 scalarIndex = 0;
-                while (cursor.TryRead(init var scalar)) {
+                while (true) {
+                    init int32 scalar;
+                    if (!cursor.TryRead(ref init scalar)) {
+                        break;
+                    }
                     if (scalarIndex >= expectedCount
                         || scalar != Host.Expected[scalarStart + scalarIndex]) {
                         return 4;
@@ -57,7 +64,7 @@ internal sealed class StringTableTextComponentTests
             init int32 vacantStart;
             init int32 vacantLength;
             if (TryGetValidatedStringTableTextRow(recordCount, 0,
-                init vacantStart, init vacantLength)
+                ref init vacantStart, ref init vacantLength)
                 || vacantStart is init || vacantLength is init) {
                 return 6;
             }
@@ -81,60 +88,68 @@ internal sealed class StringTableTextComponentTests
                 int32 expectedScalar = Host.Expected[record + 7];
                 if (isName) {
                     if (expectedCountSuccess) {
-                        if (!TryGetStringTableNameScalarCount(recordCount, row, init var count)
+                        init int32 count;
+                        if (!TryGetStringTableNameScalarCount(recordCount, row, ref init count)
                             || count != expectedCount) {
                             return 1;
                         }
                     } else {
-                        if (TryGetStringTableNameScalarCount(recordCount, row, init var rejectedCount)) {
+                        init int32 rejectedCount;
+                        if (TryGetStringTableNameScalarCount(recordCount, row, ref init rejectedCount)) {
                             return 2;
                         }
-                        if (!TryGetStringTableNameScalarCount(recordCount, 1, init rejectedCount)
+                        if (!TryGetStringTableNameScalarCount(recordCount, 1, ref init rejectedCount)
                             || rejectedCount != 1) {
                             return 3;
                         }
                     }
 
                     if (expectedReadSuccess) {
-                        if (!TryReadStringTableNameScalarAt(recordCount, row, scalarIndex, init var scalar)
+                        init int32 scalar;
+                        if (!TryReadStringTableNameScalarAt(recordCount, row, scalarIndex, ref init scalar)
                             || scalar != expectedScalar) {
                             return 4;
                         }
                     } else {
-                        if (TryReadStringTableNameScalarAt(recordCount, row, scalarIndex, init var rejectedScalar)) {
+                        init int32 rejectedScalar;
+                        if (TryReadStringTableNameScalarAt(recordCount, row, scalarIndex, ref init rejectedScalar)) {
                             return 5;
                         }
-                        if (!TryReadStringTableNameScalarAt(recordCount, 1, 0, init rejectedScalar)
+                        if (!TryReadStringTableNameScalarAt(recordCount, 1, 0, ref init rejectedScalar)
                             || rejectedScalar != 65) {
                             return 6;
                         }
                     }
                 } else {
                     if (expectedCountSuccess) {
-                        if (!TryGetStringTableNamespaceScalarCount(recordCount, row, init var count)
+                        init int32 count;
+                        if (!TryGetStringTableNamespaceScalarCount(recordCount, row, ref init count)
                             || count != expectedCount) {
                             return 7;
                         }
                     } else {
-                        if (TryGetStringTableNamespaceScalarCount(recordCount, row, init var rejectedCount)) {
+                        init int32 rejectedCount;
+                        if (TryGetStringTableNamespaceScalarCount(recordCount, row, ref init rejectedCount)) {
                             return 8;
                         }
-                        if (!TryGetStringTableNamespaceScalarCount(recordCount, 1, init rejectedCount)
+                        if (!TryGetStringTableNamespaceScalarCount(recordCount, 1, ref init rejectedCount)
                             || rejectedCount != 1) {
                             return 9;
                         }
                     }
 
                     if (expectedReadSuccess) {
-                        if (!TryReadStringTableNamespaceScalarAt(recordCount, row, scalarIndex, init var scalar)
+                        init int32 scalar;
+                        if (!TryReadStringTableNamespaceScalarAt(recordCount, row, scalarIndex, ref init scalar)
                             || scalar != expectedScalar) {
                             return 10;
                         }
                     } else {
-                        if (TryReadStringTableNamespaceScalarAt(recordCount, row, scalarIndex, init var rejectedScalar)) {
+                        init int32 rejectedScalar;
+                        if (TryReadStringTableNamespaceScalarAt(recordCount, row, scalarIndex, ref init rejectedScalar)) {
                             return 11;
                         }
-                        if (!TryReadStringTableNamespaceScalarAt(recordCount, 1, 0, init rejectedScalar)
+                        if (!TryReadStringTableNamespaceScalarAt(recordCount, 1, 0, ref init rejectedScalar)
                             || rejectedScalar != 65) {
                             return 12;
                         }

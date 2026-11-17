@@ -306,13 +306,13 @@ internal sealed partial class CliTests
     [TestCase("int64","-9223372036854775808","x /= -1;",unchecked((int)0xE0540001))]
     [TestCase("int64","-9223372036854775808","x %= -1;",42)]
     [TestCase("int32","-2147483648","x %= -1;",42)]
-    [TestCase("int32","1","x <<= -1;",unchecked((int)0xE0540001))]
-    [TestCase("int32","1","x >>>= 32;",unchecked((int)0xE0540001))]
-    [TestCase("uint32","1","x >>= -1;",unchecked((int)0xE0540001))]
-    [TestCase("int64","1","x >>= 64;",unchecked((int)0xE0540001))]
-    [TestCase("uint64","1","x >>>= 64;",unchecked((int)0xE0540001))]
-    [TestCase("int32","1","return x << -1;",unchecked((int)0xE0540001))]
-    [TestCase("int64","1","return int32(x >>> 64);",unchecked((int)0xE0540001))]
+    [TestCase("int32","1","x <<= -1;",unchecked((int)0xE0540004))]
+    [TestCase("int32","1","x >>>= 32;",unchecked((int)0xE0540004))]
+    [TestCase("uint32","1","x >>= -1;",unchecked((int)0xE0540004))]
+    [TestCase("int64","1","x >>= 64;",unchecked((int)0xE0540004))]
+    [TestCase("uint64","1","x >>>= 64;",unchecked((int)0xE0540004))]
+    [TestCase("int32","1","return x << -1;",unchecked((int)0xE0540004))]
+    [TestCase("int64","1","return int32(x >>> 64);",unchecked((int)0xE0540004))]
     public async Task FrontendMutationsPreserveExactCheckedStatusesAsync(
         string type, string initial, string mutation, int expected)
     {

@@ -36,15 +36,19 @@ internal sealed class SourceLinesModuleTests
             namespace Terrum.CodeAnalysis;
             int32 Main() { return 0; }
             public int32 GetStreamingLineExtent(int32 line) {
-                if (!TryGetSourceLineExtent(line, init var range)) { return -1; }
+                init SourceRange range;
+                if (!TryGetSourceLineExtent(line, ref init range)) { return -1; }
                 return range.Start * 256 + range.Length;
             }
             public int32 GetStreamingPosition(int32 position) {
-                if (!TryGetSourcePosition(position, init var line, init var character)) { return -1; }
+                init int32 line;
+                init int32 character;
+                if (!TryGetSourcePosition(position, ref init line, ref init character)) { return -1; }
                 return line * 256 + character;
             }
             public int32 GetStreamingOffset(int32 line, int32 character) {
-                if (!TryGetSourceOffset(line, character, init var offset)) { return -1; }
+                init int32 offset;
+                if (!TryGetSourceOffset(line, character, ref init offset)) { return -1; }
                 return offset;
             }
             """, "source-lines-module.terrum");
@@ -57,16 +61,18 @@ internal sealed class SourceLinesModuleTests
             },
         ], options);
         Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+        var producerProgram = ((global::System.Func<BoundProgram>)(() => {
             var __nunitActual0 = producerCompilation.Program;
             Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
             return (BoundProgram)__nunitActual0!;
-        }))(),
+        }))();
+        var producer = ModuleCompiler.CreateProducer(producerProgram,
         [
             "Terrum.CodeAnalysis.GetStreamingLineExtent",
             "Terrum.CodeAnalysis.GetStreamingPosition",
             "Terrum.CodeAnalysis.GetStreamingOffset",
-        ]);
+        ], TextComponentTestHelpers.CreateIdentityInputs(producerProgram,
+            "SourceLinesProvider"));
 
         var fixtures = new[] {
             "", "plain", "\r", "\n", "\r\n", "\r\r\n\n\r",

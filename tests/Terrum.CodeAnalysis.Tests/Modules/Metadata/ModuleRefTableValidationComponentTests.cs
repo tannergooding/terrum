@@ -31,10 +31,12 @@ internal sealed class ModuleRefTableValidationComponentTests
             if (valid) {
                 int32 stringIndexByteLength = (Host.Expected[2] + 1) * 4;
                 for (mut int32 row = 1; row <= Host.Expected[1]; row = row + 1) {
-                    if (!TryReadModuleTableWord((row - 1) * 48, 0, init var identity)
+                    init uint32 identity;
+                    init int32 selectedRow;
+                    if (!TryReadModuleTableWord((row - 1) * 48, 0, ref init identity)
                         || !TryFindModuleTableRowByIdentity(Host.Expected[1],
                             Host.Expected[2], stringIndexByteLength, int32(identity),
-                            init var selectedRow)
+                            ref init selectedRow)
                         || selectedRow != row) {
                         return 2;
                     }

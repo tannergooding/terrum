@@ -37,30 +37,40 @@ internal sealed class SourceLineIndexModuleTests
             namespace Terrum.CodeAnalysis;
             int32 Main() { return 0; }
             public int32 GetIndexedLineCount() {
-                if (!SourceLineIndex.TryCreate(init var index)) { return -1; }
+                init SourceLineIndex index;
+                if (!SourceLineIndex.TryCreate(ref init index)) { return -1; }
                 return index.GetLineCount();
             }
             public int32 GetIndexedLineRange(int32 line, bool includingBreak) {
-                if (!SourceLineIndex.TryCreate(init var index)) { return -1; }
+                init SourceLineIndex index;
+                if (!SourceLineIndex.TryCreate(ref init index)) { return -1; }
                 if (includingBreak) {
-                    if (!index.TryGetLineExtent(line, init var range)) { return -2; }
+                    init SourceRange range;
+                    if (!index.TryGetLineExtent(line, ref init range)) { return -2; }
                     return range.Start * 256 + range.Length;
                 }
-                if (!index.TryGetLineContentExtent(line, init var content)) { return -2; }
+                init SourceRange content;
+                if (!index.TryGetLineContentExtent(line, ref init content)) { return -2; }
                 return content.Start * 256 + content.Length;
             }
             public int32 GetIndexedPosition(int32 position) {
-                if (!SourceLineIndex.TryCreate(init var index)) { return -1; }
-                if (!index.TryGetPosition(position, init var line, init var character)) { return -1; }
+                init SourceLineIndex index;
+                init int32 line;
+                init int32 character;
+                if (!SourceLineIndex.TryCreate(ref init index)) { return -1; }
+                if (!index.TryGetPosition(position, ref init line, ref init character)) { return -1; }
                 return line * 256 + character;
             }
             public int32 GetIndexedOffset(int32 line, int32 character) {
-                if (!SourceLineIndex.TryCreate(init var index)) { return -1; }
-                if (!index.TryGetOffset(line, character, init var offset)) { return -1; }
+                init SourceLineIndex index;
+                init int32 offset;
+                if (!SourceLineIndex.TryCreate(ref init index)) { return -1; }
+                if (!index.TryGetOffset(line, character, ref init offset)) { return -1; }
                 return offset;
             }
             public int32 VerifyMaximumCrLfLineIndex() {
-                if (!SourceLineIndex.TryCreate(init var index)) { return -1; }
+                init SourceLineIndex index;
+                if (!SourceLineIndex.TryCreate(ref init index)) { return -1; }
                 int32 lineCount = index.GetLineCount();
                 if (lineCount != Host.Source.Length / 2 + 1) { return -2; }
                 mut int32 line = 0;
@@ -68,27 +78,38 @@ internal sealed class SourceLineIndexModuleTests
                     int32 expectedStart = line * 2;
                     mut int32 expectedLength = 2;
                     if (line == lineCount - 1) { expectedLength = 0; }
-                    if (!index.TryGetLineExtent(line, init var indexedExtent)) { return -3; }
+                    init SourceRange indexedExtent;
+                    init SourceRange streamedContent;
+                    init SourceRange streamedExtent;
+                    init SourceRange indexedContent;
+                    if (!index.TryGetLineExtent(line, ref init indexedExtent)) { return -3; }
                     if (!TryReadSourceLine(expectedStart,
-                        init var streamedContent, init var streamedExtent)) { return -4; }
+                        ref init streamedContent, ref init streamedExtent)) { return -4; }
                     if (indexedExtent.Start != expectedStart || indexedExtent.Length != expectedLength
                         || streamedContent.Start != expectedStart || streamedContent.Length != 0
                         || streamedExtent.Start != indexedExtent.Start
                         || streamedExtent.Length != indexedExtent.Length) { return -5; }
-                    if (!index.TryGetLineContentExtent(line, init var indexedContent)) { return -6; }
+                    if (!index.TryGetLineContentExtent(line, ref init indexedContent)) { return -6; }
                     if (indexedContent.Start != expectedStart || indexedContent.Length != 0) { return -7; }
                     if (expectedLength == 0) {
-                        if (!index.TryGetPosition(expectedStart, init var finalLine, init var finalCharacter)
+                        init int32 finalLine;
+                        init int32 finalCharacter;
+                        init int32 finalOffset;
+                        if (!index.TryGetPosition(expectedStart, ref init finalLine,
+                            ref init finalCharacter)
                             || finalLine != line || finalCharacter != 0) { return -8; }
-                        if (!index.TryGetOffset(line, 0, init var finalOffset)
+                        if (!index.TryGetOffset(line, 0, ref init finalOffset)
                             || finalOffset != expectedStart) { return -9; }
                     } else {
                         for (mut int32 character = 0; character < expectedLength;
                             character = character + 1) {
+                            init int32 positionLine;
+                            init int32 positionCharacter;
+                            init int32 offset;
                             if (!index.TryGetPosition(expectedStart + character,
-                                init var positionLine, init var positionCharacter)
+                                ref init positionLine, ref init positionCharacter)
                                 || positionLine != line || positionCharacter != character) { return -10; }
-                            if (!index.TryGetOffset(line, character, init var offset)
+                            if (!index.TryGetOffset(line, character, ref init offset)
                                 || offset != expectedStart + character) { return -11; }
                         }
                     }
@@ -107,18 +128,20 @@ internal sealed class SourceLineIndexModuleTests
             },
         ], options);
         Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+        var producerProgram = ((global::System.Func<BoundProgram>)(() => {
             var __nunitActual0 = producerCompilation.Program;
             Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
             return (BoundProgram)__nunitActual0!;
-        }))(),
+        }))();
+        var producer = ModuleCompiler.CreateProducer(producerProgram,
             [
                 "Terrum.CodeAnalysis.GetIndexedLineCount",
                 "Terrum.CodeAnalysis.GetIndexedLineRange",
                 "Terrum.CodeAnalysis.GetIndexedPosition",
                 "Terrum.CodeAnalysis.GetIndexedOffset",
                 "Terrum.CodeAnalysis.VerifyMaximumCrLfLineIndex",
-            ]);
+            ], TextComponentTestHelpers.CreateIdentityInputs(producerProgram,
+                "SourceLineIndexProvider"));
 
         var fixtures = new[] {
             "",

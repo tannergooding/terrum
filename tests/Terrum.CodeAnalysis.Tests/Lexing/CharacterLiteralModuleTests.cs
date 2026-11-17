@@ -13,6 +13,7 @@ using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 using Terrum.CodeAnalysis.Tests.Semantics;
+using Terrum.CodeAnalysis.Tests.Text;
 using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Lexing;
@@ -42,8 +43,12 @@ internal sealed class CharacterLiteralModuleTests
             namespace Terrum.CodeAnalysis;
             int32 Main() { return 0; }
             public int32 DecodeWholeSource() {
-                if (!SourceRange.TryCreate(0, Host.Source.Length, init var spelling)) { return int32.MinValue; }
-                if (!CharacterLiteralDecodeResult.TryAnalyze(spelling, init var decoded)) { return int32.MinValue; }
+                init SourceRange spelling;
+                init CharacterLiteralDecodeResult decoded;
+                if (!SourceRange.TryCreate(0, Host.Source.Length,
+                    ref init spelling)) { return int32.MinValue; }
+                if (!CharacterLiteralDecodeResult.TryAnalyze(spelling,
+                    ref init decoded)) { return int32.MinValue; }
                 if (decoded.ErrorCode == 0) { return decoded.Scalar; }
                 return 0 - decoded.ErrorCode * 1_000_000
                     + decoded.ErrorSpan.Start * 128 + decoded.ErrorSpan.Length;
@@ -62,8 +67,12 @@ internal sealed class CharacterLiteralModuleTests
                     int32 spellingLength = int32(Host.Source[at + 5]);
                     at = at + 6;
                     if (spellingLength < 2 || spellingLength > sourceLength - at) { return -2; }
-                    if (!SourceRange.TryCreate(at, spellingLength, init var spelling)
-                        || !CharacterLiteralDecodeResult.TryAnalyze(spelling, init var decoded)) {
+                    init SourceRange spelling;
+                    init CharacterLiteralDecodeResult decoded;
+                    if (!SourceRange.TryCreate(at, spellingLength,
+                            ref init spelling)
+                        || !CharacterLiteralDecodeResult.TryAnalyze(spelling,
+                            ref init decoded)) {
                         return -3;
                     }
                     int32 absoluteErrorStart = expectedError == 0 ? 0 : at + expectedErrorStart;
@@ -103,12 +112,16 @@ internal sealed class CharacterLiteralModuleTests
             },
         ], options);
         Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+        var producerProgram = ((global::System.Func<BoundProgram>)(() => {
             var __nunitActual0 = producerCompilation.Program;
             Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
             return (BoundProgram)__nunitActual0!;
-        }))(),
-            ["Terrum.CodeAnalysis.DecodeWholeSource", "Terrum.CodeAnalysis.VerifyCharacterLiteralRecords"]);
+        }))();
+        var producer = ModuleCompiler.CreateProducer(producerProgram,
+            ["Terrum.CodeAnalysis.DecodeWholeSource",
+                "Terrum.CodeAnalysis.VerifyCharacterLiteralRecords"],
+            TextComponentTestHelpers.CreateIdentityInputs(producerProgram,
+                "CharacterLiteralProvider"));
 
         var consumerTree = SyntaxTree.Parse("""
             namespace Terrum.CodeAnalysis;

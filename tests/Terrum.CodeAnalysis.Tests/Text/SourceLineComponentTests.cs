@@ -61,21 +61,27 @@ internal sealed partial class SourceLineComponentTests
             namespace Terrum.CodeAnalysis;
             int32 Main() {
                 int32 length = GetSourceTextLength();
-                if (TryReadSourceCodeUnit(length, init var outOfRange)) { return -7; }
-                if (!TryGetSourceRange(0, length, init var whole)) { return -2; }
+                init char16 outOfRange;
+                if (TryReadSourceCodeUnit(length, ref init outOfRange)) { return -7; }
+                init SourceRange whole;
+                if (!TryGetSourceRange(0, length, ref init whole)) { return -2; }
                 int32 last = GetLastSourceCodeUnitOrMinusOne();
                 int32 first = GetFirstSourceCodeUnitOrMinusOne();
                 mut int32 checksum = (length + whole.Start + whole.Length + last + first + 2 * 65521) % 65521;
                 mut int32 at = 0;
                 while (at < length) {
-                    if (!TryReadSourceCodeUnit(at, init var unit)) { return -3; }
+                    init char16 unit;
+                    if (!TryReadSourceCodeUnit(at, ref init unit)) { return -3; }
                     checksum = (checksum + (int32(unit) * ((at % 97) + 1)) % 65521) % 65521;
                     at = at + 1;
                 }
                 at = 0;
                 while (at <= length) {
-                    if (!TryGetSourcePosition(at, init var line, init var character)) { return -4; }
-                    if (!TryGetSourceOffset(line, character, init var offset)) { return -5; }
+                    init int32 line;
+                    init int32 character;
+                    init int32 offset;
+                    if (!TryGetSourcePosition(at, ref init line, ref init character)) { return -4; }
+                    if (!TryGetSourceOffset(line, character, ref init offset)) { return -5; }
                     if (offset != at) { return -6; }
                     checksum = (checksum + (line * 31 + character) % 65521) % 65521;
                     at = at + 1;
@@ -83,7 +89,8 @@ internal sealed partial class SourceLineComponentTests
                 mut int32 lineIndex = 0;
                 mut bool done = false;
                 while (!done) {
-                    if (TryGetSourceLineExtent(lineIndex, init var extent)) {
+                    init SourceRange extent;
+                    if (TryGetSourceLineExtent(lineIndex, ref init extent)) {
                         checksum = (checksum + extent.Start + extent.Length) % 65521;
                         lineIndex = lineIndex + 1;
                     } else {
@@ -110,17 +117,20 @@ internal sealed partial class SourceLineComponentTests
                     IsInvocationScoped = true,
                 }], policy);
             Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
-            var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var producerProgram = ((global::System.Func<BoundProgram>)(() => {
                 var __nunitActual0 = producerCompilation.Program;
                 Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
                 return (BoundProgram)__nunitActual0!;
-            }))(),
+            }))();
+            var producer = ModuleCompiler.CreateProducer(producerProgram,
                 ["Terrum.CodeAnalysis.GetSourceTextLength", "Terrum.CodeAnalysis.TryReadSourceCodeUnit",
                     "Terrum.CodeAnalysis.TryGetSourceRange", "Terrum.CodeAnalysis.TryReadSourceLine",
                     "Terrum.CodeAnalysis.TryGetSourcePosition", "Terrum.CodeAnalysis.TryGetSourceOffset",
                     "Terrum.CodeAnalysis.TryGetSourceLineExtent",
                     "Terrum.CodeAnalysis.GetLastSourceCodeUnitOrMinusOne",
-                    "Terrum.CodeAnalysis.GetFirstSourceCodeUnitOrMinusOne"]);
+                    "Terrum.CodeAnalysis.GetFirstSourceCodeUnitOrMinusOne"],
+                TextComponentTestHelpers.CreateIdentityInputs(producerProgram,
+                    "SourceFacadeProvider"));
             Assert.That(producer.AsSpan().IndexOf(new byte[] { 0x57, 0x13, 0x68, 0x24, 0x9A, 0x36 }), Is.EqualTo(-1));
             Assert.That(ModuleCompiler.CreateReference(producer).RequiresSourceGrant, Is.True);
 
@@ -180,7 +190,8 @@ internal sealed partial class SourceLineComponentTests
             var vacantOutputCompilation = Compilation.Create(SyntaxTree.Parse("""
                 namespace Terrum.CodeAnalysis;
                 int32 Main() {
-                    if (TryReadSourceCodeUnit(-1, init var codeUnit)) { return 1; }
+                    init char16 codeUnit;
+                    if (TryReadSourceCodeUnit(-1, ref init codeUnit)) { return 1; }
                     return int32(codeUnit);
                 }
                 """, "source-grant-vacant-output.terrum"), ModuleCompiler.CreateReference(producer), policy);
@@ -275,17 +286,18 @@ internal sealed partial class SourceLineComponentTests
                 NativeRuntimePolicy.FailFast), Is.EqualTo(last));
         }
     }
-    [TestCase("bool ok = TryReadSourceLine(-1, init var content, init var including); return content.Start;")]
-    [TestCase("bool ok = TryReadSourceLine(-1, init var content, init var including); return including.Length;")]
-    [TestCase("bool ok = TryGetSourcePosition(-1, init var line, init var character); return line;")]
-    [TestCase("bool ok = TryGetSourcePosition(-1, init var line, init var character); return character;")]
-    [TestCase("bool ok = TryGetSourceOffset(-1, 0, init var offset); return offset;")]
-    [TestCase("bool ok = TryGetSourceOffset(0, 2, init var offset); return offset;")]
-    [TestCase("bool ok = TryGetSourceLineExtent(-1, init var extent); return extent.Start;")]
-    [TestCase("bool ok = TryGetSourceLineExtent(1, init var extent); return extent.Length;")]
-    [TestCase("bool ok = TryReadSourceCodeUnit(-1, init var codeUnit); return int32(codeUnit);")]
-    [TestCase("bool ok = TryGetSourceRange(-1, 0, init var range); return range.Start;")]
-    public async Task FailedQueriesCannotPublishReadableOutputsAsync(string body)
+    [TestCase("init SourceRange content; init SourceRange including; bool ok = TryReadSourceLine(-1, ref init content, ref init including); return content.Start;", "TRM3023")]
+    [TestCase("init SourceRange content; init SourceRange including; bool ok = TryReadSourceLine(-1, ref init content, ref init including); return including.Length;", "TRM3023")]
+    [TestCase("init int32 line; init int32 character; bool ok = TryGetSourcePosition(-1, ref init line, ref init character); return line;", "TRM3016")]
+    [TestCase("init int32 line; init int32 character; bool ok = TryGetSourcePosition(-1, ref init line, ref init character); return character;", "TRM3016")]
+    [TestCase("init int32 offset; bool ok = TryGetSourceOffset(-1, 0, ref init offset); return offset;", "TRM3016")]
+    [TestCase("init int32 offset; bool ok = TryGetSourceOffset(0, 2, ref init offset); return offset;", "TRM3016")]
+    [TestCase("init SourceRange extent; bool ok = TryGetSourceLineExtent(-1, ref init extent); return extent.Start;", "TRM3023")]
+    [TestCase("init SourceRange extent; bool ok = TryGetSourceLineExtent(1, ref init extent); return extent.Length;", "TRM3023")]
+    [TestCase("init char16 codeUnit; bool ok = TryReadSourceCodeUnit(-1, ref init codeUnit); return int32(codeUnit);", "TRM3016")]
+    [TestCase("init SourceRange range; bool ok = TryGetSourceRange(-1, 0, ref init range); return range.Start;", "TRM3023")]
+    public async Task FailedQueriesCannotPublishReadableOutputsAsync(
+        string body, string expectedDiagnosticCode)
     {
         var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
         var entry = SyntaxTree.Parse($"namespace Terrum.CodeAnalysis; int32 Main() {{ {body} }}", "entry.terrum");
@@ -293,8 +305,13 @@ internal sealed partial class SourceLineComponentTests
             [new HostBuffer("Source", PrimitiveType.Char16, [65], false)]);
         Assert.That(compilation.HasErrors, Is.True);
         Assert.That(compilation.Program, Is.Null);
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3016"),Is.True);
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.SourceDiagnostics,diagnostic => diagnostic.SyntaxTree == entry && diagnostic.Diagnostic.Code == "TRM3016"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,
+            diagnostic => diagnostic.Code == expectedDiagnosticCode), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.SourceDiagnostics,
+            diagnostic => diagnostic.SyntaxTree == entry
+                && diagnostic.Diagnostic.Code == expectedDiagnosticCode), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
     }
 
     [Test]

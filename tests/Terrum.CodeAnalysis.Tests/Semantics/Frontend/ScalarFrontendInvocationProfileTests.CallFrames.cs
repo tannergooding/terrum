@@ -129,16 +129,22 @@ internal sealed partial class ScalarFrontendInvocationProfileTests
             "int32 Main() => Pick(1, b: true, d: 2.0, c: 'x'); "
                 + "int32 Pick(int32 a, bool b, char16 c, float64 d) => a; "
                 + "int32 Other(int32 a, bool b, char16 c, int32 d) => a;",
-            "int32 Main() { mut int32 a = 0; Fill(second: init var b, first: out a); return a; } "
-                + "void Fill(out int32 first, init ref<bool> second) { first = 42; second = true; } "
+            "int32 Main() { mut int32 a = 0; init bool b; "
+                + "Fill(second: ref init b, first: out a); return a; } "
+                + "void Fill(out int32 first, ref<init bool> second) { "
+                + "first = 42; *second = true; } "
                 + "void Other() { }",
             "namespace Demo.Tools; "
-                + "int32 Main() { mut int32 a = 0; Fill(second: init var b, first: out a); return a; } "
-                + "void Fill(out int32 first, init ref<bool> second) { first = 42; second = true; } "
+                + "int32 Main() { mut int32 a = 0; init bool b; "
+                + "Fill(second: ref init b, first: out a); return a; } "
+                + "void Fill(out int32 first, ref<init bool> second) { "
+                + "first = 42; *second = true; } "
                 + "void Other() { }",
             "namespace Demo.Tools { "
-                + "int32 Main() { mut int32 a = 0; Fill(second: init var b, first: out a); return a; } "
-                + "void Fill(out int32 first, init ref<bool> second) { first = 42; second = true; } "
+                + "int32 Main() { mut int32 a = 0; init bool b; "
+                + "Fill(second: ref init b, first: out a); return a; } "
+                + "void Fill(out int32 first, ref<init bool> second) { "
+                + "first = 42; *second = true; } "
                 + "void Other() { } }",
             "namespace Demo { int32 Main() => Next(); int32 Next() => 42; "
                 + "namespace Tools { int32 Before() => 0; "

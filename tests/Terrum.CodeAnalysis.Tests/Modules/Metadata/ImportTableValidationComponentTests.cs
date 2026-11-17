@@ -71,17 +71,23 @@ internal sealed partial class ImportTableValidationComponentTests
             }
 
             if (Host.Expected[20] != 0) {
+                init uint32 target;
+                init uint32 policy;
                 if (!TryGetExpectedImportRequirements(reference, Host.Expected[0],
-                    init var target, init var policy)) {
+                    ref init target, ref init policy)) {
                     return 3;
                 }
                 if (target != uint32(Host.Expected[18])
                     || policy != uint32(Host.Expected[19])) {
                     return 4;
                 }
-            } else if (TryGetExpectedImportRequirements(reference, Host.Expected[0],
-                init var unusedTarget, init var unusedPolicy)) {
-                return 3;
+            } else {
+                init uint32 unusedTarget;
+                init uint32 unusedPolicy;
+                if (TryGetExpectedImportRequirements(reference, Host.Expected[0],
+                    ref init unusedTarget, ref init unusedPolicy)) {
+                    return 3;
+                }
             }
 
             return 0;

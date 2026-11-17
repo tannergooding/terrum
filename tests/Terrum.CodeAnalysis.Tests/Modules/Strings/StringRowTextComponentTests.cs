@@ -34,57 +34,65 @@ internal sealed class StringRowTextComponentTests
                 int32 expectedScalar = Host.Expected[record + 7];
                 if (isName) {
                     if (expectedCountSuccess) {
-                        if (!TryGetStringNameScalarCount(rowStart, rowLength, init var count)
+                        init int32 count;
+                        if (!TryGetStringNameScalarCount(rowStart, rowLength, ref init count)
                             || count != expectedCount) {
                             return 1;
                         }
                     } else {
-                        if (TryGetStringNameScalarCount(rowStart, rowLength, init var rejectedCount)) {
+                        init int32 rejectedCount;
+                        if (TryGetStringNameScalarCount(rowStart, rowLength, ref init rejectedCount)) {
                             return 2;
                         }
-                        if (!TryGetStringNamespaceScalarCount(0, 8, init rejectedCount) || rejectedCount != 3) {
+                        if (!TryGetStringNamespaceScalarCount(0, 8, ref init rejectedCount) || rejectedCount != 3) {
                             return 9;
                         }
                     }
 
                     if (expectedReadSuccess) {
-                        if (!TryReadStringNameScalarAt(rowStart, rowLength, scalarIndex, init var scalar)
+                        init int32 scalar;
+                        if (!TryReadStringNameScalarAt(rowStart, rowLength, scalarIndex, ref init scalar)
                             || scalar != expectedScalar) {
                             return 3;
                         }
                     } else {
-                        if (TryReadStringNameScalarAt(rowStart, rowLength, scalarIndex, init var rejectedScalar)) {
+                        init int32 rejectedScalar;
+                        if (TryReadStringNameScalarAt(rowStart, rowLength, scalarIndex, ref init rejectedScalar)) {
                             return 4;
                         }
-                        if (!TryReadStringNamespaceScalarAt(0, 8, 0, init rejectedScalar) || rejectedScalar != 1) {
+                        if (!TryReadStringNamespaceScalarAt(0, 8, 0, ref init rejectedScalar) || rejectedScalar != 1) {
                             return 10;
                         }
                     }
                 } else {
                     if (expectedCountSuccess) {
-                        if (!TryGetStringNamespaceScalarCount(rowStart, rowLength, init var count)
+                        init int32 count;
+                        if (!TryGetStringNamespaceScalarCount(rowStart, rowLength, ref init count)
                             || count != expectedCount) {
                             return 5;
                         }
                     } else {
-                        if (TryGetStringNamespaceScalarCount(rowStart, rowLength, init var rejectedCount)) {
+                        init int32 rejectedCount;
+                        if (TryGetStringNamespaceScalarCount(rowStart, rowLength, ref init rejectedCount)) {
                             return 6;
                         }
-                        if (!TryGetStringNamespaceScalarCount(0, 8, init rejectedCount) || rejectedCount != 3) {
+                        if (!TryGetStringNamespaceScalarCount(0, 8, ref init rejectedCount) || rejectedCount != 3) {
                             return 11;
                         }
                     }
 
                     if (expectedReadSuccess) {
-                        if (!TryReadStringNamespaceScalarAt(rowStart, rowLength, scalarIndex, init var scalar)
+                        init int32 scalar;
+                        if (!TryReadStringNamespaceScalarAt(rowStart, rowLength, scalarIndex, ref init scalar)
                             || scalar != expectedScalar) {
                             return 7;
                         }
                     } else {
-                        if (TryReadStringNamespaceScalarAt(rowStart, rowLength, scalarIndex, init var rejectedScalar)) {
+                        init int32 rejectedScalar;
+                        if (TryReadStringNamespaceScalarAt(rowStart, rowLength, scalarIndex, ref init rejectedScalar)) {
                             return 8;
                         }
-                        if (!TryReadStringNamespaceScalarAt(0, 8, 0, init rejectedScalar) || rejectedScalar != 1) {
+                        if (!TryReadStringNamespaceScalarAt(0, 8, 0, ref init rejectedScalar) || rejectedScalar != 1) {
                             return 12;
                         }
                     }

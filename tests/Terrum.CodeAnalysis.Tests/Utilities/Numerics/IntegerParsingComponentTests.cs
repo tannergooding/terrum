@@ -110,16 +110,26 @@ internal sealed class IntegerParsingComponentTests
                 (false, false, true) => "TryParseChar16Base",
                 _ => throw new InvalidOperationException("Unsupported parse fixture."),
             };
+            var resultType = (test.IsSigned, test.IsNarrow, test.IsChar) switch {
+                (false, false, false) => "uint64",
+                (true, false, false) => "int64",
+                (false, true, false) => "uint32",
+                (true, true, false) => "int32",
+                (false, false, true) => "char16",
+                _ => throw new InvalidOperationException("Unsupported parse fixture."),
+            };
+            _ = checks.Append("init ").Append(resultType)
+                .AppendLine(" parsed;");
             if (test.Expected is not null)
             {
                 _ = checks.AppendLine(System.Globalization.CultureInfo.InvariantCulture,
-                    $"if (!{method}({start}, {test.Text.Length}, {test.Radix}, init var parsed)"
+                    $"if (!{method}({start}, {test.Text.Length}, {test.Radix}, ref init parsed)"
                     + $" || parsed != {test.Expected}) {{ return {index + 1}; }}");
             }
             else
             {
                 _ = checks.AppendLine(System.Globalization.CultureInfo.InvariantCulture,
-                    $"if ({method}({start}, {test.Text.Length}, {test.Radix}, init var ignored))"
+                    $"if ({method}({start}, {test.Text.Length}, {test.Radix}, ref init parsed))"
                     + $" {{ return {index + 1}; }}");
             }
             _ = checks.AppendLine("}");
@@ -129,18 +139,28 @@ internal sealed class IntegerParsingComponentTests
         var oversizedNegativeStart = source.Length;
         _ = source.Append('-');
         var sourceEnd = source.Length;
-        _ = checks.AppendLine($"if (TryParseUInt64Base(0, 1, 10, init var reusable)) {{ return 102; }}"
-            + $" require TryParseUInt64Base({zeroStart}, 1, 10, init reusable);"
+        _ = checks.AppendLine("init uint64 reusable;");
+        _ = checks.AppendLine($"if (TryParseUInt64Base(0, 1, 10, ref init reusable)) {{ return 102; }}"
+            + $" require TryParseUInt64Base({zeroStart}, 1, 10, ref init reusable);"
             + " if (reusable != 0) { return 103; }");
-        _ = checks.AppendLine("if (TryParseUInt64Base(-1, 1, 10, init var negativeStart)"
-            + $" || TryParseInt64Base({oversizedNegativeStart}, 2, 10, init var oversizedNegative)"
-            + $" || TryParseInt64Base({sourceEnd}, 1, 10, init var sourceEndStart)"
-            + " || TryParseUInt64Base(int32.MaxValue, 1, 10, init var hugeStart)"
-            + " || TryParseUInt32Base(int32.MaxValue, 1, 10, init var initHugeStart)"
-            + " || TryParseInt64Base(0, int32.MaxValue, 10, init var hugeLength)"
-            + " || TryParseInt64Base(0, -1, 10, init var negativeLength)"
-            + " || TryParseInt32Base(0, -1, 10, init var initNegativeLength)"
-            + " || TryParseChar16Base(0, -1, 10, init var negativeCharLength)) { return 100; }");
+        _ = checks.AppendLine("init uint64 negativeStart;");
+        _ = checks.AppendLine("init int64 oversizedNegative;");
+        _ = checks.AppendLine("init int64 sourceEndStart;");
+        _ = checks.AppendLine("init uint64 hugeStart;");
+        _ = checks.AppendLine("init uint32 initHugeStart;");
+        _ = checks.AppendLine("init int64 hugeLength;");
+        _ = checks.AppendLine("init int64 negativeLength;");
+        _ = checks.AppendLine("init int32 initNegativeLength;");
+        _ = checks.AppendLine("init char16 negativeCharLength;");
+        _ = checks.AppendLine("if (TryParseUInt64Base(-1, 1, 10, ref init negativeStart)"
+            + $" || TryParseInt64Base({oversizedNegativeStart}, 2, 10, ref init oversizedNegative)"
+            + $" || TryParseInt64Base({sourceEnd}, 1, 10, ref init sourceEndStart)"
+            + " || TryParseUInt64Base(int32.MaxValue, 1, 10, ref init hugeStart)"
+            + " || TryParseUInt32Base(int32.MaxValue, 1, 10, ref init initHugeStart)"
+            + " || TryParseInt64Base(0, int32.MaxValue, 10, ref init hugeLength)"
+            + " || TryParseInt64Base(0, -1, 10, ref init negativeLength)"
+            + " || TryParseInt32Base(0, -1, 10, ref init initNegativeLength)"
+            + " || TryParseChar16Base(0, -1, 10, ref init negativeCharLength)) { return 100; }");
         _ = checks.AppendLine("return 0;");
 
         var root = RepositoryRoot();
@@ -188,11 +208,11 @@ internal sealed class IntegerParsingComponentTests
             await TestFileCleanup.DeleteWithRetryAsync(path).ConfigureAwait(true);
         }
     }
-    [TestCase("TryParseUInt64Base(1, 1, 10, init var value); return int32(value);")]
-    [TestCase("TryParseInt64Base(1, 1, 10, init var value); return int32(value);")]
-    [TestCase("TryParseUInt32Base(1, 1, 10, init var value); return int32(value);")]
-    [TestCase("TryParseInt32Base(1, 1, 10, init var value); return value;")]
-    [TestCase("TryParseChar16Base(1, 1, 10, init var value); return int32(value);")]
+    [TestCase("init uint64 value; if (TryParseUInt64Base(1, 1, 10, ref init value)) { return int32(value); } return int32(value);")]
+    [TestCase("init int64 value; if (TryParseInt64Base(1, 1, 10, ref init value)) { return int32(value); } return int32(value);")]
+    [TestCase("init uint32 value; if (TryParseUInt32Base(1, 1, 10, ref init value)) { return int32(value); } return int32(value);")]
+    [TestCase("init int32 value; if (TryParseInt32Base(1, 1, 10, ref init value)) { return value; } return value;")]
+    [TestCase("init char16 value; if (TryParseChar16Base(1, 1, 10, ref init value)) { return int32(value); } return int32(value);")]
     public void FailedParseCannotPublishOutput(string body)
     {
         ArgumentNullException.ThrowIfNull(body);

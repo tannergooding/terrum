@@ -11,6 +11,7 @@ using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 using Terrum.CodeAnalysis.Tests.Semantics;
+using Terrum.CodeAnalysis.Tests.Text;
 using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.Strings;
@@ -31,16 +32,22 @@ internal sealed class StringRowComparisonModuleTests
             if (leftLength > Host.Source.Length - 2) { return -2; }
             int32 rightStart = 2 + leftLength;
             if (rightLength != Host.Source.Length - rightStart) { return -2; }
-            if (!SourceRange.TryCreate(2, leftLength, init var leftSpelling)) { return -2; }
-            if (!SourceRange.TryCreate(rightStart, rightLength, init var rightSpelling)) { return -2; }
-            if (!StringLiteral.TryCreate(leftSpelling, init var left)) { return -2; }
-            if (!StringLiteral.TryCreate(rightSpelling, init var right)) { return -2; }
+            init SourceRange leftSpelling;
+            if (!SourceRange.TryCreate(2, leftLength, ref init leftSpelling)) { return -2; }
+            init SourceRange rightSpelling;
+            if (!SourceRange.TryCreate(rightStart, rightLength, ref init rightSpelling)) { return -2; }
+            init StringLiteral left;
+            if (!StringLiteral.TryCreate(leftSpelling, ref init left)) { return -2; }
+            init StringLiteral right;
+            if (!StringLiteral.TryCreate(rightSpelling, ref init right)) { return -2; }
             if (allowEmpty) {
-                if (!TryCompareStringNamespaces(left, right, init var equal)) { return -1; }
+                init bool equal;
+                if (!TryCompareStringNamespaces(left, right, ref init equal)) { return -1; }
                 if (equal) { return 1; }
                 return 0;
             }
-            if (!TryCompareStringNames(left, right, init var equal)) { return -1; }
+            init bool equal;
+            if (!TryCompareStringNames(left, right, ref init equal)) { return -1; }
             if (equal) { return 1; }
             return 0;
         }
@@ -75,12 +82,16 @@ internal sealed class StringRowComparisonModuleTests
         Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
 
         var exports = new[] { "CompareStringNames", "CompareStringNamespaces" };
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+        var producerProgram = ((global::System.Func<BoundProgram>)(() => {
             var __nunitActual0 = producerCompilation.Program;
             Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
             return (BoundProgram)__nunitActual0!;
-        }))(),
-            [.. exports.Select(static name => "Terrum.CodeAnalysis." + name)]);
+        }))();
+        var identityInputs = TextComponentTestHelpers.CreateIdentityInputs(
+            producerProgram, "StringRowComparisonProvider");
+        var producer = ModuleCompiler.CreateProducer(producerProgram,
+            [.. exports.Select(static name => "Terrum.CodeAnalysis." + name)],
+            identityInputs);
         var consumers = new BoundProgram[exports.Length];
         for (var index = 0; index < exports.Length; index++)
         {

@@ -55,8 +55,10 @@ internal sealed class IntegerFormattingModuleTests
             }
 
             int32 VerifyUInt64(uint64 value, int32 position, uint32 radix, bool uppercase, bool useBase) {
-                if (!TryGetUInt64BaseLength(value, radix, init var capacity)) { return -1; }
-                require OwnedInt32Buffer.TryCreate(capacity, out var workspace);
+                init int32 capacity;
+                if (!TryGetUInt64BaseLength(value, radix, ref init capacity)) { return -1; }
+                init OwnedInt32Buffer workspace;
+                require OwnedInt32Buffer.TryCreate(capacity, ref init workspace);
                 if (!useBase) { return VerifyDigits(FormatUInt64(value, move workspace), position); }
                 if (uppercase) {
                     return VerifyDigits(FormatUInt64BaseUpper(value, radix, move workspace), position);
@@ -65,8 +67,10 @@ internal sealed class IntegerFormattingModuleTests
             }
 
             int32 VerifyInt64(int64 value, int32 position, uint32 radix, bool uppercase, bool useBase) {
-                if (!TryGetInt64BaseLength(value, radix, init var capacity)) { return -1; }
-                require OwnedInt32Buffer.TryCreate(capacity, out var workspace);
+                init int32 capacity;
+                if (!TryGetInt64BaseLength(value, radix, ref init capacity)) { return -1; }
+                init OwnedInt32Buffer workspace;
+                require OwnedInt32Buffer.TryCreate(capacity, ref init workspace);
                 if (!useBase) { return VerifyDigits(FormatInt64(value, move workspace), position); }
                 if (uppercase) {
                     return VerifyDigits(FormatInt64BaseUpper(value, radix, move workspace), position);
@@ -75,8 +79,10 @@ internal sealed class IntegerFormattingModuleTests
             }
 
             int32 VerifyUInt32(uint32 value, int32 position, uint32 radix, bool uppercase, bool useBase) {
-                if (!TryGetUInt32BaseLength(value, radix, init var capacity)) { return -1; }
-                require OwnedInt32Buffer.TryCreate(capacity, out var workspace);
+                init int32 capacity;
+                if (!TryGetUInt32BaseLength(value, radix, ref init capacity)) { return -1; }
+                init OwnedInt32Buffer workspace;
+                require OwnedInt32Buffer.TryCreate(capacity, ref init workspace);
                 if (!useBase) { return VerifyDigits(FormatUInt32(value, move workspace), position); }
                 if (uppercase) {
                     return VerifyDigits(FormatUInt32BaseUpper(value, radix, move workspace), position);
@@ -85,8 +91,10 @@ internal sealed class IntegerFormattingModuleTests
             }
 
             int32 VerifyInt32(int32 value, int32 position, uint32 radix, bool uppercase, bool useBase) {
-                if (!TryGetInt32BaseLength(value, radix, init var capacity)) { return -1; }
-                require OwnedInt32Buffer.TryCreate(capacity, out var workspace);
+                init int32 capacity;
+                if (!TryGetInt32BaseLength(value, radix, ref init capacity)) { return -1; }
+                init OwnedInt32Buffer workspace;
+                require OwnedInt32Buffer.TryCreate(capacity, ref init workspace);
                 if (!useBase) { return VerifyDigits(FormatInt32(value, move workspace), position); }
                 if (uppercase) {
                     return VerifyDigits(FormatInt32BaseUpper(value, radix, move workspace), position);
@@ -95,8 +103,10 @@ internal sealed class IntegerFormattingModuleTests
             }
 
             int32 VerifyChar16(char16 value, int32 position, uint32 radix, bool uppercase, bool useBase) {
-                if (!TryGetChar16BaseLength(value, radix, init var capacity)) { return -1; }
-                require OwnedInt32Buffer.TryCreate(capacity, out var workspace);
+                init int32 capacity;
+                if (!TryGetChar16BaseLength(value, radix, ref init capacity)) { return -1; }
+                init OwnedInt32Buffer workspace;
+                require OwnedInt32Buffer.TryCreate(capacity, ref init workspace);
                 if (!useBase) { return VerifyDigits(FormatChar16(value, move workspace), position); }
                 if (uppercase) {
                     return VerifyDigits(FormatChar16BaseUpper(value, radix, move workspace), position);

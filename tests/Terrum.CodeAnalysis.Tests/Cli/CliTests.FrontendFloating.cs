@@ -423,10 +423,10 @@ internal sealed partial class CliTests
         string floatingType, string literal, int type, ulong expectedBits, string policy)
     {
         var source = $$"""
-            bool TryGet(init ref<{{floatingType}}> value) { value = {{literal}}; return true; }
+            bool TryGet(ref<init {{floatingType}}> value) { *value = {{literal}}; return true; }
             public {{floatingType}} Read() {
                 init {{floatingType}} value;
-                if (TryGet(init value)) { return value; }
+                if (TryGet(ref init value)) { return value; }
                 return 0.0;
             }
             """;
@@ -626,9 +626,9 @@ internal sealed partial class CliTests
         string floatingType, string literal, string policy)
     {
         var source = $$"""
-            public bool Fill({{floatingType}} seed, init ref<{{floatingType}}> value) {
-                if (seed == 0.0) { value = {{literal}}; return true; }
-                return Fill(seed - 1.0, init value);
+            public bool Fill({{floatingType}} seed, ref<init {{floatingType}}> value) {
+                if (seed == 0.0) { *value = {{literal}}; return true; }
+                return Fill(seed - 1.0, ref init *value);
             }
             """;
         var directory = TerrumProjectPaths.SourceDirectory(RepositoryRoot());

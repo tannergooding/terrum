@@ -34,7 +34,8 @@ internal sealed partial class ScalarFrontendInvocationProfileTests
         }
         public int32 InspectPrivateSpan() {
             int32 count = Scan();
-            require TokenSnapshot.TryBuild(count, init var owner);
+            init TokenSnapshot owner;
+            require TokenSnapshot.TryBuild(count, ref init owner);
             Span<Token> view = owner.AsSpan();
             return VerifySpan(count: count, view: view);
         }
@@ -172,14 +173,16 @@ internal sealed partial class ScalarFrontendInvocationProfileTests
             namespace Terrum.CodeAnalysis;
             int32 Main() { return 0; }
             internal bool Replace(out TokenSnapshot owner, int32 count) {
-                require TokenSnapshot.TryBuild(count, init var fresh);
+                init TokenSnapshot fresh;
+                require TokenSnapshot.TryBuild(count, ref init fresh);
                 owner = move fresh;
                 return true;
             }
             internal int32 Observe(Span<Token> view, bool ignored) { return int32(view.Length); }
             public int32 Stage() {
                 int32 count = Scan();
-                require TokenSnapshot.TryBuild(count, init var scanned);
+                init TokenSnapshot scanned;
+                require TokenSnapshot.TryBuild(count, ref init scanned);
                 mut TokenSnapshot owner = move scanned;
                 require Replace(out owner, count);
                 return Observe(owner.AsSpan(), false);
@@ -225,8 +228,12 @@ internal sealed partial class ScalarFrontendInvocationProfileTests
             }
             public int32 CountWithCleanup() {
                 int32 count = Scan();
-                require TokenSnapshot.TryBuild(count, init var firstScanned);
-                require TokenSnapshot.TryBuild(count, init var secondScanned);
+                init TokenSnapshot firstScanned;
+                init TokenSnapshot secondScanned;
+                require TokenSnapshot.TryBuild(count,
+                    ref init firstScanned);
+                require TokenSnapshot.TryBuild(count,
+                    ref init secondScanned);
                 mut TokenSnapshot first = move firstScanned;
                 mut TokenSnapshot second = move secondScanned;
                 {{cleanup}}

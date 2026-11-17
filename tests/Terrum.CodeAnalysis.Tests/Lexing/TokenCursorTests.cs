@@ -117,7 +117,8 @@ internal sealed class TokenCursorTests
         using Terrum.CodeAnalysis;
         bool Pick() { return false; }
         bool Replace(out TokenSnapshot value) {
-            require TokenSnapshot.TryScan(init var fresh);
+            init TokenSnapshot fresh;
+            require TokenSnapshot.TryScan(ref init fresh);
             value = move fresh;
             return true;
         }
@@ -125,7 +126,8 @@ internal sealed class TokenCursorTests
         int32 Observe(Span<Token> tokens, bool ignored) { return 42; }
         int32 Consume(TokenCursor cursor, bool ignored) { return 42; }
         int32 Main() {
-            require TokenSnapshot.TryScan(init var scanned);
+            init TokenSnapshot scanned;
+            require TokenSnapshot.TryScan(ref init scanned);
             mut TokenSnapshot owner = move scanned;
         """;
     [TestCase("")]
@@ -139,7 +141,9 @@ internal sealed class TokenCursorTests
             require tokens.Length == uint64(owner.GetCount());
             mut TokenCursor cursor = new TokenCursor(tokens);
             mut int32 index = 0;
-            while (cursor.TryRead(init var token)) {
+            while (true) {
+                init Token token;
+                if (!cursor.TryRead(ref init token)) { break; }
                 require token.Kind == Host.Tokens[index * 3];
                 require token.Range.Start == Host.Tokens[index * 3 + 1];
                 require token.Range.Length == Host.Tokens[index * 3 + 2];
@@ -147,7 +151,7 @@ internal sealed class TokenCursorTests
             }
             require index == owner.GetCount();
             init Token exhausted;
-            require !cursor.TryRead(init exhausted);
+            require !cursor.TryRead(ref init exhausted);
             require !(exhausted is init);
             cursor = _;
             tokens = _;
@@ -362,11 +366,14 @@ internal sealed class TokenCursorTests
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TokenSnapshot.TryScan(init var scanned);
+                init TokenSnapshot scanned;
+                require TokenSnapshot.TryScan(ref init scanned);
                 mut TokenSnapshot owner = move scanned;
                 mut TokenCursor cursor = new TokenCursor(owner.AsSpan());
                 mut int32 index = 0;
-                while (cursor.TryRead(init var token)) {
+                while (true) {
+                    init Token token;
+                    if (!cursor.TryRead(ref init token)) { break; }
                     if (index < {{identifierCount}}) {
                         if (token.Kind != 2 || token.Range.Start != index * 2
                             || token.Range.Length != 1) { return 1; }
@@ -378,8 +385,9 @@ internal sealed class TokenCursorTests
                     }
                     index = index + 1;
                 }
+                init Token exhausted;
                 if (index != {{expectedTokenCount}}
-                    || cursor.TryRead(init var exhausted)) { return 4; }
+                    || cursor.TryRead(ref init exhausted)) { return 4; }
                 cursor = _;
                 owner = _;
                 return 42;
@@ -914,6 +922,92 @@ internal sealed class TokenCursorTests
 
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task WritableScalarFieldThroughReferenceUpdatesAliasedStorageAsync(
+        BoundRuntimePolicy policy)
+    {
+        const string entry = """
+            struct Cell {
+                public mut int32 Value;
+                public Cell(int32 value) { Value = value; }
+            }
+            int32 Main() {
+                mut Cell cell = new Cell(int32(1));
+                write ref<Cell> borrowedCell = ref cell;
+                (*borrowedCell).Value = int32(42);
+                return cell.Value;
+            }
+            """;
+        var program = Program(await CompileAsync("", entry, policy).ConfigureAwait(true));
+        await ExecuteAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task WritableReferenceFieldRebindingThroughAliasUpdatesAggregateCopyAsync(
+        BoundRuntimePolicy policy)
+    {
+        const string entry = """
+            struct ReferenceCell {
+                public mut write ref<int32> Value;
+                [this: Captures(nameof(value))]
+                public ReferenceCell(write ref<int32> value) {
+                    Value = value;
+                }
+            }
+            int32 Main() {
+                mut int32 first = int32(7);
+                mut int32 second = int32(41);
+                mut ReferenceCell cell =
+                    new ReferenceCell(ref first);
+                write ref<ReferenceCell> borrowedCell = ref cell;
+                (*borrowedCell).Value = ref second;
+                ReferenceCell copied = cell;
+                *copied.Value = int32(42);
+                require first == int32(7);
+                require second == int32(42);
+                return int32(42);
+            }
+            """;
+        var program = Program(await CompileAsync("", entry, policy).ConfigureAwait(true));
+        await ExecuteAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [TestCase("ref<ReferenceCell> borrowedCell = ref cell; (*borrowedCell).Value = ref second;")]
+    [TestCase("write ref<ReferenceCell> borrowedCell = ref cell; (*borrowedCell).Readonly = ref second;")]
+    public async Task ReferenceFieldAssignmentRejectsReadOnlyAccessAsync(
+        string assignment)
+    {
+        var entry = """
+            struct ReferenceCell {
+                public mut ref<int32> Value;
+                public ref<int32> Readonly;
+                [this: Captures(nameof(value))]
+                public ReferenceCell(ref<int32> value) {
+                    Value = value;
+                    Readonly = value;
+                }
+            }
+            int32 Main() {
+                mut int32 first = int32(7);
+                mut int32 second = int32(41);
+                mut ReferenceCell cell =
+                    new ReferenceCell(ref first);
+            """ + assignment + """
+                return int32(42);
+            }
+            """;
+        var compilation = await CompileAsync("", entry,
+            BoundRuntimePolicy.FailFast).ConfigureAwait(true);
+
+        Assert.That(compilation.HasErrors, Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Diagnostics.Any(
+            static diagnostic => diagnostic.Code == "TRM3008"), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task ReferenceFieldBackingSurvivesAggregateCopiesAsync(
         BoundRuntimePolicy policy)
     {
@@ -927,9 +1021,11 @@ internal sealed class TokenCursorTests
                 }
             }
             int32 Main() {
-                require TokenSnapshot.TryScan(init var scanned);
+                init TokenSnapshot scanned;
+                require TokenSnapshot.TryScan(ref init scanned);
                 mut TokenSnapshot owner = move scanned;
-                require TokenSnapshot.TryScan(init var replacementScanned);
+                init TokenSnapshot replacementScanned;
+                require TokenSnapshot.TryScan(ref init replacementScanned);
                 mut TokenSnapshot replacement = move replacementScanned;
                 mut Span<Token> span = owner.AsSpan();
                 mut ReferenceSpan original = new ReferenceSpan(ref span);
@@ -991,7 +1087,8 @@ internal sealed class TokenCursorTests
                 }
             }
             OwnedInt32Buffer Create(int32 value) {
-                require OwnedInt32Buffer.TryCreate(1, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(1, ref init raw);
                 mut OwnedInt32Buffer buffer = move raw;
                 require buffer.TryAppend(value);
                 return move buffer;
@@ -1105,8 +1202,10 @@ internal sealed class TokenCursorTests
                 *destination = source;
             }
             int32 Main() {
-                require TokenSnapshot.TryScan(init var firstScanned);
-                require TokenSnapshot.TryScan(init var secondScanned);
+                init TokenSnapshot firstScanned;
+                require TokenSnapshot.TryScan(ref init firstScanned);
+                init TokenSnapshot secondScanned;
+                require TokenSnapshot.TryScan(ref init secondScanned);
                 mut TokenSnapshot first = move firstScanned;
                 mut TokenSnapshot second = move secondScanned;
                 {
@@ -1153,8 +1252,10 @@ internal sealed class TokenCursorTests
                 *destination = source;
             }
             int32 Main() {
-                require TokenSnapshot.TryScan(init var firstScanned);
-                require TokenSnapshot.TryScan(init var secondScanned);
+                init TokenSnapshot firstScanned;
+                require TokenSnapshot.TryScan(ref init firstScanned);
+                init TokenSnapshot secondScanned;
+                require TokenSnapshot.TryScan(ref init secondScanned);
                 mut TokenSnapshot first = move firstScanned;
                 mut TokenSnapshot second = move secondScanned;
                 {
@@ -1975,8 +2076,10 @@ internal sealed class TokenCursorTests
     {
         var entry = ForwardingDeclarations + """
             int32 Main() {
-                require TokenSnapshot.TryScan(init var firstScanned);
-                require TokenSnapshot.TryScan(init var secondScanned);
+                init TokenSnapshot firstScanned;
+                require TokenSnapshot.TryScan(ref init firstScanned);
+                init TokenSnapshot secondScanned;
+                require TokenSnapshot.TryScan(ref init secondScanned);
                 mut TokenSnapshot first = move firstScanned;
                 mut TokenSnapshot second = move secondScanned;
                 Span<Token> result = Identity(Forward(second: second.AsSpan(), first: first.AsSpan(),
@@ -2175,7 +2278,8 @@ internal sealed class TokenCursorTests
         var entry = """
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TokenSnapshot.TryScan(init var scanned);
+                init TokenSnapshot scanned;
+                require TokenSnapshot.TryScan(ref init scanned);
                 mut TokenSnapshot owner = move scanned;
                 Span<Token> view = owner.CreateView();
                 Span<Token> forwarded = owner.CreateForwardedView();
@@ -2227,7 +2331,8 @@ internal sealed class TokenCursorTests
         const string entry = """
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TokenSnapshot.TryScan(init var scanned);
+                init TokenSnapshot scanned;
+                require TokenSnapshot.TryScan(ref init scanned);
                 mut TokenSnapshot owner = move scanned;
                 Span<Token> view = owner.CreateForwardedView();
                 owner = _;
@@ -2258,8 +2363,10 @@ internal sealed class TokenCursorTests
         const string entry = """
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TokenSnapshot.TryScan(init var firstScanned);
-                require TokenSnapshot.TryScan(init var secondScanned);
+                init TokenSnapshot firstScanned;
+                require TokenSnapshot.TryScan(ref init firstScanned);
+                init TokenSnapshot secondScanned;
+                require TokenSnapshot.TryScan(ref init secondScanned);
                 mut TokenSnapshot first = move firstScanned;
                 mut TokenSnapshot second = move secondScanned;
                 mut TokenCursor cursor = new TokenCursor(first.AsSpan());
@@ -2349,7 +2456,8 @@ internal sealed class TokenCursorTests
         const string Entry = """
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TokenSnapshot.TryScan(init var scanned);
+                init TokenSnapshot scanned;
+                require TokenSnapshot.TryScan(ref init scanned);
                 mut TokenSnapshot owner = move scanned;
                 Span<Token> view = owner.AsSpan();
                 mut TokenSnapshot transferred = move owner;
@@ -2371,7 +2479,8 @@ internal sealed class TokenCursorTests
         const string Entry = """
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TokenSnapshot.TryScan(init var scanned);
+                init TokenSnapshot scanned;
+                require TokenSnapshot.TryScan(ref init scanned);
                 mut TokenSnapshot owner = move scanned;
                 Span<Token> view = owner.AsSpan();
                 mut TokenSnapshot transferred = move owner;
@@ -2395,12 +2504,14 @@ internal sealed class TokenCursorTests
         const string Entry = """
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TokenSnapshot.TryScan(init var firstScanned);
+                init TokenSnapshot firstScanned;
+                require TokenSnapshot.TryScan(ref init firstScanned);
                 mut TokenSnapshot owner = move firstScanned;
                 Span<Token> firstView = owner.AsSpan();
                 mut TokenSnapshot firstOwner = move owner;
 
-                require TokenSnapshot.TryScan(init var secondScanned);
+                init TokenSnapshot secondScanned;
+                require TokenSnapshot.TryScan(ref init secondScanned);
                 owner = move secondScanned;
                 Span<Token> secondView = owner.AsSpan();
                 require firstView.Length == uint64(firstOwner.GetCount());
@@ -2427,8 +2538,10 @@ internal sealed class TokenCursorTests
             using Terrum.CodeAnalysis;
             bool Pick() { return Host.Tokens[0] == 2; }
             int32 Main() {
-                require TokenSnapshot.TryScan(init var firstScanned);
-                require TokenSnapshot.TryScan(init var secondScanned);
+                init TokenSnapshot firstScanned;
+                require TokenSnapshot.TryScan(ref init firstScanned);
+                init TokenSnapshot secondScanned;
+                require TokenSnapshot.TryScan(ref init secondScanned);
                 mut TokenSnapshot first = move firstScanned;
                 mut TokenSnapshot second = move secondScanned;
                 Span<Token> view = Pick() ? first.AsSpan() : second.AsSpan();
@@ -2451,7 +2564,8 @@ internal sealed class TokenCursorTests
             int32 Main() {
                 mut int32 iteration = 0;
                 while (iteration < 2) {
-                    require TokenSnapshot.TryScan(init var scanned);
+                    init TokenSnapshot scanned;
+                    require TokenSnapshot.TryScan(ref init scanned);
                     mut TokenSnapshot owner = move scanned;
                     Span<Token> view = owner.AsSpan();
                     require view[0].Kind == 2;
@@ -2475,7 +2589,8 @@ internal sealed class TokenCursorTests
         var entry = ForwardingDeclarations + $$"""
             int32 Consume(TokenCursor cursor, bool ignored) { return 42; }
             int32 Main() {
-                require TokenSnapshot.TryScan(init var scanned);
+                init TokenSnapshot scanned;
+                require TokenSnapshot.TryScan(ref init scanned);
                 mut TokenSnapshot owner = move scanned;
                 int32 result = Consume(new TokenCursor({{view}}), false);
                 owner = _;
@@ -2493,8 +2608,10 @@ internal sealed class TokenCursorTests
     {
         var entry = ForwardingDeclarations + """
             int32 Main() {
-                require TokenSnapshot.TryScan(init var firstScanned);
-                require TokenSnapshot.TryScan(init var secondScanned);
+                init TokenSnapshot firstScanned;
+                require TokenSnapshot.TryScan(ref init firstScanned);
+                init TokenSnapshot secondScanned;
+                require TokenSnapshot.TryScan(ref init secondScanned);
                 mut TokenSnapshot first = move firstScanned;
                 mut TokenSnapshot second = move secondScanned;
                 Span<Token> result = Choose(first.AsSpan(), second.AsSpan(), false);
@@ -2515,11 +2632,13 @@ internal sealed class TokenCursorTests
     {
         var entry = ForwardingDeclarations + """
             int32 Main() {
-                require TokenSnapshot.TryScan(init var firstScanned);
+                init TokenSnapshot firstScanned;
+                require TokenSnapshot.TryScan(ref init firstScanned);
                 mut TokenSnapshot first = move firstScanned;
                 mut TokenCursor result = new TokenCursor(first.AsSpan());
                 {
-                    require TokenSnapshot.TryScan(init var scopedScanned);
+                    init TokenSnapshot scopedScanned;
+                    require TokenSnapshot.TryScan(ref init scopedScanned);
                     mut TokenSnapshot scoped = move scopedScanned;
                     result = new TokenCursor(Forward(scoped.AsSpan(), scoped.AsSpan(), true));
                 }
@@ -2553,7 +2672,8 @@ internal sealed class TokenCursorTests
     {
         var entry = ForwardingDeclarations + """
             int32 Main() {
-                require TokenSnapshot.TryScan(init var scanned);
+                init TokenSnapshot scanned;
+                require TokenSnapshot.TryScan(ref init scanned);
                 mut TokenSnapshot owner = move scanned;
                 Span<Token> result = Identity(Forward(owner.AsSpan(), owner.AsSpan(), false));
                 result = _;
@@ -2654,13 +2774,15 @@ internal sealed class TokenCursorTests
     {
         var entry = ForwardingDeclarations + """
             bool Replace(out TokenSnapshot value) {
-                require TokenSnapshot.TryScan(init var fresh);
+                init TokenSnapshot fresh;
+                require TokenSnapshot.TryScan(ref init fresh);
                 value = move fresh;
                 return true;
             }
             int32 Observe(Span<Token> tokens, bool ignored) { return 42; }
             int32 Main() {
-                require TokenSnapshot.TryScan(init var scanned);
+                init TokenSnapshot scanned;
+                require TokenSnapshot.TryScan(ref init scanned);
                 mut TokenSnapshot owner = move scanned;
                 return Observe(Identity(owner.AsSpan()), Replace(out owner));
             }
@@ -2675,7 +2797,8 @@ internal sealed class TokenCursorTests
     {
         var entry = ForwardingDeclarations + """
             int32 Main() {
-                require TokenSnapshot.TryScan(init var scanned);
+                init TokenSnapshot scanned;
+                require TokenSnapshot.TryScan(ref init scanned);
                 mut TokenSnapshot owner = move scanned;
                 unsafe {
                     try {
@@ -2743,7 +2866,8 @@ internal sealed class TokenCursorTests
             using Terrum.CodeAnalysis;
             [return: DependsOn(nameof(tokens))]
             internal Span<Token> Escape(Span<Token> tokens) {
-                require TokenSnapshot.TryScan(init var scanned);
+                init TokenSnapshot scanned;
+                require TokenSnapshot.TryScan(ref init scanned);
                 TokenSnapshot owner = move scanned;
                 Span<Token> local = owner.AsSpan();
                 return local;
@@ -2758,8 +2882,9 @@ internal sealed class TokenCursorTests
     [TestCase(true)]
     public async Task SnapshotConstructionPathsBothProduceAValidatedViewAsync(bool lossless)
     {
-        var build = lossless ? "require TryScanLossless(init var scanned, init var trivia);"
-            : "require TokenSnapshot.TryScan(init var scanned);";
+        var build = lossless
+            ? "init TokenSnapshot scanned; init TokenTriviaSnapshot trivia; require TryScanLossless(ref init scanned, ref init trivia);"
+            : "init TokenSnapshot scanned; require TokenSnapshot.TryScan(ref init scanned);";
         var entry = $$"""
             using Terrum.CodeAnalysis;
             uint64 Length(Span<Token> tokens) { return tokens.Length; }
@@ -2773,7 +2898,8 @@ internal sealed class TokenCursorTests
                 require tokens[0].Kind == 2 && tokens[1].Kind == 3;
                 mut TokenCursor first = new TokenCursor(tokens);
                 mut TokenCursor second = move first;
-                require second.TryRead(init var token);
+                init Token token;
+                require second.TryRead(ref init token);
                 require token.Range.Start == 0 && token.Range.Length == 5;
                 second = _;
                 tokens = _;
@@ -2793,29 +2919,37 @@ internal sealed class TokenCursorTests
         const string Entry = """
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require TokenSnapshot.TryScan(init var scanned);
+                init TokenSnapshot scanned;
+                require TokenSnapshot.TryScan(ref init scanned);
                 mut TokenSnapshot owner = move scanned;
                 mut TokenCursor cursor = new TokenCursor(owner.AsSpan());
                 int32 count = owner.GetCount();
-                if (!cursor.TryGet(0, init var first)
-                    || !cursor.TryGet(0, init var repeated)
+                init Token first;
+                init Token repeated;
+                if (!cursor.TryGet(0, ref init first)
+                    || !cursor.TryGet(0, ref init repeated)
                     || first.Kind != repeated.Kind
                     || first.Range.Start != repeated.Range.Start
                     || first.Range.Length != repeated.Range.Length) { return 1; }
-                if (!cursor.TryGet(count - 1, init var last) || last.Kind != 0) { return 2; }
+                init Token last;
+                if (!cursor.TryGet(count - 1, ref init last) || last.Kind != 0) { return 2; }
                 init Token negative;
-                if (cursor.TryGet(-1, init negative) || negative is init) { return 3; }
+                if (cursor.TryGet(-1, ref init negative) || negative is init) { return 3; }
                 init Token beyond;
-                if (cursor.TryGet(count, init beyond) || beyond is init) { return 4; }
+                if (cursor.TryGet(count, ref init beyond) || beyond is init) { return 4; }
                 init Token tooLarge;
-                if (cursor.TryGet(int32.MaxValue, init tooLarge) || tooLarge is init) { return 5; }
-                if (!cursor.TryRead(init var next)
+                if (cursor.TryGet(int32.MaxValue, ref init tooLarge) || tooLarge is init) { return 5; }
+                init Token next;
+                if (!cursor.TryRead(ref init next)
                     || next.Kind != first.Kind
                     || next.Range.Start != first.Range.Start
                     || next.Range.Length != first.Range.Length) { return 6; }
-                while (cursor.TryRead(init var remaining)) { }
+                while (true) {
+                    init Token remaining;
+                    if (!cursor.TryRead(ref init remaining)) { break; }
+                }
                 init Token exhausted;
-                if (cursor.TryRead(init exhausted) || exhausted is init) { return 7; }
+                if (cursor.TryRead(ref init exhausted) || exhausted is init) { return 7; }
                 cursor = _;
                 owner = _;
                 return 42;
@@ -2840,26 +2974,31 @@ internal sealed class TokenCursorTests
                     _initialized = 1;
                 }
 
-                public bool TryGet(Span<Token> tokens, int32 index, init ref<Token> token) {
+                public bool TryGet(Span<Token> tokens, int32 index, ref<init Token> token) {
                     if (index < 0) { return false; }
                     uint64 unsignedIndex = uint64(index);
                     if (unsignedIndex >= tokens.Length) { return false; }
-                    token = tokens[unsignedIndex];
+                    *token = tokens[unsignedIndex];
                     return true;
                 }
             }
             int32 Main() {
-                require TokenSnapshot.TryScan(init var scanned);
+                init TokenSnapshot scanned;
+                require TokenSnapshot.TryScan(ref init scanned);
                 mut TokenSnapshot owner = move scanned;
                 Span<Token> tokens = owner.AsSpan();
                 require TokenViewReader.TryCreate(out var reader);
-                if (!reader.TryGet(tokens, 0, init var first)
-                    || !reader.TryGet(tokens, 0, init var repeated)
+                init Token first;
+                init Token repeated;
+                if (!reader.TryGet(tokens, 0, ref init first)
+                    || !reader.TryGet(tokens, 0, ref init repeated)
                     || first.Kind != repeated.Kind
                     || first.Range.Start != repeated.Range.Start
                     || first.Range.Length != repeated.Range.Length) { return 1; }
-                if (reader.TryGet(tokens, -1, init var negative)
-                    || reader.TryGet(tokens, owner.GetCount(), init var beyond)) { return 2; }
+                init Token negative;
+                init Token beyond;
+                if (reader.TryGet(tokens, -1, ref init negative)
+                    || reader.TryGet(tokens, owner.GetCount(), ref init beyond)) { return 2; }
                 tokens = _;
                 owner = _;
                 return 42;
@@ -2874,10 +3013,10 @@ internal sealed class TokenCursorTests
     [TestCase("Span<Token> tokens = owner.AsSpan(); owner = _; return 42;")]
     [TestCase("Span<Token> tokens = owner.AsSpan(); TokenSnapshot moved = move owner; return 42;")]
     [TestCase("Span<Token> tokens = owner.AsSpan(); require Replace(out owner); return 42;")]
-    [TestCase("Span<Token> tokens = owner.AsSpan(); require TokenSnapshot.TryScan(init var fresh); owner = move fresh; return 42;")]
+    [TestCase("Span<Token> tokens = owner.AsSpan(); init TokenSnapshot fresh; require TokenSnapshot.TryScan(ref init fresh); owner = move fresh; return 42;")]
     [TestCase("mut TokenCursor cursor = new TokenCursor(owner.AsSpan()); owner = _; return 42;")]
     [TestCase("mut TokenCursor cursor = new TokenCursor(owner.AsSpan()); mut TokenCursor moved = move cursor; owner = _; return 42;")]
-    [TestCase("mut TokenCursor cursor = new TokenCursor(owner.AsSpan()); while (cursor.TryRead(init var token)) { } owner = _; return 42;")]
+    [TestCase("mut TokenCursor cursor = new TokenCursor(owner.AsSpan()); while (true) { init Token token; if (!cursor.TryRead(ref init token)) { break; } } owner = _; return 42;")]
     [TestCase("mut TokenCursor cursor = new TokenCursor(owner.AsSpan()); if (Pick()) { cursor = _; } owner = _; return 42;")]
     [TestCase("return Observe(owner.AsSpan(), Replace(out owner));")]
     [TestCase("mut TokenCursor cursor = new TokenCursor(owner.AsSpan()); return Consume(move cursor, Replace(out owner));")]
@@ -2894,7 +3033,7 @@ internal sealed class TokenCursorTests
     [TestCase("{ Span<Token> tokens = owner.AsSpan(); require tokens.Length == 1; } owner = _; return 42;")]
     [TestCase("Span<Token> tokens = owner.AsSpan(); Span<Token> copied = tokens; tokens = _; require copied.Length == 1; copied = _; owner = _; return 42;")]
     [TestCase("mut TokenCursor cursor = new TokenCursor(owner.AsSpan()); if (Pick()) { cursor = _; } else { cursor = _; } owner = _; return 42;")]
-    [TestCase("mut TokenCursor cursor = new TokenCursor(owner.AsSpan()); while (cursor.TryRead(init var token)) { } cursor = _; owner = _; return 42;")]
+    [TestCase("mut TokenCursor cursor = new TokenCursor(owner.AsSpan()); while (true) { init Token token; if (!cursor.TryRead(ref init token)) { break; } } cursor = _; owner = _; return 42;")]
     [TestCase("unsafe { try { Span<Token> tokens = owner.AsSpan(); Token token = tokens[uint64.MaxValue]; } catch { owner = _; } } return 42;")]
     public async Task DependenciesRetireAtTheirOwnEndsJoinsAndUnwindScopesAsync(string body)
     {
@@ -2920,7 +3059,8 @@ internal sealed class TokenCursorTests
     public async Task AJoinPreservesBothPossibleBackingOwnersAsync()
     {
         var compilation = await CompileAsync("", EntryPrefix + """
-            require TokenSnapshot.TryScan(init var other);
+            init TokenSnapshot other;
+            require TokenSnapshot.TryScan(ref init other);
             mut TokenCursor cursor = new TokenCursor(owner.AsSpan());
             if (Pick()) { cursor = _; cursor = new TokenCursor(other.AsSpan()); }
             owner = _;
@@ -2962,9 +3102,16 @@ internal sealed class TokenCursorTests
             require last.Kind == 0 && last.Range.Start == Host.Source.Length && last.Range.Length == 0;
             mut TokenCursor cursor = new TokenCursor(tokens);
             mut int32 count = 0;
-            while (cursor.TryRead(init var token)) { count = count + 1; }
+            while (true) {
+                init Token token;
+                if (!cursor.TryRead(ref init token)) { break; }
+                count = count + 1;
+            }
             require count == owner.GetCount();
-            require !cursor.TryRead(init var firstExhausted) && !cursor.TryRead(init var secondExhausted);
+            init Token firstExhausted;
+            init Token secondExhausted;
+            require !cursor.TryRead(ref init firstExhausted)
+                && !cursor.TryRead(ref init secondExhausted);
             require tokens.Length == uint64(count);
             return 42;
         }
@@ -3091,7 +3238,8 @@ internal sealed class TokenCursorTests
     {
         var entry = EntryPrefix + """
             mut TokenCursor cursor = new TokenCursor(owner.AsSpan());
-            require cursor.TryRead(init var token);
+            init Token token;
+            require cursor.TryRead(ref init token);
             cursor = _;
             require Measure(move owner) == 1;
             return 42;
@@ -3144,8 +3292,6 @@ internal sealed class TokenCursorTests
     [TestCase("write Span<Token> tokens = owner.AsSpan(); return 42;")]
     [TestCase("Span<Token>? tokens = owner.AsSpan(); return 42;")]
     [TestCase("Span<Token>?? tokens = owner.AsSpan(); return 42;")]
-    [TestCase("nuint index = 0; return 42;")]
-    [TestCase("nint index = 0; return 42;")]
     [TestCase("Span<Token> tokens = owner.AsSpan(); Token token = tokens[nuint(0)]; return 42;")]
     [TestCase("Span<Token> tokens = owner.AsSpan(); Token token = tokens[nint(0)]; return 42;")]
     [TestCase("Span<Token> tokens = owner.AsSpan(); tokens[0] = tokens[0]; return 42;")]
@@ -3155,7 +3301,7 @@ internal sealed class TokenCursorTests
     [TestCase("Span<Token> tokens = owner.AsSpan(); int32 index = 0; Token token = tokens[index]; return 42;")]
     [TestCase("Span<Token> tokens = owner.AsSpan(); int64 index = 0; Token token = tokens[index]; return 42;")]
     [TestCase("Span<Token> tokens = owner.AsSpan(); uint32 index = 0; Token token = tokens[index]; return 42;")]
-    public async Task BroaderSpanAndNativeIntegerSurfacesRemainUnsupportedAsync(string body)
+    public async Task BroaderSpanSurfacesRemainUnsupportedAsync(string body)
     {
         var compilation = await CompileAsync("", EntryPrefix + body + "}", BoundRuntimePolicy.FailFast).ConfigureAwait(false);
         Assert.That(compilation.HasErrors, Is.True);
@@ -3480,7 +3626,8 @@ internal sealed class TokenCursorTests
             bool Fail() { require false; return true; }
             int32 Consume(TokenCursor cursor, bool ignored) { return 1; }
             int32 Main() {
-                require TokenSnapshot.TryScan(init var owner);
+                init TokenSnapshot owner;
+                require TokenSnapshot.TryScan(ref init owner);
                 mut TokenCursor cursor = new TokenCursor(owner.AsSpan());
                 unsafe { try { return Consume(move cursor, Fail()); } catch { require Host.Trace[0] == 0; } }
                 owner = _;
@@ -3505,12 +3652,14 @@ internal sealed class TokenCursorTests
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(3, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(3, ref init raw);
                 mut OwnedInt32Buffer records = move raw;
                 {{append}}
                 unsafe {
                     try {
-                        require TokenSnapshot.TryCreateValidated(move records, {{count}}, init var bad);
+                        init TokenSnapshot bad;
+                        require TokenSnapshot.TryCreateValidated(move records, {{count}}, ref init bad);
                         return 1;
                     } catch { }
                 }
@@ -3535,11 +3684,13 @@ internal sealed class TokenCursorTests
         var entry = $$"""
             using Terrum.CodeAnalysis;
             TokenSnapshot Build(OwnedInt32Buffer records) {
-                require TokenSnapshot.TryCreateValidated(move records, {{count}}, init var result);
+                init TokenSnapshot result;
+                require TokenSnapshot.TryCreateValidated(move records, {{count}}, ref init result);
                 return move result;
             }
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(6, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(6, ref init raw);
                 mut OwnedInt32Buffer records = move raw;
                 {{append}}
                 unsafe {
@@ -3564,9 +3715,9 @@ internal sealed class TokenCursorTests
                 Assert.That(start >= 0 && end > start, Is.True);
                 var uncheckedFactory = """
                     internal static bool TryCreateValidated(OwnedInt32Buffer records, int32 count,
-                        init ref<TokenSnapshot> result)
+                        ref<init TokenSnapshot> result)
                     {
-                        result = new TokenSnapshot(move records, count);
+                        *result = new TokenSnapshot(move records, count);
                         return true;
                     }
 

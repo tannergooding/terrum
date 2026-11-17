@@ -243,7 +243,9 @@ internal static partial class Program
                 throw new InvalidOperationException("A successful component build must contain its parsed source.");
             }
             return CompileTrees(args[0], [scannedTree], outputPath, json,
-                runtimePolicy: policy, sourceArithmeticProfile: sourceArithmeticProfile);
+                runtimePolicy: policy,
+                sourceArithmeticProfile: sourceArithmeticProfile,
+                layoutCoreRegistration: layoutCoreRegistration);
         }
         var tokens = lexResult.Tokens;
         var diagnostics = lexResult.Diagnostics;

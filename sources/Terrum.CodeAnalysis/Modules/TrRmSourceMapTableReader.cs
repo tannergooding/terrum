@@ -183,7 +183,9 @@ public readonly ref struct TrRmSourceMapTableReader
             var kind = ReadU16(slot, 0);
             if (((_schema is TrRmArtifactSchema.Standard
                     or TrRmArtifactSchema.RootPinRuntimeDraft
-                    or TrRmArtifactSchema.GeneralPredicateGraphsDraft) && kind == 0)
+                    or TrRmArtifactSchema.GeneralPredicateGraphsDraft
+                    or TrRmArtifactSchema.InitializationReferencePointerLoadNativeParameterDraft
+                    or TrRmArtifactSchema.InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft) && kind == 0)
                 || (_schema.IsDevelopmentProfile() && kind == 0x0020))
             {
                 var method = methods.GetBodyOwnerMethod((int)Read(slot, 4));
@@ -191,7 +193,9 @@ public readonly ref struct TrRmSourceMapTableReader
                 var counts = operationCounts[method];
                 var countIndex = (_schema is TrRmArtifactSchema.Standard
                     or TrRmArtifactSchema.RootPinRuntimeDraft
-                    or TrRmArtifactSchema.GeneralPredicateGraphsDraft)
+                    or TrRmArtifactSchema.GeneralPredicateGraphsDraft
+                    or TrRmArtifactSchema.InitializationReferencePointerLoadNativeParameterDraft
+                    or TrRmArtifactSchema.InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft)
                     ? block + 1 : block;
                 if (ReadU16(slot, 2) != 1 || ReadU16(slot, 10) != 0
                     || (_schema.IsDevelopmentProfile() && block == 0)
@@ -208,7 +212,9 @@ public readonly ref struct TrRmSourceMapTableReader
         TrRmArtifactSchema schema)
         => (schema is TrRmArtifactSchema.Standard
             or TrRmArtifactSchema.RootPinRuntimeDraft
-            or TrRmArtifactSchema.GeneralPredicateGraphsDraft)
+            or TrRmArtifactSchema.GeneralPredicateGraphsDraft
+            or TrRmArtifactSchema.InitializationReferencePointerLoadNativeParameterDraft
+            or TrRmArtifactSchema.InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft)
             ? kind == 0 && selector == 1
             : kind == 0x0020 && selector == 1;
 

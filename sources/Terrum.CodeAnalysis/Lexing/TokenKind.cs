@@ -233,4 +233,6 @@ public enum TokenKind
     InterpolatedRawTextEnd,
     /// <summary>The <c>gc</c> backing qualifier.</summary>
     GcKeyword,
+    /// <summary>The reserved <c>typeof</c> type-identity query.</summary>
+    TypeofKeyword,
 }

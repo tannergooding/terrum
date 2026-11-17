@@ -30,6 +30,51 @@ internal sealed partial class ScalarFrontendInvocationProfileTests
         "Lexing/TokenIntegerSnapshot", "Lexing/TokenDiagnosticSnapshot",
     ];
 
+    private static PrivateModuleIdentityInputs
+        CreateScannerPrivateModuleIdentityInputs(BoundProgram program)
+    {
+        var definitions = program.Structures.Select((structure, index) =>
+                new PrivateNominalDefinition((PrimitiveType)(100 + index),
+                    $"scanner.{structure.Name.ToUpperInvariant()}",
+                    IsExported: true))
+            .Concat(program.Classes.Select((classDefinition, index) =>
+                new PrivateNominalDefinition(
+                    (PrimitiveType)(ManagedClassTypes.First + index),
+                    $"scanner.{classDefinition.Name.ToUpperInvariant()}",
+                    IsExported: !classDefinition.IsInternal)))
+            .ToArray();
+        var imports = program.PrivateClassReferences
+            .Where(static reference => reference.IsSourceLookupRoot
+                && reference.Origin.OriginKind
+                    == BoundPrivateNominalOriginKind.ImportedExpectation)
+            .GroupBy(static reference => reference.ClassType)
+            .Select(static references => {
+                var reference = references.First();
+                if (references.Any(other =>
+                    other.Origin.LocalDeclarationKey
+                        != reference.Origin.LocalDeclarationKey
+                    || other.Origin.SelectedModuleIdentity
+                        != reference.Origin.SelectedModuleIdentity
+                    || other.Origin.SelectedExportKey
+                        != reference.Origin.SelectedExportKey))
+                {
+                    throw new InvalidOperationException(
+                        "A scanner class reference has conflicting provider origins.");
+                }
+                return new PrivateNominalImport(reference.ClassType,
+                    reference.Origin.LocalDeclarationKey,
+                    reference.Origin.SelectedModuleIdentity
+                        ?? throw new InvalidOperationException(
+                            "A scanner class reference has no selected provider."),
+                    reference.Origin.SelectedExportKey
+                        ?? throw new InvalidOperationException(
+                            "A scanner class reference has no selected export."));
+            })
+            .ToArray();
+        return PrivateModuleIdentityInputs.Create(program,
+            "ScannerFrontend", definitions, imports);
+    }
+
     private static readonly string[] s_frontendComponents = [.. s_scannerComponents,
         "Lexing/HexDigitValue", "Lexing/BasedIntegerFloatLiteral", "Lexing/HexFloatLiteral",
         "Lexing/DecimalFloatLiteral", "Utilities/Numerics/IntegerFloatConversion",
@@ -179,23 +224,27 @@ internal sealed partial class ScalarFrontendInvocationProfileTests
         var buffers = ScannerHost.CreateInvocationProfileBuffers(seed);
         var compilation = CreateWithLayoutCore(trees, buffers, policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+        var program = ((global::System.Func<BoundProgram>)(() => {
             var __nunitActual5 = compilation.Program;
             Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>());
             return (BoundProgram)__nunitActual5!;
-        }))(),
-            ["Terrum.CodeAnalysis.ScanFrontendFixture"]);
+        }))();
+        var producer = ModuleCompiler.CreateProducer(program,
+            ["Terrum.CodeAnalysis.ScanFrontendFixture"],
+            CreateScannerPrivateModuleIdentityInputs(program));
         var alternateCompilation = CreateWithLayoutCore(trees,
             ScannerHost.CreateInvocationProfileBuffers(
                 SourceText.From("different seed 123")), policy);
         Assert.That(alternateCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, alternateCompilation.Diagnostics));
-        Assert.That(ModuleCompiler.CreateProducer(
-            ((global::System.Func<BoundProgram>)(() => {
+        var alternateProgram = ((global::System.Func<BoundProgram>)(() => {
                 var __nunitActual6 = alternateCompilation.Program;
                 Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>());
                 return (BoundProgram)__nunitActual6!;
-            }))(),
-            ["Terrum.CodeAnalysis.ScanFrontendFixture"]), Is.EqualTo(producer));
+            }))();
+        Assert.That(ModuleCompiler.CreateProducer(alternateProgram,
+            ["Terrum.CodeAnalysis.ScanFrontendFixture"],
+            CreateScannerPrivateModuleIdentityInputs(alternateProgram)),
+            Is.EqualTo(producer));
         var reference = ModuleCompiler.CreateReference(producer);
         Assert.That(reference.InvocationProfileId, Is.EqualTo(ScannerHost.InvocationProfileIdentity));
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""

@@ -85,6 +85,8 @@ internal sealed partial class CliTests
     }
     [TestCase("_ = 1; return 42;")]
     [TestCase("_ = -1; return 42;")]
+    [TestCase("_ = +1; return 42;")]
+    [TestCase("_ = -(1); return 42;")]
     [TestCase("_ = 1 + 2; return 42;")]
     [TestCase("_ = true ? 1 : 2; return 42;")]
     [TestCase("_ = bool(true); return 42;")]
@@ -125,6 +127,46 @@ internal sealed partial class CliTests
             File.Delete(path);
         }
     }
+    [Test]
+    public async Task CheckedExceptionExportsRejectUnprovenFailureAsync()
+    {
+        var path = CreateTestArtifactPath($"discard-{Guid.NewGuid():N}.dll");
+        try
+        {
+            var safeSource = Encoding.UTF8.GetBytes(
+                "public int32 Value(int32 input) { return input; }");
+            var (initialExit, initialOutput, initialError) = await RunAsync(
+                safeSource, "frontend-build-library",
+                TerrumProjectPaths.SourceDirectory(RepositoryRoot()), "-",
+                "-o", path, "--runtime", "checked-exceptions", "--json")
+                .ConfigureAwait(false);
+            Assert.That(initialExit, Is.Zero, $"{initialOutput}{initialError}");
+            var initialImage = await File.ReadAllBytesAsync(path)
+                .ConfigureAwait(false);
+
+            var failingSource = Encoding.UTF8.GetBytes("""
+                public int32 Value(int32 left, int32 right) {
+                    return left + right;
+                }
+                """);
+            var (exit, output, error) = await RunAsync(failingSource,
+                "frontend-build-library",
+                TerrumProjectPaths.SourceDirectory(RepositoryRoot()), "-",
+                "-o", path, "--runtime", "checked-exceptions", "--json")
+                .ConfigureAwait(false);
+            Assert.That(exit, Is.EqualTo(1), $"{output}{error}");
+            using var json = JsonDocument.Parse(output);
+            Assert.That(json.RootElement.GetProperty("success").GetBoolean(),
+                Is.False);
+            Assert.That(await File.ReadAllBytesAsync(path).ConfigureAwait(false),
+                Is.EqualTo(initialImage));
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(path).ConfigureAwait(true);
+        }
+    }
+
     [TestCase("int32","int32(42)",42)]
     [TestCase("uint32","uint32(42)",42)]
     [TestCase("int64","int64(42)",42)]
@@ -291,7 +333,7 @@ internal sealed partial class CliTests
         try
         {
             var input = Encoding.UTF8.GetBytes(
-                "public int32 @await(int32 @const, int32 some, int32 c) { _ = const + @some; return c; }");
+                "public int32 @await(int32 @const, int32 some, int32 c) { _ = const; _ = @some; return c; }");
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
             {
                 var (exit, output, error) = await RunAsync(input, "frontend-build-library",

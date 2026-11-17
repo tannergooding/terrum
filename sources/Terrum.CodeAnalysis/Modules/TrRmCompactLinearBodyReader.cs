@@ -526,7 +526,8 @@ public readonly ref struct TrRmCompactLinearBodyReader
                     : left != right
                         || kind switch {
                             4 or 5 when opcode == 5
-                                => left is not (1 or 3 or 8 or 9 or 0x0D or 0x0E)
+                                => left is not (1 or 3 or 8 or 9 or 0x0D or 0x0E
+                                    or 0x10 or 0x11)
                                     and not 0x103,
                             _ => !IsInteger(left),
                         })
@@ -781,7 +782,7 @@ public readonly ref struct TrRmCompactLinearBodyReader
         };
 
     private static bool IsInteger(ushort type)
-        => type is 8 or 9 or 0x0D or 0x0E;
+        => type is 8 or 9 or 0x0D or 0x0E or 0x10 or 0x11;
 
     private static bool IsFloat(ushort type)
         => type is 0x14 or 0x15;

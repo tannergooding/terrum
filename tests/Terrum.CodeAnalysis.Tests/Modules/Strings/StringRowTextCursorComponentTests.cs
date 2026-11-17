@@ -21,13 +21,18 @@ internal sealed class StringRowTextCursorComponentTests
     private const string ReadAllSource = """
         namespace Terrum.CodeAnalysis;
         int32 Main() {
-            if (!StringRowTextCursor.TryCreateName(0, Host.Rows.Length, init var created)) {
+            init StringRowTextCursor created;
+            if (!StringRowTextCursor.TryCreateName(0, Host.Rows.Length, ref init created)) {
                 return 1;
             }
             mut StringRowTextCursor cursor = move created;
             mut int32 index = 0;
             mut bool passed = true;
-            while (cursor.TryRead(init var scalar)) {
+            while (true) {
+                init int32 scalar;
+                if (!cursor.TryRead(ref init scalar)) {
+                    break;
+                }
                 if (index >= Host.Expected.Length || scalar != Host.Expected[index]) {
                     passed = false;
                 }
@@ -37,7 +42,7 @@ internal sealed class StringRowTextCursorComponentTests
                 passed = false;
             }
             init int32 exhausted;
-            if (cursor.TryRead(init exhausted) || exhausted is init) {
+            if (cursor.TryRead(ref init exhausted) || exhausted is init) {
                 passed = false;
             }
             cursor = _;
@@ -49,29 +54,30 @@ internal sealed class StringRowTextCursorComponentTests
         namespace Terrum.CodeAnalysis;
         int32 Main() {
             if (Host.Expected[0] == 0) {
-                if (!StringRowTextCursor.TryCreateNamespace(0, Host.Rows.Length, init var created)) {
+                init StringRowTextCursor created;
+                if (!StringRowTextCursor.TryCreateNamespace(0, Host.Rows.Length, ref init created)) {
                     return 1;
                 }
                 mut StringRowTextCursor cursor = move created;
                 init int32 empty;
-                if (cursor.TryRead(init empty) || empty is init) {
+                if (cursor.TryRead(ref init empty) || empty is init) {
                     cursor = _;
                     return 2;
                 }
                 cursor = _;
                 init StringRowTextCursor rejectedName;
-                if (StringRowTextCursor.TryCreateName(0, Host.Rows.Length, init rejectedName)
+                if (StringRowTextCursor.TryCreateName(0, Host.Rows.Length, ref init rejectedName)
                     || rejectedName is init) {
                     return 3;
                 }
             } else {
                 init StringRowTextCursor rejectedName;
-                if (StringRowTextCursor.TryCreateName(0, Host.Rows.Length, init rejectedName)
+                if (StringRowTextCursor.TryCreateName(0, Host.Rows.Length, ref init rejectedName)
                     || rejectedName is init) {
                     return 4;
                 }
                 init StringRowTextCursor rejectedNamespace;
-                if (StringRowTextCursor.TryCreateNamespace(0, Host.Rows.Length, init rejectedNamespace)
+                if (StringRowTextCursor.TryCreateNamespace(0, Host.Rows.Length, ref init rejectedNamespace)
                     || rejectedNamespace is init) {
                     return 5;
                 }
@@ -90,13 +96,13 @@ internal sealed class StringRowTextCursorComponentTests
                 int32 rowLength = Host.Expected[expected + 1];
                 init StringRowTextCursor rejectedName;
                 if (StringRowTextCursor.TryCreateName(
-                        rowStart, rowLength, init rejectedName)
+                        rowStart, rowLength, ref init rejectedName)
                     || rejectedName is init) {
                     return 1;
                 }
                 init StringRowTextCursor rejectedNamespace;
                 if (StringRowTextCursor.TryCreateNamespace(
-                        rowStart, rowLength, init rejectedNamespace)
+                        rowStart, rowLength, ref init rejectedNamespace)
                     || rejectedNamespace is init) {
                     return 2;
                 }

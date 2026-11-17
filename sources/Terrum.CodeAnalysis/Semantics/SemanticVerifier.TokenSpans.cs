@@ -1618,23 +1618,44 @@ public static partial class SemanticVerifier
             };
             if ((uint)sourceSlot >= (uint)function.ParameterCount)
             {
-                throw InvalidEffect(span, "Ownership");
+                throw InvalidEffect(span, "CheckedReference");
             }
             _ = permittedSources.Add(ProvenanceAnchor.ForBackingSource(~sourceSlot));
         }
         if (sources.Count == 0 || sources.Any(source => !permittedSources.Contains(source)))
         {
-            throw InvalidEffect(span, "Ownership");
+            throw InvalidEffect(span, "CheckedReference");
         }
     }
 
     private static bool IsForwardedCaptureSource(
         BoundFunction function, BoundDependencyContract capture,
         BoundDependencySource source)
+        => IsForwardedDependencySource(function, capture.Destination,
+            capture.DestinationOrdinal, source);
+
+    private static bool IsBorrowedCaptureSource(
+        BoundFunction function, BoundDependencyContract capture,
+        BoundDependencySource source)
+        => IsBorrowedDependencySource(function, capture.Destination,
+            capture.DestinationOrdinal, source);
+
+    private static bool IsForwardedDependencySource(
+        BoundFunction function, BoundDependencyDestination destination,
+        int? destinationOrdinal, BoundDependencySource source)
         => function.DependencyContracts.Any(contract =>
             contract.Relation == BoundDependencyRelation.ForwardsBacking
-            && contract.Destination == capture.Destination
-            && contract.DestinationOrdinal == capture.DestinationOrdinal
+            && contract.Destination == destination
+            && contract.DestinationOrdinal == destinationOrdinal
+            && contract.Sources.Contains(source));
+
+    private static bool IsBorrowedDependencySource(
+        BoundFunction function, BoundDependencyDestination destination,
+        int? destinationOrdinal, BoundDependencySource source)
+        => function.DependencyContracts.Any(contract =>
+            contract.Relation == BoundDependencyRelation.BorrowSourceStorage
+            && contract.Destination == destination
+            && contract.DestinationOrdinal == destinationOrdinal
             && contract.Sources.Contains(source));
 
     private static bool IsForwardedCaptureSource(
@@ -1675,7 +1696,7 @@ public static partial class SemanticVerifier
                 or ProvenanceAnchorKind.IncomingReferenceField
                 or ProvenanceAnchorKind.IncomingReferencePlace))
             {
-                throw InvalidEffect(span, "CheckedReference");
+                throw InvalidEffect(span, "Ownership");
             }
             _ = sources.Add(ProvenanceAnchor.ForBackingSource(~target.Identity));
         }
@@ -1692,7 +1713,7 @@ public static partial class SemanticVerifier
             }
             else
             {
-                throw InvalidEffect(span, "CheckedReference");
+                throw InvalidEffect(span, "Ownership");
             }
         }
         foreach (var backingSource in value.BackingSources)
@@ -2755,6 +2776,16 @@ public static partial class SemanticVerifier
                 throw Invalid();
             }
             _ = CopyOriginCallResults.Remove(expression);
+        }
+
+        internal void ClearCallResultCaches(BoundExpression expression)
+        {
+            ClearCopyOriginCallResult(expression);
+            ClearBackingCallResult(expression);
+            ClearReferenceFieldCallResult(expression);
+            ClearNativePointerCallResult(expression);
+            ClearRawUnionCallCoverageResult(expression);
+            ClearRawUnionArrayCallResult(expression);
         }
 
         internal void ClearBackingCallResult(BoundExpression expression)
@@ -6065,19 +6096,51 @@ public static partial class SemanticVerifier
     private static BackingDependencies? CreateBackingDependencies(int functionActivation,
         BoundFunction function,
         BoundProgram program, bool hasSpans,
+        bool hasNormalPostconditionFunctions,
         HashSet<NativePointerWriteEffect>[] nativePointerCaptureEffects,
         BoundCopyOriginSummary?[] copyOriginSummaries,
         NormalBackingClassConstructorSummary?[] normalBackingClassConstructorSummaries,
         bool deriveCopyOriginSummaries, bool hasCopyOriginValues)
     {
-        if (!hasSpans && program.NativePointerTypes.IsEmpty
-            && program.NativeFunctionPointerSignatures.IsEmpty
-            && program.CheckedReferenceTypes.IsEmpty
-            && !CarriesNativePointer(function.ReturnType, program)
-            && !function.Variables.Any(variable => CarriesNativePointer(variable.Type, program))
-            && !CarriesCopyOrigin(function.ReturnType, program)
-            && !function.Variables.Any(variable => CarriesCopyOrigin(variable.Type, program))
-            && !hasCopyOriginValues)
+        var requiresBackingDependencies = hasSpans
+            || !program.NativePointerTypes.IsEmpty
+            || !program.NativeFunctionPointerSignatures.IsEmpty
+            || !program.CheckedReferenceTypes.IsEmpty
+            || CarriesNativePointer(function.ReturnType, program)
+            || function.Variables.Any(variable =>
+                CarriesNativePointer(variable.Type, program))
+            || CarriesCopyOrigin(function.ReturnType, program)
+            || function.Variables.Any(variable =>
+                CarriesCopyOrigin(variable.Type, program))
+            || hasCopyOriginValues;
+        if (!requiresBackingDependencies
+            && !hasNormalPostconditionFunctions)
+        {
+            return null;
+        }
+        var hasNativePointerFieldFlow = false;
+        var hasInitializationPostconditionCall = false;
+        if (!BoundTreeTraversal.VisitExpressions(function.Body, expression =>
+        {
+            hasNativePointerFieldFlow |= expression is BoundFieldRead field
+                && CarriesNativePointer(field.Type, program);
+            if (hasNormalPostconditionFunctions
+                && expression is BoundCall call
+                && (uint)call.Function < (uint)program.Functions.Length)
+            {
+                hasInitializationPostconditionCall |=
+                    program.Functions[call.Function]
+                        .DeclarationContractClauses.Any(static clause =>
+                            clause.Phase
+                                == BoundDeclarationContractPhase
+                                    .NormalPostcondition);
+            }
+        }))
+        {
+            throw Invalid(function.Span);
+        }
+        if (!requiresBackingDependencies
+            && !hasInitializationPostconditionCall)
         {
             return null;
         }
@@ -6096,13 +6159,6 @@ public static partial class SemanticVerifier
         var nativePointerReturns = new List<BoundExpression>();
         var nativePointerReads = new List<(int Destination, BoundExpression Address)>();
         var nativePointerWrites = new List<(BoundExpression Address, BoundExpression Value)>();
-        var hasNativePointerFieldFlow = false;
-        if (!BoundTreeTraversal.VisitExpressions(function.Body, expression =>
-            hasNativePointerFieldFlow |= expression is BoundFieldRead field
-                && CarriesNativePointer(field.Type, program)))
-        {
-            throw Invalid(function.Span);
-        }
         var remaining = MaximumAnalysisVisits;
         for (var slot = 0; slot < edges.Length; slot++)
         {
@@ -6130,7 +6186,7 @@ public static partial class SemanticVerifier
             }
             if (slot < function.ParameterCount + (function.IsConstructor ? 1 : 0)
                 && !(slot == 0 && (function.IsConstructor || function.IsClassConstructor))
-                && !function.Variables[slot].IsOut && !function.Variables[slot].IsInit
+                && !function.Variables[slot].IsOut
                 && CheckedReferenceTypeContract.IsValidType(
                     function.Variables[slot].Type, program.CheckedReferenceTypes))
             {
@@ -6972,7 +7028,8 @@ public static partial class SemanticVerifier
         => CheckedReferenceTypeContract.IsValidType(type, program.CheckedReferenceTypes)
             && CheckedReferenceTypeContract.IsSupportedReferenceStoreValueType(
                 type, program.Structures, program.Classes,
-                program.EnumDefinitions.Length, program.CheckedReferenceTypes);
+                program.EnumDefinitions.Length, program.CheckedReferenceTypes,
+                program.NativePointerTypes);
 
     private static List<(StorageProjection Projection, PrimitiveType Type)> NativePointerFieldLeaves(
         PrimitiveType type, BoundProgram program, ref int remaining, int depth)
@@ -7047,8 +7104,7 @@ public static partial class SemanticVerifier
             if (NativeFixedArrayTypes.IsType(current))
             {
                 if (!NativeFixedArrayContract.TryGetLayout(current,
-                        program.Structures, program.NativeFixedArrayTypes,
-                        out var layout, program.CheckedReferenceTypes))
+                        program, out var layout))
                 {
                     throw InvalidEffect(default, "Ownership");
                 }
@@ -7281,7 +7337,8 @@ public static partial class SemanticVerifier
             var fieldProjection = projection.AppendField(type, field);
             if (CheckedReferenceTypeContract.IsSupportedReferenceStoreValueType(
                 fieldType, program.Structures, program.Classes,
-                program.EnumDefinitions.Length, program.CheckedReferenceTypes))
+                program.EnumDefinitions.Length, program.CheckedReferenceTypes,
+                program.NativePointerTypes))
             {
                 result.Add((fieldProjection, fieldType));
             }
@@ -7326,8 +7383,7 @@ public static partial class SemanticVerifier
         if (NativeFixedArrayTypes.IsType(type))
         {
             if (!NativeFixedArrayContract.TryGetLayout(type,
-                    program.Structures, program.NativeFixedArrayTypes,
-                    out _, program.CheckedReferenceTypes))
+                    program, out _))
             {
                 throw InvalidEffect(default, "Ownership");
             }
@@ -7380,8 +7436,7 @@ public static partial class SemanticVerifier
         if (NativeFixedArrayTypes.IsType(type))
         {
             if (!NativeFixedArrayContract.TryGetLayout(type,
-                    program.Structures, program.NativeFixedArrayTypes,
-                    out var layout, program.CheckedReferenceTypes))
+                    program, out var layout))
             {
                 throw InvalidEffect(default, "NativePointer");
             }
@@ -9348,8 +9403,10 @@ public static partial class SemanticVerifier
                 continue;
             }
 
-            var sourceIsForwardedBacking =
-                IsForwardedBackingResultSource(target, source);
+            var sourceAllowsStorage
+                = !IsForwardedBackingResultSource(target, source);
+            var sourceAllowsForwardedBacking
+                = !IsBorrowedSourceStorageResultSource(target, source);
             var sourceHasReference = false;
             if (CheckedReferenceTypeContract.IsValidType(
                     argument.Type, program.CheckedReferenceTypes))
@@ -9365,10 +9422,12 @@ public static partial class SemanticVerifier
                 if (sourceType.ReferentType == resultType.ReferentType)
                 {
                     sourceHasReference = true;
-                    if (!sourceIsForwardedBacking)
+                    if (sourceAllowsStorage)
                     {
                         Include(new ReferenceFieldValue(staged.ReferenceTargets,
-                            staged.ReferenceObligations, staged.BackingSources,
+                            staged.ReferenceObligations,
+                            sourceAllowsForwardedBacking
+                                ? staged.BackingSources : EmptyBackingSources,
                             isAvailable: staged.ReferenceTargets.Count != 0
                                 || (sourceType.IsOptional && resultType.IsOptional)));
                     }
@@ -9378,13 +9437,16 @@ public static partial class SemanticVerifier
                     && IsOrdinaryStoredReferenceType(call.Type, program))
                 {
                     sourceHasReference = true;
-                    var referenceRead = new BoundReferenceRead(
-                        argument, sourceType.ReferentType, call.Span);
-                    Include(ReferenceFieldValueOfReferenceRead(
-                        referenceRead, sourceType.ReferentType,
-                        StorageProjection.WholeObject, facts, state, fieldMasks,
-                        caller, program, ref remaining, depth + 1,
-                        staged.ReferenceTargets));
+                    if (sourceAllowsForwardedBacking)
+                    {
+                        var referenceRead = new BoundReferenceRead(
+                            argument, sourceType.ReferentType, call.Span);
+                        Include(ReferenceFieldValueOfReferenceRead(
+                            referenceRead, sourceType.ReferentType,
+                            StorageProjection.WholeObject, facts, state,
+                            fieldMasks, caller, program, ref remaining,
+                            depth + 1, staged.ReferenceTargets));
+                    }
                 }
 
                 if (IsInlineStructStorage(sourceType.ReferentType, program))
@@ -9392,7 +9454,7 @@ public static partial class SemanticVerifier
                     var placeLeaves = ReferencePlaceFieldLeaves(
                         sourceType.ReferentType, program, ref remaining,
                         depth + 1);
-                    if (!sourceIsForwardedBacking)
+                    if (sourceAllowsStorage)
                     {
                         foreach (var (projection, placeType) in placeLeaves)
                         {
@@ -9416,6 +9478,10 @@ public static partial class SemanticVerifier
                         argument, sourceType.ReferentType, call.Span);
                     foreach (var (projection, leafType) in leaves)
                     {
+                        if (!sourceAllowsForwardedBacking)
+                        {
+                            continue;
+                        }
                         if (leafType != call.Type)
                         {
                             available = false;
@@ -9456,7 +9522,7 @@ public static partial class SemanticVerifier
                             fieldMasks, caller, program, out receiverTarget))
                     {
                         hasReceiverTarget = true;
-                        if (!sourceIsForwardedBacking
+                        if (sourceAllowsStorage
                             && argument.Type == resultType.ReferentType)
                         {
                             sourceHasReference = true;
@@ -9472,7 +9538,7 @@ public static partial class SemanticVerifier
                         argument, argument.Type, facts, state, caller, program,
                         ref remaining, depth + 1, fieldMasks);
 
-                    if (!sourceIsForwardedBacking)
+                    if (sourceAllowsStorage)
                     {
                         var placeLeaves = ReferencePlaceFieldLeaves(
                             argument.Type, program, ref remaining, depth + 1);
@@ -9492,17 +9558,16 @@ public static partial class SemanticVerifier
                                 ref remaining);
                         }
                     }
-                    else if (ReferenceFieldLeaves(argument.Type, program,
-                        ref remaining, depth + 1).Count != 0)
-                    {
-                        available = false;
-                    }
                 }
 
                 var leaves = ReferenceFieldLeaves(argument.Type, program,
                     ref remaining, depth + 1);
                 foreach (var (projection, leafType) in leaves)
                 {
+                    if (!sourceAllowsForwardedBacking)
+                    {
+                        continue;
+                    }
                     if (leafType != call.Type)
                     {
                         available = false;
@@ -9510,7 +9575,7 @@ public static partial class SemanticVerifier
                     }
 
                     sourceHasReference = true;
-                    if (isMutableReceiver || sourceIsForwardedBacking)
+                    if (isMutableReceiver)
                     {
                         available = false;
                     }
@@ -9770,6 +9835,14 @@ public static partial class SemanticVerifier
             Count(ref remaining, depth + 1);
             var parameterIndex = DependencyCallParameterIndex(target, source);
             var argument = DependencyCallArgument(call, target, source);
+            var sourceAllowsStorage
+                = !IsForwardedDependencySource(target,
+                    relationship.Destination,
+                    relationship.DestinationOrdinal, source);
+            var sourceAllowsForwardedBacking
+                = !IsBorrowedDependencySource(target,
+                    relationship.Destination,
+                    relationship.DestinationOrdinal, source);
             if (!TokenSpanContract.IsDependent(argument.Type, program.Structures)
                 && !IsTokenSnapshotType(argument.Type, program)
                 && !CheckedReferenceTypeContract.IsValidType(
@@ -9787,27 +9860,47 @@ public static partial class SemanticVerifier
             {
                 throw Invalid(call.Span);
             }
+            var staged = facts.Staged.LastOrDefault(candidate =>
+                ReferenceEquals(candidate.Call, call)
+                && candidate.ParameterIndex == parameterIndex);
 
             if (source.Kind == BoundDependencySourceKind.Receiver
                 || target.Variables[variableIndex].IsImplicitRef)
             {
-                result.UnionWith(BackingOf(argument, facts, program,
-                    ref remaining, depth + 1));
+                if (sourceAllowsForwardedBacking)
+                {
+                    result.UnionWith(BackingOf(argument, facts, program,
+                        ref remaining, depth + 1));
+                }
+                if (sourceAllowsStorage && staged.Call is not null
+                    && CheckedReferenceTypeContract.IsValidType(
+                        argument.Type, program.CheckedReferenceTypes))
+                {
+                    result.UnionWith(staged.ReferenceTargets);
+                    result.UnionWith(staged.ReferenceObligations);
+                }
                 continue;
             }
 
-            var staged = facts.Staged.LastOrDefault(candidate =>
-                ReferenceEquals(candidate.Call, call)
-                && candidate.ParameterIndex == parameterIndex);
             if (staged.Call is not null)
             {
-                result.UnionWith(staged.BackingSources);
-                foreach (var value in staged.ReferenceFieldValues.Values)
+                if (sourceAllowsForwardedBacking)
                 {
-                    result.UnionWith(value.BackingSources);
+                    result.UnionWith(staged.BackingSources);
+                    foreach (var value in staged.ReferenceFieldValues.Values)
+                    {
+                        result.UnionWith(value.BackingSources);
+                    }
+                }
+                if (sourceAllowsStorage
+                    && CheckedReferenceTypeContract.IsValidType(
+                        argument.Type, program.CheckedReferenceTypes))
+                {
+                    result.UnionWith(staged.ReferenceTargets);
+                    result.UnionWith(staged.ReferenceObligations);
                 }
             }
-            else
+            else if (sourceAllowsForwardedBacking)
             {
                 result.UnionWith(BackingOf(argument, facts, program,
                     ref remaining, depth + 1));
@@ -9839,6 +9932,8 @@ public static partial class SemanticVerifier
             ReferenceFieldValue? sourceValue = null;
             var forwardsSource = IsForwardedCaptureSource(
                 target, relationship, source);
+            var allowsForwardedBacking = !IsBorrowedCaptureSource(
+                target, relationship, source);
             if (CheckedReferenceTypeContract.IsValidType(
                     argument.Type, program.CheckedReferenceTypes))
             {
@@ -9848,10 +9943,12 @@ public static partial class SemanticVerifier
                 {
                     sourceValue = new ReferenceFieldValue(
                         staged.ReferenceTargets, staged.ReferenceObligations,
-                        staged.BackingSources,
+                        allowsForwardedBacking
+                            ? staged.BackingSources : EmptyBackingSources,
                         isAvailable: staged.ReferenceTargets.Count != 0);
                 }
-                else if (argumentReference.ReferentType == storedReferenceType)
+                else if (argumentReference.ReferentType == storedReferenceType
+                    && allowsForwardedBacking)
                 {
                     var referenceRead = new BoundReferenceRead(argument,
                         argumentReference.ReferentType, call.Span);
@@ -9861,8 +9958,9 @@ public static partial class SemanticVerifier
                         caller, program, ref remaining, depth + 1,
                         staged.ReferenceTargets);
                 }
-                else if (IsInlineStructStorage(
-                    argumentReference.ReferentType, program))
+                else if (allowsForwardedBacking
+                    && IsInlineStructStorage(argumentReference.ReferentType,
+                        program))
                 {
                     var leaves = ReferenceFieldLeaves(
                         argumentReference.ReferentType, program,
@@ -9891,7 +9989,8 @@ public static partial class SemanticVerifier
                     }
                 }
             }
-            else if (IsInlineStructStorage(argument.Type, program))
+            else if (allowsForwardedBacking
+                && IsInlineStructStorage(argument.Type, program))
             {
                 foreach (var (projection, fieldType) in ReferenceFieldLeaves(
                     argument.Type, program, ref remaining, depth + 1))
@@ -10601,9 +10700,7 @@ public static partial class SemanticVerifier
             {
                 if (!CarriesRawUnionPayloadFacts(program, currentType)
                     || !NativeFixedArrayContract.TryGetLayout(currentType,
-                        program.Structures,
-                        program.NativeFixedArrayTypes, out var layout,
-                        program.CheckedReferenceTypes))
+                        program, out var layout))
                 {
                     return;
                 }
@@ -12584,10 +12681,8 @@ public static partial class SemanticVerifier
                     || address.ByteExtent % address.ElementStride != 0
                     || (fixedArrayStorage
                         && (!NativeFixedArrayContract.TryGetLayout(
-                                address.CarrierType, program.Structures,
-                                program.NativeFixedArrayTypes,
-                                out var rootArrayLayout,
-                                program.CheckedReferenceTypes)
+                                address.CarrierType, program,
+                                out var rootArrayLayout)
                             || !TryGetNativeFixedArrayArrayPrefix(
                                 address.Variable, address.FieldPlace,
                                 rootArrayLayout, function, program, out _)
@@ -13007,8 +13102,7 @@ public static partial class SemanticVerifier
 
         var variable = function.Variables[source.Identity];
         if (!NativeFixedArrayContract.TryGetLayout(variable.Type,
-                program.Structures, program.NativeFixedArrayTypes,
-                out var layout, program.CheckedReferenceTypes))
+                program, out var layout))
         {
             if (storage.Projection.Kind != StorageProjectionKind.WholeObject
                 || variable.Type != pointeeType)
@@ -13486,7 +13580,13 @@ public static partial class SemanticVerifier
                         or ProvenanceAnchorKind.IncomingReferenceField
                         or ProvenanceAnchorKind.IncomingReferencePlace)
                         || !AggregateReferenceReturnDependsOnFormal(
-                            function, target.Identity))
+                            function, target.Identity,
+                            requiresSourceStorage: target.Kind is
+                                ProvenanceAnchorKind.IncomingReference
+                                    or ProvenanceAnchorKind.IncomingReferenceField
+                                    or ProvenanceAnchorKind.IncomingReferencePlace,
+                            requiresForwardedBacking: target.Kind
+                                == ProvenanceAnchorKind.IncomingReferenceContents))
                     {
                         throw InvalidEffect(span, "CheckedReference");
                     }
@@ -13523,7 +13623,10 @@ public static partial class SemanticVerifier
                 || !ReferenceReturnDependsOnFormal(function, target.Identity,
                     requiresSourceStorage: target.Kind is
                         ProvenanceAnchorKind.IncomingReference
-                            or ProvenanceAnchorKind.IncomingReferencePlace))
+                            or ProvenanceAnchorKind.IncomingReferenceField
+                            or ProvenanceAnchorKind.IncomingReferencePlace,
+                    requiresForwardedBacking: target.Kind
+                        == ProvenanceAnchorKind.IncomingReferenceContents))
             {
                 throw InvalidEffect(span, "CheckedReference");
             }
@@ -13539,29 +13642,28 @@ public static partial class SemanticVerifier
     }
 
     private static bool AggregateReferenceReturnDependsOnFormal(
-        BoundFunction function, int parameterSlot)
+        BoundFunction function, int parameterSlot,
+        bool requiresSourceStorage = false,
+        bool requiresForwardedBacking = false)
     {
         if (!function.IsConstructor)
         {
-            return ReferenceReturnDependsOnFormal(function, parameterSlot);
+            return ReferenceReturnDependsOnFormal(function, parameterSlot,
+                requiresSourceStorage, requiresForwardedBacking);
         }
 
         var formalOrdinal = parameterSlot - 1;
-        var capture = ReceiverCaptureContract(function);
-        return formalOrdinal >= 0 && capture is not null
-            && capture.Sources.Any(source =>
-                source.Kind == BoundDependencySourceKind.Formal
-                && source.FormalOrdinal == formalOrdinal);
+        return formalOrdinal >= 0 && DependencyAllowsSource(function,
+            BoundDependencyDestination.Receiver, null,
+            new BoundDependencySource(BoundDependencySourceKind.Formal,
+                formalOrdinal), requiresSourceStorage,
+            requiresForwardedBacking);
     }
 
     private static bool ReferenceReturnDependsOnFormal(BoundFunction function,
-        int parameterSlot, bool requiresSourceStorage = false)
+        int parameterSlot, bool requiresSourceStorage = false,
+        bool requiresForwardedBacking = false)
     {
-        var dependency = ResultDependencyContract(function);
-        if (dependency is null)
-        {
-            return false;
-        }
         var receiverOffset = function.DeclaringStruct is not null
             && !function.IsStatic && !function.IsConstructor && !function.IsClassConstructor
                 ? 1 : 0;
@@ -13582,20 +13684,52 @@ public static partial class SemanticVerifier
                 BoundDependencySourceKind.Formal, formalOrdinal);
         }
 
-        if (!dependency.Sources.Contains(source))
+        return DependencyAllowsSource(function,
+            BoundDependencyDestination.Result, null, source,
+            requiresSourceStorage, requiresForwardedBacking);
+    }
+
+    private static bool DependencyAllowsSource(BoundFunction function,
+        BoundDependencyDestination destination, int? destinationOrdinal,
+        BoundDependencySource source, bool requiresSourceStorage,
+        bool requiresForwardedBacking)
+    {
+        var relationship = function.DependencyContracts.FirstOrDefault(
+            contract => contract.Destination == destination
+                && contract.DestinationOrdinal == destinationOrdinal
+                && contract.Relation
+                    == (destination == BoundDependencyDestination.Receiver
+                        ? BoundDependencyRelation.Captures
+                        : BoundDependencyRelation.DependsOn));
+        if (relationship is null || !relationship.Sources.Contains(source))
         {
             return false;
         }
-        return !requiresSourceStorage
-            || !IsForwardedBackingResultSource(function, source);
+
+        var isForwardedBacking = function.DependencyContracts.Any(contract =>
+            contract.Relation == BoundDependencyRelation.ForwardsBacking
+            && contract.Destination == destination
+            && contract.DestinationOrdinal == destinationOrdinal
+            && contract.Sources.Contains(source));
+        var isBorrowedSourceStorage = function.DependencyContracts.Any(
+            contract => contract.Relation
+                    == BoundDependencyRelation.BorrowSourceStorage
+                && contract.Destination == destination
+                && contract.DestinationOrdinal == destinationOrdinal
+                && contract.Sources.Contains(source));
+        return (!requiresSourceStorage || !isForwardedBacking)
+            && (!requiresForwardedBacking || !isBorrowedSourceStorage);
     }
 
     private static bool IsForwardedBackingResultSource(
         BoundFunction function, BoundDependencySource source)
-        => function.DependencyContracts.Any(contract =>
-            contract.Relation == BoundDependencyRelation.ForwardsBacking
-            && contract.Destination == BoundDependencyDestination.Result
-            && contract.Sources.Contains(source));
+        => IsForwardedDependencySource(function,
+            BoundDependencyDestination.Result, null, source);
+
+    private static bool IsBorrowedSourceStorageResultSource(
+        BoundFunction function, BoundDependencySource source)
+        => IsBorrowedDependencySource(function,
+            BoundDependencyDestination.Result, null, source);
 
     private static HashSet<ProvenanceAnchor> ReferenceTargetsSummary(
         BoundExpression expression, BackingDependencies facts, BoundFunction function,
@@ -13663,10 +13797,30 @@ public static partial class SemanticVerifier
                 break;
             case BoundReferenceFormation formation:
                 if (formation.Type != expression.Type
-                    || type.IsGarbageCollected || type.IsInitialization || type.IsOptional
+                    || type.IsGarbageCollected || type.IsOptional
                     || formation.Place.Type != type.ReferentType)
                 {
                     throw InvalidEffect(formation.Span, "CheckedReference");
+                }
+
+                if (type.IsInitialization)
+                {
+                    if (!TryGetInitializationReferencePlaceStorage(
+                            formation.Place, function, program,
+                            out var initializationVariable,
+                            out var initializationProjection)
+                        || !function.Variables[initializationVariable]
+                            .IsInitializationLocal)
+                    {
+                        throw InvalidEffect(formation.Span,
+                            "CheckedReference");
+                    }
+                    _ = result.Add(ProvenanceAnchor.ForReferencePlace(
+                        facts.FunctionActivation, initializationVariable,
+                        new StorageInstance(
+                            BackingDependencies.RootScopeActivation, 0),
+                        initializationProjection));
+                    break;
                 }
 
                 if (TryGetIncomingReferencePlace(
@@ -13720,9 +13874,12 @@ public static partial class SemanticVerifier
                 var sourceReference = program.CheckedReferenceTypes[
                     CheckedReferenceTypes.Index(reborrow.Descriptor.Type)];
                 if (reborrow.Type != expression.Type
-                    || sourceReference.IsGarbageCollected || sourceReference.IsInitialization
-                    || sourceReference.IsOptional || type.IsGarbageCollected
-                    || type.IsInitialization || type.IsOptional
+                    || sourceReference.IsGarbageCollected
+                    || sourceReference.IsOptional
+                    || type.IsGarbageCollected
+                    || type.IsOptional
+                    || type.IsInitialization
+                        != sourceReference.IsInitialization
                     || sourceReference.ReferentType != type.ReferentType
                     || (type.IsWritable && !sourceReference.IsWritable))
                 {
@@ -14005,6 +14162,19 @@ public static partial class SemanticVerifier
     private static bool TryGetReferencePlaceStorage(BoundExpression place,
         BoundFunction function, BoundProgram program, out int variable,
         out StorageProjection projection)
+        => TryGetReferencePlaceStorage(place, function, program,
+            allowInitializationLocal: false, out variable, out projection);
+
+    private static bool TryGetInitializationReferencePlaceStorage(
+        BoundExpression place, BoundFunction function, BoundProgram program,
+        out int variable, out StorageProjection projection)
+        => TryGetReferencePlaceStorage(place, function, program,
+            allowInitializationLocal: true, out variable, out projection);
+
+    private static bool TryGetReferencePlaceStorage(BoundExpression place,
+        BoundFunction function, BoundProgram program,
+        bool allowInitializationLocal, out int variable,
+        out StorageProjection projection)
     {
         switch (place)
         {
@@ -14054,23 +14224,25 @@ public static partial class SemanticVerifier
             case BoundFieldRead field:
                 if (!IsReferenceAddressablePlace(field)
                     || !IsReferenceAddressableFieldPath(field, function, program)
-                    || !TryGetNativePointerFieldPlace(field, function, program,
-                    out variable, out projection))
+                    || !TryGetReferenceFieldStorageProjection(field,
+                        function, program, out variable,
+                        out projection))
                 {
                     variable = -1;
                     projection = default;
                     return false;
                 }
                 var root = function.Variables[variable];
-                if (root.IsOut || root.IsInit || root.IsInitializationLocal)
+                if (root.IsOut || root.IsInit
+                    || (root.IsInitializationLocal
+                        && !allowInitializationLocal))
                 {
                     variable = -1;
                     projection = default;
                     return false;
                 }
                 if (NativeFixedArrayContract.TryGetLayout(root.Type,
-                        program.Structures, program.NativeFixedArrayTypes,
-                        out var layout, program.CheckedReferenceTypes))
+                        program, out var layout))
                 {
                     if (!NativeFixedArrayContract.MatchesLayout(layout, program))
                     {
@@ -14096,6 +14268,130 @@ public static partial class SemanticVerifier
         }
     }
 
+    private static bool TryGetReferenceFieldStorageProjection(
+        BoundFieldRead place, BoundFunction function, BoundProgram program,
+        out int rootVariable, out StorageProjection projection)
+    {
+        if (TryGetFieldProjectionPath(place, function, program,
+                out rootVariable, out var fieldPath))
+        {
+            projection = StorageProjection.ForFieldPath(fieldPath);
+            return true;
+        }
+
+        var fields = new Stack<BoundFieldRead>();
+        BoundExpression receiver = place;
+        while (receiver is BoundFieldRead field)
+        {
+            fields.Push(field);
+            receiver = field.Receiver;
+        }
+
+        PrimitiveType ownerType;
+        switch (receiver)
+        {
+            case BoundNativeFixedArrayElement element:
+                rootVariable = element.Variable;
+                ownerType = element.Type;
+                projection = NativeFixedArrayElementProjection(
+                    element.Variable, element.FieldPlace, element.Layout,
+                    element.Index, function, program);
+                break;
+
+            case BoundNativeFixedArrayPathElement element:
+                rootVariable = element.Variable;
+                ownerType = element.Type;
+                projection = NativeFixedArrayPathProjection(
+                    element.Variable, element.FieldPlace,
+                    element.Projections, function, program);
+                break;
+
+            default:
+                rootVariable = -1;
+                projection = default;
+                return false;
+        }
+
+        if (fields.Count == 0)
+        {
+            rootVariable = -1;
+            projection = default;
+            return false;
+        }
+
+        while (fields.TryPop(out var field))
+        {
+            if (field.Receiver.Type != ownerType
+                || !HasFields(program, ownerType)
+                || (uint)field.Field
+                    >= (uint)Fields(program, ownerType).Length)
+            {
+                rootVariable = -1;
+                projection = default;
+                return false;
+            }
+
+            var definition = Fields(program, ownerType)[field.Field];
+            if (definition.Type != field.Type
+                || !CanAccessField(function, program, ownerType,
+                    field.Field))
+            {
+                rootVariable = -1;
+                projection = default;
+                return false;
+            }
+            if (RequiresUnsafeFieldAccess(program, ownerType,
+                    definition) && !field.IsUnsafeAuthorized)
+            {
+                throw InvalidEffect(field.Span, "UnsafeCaller");
+            }
+
+            projection = projection.AppendField(ownerType, field.Field);
+            ownerType = field.Type;
+        }
+
+        if (ownerType != place.Type
+            || projection.Kind == StorageProjectionKind.UnknownElement)
+        {
+            rootVariable = -1;
+            projection = default;
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool TryGetVacantInitializationReferencePlace(
+        BoundExpression place, InitializationState initialized,
+        uint[]? fieldMasks, BoundFunction function, BoundProgram program,
+        out int variable, out StorageProjection projection)
+    {
+        var hasStorage = TryGetInitializationReferencePlaceStorage(
+            place, function, program, out variable, out projection);
+        var isInitializationLocal = hasStorage
+            && function.Variables[variable].IsInitializationLocal;
+        var isReserved = hasStorage
+            && initialized.IsNativeOutputReserved(variable);
+        if (!hasStorage || !isInitializationLocal || isReserved)
+        {
+            variable = -1;
+            projection = default;
+            return false;
+        }
+
+        if (projection.Kind == StorageProjectionKind.WholeObject)
+        {
+            return !initialized.HasPartialValue(variable)
+                && initialized.IsVacant(variable);
+        }
+
+        return projection.Kind
+                == StorageProjectionKind.InlineFieldPath
+            && fieldMasks is not null
+            && StoragePlaceIsVacant(variable, projection,
+                initialized, fieldMasks, program);
+    }
+
     private static bool TryGetNormalBackingClassPlace(BoundExpression place,
         BoundFunction function, BoundProgram program, out int variable,
         out StorageProjection projection)
@@ -14117,7 +14413,8 @@ public static partial class SemanticVerifier
             || placeType != place.Type
             || !CheckedReferenceTypeContract.IsSupportedReferenceStoreValueType(
                 place.Type, program.Structures, program.Classes,
-                program.EnumDefinitions.Length, program.CheckedReferenceTypes))
+                program.EnumDefinitions.Length, program.CheckedReferenceTypes,
+                program.NativePointerTypes))
         {
             variable = -1;
             projection = default;
@@ -14244,7 +14541,8 @@ public static partial class SemanticVerifier
             var fieldTypeIsSupported = isLeaf
                 ? CheckedReferenceTypeContract.IsSupportedReferenceStoreValueType(
                     fieldDefinition.Type, program.Structures, program.Classes,
-                    program.EnumDefinitions.Length, program.CheckedReferenceTypes)
+                    program.EnumDefinitions.Length, program.CheckedReferenceTypes,
+                    program.NativePointerTypes)
                 : IsInlineStructStorage(fieldDefinition.Type, program);
             if (!fieldTypeIsSupported)
             {
@@ -14262,6 +14560,194 @@ public static partial class SemanticVerifier
         }
         target = ProvenanceAnchor.ForIncomingReferencePlace(
             sourceSlot, projection, referenceDepth);
+        return true;
+    }
+
+    private static bool TryGetAliasedInlineReferenceFieldPlace(
+        BoundExpression place, BoundFunction function, BoundProgram program,
+        ref int remaining, int depth, out BoundExpression descriptor,
+        out PrimitiveType referentType, out StorageProjection relativeProjection,
+        out bool isWritable)
+    {
+        Count(ref remaining, depth);
+        descriptor = null!;
+        referentType = PrimitiveType.Void;
+        relativeProjection = default;
+        isWritable = false;
+
+        var fields = new Stack<BoundFieldRead>();
+        var root = place;
+        while (root is BoundFieldRead field)
+        {
+            Count(ref remaining, depth + fields.Count + 1);
+            fields.Push(field);
+            root = field.Receiver;
+        }
+        if (fields.Count == 0 || root is not BoundReferenceRead referenceRead
+            || !CheckedReferenceTypeContract.IsValidType(
+                referenceRead.Descriptor.Type, program.CheckedReferenceTypes))
+        {
+            return false;
+        }
+
+        var reference = program.CheckedReferenceTypes[
+            CheckedReferenceTypes.Index(referenceRead.Descriptor.Type)];
+        if (reference.IsGarbageCollected || reference.IsInitialization
+            || reference.IsOptional || reference.ReferentType != referenceRead.Type
+            || !IsInlineStructStorage(referenceRead.Type, program))
+        {
+            return false;
+        }
+
+        var projection = StorageProjection.WholeObject;
+        var ownerType = referenceRead.Type;
+        while (fields.TryPop(out var field))
+        {
+            Count(ref remaining, depth + 1);
+            var ownerIndex = (int)ownerType - 100;
+            if (field.Receiver.Type != ownerType
+                || ownerIndex < 0 || ownerIndex >= program.Structures.Length
+                || ManagedClassTypes.IsClass(ownerType)
+                || (program.Structures[ownerIndex].CleanupMethod is not null
+                    && !program.Structures[ownerIndex].IsUnique)
+                || (uint)field.Field
+                    >= (uint)program.Structures[ownerIndex].Fields.Length
+                || !CanAccessField(function, program, ownerType, field.Field))
+            {
+                return false;
+            }
+
+            var fieldDefinition = program.Structures[ownerIndex].Fields[field.Field];
+            if (field.Type != fieldDefinition.Type)
+            {
+                return false;
+            }
+            if (fields.Count == 0
+                ? !CheckedReferenceTypeContract.IsSupportedReferenceStoreValueType(
+                    field.Type, program.Structures, program.Classes,
+                    program.EnumDefinitions.Length, program.CheckedReferenceTypes,
+                    program.NativePointerTypes)
+                : !IsInlineStructStorage(field.Type, program))
+            {
+                return false;
+            }
+
+            projection = projection.AppendField(ownerType, field.Field);
+            ownerType = field.Type;
+        }
+
+        if (ownerType != place.Type)
+        {
+            return false;
+        }
+
+        descriptor = referenceRead.Descriptor;
+        referentType = referenceRead.Type;
+        relativeProjection = projection;
+        isWritable = reference.IsWritable
+            && IsWritableReferencePlace(place, function, program);
+        return true;
+    }
+
+    private static bool TryAppendInlineFieldProjection(
+        StorageProjection prefix, StorageProjection suffix,
+        out StorageProjection projection)
+    {
+        projection = default;
+        if (suffix.Kind != StorageProjectionKind.InlineFieldPath)
+        {
+            return false;
+        }
+        if (prefix.Kind == StorageProjectionKind.WholeObject)
+        {
+            projection = suffix;
+            return true;
+        }
+        if (prefix.Kind != StorageProjectionKind.InlineFieldPath)
+        {
+            return false;
+        }
+
+        projection = new StorageProjection(
+            StorageProjectionKind.InlineFieldPath, 0, 0,
+            prefix.FieldPath.Append(suffix.FieldPath),
+            prefix.ProjectionPath.Append(suffix.ProjectionPath));
+        return true;
+    }
+
+    private static bool TryGetAliasedInlineReferenceFieldPlaceTargets(
+        BoundExpression place, BackingDependencies facts,
+        InitializationState state, BoundFunction function,
+        BoundProgram program, ref int remaining, int depth,
+        uint[]? fieldMasks, out HashSet<ProvenanceAnchor> targets,
+        out bool isWritable)
+    {
+        targets = [];
+        if (!TryGetAliasedInlineReferenceFieldPlace(place, function,
+                program, ref remaining, depth + 1, out var descriptor,
+                out var referentType, out var relativeProjection,
+                out isWritable))
+        {
+            isWritable = false;
+            return false;
+        }
+
+        var sourceTargets = ReferenceTargetsOfExpression(descriptor, facts,
+            state, function, program, ref remaining, depth + 1, fieldMasks);
+        if (sourceTargets.Count == 0)
+        {
+            isWritable = false;
+            return false;
+        }
+
+        foreach (var sourceTarget in sourceTargets)
+        {
+            Count(ref remaining, depth + 1);
+            ValidateReferenceTarget(sourceTarget, referentType, facts, state,
+                function, program, place.Span, fieldMasks);
+            switch (sourceTarget.Kind)
+            {
+                case ProvenanceAnchorKind.ReferencePlace
+                    when sourceTarget.Storage is StorageKey storage
+                        && storage.IsKnown
+                        && storage.Site == sourceTarget.Identity
+                        && TryAppendInlineFieldProjection(storage.Projection,
+                            relativeProjection, out var projection)
+                        && ReferenceTargetPlaceInitialized(storage.Site,
+                            projection, state, fieldMasks, function, program):
+                    var referencePlace = ProvenanceAnchor.ForReferencePlace(
+                        storage.Activation, storage.Site, storage.Instance,
+                        projection, state.FieldPlaceGeneration(
+                            storage.Site, projection));
+                    ValidateReferenceTarget(referencePlace, place.Type, facts,
+                        state, function, program, place.Span, fieldMasks);
+                    _ = targets.Add(referencePlace);
+                    break;
+                case ProvenanceAnchorKind.IncomingReferencePlace
+                    when sourceTarget.IncomingProjection
+                            is StorageProjection incomingProjection
+                        && TryAppendInlineFieldProjection(incomingProjection,
+                            relativeProjection, out var projectedIncoming):
+                    var incomingPlace =
+                        ProvenanceAnchor.ForIncomingReferencePlace(
+                            sourceTarget.Identity, projectedIncoming,
+                            sourceTarget.IncomingReferenceDepth);
+                    ValidateReferenceTarget(incomingPlace, place.Type, facts,
+                        state, function, program, place.Span, fieldMasks);
+                    _ = targets.Add(incomingPlace);
+                    break;
+                default:
+                    isWritable = false;
+                    targets.Clear();
+                    return false;
+            }
+        }
+
+        if (targets.Count == 0)
+        {
+            isWritable = false;
+            return false;
+        }
         return true;
     }
 
@@ -14315,7 +14801,8 @@ public static partial class SemanticVerifier
         var supportedFieldType = isLeaf
             ? CheckedReferenceTypeContract.IsSupportedReferenceStoreValueType(
                 field.Type, program.Structures, program.Classes,
-                program.EnumDefinitions.Length, program.CheckedReferenceTypes)
+                program.EnumDefinitions.Length, program.CheckedReferenceTypes,
+                program.NativePointerTypes)
             : HasFields(program, field.Type) && !ManagedClassTypes.IsClass(field.Type);
         return definition.Type == field.Type
             && supportedFieldType
@@ -14428,6 +14915,19 @@ public static partial class SemanticVerifier
                 return (uint)read.Variable < (uint)function.Variables.Length
                     && function.Variables[read.Variable].Type == read.Type
                     && function.Variables[read.Variable].IsMutable;
+            case BoundReferenceRead referenceRead:
+                if (!CheckedReferenceTypeContract.IsValidType(
+                        referenceRead.Descriptor.Type,
+                        program.CheckedReferenceTypes))
+                {
+                    return false;
+                }
+                var reference = program.CheckedReferenceTypes[
+                    CheckedReferenceTypes.Index(
+                        referenceRead.Descriptor.Type)];
+                return reference.IsWritable && !reference.IsGarbageCollected
+                    && !reference.IsInitialization && !reference.IsOptional
+                    && reference.ReferentType == referenceRead.Type;
             case BoundNativeFixedArrayElement element:
                 return (uint)element.Variable < (uint)function.Variables.Length
                     && (element.FieldPlace is null
@@ -14917,6 +15417,16 @@ public static partial class SemanticVerifier
                     facts.ReferenceObligations[move.Variable] ?? EmptyBackingSources,
                     facts.ReferenceBackingSources[move.Variable] ?? EmptyBackingSources,
                     isAvailable: true);
+            case BoundPrivatePlaceRead {
+                UseKind: 3,
+            } borrowedDescriptor:
+                var descriptorPlace =
+                    PrivateBodyPlaceExpression(borrowedDescriptor.Place,
+                        function, program, borrowedDescriptor.Span,
+                        ref remaining, depth + 1);
+                return ReferenceFieldValueOfDescriptorExpression(
+                    descriptorPlace, facts, state, function, program,
+                    ref remaining, depth + 1, fieldMasks);
             case BoundPrivateReferenceForm formation:
                 var privateTargets = ReferenceTargetsOfExpression(
                     formation, facts, state, function, program,
@@ -14954,6 +15464,10 @@ public static partial class SemanticVerifier
                 return new ReferenceFieldValue(reborrowTargets,
                     reborrowObligations, sourceValue.BackingSources,
                     reborrowTargets.Count != 0 && sourceValue.IsAvailable);
+            case BoundInitializationAttenuation attenuation:
+                return ReferenceFieldValueOfDescriptorExpression(
+                    attenuation.Descriptor, facts, state, function, program,
+                    ref remaining, depth + 1, fieldMasks);
             case BoundReferenceRead referenceRead:
                 return ReferenceFieldValueOfReferenceRead(referenceRead,
                     expression.Type, StorageProjection.WholeObject,
@@ -15563,29 +16077,29 @@ public static partial class SemanticVerifier
                     if (placeProjection.Kind
                         == StorageProjectionKind.InlineFieldPath
                         && (fieldMasks is null
-                            || !PrivateStoragePlaceIsVacant(placeVariable,
+                            || !StoragePlaceIsVacant(placeVariable,
                                 placeProjection, state, fieldMasks, program)))
                     {
                         throw InvalidEffect(formation.Span,
                             "CheckedReference");
                     }
                     var instances = facts.StorageInstanceSet(placeVariable);
-                    if (instances.Count != 1)
+                    if (instances.Count == 0
+                        || instances.Any(
+                            static instance => !instance.IsKnown))
                     {
                         throw InvalidEffect(formation.Span,
                             "CheckedReference");
                     }
-                    var instance = instances.Single();
-                    if (!instance.IsKnown)
+                    foreach (var instance in instances)
                     {
-                        throw InvalidEffect(formation.Span,
-                            "CheckedReference");
+                        _ = result.Add(
+                            ProvenanceAnchor.ForReferencePlace(
+                                facts.FunctionActivation, placeVariable,
+                                instance, placeProjection,
+                                state.FieldPlaceGeneration(
+                                    placeVariable, placeProjection)));
                     }
-                    _ = result.Add(ProvenanceAnchor.ForReferencePlace(
-                        facts.FunctionActivation, placeVariable, instance,
-                        placeProjection,
-                        state.FieldPlaceGeneration(placeVariable,
-                            placeProjection)));
                 }
                 else if (formation.FormationKind == 2
                     && formation.Place is BoundPrivateReferentPlace referent)
@@ -15738,7 +16252,7 @@ public static partial class SemanticVerifier
                     || type.IsOptional || type.IsGarbageCollected)
                 {
                     throw InvalidEffect(attenuation.Span,
-                        "CheckedReference");
+                        "Ownership");
                 }
                 var attenuationSource = program.CheckedReferenceTypes[
                     CheckedReferenceTypes.Index(
@@ -15747,19 +16261,28 @@ public static partial class SemanticVerifier
                     || attenuationSource.IsOptional
                     || attenuationSource.IsGarbageCollected
                     || attenuationSource.ReferentType != type.ReferentType
-                    || attenuationSource.IsWritable != type.IsWritable)
+                    || (type.IsWritable
+                        && !attenuationSource.IsWritable))
                 {
                     throw InvalidEffect(attenuation.Span,
-                        "CheckedReference");
+                        "Ownership");
                 }
                 result = ReferenceTargetsOfExpression(
                     attenuation.Descriptor, facts, state, function, program,
                     ref remaining, depth + 1, fieldMasks);
                 foreach (var target in result)
                 {
-                    ValidateReferenceTarget(target, type.ReferentType,
-                        facts, state, function, program, attenuation.Span,
-                        fieldMasks);
+                    ValidateInitializationReferenceTarget(target,
+                        type.ReferentType, facts, state, function, program,
+                        attenuation.Span);
+                    if (!ReferenceTargetIsInitialized(target,
+                            type.ReferentType, attenuation.Span, state,
+                            fieldMasks ?? state.PossibleFieldMasks, function,
+                            program, ref remaining, depth + 1))
+                    {
+                        throw InvalidEffect(attenuation.Span,
+                            "Ownership");
+                    }
                 }
                 break;
             case BoundImplicitReferenceMaterialize materialize:
@@ -15794,10 +16317,44 @@ public static partial class SemanticVerifier
                 break;
             case BoundReferenceFormation formation:
                 if (formation.Type != expression.Type
-                    || type.IsGarbageCollected || type.IsInitialization || type.IsOptional
+                    || type.IsGarbageCollected || type.IsOptional
                     || formation.Place.Type != type.ReferentType)
                 {
                     throw InvalidEffect(formation.Span, "CheckedReference");
+                }
+
+                if (type.IsInitialization)
+                {
+                    if (!TryGetVacantInitializationReferencePlace(
+                            formation.Place, state, fieldMasks, function,
+                            program, out var initializationVariable,
+                            out var initializationProjection))
+                    {
+                        throw InvalidEffect(formation.Span,
+                            "CheckedReference");
+                    }
+                    var initializationInstances = facts.StorageInstanceSet(
+                        initializationVariable);
+                    if (initializationInstances.Count == 0
+                        || initializationInstances.Any(
+                            static instance => !instance.IsKnown))
+                    {
+                        throw InvalidEffect(formation.Span,
+                            "CheckedReference");
+                    }
+                    foreach (var initializationInstance
+                        in initializationInstances)
+                    {
+                        _ = result.Add(ProvenanceAnchor.ForReferencePlace(
+                            facts.FunctionActivation,
+                            initializationVariable,
+                            initializationInstance,
+                            initializationProjection,
+                            state.FieldPlaceGeneration(
+                                initializationVariable,
+                                initializationProjection)));
+                    }
+                    break;
                 }
 
                 if (TryGetIncomingReferencePlace(
@@ -15811,6 +16368,18 @@ public static partial class SemanticVerifier
                     ValidateReferenceTarget(incomingPlace, type.ReferentType,
                         facts, state, function, program, formation.Span, fieldMasks);
                     _ = result.Add(incomingPlace);
+                }
+                else if (TryGetAliasedInlineReferenceFieldPlaceTargets(
+                    formation.Place, facts, state, function, program,
+                    ref remaining, depth + 1, fieldMasks,
+                    out var aliasedTargets, out var aliasedWritable))
+                {
+                    if (type.IsWritable && !aliasedWritable)
+                    {
+                        throw InvalidEffect(formation.Span,
+                            "CheckedReference");
+                    }
+                    result = aliasedTargets;
                 }
                 else if (TryGetNormalBackingClassPlace(formation.Place,
                     function, program, out var normalBackingVariable,
@@ -15883,9 +16452,11 @@ public static partial class SemanticVerifier
                 var sourceReference = program.CheckedReferenceTypes[
                     CheckedReferenceTypes.Index(reborrow.Descriptor.Type)];
                 if (reborrow.Type != expression.Type
-                    || sourceReference.IsGarbageCollected || sourceReference.IsInitialization
-                    || sourceReference.IsOptional || type.IsGarbageCollected
-                    || type.IsInitialization || type.IsOptional
+                    || sourceReference.IsGarbageCollected
+                    || sourceReference.IsOptional
+                    || type.IsGarbageCollected || type.IsOptional
+                    || type.IsInitialization
+                        != sourceReference.IsInitialization
                     || sourceReference.ReferentType != type.ReferentType
                     || (type.IsWritable && !sourceReference.IsWritable))
                 {
@@ -15895,10 +16466,14 @@ public static partial class SemanticVerifier
                     function, program, ref remaining, depth + 1, fieldMasks);
                 result = ReferenceTargetsOfExpression(reborrow.Descriptor, facts,
                     state, function, program, ref remaining, depth + 1, fieldMasks);
-                foreach (var target in result)
+                if (!type.IsInitialization)
                 {
-                    ValidateReferenceTarget(target, type.ReferentType, facts,
-                        state, function, program, reborrow.Span, fieldMasks);
+                    foreach (var target in result)
+                    {
+                        ValidateReferenceTarget(target, type.ReferentType,
+                            facts, state, function, program, reborrow.Span,
+                            fieldMasks);
+                    }
                 }
                 break;
             case BoundFieldRead field:
@@ -15951,8 +16526,18 @@ public static partial class SemanticVerifier
                 }
                 foreach (var target in targets)
                 {
-                    ValidateReferenceTarget(target, type.ReferentType, facts, state,
-                        function, program, read.Span, fieldMasks);
+                    if (type.IsInitialization)
+                    {
+                        ValidateInitializationReferenceTarget(target,
+                            type.ReferentType, facts, state, function,
+                            program, read.Span);
+                    }
+                    else
+                    {
+                        ValidateReferenceTarget(target, type.ReferentType,
+                            facts, state, function, program, read.Span,
+                            fieldMasks);
+                    }
                     _ = result.Add(target);
                 }
                 break;
@@ -16254,6 +16839,14 @@ public static partial class SemanticVerifier
                         }
                     }
                 }
+                else if (TryGetAliasedInlineReferenceFieldPlace(
+                    formation.Place, function, program, ref remaining,
+                    depth + 1, out var descriptor, out _, out _, out _))
+                {
+                    result.UnionWith(ReferenceObligationsOfExpression(
+                        descriptor, facts, state, function, program,
+                        ref remaining, depth + 1, fieldMasks));
+                }
                 break;
             case BoundRead read:
                 if ((uint)read.Variable >= (uint)function.Variables.Length
@@ -16401,6 +16994,14 @@ public static partial class SemanticVerifier
         switch (expression)
         {
             case BoundNull when type.IsOptional:
+                break;
+            case BoundPrivateReferenceForm {
+                FormationKind: 2,
+                Place: BoundPrivateReferentPlace referent,
+            }:
+                result = ReferenceDescriptorPlacesOfExpression(
+                    referent.Descriptor, facts, state, function, program,
+                    ref remaining, depth + 1, fieldMasks);
                 break;
             case BoundPrivatePlaceRead { UseKind: 3 } borrowedDescriptor:
                 if (borrowedDescriptor.Place
@@ -16572,7 +17173,7 @@ public static partial class SemanticVerifier
                     function.Variables[obligation.Identity].Type, program.CheckedReferenceTypes)
                 || !state[obligation.Identity])
             {
-                throw InvalidEffect(span, "CheckedReference");
+                throw InvalidEffect(span, "Ownership");
             }
             return;
         }
@@ -16589,7 +17190,7 @@ public static partial class SemanticVerifier
                 descriptorType, program.CheckedReferenceTypes)
             || !state[obligation.Identity] || state.HasRetiredValue(obligation.Identity))
         {
-            throw InvalidEffect(span, "CheckedReference");
+            throw InvalidEffect(span, "Ownership");
         }
         if (key.Projection.Kind == StorageProjectionKind.InlineFieldPath
             && (key.PlaceGeneration
@@ -16597,7 +17198,7 @@ public static partial class SemanticVerifier
                 || !ReferenceTargetPlaceInitialized(obligation.Identity,
                     key.Projection, state, fieldMasks, function, program)))
         {
-            throw InvalidEffect(span, "CheckedReference");
+            throw InvalidEffect(span, "Ownership");
         }
         var instances = facts.StorageInstanceSet(obligation.Identity);
         if (instances.Count != 1 || !instances.Contains(key.Instance))
@@ -16646,8 +17247,7 @@ public static partial class SemanticVerifier
             if (segment.Kind is StorageProjectionSegmentKind.ArrayIndex
                     or StorageProjectionSegmentKind.ArrayRange
                 && NativeFixedArrayContract.TryGetLayout(type,
-                    program.Structures, program.NativeFixedArrayTypes,
-                    out var layout, program.CheckedReferenceTypes))
+                    program, out var layout))
             {
                 type = layout.ElementType;
                 continue;
@@ -16718,8 +17318,16 @@ public static partial class SemanticVerifier
             }
             var incomingType = program.CheckedReferenceTypes[
                 CheckedReferenceTypes.Index(function.Variables[target.Identity].Type)];
-            if (incomingType.IsGarbageCollected || incomingType.IsInitialization
+            if (incomingType.IsGarbageCollected
                 || incomingType.ReferentType != referentType)
+            {
+                throw InvalidEffect(span, "CheckedReference");
+            }
+            if (incomingType.IsInitialization
+                && (!state.IsIncomingReferenceDefinitelyInitialized(target)
+                    || !state.HasConsumedInitializationAuthority(
+                        ProvenanceAnchor.ForIncomingReferenceDescriptor(
+                            target.Identity))))
             {
                 throw InvalidEffect(span, "CheckedReference");
             }
@@ -16882,6 +17490,61 @@ public static partial class SemanticVerifier
         {
             throw InvalidEffect(span, "CheckedReference");
         }
+        var instances = facts.StorageInstanceSet(target.Identity);
+        if (instances.Count != 1 || !instances.Contains(key.Instance))
+        {
+            throw InvalidEffect(span, "CheckedReference");
+        }
+    }
+
+    private static void ValidateInitializationReferenceTarget(
+        ProvenanceAnchor target, PrimitiveType referentType,
+        BackingDependencies facts, InitializationState state,
+        BoundFunction function, BoundProgram program, TextSpan span)
+    {
+        if (target.Kind == ProvenanceAnchorKind.IncomingReference)
+        {
+            var parameterCount = function.ParameterCount
+                + (function.IsConstructor ? 1 : 0);
+            if ((uint)target.Identity >= (uint)parameterCount
+                || !function.Variables[target.Identity].IsInit
+                || !state[target.Identity]
+                || state.HasRetiredValue(target.Identity)
+                || state.IsNativeOutputReserved(target.Identity)
+                || !CheckedReferenceTypeContract.IsValidType(
+                    function.Variables[target.Identity].Type,
+                    program.CheckedReferenceTypes))
+            {
+                throw InvalidEffect(span, "CheckedReference");
+            }
+            var incoming = program.CheckedReferenceTypes[
+                CheckedReferenceTypes.Index(
+                    function.Variables[target.Identity].Type)];
+            if (!incoming.IsInitialization
+                || incoming.IsGarbageCollected || incoming.IsOptional
+                || incoming.ReferentType != referentType)
+            {
+                throw InvalidEffect(span, "CheckedReference");
+            }
+            return;
+        }
+
+        if (target.Kind != ProvenanceAnchorKind.ReferencePlace
+            || target.Storage is not StorageKey key || !key.IsKnown
+            || key.Activation != facts.FunctionActivation
+            || key.Site != target.Identity
+            || (uint)target.Identity >= (uint)function.Variables.Length
+            || state.HasRetiredValue(target.Identity)
+            || state.IsNativeOutputReserved(target.Identity)
+            || key.PlaceGeneration
+                != state.FieldPlaceGeneration(target.Identity, key.Projection)
+            || !TryGetReferencePlaceType(target.Identity, key.Projection,
+                function, program, out var actualType)
+            || actualType != referentType)
+        {
+            throw InvalidEffect(span, "CheckedReference");
+        }
+
         var instances = facts.StorageInstanceSet(target.Identity);
         if (instances.Count != 1 || !instances.Contains(key.Instance))
         {
@@ -17080,12 +17743,9 @@ public static partial class SemanticVerifier
                 var dependency = ResultDependencyContract(callee);
                 if (dependency is not null)
                 {
-                    foreach (var source in dependency.Sources)
-                    {
-                        result.UnionWith(BackingOf(
-                            DependencyCallArgument(call, callee, source), facts,
-                            program, ref remaining, depth + 1));
-                    }
+                    result.UnionWith(BackingSourcesForCallRelationship(
+                        call, callee, dependency, facts, program, ref remaining,
+                        depth + 1));
                 }
                 return result;
             case BoundConditional conditional when conditional.Condition is not null
@@ -17343,6 +18003,11 @@ public static partial class SemanticVerifier
             || (projection.Kind != StorageProjectionKind.WholeObject
                 && (projection.Kind != StorageProjectionKind.InlineFieldPath
                     || projection.FieldPath.Segments.IsEmpty)))
+        {
+            throw InvalidEffect(span, "CheckedReference");
+        }
+        if (HasActiveInitializationReservationForPlace(
+            root, projection, state))
         {
             throw InvalidEffect(span, "CheckedReference");
         }
