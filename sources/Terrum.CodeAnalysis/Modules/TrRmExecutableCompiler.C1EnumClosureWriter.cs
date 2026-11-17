@@ -38,7 +38,7 @@ public static partial class TrRmExecutableCompiler
             || program.Functions.Length != 1)
         {
             throw Unsupported(
-                "The bounded EN1 Body route accepts only one parameterless unsafe nint method returning an authorized class-root OffsetOfType query.");
+                "The bounded EN1 Body route accepts one parameterless nint method with authorized class-root OffsetOfType queries.");
         }
 
         var function = program.Functions[0];
@@ -55,97 +55,130 @@ public static partial class TrRmExecutableCompiler
             || function.Body.Statements[0] is not BoundReturn)
         {
             throw Unsupported(
-                "The bounded EN1 Body route accepts only one parameterless unsafe nint method returning an authorized class-root OffsetOfType query.");
+                "The bounded EN1 Body route accepts one parameterless nint method with authorized class-root OffsetOfType queries.");
         }
 
         var returned = (BoundReturn)function.Body.Statements[0];
-        if (returned.Value is not BoundUnsafeExpression)
+        if (returned.Value is null)
         {
             throw Unsupported(
-                "An EN1 class query Body must retain its lexical unsafe expression.");
+                "An EN1 class query Body requires a returned class layout expression.");
         }
 
-        var unsafeExpression = (BoundUnsafeExpression)returned.Value;
-        if (unsafeExpression.Expression is not BoundLayoutQuery)
+        var queries = GetEN1ClassLayoutQueries(function);
+        if (queries.IsEmpty)
         {
             throw Unsupported(
-                "An EN1 class query Body must contain one direct OffsetOfType operation.");
+                "An EN1 class query Body must contain an OffsetOfType operation.");
         }
 
-        var query = (BoundLayoutQuery)unsafeExpression.Expression;
-        var fieldPath = query.Subject.FieldPath;
-        if (query.Type != PrimitiveType.NativeInt
-            || query.Kind != BoundLayoutQueryKind.OffsetOfType
-            || query.Subject.Kind != BoundQuerySubjectKind.Type
-            || !query.Subject.RequiresUnsafe
-            || !query.Subject.IsUnsafeAuthorized
-            || fieldPath is null
-            || !fieldPath.HasValidStructure
-            || fieldPath.RootType != query.Subject.Type
-            || !BoundGenericNominalTypeContract.IsNominalClassType(
-                fieldPath.RootType,
-                program.GenericNominalTypeInstances,
-                program.GenericNominalTypeDefinitions))
+        BoundGenericNominalTypeInstance? rootInstance = null;
+        foreach (var query in queries)
         {
-            throw Unsupported(
-                "The bounded EN1 Body route accepts only one parameterless unsafe nint method returning an authorized class-root OffsetOfType query.");
-        }
+            var fieldPath = query.Subject.FieldPath;
+            if (query.Type != PrimitiveType.NativeInt
+                || query.Kind != BoundLayoutQueryKind.OffsetOfType
+                || query.Subject.Kind != BoundQuerySubjectKind.Type
+                || !query.Subject.RequiresUnsafe
+                || !query.Subject.IsUnsafeAuthorized
+                || fieldPath is null
+                || !fieldPath.HasValidStructure
+                || fieldPath.RootType != query.Subject.Type
+                || !BoundGenericNominalTypeContract.IsNominalClassType(
+                    fieldPath.RootType,
+                    program.GenericNominalTypeInstances,
+                    program.GenericNominalTypeDefinitions))
+            {
+                throw Unsupported(
+                    "The bounded EN1 Body route accepts only authorized class-root OffsetOfType queries.");
+            }
 
-        var instanceIndex
-            = BoundGenericNominalTypeTypes.Index(fieldPath.RootType);
-        if ((uint)instanceIndex
-            >= (uint)program.GenericNominalTypeInstances.Length)
-        {
-            throw Unsupported(
-                "An EN1 class query Body requires an ordinary nongeneric class root.");
-        }
+            var instanceIndex
+                = BoundGenericNominalTypeTypes.Index(fieldPath.RootType);
+            if ((uint)instanceIndex
+                >= (uint)program.GenericNominalTypeInstances.Length)
+            {
+                throw Unsupported(
+                    "An EN1 class query Body requires an ordinary nongeneric class root.");
+            }
 
-        var instance = program.GenericNominalTypeInstances[instanceIndex];
-        if (instance is null || !instance.Arguments.IsEmpty
-            || instance.Qualifiers != 0
-            || (instance.TypeSpecReference == 0
-                ? instance.TypeSpecProviderIdentity is not null
-                    || instance.TypeSpecForm != 0
-                : string.IsNullOrEmpty(
-                        instance.TypeSpecProviderIdentity)
-                    || instance.TypeSpecForm is not (0x02 or 0x03)))
-        {
-            throw Unsupported(
-                "An EN1 class query Body requires an ordinary nongeneric class root.");
-        }
+            var instance = program.GenericNominalTypeInstances[
+                instanceIndex];
+            if (instance is null || !instance.Arguments.IsEmpty
+                || instance.Qualifiers != 0
+                || (instance.TypeSpecReference == 0
+                    ? instance.TypeSpecProviderIdentity is not null
+                        || instance.TypeSpecForm != 0
+                    : string.IsNullOrEmpty(
+                            instance.TypeSpecProviderIdentity)
+                        || instance.TypeSpecForm is not (0x02 or 0x03))
+                || (rootInstance is not null
+                    && rootInstance.Definition != instance.Definition))
+            {
+                throw Unsupported(
+                    "An EN1 class query Body requires one ordinary nongeneric class root and exact TypeSpec context.");
+            }
 
-        var declaration = program.StandardClassDeclarations.SingleOrDefault(
-            candidate =>
-                candidate.Declaration.Identity == instance.Definition
-                && !candidate.SelectedExportKeys.IsEmpty);
-        if (declaration is null || fieldPath.Steps.IsEmpty
-            || fieldPath.Steps.Skip(1).Any(step =>
-                step.StandardClassFieldOrigin is not null))
-        {
-            throw Unsupported(
-                "The bounded EN1 Body route requires a selected public class FieldDef followed only by inline-struct FieldPath steps.");
-        }
+            rootInstance ??= instance;
+            var declaration
+                = program.StandardClassDeclarations.SingleOrDefault(
+                    candidate =>
+                        candidate.Declaration.Identity
+                            == instance.Definition
+                        && !candidate.SelectedExportKeys.IsEmpty);
+            if (declaration is null || fieldPath.Steps.IsEmpty
+                || fieldPath.Steps.Skip(1).Any(step =>
+                    step.StandardClassFieldOrigin is not null))
+            {
+                throw Unsupported(
+                    "The bounded EN1 Body route requires a selected public class FieldDef followed only by inline-struct FieldPath steps.");
+            }
 
-        var classField = fieldPath.Steps[0].StandardClassFieldOrigin;
-        if (classField is null
-            || classField.OwnerDefinitionId
-                != declaration.Declaration.Identity.DefinitionId
-            || classField.SelectedExportKeys.IsEmpty
-            || (classField.Flags & 3) != 2
-            || (classField.Flags & 8) != 0)
-        {
-            throw Unsupported(
-                "The bounded EN1 Body route requires a selected public nonstatic class FieldDef.");
+            var classField
+                = fieldPath.Steps[0].StandardClassFieldOrigin;
+            if (classField is null
+                || classField.OwnerDefinitionId
+                    != declaration.Declaration.Identity.DefinitionId
+                || classField.SelectedExportKeys.IsEmpty
+                || (classField.Flags & 3) != 2
+                || (classField.Flags & 8) != 0)
+            {
+                throw Unsupported(
+                    "The bounded EN1 Body route requires a selected public nonstatic class FieldDef.");
+            }
         }
 
         return function;
     }
 
+    private static ImmutableArray<BoundLayoutQuery>
+        GetEN1ClassLayoutQueries(BoundFunction function)
+    {
+        var queries = ImmutableArray.CreateBuilder<BoundLayoutQuery>();
+        var hasTypeIdentityQuery = false;
+        if (!BoundTreeTraversal.VisitExpressions(function.Body,
+                expression => {
+                    if (expression is BoundLayoutQuery query)
+                    {
+                        queries.Add(query);
+                    }
+                    else if (expression is BoundTypeIdentityQuery)
+                    {
+                        hasTypeIdentityQuery = true;
+                    }
+                })
+            || hasTypeIdentityQuery)
+        {
+            throw Unsupported(
+                "An EN1 class query Body contains an unsupported query expression.");
+        }
+
+        return queries.ToImmutable();
+    }
+
     private static BoundQueryFieldPath GetEN1ClassQueryFieldPath(
         BoundFunction function)
-        => ((BoundLayoutQuery)((BoundUnsafeExpression)
-            ((BoundReturn)function.Body.Statements[0]).Value!).Expression)
-            .Subject.FieldPath!;
+        => GetEN1ClassLayoutQueries(function)[0].Subject.FieldPath!;
 
     private static int GetEN1ClassQueryRootTypeDefRow(
         BoundGenericNominalTypeInstance instance,
@@ -3132,8 +3165,12 @@ public static partial class TrRmExecutableCompiler
 
         if (classQueryFunction is not null)
         {
+            var classFieldPaths
+                = GetEN1ClassLayoutQueries(classQueryFunction)
+                    .Select(static query => query.Subject.FieldPath!)
+                    .ToArray();
             var classFieldPath
-                = GetEN1ClassQueryFieldPath(classQueryFunction);
+                = classFieldPaths[0];
             var classTypeIndex
                 = BoundGenericNominalTypeTypes.Index(
                     classFieldPath.RootType);
@@ -3268,21 +3305,32 @@ public static partial class TrRmExecutableCompiler
                 allowUnsafeClassOffsetQuery: true,
                 requireClassFieldImport: !StringComparer.Ordinal.Equals(
                     rootSnapshot!.ModuleIdentity, moduleIdentity)));
-            if (fieldPathRows.Count != 1
-                || fieldPathRows[0].RootTypeSpecRef == 0
-                || fieldPathRows[0].FieldReferences.Count
-                    != classFieldPath.Steps.Length)
+            if (fieldPathRows.Count != classFieldPaths.Length)
             {
                 throw Invalid(
-                    "An EN1 class query Body did not emit one complete FieldPath.");
+                    "An EN1 class query Body did not emit one FieldPath per query.");
             }
 
-            targetLayoutDependencyFieldReferences.AddRange(
-                fieldPathRows[0].FieldReferences);
-            targetLayoutDependencyRows.Add(
-                new TrRmTargetLayoutDependencyRow(3, 0, 0,
-                    fieldPathRows[0].RootTypeSpecRef, 1, 1,
-                    fieldPathRows[0].FieldReferences.Count));
+            for (var pathIndex = 0;
+                pathIndex < fieldPathRows.Count; pathIndex++)
+            {
+                var fieldPath = fieldPathRows[pathIndex];
+                if (fieldPath.RootTypeSpecRef == 0
+                    || fieldPath.FieldReferences.Count
+                        != classFieldPaths[pathIndex].Steps.Length)
+                {
+                    throw Invalid(
+                        "An EN1 class query Body emitted an incomplete FieldPath.");
+                }
+
+                targetLayoutDependencyFieldReferences.AddRange(
+                    fieldPath.FieldReferences);
+                targetLayoutDependencyRows.Add(
+                    new TrRmTargetLayoutDependencyRow(3, 0, 0,
+                        fieldPath.RootTypeSpecRef, 1, 1,
+                        fieldPath.FieldReferences.Count));
+            }
+
             hasTargetProfile = true;
 
             var methodNameRow = AddString(classQueryFunction.Name);

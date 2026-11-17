@@ -1147,12 +1147,14 @@ internal sealed class TrRmC1EnumClosureSourceTests
             providerArtifact);
         var reference = TrRmExecutableCompiler.CreateStandardReference(
             providerInput, "ClassLayoutProvider", [], ["type.box"],
-            ["field.box.value"]);
+            ["field.box.value", "field.box.prefix"]);
         var queryCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
                 using Demo;
                 nint Offset() {
-                    return unsafe(offsetof(Box, Value));
+                    return unsafe(offsetof(Box, Value))
+                        + unsafe(offsetof(Box, Prefix))
+                        + unsafe(offsetof(Box, Value));
                 }
                 """), reference, new CompilationOptions {
                 LayoutCoreRegistration
@@ -1163,18 +1165,49 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
             queryCompilation.Program!, "ClassLayoutConsumer",
             schemaIdentity, 1);
+        var consumerTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                consumerArtifact, SchemaFor(schemaIdentity), null,
+                usesNativePointerLoads: false,
+                standardSchemaIdentity: schemaIdentity));
+        Assert.That(consumerTables.TargetLayoutDependencies.Count,
+            Is.EqualTo(3));
+        Assert.That(consumerTables.TargetLayoutDependencyFields.Count,
+            Is.EqualTo(3));
+        var firstQueryFields
+            = consumerTables.TargetLayoutDependencies.GetFieldRange(1);
+        var secondQueryFields
+            = consumerTables.TargetLayoutDependencies.GetFieldRange(2);
+        var thirdQueryFields
+            = consumerTables.TargetLayoutDependencies.GetFieldRange(3);
+        Assert.That(firstQueryFields.Count, Is.EqualTo(1));
+        Assert.That(secondQueryFields.Count, Is.EqualTo(1));
+        Assert.That(thirdQueryFields.Count, Is.EqualTo(1));
+        var firstFieldReference
+            = consumerTables.TargetLayoutDependencyFields
+                .GetFieldReference(firstQueryFields.First);
+        var secondFieldReference
+            = consumerTables.TargetLayoutDependencyFields
+                .GetFieldReference(secondQueryFields.First);
+        var thirdFieldReference
+            = consumerTables.TargetLayoutDependencyFields
+                .GetFieldReference(thirdQueryFields.First);
+        Assert.That(firstFieldReference, Is.Not.EqualTo(secondFieldReference));
+        Assert.That(thirdFieldReference, Is.EqualTo(firstFieldReference));
         var loaded = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
             "ClassLayoutConsumer", [providerInput]);
         var returned = (BoundReturn)loaded.Functions.Single().Body
             .Statements.Single();
-        var unsafeQuery = (BoundUnsafeExpression)returned.Value!;
-        var query = (BoundLayoutQuery)unsafeQuery.Expression;
+        BoundLayoutQuery? query = null;
+        Assert.That(BoundTreeTraversal.VisitExpressions(
+            loaded.Functions.Single().Body,
+            expression => query ??= expression as BoundLayoutQuery), Is.True);
         var main = loaded.Functions.Single() with {
             Name = "Main",
             ReturnType = PrimitiveType.Int32,
             Body = new BoundBlock([
-                new BoundReturn(new BoundCast(unsafeQuery,
+                new BoundReturn(new BoundCast(returned.Value!,
                     PrimitiveType.Int32, default), default),
             ], default),
         };
@@ -1184,10 +1217,27 @@ internal sealed class TrRmC1EnumClosureSourceTests
         };
 
         Assert.That(NativeJit.Execute(executable,
-            NativeRuntimePolicy.FailFast), Is.EqualTo(4));
+            NativeRuntimePolicy.FailFast), Is.EqualTo(8));
         Assert.That(NativeEmitter.EmitLibrary(loaded, ["Offset"],
             NativeRuntimePolicy.FailFast), Is.Not.Empty);
-        Assert.That(query.Subject.RequiresUnsafe, Is.True);
+        Assert.That(query!.Subject.RequiresUnsafe, Is.True);
+
+        var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(loaded,
+            "ClassLayoutConsumer", schemaIdentity, 1);
+        var reemittedTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                reemittedArtifact, SchemaFor(schemaIdentity), null,
+                usesNativePointerLoads: false,
+                standardSchemaIdentity: schemaIdentity));
+        Assert.That(reemittedTables.TargetLayoutDependencies.Count,
+            Is.EqualTo(3));
+        Assert.That(reemittedTables.TargetLayoutDependencyFields.Count,
+            Is.EqualTo(3));
+        var reloaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                reemittedArtifact), "ClassLayoutConsumer", [providerInput]);
+        Assert.That(NativeEmitter.EmitLibrary(reloaded, ["Offset"],
+            NativeRuntimePolicy.FailFast), Is.Not.Empty);
     }
 
     [Test]

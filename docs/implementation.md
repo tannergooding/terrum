@@ -1549,13 +1549,15 @@ Provisional EN1 type+field-key reference selection now retains selected local
 class fields and fields in the selected inline-struct closure. Source binding
 and mandatory verification admit class-root offsetof FieldPaths through one
 selected public instance field and subsequent inline-struct fields. Under the
-unapproved exact class-layout successors, the bounded producer emits one
-parameterless `nint` OffsetOfType Body with ordered FieldPath/0045 linkage;
-source-free load/re-emission preserves the selected class provider and
-FieldDef expectations, and native lowering derives supported Auto/Sequential
-field offsets from complete class/inline-struct layouts. Direct and nested
-load/JIT and exact-successor re-emission/reload regressions are added but
-unverified under the active hold. Broader Body composition, provider
+unapproved exact class-layout successors, the bounded producer emits a
+single parameterless `nint` method whose return expression may combine
+class-root OffsetOfType operations, with one ordered FieldPath/0045 dependency
+per query occurrence. Source-free load/re-emission preserves the selected
+class provider and FieldDef expectations, and native lowering derives
+supported Auto/Sequential field offsets from complete class/inline-struct
+layouts. Direct/nested load/JIT, multiple-query and exact-successor
+re-emission/reload regressions are added but unverified under the active hold.
+Broader Body composition, provider
 replacement and nontrivial dependency remapping, optional folding, additional
 class representations, runtime/AOT and CLI support remain open.
 No end-to-end EN1 support is implemented.
