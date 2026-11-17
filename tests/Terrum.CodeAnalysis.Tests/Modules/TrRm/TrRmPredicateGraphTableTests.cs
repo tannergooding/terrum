@@ -177,6 +177,21 @@ internal sealed class TrRmPredicateGraphTableTests
     }
 
     [Test]
+    public void AcceptsEmptyReadFootprintForRootlessPredicate()
+    {
+        var bytes = TrRmPredicateReadFootprintTableWriter.Encode([
+            new TrRmPredicateReadFootprintRow(0, 0, 0, 0),
+        ], rootCount: 0, dependencyCount: 0);
+        var reader = new TrRmPredicateReadFootprintTableReader(
+            bytes, recordCount: 1, rootCount: 0, dependencyCount: 0);
+
+        Assert.That(reader.GetRootFirstRow(1), Is.Zero);
+        Assert.That(reader.GetRootRowCount(1), Is.Zero);
+        Assert.That(reader.GetDependencyFirstRow(1), Is.Zero);
+        Assert.That(reader.GetDependencyRowCount(1), Is.Zero);
+    }
+
+    [Test]
     public void RejectsInvalidGraphTargetsAndCaptureOrdinalsRolesFlagsOrTypes()
     {
         _ = Assert.Throws<InvalidDataException>(() =>
