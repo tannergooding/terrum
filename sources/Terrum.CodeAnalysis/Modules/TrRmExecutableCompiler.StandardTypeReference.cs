@@ -773,14 +773,6 @@ public static partial class TrRmExecutableCompiler
             throw Unsupported(
                 "The bounded EN1 source-reference route requires an enum and non-generic struct declaration Module within the supported limits.");
         }
-        if (structTypeDefRows.Length != 0
-            && (rootTables.Imports.Count != 0
-                || rootTables.ModuleRefs.Count != 0))
-        {
-            throw Unsupported(
-                "The bounded EN1 mixed struct/enum reference route currently requires a local TypeDef and FieldDef closure.");
-        }
-
         var selectedByTypeDef = new Dictionary<int, List<string>>();
         foreach (var exportKey in selectedExportKeys)
         {
@@ -912,6 +904,8 @@ public static partial class TrRmExecutableCompiler
             = ImmutableArray.CreateBuilder<BoundEnumDefinition>(
                 checked(typeDefCount + importedViewsByActual.Count));
         var enumIndexByTypeDefRow = new Dictionary<int, int>();
+        var enumIndexByActual = new Dictionary<
+            (int ArtifactIndex, int ModuleRow, int TypeDefRow), int>();
         var rootSnapshot = GetSnapshot(0, rootModuleRow);
         for (var offset = 0; offset < typeDefCount; offset++)
         {
@@ -982,6 +976,7 @@ public static partial class TrRmExecutableCompiler
             var occurrence = new BoundStandardEnumOccurrence(view,
                 [.. originalViewsByActual[actualKey]],
                 [.. expectationsByActual[actualKey]], exportKeys, []);
+            enumIndexByActual.Add(actualKey, definitions.Count);
             definitions.Add(CreateStandardEnumDefinition(view, occurrence));
         }
 
@@ -992,12 +987,33 @@ public static partial class TrRmExecutableCompiler
                 "The EN1 enum declaration closure cannot be reconstructed as a checked type table.");
         }
 
+        var enumIndexByImportRow = new Dictionary<int, int>();
+        foreach (var binding in typeProviderBindings)
+        {
+            if (binding.ConsumerArtifactIndex != 0
+                || binding.ConsumerModuleRow != rootModuleRow)
+            {
+                continue;
+            }
+
+            var actualKey = (binding.ProviderArtifactIndex,
+                binding.ProviderModuleRow, binding.ProviderTypeDefRow);
+            if (!enumIndexByActual.TryGetValue(actualKey,
+                    out var enumIndex)
+                || !enumIndexByImportRow.TryAdd(binding.ImportRow,
+                    enumIndex))
+            {
+                throw Invalid(
+                    "An EN1 imported enum FieldDef type lost its provider occurrence.");
+            }
+        }
+
         var structures = structTypeDefRows.Length == 0
             ? ImmutableArray<BoundStruct>.Empty
             : CreateC1EnumClosureStructSourceTypes(rootTables,
                 rootSnapshot, rootModuleRow, structTypeDefRows,
                 selectedByTypeDef, enumIndexByTypeDefRow,
-                enumDefinitions);
+                enumIndexByImportRow, enumDefinitions);
         if (!structures.IsEmpty)
         {
             var program = new BoundProgram([], -1) {
@@ -1018,6 +1034,7 @@ public static partial class TrRmExecutableCompiler
         BoundSourceTypeProviderSnapshot provider, int moduleRow,
         int[] typeDefRows, Dictionary<int, List<string>> selectedByTypeDef,
         Dictionary<int, int> enumIndexByTypeDefRow,
+        Dictionary<int, int> enumIndexByImportRow,
         ImmutableArray<BoundEnumDefinition> enumDefinitions)
     {
         var structureIndexByTypeDefRow = new Dictionary<int, int>(
@@ -1133,8 +1150,27 @@ public static partial class TrRmExecutableCompiler
                 return BoundEnumTypes.Type(enumIndex);
             }
 
+            if (type.Form == 0x03 && type.Qualifiers == 0
+                && enumIndexByImportRow.TryGetValue(type.Row,
+                    out var importedEnumIndex))
+            {
+                var definition = enumDefinitions[importedEnumIndex];
+                if ((definition.UnderlyingType is PrimitiveType.NativeInt
+                        or PrimitiveType.NativeUInt)
+                    && tables.Modules.GetRequirements(moduleRow)
+                        .TargetRequirement
+                        != TrRmModuleTableReader
+                            .WindowsX64NativeTargetRequirement)
+                {
+                    throw Unsupported(
+                        "EN1 native-width enum fields require the selected Windows x64 target.");
+                }
+
+                return BoundEnumTypes.Type(importedEnumIndex);
+            }
+
             throw Unsupported(
-                "The bounded EN1 struct reference supports only local scalar, enum and non-generic struct FieldDefs.");
+                "The bounded EN1 struct reference supports only scalar, local enum, imported enum and local non-generic struct FieldDefs.");
         }
 
         var structures = new List<BoundStruct>(typeDefRows.Length);

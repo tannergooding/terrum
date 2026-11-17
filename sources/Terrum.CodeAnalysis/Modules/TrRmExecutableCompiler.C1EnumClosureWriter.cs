@@ -21,6 +21,7 @@ public static partial class TrRmExecutableCompiler
         byte Kind, byte Flags, uint Alignment, uint Pack);
 
     private sealed record C1EnumClosureEmission(
+        int DefinitionIndex,
         string Namespace, string Name, uint TypeDefFlags,
         PrimitiveType UnderlyingType, uint EnumFlags,
         ImmutableArray<C1EnumClosureEmissionLayout> Layouts,
@@ -193,14 +194,6 @@ public static partial class TrRmExecutableCompiler
                         "Mixed EN1 struct re-emission cannot weaken its retained declaration snapshot.");
                 }
             }
-            if (program.EnumDefinitions.Any(static definition =>
-                    definition.Identity
-                        is BoundEnumDeclarationIdentity.Standard standard
-                    && !standard.Value.Expectations.IsEmpty))
-            {
-                throw Unsupported(
-                    "Mixed EN1 struct re-emission requires local enum declarations without provider Imports.");
-            }
         }
 
         ArgumentException.ThrowIfNullOrEmpty(moduleIdentity);
@@ -300,7 +293,8 @@ public static partial class TrRmExecutableCompiler
 
                 var visibility = definition.IsPublic ? 2u
                     : sourceExport.Declaration.IsFileLocal ? 0u : 1u;
-                emittedEnums.Add(new C1EnumClosureEmission(namespaceName,
+                emittedEnums.Add(new C1EnumClosureEmission(enumIndex,
+                    namespaceName,
                     typeName, 0x10u | visibility,
                     definition.UnderlyingType,
                     definition.IsFlags ? 1u : 0u,
@@ -368,6 +362,7 @@ public static partial class TrRmExecutableCompiler
             }
 
             C1EnumClosureEmission CreateEmission(
+                int definitionIndex,
                 BoundStandardEnumView view,
                 ImmutableArray<string> exportKeys,
                 C1EnumClosureImport? import)
@@ -393,14 +388,18 @@ public static partial class TrRmExecutableCompiler
                         member.DeclarationKey, member.Name, member.Value));
                 }
 
-                return new C1EnumClosureEmission(view.Namespace, view.Name,
-                    view.TypeDefFlags, view.UnderlyingType, view.EnumFlags,
+                return new C1EnumClosureEmission(definitionIndex,
+                    view.Namespace, view.Name, view.TypeDefFlags,
+                    view.UnderlyingType, view.EnumFlags,
                     layouts.MoveToImmutable(), members.MoveToImmutable(),
                     exportKeys, import);
             }
 
-            foreach (var definition in program.EnumDefinitions)
+            for (var definitionIndex = 0;
+                definitionIndex < program.EnumDefinitions.Length;
+                definitionIndex++)
             {
+                var definition = program.EnumDefinitions[definitionIndex];
                 var occurrence
                     = ((BoundEnumDeclarationIdentity.Standard)
                         definition.Identity).Value;
@@ -415,7 +414,8 @@ public static partial class TrRmExecutableCompiler
                     }
 
                     emittedEnums.Add(CreateEmission(
-                        occurrence.Declaration, occurrence.ExportKeys, null));
+                        definitionIndex, occurrence.Declaration,
+                        occurrence.ExportKeys, null));
                     continue;
                 }
 
@@ -429,7 +429,7 @@ public static partial class TrRmExecutableCompiler
                     }
 
                     emittedEnums.Add(CreateEmission(
-                        expectation.ExpectedDeclaration, [],
+                        definitionIndex, expectation.ExpectedDeclaration, [],
                         new C1EnumClosureImport(
                             binding.ProducerIdentity, binding.ExportKey,
                             binding.TargetRequirement,
@@ -802,8 +802,10 @@ public static partial class TrRmExecutableCompiler
             emittedEnums.Count);
         var enumMemberRows = new List<TrRmTypedEnumMemberDefRow>();
         var typeSpecRows = new List<ReadOnlyMemory<byte>>();
-        var typeSpecByEnumIndex = new Dictionary<int, uint>();
+        var typeSpecByEmissionEnumIndex = new Dictionary<int, uint>();
+        var typeSpecByBoundEnumIndex = new Dictionary<int, uint>();
         var typeDefRowByEnumIndex = new Dictionary<int, int>();
+        var importRowByEnumIndex = new Dictionary<int, int>();
         var typeDefRowByStructure = retainedStructureIndexes
             .Select((structureIndex, ordinal) => (structureIndex,
                 typeDefRow: emittedEnums.Count + ordinal + 1))
@@ -867,13 +869,18 @@ public static partial class TrRmExecutableCompiler
                         "An EN1 source struct field refers to an unretained local enum.");
                 }
 
-                if (!typeSpecByEnumIndex.TryGetValue(enumIndex,
+                if (!typeSpecByBoundEnumIndex.TryGetValue(enumIndex,
                         out var typeSpecRow))
                 {
                     typeSpecRow = checked((uint)typeSpecRows.Count + 1);
+                    var importRow = importRowByEnumIndex.TryGetValue(
+                        enumIndex, out var selectedImportRow)
+                        ? selectedImportRow : 0;
                     typeSpecRows.Add(TrRmTypeSpecTableWriter.Reference(
-                        0x02, checked((uint)typeDefRow)));
-                    typeSpecByEnumIndex.Add(enumIndex, typeSpecRow);
+                        importRow == 0 ? (byte)0x02 : (byte)0x03,
+                        checked((uint)(importRow == 0
+                            ? typeDefRow : importRow))));
+                    typeSpecByBoundEnumIndex.Add(enumIndex, typeSpecRow);
                 }
 
                 return typeSpecRow;
@@ -910,7 +917,14 @@ public static partial class TrRmExecutableCompiler
             }
 
             var typeDefRow = enumIndex + 1;
-            typeDefRowByEnumIndex.Add(enumIndex, typeDefRow);
+            if ((uint)emittedEnum.DefinitionIndex
+                    >= (uint)program.EnumDefinitions.Length)
+            {
+                throw Invalid(
+                    "An EN1 enum emission lost its checked declaration index.");
+            }
+            _ = typeDefRowByEnumIndex.TryAdd(
+                emittedEnum.DefinitionIndex, typeDefRow);
             var namespaceName = emittedEnum.Namespace;
             var typeName = emittedEnum.Name;
             var layoutFirst = layoutRows.Count + 1;
@@ -1010,6 +1024,8 @@ public static partial class TrRmExecutableCompiler
                     AddString(enumImport.ExportKey),
                     0x1300_0000u | checked((uint)typeDefRow)));
                 enumImportRow = importRows.Count;
+                _ = importRowByEnumIndex.TryAdd(
+                    emittedEnum.DefinitionIndex, enumImportRow);
             }
 
             if (!emittedEnum.Members.IsEmpty)
@@ -1019,7 +1035,7 @@ public static partial class TrRmExecutableCompiler
                     enumImportRow == 0 ? (byte)0x02 : (byte)0x03,
                     checked((uint)(enumImportRow == 0
                         ? typeDefRow : enumImportRow))));
-                typeSpecByEnumIndex.Add(enumIndex, typeSpecRow);
+                typeSpecByEmissionEnumIndex.Add(enumIndex, typeSpecRow);
             }
 
             var memberFirst = emittedEnum.Members.IsEmpty
@@ -1043,7 +1059,7 @@ public static partial class TrRmExecutableCompiler
                     BoundEnumTypes.Type(enumIndex),
                     emittedEnum.UnderlyingType, default);
                 var frozenValue = valueBuilder.AddC1EnumClosureMember(
-                    constant, typeSpecByEnumIndex[enumIndex],
+                    constant, typeSpecByEmissionEnumIndex[enumIndex],
                     emittedEnum.UnderlyingType, schema);
                 enumMemberRows.Add(new TrRmTypedEnumMemberDefRow(
                     typeDefRow, enumMemberRows.Count - memberFirst + 1,
