@@ -22,8 +22,10 @@ internal sealed class PartialOwnerFieldLifecycleTests
 
     private const string FieldMoveProgram = PairSource + """
         int32 Main() {
-            require OwnedInt32Buffer.TryCreate(1, out var leftRaw);
-            require OwnedInt32Buffer.TryCreate(1, out var rightRaw);
+            init OwnedInt32Buffer leftRaw;
+            require OwnedInt32Buffer.TryCreate(1, ref init leftRaw);
+            init OwnedInt32Buffer rightRaw;
+            require OwnedInt32Buffer.TryCreate(1, ref init rightRaw);
             mut OwnedInt32Buffer left = move leftRaw;
             mut OwnedInt32Buffer right = move rightRaw;
             require left.TryAppend(40);
@@ -36,8 +38,10 @@ internal sealed class PartialOwnerFieldLifecycleTests
 
     private const string FieldMoveFailureProgram = PairSource + """
         int32 Main() {
-            require OwnedInt32Buffer.TryCreate(1, out var leftRaw);
-            require OwnedInt32Buffer.TryCreate(1, out var rightRaw);
+            init OwnedInt32Buffer leftRaw;
+            require OwnedInt32Buffer.TryCreate(1, ref init leftRaw);
+            init OwnedInt32Buffer rightRaw;
+            require OwnedInt32Buffer.TryCreate(1, ref init rightRaw);
             mut OwnedInt32Buffer left = move leftRaw;
             mut OwnedInt32Buffer right = move rightRaw;
             require left.TryAppend(40);
@@ -57,15 +61,18 @@ internal sealed class PartialOwnerFieldLifecycleTests
 
     private const string FieldRepairFailureProgram = PairSource + """
         OwnedInt32Buffer Create(bool fail) {
-            require OwnedInt32Buffer.TryCreate(1, out var raw);
+            init OwnedInt32Buffer raw;
+            require OwnedInt32Buffer.TryCreate(1, ref init raw);
             mut OwnedInt32Buffer value = move raw;
             require value.TryAppend(10);
             if (fail) { require false; }
             return move value;
         }
         int32 Main() {
-            require OwnedInt32Buffer.TryCreate(1, out var leftRaw);
-            require OwnedInt32Buffer.TryCreate(1, out var rightRaw);
+            init OwnedInt32Buffer leftRaw;
+            require OwnedInt32Buffer.TryCreate(1, ref init leftRaw);
+            init OwnedInt32Buffer rightRaw;
+            require OwnedInt32Buffer.TryCreate(1, ref init rightRaw);
             mut OwnedInt32Buffer left = move leftRaw;
             mut OwnedInt32Buffer right = move rightRaw;
             require left.TryAppend(40);
@@ -85,7 +92,8 @@ internal sealed class PartialOwnerFieldLifecycleTests
 
     private const string PartialOwnerReplacementProgram = PairSource + """
         OwnedInt32Buffer Create(int32 value) {
-            require OwnedInt32Buffer.TryCreate(1, out var raw);
+            init OwnedInt32Buffer raw;
+            require OwnedInt32Buffer.TryCreate(1, ref init raw);
             mut OwnedInt32Buffer buffer = move raw;
             require buffer.TryAppend(value);
             return move buffer;
@@ -128,8 +136,10 @@ internal sealed class PartialOwnerFieldLifecycleTests
             public int32 ReadRight() { return Right.Read(0); }
         }
         int32 Main() {
-            require OwnedInt32Buffer.TryCreate(1, out var leftRaw);
-            require OwnedInt32Buffer.TryCreate(1, out var rightRaw);
+            init OwnedInt32Buffer leftRaw;
+            require OwnedInt32Buffer.TryCreate(1, ref init leftRaw);
+            init OwnedInt32Buffer rightRaw;
+            require OwnedInt32Buffer.TryCreate(1, ref init rightRaw);
             mut OwnedInt32Buffer left = move leftRaw;
             mut OwnedInt32Buffer right = move rightRaw;
             mut Pair pair = new Pair(move left, move right);
@@ -148,8 +158,10 @@ internal sealed class PartialOwnerFieldLifecycleTests
             [Cleanup] public void Close() {}
         }
         int32 Main() {
-            require OwnedInt32Buffer.TryCreate(1, out var leftRaw);
-            require OwnedInt32Buffer.TryCreate(1, out var rightRaw);
+            init OwnedInt32Buffer leftRaw;
+            require OwnedInt32Buffer.TryCreate(1, ref init leftRaw);
+            init OwnedInt32Buffer rightRaw;
+            require OwnedInt32Buffer.TryCreate(1, ref init rightRaw);
             mut OwnedInt32Buffer left = move leftRaw;
             mut OwnedInt32Buffer right = move rightRaw;
             mut Pair pair = new Pair(move left, move right);
@@ -167,8 +179,10 @@ internal sealed class PartialOwnerFieldLifecycleTests
             }
         }
         int32 Main() {
-            require OwnedInt32Buffer.TryCreate(1, out var leftRaw);
-            require OwnedInt32Buffer.TryCreate(1, out var rightRaw);
+            init OwnedInt32Buffer leftRaw;
+            require OwnedInt32Buffer.TryCreate(1, ref init leftRaw);
+            init OwnedInt32Buffer rightRaw;
+            require OwnedInt32Buffer.TryCreate(1, ref init rightRaw);
             mut OwnedInt32Buffer left = move leftRaw;
             mut OwnedInt32Buffer right = move rightRaw;
             mut Pair pair = new Pair(move left, move right);
@@ -186,8 +200,10 @@ internal sealed class PartialOwnerFieldLifecycleTests
             }
         }
         int32 Main() {
-            require OwnedInt32Buffer.TryCreate(1, out var leftRaw);
-            require OwnedInt32Buffer.TryCreate(1, out var rightRaw);
+            init OwnedInt32Buffer leftRaw;
+            require OwnedInt32Buffer.TryCreate(1, ref init leftRaw);
+            init OwnedInt32Buffer rightRaw;
+            require OwnedInt32Buffer.TryCreate(1, ref init rightRaw);
             mut OwnedInt32Buffer left = move leftRaw;
             mut OwnedInt32Buffer right = move rightRaw;
             mut Pair pair = new Pair(move left, move right);

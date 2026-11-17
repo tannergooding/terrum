@@ -215,11 +215,15 @@ public static partial class TrRmExecutableCompiler
         TrRmArtifactSchema schema = TrRmArtifactSchema.ForeignInvocationDraft,
         TrRmA3LayoutResourceLedger? a3LayoutResourceLedger = null,
         ImmutableArray<TrRmStandardTypeProviderBinding> typeProviderBindings
-            = default)
+            = default,
+        ImmutableArray<TrRmStandardFieldProviderBinding>
+            fieldProviderBindings = default)
     {
         var index = a3LayoutResourceLedger is not null
             ? new TrRmArtifactIndex(artifact, schema,
                 a3LayoutResourceLedger)
+            : schema == TrRmArtifactSchema.Standard
+                ? new TrRmArtifactIndex(artifact)
             : schema == TrRmArtifactSchema.LocalAggregateLayoutDraft
                 ? TrRmArtifactIndex.ForLocalAggregateLayoutDraft(artifact)
             : schema
@@ -253,7 +257,10 @@ public static partial class TrRmExecutableCompiler
             : schema.UsesForeignInvocationStorageAddresses()
                 ? TrRmArtifactIndex.ForForeignInvocationStorageAddressDraft(artifact)
                 : TrRmArtifactIndex.ForForeignInvocationDraft(artifact);
-        var tables = schema.UsesForeignInvocationStorageFixedArrays()
+        var tables = schema == TrRmArtifactSchema.Standard
+            ? TrRmStructuralMetadataValidator
+                .ValidateAndGetExecutionTables(index)
+            : schema.UsesForeignInvocationStorageFixedArrays()
             ? schema
                 == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
                 ? TrRmStructuralMetadataValidator
@@ -289,6 +296,14 @@ public static partial class TrRmExecutableCompiler
                     .ValidateForeignInvocationStorageAddressDraftAndGetExecutionTables(index)
                 : TrRmStructuralMetadataValidator
                     .ValidateForeignInvocationDraftAndGetExecutionTables(index);
+        if (schema == TrRmArtifactSchema.Standard
+            && tables.Methods.Count == 0 && tables.TypeDefs.Count != 0)
+        {
+            return LoadStandardLayoutQueriesTypeLibrary(tables,
+                selectedModuleRow, verifySemantics, typeProviderBindings,
+                fieldProviderBindings);
+        }
+
         if (ShouldReconstructNativeOutputCallProgram(tables,
                 selectedModuleRow, schema))
         {
@@ -299,7 +314,8 @@ public static partial class TrRmExecutableCompiler
 
         return LoadForeignInvocationDraftNativeAddressLibrary(index, tables,
             selectedModuleRow, selectedModuleImports, verifySemantics, schema,
-            a3LayoutResourceLedger, typeProviderBindings);
+            a3LayoutResourceLedger, typeProviderBindings,
+            fieldProviderBindings);
     }
 
     private static bool HasNativeOutputReservationBody(
@@ -2267,7 +2283,9 @@ public static partial class TrRmExecutableCompiler
         bool verifySemantics,
         TrRmArtifactSchema schema,
         TrRmA3LayoutResourceLedger? a3LayoutResourceLedger,
-        ImmutableArray<TrRmStandardTypeProviderBinding> typeProviderBindings)
+        ImmutableArray<TrRmStandardTypeProviderBinding> typeProviderBindings,
+        ImmutableArray<TrRmStandardFieldProviderBinding>
+            fieldProviderBindings)
     {
         if (ShouldReconstructNativeOutputCallProgram(tables,
                 selectedModuleRow, schema))
@@ -2289,8 +2307,21 @@ public static partial class TrRmExecutableCompiler
             : (0, 0);
         var selectedImportCount = 0;
         var selectedTypeImportCount = 0;
+        var selectedFieldImportCount = 0;
         var selectedUnsupportedImportCount = 0;
         var selectedImportRows = new Dictionary<int, int>();
+        var selectedFieldImportRows = new HashSet<int>();
+        if (!fieldProviderBindings.IsDefault)
+        {
+            foreach (var binding in fieldProviderBindings)
+            {
+                if (binding.ConsumerArtifactIndex == 0
+                    && binding.ConsumerModuleRow == selectedModuleRow)
+                {
+                    _ = selectedFieldImportRows.Add(binding.ImportRow);
+                }
+            }
+        }
         if (selectedModuleIsValid)
         {
             for (var importRow = 1; importRow <= tables.Imports.Count;
@@ -2318,6 +2349,11 @@ public static partial class TrRmExecutableCompiler
                     {
                         selectedTypeImportCount++;
                     }
+                    else if ((expectedDefinition >> 24) == 0x14
+                        && selectedFieldImportRows.Remove(importRow))
+                    {
+                        selectedFieldImportCount++;
+                    }
                     else
                     {
                         selectedUnsupportedImportCount++;
@@ -2329,6 +2365,12 @@ public static partial class TrRmExecutableCompiler
             = typeProviderBindings.IsDefault
                 ? 0
                 : typeProviderBindings.Count(binding =>
+                    binding.ConsumerArtifactIndex == 0
+                    && binding.ConsumerModuleRow == selectedModuleRow);
+        var selectedFieldProviderBindingCount
+            = fieldProviderBindings.IsDefault
+                ? 0
+                : fieldProviderBindings.Count(binding =>
                     binding.ConsumerArtifactIndex == 0
                     && binding.ConsumerModuleRow == selectedModuleRow);
         var selectedModuleRefRangeMatchesImports
@@ -2363,7 +2405,10 @@ public static partial class TrRmExecutableCompiler
             || !selectedMethodImportsMatch
             || selectedUnsupportedImportCount != 0
             || selectedTypeImportCount
-                != selectedTypeProviderBindingCount)
+                != selectedTypeProviderBindingCount
+            || selectedFieldImportCount
+                != selectedFieldProviderBindingCount
+            || selectedFieldImportRows.Count != 0)
         {
             throw Unsupported(
                 "The source-free loader supports one caller Body, one address anchor and direct NativeImport methods under the selected profile.");
@@ -8471,6 +8516,7 @@ public static partial class TrRmExecutableCompiler
             case PrimitiveType.Int16:
             case PrimitiveType.Int32:
             case PrimitiveType.Int64:
+            case PrimitiveType.NativeInt:
                 value = -1;
                 return true;
             case PrimitiveType.UInt8:
@@ -8479,6 +8525,7 @@ public static partial class TrRmExecutableCompiler
                 value = checked((long)allBitsSet);
                 return true;
             case PrimitiveType.UInt64:
+            case PrimitiveType.NativeUInt:
             case PrimitiveType.Float32:
             case PrimitiveType.Float64:
                 value = unchecked((long)allBitsSet);
@@ -9243,6 +9290,150 @@ public static partial class TrRmExecutableCompiler
 
         return FromNativeValueRow(typeSpecs, typeSpecRef,
             nativePointerTypeDefinitions, structureTypeByTypeDef, imports);
+    }
+
+    private static BoundProgram LoadStandardLayoutQueriesTypeLibrary(
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+        int selectedModuleRow, bool verifySemantics,
+        ImmutableArray<TrRmStandardTypeProviderBinding> typeProviderBindings,
+        ImmutableArray<TrRmStandardFieldProviderBinding> fieldProviderBindings)
+    {
+        var (typeDefStart, typeDefEnd)
+            = tables.Modules.GetTypeDefRange(selectedModuleRow);
+        var (methodStart, methodEnd)
+            = tables.Modules.GetMethodDefRange(selectedModuleRow);
+        var (moduleRefStart, moduleRefEnd)
+            = tables.Modules.GetModuleRefRange(selectedModuleRow);
+        if (tables.Schema != TrRmArtifactSchema.Standard
+            || selectedModuleRow <= 0
+            || selectedModuleRow > tables.Modules.Count
+            || tables.Modules.GetRequirements(selectedModuleRow) != (1u, 0u)
+            || tables.Modules.GetEntryMethod(selectedModuleRow) != 0
+            || methodStart != methodEnd
+            || typeDefStart <= 0 || typeDefEnd <= typeDefStart
+            || typeDefEnd - typeDefStart > tables.TypeDefs.Count
+            || tables.StandardNativeImports.Count != 0)
+        {
+            throw Unsupported(
+                "The declaration-only LayoutQueries loader requires a selected nongeneric Standard type Module.");
+        }
+
+        var boundTypeImports = new HashSet<int>();
+        foreach (var binding in typeProviderBindings)
+        {
+            if (binding.ConsumerArtifactIndex == 0
+                && binding.ConsumerModuleRow == selectedModuleRow
+                && !boundTypeImports.Add(binding.ImportRow))
+            {
+                throw Invalid(
+                    "A LayoutQueries TypeDef Import has multiple provider bindings.");
+            }
+        }
+        var boundFieldImports = new HashSet<int>();
+        foreach (var binding in fieldProviderBindings)
+        {
+            if (binding.ConsumerArtifactIndex == 0
+                && binding.ConsumerModuleRow == selectedModuleRow
+                && !boundFieldImports.Add(binding.ImportRow))
+            {
+                throw Invalid(
+                    "A LayoutQueries FieldDef Import has multiple provider bindings.");
+            }
+        }
+
+        var usedModuleRefs = new bool[tables.ModuleRefs.Count + 1];
+        var typeImportCount = 0;
+        var fieldImportCount = 0;
+        for (var importRow = 1; importRow <= tables.Imports.Count;
+            importRow++)
+        {
+            var moduleRefRow
+                = tables.Imports.GetModuleRefForImportRow(importRow);
+            if (tables.ModuleRefs.GetOwnerModule(moduleRefRow)
+                != selectedModuleRow)
+            {
+                continue;
+            }
+
+            var expectedDefinition = tables.Imports
+                .GetExpectedDefinitionForImportRow(importRow);
+            switch (expectedDefinition >> 24)
+            {
+                case 0x13 when boundTypeImports.Contains(importRow):
+                    typeImportCount++;
+                    break;
+                case 0x14 when boundFieldImports.Contains(importRow):
+                    fieldImportCount++;
+                    break;
+                default:
+                    throw Invalid(
+                        "A declaration-only LayoutQueries Module has an unbound or unsupported Import.");
+            }
+            usedModuleRefs[moduleRefRow] = true;
+        }
+
+        for (var moduleRefRow = moduleRefStart;
+            moduleRefRow < moduleRefEnd; moduleRefRow++)
+        {
+            if (!usedModuleRefs[moduleRefRow])
+            {
+                throw Invalid(
+                    "A declaration-only LayoutQueries Module has an unconsumed ModuleRef.");
+            }
+        }
+        if (typeImportCount != boundTypeImports.Count
+            || fieldImportCount != boundFieldImports.Count)
+        {
+            throw Invalid(
+                "LayoutQueries provider bindings do not belong to the selected type Module.");
+        }
+
+        var selectedTypeDefRows = new HashSet<int>(
+            Enumerable.Range(typeDefStart, typeDefEnd - typeDefStart));
+        var nativePointerTypeDefinitions
+            = new List<NativePointerTypeDefinition>();
+        var fixedArrayTypes = new List<BoundNativeFixedArrayType>();
+        var arrayTypeByTypeSpecRow = new Dictionary<int, PrimitiveType>();
+        var structures = LoadBlittableStructures(tables.TypeDefs,
+            tables.Fields, tables.Layouts, tables.LayoutFields,
+            tables.TargetProfiles, tables.TypeSpecs, [],
+            nativePointerTypeDefinitions, out var structureTypeByTypeDef,
+            fixedArrayTypes, arrayTypeByTypeSpecRow,
+            selectedTypeDefRows: selectedTypeDefRows,
+            imports: tables.Imports,
+            includedTypeDefRows: selectedTypeDefRows,
+            allowDuplicateImportedViews: true);
+        if (typeDefEnd - typeDefStart != structures.Length
+            || Enumerable.Range(typeDefStart, typeDefEnd - typeDefStart)
+                .Any(typeDefRow => structureTypeByTypeDef[typeDefRow] < 0))
+        {
+            throw Unsupported(
+                "Every declaration-only LayoutQueries TypeDef requires the selected Blittable layout.");
+        }
+
+        var nativePointers = nativePointerTypeDefinitions.ToImmutableArray();
+        var nativeFixedArrays = fixedArrayTypes.ToImmutableArray();
+        if (!NativePointerTypeContract.IsValidTable(nativePointers,
+                structures, [], nativeFixedArrays)
+            || !NativeFixedArrayContract.TryCreateTypeIdentityIndex(
+                nativeFixedArrays, out _))
+        {
+            throw Invalid(
+                "The declaration-only LayoutQueries type tables are inconsistent.");
+        }
+
+        var program = new BoundProgram([], -1) {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            Structures = structures,
+            NativePointerTypes = nativePointers,
+            NativeFixedArrayTypes = nativeFixedArrays,
+        };
+        if (verifySemantics)
+        {
+            SemanticVerifier.VerifyLibraryReferences(program);
+        }
+
+        return program;
     }
 
     private static BoundProgram LoadForeignInvocationFixedArrayTypeLibrary(

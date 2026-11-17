@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.Linq;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Text;
 
@@ -87,23 +88,30 @@ internal sealed record TrRmScalarBlock(ImmutableArray<int> Parameters,
     ImmutableArray<BoundStatement> Operations, int Condition, TrRmScalarEdge? True,
     TrRmScalarEdge? False, int ReturnValue, int FailureReason, int SwitchValue = 0,
     ImmutableArray<TrRmScalarSwitchCase> SwitchCases = default,
-    TrRmScalarEdge? SwitchDefault = null, bool IsCallerUnsafeScope = false);
+    TrRmScalarEdge? SwitchDefault = null, bool IsCallerUnsafeScope = false,
+    int Region = 0);
+
+internal sealed record TrRmScalarRegion(byte Kind, int Parent, int Header,
+    int Exit);
 
 /// <summary>Immutable, source-free scalar SSA body admitted only after compact Body validation.</summary>
 internal sealed class TrRmScalarGraph
 {
     internal ImmutableArray<TrRmScalarBlock> Blocks { get; }
     internal ImmutableArray<PrimitiveType> Types { get; }
+    internal ImmutableArray<TrRmScalarRegion> Regions { get; }
     internal int ParameterCount { get; }
     internal PrimitiveType ResultType { get; }
     internal bool DoesNotReturn { get; }
 
     private TrRmScalarGraph(ImmutableArray<TrRmScalarBlock> blocks,
-        ImmutableArray<PrimitiveType> types, int parameterCount,
+        ImmutableArray<PrimitiveType> types,
+        ImmutableArray<TrRmScalarRegion> regions, int parameterCount,
         PrimitiveType resultType, bool doesNotReturn)
     {
         Blocks = blocks;
         Types = types;
+        Regions = regions;
         ParameterCount = parameterCount;
         ResultType = resultType;
         DoesNotReturn = doesNotReturn;
@@ -111,8 +119,169 @@ internal sealed class TrRmScalarGraph
 
     internal static TrRmScalarGraph FromAuditedBody(ImmutableArray<TrRmScalarBlock> blocks,
         ImmutableArray<PrimitiveType> types, int parameterCount,
-        PrimitiveType resultType, bool doesNotReturn)
-        => new(blocks, types, parameterCount, resultType, doesNotReturn);
+        PrimitiveType resultType, bool doesNotReturn,
+        ImmutableArray<TrRmScalarRegion> regions = default)
+        => new(blocks, types, regions.IsDefault ? [] : regions,
+            parameterCount, resultType, doesNotReturn);
+
+    internal TrRmScalarGraph RewriteCalls(Func<BoundCall, BoundCall> rewrite)
+    {
+        ArgumentNullException.ThrowIfNull(rewrite);
+        var blocks = ImmutableArray.CreateBuilder<TrRmScalarBlock>(
+            Blocks.Length);
+        foreach (var block in Blocks)
+        {
+            var operations = ImmutableArray.CreateBuilder<BoundStatement>(
+                block.Operations.Length);
+            foreach (var operation in block.Operations)
+            {
+                operations.Add(BoundTreeTraversal.RewriteCalls(operation,
+                    rewrite));
+            }
+            blocks.Add(block with {
+                Operations = operations.MoveToImmutable(),
+            });
+        }
+        return new TrRmScalarGraph(blocks.MoveToImmutable(), Types, Regions,
+            ParameterCount, ResultType, DoesNotReturn);
+    }
+
+    internal TrRmScalarGraph RewriteExpressions(
+        Func<BoundExpression, BoundExpression> rewrite)
+    {
+        ArgumentNullException.ThrowIfNull(rewrite);
+        var blocks = ImmutableArray.CreateBuilder<TrRmScalarBlock>(
+            Blocks.Length);
+        foreach (var block in Blocks)
+        {
+            var operations = ImmutableArray.CreateBuilder<BoundStatement>(
+                block.Operations.Length);
+            foreach (var operation in block.Operations)
+            {
+                operations.Add(BoundTreeTraversal.RewriteExpressions(
+                    operation, rewrite));
+            }
+            blocks.Add(block with {
+                Operations = operations.MoveToImmutable(),
+            });
+        }
+        return new TrRmScalarGraph(blocks.MoveToImmutable(), Types, Regions,
+            ParameterCount, ResultType, DoesNotReturn);
+    }
+
+    internal TrRmScalarGraph RewriteTypes(
+        Func<PrimitiveType, PrimitiveType> rewriteType)
+    {
+        ArgumentNullException.ThrowIfNull(rewriteType);
+        var blocks = ImmutableArray.CreateBuilder<TrRmScalarBlock>(
+            Blocks.Length);
+        foreach (var block in Blocks)
+        {
+            var operations = ImmutableArray.CreateBuilder<BoundStatement>(
+                block.Operations.Length);
+            foreach (var operation in block.Operations)
+            {
+                operations.Add(operation is TrRmScalarDivRem divRem
+                    ? divRem with {
+                        Dividend = (BoundRead)
+                            BoundTreeTraversal.RewriteExpressionTypes(
+                                divRem.Dividend, rewriteType),
+                        Divisor = (BoundRead)
+                            BoundTreeTraversal.RewriteExpressionTypes(
+                                divRem.Divisor, rewriteType),
+                        Type = rewriteType(divRem.Type),
+                    }
+                    : BoundTreeTraversal.RewriteExpressions(operation,
+                        expression =>
+                            BoundTreeTraversal.RewriteExpressionTypes(
+                                expression, rewriteType)));
+            }
+            blocks.Add(block with {
+                Operations = operations.MoveToImmutable(),
+            });
+        }
+
+        var types = ImmutableArray.CreateBuilder<PrimitiveType>(
+            Types.Length);
+        foreach (var type in Types)
+        {
+            types.Add(rewriteType(type));
+        }
+        return new TrRmScalarGraph(blocks.MoveToImmutable(),
+            types.MoveToImmutable(), Regions, ParameterCount,
+            rewriteType(ResultType), DoesNotReturn);
+    }
+
+    internal TrRmScalarGraph RewriteVariables(
+        ImmutableArray<BoundVariable> variables,
+        Func<int, int> rewriteVariable)
+    {
+        ArgumentNullException.ThrowIfNull(rewriteVariable);
+
+        int Value(int value)
+            => value == 0 ? 0 : checked(rewriteVariable(value - 1) + 1);
+
+        TrRmScalarEdge RewriteEdge(TrRmScalarEdge edge)
+            => edge with {
+                Arguments = [.. edge.Arguments.Select(Value)],
+            };
+
+        var blocks = ImmutableArray.CreateBuilder<TrRmScalarBlock>(
+            Blocks.Length);
+        foreach (var block in Blocks)
+        {
+            var operations = ImmutableArray.CreateBuilder<BoundStatement>(
+                block.Operations.Length);
+            foreach (var operation in block.Operations)
+            {
+                operations.Add(operation is TrRmScalarDivRem divRem
+                    ? divRem with {
+                        QuotientVariable = rewriteVariable(
+                            divRem.QuotientVariable),
+                        RemainderVariable = rewriteVariable(
+                            divRem.RemainderVariable),
+                        Dividend = divRem.Dividend with {
+                            Variable = rewriteVariable(
+                                divRem.Dividend.Variable),
+                        },
+                        Divisor = divRem.Divisor with {
+                            Variable = rewriteVariable(
+                                divRem.Divisor.Variable),
+                        },
+                    }
+                    : BoundTreeTraversal.RewriteVariables(operation,
+                        rewriteVariable));
+            }
+            blocks.Add(block with {
+                Parameters = [.. block.Parameters.Select(Value)],
+                Operations = operations.MoveToImmutable(),
+                Condition = Value(block.Condition),
+                True = block.True is null
+                    ? null : RewriteEdge(block.True),
+                False = block.False is null
+                    ? null : RewriteEdge(block.False),
+                ReturnValue = Value(block.ReturnValue),
+                SwitchValue = Value(block.SwitchValue),
+                SwitchCases = block.SwitchCases.IsDefault
+                    ? default : [.. block.SwitchCases.Select(switchCase =>
+                        switchCase with {
+                            Edge = RewriteEdge(switchCase.Edge),
+                        })],
+                SwitchDefault = block.SwitchDefault is null
+                    ? null : RewriteEdge(block.SwitchDefault),
+            });
+        }
+
+        var types = ImmutableArray.CreateBuilder<PrimitiveType>(
+            variables.Length);
+        foreach (var variable in variables)
+        {
+            types.Add(variable.Type);
+        }
+        return new TrRmScalarGraph(blocks.MoveToImmutable(),
+            types.MoveToImmutable(), Regions, ParameterCount, ResultType,
+            DoesNotReturn);
+    }
 
     internal void Verify(BoundProgram program, BoundFunction function, ref int remaining)
     {
@@ -278,7 +447,8 @@ internal sealed class TrRmScalarGraph
                 var isDirectNativeImport = target?.IsExternal == true
                     && target.DirectNativeImport is not null
                     && DirectNativeImportContract.IsValid(target, program.Structures,
-                        program.NativeFunctionPointerSignatures, program.NativePointerTypes);
+                        program.NativeFunctionPointerSignatures,
+                        program.NativePointerTypes, program.EnumDefinitions);
                 if (target is null || target.Variables.IsDefault
                     || target.Variables.Length < call.Arguments.Length
                     || (target.IsExternal && !isDirectNativeImport) || target.IsConstructor
@@ -559,7 +729,8 @@ internal sealed class TrRmScalarGraph
 
     private static bool IsInteger(PrimitiveType type)
         => type is PrimitiveType.Int32 or PrimitiveType.UInt32
-            or PrimitiveType.Int64 or PrimitiveType.UInt64;
+            or PrimitiveType.Int64 or PrimitiveType.UInt64
+            or PrimitiveType.NativeInt or PrimitiveType.NativeUInt;
 
     private static bool ValidOptionalExpression(BoundExpression expression,
         ImmutableArray<PrimitiveType> types)

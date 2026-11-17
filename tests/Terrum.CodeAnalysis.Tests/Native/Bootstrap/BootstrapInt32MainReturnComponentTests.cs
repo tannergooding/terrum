@@ -151,16 +151,21 @@ internal sealed class BootstrapInt32MainReturnComponentTests
         int32 Main() {
             if (!TryEmitBootstrapInt32MainSource()) { return -1; }
             if (!TryWriteBootstrapInt32MainPeImage()) { return -2; }
+            init int32 parameterlessForwardingCount;
             if (TryGetBootstrapInt32MainParameterlessCallChainCountForLength(
-                    Host.BootstrapCodeLength[0], init var parameterlessForwardingCount)
+                    Host.BootstrapCodeLength[0], ref init parameterlessForwardingCount)
                 && !VerifyBootstrapParameterlessCallChainPeRejections()) { return -62; }
+            init int32 chainArgumentCount;
+            init bool chainMultiplication;
+            init int32 chainForwardingCount;
             if (TryGetBootstrapInt32MainCallChainCountForLength(
-                    Host.BootstrapCodeLength[0], init var chainArgumentCount,
-                    init var chainMultiplication,
-                    init var chainForwardingCount)
+                    Host.BootstrapCodeLength[0], ref init chainArgumentCount,
+                    ref init chainMultiplication,
+                    ref init chainForwardingCount)
                 && !VerifyBootstrapCallChainPeRejections()) { return -61; }
+            init int32 argumentCount;
             if (TryGetBootstrapInt32MainStackArgumentCountForLength(
-                    Host.BootstrapCodeLength[0], init var argumentCount)
+                    Host.BootstrapCodeLength[0], ref init argumentCount)
                 && !VerifyBootstrapStackArgumentPeRejections()) { return -60; }
             if (!TryWriteBootstrapInt32MainPeImage()) { return -6; }
             return Host.BootstrapImageLength[0];
@@ -168,8 +173,9 @@ internal sealed class BootstrapInt32MainReturnComponentTests
 
         bool VerifyBootstrapParameterlessCallChainPeRejections() {
             int32 codeLength = Host.BootstrapCodeLength[0];
+            init int32 forwardingCount;
             if (!TryGetBootstrapInt32MainParameterlessCallChainCountForLength(
-                    codeLength, init var forwardingCount)) { return false; }
+                    codeLength, ref init forwardingCount)) { return false; }
             int32 helperOffset = (forwardingCount + 1) * 14;
             for (mut int32 offset = 0; offset < helperOffset; offset = offset + 1) {
                 if (!BootstrapCallChainMutationRejected(offset)) { return false; }
@@ -207,8 +213,9 @@ internal sealed class BootstrapInt32MainReturnComponentTests
 
         bool VerifyBootstrapStackArgumentPeRejections() {
             int32 codeLength = Host.BootstrapCodeLength[0];
+            init int32 argumentCount;
             if (!TryGetBootstrapInt32MainStackArgumentCountForLength(
-                    codeLength, init var argumentCount)) { return false; }
+                    codeLength, ref init argumentCount)) { return false; }
             mut int32 frameBaseSize = 0x20;
             if (argumentCount > 4) {
                 frameBaseSize = frameBaseSize + (argumentCount - 4) * 8;
@@ -380,13 +387,19 @@ internal sealed class BootstrapInt32MainReturnComponentTests
 
         bool VerifyBootstrapCallChainPeRejections() {
             int32 codeLength = Host.BootstrapCodeLength[0];
+            init int32 argumentCount;
+            init bool multiplication;
+            init int32 forwardingCount;
+            init int32 mainFunctionEnd;
+            init int32 forwardingFunctionEnd;
+            init int32 expectedCodeLength;
             if (!TryGetBootstrapInt32MainCallChainCountForLength(
-                    codeLength, init var argumentCount,
-                    init var multiplication, init var forwardingCount)
+                    codeLength, ref init argumentCount,
+                    ref init multiplication, ref init forwardingCount)
                 || !TryGetBootstrapInt32MainCallChainLayoutForDepth(
                     argumentCount, multiplication, forwardingCount,
-                    init var mainFunctionEnd,
-                    init var forwardingFunctionEnd, init var expectedCodeLength)
+                    ref init mainFunctionEnd,
+                    ref init forwardingFunctionEnd, ref init expectedCodeLength)
                 || expectedCodeLength != codeLength) {
                 return false;
             }
@@ -478,10 +491,12 @@ internal sealed class BootstrapInt32MainReturnComponentTests
     private const string VerifyBootstrapStackProbeFrameLimitsSource = """
         namespace Terrum.CodeAnalysis;
         int32 Main() {
+            init int32 unsupportedSourceLength;
+            init int32 unsupportedPeLength;
             if (TryGetBootstrapInt32MainSourceStackArgumentCodeLength(
-                    65536, false, init var unsupportedSourceLength)) { return 1; }
+                    65536, false, ref init unsupportedSourceLength)) { return 1; }
             if (TryGetBootstrapInt32MainPeStackArgumentCodeLength(
-                    65536, false, init var unsupportedPeLength)) { return 2; }
+                    65536, false, ref init unsupportedPeLength)) { return 2; }
             return 0;
         }
         """;

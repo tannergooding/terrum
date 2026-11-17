@@ -267,7 +267,8 @@ internal sealed partial class Binder
         }
 
         var carrierType = _variables[variable].Type;
-        var extentBytes = ValueLayout.Size(carrierType, _structs);
+        var extentBytes = ValueLayout.Size(carrierType, _structs,
+            enumDefinitions: _enumDefinitions);
         return new BoundNativeStorageAddress(variable,
             new BoundConstant(0, PrimitiveType.Int32, span), carrierType, carrierType,
             PrimitiveType.NativeStorageAddress, 1, (ulong)extentBytes,

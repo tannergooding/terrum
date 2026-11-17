@@ -1804,6 +1804,95 @@ internal sealed class ReferenceInitializationCapabilityTests
 
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
+    public void InitPostconditionMentionWithoutRelationKeepsBooleanDefault(
+        NativeRuntimePolicy policy)
+    {
+        const string source = """
+            bool MaybeCreate(bool create, ref<init int32> destination)
+                ensure *destination is init || true
+            {
+                if (create) { *destination = 42; }
+                return create;
+            }
+
+            int32 Main() {
+                init int32 result;
+                bool created = MaybeCreate(true, ref init result);
+                if (created) { return result; }
+                return 0;
+            }
+            """;
+
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            new CompilationOptions {
+                RuntimePolicy = (BoundRuntimePolicy)policy,
+                CoreContractFailureIdentitySelection =
+                    PostconditionSelection(),
+            });
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var maybeCreate = program.Functions.Single(
+            static function => function.Name == "MaybeCreate");
+        Assert.That(maybeCreate.HasStandardCheckedOutputStateMetadata,
+            Is.True);
+        Assert.That(maybeCreate.CheckedOutputSelectors
+            .Select(static selector => selector.NodeKind),
+            Is.EqualTo(new byte[] { 1, 2 }));
+        Assert.That(maybeCreate.CheckedOutputStates,
+            Is.EquivalentTo(new[] {
+                new NativeFunctionPointerOutputState(1, 0, 1),
+                new NativeFunctionPointerOutputState(1, 1, 0),
+            }));
+        Assert.That(CheckedOutputStateProjection.GetExplicitOutputFormals(
+            maybeCreate, program.CheckedReferenceTypes), Is.Empty);
+    }
+
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
+    public void InitPostconditionUnconditionalCompletionReplacesBooleanDefault(
+        NativeRuntimePolicy policy)
+    {
+        const string source = """
+            bool AlwaysCreate(ref<init int32> destination)
+                ensure *destination is init
+            {
+                *destination = 42;
+                return false;
+            }
+
+            int32 Main() {
+                init int32 result;
+                bool created = AlwaysCreate(ref init result);
+                if (created) { return 0; }
+                return result;
+            }
+            """;
+
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            new CompilationOptions {
+                RuntimePolicy = (BoundRuntimePolicy)policy,
+                CoreContractFailureIdentitySelection =
+                    PostconditionSelection(),
+            });
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var alwaysCreate = program.Functions.Single(
+            static function => function.Name == "AlwaysCreate");
+        Assert.That(alwaysCreate.HasStandardCheckedOutputStateMetadata,
+            Is.True);
+        Assert.That(alwaysCreate.CheckedOutputSelectors, Is.Empty);
+        Assert.That(alwaysCreate.CheckedOutputStates, Is.Empty);
+        Assert.That(CheckedOutputStateProjection.GetExplicitOutputFormals(
+            alwaysCreate, program.CheckedReferenceTypes),
+            Does.Contain(0));
+    }
+
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void InitPostconditionDoesNotPublishForFalseInput(
         NativeRuntimePolicy policy)
     {

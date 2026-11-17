@@ -15,6 +15,7 @@ internal sealed class CheckedReferenceTypeTests
     [TestCase("ref<int32>")]
     [TestCase("ref<ref<int32>>")]
     [TestCase("ref<int32>?")]
+    [TestCase("ref<init int32>")]
     [TestCase("write ref<init int32>")]
     [TestCase("gc ref<int32>")]
     public void BindsCompleteReferenceTypeParameters(string type)
@@ -142,6 +143,18 @@ internal sealed class CheckedReferenceTypeTests
             (int)CheckedReferenceTypes.Type(0));
         _ = Assert.Throws<ModuleFormatException>(
             () => ModuleCompiler.CreateReference(malformed));
+
+        var neutralCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public int32 Neutral() { return 0; }
+            """));
+        Assert.That(neutralCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                neutralCompilation.Diagnostics));
+        var neutralProducer = ModuleCompiler.CreateProducer(
+            neutralCompilation.Program!, ["Neutral"]);
+        _ = Assert.Throws<ModuleFormatException>(
+            () => ModuleCompiler.CreateReferenceSet(
+                [malformed, neutralProducer]));
     }
 
     [Test]
@@ -270,9 +283,11 @@ internal sealed class CheckedReferenceTypeTests
             string.Join(Environment.NewLine, compilation.Diagnostics));
 
         var program = compilation.Program!;
-        PrimitiveType ParameterType(string name) =>
-            global::System.Linq.Enumerable.Single(program.Functions,
+        PrimitiveType ParameterType(string name)
+        {
+            return global::System.Linq.Enumerable.Single(program.Functions,
                 function => function.Name == name).Variables[0].Type;
+        }
 
         var scalarType = ParameterType("AcceptSuffix");
         Assert.That(ParameterType("AcceptConstructor"), Is.EqualTo(scalarType));
@@ -367,6 +382,11 @@ internal sealed class CheckedReferenceTypeTests
     [Test]
     public void OptionalIntegerBackedEnumUsesTaggedLayout()
     {
+        var enumIdentity = new BoundEnumDeclarationIdentity.Core(
+            new CoreDeclarationIdentity("module", "OptionalInteger",
+                CoreDeclarationKind.EnumType));
+        var enumDefinition = new BoundEnumDefinition(enumIdentity,
+            "OptionalInteger", PrimitiveType.Int32, [], true, true, false);
         var optionalEnum = new CheckedReferenceTypeDefinition(
             BoundEnumTypes.Type(0), IsWritable: false,
             IsGarbageCollected: false, IsInitialization: false,
@@ -375,7 +395,7 @@ internal sealed class CheckedReferenceTypeTests
 
         Assert.That(ValueLayout.TryGetOptionalValueLayout(
                 CheckedReferenceTypes.Type(0), [], referenceTypes, null, [],
-                out var layout),
+                out var layout, [enumDefinition]),
             Is.True);
         Assert.That(layout.PayloadOffset, Is.EqualTo(4));
         Assert.That(layout.Size, Is.EqualTo(8));
@@ -431,7 +451,7 @@ internal sealed class CheckedReferenceTypeTests
             static candidate => candidate.Name == "OptionalValues");
         Assert.That(structure.Fields.Select(static field =>
                 (field.Offset, field.Size)),
-            Is.EqualTo(new[] { (0UL, 2UL), (4UL, 8UL) }));
+            Is.EqualTo([(0UL, 2UL), (4UL, 8UL)]));
         Assert.That(structure.Size, Is.EqualTo(12));
         Assert.That(structure.Alignment, Is.EqualTo(4));
     }
@@ -458,7 +478,7 @@ internal sealed class CheckedReferenceTypeTests
             Is.EqualTo(FixedLayoutStorage.WindowsX64TargetRequirement));
         Assert.That(structure.Fields.Select(static field =>
                 (field.Offset, field.Size)),
-            Is.EqualTo(new[] { (0UL, 2UL), (4UL, 8UL) }));
+            Is.EqualTo([(0UL, 2UL), (4UL, 8UL)]));
         Assert.That(structure.Size, Is.EqualTo(12));
         Assert.That(structure.Alignment, Is.EqualTo(4));
     }

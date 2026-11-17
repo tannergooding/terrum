@@ -14,6 +14,7 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Tests.Semantics;
+using Terrum.CodeAnalysis.Tests.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Graphs;
 
@@ -51,7 +52,9 @@ internal sealed class NativeGraphTests
             return (BoundProgram)__nunitActual0!;
         }))();
         return NativeModuleCompiler.CreateProducer(program,
-            ["Leaf"], "NodeB", policy);
+            ["Leaf"], "NodeB", policy,
+            TextComponentTestHelpers.CreateIdentityInputs(
+                program, "NativeGraphLeaf"));
     }
 
     private static byte[] Middle(string source, byte[] leaf,
@@ -904,13 +907,13 @@ internal sealed class NativeGraphTests
         NativeRuntimePolicy policy, bool initialUsesInit)
     {
         var initialSource = initialUsesInit
-            ? "public void Leaf(init ref<int32> result) { result = 42; }"
+            ? "public void Leaf(ref<init int32> result) { *result = 42; }"
             : "public void Leaf(out int32 result) { result = 42; }";
         var replacementSource = initialUsesInit
             ? "public void Leaf(out int32 result) { result = 43; }"
-            : "public void Leaf(init ref<int32> result) { result = 43; }";
+            : "public void Leaf(ref<init int32> result) { *result = 43; }";
         var consumerSource = initialUsesInit
-            ? "int32 Main() { init int32 result; Leaf(init result); return result; }"
+            ? "int32 Main() { init int32 result; Leaf(ref init result); return result; }"
             : "int32 Main() { Leaf(out var result); return result; }";
 
         var leaf = Leaf(initialSource, policy);
@@ -976,11 +979,11 @@ internal sealed class NativeGraphTests
     public async Task FloatingInitReferenceExecutesAcrossGraphAsync(
         NativeRuntimePolicy policy, string outputType, string replacementType)
     {
-        var leafSource = $"public bool Leaf(bool publish, init ref<{outputType}> result) "
-            + "{ if (!publish) { return false; } result = 7.75; return true; }";
-        var replacementSource = $"public bool Leaf(bool publish, init ref<{replacementType}> result) "
-            + "{ if (!publish) { return false; } result = 7.75; return true; }";
-        var consumerSource = $"int32 Main() {{ return Leaf(true, init var result) "
+        var leafSource = $"public bool Leaf(bool publish, ref<init {outputType}> result) "
+            + "{ if (!publish) { return false; } *result = 7.75; return true; }";
+        var replacementSource = $"public bool Leaf(bool publish, ref<init {replacementType}> result) "
+            + "{ if (!publish) { return false; } *result = 7.75; return true; }";
+        var consumerSource = $"int32 Main() {{ init {outputType} result; return Leaf(true, ref init result) "
             + "&& result == 7.75 ? 42 : 0; }";
 
         var leaf = Leaf(leafSource, policy);
@@ -1011,7 +1014,10 @@ internal sealed class NativeGraphTests
     public async Task CopyStructOutputExecutesAcrossGraphAsync(
         NativeRuntimePolicy policy, bool usesInit)
     {
-        var outputMode = usesInit ? "init ref<Pair>" : "out Pair";
+        var outputMode = usesInit ? "ref<init Pair>" : "out Pair";
+        var outputWrite = usesInit
+            ? "*result = new Pair(20, 22);"
+            : "result = new Pair(20, 22);";
         const string ProviderTemplate = """
             [Blittable] [Layout(LayoutKind.Sequential)] public struct Pair {
                 public int64 First;
@@ -1020,12 +1026,12 @@ internal sealed class NativeGraphTests
             }
             """;
         var providerSource = $"{ProviderTemplate}public void Leaf({outputMode} result) "
-            + "{ result = new Pair(20, 22); }";
+            + "{ " + outputWrite + " }";
         var consumerSource = usesInit
             ? """
                 int32 Main() {
                     init Pair result;
-                    Leaf(init result);
+                    Leaf(ref init result);
                     return int32(result.First + result.Second);
                 }
                 """
@@ -1053,8 +1059,11 @@ internal sealed class NativeGraphTests
         Assert.That(await NativeModuleCompiler.RunGraphJitAsync(root, [leaf],
             CompilerApphost(), TimeSpan.FromSeconds(30), policy).ConfigureAwait(true), Is.EqualTo(42));
 
+        var replacementWrite = usesInit
+            ? "*result = new Pair(21, 22);"
+            : "result = new Pair(21, 22);";
         var replacementSource = $"{ProviderTemplate}public void Leaf({outputMode} result) "
-            + "{ result = new Pair(21, 22); }";
+            + "{ " + replacementWrite + " }";
         var replacement = Leaf(replacementSource, policy);
         NativeModuleCompiler.ValidateGraph(root, [replacement]);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [replacement],
@@ -1062,30 +1071,35 @@ internal sealed class NativeGraphTests
         Assert.That(await NativeModuleCompiler.RunGraphJitAsync(root, [replacement],
             CompilerApphost(), TimeSpan.FromSeconds(30), policy).ConfigureAwait(true), Is.EqualTo(43));
 
-        var incompatibleMode = usesInit ? "out Pair" : "init ref<Pair>";
+        var incompatibleMode = usesInit ? "out Pair" : "ref<init Pair>";
+        var incompatibleWrite = usesInit
+            ? "result = new Pair(21, 22);"
+            : "*result = new Pair(21, 22);";
         var incompatible = Leaf($"{ProviderTemplate}public void Leaf({incompatibleMode} result) "
-            + "{ result = new Pair(21, 22); }", policy);
+            + "{ " + incompatibleWrite + " }", policy);
         _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.ValidateGraph(root, [incompatible]))!;
     }
 
     [Test]
-    public async Task CheckedGraphFailureLeavesInitRefOutputVacantForRetryAsync()
+    public async Task CheckedGraphFailureOutputCanBeRetiredBeforeRetryAsync()
     {
         const NativeRuntimePolicy policy = NativeRuntimePolicy.CheckedExceptions;
         const string ProviderSource = """
-            public void Fail(init ref<int32> result) { result = 42; require false; }
-            public void Complete(init ref<int32> result) { result = 43; }
+            public void Fail(ref<init int32> result) { *result = 42; require false; }
+            public void Complete(ref<init int32> result) { *result = 43; }
             """;
         const string ConsumerSource = """
             int32 Main() {
-                init int32 result;
+                init mut int32 result;
                 unsafe {
                     try {
-                        Fail(init result);
+                        Fail(ref init result);
                         return 1;
-                    } catch { }
+                    } catch {
+                        if (result is init) { result = _; }
+                    }
                 }
-                Complete(init result);
+                Complete(ref init result);
                 return result;
             }
             """;
@@ -1129,31 +1143,33 @@ internal sealed class NativeGraphTests
                     public int64 Second;
                     public Pair(int64 first, int64 second) { First = first; Second = second; }
                 }
-                public bool TryPublish(bool publish, init ref<Pair> result) {
-                    result = publish ? new Pair(20, 22) : new Pair(20, 21);
-                    return publish;
+                public bool TryPublish(bool publish, ref<init Pair> result) {
+                    if (!publish) { return false; }
+                    *result = new Pair(20, 22);
+                    return true;
                 }
                 """
             : """
-            public bool TryPublish(bool publish, init ref<int32> result) {
-                result = publish ? 42 : 41;
-                return publish;
+            public bool TryPublish(bool publish, ref<init int32> result) {
+                if (!publish) { return false; }
+                *result = 42;
+                return true;
             }
             """;
         var consumerSource = usesCopyStruct
             ? """
                 int32 Main() {
                     init Pair result;
-                    if (TryPublish(false, init result)) { return 1; }
-                    if (!TryPublish(true, init result)) { return 2; }
+                    if (TryPublish(false, ref init result)) { return 1; }
+                    if (!TryPublish(true, ref init result)) { return 2; }
                     return int32(result.First + result.Second);
                 }
                 """
             : """
             int32 Main() {
                 init int32 result;
-                if (TryPublish(false, init result)) { return 1; }
-                if (!TryPublish(true, init result)) { return 2; }
+                if (TryPublish(false, ref init result)) { return 1; }
+                if (!TryPublish(true, ref init result)) { return 2; }
                 return result;
             }
             """;
@@ -1161,12 +1177,15 @@ internal sealed class NativeGraphTests
         var providerCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(providerSource), LayoutOptions(policy));
         Assert.That(providerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, providerCompilation.Diagnostics));
-        var provider = NativeModuleCompiler.CreateProducer(
-            ((global::System.Func<BoundProgram>)(() => {
-                var __nunitActual22 = providerCompilation.Program;
-                Assert.That(__nunitActual22, Is.TypeOf<BoundProgram>());
-                return (BoundProgram)__nunitActual22!;
-            }))(), ["TryPublish"], "NodeB", policy);
+        var providerProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual22 = providerCompilation.Program;
+            Assert.That(__nunitActual22, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual22!;
+        }))();
+        var provider = NativeModuleCompiler.CreateProducer(providerProgram,
+            ["TryPublish"], "NodeB", policy,
+            TextComponentTestHelpers.CreateIdentityInputs(
+                providerProgram, "NativeGraphInitOutput"));
         var rootCompilation = Compilation.Create(SyntaxTree.Parse(consumerSource),
             NativeModuleCompiler.CreateGraphReference([provider]), (BoundRuntimePolicy)policy);
         Assert.That(rootCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, rootCompilation.Diagnostics));
@@ -1201,20 +1220,21 @@ internal sealed class NativeGraphTests
                     result = publish ? new Pair(20, 22) : new Pair(20, 21);
                     return publish;
                 }
-                public void Complete(init ref<Pair> result) { result = new Pair(30, 13); }
+                public void Complete(ref<init Pair> result) { *result = new Pair(30, 13); }
                 """
             : """
             public bool TryPublish(bool publish, out int32 result) {
                 result = publish ? 42 : 41;
                 return publish;
             }
-            public void Complete(init ref<int32> result) { result = 43; }
+            public void Complete(ref<init int32> result) { *result = 43; }
             """;
         var consumerSource = usesCopyStruct
             ? """
                 int32 Main() {
-                    if (TryPublish(false, out var failed)) { return 1; }
-                    Complete(init failed);
+                    init mut Pair failed;
+                    if (TryPublish(false, out failed)) { return 1; }
+                    Complete(ref init failed);
                     if (failed.First != 30 || failed.Second != 13) { return 2; }
                     if (!TryPublish(true, out var published)) { return 3; }
                     return int32(published.First + published.Second);
@@ -1222,8 +1242,9 @@ internal sealed class NativeGraphTests
                 """
             : """
             int32 Main() {
-                if (TryPublish(false, out var failed)) { return 1; }
-                Complete(init failed);
+                init mut int32 failed;
+                if (TryPublish(false, out failed)) { return 1; }
+                Complete(ref init failed);
                 if (failed != 43) { return 2; }
                 if (!TryPublish(true, out var published)) { return 3; }
                 return published;
@@ -1233,13 +1254,15 @@ internal sealed class NativeGraphTests
         var providerCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(providerSource), LayoutOptions(policy));
         Assert.That(providerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, providerCompilation.Diagnostics));
-        var provider = NativeModuleCompiler.CreateProducer(
-            ((global::System.Func<BoundProgram>)(() => {
-                var __nunitActual24 = providerCompilation.Program;
-                Assert.That(__nunitActual24, Is.TypeOf<BoundProgram>());
-                return (BoundProgram)__nunitActual24!;
-            }))(), ["TryPublish", "Complete"],
-            "NodeB", policy);
+        var providerProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual24 = providerCompilation.Program;
+            Assert.That(__nunitActual24, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual24!;
+        }))();
+        var provider = NativeModuleCompiler.CreateProducer(providerProgram,
+            ["TryPublish", "Complete"], "NodeB", policy,
+            TextComponentTestHelpers.CreateIdentityInputs(
+                providerProgram, "NativeGraphOutOutput"));
         var rootCompilation = Compilation.Create(SyntaxTree.Parse(consumerSource),
             NativeModuleCompiler.CreateGraphReference([provider]), (BoundRuntimePolicy)policy);
         Assert.That(rootCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, rootCompilation.Diagnostics));

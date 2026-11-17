@@ -25,7 +25,8 @@ internal sealed class NestedOwnerFieldOperationTests
             }
         }
         OwnedInt32Buffer Create(int32 value) {
-            require OwnedInt32Buffer.TryCreate(1, out var raw);
+            init OwnedInt32Buffer raw;
+            require OwnedInt32Buffer.TryCreate(1, ref init raw);
             mut OwnedInt32Buffer buffer = move raw;
             require buffer.TryAppend(value);
             return move buffer;
@@ -109,13 +110,15 @@ internal sealed class NestedOwnerFieldOperationTests
                 public Owner(Child nested) { Nested = move nested; }
             }
             OwnedInt32Buffer Create(int32 value) {
-                require OwnedInt32Buffer.TryCreate(1, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(1, ref init raw);
                 mut OwnedInt32Buffer buffer = move raw;
                 require buffer.TryAppend(value);
                 return move buffer;
             }
             OwnedInt32Buffer CreateMaybe(bool fail) {
-                require OwnedInt32Buffer.TryCreate(1, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(1, ref init raw);
                 mut OwnedInt32Buffer buffer = move raw;
                 require buffer.TryAppend(10);
                 if (fail) { require false; }
@@ -165,7 +168,8 @@ internal sealed class NestedOwnerFieldOperationTests
                 [Cleanup] public void Close() {}
             }
             OwnedInt32Buffer Create() {
-                require OwnedInt32Buffer.TryCreate(1, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(1, ref init raw);
                 return move raw;
             }
             int32 Main() {
@@ -203,7 +207,8 @@ internal sealed class NestedOwnerFieldOperationTests
             public Owner(Child nested) { Nested = move nested; }
         }
         OwnedInt32Buffer Create() {
-            require OwnedInt32Buffer.TryCreate(1, out var raw);
+            init OwnedInt32Buffer raw;
+            require OwnedInt32Buffer.TryCreate(1, ref init raw);
             return move raw;
         }
         int32 Main() {
@@ -223,7 +228,8 @@ internal sealed class NestedOwnerFieldOperationTests
             public Owner(Child nested) { Nested = move nested; }
         }
         OwnedInt32Buffer Create() {
-            require OwnedInt32Buffer.TryCreate(1, out var raw);
+            init OwnedInt32Buffer raw;
+            require OwnedInt32Buffer.TryCreate(1, ref init raw);
             return move raw;
         }
         int32 Main() {
@@ -242,7 +248,8 @@ internal sealed class NestedOwnerFieldOperationTests
             public Owner(Child nested) { Nested = move nested; }
         }
         OwnedInt32Buffer Create() {
-            require OwnedInt32Buffer.TryCreate(1, out var raw);
+            init OwnedInt32Buffer raw;
+            require OwnedInt32Buffer.TryCreate(1, ref init raw);
             return move raw;
         }
         int32 Main() {
@@ -261,7 +268,8 @@ internal sealed class NestedOwnerFieldOperationTests
             public Owner(Child nested) { Nested = move nested; }
         }
         OwnedInt32Buffer Create() {
-            require OwnedInt32Buffer.TryCreate(1, out var raw);
+            init OwnedInt32Buffer raw;
+            require OwnedInt32Buffer.TryCreate(1, ref init raw);
             return move raw;
         }
         int32 Main() {

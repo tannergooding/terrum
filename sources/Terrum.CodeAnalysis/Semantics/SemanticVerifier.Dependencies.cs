@@ -32,7 +32,8 @@ public static partial class SemanticVerifier
             if (contract is null || contract.Sources.IsDefault
                 || contract.Relation is not (BoundDependencyRelation.DependsOn
                     or BoundDependencyRelation.Captures
-                    or BoundDependencyRelation.ForwardsBacking))
+                    or BoundDependencyRelation.ForwardsBacking
+                    or BoundDependencyRelation.BorrowSourceStorage))
             {
                 throw InvalidEffect(function.Span, "Ownership");
             }
@@ -44,7 +45,8 @@ public static partial class SemanticVerifier
             {
                 throw InvalidEffect(function.Span, "Ownership");
             }
-            if (contract.Relation == BoundDependencyRelation.ForwardsBacking
+            if ((contract.Relation is BoundDependencyRelation.ForwardsBacking
+                    or BoundDependencyRelation.BorrowSourceStorage)
                 && contract.Sources.IsEmpty)
             {
                 throw InvalidEffect(function.Span, "Ownership");
@@ -71,9 +73,10 @@ public static partial class SemanticVerifier
             }
         }
 
-        foreach (var forwarding in function.DependencyContracts)
+        foreach (var refinement in function.DependencyContracts)
         {
-            if (forwarding.Relation != BoundDependencyRelation.ForwardsBacking)
+            if (refinement.Relation is not (BoundDependencyRelation.ForwardsBacking
+                or BoundDependencyRelation.BorrowSourceStorage))
             {
                 continue;
             }
@@ -82,8 +85,9 @@ public static partial class SemanticVerifier
             var permittedSources = new HashSet<BoundDependencySource>();
             foreach (var relationship in function.DependencyContracts)
             {
-                if (relationship.Destination != forwarding.Destination
-                    || relationship.DestinationOrdinal != forwarding.DestinationOrdinal
+                if (relationship.Destination != refinement.Destination
+                    || relationship.DestinationOrdinal
+                        != refinement.DestinationOrdinal
                     || relationship.Relation is not (BoundDependencyRelation.DependsOn
                         or BoundDependencyRelation.Captures))
                 {
@@ -97,9 +101,24 @@ public static partial class SemanticVerifier
             {
                 throw InvalidEffect(function.Span, "Ownership");
             }
-            foreach (var source in forwarding.Sources)
+            foreach (var source in refinement.Sources)
             {
                 if (!permittedSources.Contains(source))
+                {
+                    throw InvalidEffect(function.Span, "Ownership");
+                }
+
+                var oppositeRefinement
+                    = refinement.Relation
+                        == BoundDependencyRelation.ForwardsBacking
+                            ? BoundDependencyRelation.BorrowSourceStorage
+                            : BoundDependencyRelation.ForwardsBacking;
+                if (function.DependencyContracts.Any(contract =>
+                    contract.Relation == oppositeRefinement
+                    && contract.Destination == refinement.Destination
+                    && contract.DestinationOrdinal
+                        == refinement.DestinationOrdinal
+                    && contract.Sources.Contains(source)))
                 {
                     throw InvalidEffect(function.Span, "Ownership");
                 }
@@ -157,6 +176,7 @@ public static partial class SemanticVerifier
                     or BoundDependencyDestination.RetainedFormal
                     or BoundDependencyDestination.Operation,
             BoundDependencyRelation.ForwardsBacking
+            or BoundDependencyRelation.BorrowSourceStorage
                 => contract.Destination is BoundDependencyDestination.Result
                     or BoundDependencyDestination.Receiver
                     or BoundDependencyDestination.InitializedOutput

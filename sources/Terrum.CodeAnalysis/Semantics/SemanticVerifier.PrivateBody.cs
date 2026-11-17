@@ -21,7 +21,8 @@ public static partial class SemanticVerifier
         && HasRawUnionReturnCoverageSubject(type, program)
         && ValueLayout.Size(type, structures,
             program.CheckedReferenceTypes,
-            program.NativeLoweringAgreement, fixedArrays)
+            program.NativeLoweringAgreement, fixedArrays,
+            program.EnumDefinitions)
             <= ValueLayout.MaximumStructureSize;
 
     private readonly record struct PrivateBodyPlaceFacts(
@@ -134,9 +135,7 @@ public static partial class SemanticVerifier
                     allowNestedFieldWriteBacking);
                 if (parent.Type != element.ArrayType
                     || !NativeFixedArrayContract.TryGetLayout(
-                        element.ArrayType, program.Structures,
-                        program.NativeFixedArrayTypes, out var layout,
-                        program.CheckedReferenceTypes)
+                        element.ArrayType, program, out var layout)
                     || layout.ElementType != element.Type
                     || (!NativeFixedArrayContract.IsRevision100RuntimeArrayLayout(
                             layout, program.Structures,
@@ -308,9 +307,7 @@ public static partial class SemanticVerifier
                 var parent = PrivateBodyPlaceExpression(element.ArrayPlace,
                     function, program, span, ref remaining, depth + 1);
                 if (!NativeFixedArrayContract.TryGetLayout(
-                        element.ArrayType, program.Structures,
-                        program.NativeFixedArrayTypes, out var layout,
-                        program.CheckedReferenceTypes)
+                        element.ArrayType, program, out var layout)
                     || !TryGetPrivateBodyPlaceRoot(parent, out var rootVariable))
                 {
                     throw InvalidEffect(span, "CheckedReference");
@@ -387,8 +384,7 @@ public static partial class SemanticVerifier
         {
             Count(ref remaining, depth++);
             if (!NativeFixedArrayContract.TryGetLayout(element.ArrayType,
-                    program.Structures, program.NativeFixedArrayTypes,
-                    out var layout, program.CheckedReferenceTypes)
+                    program, out var layout)
                 || element.Type != layout.ElementType)
             {
                 return false;
@@ -864,7 +860,78 @@ public static partial class SemanticVerifier
         }
         foreach (var target in targets)
         {
-            if (!PrivateReferenceTargetIsInitialized(target,
+            if (!ReferenceTargetIsInitialized(target,
+                    sourceType.ReferentType, attenuation.Span, initialized,
+                    fieldMasks, function, program, ref remaining,
+                    depth + 1))
+            {
+                throw InvalidEffect(attenuation.Span, "CheckedReference");
+            }
+        }
+
+        var descriptorPlaces = ReferenceDescriptorPlacesOfExpression(
+            attenuation.Descriptor, dependencies, initialized, function,
+            program, ref remaining, depth + 1, fieldMasks);
+        if (descriptorPlaces.Count != 1
+            || initialized.HasConsumedInitializationAuthority(
+                descriptorPlaces.Single()))
+        {
+            throw InvalidEffect(attenuation.Span, "CheckedReference");
+        }
+        initialized.ConsumeInitializationAuthority(
+            descriptorPlaces.Single());
+    }
+
+    private static void VerifySourceInitializationAttenuation(
+        BoundInitializationAttenuation attenuation,
+        InitializationState initialized, uint[] fieldMasks,
+        HashSet<int> declarations, BoundFunction function,
+        BoundProgram program, ref int remaining, int depth,
+        FailureEdges? failures)
+    {
+        if (!CheckedReferenceTypeContract.IsValidType(
+                attenuation.Descriptor.Type, program.CheckedReferenceTypes)
+            || !CheckedReferenceTypeContract.IsValidType(
+                attenuation.Type, program.CheckedReferenceTypes))
+        {
+            throw InvalidEffect(attenuation.Span, "CheckedReference");
+        }
+        var sourceType = program.CheckedReferenceTypes[
+            CheckedReferenceTypes.Index(attenuation.Descriptor.Type)];
+        var resultType = program.CheckedReferenceTypes[
+            CheckedReferenceTypes.Index(attenuation.Type)];
+        if (!sourceType.IsInitialization
+            || sourceType.IsOptional || sourceType.IsGarbageCollected
+            || resultType.IsInitialization || resultType.IsOptional
+            || resultType.IsGarbageCollected
+            || sourceType.ReferentType != resultType.ReferentType
+            || (resultType.IsWritable && !sourceType.IsWritable))
+        {
+            throw InvalidEffect(attenuation.Span, "CheckedReference");
+        }
+
+        if (!CanCompleteNormally(attenuation.Descriptor, initialized,
+                program, ref remaining, depth + 1))
+        {
+            return;
+        }
+        Expression(attenuation.Descriptor, initialized, fieldMasks,
+            declarations, function, program, ref remaining, depth + 1,
+            failures);
+        if (initialized.Dependencies is not BackingDependencies dependencies)
+        {
+            throw InvalidEffect(attenuation.Span, "CheckedReference");
+        }
+        var targets = ReferenceTargetsOfExpression(
+            attenuation.Descriptor, dependencies, initialized, function,
+            program, ref remaining, depth + 1, fieldMasks);
+        if (targets.Count != 1)
+        {
+            throw InvalidEffect(attenuation.Span, "CheckedReference");
+        }
+        foreach (var target in targets)
+        {
+            if (!ReferenceTargetIsInitialized(target,
                     sourceType.ReferentType, attenuation.Span, initialized,
                     fieldMasks, function, program, ref remaining,
                     depth + 1))
@@ -898,7 +965,8 @@ public static partial class SemanticVerifier
             || store.Value.Type != store.Destination.Type
             || !CheckedReferenceTypeContract.IsSupportedReferenceStoreValueType(
                 store.Value.Type, program.Structures, program.Classes,
-                program.EnumDefinitions.Length, program.CheckedReferenceTypes))
+                program.EnumDefinitions.Length, program.CheckedReferenceTypes,
+                program.NativePointerTypes))
         {
             throw InvalidEffect(store.Span, "CheckedReference");
         }
@@ -1017,9 +1085,7 @@ public static partial class SemanticVerifier
                     NativeFixedArrayTypes.Index(arrayPlace.ArrayType)]
                 : default;
             if (!NativeFixedArrayContract.TryGetLayout(arrayPlace.ArrayType,
-                    program.Structures, program.NativeFixedArrayTypes,
-                    out var arrayLayout,
-                    program.CheckedReferenceTypes)
+                    program, out var arrayLayout)
                 || arrayLayout.ElementType != arrayPlace.Type
                 || layout.ElementType != arrayLayout.ElementType)
             {
@@ -1156,14 +1222,14 @@ public static partial class SemanticVerifier
             return;
         }
 
-        var vacant = PrivateReferenceTargetIsVacant(target,
+        var vacant = ReferenceTargetIsVacant(target,
             destinationType.ReferentType, initialized, fieldMasks, function,
             program);
-        var live = PrivateReferenceTargetIsInitialized(target,
+        var live = ReferenceTargetIsInitialized(target,
             destinationType.ReferentType, store.Span, initialized,
             fieldMasks, function, program, ref remaining, depth + 1);
         var transitionCanCommit = store.Transition != 3
-            || PrivateReferenceTargetCanInitializeOrReplace(target,
+            || ReferenceTargetCanInitializeOrReplace(target,
                 initialized, fieldMasks, function, program);
         if ((store.Transition == 1 && !vacant)
             || (store.Transition == 2 && !live)
@@ -1177,16 +1243,9 @@ public static partial class SemanticVerifier
             throw InvalidEffect(store.Span, "CheckedReference");
         }
 
-        if (target.Kind == ProvenanceAnchorKind.IncomingReference
-            && !IsImplicitReferenceScalarType(
-                destinationType.ReferentType))
-        {
-            throw InvalidEffect(store.Span, "Ownership");
-        }
-
         if ((store.Transition == 2 && live)
             || (store.Transition == 3
-                && PrivateReferenceTargetMayBeLive(target, initialized,
+                && ReferenceTargetMayBeLive(target, initialized,
                     fieldMasks, program)))
         {
             if (target.Kind == ProvenanceAnchorKind.IncomingReference)
@@ -1389,7 +1448,7 @@ public static partial class SemanticVerifier
             }
             foreach (var target in targets)
             {
-                if (!PrivateReferenceTargetIsInitialized(target,
+                if (!ReferenceTargetIsInitialized(target,
                         place.Type, span, initialized, fieldMasks, function,
                         program, ref remaining, depth + 1))
                 {
@@ -1427,7 +1486,7 @@ public static partial class SemanticVerifier
         return false;
     }
 
-    private static bool PrivateReferenceTargetIsInitialized(
+    private static bool ReferenceTargetIsInitialized(
         ProvenanceAnchor target, PrimitiveType type,
         Terrum.CodeAnalysis.Text.TextSpan span,
         InitializationState initialized, uint[] fieldMasks,
@@ -1528,7 +1587,7 @@ public static partial class SemanticVerifier
             }
             foreach (var target in targets)
             {
-                if (!PrivateReferenceTargetIsVacant(target, place.Type,
+                if (!ReferenceTargetIsVacant(target, place.Type,
                         initialized, fieldMasks, function, program))
                 {
                     return false;
@@ -1542,7 +1601,7 @@ public static partial class SemanticVerifier
             && (uint)fieldRoot < (uint)function.Variables.Length
             && function.Variables[fieldRoot].IsInitializationLocal)
         {
-            return PrivateStoragePlaceIsVacant(fieldRoot,
+            return StoragePlaceIsVacant(fieldRoot,
                 StorageProjection.ForFieldPath(fieldPath), initialized,
                 fieldMasks, program);
         }
@@ -1550,13 +1609,13 @@ public static partial class SemanticVerifier
             && TryGetReferencePlaceStorage(place.Address, function, program,
                 out var variable, out var projection))
         {
-            return PrivateStoragePlaceIsVacant(variable, projection,
+            return StoragePlaceIsVacant(variable, projection,
                 initialized, fieldMasks, program);
         }
         return false;
     }
 
-    private static bool PrivateReferenceTargetIsVacant(
+    private static bool ReferenceTargetIsVacant(
         ProvenanceAnchor target, PrimitiveType type,
         InitializationState initialized, uint[] fieldMasks,
         BoundFunction function, BoundProgram program)
@@ -1573,21 +1632,69 @@ public static partial class SemanticVerifier
                     CheckedReferenceTypes.Index(
                         function.Variables[target.Identity].Type)]
                     .IsInitialization
-                && !initialized.IsPrivateReferentInitialized(target)
+                && initialized.IsIncomingReferenceDefinitelyVacant(
+                    target)
                 && !initialized.IsNativeOutputReserved(target.Identity);
         }
         if ((target.Kind is ProvenanceAnchorKind.ReferencePlace
                 or ProvenanceAnchorKind.NormalBackingPlace)
             && target.Storage is StorageKey storage)
         {
-            return PrivateStoragePlaceIsVacant(target.Identity,
+            return StoragePlaceIsVacant(target.Identity,
                 storage.Projection, initialized, fieldMasks, program);
         }
         _ = type;
         return false;
     }
 
-    private static bool PrivateReferenceTargetCanInitializeOrReplace(
+    private static bool ReferenceTargetMayBeVacant(
+        ProvenanceAnchor target, InitializationState initialized,
+        uint[] fieldMasks, BoundProgram program)
+    {
+        if (target.Kind is ProvenanceAnchorKind.IncomingReference
+            or ProvenanceAnchorKind.IncomingReferenceContents
+            or ProvenanceAnchorKind.IncomingReferencePlace
+            or ProvenanceAnchorKind.IncomingReferenceField)
+        {
+            return initialized.IncomingReferenceMayBeVacant(target);
+        }
+        if (target.Kind is not (ProvenanceAnchorKind.ReferencePlace
+                or ProvenanceAnchorKind.NormalBackingPlace)
+            || target.Storage is not StorageKey storage
+            || (uint)target.Identity >= (uint)initialized.Length
+            || initialized.IsNativeOutputReserved(target.Identity))
+        {
+            return false;
+        }
+        if (storage.Projection.Kind == StorageProjectionKind.WholeObject)
+        {
+            return !initialized.HasPartialValue(target.Identity)
+                && (initialized.Possibilities(target.Identity) & 1) != 0;
+        }
+        if (storage.Projection.Kind != StorageProjectionKind.InlineFieldPath
+            || storage.Projection.FieldPath.Segments.IsEmpty
+            || (uint)target.Identity >= (uint)fieldMasks.Length)
+        {
+            return false;
+        }
+        var segments = storage.Projection.FieldPath.Segments;
+        for (var index = 0; index < segments.Length; index++)
+        {
+            var segment = segments[index];
+            var ownerPath = FieldPathPrefix(
+                storage.Projection.FieldPath, index);
+            var (definite, _) = FieldPathOwnerMasks(target.Identity,
+                ownerPath, segment.OwnerType, initialized, fieldMasks,
+                program);
+            if ((definite & (1u << segment.Field)) == 0)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static bool ReferenceTargetCanInitializeOrReplace(
         ProvenanceAnchor target, InitializationState initialized,
         uint[] fieldMasks, BoundFunction function, BoundProgram program)
     {
@@ -1608,8 +1715,7 @@ public static partial class SemanticVerifier
         if (target.Kind != ProvenanceAnchorKind.ReferencePlace
             || target.Storage is not StorageKey storage
             || (uint)target.Identity >= (uint)initialized.Length
-            || initialized.IsNativeOutputReserved(target.Identity)
-            || initialized.HasPartialValue(target.Identity))
+            || initialized.IsNativeOutputReserved(target.Identity))
         {
             return false;
         }
@@ -1617,7 +1723,8 @@ public static partial class SemanticVerifier
         if (storage.Projection.Kind == StorageProjectionKind.WholeObject)
         {
             var possibilities = initialized.Possibilities(target.Identity);
-            return possibilities != 0 && (possibilities & ~7) == 0;
+            return !initialized.HasPartialValue(target.Identity)
+                && possibilities != 0 && (possibilities & ~7) == 0;
         }
         if (storage.Projection.Kind != StorageProjectionKind.InlineFieldPath
             || storage.Projection.FieldPath.Segments.IsEmpty
@@ -1626,21 +1733,52 @@ public static partial class SemanticVerifier
             return false;
         }
 
-        var leaf = storage.Projection.FieldPath.Segments[^1];
-        var ownerPath = FieldPathPrefix(storage.Projection.FieldPath,
-            storage.Projection.FieldPath.Segments.Length - 1);
-        var (_, possible) = FieldPathOwnerMasks(target.Identity, ownerPath,
-            leaf.OwnerType, initialized, fieldMasks, program);
-        return possible == 0 || (possible & (1u << leaf.Field)) != 0;
+        var segments = storage.Projection.FieldPath.Segments;
+        for (var index = 0; index < segments.Length; index++)
+        {
+            var segment = segments[index];
+            var ownerPath = FieldPathPrefix(
+                storage.Projection.FieldPath, index);
+            var (_, possible) = FieldPathOwnerMasks(target.Identity,
+                ownerPath, segment.OwnerType, initialized, fieldMasks,
+                program);
+            if ((possible & (1u << segment.Field)) == 0)
+            {
+                return false;
+            }
+        }
+        return true;
     }
 
-    private static bool PrivateReferenceTargetMayBeLive(
+    private static bool ReferenceTargetIsVacant(
         ProvenanceAnchor target, InitializationState initialized,
         uint[] fieldMasks, BoundProgram program)
     {
-        if (target.Kind == ProvenanceAnchorKind.IncomingReference)
+        if (target.Kind is ProvenanceAnchorKind.IncomingReference
+            or ProvenanceAnchorKind.IncomingReferenceContents
+            or ProvenanceAnchorKind.IncomingReferencePlace
+            or ProvenanceAnchorKind.IncomingReferenceField)
         {
-            return initialized.IsPrivateReferentInitialized(target);
+            return initialized.IsIncomingReferenceDefinitelyVacant(target);
+        }
+        return (target.Kind is ProvenanceAnchorKind.ReferencePlace
+                or ProvenanceAnchorKind.NormalBackingPlace)
+            && target.Storage is StorageKey storage
+            && StoragePlaceIsVacant(target.Identity,
+                storage.Projection, initialized, fieldMasks, program);
+    }
+
+    private static bool ReferenceTargetMayBeLive(
+        ProvenanceAnchor target, InitializationState initialized,
+        uint[] fieldMasks, BoundProgram program)
+    {
+        if (target.Kind is ProvenanceAnchorKind.IncomingReference
+            or ProvenanceAnchorKind.IncomingReferenceContents
+            or ProvenanceAnchorKind.IncomingReferencePlace
+            or ProvenanceAnchorKind.IncomingReferenceField)
+        {
+            return initialized.IncomingReferenceMayBeInitialized(
+                target);
         }
         if (target.Storage is not StorageKey storage
             || (uint)target.Identity >= (uint)initialized.Length)
@@ -1655,30 +1793,38 @@ public static partial class SemanticVerifier
             && !storage.Projection.FieldPath.Segments.IsEmpty
             && (uint)target.Identity < (uint)fieldMasks.Length)
         {
-            var leaf = storage.Projection.FieldPath.Segments[^1];
-            var ownerPath = FieldPathPrefix(storage.Projection.FieldPath,
-                storage.Projection.FieldPath.Segments.Length - 1);
-            var (_, possible) = FieldPathOwnerMasks(target.Identity,
-                ownerPath, leaf.OwnerType, initialized, fieldMasks,
-                program);
-            return (possible & (1u << leaf.Field)) != 0;
+            var segments = storage.Projection.FieldPath.Segments;
+            for (var index = 0; index < segments.Length; index++)
+            {
+                var segment = segments[index];
+                var ownerPath = FieldPathPrefix(
+                    storage.Projection.FieldPath, index);
+                var (_, possible) = FieldPathOwnerMasks(target.Identity,
+                    ownerPath, segment.OwnerType, initialized, fieldMasks,
+                    program);
+                if ((possible & (1u << segment.Field)) == 0)
+                {
+                    return false;
+                }
+            }
+            return true;
         }
         return false;
     }
 
-    private static bool PrivateStoragePlaceIsVacant(int variable,
+    private static bool StoragePlaceIsVacant(int variable,
         StorageProjection projection, InitializationState initialized,
         uint[] fieldMasks, BoundProgram program)
     {
         if ((uint)variable >= (uint)initialized.Length
-            || initialized.IsNativeOutputReserved(variable)
-            || initialized.HasPartialValue(variable))
+            || initialized.IsNativeOutputReserved(variable))
         {
             return false;
         }
         if (projection.Kind == StorageProjectionKind.WholeObject)
         {
-            return initialized.IsVacant(variable);
+            return !initialized.HasPartialValue(variable)
+                && initialized.IsVacant(variable);
         }
         if (projection.Kind != StorageProjectionKind.InlineFieldPath
             || projection.FieldPath.Segments.IsEmpty
@@ -1686,14 +1832,22 @@ public static partial class SemanticVerifier
         {
             return false;
         }
-        var leaf = projection.FieldPath.Segments[^1];
-        var ownerPath = FieldPathPrefix(projection.FieldPath,
-            projection.FieldPath.Segments.Length - 1);
-        var (definite, possible) = FieldPathOwnerMasks(variable,
-            ownerPath, leaf.OwnerType, initialized, fieldMasks, program);
-        var fieldBit = 1u << leaf.Field;
-        return (possible & fieldBit) == 0
-            && (definite & fieldBit) == 0;
+        var segments = projection.FieldPath.Segments;
+        for (var index = 0; index < segments.Length; index++)
+        {
+            var segment = segments[index];
+            var ownerPath = FieldPathPrefix(projection.FieldPath,
+                index);
+            var (definite, possible) = FieldPathOwnerMasks(variable,
+                ownerPath, segment.OwnerType, initialized, fieldMasks,
+                program);
+            var bit = 1u << segment.Field;
+            if ((definite & bit) == 0)
+            {
+                return (possible & bit) == 0;
+            }
+        }
+        return false;
     }
 
     private static void VerifyPrivateReferenceMaterialize(

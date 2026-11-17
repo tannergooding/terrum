@@ -12,11 +12,14 @@ internal static class ManagedExportShape
         && Parameters(function, out var offset)
         && ScalarParameters(function, offset);
 
-    internal static bool Supported(BoundFunction function, ImmutableArray<BoundStruct> structures)
+    internal static bool Supported(BoundFunction function,
+        ImmutableArray<BoundStruct> structures,
+        ImmutableArray<CheckedReferenceTypeDefinition> checkedReferenceTypes)
     {
         Dictionary<(PrimitiveType Type, int Depth), bool>? valueCache = null;
         if (!Parameters(function, out var offset)
-            || (function.ReturnType != PrimitiveType.Void && !HasValueLayout(function.ReturnType))
+            || (function.ReturnType != PrimitiveType.Void
+                && !HasValueLayout(function.ReturnType))
             || (function.DeclaringStruct is not null && !function.IsStatic && !function.IsConstructor
                 && !function.IsClassConstructor && !function.Variables.IsEmpty
                 && function.Variables[0].IsMutable))
@@ -26,7 +29,7 @@ internal static class ManagedExportShape
         for (var index = offset; index < offset + function.ParameterCount; index++)
         {
             var parameter = function.Variables[index];
-            if (!HasValueLayout(parameter.Type)
+            if (!HasParameterLayout(parameter.Type)
                 || (parameter.IsOut && !parameter.IsInit && function.ReturnType != PrimitiveType.Bool
                     && !CopyStruct(parameter.Type, structures)))
             {
@@ -43,6 +46,20 @@ internal static class ManagedExportShape
             }
             valueCache ??= new Dictionary<(PrimitiveType Type, int Depth), bool>();
             return Value(type, structures, 0, valueCache);
+        }
+
+        bool HasParameterLayout(PrimitiveType type)
+        {
+            if (!CheckedReferenceTypeContract.IsValidType(type,
+                    checkedReferenceTypes))
+            {
+                return HasValueLayout(type);
+            }
+
+            var reference = checkedReferenceTypes[
+                CheckedReferenceTypes.Index(type)];
+            return !reference.IsGarbageCollected && !reference.IsOptional
+                && HasValueLayout(reference.ReferentType);
         }
     }
 
@@ -67,7 +84,8 @@ internal static class ManagedExportShape
     }
 
     private static bool Scalar(PrimitiveType type) => type is PrimitiveType.Bool or PrimitiveType.Int32
-        or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Char16
+        or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
+        or PrimitiveType.NativeInt or PrimitiveType.NativeUInt or PrimitiveType.Char16
         or PrimitiveType.Float32 or PrimitiveType.Float64;
 
     private static bool CopyStruct(PrimitiveType type, IReadOnlyList<BoundStruct> structures)

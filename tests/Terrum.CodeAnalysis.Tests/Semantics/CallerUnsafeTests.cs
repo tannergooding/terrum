@@ -1821,7 +1821,7 @@ internal sealed class CallerUnsafeTests
     public void GenericSpecializationPreservesCallerUnsafeRequirement()
     {
         const string declaration = """
-            unsafe T Identity<T>(T value) where T : [Copy] { return value; }
+            unsafe T Identity<T>(T value)  { return value; }
             """;
 
         var safeCall = Compilation.Create(SyntaxTree.Parse(declaration

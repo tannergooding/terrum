@@ -60,6 +60,12 @@ public static partial class TrRmExecutableCompiler
         {
             SemanticVerifier.VerifyWithDirectNativeImports(program);
         }
+        if (program.Structures.Any(static structure =>
+                structure.SourceGenericTypeDefinitionIndex >= 0))
+        {
+            throw Unsupported(
+                "The selected TRRM schema has no assigned source generic type persistence.");
+        }
 
         var hasNativeAddressFunctionBody
             = program.NativeFunctionPointerSignatures.Length == 1
@@ -4503,8 +4509,10 @@ public static partial class TrRmExecutableCompiler
         PrimitiveType type)
         => type is PrimitiveType.Int8 or PrimitiveType.Int16
             or PrimitiveType.Int32 or PrimitiveType.Int64
+            or PrimitiveType.NativeInt
             or PrimitiveType.UInt8 or PrimitiveType.UInt16
             or PrimitiveType.UInt32 or PrimitiveType.UInt64
+            or PrimitiveType.NativeUInt
             or PrimitiveType.Float32 or PrimitiveType.Float64;
 
     private static bool IsSupportedNativeUnitConditionalBooleanXor(
@@ -4682,9 +4690,11 @@ public static partial class TrRmExecutableCompiler
         {
             PrimitiveType.Bool => constant.Bits.Low == 1,
             PrimitiveType.Int8 or PrimitiveType.Int16 or PrimitiveType.Int32
-                or PrimitiveType.Int64 or PrimitiveType.UInt8
+                or PrimitiveType.Int64 or PrimitiveType.NativeInt
+                or PrimitiveType.UInt8
                 or PrimitiveType.UInt16 or PrimitiveType.UInt32
-                or PrimitiveType.UInt64 or PrimitiveType.Float32
+                or PrimitiveType.UInt64 or PrimitiveType.NativeUInt
+                or PrimitiveType.Float32
                 or PrimitiveType.Float64 => constant.Bits.Low == allBitsSet,
             _ => false,
         };

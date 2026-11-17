@@ -454,8 +454,15 @@ public static partial class SemanticVerifier
         BoundExpression expression, InitializationState initialized, ref int remaining)
     {
         Count(ref remaining, 0);
+        if (initialized.TryGetNativePointerExtentFlowEffect(
+                expression, out var cachedEffect))
+        {
+            return cachedEffect;
+        }
         if (initialized.Dependencies is null)
         {
+            initialized.RecordNativePointerExtentFlowEffect(expression,
+                hasEffect: false);
             return false;
         }
 
@@ -508,6 +515,8 @@ public static partial class SemanticVerifier
             }
         }
 
+        initialized.RecordNativePointerExtentFlowEffect(expression,
+            hasEffect);
         return hasEffect;
     }
 
@@ -944,13 +953,15 @@ public static partial class SemanticVerifier
         reservation.Type == PrimitiveType.Void
         && reservation.PointeeType == output.PointeeType
         && DirectNativeImportContract.IsNativeOutputCellType(output.PointeeType, program.Structures,
-            program.NativeFunctionPointerSignatures, program.NativePointerTypes)
+            program.NativeFunctionPointerSignatures,
+            program.NativePointerTypes, program.EnumDefinitions)
         && (uint)reservation.Variable < (uint)caller.Variables.Length
         && caller.Variables[reservation.Variable].Type == output.PointeeType
         && caller.Variables[reservation.Variable].IsInitializationLocal
         && ValueLayout.Size(output.PointeeType, program.Structures,
             program.CheckedReferenceTypes, program.NativeLoweringAgreement,
-            program.NativeFixedArrayTypes) > 0;
+            program.NativeFixedArrayTypes,
+            program.EnumDefinitions) > 0;
 
     private static void VerifyNativeOutputReservation(BoundNativeOutputReservation reservation,
         DirectNativeOutput output, InitializationState initialized, uint[] fieldMasks,

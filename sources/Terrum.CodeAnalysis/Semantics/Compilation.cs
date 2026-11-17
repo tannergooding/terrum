@@ -64,6 +64,10 @@ public readonly record struct CompilationOptions
     public CoreContractFailureIdentitySelection?
         CoreContractFailureIdentitySelection { get; init; }
 
+    /// <summary>The exact host-selected Pure and ConstEval schema identities for this using Module, if any.</summary>
+    public CoreEvaluationFormIdentitySelection?
+        CoreEvaluationFormIdentitySelection { get; init; }
+
     /// <summary>The explicit host-selected target-lowering agreement, if any.</summary>
     public string? NativeLoweringAgreement { get; init; }
 }
@@ -382,6 +386,9 @@ public sealed class Compilation
                         case BoundBufferRead buffer:
                             expressions.Push(buffer.Index);
                             break;
+                        case BoundReferenceFormation formation:
+                            expressions.Push(formation.Place);
+                            break;
                         case BoundConstant or BoundRead or BoundMove or BoundReceiverLoan
                             or BoundMutableReceiverLoan or BoundViewLength or BoundBufferLength or BoundOutArgument:
                             break;
@@ -576,7 +583,9 @@ public sealed class Compilation
             coreExceptionIdentitySelections:
                 options.CoreExceptionIdentitySelections,
             coreContractFailureIdentitySelection:
-                options.CoreContractFailureIdentitySelection);
+                options.CoreContractFailureIdentitySelection,
+            coreEvaluationFormIdentitySelection:
+                options.CoreEvaluationFormIdentitySelection);
     }
 
     /// <summary>Binds a source snapshot under an explicit checked-failure runtime policy.</summary>
@@ -610,7 +619,9 @@ public sealed class Compilation
             coreExceptionIdentitySelections:
                 options.CoreExceptionIdentitySelections,
             coreContractFailureIdentitySelection:
-                options.CoreContractFailureIdentitySelection);
+                options.CoreContractFailureIdentitySelection,
+            coreEvaluationFormIdentitySelection:
+                options.CoreEvaluationFormIdentitySelection);
     }
 
     /// <summary>Binds source snapshots for explicit native-import emission.</summary>
@@ -636,7 +647,9 @@ public sealed class Compilation
             coreExceptionIdentitySelections:
                 options.CoreExceptionIdentitySelections,
             coreContractFailureIdentitySelection:
-                options.CoreContractFailureIdentitySelection);
+                options.CoreContractFailureIdentitySelection,
+            coreEvaluationFormIdentitySelection:
+                options.CoreEvaluationFormIdentitySelection);
     }
 
     /// <summary>Binds a library snapshot under an explicit checked-failure runtime policy.</summary>
@@ -661,7 +674,9 @@ public sealed class Compilation
             coreExceptionIdentitySelections:
                 options.CoreExceptionIdentitySelections,
             coreContractFailureIdentitySelection:
-                options.CoreContractFailureIdentitySelection);
+                options.CoreContractFailureIdentitySelection,
+            coreEvaluationFormIdentitySelection:
+                options.CoreEvaluationFormIdentitySelection);
     }
 
     /// <summary>Binds and verifies library definitions without requiring or selecting a Main entry point.</summary>
@@ -706,7 +721,9 @@ public sealed class Compilation
             coreExceptionIdentitySelections:
                 options.CoreExceptionIdentitySelections,
             coreContractFailureIdentitySelection:
-                options.CoreContractFailureIdentitySelection);
+                options.CoreContractFailureIdentitySelection,
+            coreEvaluationFormIdentitySelection:
+                options.CoreEvaluationFormIdentitySelection);
     }
 
     /// <summary>Binds consumer source against validated module declarations, without reading producer source or binding its bodies.</summary>
@@ -743,7 +760,9 @@ public sealed class Compilation
             coreExceptionIdentitySelections:
                 options.CoreExceptionIdentitySelections,
             coreContractFailureIdentitySelection:
-                options.CoreContractFailureIdentitySelection);
+                options.CoreContractFailureIdentitySelection,
+            coreEvaluationFormIdentitySelection:
+                options.CoreEvaluationFormIdentitySelection);
     }
 
     internal static void ValidateOptions(CompilationOptions options)
@@ -840,6 +859,15 @@ public sealed class Compilation
                 "The selected Core contract-failure identities are invalid.",
                 nameof(options));
         }
+        if (options.CoreEvaluationFormIdentitySelection is
+                CoreEvaluationFormIdentitySelection evaluationFormSelection
+            && !CoreEvaluationFormIdentitySelectionContract.IsValidTable(
+                [evaluationFormSelection]))
+        {
+            throw new ArgumentException(
+                "The selected Core evaluation-form identities are invalid.",
+                nameof(options));
+        }
         if (options.NativeLoweringAgreement is string agreement
             && agreement is not (
                 CompilationOptions.WindowsX64NormalBackingAgreement
@@ -864,7 +892,9 @@ public sealed class Compilation
         CoreContractFailureIdentitySelection?
             coreContractFailureIdentitySelection = null,
         NativeOutputCoreRegistrationSet?
-            nativeOutputCoreRegistration = null)
+            nativeOutputCoreRegistration = null,
+        CoreEvaluationFormIdentitySelection?
+            coreEvaluationFormIdentitySelection = null)
     {
         ArgumentNullException.ThrowIfNull(tree);
         cancellationToken.ThrowIfCancellationRequested();
@@ -892,6 +922,26 @@ public sealed class Compilation
         var selectedCoreContractFailureIdentitySelections
             = SelectCoreContractFailureIdentitySelections(reference,
                 coreContractFailureIdentitySelection);
+        var selectedCoreEvaluationFormIdentitySelections
+            = SelectCoreEvaluationFormIdentitySelections(reference,
+                coreEvaluationFormIdentitySelection);
+        var selectedCoreEvaluationFormSchemaProviders
+            = SelectCoreEvaluationFormSchemaProviders(reference,
+                coreEvaluationFormIdentitySelection);
+        if (!CoreEvaluationFormIdentitySelectionContract
+            .IsValidAgainstProviders(
+                selectedCoreEvaluationFormIdentitySelections,
+                selectedCoreEvaluationFormSchemaProviders)
+            || !CoreEvaluationFormIdentitySelectionContract
+                .IsRuntimePolicyCompatible(
+                    coreEvaluationFormIdentitySelection,
+                    selectedCoreEvaluationFormSchemaProviders,
+                    (uint)runtimePolicy))
+        {
+            throw new ArgumentException(
+                "Reference and compilation evaluation-form selections are duplicate or invalid.",
+                nameof(coreEvaluationFormIdentitySelection));
+        }
 
         // Recovery nodes do not have the structural guarantees required for binding.
         if (tree.HasErrors)
@@ -915,7 +965,13 @@ public sealed class Compilation
             coreContractFailureIdentitySelections:
                 selectedCoreContractFailureIdentitySelections,
             coreContractFailureIdentitySelection:
-                coreContractFailureIdentitySelection);
+                coreContractFailureIdentitySelection,
+            coreEvaluationFormIdentitySelection:
+                coreEvaluationFormIdentitySelection,
+            coreEvaluationFormIdentitySelections:
+                selectedCoreEvaluationFormIdentitySelections,
+            coreEvaluationFormSchemaProviders:
+                selectedCoreEvaluationFormSchemaProviders);
         var program = binder.Bind();
         var diagnosticCount = tree.Diagnostics.Length + binder.Diagnostics.Count;
         if (diagnosticCount == 0)
@@ -1126,6 +1182,53 @@ public sealed class Compilation
         }
     }
 
+    private static ImmutableArray<CoreEvaluationFormIdentitySelection>
+        SelectCoreEvaluationFormIdentitySelections(
+            CompilationReference? reference,
+            CoreEvaluationFormIdentitySelection? configured)
+    {
+        var referenceSelections
+            = reference?.CoreEvaluationFormIdentitySelections ?? [];
+        if (configured is null)
+        {
+            return referenceSelections;
+        }
+
+        if (referenceSelections.IsDefaultOrEmpty)
+        {
+            return [configured];
+        }
+
+        return [.. referenceSelections, configured];
+    }
+
+    private static ImmutableArray<CoreEvaluationFormSchemaDeclarations>
+        SelectCoreEvaluationFormSchemaProviders(
+            CompilationReference? reference,
+            CoreEvaluationFormIdentitySelection? configured)
+    {
+        var referenceProviders
+            = reference?.CoreEvaluationFormSchemaProviders ?? [];
+        if (configured?.LocalSchemaDeclarations
+            is not CoreEvaluationFormSchemaDeclarations localSchemas)
+        {
+            return referenceProviders;
+        }
+
+        foreach (var provider in referenceProviders)
+        {
+            if (StringComparer.Ordinal.Equals(provider.Origin.ModuleIdentity,
+                localSchemas.Origin.ModuleIdentity))
+            {
+                throw new ArgumentException(
+                    "A local evaluation-form catalog overlaps a selected reference provider.",
+                    nameof(configured));
+            }
+        }
+
+        return referenceProviders;
+    }
+
     private static ImmutableArray<CoreExceptionIdentitySelection>
         SelectCoreExceptionIdentitySelections(CompilationReference? reference,
             ImmutableArray<CoreExceptionIdentitySelection> configured)
@@ -1223,7 +1326,9 @@ public sealed class Compilation
             coreExceptionIdentitySelections:
                 options.CoreExceptionIdentitySelections,
             coreContractFailureIdentitySelection:
-                options.CoreContractFailureIdentitySelection);
+                options.CoreContractFailureIdentitySelection,
+            coreEvaluationFormIdentitySelection:
+                options.CoreEvaluationFormIdentitySelection);
     }
 
     /// <summary>Binds multiple source snapshots under an explicit checked-failure runtime policy.</summary>
@@ -1254,7 +1359,9 @@ public sealed class Compilation
             coreExceptionIdentitySelections:
                 options.CoreExceptionIdentitySelections,
             coreContractFailureIdentitySelection:
-                options.CoreContractFailureIdentitySelection);
+                options.CoreContractFailureIdentitySelection,
+            coreEvaluationFormIdentitySelection:
+                options.CoreEvaluationFormIdentitySelection);
     }
 
     /// <summary>Binds source snapshots and shared host buffers under an explicit checked-failure runtime policy.</summary>
@@ -1289,7 +1396,9 @@ public sealed class Compilation
             coreExceptionIdentitySelections:
                 options.CoreExceptionIdentitySelections,
             coreContractFailureIdentitySelection:
-                options.CoreContractFailureIdentitySelection);
+                options.CoreContractFailureIdentitySelection,
+            coreEvaluationFormIdentitySelection:
+                options.CoreEvaluationFormIdentitySelection);
     }
 
     /// <summary>Binds multiple library snapshots under an explicit checked-failure runtime policy.</summary>
@@ -1320,7 +1429,9 @@ public sealed class Compilation
             coreExceptionIdentitySelections:
                 options.CoreExceptionIdentitySelections,
             coreContractFailureIdentitySelection:
-                options.CoreContractFailureIdentitySelection);
+                options.CoreContractFailureIdentitySelection,
+            coreEvaluationFormIdentitySelection:
+                options.CoreEvaluationFormIdentitySelection);
     }
 
     /// <summary>Binds the compiler-owned primitive declarations and APIs of a Core library without a standard-library reference.</summary>
@@ -1353,7 +1464,9 @@ public sealed class Compilation
             coreExceptionIdentitySelections:
                 options.CoreExceptionIdentitySelections,
             coreContractFailureIdentitySelection:
-                options.CoreContractFailureIdentitySelection);
+                options.CoreContractFailureIdentitySelection,
+            coreEvaluationFormIdentitySelection:
+                options.CoreEvaluationFormIdentitySelection);
     }
 
     /// <summary>Binds multiple library source snapshots against validated external declarations.</summary>
@@ -1391,7 +1504,9 @@ public sealed class Compilation
             coreExceptionIdentitySelections:
                 options.CoreExceptionIdentitySelections,
             coreContractFailureIdentitySelection:
-                options.CoreContractFailureIdentitySelection);
+                options.CoreContractFailureIdentitySelection,
+            coreEvaluationFormIdentitySelection:
+                options.CoreEvaluationFormIdentitySelection);
     }
 
     /// <summary>Binds consumer source snapshots against one validated module reference.</summary>
@@ -1428,7 +1543,9 @@ public sealed class Compilation
             coreExceptionIdentitySelections:
                 options.CoreExceptionIdentitySelections,
             coreContractFailureIdentitySelection:
-                options.CoreContractFailureIdentitySelection);
+                options.CoreContractFailureIdentitySelection,
+            coreEvaluationFormIdentitySelection:
+                options.CoreEvaluationFormIdentitySelection);
     }
 
     private static Compilation CreateCore(IEnumerable<SyntaxTree> trees, ImmutableArray<HostBuffer> buffers, bool isLibrary,
@@ -1446,7 +1563,9 @@ public sealed class Compilation
         CoreContractFailureIdentitySelection?
             coreContractFailureIdentitySelection = null,
         NativeOutputCoreRegistrationSet?
-            nativeOutputCoreRegistration = null)
+            nativeOutputCoreRegistration = null,
+        CoreEvaluationFormIdentitySelection?
+            coreEvaluationFormIdentitySelection = null)
     {
         ArgumentNullException.ThrowIfNull(trees);
         cancellationToken.ThrowIfCancellationRequested();
@@ -1474,6 +1593,26 @@ public sealed class Compilation
         var selectedCoreContractFailureIdentitySelections
             = SelectCoreContractFailureIdentitySelections(reference,
                 coreContractFailureIdentitySelection);
+        var selectedCoreEvaluationFormIdentitySelections
+            = SelectCoreEvaluationFormIdentitySelections(reference,
+                coreEvaluationFormIdentitySelection);
+        var selectedCoreEvaluationFormSchemaProviders
+            = SelectCoreEvaluationFormSchemaProviders(reference,
+                coreEvaluationFormIdentitySelection);
+        if (!CoreEvaluationFormIdentitySelectionContract
+            .IsValidAgainstProviders(
+                selectedCoreEvaluationFormIdentitySelections,
+                selectedCoreEvaluationFormSchemaProviders)
+            || !CoreEvaluationFormIdentitySelectionContract
+                .IsRuntimePolicyCompatible(
+                    coreEvaluationFormIdentitySelection,
+                    selectedCoreEvaluationFormSchemaProviders,
+                    (uint)runtimePolicy))
+        {
+            throw new ArgumentException(
+                "Reference and compilation evaluation-form selections are duplicate or invalid.",
+                nameof(coreEvaluationFormIdentitySelection));
+        }
         var snapshots = ImmutableArray.CreateBuilder<SyntaxTree>(
             trees is ICollection<SyntaxTree> collection ? collection.Count : 0);
         ImmutableArray<Diagnostic>.Builder? diagnostics = null;
@@ -1516,7 +1655,13 @@ public sealed class Compilation
             lazyInitializationCoreRegistration:
                 selectedLazyInitializationCoreRegistration,
             nativeOutputCoreRegistration:
-                selectedNativeOutputCoreRegistration);
+                selectedNativeOutputCoreRegistration,
+            coreEvaluationFormIdentitySelection:
+                coreEvaluationFormIdentitySelection,
+            coreEvaluationFormIdentitySelections:
+                selectedCoreEvaluationFormIdentitySelections,
+            coreEvaluationFormSchemaProviders:
+                selectedCoreEvaluationFormSchemaProviders);
         var program = binder.Bind();
         if (binder.Diagnostics.Count != 0)
         {
@@ -1581,7 +1726,9 @@ public sealed class Compilation
             coreContractFailureIdentitySelections:
                 coreContractFailureIdentitySelections,
             coreContractFailureIdentitySelection:
-                options.CoreContractFailureIdentitySelection);
+                options.CoreContractFailureIdentitySelection,
+            coreEvaluationFormIdentitySelection:
+                options.CoreEvaluationFormIdentitySelection);
         var program = binder.Bind();
         var diagnostics = tree.Diagnostics.AddRange(binder.Diagnostics);
         return new Compilation(tree, diagnostics, diagnostics.IsEmpty ? program : null);
