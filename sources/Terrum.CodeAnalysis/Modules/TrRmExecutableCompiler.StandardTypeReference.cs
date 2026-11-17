@@ -224,6 +224,18 @@ public static partial class TrRmExecutableCompiler
         byte[][] artifacts, string[] schemaIdentities, string moduleIdentity,
         string[] exportKeys)
     {
+        var isEN1 = IsSelectedC1EnumClosureSchemaIdentity(
+            schemaIdentities[0]);
+        if ((!isEN1 && !StringComparer.Ordinal.Equals(
+                    schemaIdentities[0], StandardC1M1SchemaIdentity))
+            || schemaIdentities.Skip(1).Any(schemaIdentity =>
+                !StringComparer.Ordinal.Equals(schemaIdentity,
+                    schemaIdentities[0])))
+        {
+            throw Unsupported(
+                "The C1 class source-reference projection requires one exact C1M1 or EN1 schema selection for every provider.");
+        }
+
         var moduleValidation = ValidateStandardInputModules(artifacts,
             schemaIdentities, moduleIdentity, a3LayoutResourceLedger: null);
         var rootModuleRow = moduleValidation.RootModuleRow;
@@ -231,6 +243,11 @@ public static partial class TrRmExecutableCompiler
             CreateForeignInvocationIndex(artifacts[0], schemaIdentities[0]),
             schemaIdentities[0], null, createA3ResourceLedger: false);
         EnsureC1ClassDeclarationTablesSupported(rootTables);
+        if (isEN1 && rootTables.Schema.UsesPropertyInitializedState())
+        {
+            throw Unsupported(
+                "The bounded EN1 class source-reference projection does not yet retain PI1 property and initialized-state declarations.");
+        }
         var (methodStart, methodEnd)
             = rootTables.Modules.GetMethodDefRange(rootModuleRow);
         if (rootTables.Modules.GetEntryMethod(rootModuleRow) != 0
@@ -287,11 +304,35 @@ public static partial class TrRmExecutableCompiler
             selectedKeys.Add(exportKey);
         }
 
-        var typeProviderBindings
-            = TrRmFixedArrayProviderBindingValidator
-                .ValidateC1M1TypeDefImports(rootTables, artifacts,
-                    schemaIdentities, moduleValidation.Modules,
-                    rootModuleRow);
+        ImmutableArray<TrRmStandardTypeProviderBinding>
+            typeProviderBindings;
+        if (isEN1)
+        {
+            var fieldValidation
+                = TrRmFixedArrayProviderBindingValidator
+                    .ValidateFieldDefImports(rootTables, artifacts,
+                        schemaIdentities, moduleValidation.Modules,
+                        rootModuleRow);
+            if (fieldValidation.FieldBindings.Any(binding =>
+                    binding.ConsumerArtifactIndex == 0
+                    && binding.ConsumerModuleRow == rootModuleRow
+                    && rootTables.TypeDefs.GetKind(
+                        binding.ExpectedOwnerTypeDefRow) == 2))
+            {
+                throw Unsupported(
+                    "The EN1 class source-reference projection does not yet support imported class FieldDefs.");
+            }
+
+            typeProviderBindings = fieldValidation.TypeBindings;
+        }
+        else
+        {
+            typeProviderBindings
+                = TrRmFixedArrayProviderBindingValidator
+                    .ValidateC1M1TypeDefImports(rootTables, artifacts,
+                        schemaIdentities, moduleValidation.Modules,
+                        rootModuleRow);
+        }
         var rootSnapshot = CreateA2SourceTypeProviderSnapshot(rootTables,
             artifacts[0], schemaIdentities[0], rootModuleRow);
 
@@ -313,6 +354,10 @@ public static partial class TrRmExecutableCompiler
                 binding.ExpectedTypeDefRow);
             var providerKind = providerTables.TypeDefs.GetKind(
                 binding.ProviderTypeDefRow);
+            if (isEN1 && expectedKind == 4 && providerKind == 4)
+            {
+                continue;
+            }
             if (expectedKind is not (1 or 2)
                 || providerKind != expectedKind
                 || consumerTables.TypeDefs.GetGenericRange(
@@ -398,6 +443,12 @@ public static partial class TrRmExecutableCompiler
         {
             var providerTables = GetC1M1Tables(artifacts, schemaIdentities,
                 binding.ProviderArtifactIndex);
+            if (isEN1
+                && providerTables.TypeDefs.GetKind(binding.ProviderTypeDefRow)
+                    == 4)
+            {
+                continue;
+            }
             if (providerTables.TypeDefs.GetKind(binding.ProviderTypeDefRow)
                 is not (1 or 2))
             {
@@ -618,10 +669,11 @@ public static partial class TrRmExecutableCompiler
     {
         var schemaIdentity = schemaIdentities[artifactIndex];
         if (!StringComparer.Ordinal.Equals(schemaIdentity,
-                StandardC1M1SchemaIdentity))
+                StandardC1M1SchemaIdentity)
+            && !IsSelectedC1EnumClosureSchemaIdentity(schemaIdentity))
         {
             throw Unsupported(
-                "The C1M1 class provider closure requires exact C1M1 selections.");
+                "The C1 class provider closure requires exact C1M1 or EN1 selections.");
         }
 
         var tables = ValidateForeignInvocationArtifact(
@@ -651,6 +703,64 @@ public static partial class TrRmExecutableCompiler
     }
 
     private static CompilationReference CreateC1EnumClosureSourceTypeReference(
+        byte[][] artifacts, string[] schemaIdentities, string moduleIdentity,
+        string[] selectedExportKeys)
+    {
+        var moduleValidation = ValidateStandardInputModules(artifacts,
+            schemaIdentities, moduleIdentity, a3LayoutResourceLedger: null);
+        var rootTables = ValidateForeignInvocationArtifact(
+            CreateForeignInvocationIndex(artifacts[0], schemaIdentities[0]),
+            schemaIdentities[0], null, createA3ResourceLedger: false);
+        var selectedClassKeys = new List<string>();
+        foreach (var exportKey in selectedExportKeys)
+        {
+            if (rootTables.Exports.TryGetDefinitionForKey(
+                    moduleValidation.RootModuleRow, exportKey,
+                    out var definition)
+                && (definition >> 24) == 0x13
+                && rootTables.TypeDefs.GetKind(checked((int)(
+                    definition & 0x00FF_FFFF))) == 2)
+            {
+                selectedClassKeys.Add(exportKey);
+            }
+        }
+
+        if (selectedClassKeys.Count == 0)
+        {
+            return CreateC1EnumClosureSourceTypeReferenceCore(artifacts,
+                schemaIdentities, moduleIdentity, selectedExportKeys);
+        }
+
+        var classKeySet = selectedClassKeys.ToHashSet(
+            StringComparer.Ordinal);
+        var enumAndStructKeys = selectedExportKeys.Where(exportKey =>
+            !classKeySet.Contains(exportKey)).ToArray();
+        var classReference = CreateC1M1ClassSourceTypeReference(artifacts,
+            schemaIdentities, moduleIdentity, [.. selectedClassKeys]);
+        var enumAndStructReference
+            = CreateC1EnumClosureSourceTypeReferenceCore(artifacts,
+                schemaIdentities, moduleIdentity, enumAndStructKeys);
+        if (classReference.RuntimePolicy
+                != enumAndStructReference.RuntimePolicy)
+        {
+            throw Invalid(
+                "The EN1 class and enum references selected different runtime policies.");
+        }
+
+        return new CompilationReference(
+            enumAndStructReference.Structures,
+            enumAndStructReference.Functions,
+            enumAndStructReference.RuntimePolicy,
+            enumDefinitions: enumAndStructReference.EnumDefinitions,
+            genericNominalTypeDefinitions:
+                classReference.GenericNominalTypeDefinitions,
+            standardQuerySourceAssociation:
+                enumAndStructReference.StandardQuerySourceAssociation,
+            standardClassDeclarations:
+                classReference.StandardClassDeclarations);
+    }
+
+    private static CompilationReference CreateC1EnumClosureSourceTypeReferenceCore(
         byte[][] artifacts, string[] schemaIdentities, string moduleIdentity,
         string[] selectedExportKeys)
     {
@@ -759,6 +869,8 @@ public static partial class TrRmExecutableCompiler
             .ToArray();
         var structTypeDefRows = typeDefRows.Where(typeDefRow =>
             rootTables.TypeDefs.GetKind(typeDefRow) == 1).ToArray();
+        var classTypeDefCount = typeDefRows.Count(typeDefRow =>
+            rootTables.TypeDefs.GetKind(typeDefRow) == 2);
         var structureIndexByTypeDefRow = structTypeDefRows
             .Select((typeDefRow, structureIndex) => (typeDefRow,
                 structureIndex))
@@ -772,9 +884,12 @@ public static partial class TrRmExecutableCompiler
             || typeDefCount > SemanticVerifier.MaximumAnalysisVisits
             || structTypeDefRows.Length
                 > ManagedClassTypes.First - 100
+            || classTypeDefCount
+                > ManagedClassTypes.OptionalFirst - ManagedClassTypes.First
             || enumTypeDefCount > BoundEnumTypes.MaximumCount
             || typeDefRows.Any(typeDefRow =>
-                rootTables.TypeDefs.GetKind(typeDefRow) is not (1 or 4)))
+                rootTables.TypeDefs.GetKind(typeDefRow)
+                    is not (1 or 2 or 4)))
         {
             throw Unsupported(
                 "The bounded EN1 source-reference route requires an enum and non-generic struct declaration Module within the supported limits.");
@@ -874,6 +989,10 @@ public static partial class TrRmExecutableCompiler
                         "The bounded EN1 source-reference route supports only local non-generic uncontracted struct Import stubs.");
                 }
 
+                continue;
+            }
+            if (expectedKind == 2)
+            {
                 continue;
             }
             if (expectedKind != 4)
@@ -979,6 +1098,10 @@ public static partial class TrRmExecutableCompiler
                 }
                 continue;
             }
+            if (rootTables.TypeDefs.GetKind(typeDefRow) == 2)
+            {
+                continue;
+            }
             if (rootTables.TypeDefs.GetKind(typeDefRow) != 4)
             {
                 throw Unsupported(
@@ -1059,6 +1182,10 @@ public static partial class TrRmExecutableCompiler
                     throw Invalid(
                         "An EN1 imported struct FieldDef type lost its expected TypeDef view.");
                 }
+                continue;
+            }
+            if (expectedKind == 2)
+            {
                 continue;
             }
 

@@ -634,6 +634,38 @@ internal sealed class TrRmC1EnumClosureSourceTests
         Assert.That(Enumerable.Range(1, tables.Features.Count)
                 .Select(row => tables.Features.GetFeature(row).FeatureId),
             Does.Contain(13u).And.Contain(18u));
+
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "PaletteModule", [], ["type.palette"]);
+        Assert.That(reference.StandardClassDeclarations, Has.Length.EqualTo(1));
+        Assert.That(reference.EnumDefinitions, Has.Length.EqualTo(1));
+        var sourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), reference);
+        Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceFreeCompilation.Diagnostics));
+        var reemitted = TrRmExecutableCompiler.EmitStandard(
+            sourceFreeCompilation.Program!, "PaletteModule", schemaIdentity,
+            1);
+        var reemittedTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                reemitted, SchemaFor(schemaIdentity)));
+        Assert.That(reemittedTables.TypeDefs.Count, Is.EqualTo(2));
+        Assert.That(reemittedTables.Fields.Count, Is.EqualTo(2));
+        Assert.That(reemittedTables.Exports.TryGetDefinitionForKey(1,
+            "type.palette", out _), Is.True);
+        Assert.That(reemittedTables.Exports.TryGetDefinitionForKey(1,
+            "field.palette.shade", out _), Is.True);
+        Assert.That(reemittedTables.Exports.TryGetDefinitionForKey(1,
+            "field.palette.id", out _), Is.True);
+
+        var reloadedReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+            "PaletteModule", [], ["type.palette"]);
+        Assert.That(reloadedReference.StandardClassDeclarations,
+            Has.Length.EqualTo(1));
+        Assert.That(reloadedReference.EnumDefinitions, Has.Length.EqualTo(1));
     }
 
     [Test]
