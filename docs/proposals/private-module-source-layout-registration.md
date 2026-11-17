@@ -3,7 +3,7 @@
 | Dimension | Status |
 |---|---|
 | Approval | **Unapproved candidate**, provisionally actionable only under the user's authorized missing-contract workflow; later user review remains required. |
-| Implementation | The existing host carrier and manifest are provisionally implemented for private producer/consumer source compilation; the exact candidate remains unapproved and has no stability promise. The Debug fast build and focused module/private-CLI selection passed 182/182 with zero skips, covering producer/consumer source binding, configuration-before-source failures, input/output alias rejection and native/source-free route rejection. |
+| Implementation | The existing host carrier and manifest are provisionally implemented for private producer/consumer source compilation; the exact candidate remains unapproved and has no stability promise. |
 | Stability | Unpublished CLI/configuration/private-persistence direction, not a released compatibility promise or normative adoption. |
 
 ## Missing decision and recommendation

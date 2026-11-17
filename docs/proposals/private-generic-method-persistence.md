@@ -1,23 +1,19 @@
 # Open generic methods in private semantic modules
 
 > [!IMPORTANT]
-> **Unapproved proposal; provisional direction under the authorized
-> missing-contract workflow.** This document selects a private encoding, not
-> normative approval, implemented support, execution evidence or format
-> stability. It changes no source grammar or Standard TRRM assignment.
->
-> Governing direction: “At a genuine missing contract, prepare the smallest
-> concrete decision needed as a new proposal doc using gpt-6.1-sol at max
-> reasoning, then continue with it being treated as a provisional
-> approval/direction.”
+> **Superseded as the current provisional selection by
+> [G108S](private-span-type-term-persistence.md).** Retained as the exact
+> generic-method base; no independent revision-107 support or compatibility
+> is selected.
 
 ## Decision and boundary
 
-Select **`terrum/private-semantic-107-generic-methods-1`**, abbreviated **G107**:
-the exact private revision-106/-2 base below plus method-owned formal
-identities, open declaration/body records, bounded operator evidence, retained
-closed-instance origins and one typed generic-call expression. Use private
-little-endian **i32 revision 107**, not another interpretation of 106.
+Earlier recommendation: **`terrum/private-semantic-107-generic-methods-1`**,
+abbreviated **G107**: the exact private revision-106/-2 base below plus
+method-owned formal identities, open declaration/body records, bounded
+operator evidence, retained closed-instance origins and one typed generic-call
+expression. The earlier candidate used private little-endian **i32 revision
+107**, not another interpretation of 106.
 
 The required result is independent producer/reference/consumer use, including
 semantic sets, graph libraries, replacement and source-free re-emission.
@@ -75,8 +71,22 @@ These are inspected worktree facts, not newly executed tests:
   `BoundGenericMethodDefinition` collections. Definitions retain an isolated
   proof program, entry function, source-input ordinal, visibility, caller
   unsafety, explicit formal-to-placeholder mappings and operator requirements.
-  `BoundGenericMethodInstantiation` identifies specialized functions and
-  `BoundCall.GenericMethodCall`; it currently carries **type actuals only**.
+  Used operator requirements refer by ordinal to a separate
+  `BoundGenericMethodOperatorProtocol` catalog. Each record retains the
+  qualified name, source-input/span identity, operator/arity, self role and
+  caller-unsafety. `BoundGenericMethodInstantiation` identifies specialized
+  functions and `BoundCall.GenericMethodCall`; it currently carries **type
+  actuals only**. Type-formal defaults now retain syntax-free concrete,
+  method-formal, checked-reference, optional and local source-generic type
+  terms plus earlier-formal dependency ordinals; imported generic nominal
+  terms retain exact provider/module/TypeDef identity. Native-pointer,
+  fixed-array and function-pointer terms also retain their constructors;
+  pointer/array formals require selected Blittable evidence and function
+  pointers retain calling convention and ABI-supported type positions. Call
+  binding applies defaults after inference or a supplied prefix and rejects
+  self/forward defaults. These constructor terms have no selected G107 wire
+  encoding; private persistence, provider-context remapping and constant
+  method formals remain open.
 * [`Binder.StaticProtocols.cs`](../../sources/Terrum.CodeAnalysis/Semantics/Binder.StaticProtocols.cs)
   source-binds public templates, assigns domain tags 1/1 and binds reference
   formal/result patterns and declaration dependencies. Proofs currently use

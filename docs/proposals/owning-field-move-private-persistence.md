@@ -68,17 +68,6 @@ ownership permission.
   [CG-009](../implementation/conformance-gaps.md#cg-009-owning-fields-and-partial-retirement)
   still record broader ownership/persistence gaps. In-progress nested
   source/native support does not close private exchange or that milestone.
-* The private-module test independently checks the tag-42 envelope and two
-  field-place nodes, then rejects an unknown tag, non-field operand,
-  out-of-range field/root and field-type mismatch. Direct module replacement
-  plus native graph and set execution exercise the same private payload with
-  a consumer-owned type preceding producer types. The Debug fast build and
-  combined checked-reference, partial-owner, nested-owner, cleanup and
-  private-module selection passed 63/63 with zero skips at
-  `artifacts\\tst\\Debug\\nested-owner-complete-final-v5\\nested-owner-complete-final-v5.trx`.
-  This is focused private-codec evidence, not Standard TRRM or milestone
-  acceptance.
-
 ## Exact record and place identity
 
 All integers below are little-endian. `Envelope` is the existing 13-byte

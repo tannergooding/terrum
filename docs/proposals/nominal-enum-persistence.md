@@ -96,6 +96,10 @@ or same-name/value member is allowed. Ordinary lookup *within* an already
 selected enum still selects its actual declared member by source name.
 Ordinary transparent aliases normalize to T; this introduces no wire aliases.
 
+The separate [Standard source enum identity-input candidate](standard-trrm-source-enum-identity-inputs.md)
+supplies explicit TypeDef export and complete ordered member keys for
+source-local declarations; it leaves this carrier and its exact schema unchanged.
+
 For this complete-snapshot carrier, replacement preserves the namespace/name,
 base, member key/name/ordinal/value list, Flags/access and retained
 representation facts exactly. A changed or added member does not satisfy that snapshot merely
