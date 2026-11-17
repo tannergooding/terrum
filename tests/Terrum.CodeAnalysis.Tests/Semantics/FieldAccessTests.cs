@@ -92,6 +92,49 @@ internal sealed class FieldAccessTests
         _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(malformed, NativeRuntimePolicy.FailFast))!;
     }
 
+    [Test]
+    public void PublicIrCannotForgeWriteThroughAReadOnlyCheckedReferenceField()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            struct Cell {
+                public mut int32 Value;
+                public Cell(int32 value) { Value = value; }
+            }
+            int32 Main() {
+                mut Cell cell = new Cell(int32(1));
+                write ref<Cell> borrowedCell = ref cell;
+                (*borrowedCell).Value = int32(42);
+                return cell.Value;
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var actual = compilation.Program;
+            Assert.That(actual, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)actual!;
+        }))();
+        var cellIndex = -1;
+        for (var index = 0; index < program.Structures.Length; index++)
+        {
+            if (program.Structures[index].Name == "Cell")
+            {
+                cellIndex = index;
+                break;
+            }
+        }
+        Assert.That(cellIndex, Is.GreaterThanOrEqualTo(0));
+        var cell = program.Structures[cellIndex];
+        var malformed = program with {
+            Structures = program.Structures.SetItem(cellIndex, cell with {
+                Fields = cell.Fields.SetItem(0,
+                    cell.Fields[0] with { IsMutable = false }),
+            }),
+        };
+        _ = Assert.Throws<ArgumentException>(
+            () => SemanticVerifier.Verify(malformed))!;
+    }
+
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void WritableClassHandleSurvivesReadonlyManagedField(NativeRuntimePolicy policy)
@@ -171,7 +214,8 @@ internal sealed class FieldAccessTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         var range = await File.ReadAllTextAsync(TerrumProjectPaths.RepositoryFile(root, "sources/Terrum.CodeAnalysis.Terrum/Text/SourceRange.terrum")).ConfigureAwait(false);
-        var entry = "using Terrum.CodeAnalysis; int32 Main() { require SourceRange.TryCreate(0, 1, init var range); "
+        var entry = "using Terrum.CodeAnalysis; int32 Main() { init SourceRange range; "
+            + "require SourceRange.TryCreate(0, 1, ref init range); "
             + "mut SourceRange copy = range; copy.Start = -1; return 0; }";
         var compilation = Compilation.Create([SyntaxTree.Parse(range), SyntaxTree.Parse(entry)]);
         Assert.That(compilation.HasErrors, Is.True);

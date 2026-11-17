@@ -15,7 +15,11 @@ internal sealed class ConstExpressionTests
     public void PrefixPrecedenceAndParenthesesSelectTheRequiredSubexpression()
     {
         const string Source = """
-            [ConstEval] int32 Add(int32 left, int32 right) { return left + right; }
+            [ConstEval] int32 Add(int32 left, int32 right)
+                require left >= 0 && left <= 1073741823
+                    && right >= 0 && right <= 1073741823 {
+                return left + right;
+            }
             int32 Main() {
                 int32 left = const Add(1, 1) + 40;
                 int32 whole = const (Add(1, 1) + 40);
@@ -32,7 +36,7 @@ internal sealed class ConstExpressionTests
         }))();
         Assert.That(version.GetRawConstantValue(), Is.EqualTo("syntax-47"));
         Assert.That(tree.Root.DescendantNodes().Count(node => node.Kind == SyntaxKind.ConstExpression), Is.EqualTo(2));
-        var compilation = Compilation.Create(tree);
+        var compilation = CreateConstEvalCompilation(tree);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var main = global::System.Linq.Enumerable.Single(((global::System.Func<BoundProgram>)(() => {
             var __nunitActual1 = compilation.Program;
@@ -150,12 +154,16 @@ internal sealed class ConstExpressionTests
     public void RequiredArgumentReplacesOnlyThatCallPosition()
     {
         const string Source = """
-            [ConstEval] int32 Twice(int32 value) { return value + value; }
+            [ConstEval] int32 Twice(int32 value)
+                require value >= 0 && value <= 1073741823 {
+                return value + value;
+            }
             int32 Runtime(int32 value) { return value + 1; }
             int32 Add(int32 left, int32 right) { return left + right; }
             int32 Main() { return Add(Runtime(1), const Twice(20)); }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(Source));
+        var compilation = CreateConstEvalCompilation(
+            SyntaxTree.Parse(Source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var main = global::System.Linq.Enumerable.Single(((global::System.Func<BoundProgram>)(() => {
             var __nunitActual20 = compilation.Program;
@@ -201,7 +209,8 @@ internal sealed class ConstExpressionTests
             int32 NotConst() { return 1; }
             int32 Main() { STATEMENT }
             """.Replace("STATEMENT", statement, StringComparison.Ordinal);
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = CreateConstEvalCompilation(
+            SyntaxTree.Parse(source));
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3024"
             && diagnostic.Message.Contains(message, StringComparison.Ordinal)),Is.True);
     }
@@ -239,7 +248,8 @@ internal sealed class ConstExpressionTests
             [ConstEval] int32 Outer() { return const Inner() + 1; }
             [ConstEval] int32 Inner() { return 41; }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(Source));
+        var compilation = CreateConstEvalCompilation(
+            SyntaxTree.Parse(Source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => {
             var __nunitActual25 = compilation.Program;
@@ -268,4 +278,9 @@ internal sealed class ConstExpressionTests
             return (BoundConstant)__nunitActual30!;
         }))().Value, Is.EqualTo(41));
     }
+
+    private static Compilation CreateConstEvalCompilation(SyntaxTree tree)
+        => Compilation.Create(tree,
+            CoreEvaluationFormTestHelpers
+                .OptionsWithConstEvalAndContractFailures());
 }

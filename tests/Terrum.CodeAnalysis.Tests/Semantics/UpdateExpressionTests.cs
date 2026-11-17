@@ -318,7 +318,8 @@ internal sealed class UpdateExpressionTests
                 return old + ++value - 40;
             }
             int32 Main() { const int32 result = Calculate(); return result; }
-            """, NativeRuntimePolicy.FailFast);
+            """, NativeRuntimePolicy.FailFast,
+            withConstEval: true);
         var entry = valid.Functions[valid.EntryPoint];
         Assert.That(((global::System.Func<BoundConstant>)(() => {
             var __nunitActual3 = ((global::System.Func<BoundLocal>)(() => {
@@ -331,7 +332,7 @@ internal sealed class UpdateExpressionTests
         var overflow = Compilation.Create(SyntaxTree.Parse("""
             [ConstEval] int32 Calculate() { mut int32 value = int32.MaxValue; return value++; }
             int32 Main() { const int32 result = Calculate(); return result; }
-            """));
+            """), CoreEvaluationFormTestHelpers.Options());
         Assert.That(global::System.Linq.Enumerable.Any(overflow.Diagnostics,item => item.Code == "TRM3024"),Is.True);
     }
 
@@ -454,9 +455,19 @@ internal sealed class UpdateExpressionTests
             TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(43));
     }
 
-    private static BoundProgram Compile(string source, NativeRuntimePolicy policy)
+    private static BoundProgram Compile(string source,
+        NativeRuntimePolicy policy, bool withConstEval = false)
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse(source), runtimePolicy: (BoundRuntimePolicy)policy);
+        var options = new CompilationOptions {
+            RuntimePolicy = (BoundRuntimePolicy)policy,
+        };
+        if (withConstEval)
+        {
+            options = CoreEvaluationFormTestHelpers.WithConstEval(options);
+        }
+
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            options);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         return ((global::System.Func<BoundProgram>)(() => {
             var __nunitActual10 = compilation.Program;
@@ -467,7 +478,8 @@ internal sealed class UpdateExpressionTests
 
     private static BoundProgram CompileLibrary(string source, NativeRuntimePolicy policy)
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         return ((global::System.Func<BoundProgram>)(() => {
             var __nunitActual11 = compilation.Program;

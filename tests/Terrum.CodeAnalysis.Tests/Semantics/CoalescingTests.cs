@@ -142,27 +142,29 @@ internal sealed class CoalescingTests
     public void KnownCoalescePresencePreservesNestedOutputState(NativeRuntimePolicy policy)
     {
         const string source = """
-             ManagedNode? OptionalFallback(init ref<int32> value) {
-                value = 42;
+             ManagedNode? OptionalFallback(ref<init int32> value) {
+                *value = 42;
                 return null;
             }
-             bool Identity(bool input, init ref<int32> result) {
+             bool Identity(bool input, ref<init int32> result) {
                 if (!input) { return false; }
-                result = 42;
+                *result = 42;
                 return true;
             }
-             bool Fill(bool publish, init ref<int32> value) {
+             bool Fill(bool publish, ref<init int32> value) {
                 if (!publish) { return false; }
-                value = 42;
+                *value = 42;
                 return true;
             }
             int32 Main() {
                 require ManagedNode.TryCreate(42, out var leaf);
                 init int32 vacant;
-                if (Identity((leaf ?? OptionalFallback(init vacant)) is some selected, init var live)) {
-                    require Fill(true, init vacant);
+                init int32 live;
+                if (Identity((leaf ?? OptionalFallback(ref init vacant)) is some selected, ref init live)) {
+                    require Fill(true, ref init vacant);
                     init int32 nullResult;
-                    if (Identity((null ?? OptionalFallback(init nullResult)) is null, init var nullLive)) {
+                    init int32 nullLive;
+                    if (Identity((null ?? OptionalFallback(ref init nullResult)) is null, ref init nullLive)) {
                         return live + vacant + nullLive + nullResult;
                     }
                 }
@@ -176,28 +178,29 @@ internal sealed class CoalescingTests
     public void KnownCoalescePresenceSkipsInfeasibleBooleanArm(NativeRuntimePolicy policy)
     {
         const string source = """
-             ManagedNode? OptionalFallback(init ref<int32> value) {
-                value = 42;
+             ManagedNode? OptionalFallback(ref<init int32> value) {
+                *value = 42;
                 return null;
             }
-             bool Identity(bool input, init ref<int32> result) {
+             bool Identity(bool input, ref<init int32> result) {
                 if (!input) { return false; }
-                result = 42;
+                *result = 42;
                 return true;
             }
-             bool Fill(bool publish, init ref<int32> value) {
+             bool Fill(bool publish, ref<init int32> value) {
                 if (!publish) { return false; }
-                value = 42;
+                *value = 42;
                 return true;
             }
             int32 Main() {
                 require ManagedNode.TryCreate(42, out var leaf);
                 init int32 vacant;
                 init int32 dead;
-                if (Identity(((leaf ?? OptionalFallback(init vacant)) is some selected)
-                    || Fill(true, init dead), init var live)) {
-                    require Fill(true, init vacant);
-                    require Fill(true, init dead);
+                init int32 live;
+                if (Identity(((leaf ?? OptionalFallback(ref init vacant)) is some selected)
+                    || Fill(true, ref init dead), ref init live)) {
+                    require Fill(true, ref init vacant);
+                    require Fill(true, ref init dead);
                     return live + vacant + dead;
                 }
                 return 0;
@@ -210,30 +213,31 @@ internal sealed class CoalescingTests
     public void KnownPresentCoalesceMakesNullArmInfeasible(NativeRuntimePolicy policy)
     {
         const string source = """
-                 ManagedNode? OptionalFallback(init ref<int32> value) {
-                    value = 42;
+                 ManagedNode? OptionalFallback(ref<init int32> value) {
+                    *value = 42;
                     return null;
                 }
-                 bool Identity(bool input, init ref<int32> result) {
+                 bool Identity(bool input, ref<init int32> result) {
                     if (!input) { return false; }
-                    result = 42;
+                    *result = 42;
                     return true;
                 }
-                 bool Fill(bool publish, init ref<int32> value) {
+                 bool Fill(bool publish, ref<init int32> value) {
                     if (!publish) { return false; }
-                    value = 42;
+                    *value = 42;
                     return true;
                 }
                 int32 Main() {
                     require ManagedNode.TryCreate(42, out var leaf);
                     init int32 vacant;
                     init int32 dead;
-                    if (Identity(((leaf ?? OptionalFallback(init vacant)) is null)
-                        && Fill(true, init dead), init var live)) {
+                    init int32 live;
+                    if (Identity(((leaf ?? OptionalFallback(ref init vacant)) is null)
+                        && Fill(true, ref init dead), ref init live)) {
                         return 1;
                     }
-                    require Fill(true, init vacant);
-                    require Fill(true, init dead);
+                    require Fill(true, ref init vacant);
+                    require Fill(true, ref init dead);
                     return vacant + dead;
                 }
                 """;
@@ -244,22 +248,22 @@ internal sealed class CoalescingTests
     public void KnownInitializationSelectsPresentConditionalBeforeCoalescing(NativeRuntimePolicy policy)
     {
         const string source = """
-             bool Fill(init ref<int32> value) {
-                value = 42;
+             bool Fill(ref<init int32> value) {
+                *value = 42;
                 return true;
             }
-             ManagedNode? OptionalFallback(init ref<int32> value) {
-                value = 21;
+             ManagedNode? OptionalFallback(ref<init int32> value) {
+                *value = 21;
                 return null;
             }
             int32 Main() {
                 require ManagedNode.TryCreate(42, out var leaf);
                 init int32 ready;
-                require Fill(init ready);
+                require Fill(ref init ready);
                 init int32 vacant;
                 if (((ready is init ? leaf : null)
-                    ?? OptionalFallback(init vacant)) is some selected) {
-                    require Fill(init vacant);
+                    ?? OptionalFallback(ref init vacant)) is some selected) {
+                    require Fill(ref init vacant);
                     return vacant;
                 }
                 return 0;
@@ -272,20 +276,20 @@ internal sealed class CoalescingTests
     public void KnownConstantSelectsPresentConditionalBeforeCoalescing(NativeRuntimePolicy policy)
     {
         const string source = """
-                 bool Fill(init ref<int32> value) {
-                    value = 42;
+                 bool Fill(ref<init int32> value) {
+                    *value = 42;
                     return true;
                 }
-                 ManagedNode? OptionalFallback(init ref<int32> value) {
-                    value = 21;
+                 ManagedNode? OptionalFallback(ref<init int32> value) {
+                    *value = 21;
                     return null;
                 }
                 int32 Main() {
                     require ManagedNode.TryCreate(42, out var leaf);
                     init int32 vacant;
                     if (((true ? leaf : null)
-                        ?? OptionalFallback(init vacant)) is some selected) {
-                        require Fill(init vacant);
+                        ?? OptionalFallback(ref init vacant)) is some selected) {
+                        require Fill(ref init vacant);
                         return vacant;
                     }
                     return 0;
@@ -298,8 +302,8 @@ internal sealed class CoalescingTests
     public void KnownUninitializedSelectsAbsentConditionalBeforeCoalescing(NativeRuntimePolicy policy)
     {
         const string source = """
-             ManagedNode? OptionalFallback(init ref<int32> value) {
-                value = 21;
+             ManagedNode? OptionalFallback(ref<init int32> value) {
+                *value = 21;
                 return null;
             }
             int32 Main() {
@@ -307,7 +311,7 @@ internal sealed class CoalescingTests
                 init int32 ready;
                 init int32 result;
                 if (((ready is init ? leaf : null)
-                    ?? OptionalFallback(init result)) is some selected) {
+                    ?? OptionalFallback(ref init result)) is some selected) {
                     return 1;
                 }
                 return result;
@@ -320,19 +324,19 @@ internal sealed class CoalescingTests
     public void NestedKnownPresentCoalesceKeepsFallbackOutputVacant(NativeRuntimePolicy policy)
     {
         const string source = """
-             ManagedNode? OptionalFallback(init ref<int32> value) {
-                value = 42;
+             ManagedNode? OptionalFallback(ref<init int32> value) {
+                *value = 42;
                 return null;
             }
-             bool Fill(init ref<int32> value) {
-                value = 42;
+             bool Fill(ref<init int32> value) {
+                *value = 42;
                 return true;
             }
             int32 Main() {
                 require ManagedNode.TryCreate(1, out var leaf);
                 init int32 vacant;
-                if (((leaf ?? null) ?? OptionalFallback(init vacant)) is some selected) {
-                    require Fill(init vacant);
+                if (((leaf ?? null) ?? OptionalFallback(ref init vacant)) is some selected) {
+                    require Fill(ref init vacant);
                     return vacant;
                 }
                 return 0;
@@ -345,31 +349,32 @@ internal sealed class CoalescingTests
     public void KnownInitializationPrunesInfeasibleSomeBooleanArm(NativeRuntimePolicy policy)
     {
         const string source = """
-             ManagedNode? OptionalFallback(init ref<int32> value) {
-                value = 42;
+             ManagedNode? OptionalFallback(ref<init int32> value) {
+                *value = 42;
                 return null;
             }
-             bool Identity(bool input, init ref<int32> result) {
+             bool Identity(bool input, ref<init int32> result) {
                 if (!input) { return false; }
-                result = 42;
+                *result = 42;
                 return true;
             }
-             bool Fill(bool publish, init ref<int32> value) {
+             bool Fill(bool publish, ref<init int32> value) {
                 if (!publish) { return false; }
-                value = 42;
+                *value = 42;
                 return true;
             }
             int32 Main() {
                 require ManagedNode.TryCreate(42, out var leaf);
                 init int32 ready;
-                require Fill(true, init ready);
+                require Fill(true, ref init ready);
                 init int32 vacant;
                 init int32 dead;
+                init int32 live;
                 if (Identity(((ready is init ? leaf : null)
-                    ?? OptionalFallback(init vacant)) is some selected
-                    || Fill(true, init dead), init var live)) {
-                    require Fill(true, init vacant);
-                    require Fill(true, init dead);
+                    ?? OptionalFallback(ref init vacant)) is some selected
+                    || Fill(true, ref init dead), ref init live)) {
+                    require Fill(true, ref init vacant);
+                    require Fill(true, ref init dead);
                     return live + vacant + dead;
                 }
                 return 0;
@@ -382,33 +387,34 @@ internal sealed class CoalescingTests
     public void KnownInitializationPrunesInfeasibleNullBooleanArm(NativeRuntimePolicy policy)
     {
         const string source = """
-             ManagedNode? OptionalFallback(init ref<int32> value) {
-                value = 42;
+             ManagedNode? OptionalFallback(ref<init int32> value) {
+                *value = 42;
                 return null;
             }
-             bool Identity(bool input, init ref<int32> result) {
+             bool Identity(bool input, ref<init int32> result) {
                 if (!input) { return false; }
-                result = 42;
+                *result = 42;
                 return true;
             }
-             bool Fill(bool publish, init ref<int32> value) {
+             bool Fill(bool publish, ref<init int32> value) {
                 if (!publish) { return false; }
-                value = 42;
+                *value = 42;
                 return true;
             }
             int32 Main() {
                 require ManagedNode.TryCreate(42, out var leaf);
                 init int32 ready;
-                require Fill(true, init ready);
+                require Fill(true, ref init ready);
                 init int32 vacant;
                 init int32 dead;
+                init int32 live;
                 if (Identity(((ready is init ? leaf : null)
-                    ?? OptionalFallback(init vacant)) is null
-                    && Fill(true, init dead), init var live)) {
+                    ?? OptionalFallback(ref init vacant)) is null
+                    && Fill(true, ref init dead), ref init live)) {
                     return 1;
                 }
-                require Fill(true, init vacant);
-                require Fill(true, init dead);
+                require Fill(true, ref init vacant);
+                require Fill(true, ref init dead);
                 return 84;
             }
             """;
@@ -419,19 +425,19 @@ internal sealed class CoalescingTests
     public void ChainedKnownPresentCoalesceKeepsFallbackOutputVacant(NativeRuntimePolicy policy)
     {
         const string source = """
-                 ManagedNode? OptionalFallback(init ref<int32> value) {
-                    value = 42;
+                 ManagedNode? OptionalFallback(ref<init int32> value) {
+                    *value = 42;
                     return null;
                 }
-                 bool Fill(init ref<int32> value) {
-                    value = 42;
+                 bool Fill(ref<init int32> value) {
+                    *value = 42;
                     return true;
                 }
                 int32 Main() {
                     require ManagedNode.TryCreate(1, out var leaf);
                     init int32 vacant;
-                    if ((((leaf ?? null) ?? null) ?? OptionalFallback(init vacant)) is some selected) {
-                        require Fill(init vacant);
+                    if ((((leaf ?? null) ?? null) ?? OptionalFallback(ref init vacant)) is some selected) {
+                        require Fill(ref init vacant);
                         return vacant;
                     }
                     return 0;
@@ -479,21 +485,21 @@ internal sealed class CoalescingTests
     public void ConditionalKnownPresentCoalesceSkipsInfeasibleBooleanArm(NativeRuntimePolicy policy)
     {
         const string source = """
-             ManagedNode? OptionalFallback(init ref<int32> value) {
-                value = 42;
+             ManagedNode? OptionalFallback(ref<init int32> value) {
+                *value = 42;
                 return null;
             }
-             bool Fill(init ref<int32> value) {
-                value = 42;
+             bool Fill(ref<init int32> value) {
+                *value = 42;
                 return true;
             }
             int32 Main() {
                 require ManagedNode.TryCreate(1, out var leaf);
                 bool choose = true;
                 init int32 dead;
-                if (((choose ? leaf : leaf) ?? OptionalFallback(init dead)) is some selected
-                    || Fill(init dead)) {
-                    require Fill(init dead);
+                if (((choose ? leaf : leaf) ?? OptionalFallback(ref init dead)) is some selected
+                    || Fill(ref init dead)) {
+                    require Fill(ref init dead);
                     return dead;
                 }
                 return 0;
@@ -763,16 +769,16 @@ internal sealed class CoalescingTests
     {
         const string library = """
             mut class Leaf { public int32 Value; public Leaf(int32 value) { Value = value; } }
-            bool Fill(bool publish, init ref<Leaf?> output) {
+            bool Fill(bool publish, ref<init Leaf?> output) {
                 if (publish) {
                     require Leaf.TryCreate(42, out var leaf);
-                    output = leaf;
+                    *output = leaf;
                     return true;
                 }
                 return false;
             }
-            bool FillNull(init ref<Leaf?> output) {
-                output = null;
+            bool FillNull(ref<init Leaf?> output) {
+                *output = null;
                 return true;
             }
             Leaf? Identity(Leaf? value) { return value; }
@@ -781,14 +787,16 @@ internal sealed class CoalescingTests
                 init Leaf? vacant;
                 if (vacant is var absentPayload) { return 10; }
                 if (vacant is var? vacantValue) { return 1; }
-                if (Fill(false, init var value)) { return 2; }
+                init Leaf? value;
+                if (Fill(false, ref init value)) { return 2; }
                 if (value is var failedPayload) { return 11; }
                 if (value is var? failedValue) { return 3; }
-                require Fill(true, init value);
+                require Fill(true, ref init value);
                 if (!(value is var? nullable)) { return 4; }
                 if (nullable is null) { return 5; }
                 if (!(value is var present)) { return 6; }
-                require FillNull(init var initializedNull);
+                init Leaf? initializedNull;
+                require FillNull(ref init initializedNull);
                 if (!(initializedNull is var? capturedNull)) { return 7; }
                 if (!(capturedNull is null)) { return 8; }
                 if (!(capturedNull is var? repeatedNull)) { return 16; }
@@ -806,12 +814,19 @@ internal sealed class CoalescingTests
             """;
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(library), (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
-            var __nunitActual4 = compilation.Program;
-            Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
-            return (BoundProgram)__nunitActual4!;
-        }))(), ["Select"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(104));
+        var program = compilation.Program!;
+        var leafClassIndex = program.Classes
+            .Select((@class, index) => (@class, index))
+            .Single(item => item.@class.Name == "Leaf").index;
+        var identityInputs = PrivateModuleIdentityInputs.Create(program,
+            "CoalescingTests",
+            [new PrivateNominalDefinition(
+                (PrimitiveType)(ManagedClassTypes.First + leafClassIndex),
+                "types.leaf",
+                IsExported: !program.Classes[leafClassIndex].IsInternal)], []);
+        var producer = ModuleCompiler.CreateProducer(program, ["Select"],
+            identityInputs);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(106));
         var old = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(old.AsSpan(4, 4), 47);
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(old));
@@ -824,7 +839,7 @@ internal sealed class CoalescingTests
             Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>());
             return (BoundProgram)__nunitActual5!;
         }))(), producer);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(104));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(106));
         var linked = ModuleCompiler.Link(consumer, producer);
         Assert.That(NativeEmitter.Emit(linked, policy), Is.Not.Empty);
         Assert.That(NativeJit.Execute(linked, policy), Is.EqualTo(42));

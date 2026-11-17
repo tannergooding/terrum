@@ -534,14 +534,15 @@ internal sealed class FloatingLiteralBindingTests
                  public Pair(Inner nested, float64 wide) { Nested = nested; Wide = wide; }
                  public float32 ReadSingle() { return Nested.Single; }
             }
-             T Identity<T>(T value) where T : [Copy] { return value; }
-             bool TryCreatePair(init ref<Pair> result) {
-                result = new Pair(new Inner(float32(1), 42), float64(2));
+             T Identity<T>(T value)  { return value; }
+             bool TryCreatePair(ref<init Pair> result) {
+                *result = new Pair(new Inner(float32(1), 42), float64(2));
                 return true;
             }
              float32 CopyFloat(float32 value) { return value; }
-             T Forward<T>(T value) where T : [Copy] {
-                if (!TryCreatePair(init var pair)) { return Identity(value); }
+             T Forward<T>(T value)  {
+                init Pair pair;
+                if (!TryCreatePair(ref init pair)) { return Identity(value); }
                 if (CopyFloat(pair.ReadSingle()) != float32(1) || pair.Wide != float64(2)) {
                     return Identity(value);
                 }
@@ -598,12 +599,12 @@ internal sealed class FloatingLiteralBindingTests
     public void GenericFloatingOutputResultsPreserveExactReturnBits()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
-            float32 Select32<T>(T value, int32 selector, out T copied, init ref<T> initialized,
-                out int32 count, init ref<float64> score) where T : [Copy] {
+            float32 Select32<T>(T value, int32 selector, out T copied, ref<init T> initialized,
+                out int32 count, ref<init float64> score)  {
                 copied = value;
-                initialized = value;
+                *initialized = value;
                 count = 2;
-                score = float64(3.5);
+                *score = float64(3.5);
                 if (selector == 0) { return float32(0.0); }
                 if (selector == 1) { return float32(-0.0); }
                 if (selector == 2) { return float32(0x1p-149); }
@@ -611,12 +612,12 @@ internal sealed class FloatingLiteralBindingTests
                 if (selector == 4) { return float32(-0x1p+128); }
                 return float32(1.000000059604644775390625);
             }
-            float64 Select64<T>(T value, int32 selector, out T copied, init ref<T> initialized,
-                out int32 count, init ref<float32> score) where T : [Copy] {
+            float64 Select64<T>(T value, int32 selector, out T copied, ref<init T> initialized,
+                out int32 count, ref<init float32> score)  {
                 copied = value;
-                initialized = value;
+                *initialized = value;
                 count = 3;
-                score = float32(4.5);
+                *score = float32(4.5);
                 if (selector == 0) { return float64(0.0); }
                 if (selector == 1) { return float64(-0.0); }
                 if (selector == 2) { return float64(0x1p-1074); }
@@ -629,8 +630,8 @@ internal sealed class FloatingLiteralBindingTests
                 init int32 initialized;
                 mut int32 count = 0;
                 init float64 score;
-                float32 result = Select32<int32>(42, selector, out copied, init initialized,
-                    out count, init score);
+                float32 result = Select32<int32>(42, selector, out copied, ref init initialized,
+                    out count, ref init score);
                 require copied == 42 && initialized == 42 && count == 2 && score == float64(3.5);
                 return result;
             }
@@ -639,8 +640,8 @@ internal sealed class FloatingLiteralBindingTests
                 init int32 initialized;
                 mut int32 count = 0;
                 init float32 score;
-                float64 result = Select64<int32>(42, selector, out copied, init initialized,
-                    out count, init score);
+                float64 result = Select64<int32>(42, selector, out copied, ref init initialized,
+                    out count, ref init score);
                 require copied == 42 && initialized == 42 && count == 3 && score == float32(4.5);
                 return result;
             }
@@ -774,7 +775,8 @@ internal sealed class FloatingLiteralBindingTests
     public void AcceptsFloatingScalarsInConstEval(string type)
     {
         var source = $"[ConstEval] int32 Read() {{ const {type} value = 0.1; return 42; }}";
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            CoreEvaluationFormTestHelpers.Options());
 
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
     }

@@ -2,6 +2,7 @@
 
 using System;
 using System.Linq;
+using System.Numerics;
 using System.Threading;
 using NUnit.Framework;
 using Terrum.CodeAnalysis.Native;
@@ -14,6 +15,21 @@ namespace Terrum.CodeAnalysis.Tests.Semantics;
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
 internal sealed class CompilationTests
 {
+    private static readonly string[] s_partialEnumMemberNames = [
+        "Earlier", "Duplicate", "Negative", "Successor",
+    ];
+    private static readonly BigInteger[] s_partialEnumMemberValues = [
+        12, 12, -128, -127,
+    ];
+    private static readonly string[] s_fileLocalEnumMemberNames = [
+        "First", "Second",
+    ];
+    private static readonly BigInteger[] s_wideEnumMemberValues = [
+        new(4_294_967_296UL), new(4_294_967_297UL),
+    ];
+    private static readonly ulong[] s_enumFieldSizes = [1, 8];
+    private static readonly ulong[] s_enumFieldOffsets = [0, 8];
+
     [TestCase("int32 Main() { return 1 + 2 * 3; }")]
     [TestCase("void Main() { return (); }")]
     [TestCase("int32 Main() { var x = int32(3); return x; }")]
@@ -182,6 +198,201 @@ internal sealed class CompilationTests
     }
 
     [Test]
+    public void BindsPartialSourceEnumsAndImportedAliases()
+    {
+        var secondary = SyntaxTree.Parse("""
+            namespace Demo {
+                partial enum Shade {
+                    Earlier = 12,
+                    Duplicate = 12
+                }
+            }
+            """, "secondary.terrum");
+        var primary = SyntaxTree.Parse("""
+            namespace Demo {
+                struct Shade<T> { }
+                public partial enum Shade : int8 {
+                    Negative = -128,
+                    Successor
+                }
+            }
+            """, "primary.terrum");
+        var consumer = SyntaxTree.Parse("""
+            using Demo;
+            alias SelectedShade = Shade;
+            SelectedShade GetShade() { return SelectedShade.Duplicate; }
+            int32 Main() { return 0; }
+            """, "consumer.terrum");
+
+        var compilation = Compilation.Create([secondary, primary, consumer]);
+
+        var sourceProgram = compilation.Program;
+        var verifierFailure = "";
+        if (sourceProgram is not null)
+        {
+            try
+            {
+                SemanticVerifier.Verify(sourceProgram);
+            }
+            catch (Exception exception) when (exception is ArgumentException
+                or NotSupportedException)
+            {
+                verifierFailure = exception.ToString();
+            }
+        }
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics)
+            + Environment.NewLine + verifierFailure);
+        var program = sourceProgram!;
+        var definition = program.EnumDefinitions.Single(
+            static item => item.Name == "Demo.Shade");
+        Assert.That(definition.UnderlyingType, Is.EqualTo(PrimitiveType.Int8));
+        Assert.That(definition.Members.Select(static member => member.Name),
+            Is.EqualTo(s_partialEnumMemberNames));
+        Assert.That(definition.Members.Select(static member => member.Value),
+            Is.EqualTo(s_partialEnumMemberValues));
+        Assert.That(definition.Members[0].Identity,
+            Is.Not.SameAs(definition.Members[1].Identity));
+        Assert.That(definition.Members.All(static member =>
+            member.DeclarationKey is null), Is.True);
+    }
+
+    [Test]
+    public void BindsFileLocalEnumsWithinTheirSourceUnits()
+    {
+        var first = SyntaxTree.Parse("""
+            namespace Shared {
+                file enum Token : int32 { First = 1 }
+                Token FirstToken() { return Token.First; }
+                int32 Main() { return 0; }
+            }
+            """, "first.terrum");
+        var second = SyntaxTree.Parse("""
+            namespace Shared {
+                file enum Token : int32 { Second = 2 }
+                Token SecondToken() { return Token.Second; }
+            }
+            """, "second.terrum");
+
+        var compilation = Compilation.Create([first, second]);
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        SemanticVerifier.Verify(program);
+        var definitions = program.EnumDefinitions.Where(
+            static item => item.Name == "Shared.Token").ToArray();
+        Assert.That(definitions, Has.Length.EqualTo(2));
+        Assert.That(definitions.Select(static item => item.Identity).Distinct()
+            .Count(), Is.EqualTo(2));
+        Assert.That(definitions.SelectMany(static item => item.Members)
+            .Select(static member => member.Name),
+            Is.EquivalentTo(s_fileLocalEnumMemberNames));
+    }
+
+    [Test]
+    public void PreservesWideSourceEnumValues()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            public enum Wide : uint64 {
+                Large = 4294967296,
+                Successor
+            }
+            int32 Main() { return 0; }
+            """));
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        var definition = program.EnumDefinitions.Single(
+            static item => item.Name == "Wide");
+        Assert.That(definition.UnderlyingType, Is.EqualTo(PrimitiveType.UInt64));
+        Assert.That(definition.Members.Select(static member => member.Value),
+            Is.EqualTo(s_wideEnumMemberValues));
+        SemanticVerifier.Verify(program);
+    }
+
+    [Test]
+    public void LaysOutSourceEnumsUsingTheirUnderlyingIntegerStorage()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            public enum ByteEnum : int8 { Value = -7 }
+            public enum WideEnum : uint64 { Value = 4294967296 }
+            struct Pair {
+                ByteEnum Small;
+                WideEnum Large;
+            }
+            ByteEnum GetByte() { return ByteEnum.Value; }
+            WideEnum GetWide() { return WideEnum.Value; }
+            int32 Main() {
+                mut [ByteEnum; 3] values = [
+                    ByteEnum.Value, ByteEnum.Value, ByteEnum.Value];
+                values[1] = ByteEnum.Value;
+                var arrayValue = values[1];
+                var byteValue = GetByte();
+                var wideValue = GetWide();
+                return 42;
+            }
+            """));
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        SemanticVerifier.Verify(program);
+        var byteEnum = BoundEnumTypes.Type(program.EnumDefinitions
+            .Select((definition, index) => (definition, index))
+            .Single(static item => item.definition.Name == "ByteEnum")
+            .index);
+        var wideEnum = BoundEnumTypes.Type(program.EnumDefinitions
+            .Select((definition, index) => (definition, index))
+            .Single(static item => item.definition.Name == "WideEnum")
+            .index);
+        var pair = program.Structures.Single(
+            static structure => structure.Name == "Pair");
+
+        Assert.That(ValueLayout.Size(byteEnum, program.Structures,
+            enumDefinitions: program.EnumDefinitions), Is.EqualTo(1));
+        Assert.That(ValueLayout.Alignment(byteEnum, program.Structures,
+            enumDefinitions: program.EnumDefinitions), Is.EqualTo(1));
+        Assert.That(ValueLayout.Size(wideEnum, program.Structures,
+            enumDefinitions: program.EnumDefinitions), Is.EqualTo(8));
+        Assert.That(ValueLayout.Alignment(wideEnum, program.Structures,
+            enumDefinitions: program.EnumDefinitions), Is.EqualTo(8));
+        var byteArray = program.NativeFixedArrayTypes.Single(
+            fixedArray => fixedArray.ElementType == byteEnum);
+        Assert.That(byteArray.ElementStride, Is.EqualTo(1));
+        Assert.That(byteArray.ByteExtent, Is.EqualTo(3));
+        Assert.That(pair.Size, Is.EqualTo(16));
+        Assert.That(pair.Fields.Select(static field => field.Size),
+            Is.EqualTo(s_enumFieldSizes));
+        Assert.That(pair.Fields.Select(static field => field.Offset),
+            Is.EqualTo(s_enumFieldOffsets));
+        Assert.That(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast),
+            Is.Not.Empty);
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast),
+            Is.EqualTo(42));
+    }
+
+    [TestCase("public enum MissingBase { Value }", "TRM3001")]
+    [TestCase("public enum Overflow : int8 { Last = 127, Next }", "TRM3013")]
+    [TestCase("public enum Duplicate : int32 { Same = 1, Same = 2 }", "TRM3003")]
+    [TestCase("public enum Narrow : int8 { Value = int16(1) }", "TRM3024")]
+    [TestCase("public enum Other : int8 { Value = 1 } public enum Target : int8 { Copy = Other.Value }", "TRM3024")]
+    [TestCase("public partial enum Repeated : int32 { First = 1 } partial enum Repeated : int32 { Second = 2 }", "TRM3001")]
+    [TestCase("public enum InvalidBase : bool { Value = false }", "TRM3005")]
+    public void RejectsInvalidSourceEnums(string declaration,
+        string expectedDiagnostic)
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(
+            declaration + " int32 Main() { return 0; }"));
+
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Diagnostics.Any(diagnostic =>
+            diagnostic.Code == expectedDiagnostic), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
     public void PublicAliasesPreserveTheResolvedTypeInExecutableSource()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(
@@ -240,7 +451,7 @@ internal sealed class CompilationTests
                 public Node(int32 value) { Value = value; }
             }
             alias MaybeNode = Node?;
-            T Identity<T>(T value) where T : [Copy] { return value; }
+            T Identity<T>(T value) where T : null? { return value; }
             int32 Main() {
                 MaybeNode absent = null;
                 MaybeNode result = Identity<MaybeNode>(absent);
@@ -268,7 +479,7 @@ internal sealed class CompilationTests
     {
         var entry = SyntaxTree.Parse("""
             using Demo;
-            T Identity<T>(T value) where T : [Copy] {
+            T Identity<T>(T value)  {
                 Same<T> copy = value;
                 return value;
             }

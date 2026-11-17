@@ -200,7 +200,7 @@ internal sealed class NominalUpdateTests
                 public Value(int32 number) { Number = number; }
                 public static Value operator ++(Value value) { return new Value(value.Number + 1); }
             }
-            T Next<T>(T value) where T : {{constraint}}, [Copy] {
+            T Next<T>(T value) where T : {{constraint}} {
                 mut T result = value;
                 result++;
                 return ++result;
@@ -211,8 +211,8 @@ internal sealed class NominalUpdateTests
     }
     [TestCase("struct Value : Increment<Value, Value>","struct Value","TRM3007")]
     [TestCase("struct Value : Increment<Value, Value>","struct Value : Increment<Value, int32>","TRM3007")]
-    [TestCase("where T : Increment<T, T>, [Copy]","where T : [Copy]","TRM3007")]
-    [TestCase("where T : Increment<T, T>, [Copy]","where T : Increment<T, int32>, [Copy]","TRM3007")]
+    [TestCase("where T : Increment<T, T>","", "TRM3007")]
+    [TestCase("where T : Increment<T, T>","where T : Increment<T, int32>","TRM3007")]
     [TestCase("public static Value operator ++(Value value)","public static int32 operator ++(Value value)","TRM3007")]
     [TestCase("public static Value operator ++(Value value)","private static Value operator ++(Value value)","TRM3007")]
     public void IncorrectWitnessesAndSignaturesAreRejected(string oldText, string newText, string code)
@@ -224,7 +224,7 @@ internal sealed class NominalUpdateTests
                 public Value(int32 number) { Number = number; }
                 public static Value operator ++(Value value) { return new Value(value.Number + 1); }
             }
-            T Next<T>(T value) where T : Increment<T, T>, [Copy] {
+            T Next<T>(T value) where T : Increment<T, T> {
                 mut T result = value;
                 return ++result;
             }
@@ -267,7 +267,7 @@ internal sealed class NominalUpdateTests
                 public Value(int32 number) { Number = number; }
                  public static Value operator ++(Value value) { return value; }
             }
-             T Next<T>(T value) where T : Increment<T>, [Copy] {
+             T Next<T>(T value) where T : Increment<T> {
                 mut T result = value;
                 return ++result;
             }
@@ -303,7 +303,7 @@ internal sealed class NominalUpdateTests
                 public Value(int32 number) { Number = number; }
                 public static Value operator ++(Value value) { return new Value(value.Number + 1); }
             }
-             T Next<T>(T value) where T : Increment<T, T>, [Copy] {
+             T Next<T>(T value) where T : Increment<T, T> {
                 mut T result = value;
                 return ++result;
             }
@@ -326,7 +326,8 @@ internal sealed class NominalUpdateTests
             }
             int32 Main() { const int32 answer = Calculate(); return answer; }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            CoreEvaluationFormTestHelpers.Options());
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3024"),Is.True);
     }
 
@@ -461,7 +462,7 @@ internal sealed class NominalUpdateTests
     public void ConcreteNominalUpdatesInGenericDefinitionsRetainOperatorIdentity(NativeRuntimePolicy policy)
     {
         var source = Operators + """
-            T Forward<T>(T value) where T : [Copy] {
+            T Forward<T>(T value)  {
                 mut Value fixedValue = new Value(1);
                 fixedValue++;
                 return value;
@@ -533,7 +534,7 @@ internal sealed class NominalUpdateTests
                 interface Increment<this T, R> { static R operator ++(T value); }
                 """ + Operators.Replace("struct Value {", "struct Value : Increment<Value> {",
                     StringComparison.Ordinal) + """
-                T IncrementValue<T>(T initial) where T : Increment<T>, [Copy] {
+                T IncrementValue<T>(T initial) where T : Increment<T> {
                     mut T value = initial;
                     return ++value;
                 }

@@ -94,14 +94,16 @@ internal sealed class BoundEnumIdentityTests
         Assert.That(BoundEnumTypes.IsValidTable([definition]), Is.True);
         Assert.That(NativeFixedArrayContract.TryCreateType(
                 BoundEnumTypes.Type(0), 3, [], fixedArrays,
-                out var arrayType, out var layout),
+                out var arrayType, out var layout,
+                enumDefinitions: [definition]),
             Is.True);
         Assert.That(arrayType, Is.EqualTo(NativeFixedArrayTypes.Type(0)));
         Assert.That(layout.ElementStride, Is.EqualTo(4));
         Assert.That(layout.ByteExtent, Is.EqualTo(12));
         Assert.That(layout.Alignment, Is.EqualTo(4));
         Assert.That(layout.RequiredAlignment, Is.EqualTo(1));
-        Assert.That(NativeFixedArrayContract.IsValidTable([], fixedArrays),
+        Assert.That(NativeFixedArrayContract.IsValidTable([], fixedArrays,
+                enumDefinitions: [definition]),
             Is.True);
     }
 

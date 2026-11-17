@@ -107,7 +107,8 @@ internal sealed class ConditionalExpressionTests
                 return Choose(true) + int32(number) - 42;
             }
             """;
-        Assert.That(NativeJit.Execute(Compile(Source, policy), policy), Is.EqualTo(42));
+        Assert.That(NativeJit.Execute(Compile(Source, policy), policy),
+            Is.EqualTo(42));
     }
 
     [TestCase(NativeRuntimePolicy.FailFast, true, 1)]
@@ -180,8 +181,11 @@ internal sealed class ConditionalExpressionTests
     public void GenericAndRequiredConstantsEvaluateSelectedArm(NativeRuntimePolicy policy)
     {
         const string Source = """
-            [ConstEval] int32 Next(int32 n) { return n + 1; }
-             T Select<T>(bool first, T left, T right) where T : [Copy] {
+            [ConstEval] int32 Next(int32 n) {
+                if (n == int32.MaxValue) { return 0; }
+                return n + 1;
+            }
+             T Select<T>(bool first, T left, T right)  {
                 return first ? left : right;
             }
             int32 Main() {
@@ -189,7 +193,9 @@ internal sealed class ConditionalExpressionTests
                 return Select<int32>(false, 0, selected + 1);
             }
             """;
-        Assert.That(NativeJit.Execute(Compile(Source, policy), policy), Is.EqualTo(42));
+        Assert.That(NativeJit.Execute(
+            Compile(Source, policy, selectConstEval: true), policy),
+            Is.EqualTo(42));
     }
     [TestCase(" int32 F() { return false ? 1 / 0 : 42; }")]
     [TestCase(" int32 F() { return true ? 42 : Throw(); } int32 Throw() { require false; return 0; }")]
@@ -277,10 +283,10 @@ internal sealed class ConditionalExpressionTests
     public void CheckedConditionalOutcomePublishesEitherSelectedOutput(NativeRuntimePolicy policy)
     {
         const string Source = """
-            bool Fill(init ref<int32> value) { value = 42; return true; }
+            bool Fill(ref<init int32> value) { *value = 42; return true; }
             int32 Pick(bool first) {
-                init var value;
-                require first ? Fill(init value) : Fill(init value);
+                init int32 value;
+                require first ? Fill(ref init value) : Fill(ref init value);
                 return value;
             }
             int32 Main() { return Pick(false); }
@@ -369,9 +375,17 @@ internal sealed class ConditionalExpressionTests
             TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
     }
 
-    private static BoundProgram Compile(string source, NativeRuntimePolicy policy)
+    private static BoundProgram Compile(string source,
+        NativeRuntimePolicy policy, bool selectConstEval = false)
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse(source), runtimePolicy: (BoundRuntimePolicy)policy);
+        var options = new CompilationOptions {
+            RuntimePolicy = (BoundRuntimePolicy)policy,
+            CoreEvaluationFormIdentitySelection = selectConstEval
+                ? CoreEvaluationFormTestHelpers.ConstEvalSelection(
+                    (BoundRuntimePolicy)policy)
+                : null,
+        };
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), options);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         return ((global::System.Func<BoundProgram>)(() => {
             var __nunitActual7 = compilation.Program;

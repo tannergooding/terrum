@@ -50,7 +50,8 @@ internal sealed class DiscardTests
     {
         var compilation = Compilation.Create(SyntaxTree.Parse($$"""
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(1, out var created);
+                init OwnedInt32Buffer created;
+                require OwnedInt32Buffer.TryCreate(1, ref init created);
                 mut OwnedInt32Buffer buffer = move created;
                 require buffer.TryAppend(1);
                 mut MutableInt32BufferView window = buffer.SliceMutable(0, 1);
@@ -67,7 +68,8 @@ internal sealed class DiscardTests
     {
         var compilation = Compilation.Create(SyntaxTree.Parse($$"""
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(1, out var created);
+                init OwnedInt32Buffer created;
+                require OwnedInt32Buffer.TryCreate(1, ref init created);
                 mut OwnedInt32Buffer buffer = move created;
                 mut MutableInt32BufferView window = buffer.SliceMutable(0, 0);
                 {{statement}}
@@ -113,7 +115,8 @@ internal sealed class DiscardTests
             unique struct Owner {
                 public OwnedInt32Buffer Buffer;
                 public Owner() {
-                    require OwnedInt32Buffer.TryCreate(1, out var created);
+                    init OwnedInt32Buffer created;
+                    require OwnedInt32Buffer.TryCreate(1, ref init created);
                     Buffer = move created;
                 }
             }
@@ -210,7 +213,8 @@ internal sealed class DiscardTests
             unique struct Owner {
                 public OwnedInt32Buffer Buffer;
                 public Owner() {
-                    require OwnedInt32Buffer.TryCreate(1, out var created);
+                    init OwnedInt32Buffer created;
+                    require OwnedInt32Buffer.TryCreate(1, ref init created);
                     Buffer = move created;
                 }
             }

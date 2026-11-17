@@ -96,12 +96,15 @@ internal sealed class NarrowScalarOperatorTests
                 return result == int8(-128) ? 42 : 0;
             }
             """;
-        var release = Compile(source, SourceArithmeticProfile.Release, BoundRuntimePolicy.FailFast);
+        var release = Compile(source, SourceArithmeticProfile.Release,
+            BoundRuntimePolicy.FailFast, withConstEval: true);
         Assert.That(NativeJit.Execute(release, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
 
-        var development = Compilation.Create(SyntaxTree.Parse(source), new CompilationOptions {
-            RuntimePolicy = BoundRuntimePolicy.CheckedExceptions,
-        });
+        var development = Compilation.Create(SyntaxTree.Parse(source),
+            CoreEvaluationFormTestHelpers.WithConstEval(
+                new CompilationOptions {
+                    RuntimePolicy = BoundRuntimePolicy.CheckedExceptions,
+                }));
         Assert.That(global::System.Linq.Enumerable.Any(development.Diagnostics,
             static diagnostic => diagnostic.Code == "TRM3024"
                 && diagnostic.Message.Contains("checked arithmetic", StringComparison.Ordinal)), Is.True);
@@ -228,13 +231,20 @@ internal sealed class NarrowScalarOperatorTests
 
     private static BoundProgram Compile(string source, SourceArithmeticProfile profile,
         BoundRuntimePolicy runtimePolicy,
-        LayoutCoreRegistrationSet? layoutCoreRegistration = null)
+        LayoutCoreRegistrationSet? layoutCoreRegistration = null,
+        bool withConstEval = false)
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse(source), new CompilationOptions {
+        var options = new CompilationOptions {
             SourceArithmeticProfile = profile,
             RuntimePolicy = runtimePolicy,
             LayoutCoreRegistration = layoutCoreRegistration,
-        });
+        };
+        if (withConstEval)
+        {
+            options = CoreEvaluationFormTestHelpers.WithConstEval(options);
+        }
+
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), options);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         Assert.That(compilation.Program, Is.Not.Null);
         return compilation.Program!;

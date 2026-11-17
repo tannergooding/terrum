@@ -252,7 +252,7 @@ internal sealed class WideFloatingOperatorSemanticsTests
                 const decimal32 updatedDecimal = UpdateDecimal();
                 return 42;
             }
-            """));
+            """), CoreEvaluationFormTestHelpers.Options());
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
