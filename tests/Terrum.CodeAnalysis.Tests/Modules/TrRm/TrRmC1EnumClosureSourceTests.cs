@@ -1090,6 +1090,10 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 Is.EqualTo(["field.box.value"]));
             Assert.That(NativeEmitter.EmitLibrary(loadedClassQuery,
                 ["Offset"], NativeRuntimePolicy.FailFast), Is.Not.Empty);
+            Assert.That(NativeModuleCompiler.EmitStandardLibrary(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    emittedConsumer), "ClassLayoutConsumer", providerInputs,
+                ["Offset"], NativeRuntimePolicy.FailFast), Is.Not.Empty);
             var reemittedClassQuery = TrRmExecutableCompiler.EmitStandard(
                 loadedClassQuery, "ClassLayoutConsumer", schemaIdentity, 1);
             var reemittedTables = TrRmStructuralMetadataValidator

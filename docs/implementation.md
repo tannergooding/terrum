@@ -1559,8 +1559,9 @@ class provider and expected FieldDef imports while preserving co-located
 direct FieldDef references, and native lowering derives supported
 Auto/Sequential field offsets from complete class/inline-struct layouts.
 Direct/nested load/JIT, multiple-query, exact-successor re-emission/reload and
-native executable-image emission regressions are added but unverified under
-the active hold; no image execution is established.
+native executable-image emission through both the direct emitter and Standard
+native binding plan are added but unverified under the active hold; no image
+execution is established.
 Broader Body composition, provider
 replacement and nontrivial dependency remapping, optional folding, additional
 class representations, runtime/AOT and CLI support remain open.
