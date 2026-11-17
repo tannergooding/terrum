@@ -85,17 +85,46 @@ public static partial class TrRmExecutableCompiler
         string rootModuleIdentity,
         StandardModuleValidation moduleValidation,
         ImmutableArray<TrRmStandardTypeProviderBinding> typeProviderBindings,
+        ImmutableArray<TrRmStandardFieldProviderBinding> fieldProviderBindings
+            = default,
         bool initializationReferenceLocalFieldLayout = false,
-        bool generalPredicateGraphsInitializationReferenceBodies = false)
+        bool nestedInitializationReferenceFieldDestinations = false,
+        bool generalPredicateGraphsInitializationReferenceBodies = false,
+        bool standardNativePointerLoads = false,
+        bool nativeParameterContracts = false)
     {
+        if (nativeParameterContracts && !standardNativePointerLoads)
+        {
+            throw new InvalidDataException(
+                "The pointer-load NativeParameter schema requires the pointer-load profile.");
+        }
+        if (nestedInitializationReferenceFieldDestinations
+            && !initializationReferenceLocalFieldLayout)
+        {
+            throw new InvalidDataException(
+                "The nested FieldPath successor requires the local-field initialization profile.");
+        }
+
         var initializationReferenceBodyProfile
             = initializationReferenceLocalFieldLayout
-                || generalPredicateGraphsInitializationReferenceBodies;
+                || generalPredicateGraphsInitializationReferenceBodies
+                || standardNativePointerLoads
+                || nativeParameterContracts;
         var requiredSchemaIdentity
             = initializationReferenceLocalFieldLayout
-                ? StandardInitReferenceBodiesLocalFieldLayoutSchemaIdentity
+                ? nestedInitializationReferenceFieldDestinations
+                    ? StandardInitReferenceBodiesNestedFieldDestinationsSchemaIdentity
+                    : StandardInitReferenceBodiesLocalFieldLayoutSchemaIdentity
+                : nativeParameterContracts
+                    ? generalPredicateGraphsInitializationReferenceBodies
+                        ? StandardInitReferenceBodiesGeneralPredicateGraphsPointerLoadsNativeParameterSchemaIdentity
+                        : StandardInitReferenceBodiesPointerLoadsNativeParameterSchemaIdentity
                 : generalPredicateGraphsInitializationReferenceBodies
-                    ? StandardInitReferenceBodiesGeneralPredicateGraphsSchemaIdentity
+                    ? standardNativePointerLoads
+                        ? StandardInitReferenceBodiesGeneralPredicateGraphsPointerLoadsSchemaIdentity
+                        : StandardInitReferenceBodiesGeneralPredicateGraphsSchemaIdentity
+                    : standardNativePointerLoads
+                        ? StandardInitReferenceBodiesPointerLoadsSchemaIdentity
                     : StandardLocalAggregateLayoutSchemaIdentity;
         if (artifacts.Length != schemaIdentities.Length
             || schemaIdentities.Any(schemaIdentity =>
@@ -149,6 +178,21 @@ public static partial class TrRmExecutableCompiler
                     "The L1 TypeDef provider closure contains a duplicate Import binding.");
             }
         }
+        var fieldBindingsByImport = new Dictionary<
+            (int ArtifactIndex, int ModuleRow, int ImportRow),
+            TrRmStandardFieldProviderBinding>(
+            fieldProviderBindings.Length);
+        foreach (var binding in fieldProviderBindings)
+        {
+            if (!fieldBindingsByImport.TryAdd(
+                    (binding.ConsumerArtifactIndex,
+                        binding.ConsumerModuleRow, binding.ImportRow),
+                    binding))
+            {
+                throw Invalid(
+                    "The L1 FieldDef provider closure contains a duplicate Import binding.");
+            }
+        }
 
         var moduleImports
             = new Dictionary<(int ArtifactIndex, int ModuleRow),
@@ -172,6 +216,9 @@ public static partial class TrRmExecutableCompiler
             = new List<LocalAggregateMethodProviderImport>();
         var typeImports
             = new List<LocalAggregateTypeProviderImport>();
+        var fieldImports = new List<TrRmStandardFieldProviderBinding>();
+        var consumedFieldImportKeys = new HashSet<
+            (int ArtifactIndex, int ModuleRow, int ImportRow)>();
         var methodEdges
             = new List<LocalAggregateMethodProviderEdge>();
         var typeEdges
@@ -281,10 +328,66 @@ public static partial class TrRmExecutableCompiler
                     continue;
                 }
 
+                if (definitionKind == 0x14)
+                {
+                    var importKey = (artifactIndex, module.ModuleRow,
+                        importRow);
+                    var expectedFieldRow = checked((int)(
+                        expectedDefinition & 0x00FF_FFFF));
+                    if (!fieldBindingsByImport.TryGetValue(importKey,
+                            out var fieldBinding)
+                        || !consumedFieldImportKeys.Add(importKey)
+                        || fieldBinding.ExpectedFieldDefRow
+                            != expectedFieldRow
+                        || fieldBinding.ExpectedOwnerTypeDefRow
+                            != tables.Fields.GetOwnerTypeDef(
+                                expectedFieldRow)
+                        || fieldBinding.ModuleRefRow != moduleRefRow
+                        || fieldBinding.ProviderArtifactIndex
+                            != providerModule.ArtifactIndex
+                        || fieldBinding.ProviderModuleRow
+                            != providerModule.ModuleRow
+                        || !StringComparer.Ordinal.Equals(
+                            fieldBinding.ProducerIdentity,
+                            binding.ProducerIdentity)
+                        || !StringComparer.Ordinal.Equals(
+                            fieldBinding.ExportKey, binding.ExportKey)
+                        || fieldBinding.TargetRequirement
+                            != binding.TargetRequirement
+                        || fieldBinding.RuntimePolicy
+                            != binding.RuntimePolicy
+                        || !typeBindingsByImport.TryGetValue(
+                            (artifactIndex, module.ModuleRow,
+                                fieldBinding.OwnerImportRow),
+                            out var ownerTypeBinding)
+                        || ownerTypeBinding.ExpectedTypeDefRow
+                            != fieldBinding.ExpectedOwnerTypeDefRow
+                        || ownerTypeBinding.ProviderArtifactIndex
+                            != fieldBinding.ProviderArtifactIndex
+                        || ownerTypeBinding.ProviderModuleRow
+                            != fieldBinding.ProviderModuleRow
+                        || ownerTypeBinding.ProviderTypeDefRow
+                            != fieldBinding.ProviderTypeDefRow
+                        || !StringComparer.Ordinal.Equals(
+                            ownerTypeBinding.ProducerIdentity,
+                            fieldBinding.ProducerIdentity)
+                        || ownerTypeBinding.TargetRequirement
+                            != fieldBinding.TargetRequirement
+                        || ownerTypeBinding.RuntimePolicy
+                            != fieldBinding.RuntimePolicy)
+                    {
+                        throw Invalid(
+                            "An L1 FieldDef Import has no matching checked owner and provider origin.");
+                    }
+
+                    fieldImports.Add(fieldBinding);
+                    continue;
+                }
+
                 if (definitionKind != 0x16)
                 {
                     throw Unsupported(
-                        "The L1 semantic MethodDef closure admits only TypeDef and MethodDef Imports.");
+                        "The L1 semantic provider closure admits only TypeDef, FieldDef, and MethodDef Imports.");
                 }
 
                 var expectedMethodRow = checked((int)(expectedDefinition
@@ -325,6 +428,7 @@ public static partial class TrRmExecutableCompiler
         }
 
         if (typeImports.Count != typeProviderBindings.Length
+            || consumedFieldImportKeys.Count != fieldProviderBindings.Length
             || methodImports.Count != moduleImports.Values.Sum(
                 static imports => imports.Count))
         {
@@ -342,8 +446,12 @@ public static partial class TrRmExecutableCompiler
             var providerMethodImports = methodImports.Where(edge =>
                 edge.ProviderArtifactIndex == providerArtifactIndex)
                 .ToArray();
+            var providerFieldImports = fieldImports.Where(edge =>
+                edge.ProviderArtifactIndex == providerArtifactIndex)
+                .ToArray();
             if (providerTypeImports.Length == 0
-                && providerMethodImports.Length == 0)
+                && providerMethodImports.Length == 0
+                && providerFieldImports.Length == 0)
             {
                 continue;
             }
@@ -381,6 +489,32 @@ public static partial class TrRmExecutableCompiler
                     actualTypeDefinition));
             }
 
+            foreach (var import in providerFieldImports)
+            {
+                var actualFieldDefinition = 0x1400_0000u
+                    | checked((uint)import.ProviderFieldDefRow);
+                var (fieldStart, fieldEnd)
+                    = providerTables.TypeDefs.GetFieldRange(
+                        import.ProviderTypeDefRow);
+                if (import.ProviderFieldDefRow < fieldStart
+                    || import.ProviderFieldDefRow >= fieldEnd
+                    || providerTables.Fields.GetOwnerTypeDef(
+                        import.ProviderFieldDefRow)
+                        != import.ProviderTypeDefRow
+                    || !providerTables.Exports.TryGetDefinitionForKey(
+                        import.ProviderModuleRow, import.ExportKey,
+                        out var exportedDefinition)
+                    || exportedDefinition != actualFieldDefinition
+                    || !providerTables.Exports.TryGetExportRowForKey(
+                        import.ProviderModuleRow, import.ExportKey,
+                        out var exportRow)
+                    || exportRow != import.ExportRow)
+                {
+                    throw Invalid(
+                        "A FieldDef Export no longer matches its checked provider origin.");
+                }
+            }
+
             foreach (var import in providerMethodImports)
             {
                 if (!providerTables.Exports.TryGetDefinitionForKey(
@@ -410,20 +544,40 @@ public static partial class TrRmExecutableCompiler
                         consumerArtifactIndex,
                         schemaIdentities[import.ConsumerArtifactIndex],
                         createA3ResourceLedger: false);
-                    var validatedMethodRow
-                        = ValidateInitializationReferenceProvider(
-                            consumerTables,
-                            import.ExpectedMethodRow,
-                            consumerTables.Imports.GetBindingForImportRow(
-                                import.ImportRow),
-                            artifacts[import.ProviderArtifactIndex],
-                            import.ProviderModuleRow,
-                            schemaIdentities[import.ProviderArtifactIndex],
-                            a3LayoutResourceLedger: null);
-                    if (validatedMethodRow != actualMethodRow)
+                    var expectedBinding = consumerTables.Imports
+                        .GetBindingForImportRow(import.ImportRow);
+                    var hasNativeParameterContracts
+                        = nativeParameterContracts
+                            && (!consumerTables.Contracts
+                                    .GetNativeParameters(
+                                        import.ExpectedMethodRow).IsEmpty
+                                || !providerTables.Contracts
+                                    .GetNativeParameters(actualMethodRow)
+                                    .IsEmpty);
+                    if (hasNativeParameterContracts)
                     {
-                        throw Invalid(
-                            "A B+I MethodDef ExportKey resolves to a different provider row than its checked edge.");
+                        _ = ValidateNativeImportProvider(consumerTables,
+                            import.ExpectedMethodRow, expectedBinding,
+                            providerTables, import.ProviderModuleRow,
+                            actualMethodRow);
+                    }
+                    else
+                    {
+                        var validatedMethodRow
+                            = ValidateInitializationReferenceProvider(
+                                consumerTables,
+                                import.ExpectedMethodRow,
+                                expectedBinding,
+                                artifacts[import.ProviderArtifactIndex],
+                                import.ProviderModuleRow,
+                                schemaIdentities[
+                                    import.ProviderArtifactIndex],
+                                a3LayoutResourceLedger: null);
+                        if (validatedMethodRow != actualMethodRow)
+                        {
+                            throw Invalid(
+                                "A B+I MethodDef ExportKey resolves to a different provider row than its checked edge.");
+                        }
                     }
                 }
                 else
@@ -475,6 +629,14 @@ public static partial class TrRmExecutableCompiler
                     import.ProviderArtifactIndex, import.ProviderModuleRow));
         }
 
+        foreach (var import in fieldImports)
+        {
+            moduleEdges[(import.ConsumerArtifactIndex,
+                import.ConsumerModuleRow)].Add((
+                    import.ProviderArtifactIndex,
+                    import.ProviderModuleRow));
+        }
+
         var reachableModules = new HashSet<(int ArtifactIndex, int ModuleRow)>();
         var pendingModules = new Queue<(int ArtifactIndex, int ModuleRow)>();
         var rootLocation = (ArtifactIndex: 0,
@@ -499,8 +661,7 @@ public static partial class TrRmExecutableCompiler
         }
 
         if (methodTypeSpecPairs.Count != 0
-            && !initializationReferenceLocalFieldLayout
-            && !generalPredicateGraphsInitializationReferenceBodies)
+            && !initializationReferenceBodyProfile)
         {
             var rootIndexForMethodTypes
                 = CreateForeignInvocationIndex(artifacts[0],
@@ -540,12 +701,15 @@ public static partial class TrRmExecutableCompiler
                 var selectedImports
                     = moduleImports[(module.ArtifactIndex,
                         module.ModuleRow)];
-                var loadedModule = initializationReferenceLocalFieldLayout
-                    || generalPredicateGraphsInitializationReferenceBodies
+                var loadedModule = initializationReferenceBodyProfile
                     ? LoadInitializationReferenceLocalFieldLayoutModule(
                         artifacts[artifactIndex], moduleTables, module,
                         selectedImports,
-                        generalPredicateGraphsInitializationReferenceBodies)
+                        initializationReferenceLocalFieldLayout,
+                        nestedInitializationReferenceFieldDestinations,
+                        generalPredicateGraphsInitializationReferenceBodies,
+                        standardNativePointerLoads,
+                        nativeParameterContracts)
                     : LoadLocalAggregateLayoutExecution(
                         moduleIndex, moduleTables, module.ModuleRow,
                         selectedImports, isRootModule:
@@ -667,7 +831,11 @@ public static partial class TrRmExecutableCompiler
         TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
         TrRmStandardModuleSelection module,
         IReadOnlyDictionary<int, BoundModuleImport> selectedImports,
-        bool generalPredicateGraphsInitializationReferenceBodies)
+        bool initializationReferenceLocalFieldLayout,
+        bool nestedInitializationReferenceFieldDestinations,
+        bool generalPredicateGraphsInitializationReferenceBodies,
+        bool standardNativePointerLoads,
+        bool nativeParameterContracts)
     {
         var selectedMethodImports
             = new Dictionary<int, BoundModuleImport>();
@@ -689,14 +857,39 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        var program = LoadDevelopment(artifact,
-            generalPredicateGraphsInitializationReferenceBodies
-                ? TrRmArtifactSchema.GeneralPredicateGraphsDraft
-                : TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft,
-            standardSchemaIdentity:
-                generalPredicateGraphsInitializationReferenceBodies
-                    ? StandardInitReferenceBodiesGeneralPredicateGraphsSchemaIdentity
-                    : StandardInitReferenceBodiesLocalFieldLayoutSchemaIdentity,
+        var schema = nativeParameterContracts
+            ? generalPredicateGraphsInitializationReferenceBodies
+                ? TrRmArtifactSchema
+                    .InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft
+                : TrRmArtifactSchema
+                    .InitializationReferencePointerLoadNativeParameterDraft
+            : generalPredicateGraphsInitializationReferenceBodies
+            ? TrRmArtifactSchema.GeneralPredicateGraphsDraft
+            : standardNativePointerLoads
+                ? TrRmArtifactSchema.Standard
+            : nestedInitializationReferenceFieldDestinations
+                ? TrRmArtifactSchema
+                    .InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft
+                : TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft;
+        var standardSchemaIdentity
+            = nativeParameterContracts
+                ? generalPredicateGraphsInitializationReferenceBodies
+                    ? StandardInitReferenceBodiesGeneralPredicateGraphsPointerLoadsNativeParameterSchemaIdentity
+                    : StandardInitReferenceBodiesPointerLoadsNativeParameterSchemaIdentity
+            : generalPredicateGraphsInitializationReferenceBodies
+                ? standardNativePointerLoads
+                    ? StandardInitReferenceBodiesGeneralPredicateGraphsPointerLoadsSchemaIdentity
+                    : StandardInitReferenceBodiesGeneralPredicateGraphsSchemaIdentity
+                : standardNativePointerLoads
+                    ? StandardInitReferenceBodiesPointerLoadsSchemaIdentity
+                : initializationReferenceLocalFieldLayout
+                    ? nestedInitializationReferenceFieldDestinations
+                        ? StandardInitReferenceBodiesNestedFieldDestinationsSchemaIdentity
+                        : StandardInitReferenceBodiesLocalFieldLayoutSchemaIdentity
+                    : throw new InvalidDataException(
+                        "A selected initialization-reference Body profile has no exact schema identity.");
+        var program = LoadDevelopment(artifact, schema,
+            standardSchemaIdentity: standardSchemaIdentity,
             selectedModuleImports: selectedMethodImports,
             selectedModuleRow: module.ModuleRow);
         if (program.Functions.Length

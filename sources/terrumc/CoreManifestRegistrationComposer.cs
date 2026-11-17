@@ -11,7 +11,8 @@ namespace Terrum.Tools;
 internal sealed record CoreManifestRegistrationComposition(
     LayoutCoreRegistrationSet? Layout,
     NativeCoreRegistrationSet? Native,
-    NativeOutputCoreRegistrationSet? NativeOutput);
+    NativeOutputCoreRegistrationSet? NativeOutput,
+    CoreEvaluationFormIdentitySelection? Evaluation);
 
 internal static class CoreManifestRegistrationComposer
 {
@@ -19,19 +20,25 @@ internal static class CoreManifestRegistrationComposer
         LayoutCoreManifestDefinition? layout,
         NativeCoreManifestDefinition? native,
         NativeOutputCoreManifestDefinition? nativeOutput,
-        string? layoutPath, string? nativePath, string? nativeOutputPath)
+        string? layoutPath, string? nativePath, string? nativeOutputPath,
+        EvaluationCoreManifestDefinition? evaluation = null,
+        string? evaluationPath = null)
     {
-        if (layout is null && native is null && nativeOutput is null)
+        if (layout is null && native is null && nativeOutput is null
+            && evaluation is null)
         {
-            return new CoreManifestRegistrationComposition(null, null, null);
+            return new CoreManifestRegistrationComposition(null, null, null,
+                null);
         }
 
         var usingModuleIdentity = layout?.UsingModuleIdentity
             ?? native?.UsingModuleIdentity
-            ?? nativeOutput!.UsingModuleIdentity;
+            ?? nativeOutput?.UsingModuleIdentity
+            ?? evaluation!.UsingModuleIdentity;
         var coreAuthorityIdentity = layout?.CoreAuthorityIdentity
             ?? native?.CoreAuthorityIdentity
-            ?? nativeOutput!.CoreAuthorityIdentity;
+            ?? nativeOutput?.CoreAuthorityIdentity
+            ?? evaluation!.CoreAuthorityIdentity;
         if ((layout is not null
                 && (layout.CoreAuthorityIdentity != coreAuthorityIdentity
                     || layout.UsingModuleIdentity != usingModuleIdentity))
@@ -42,10 +49,19 @@ internal static class CoreManifestRegistrationComposer
                 && (nativeOutput.CoreAuthorityIdentity
                     != coreAuthorityIdentity
                     || nativeOutput.UsingModuleIdentity
-                    != usingModuleIdentity)))
+                    != usingModuleIdentity))
+            || (evaluation is not null
+                && (evaluation.CoreAuthorityIdentity != coreAuthorityIdentity
+                    || evaluation.UsingModuleIdentity != usingModuleIdentity)))
         {
             throw Invalid(layoutPath, nativePath, nativeOutputPath,
-                "authority and usingModuleIdentity must match exactly");
+                "authority and usingModuleIdentity must match exactly",
+                evaluationPath);
+        }
+        if (layout is null && native is null && nativeOutput is null)
+        {
+            return new CoreManifestRegistrationComposition(null, null, null,
+                evaluation!.Selection);
         }
 
         var origins = MergeOrigins(layout, native, nativeOutput,
@@ -72,12 +88,13 @@ internal static class CoreManifestRegistrationComposer
             return new CoreManifestRegistrationComposition(
                 layout?.CreateRegistration(bindings),
                 native?.CreateRegistration(bindings),
-                nativeOutput?.CreateRegistration(bindings));
+                nativeOutput?.CreateRegistration(bindings),
+                evaluation?.Selection);
         }
         catch (ArgumentException exception)
         {
             throw Invalid(layoutPath, nativePath, nativeOutputPath,
-                exception.Message);
+                exception.Message, evaluationPath);
         }
     }
 
@@ -118,9 +135,12 @@ internal static class CoreManifestRegistrationComposer
     }
 
     private static FormatException Invalid(string? layoutPath,
-        string? nativePath, string? nativeOutputPath, string message)
+        string? nativePath, string? nativeOutputPath, string message,
+        string? evaluationPath = null)
     {
-        var paths = new[] { layoutPath, nativePath, nativeOutputPath }
+        var paths = new[] {
+            layoutPath, nativePath, nativeOutputPath, evaluationPath,
+        }
             .Where(static path => path is not null)
             .Select(static path => $"'{path}'");
         var path = string.Join(" and ", paths);

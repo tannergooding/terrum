@@ -13,13 +13,30 @@ internal sealed partial class TrRmStandardNativeBindingPlan
 {
     private BoundProgram CreateLocalAggregateLayoutLoweringProgram(
         bool initializationReferenceLocalFieldLayout = false,
-        bool generalPredicateGraphsInitializationReferenceBodies = false)
+        bool nestedInitializationReferenceFieldDestinations = false,
+        bool generalPredicateGraphsInitializationReferenceBodies = false,
+        bool standardNativePointerLoads = false,
+        bool nativeParameterContracts = false)
     {
         if (initializationReferenceLocalFieldLayout
-            && generalPredicateGraphsInitializationReferenceBodies)
+            && (generalPredicateGraphsInitializationReferenceBodies
+                || standardNativePointerLoads))
         {
             throw new ArgumentException(
                 "The initialization-reference native schema selections are mutually exclusive.");
+        }
+        if (nestedInitializationReferenceFieldDestinations
+            && !initializationReferenceLocalFieldLayout)
+        {
+            throw new ArgumentException(
+                "The nested FieldPath successor requires the local-field initialization profile.",
+                nameof(nestedInitializationReferenceFieldDestinations));
+        }
+        if (nativeParameterContracts && !standardNativePointerLoads)
+        {
+            throw new ArgumentException(
+                "The NativeParameter schema selection requires pointer-load Bodies.",
+                nameof(nativeParameterContracts));
         }
 
         // Reload the owned snapshots, including uncalled Imports, before creating
@@ -34,6 +51,12 @@ internal sealed partial class TrRmStandardNativeBindingPlan
         var reloaded = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(_schemaIdentities[0],
                 _artifacts[0]), ModuleIdentity, providers);
+        if (nestedInitializationReferenceFieldDestinations)
+        {
+            ValidateNestedFieldProviderClosure(
+                RootProgram.StandardFieldProviderClosure,
+                reloaded.StandardFieldProviderClosure);
+        }
         var original = RootProgram.StandardMethodProviderClosure;
         var closure = reloaded.StandardMethodProviderClosure;
         if (original is null || closure is null)
@@ -54,7 +77,71 @@ internal sealed partial class TrRmStandardNativeBindingPlan
         ValidateLocalAggregateLayoutClosure(original, closure);
         return new LocalAggregateLayoutNativeProgramBuilder(closure,
             initializationReferenceLocalFieldLayout,
-            generalPredicateGraphsInitializationReferenceBodies).Build();
+            nestedInitializationReferenceFieldDestinations,
+            generalPredicateGraphsInitializationReferenceBodies,
+            standardNativePointerLoads, nativeParameterContracts).Build();
+    }
+
+    private void ValidateNestedFieldProviderClosure(
+        BoundStandardFieldProviderClosure? expected,
+        BoundStandardFieldProviderClosure? actual)
+    {
+        if (expected is null || actual is null)
+        {
+            if (expected is not null || actual is not null)
+            {
+                throw new InvalidDataException(
+                    "The nested FieldPath native plan lost its FieldDef provider closure.");
+            }
+            return;
+        }
+
+        if (!StringComparer.Ordinal.Equals(expected.RootModuleIdentity,
+                ModuleIdentity)
+            || !StringComparer.Ordinal.Equals(actual.RootModuleIdentity,
+                ModuleIdentity)
+            || expected.RootModuleRow != RootModuleRow
+            || actual.RootModuleRow != RootModuleRow
+            || !StringComparer.Ordinal.Equals(expected.SchemaIdentity,
+                InitializationReferenceNestedFieldDestinationsSchemaIdentity)
+            || !StringComparer.Ordinal.Equals(actual.SchemaIdentity,
+                InitializationReferenceNestedFieldDestinationsSchemaIdentity)
+            || expected.TargetRequirement != actual.TargetRequirement
+            || expected.RuntimePolicy != actual.RuntimePolicy
+            || expected.Artifacts.Length != _artifacts.Length
+            || actual.Artifacts.Length != _artifacts.Length
+            || expected.Modules.Length != _modules.Length
+            || actual.Modules.Length != _modules.Length
+            || !expected.Modules.SequenceEqual(actual.Modules)
+            || !expected.TypeEdges.SequenceEqual(actual.TypeEdges)
+            || !expected.FieldEdges.SequenceEqual(actual.FieldEdges))
+        {
+            throw new InvalidDataException(
+                "The nested FieldPath native plan changed its exact FieldDef provider closure.");
+        }
+
+        for (var artifactIndex = 0; artifactIndex < _artifacts.Length;
+            artifactIndex++)
+        {
+            var expectedArtifact = expected.Artifacts[artifactIndex];
+            var actualArtifact = actual.Artifacts[artifactIndex];
+            if (expectedArtifact.ArtifactIndex != artifactIndex
+                || actualArtifact.ArtifactIndex != artifactIndex
+                || !StringComparer.Ordinal.Equals(
+                    expectedArtifact.SchemaIdentity,
+                    InitializationReferenceNestedFieldDestinationsSchemaIdentity)
+                || !StringComparer.Ordinal.Equals(
+                    actualArtifact.SchemaIdentity,
+                    InitializationReferenceNestedFieldDestinationsSchemaIdentity)
+                || !expectedArtifact.ArtifactSnapshot.AsSpan()
+                    .SequenceEqual(_artifacts[artifactIndex])
+                || !actualArtifact.ArtifactSnapshot.AsSpan()
+                    .SequenceEqual(_artifacts[artifactIndex]))
+            {
+                throw new InvalidDataException(
+                    "The nested FieldPath native plan changed an exact provider artifact.");
+            }
+        }
     }
 
     private void ValidateLocalAggregateLayoutClosure(
@@ -138,8 +225,11 @@ internal sealed partial class TrRmStandardNativeBindingPlan
 
         private readonly BoundStandardMethodProviderClosure _closure;
         private readonly bool _initializationReferenceLocalFieldLayout;
+        private readonly bool _nestedInitializationReferenceFieldDestinations;
         private readonly bool
             _generalPredicateGraphsInitializationReferenceBodies;
+        private readonly bool _standardNativePointerLoads;
+        private readonly bool _nativeParameterContracts;
         private readonly ModuleOrigin _root;
         private readonly Dictionary<ModuleOrigin, BoundStandardMethodProviderModule> _modules = [];
         private readonly Dictionary<MethodOrigin, int> _methods = [];
@@ -163,13 +253,20 @@ internal sealed partial class TrRmStandardNativeBindingPlan
         internal LocalAggregateLayoutNativeProgramBuilder(
             BoundStandardMethodProviderClosure closure,
             bool initializationReferenceLocalFieldLayout,
-            bool generalPredicateGraphsInitializationReferenceBodies)
+            bool nestedInitializationReferenceFieldDestinations,
+            bool generalPredicateGraphsInitializationReferenceBodies,
+            bool standardNativePointerLoads,
+            bool nativeParameterContracts)
         {
             _closure = closure;
             _initializationReferenceLocalFieldLayout
                 = initializationReferenceLocalFieldLayout;
+            _nestedInitializationReferenceFieldDestinations
+                = nestedInitializationReferenceFieldDestinations;
             _generalPredicateGraphsInitializationReferenceBodies
                 = generalPredicateGraphsInitializationReferenceBodies;
+            _standardNativePointerLoads = standardNativePointerLoads;
+            _nativeParameterContracts = nativeParameterContracts;
             _root = new ModuleOrigin(closure.RootArtifactIndex,
                 closure.RootModuleRow);
         }
@@ -181,21 +278,49 @@ internal sealed partial class TrRmStandardNativeBindingPlan
             foreach (var artifact in _closure.Artifacts)
             {
                 var artifactIndex
-                    = _generalPredicateGraphsInitializationReferenceBodies
+                    = _nativeParameterContracts
+                    ? _generalPredicateGraphsInitializationReferenceBodies
+                        ? TrRmArtifactIndex
+                            .ForInitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft(
+                                artifact.ArtifactSnapshot.AsSpan())
+                        : TrRmArtifactIndex
+                            .ForInitializationReferencePointerLoadNativeParameterDraft(
+                                artifact.ArtifactSnapshot.AsSpan())
+                    : _standardNativePointerLoads
+                    ? _generalPredicateGraphsInitializationReferenceBodies
+                        ? TrRmArtifactIndex
+                            .ForGeneralPredicateGraphsNativePointerLoadsDraft(
+                                artifact.ArtifactSnapshot.AsSpan())
+                        : TrRmArtifactIndex.ForNativePointerLoadsDraft(
+                            artifact.ArtifactSnapshot.AsSpan())
+                    : _generalPredicateGraphsInitializationReferenceBodies
                     ? TrRmArtifactIndex.ForGeneralPredicateGraphsDraft(
                         artifact.ArtifactSnapshot.AsSpan())
                     : _initializationReferenceLocalFieldLayout
-                    ? TrRmArtifactIndex
-                        .ForInitializationReferenceLocalFieldLayoutDraft(
-                            artifact.ArtifactSnapshot.AsSpan())
+                    ? _nestedInitializationReferenceFieldDestinations
+                        ? TrRmArtifactIndex
+                            .ForInitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft(
+                                artifact.ArtifactSnapshot.AsSpan())
+                        : TrRmArtifactIndex
+                            .ForInitializationReferenceLocalFieldLayoutDraft(
+                                artifact.ArtifactSnapshot.AsSpan())
                     : TrRmArtifactIndex.ForLocalAggregateLayoutDraft(
                         artifact.ArtifactSnapshot.AsSpan());
                 var tables
-                    = _generalPredicateGraphsInitializationReferenceBodies
+                    = _nativeParameterContracts
+                    ? _generalPredicateGraphsInitializationReferenceBodies
+                        ? TrRmStructuralMetadataValidator
+                            .ValidateInitializationReferenceGeneralPredicatePointerLoadNativeParameterDraftAndGetExecutionTables(
+                                artifactIndex)
+                        : TrRmStructuralMetadataValidator
+                            .ValidateInitializationReferencePointerLoadNativeParameterDraftAndGetExecutionTables(
+                                artifactIndex)
+                    : _generalPredicateGraphsInitializationReferenceBodies
                     ? TrRmStructuralMetadataValidator
                         .ValidateGeneralPredicateGraphsDraftAndGetExecutionTables(
                             artifactIndex)
                     : _initializationReferenceLocalFieldLayout
+                        || _standardNativePointerLoads
                     ? TrRmStructuralMetadataValidator
                         .ValidateAndGetExecutionTables(artifactIndex)
                     : TrRmStructuralMetadataValidator
@@ -207,7 +332,10 @@ internal sealed partial class TrRmStandardNativeBindingPlan
                     _modules.Add(location, module);
                     ValidateProgram(module.Program,
                         _initializationReferenceLocalFieldLayout
-                            || _generalPredicateGraphsInitializationReferenceBodies);
+                            || _generalPredicateGraphsInitializationReferenceBodies
+                            || _standardNativePointerLoads,
+                        _standardNativePointerLoads,
+                        _nativeParameterContracts);
                     var (typeStart, typeEnd) = tables.Modules.GetTypeDefRange(
                         module.ModuleRow);
                     if (typeEnd - typeStart != module.Program.Structures.Length)
@@ -226,7 +354,24 @@ internal sealed partial class TrRmStandardNativeBindingPlan
                         methodRow < module.MethodDefEnd; methodRow++)
                     {
                         var index = module.FunctionIndexByMethodRow[methodRow];
-                        if (!module.Program.Functions[index].IsExternal)
+                        var function = module.Program.Functions[index];
+                        if (!function.IsExternal)
+                        {
+                            if (_implementations.Count >= SemanticVerifier.MaximumFunctions)
+                            {
+                                throw new NotSupportedException(
+                                    "The joint L1 native program exceeds the function limit.");
+                            }
+                            _methods.Add(new MethodOrigin(location, methodRow),
+                                _implementations.Count);
+                            _functions.Add(new FunctionOrigin(location, index),
+                                _implementations.Count);
+                            _implementations.Add((module, index));
+                        }
+                        else if (_standardNativePointerLoads
+                            && !function.IsModuleReference
+                            && function.ModuleImport is null
+                            && function.DirectNativeImport is not null)
                         {
                             if (_implementations.Count >= SemanticVerifier.MaximumFunctions)
                             {
@@ -367,7 +512,15 @@ internal sealed partial class TrRmStandardNativeBindingPlan
                 SourceTypePublications = default,
                 StandardMethodProviderClosure = _closure,
             };
-            if (program.EntryPoint < 0)
+            if (_standardNativePointerLoads && program.EntryPoint < 0)
+            {
+                SemanticVerifier.VerifyLibraryWithDirectNativeImports(program);
+            }
+            else if (_standardNativePointerLoads)
+            {
+                SemanticVerifier.VerifyWithDirectNativeImports(program);
+            }
+            else if (program.EntryPoint < 0)
             {
                 SemanticVerifier.VerifyLibrary(program);
             }
@@ -383,25 +536,35 @@ internal sealed partial class TrRmStandardNativeBindingPlan
             => new(module.ArtifactIndex, module.ModuleRow);
 
         private static void ValidateProgram(BoundProgram program,
-            bool initializationReferenceLocalFieldLayout)
+            bool supportsCheckedReferenceTypes,
+            bool standardNativePointerLoads,
+            bool nativeParameterContracts)
         {
             if (program.RuntimePolicy != BoundRuntimePolicy.FailFast
                 || !program.Classes.IsEmpty || !program.Buffers.IsEmpty
                 || !program.NativeFunctionPointerSignatures.IsEmpty
-                || (!initializationReferenceLocalFieldLayout
+                || (!supportsCheckedReferenceTypes
                     && !program.CheckedReferenceTypes.IsEmpty)
                 || !program.GenericNominalTypeDefinitions.IsEmpty
                 || !program.GenericNominalTypeInstances.IsEmpty
                 || !program.Interfaces.IsEmpty || !program.EnumDefinitions.IsEmpty
                 || program.RequiresSourceGrant
                 || program.Functions.Any(static function =>
-                    function.DirectNativeImport is not null
-                    || function.NativeVTableMethod is not null
+                    function.NativeVTableMethod is not null
                     || function.NativeFunctionPointerType is not null
                     || function.NativeCallableEntryName is not null
                     || function.DeclaringStruct is not null
                     || function.IsClassConstructor
-                    || function.ClassConstructor >= 0))
+                    || function.ClassConstructor >= 0)
+                || program.Functions.Any(function =>
+                    function.DirectNativeImport is not null
+                    && !(standardNativePointerLoads
+                        && function.IsExternal
+                        && ((!function.IsModuleReference
+                                && function.ModuleImport is null)
+                            || (nativeParameterContracts
+                                && function.IsModuleReference
+                                && function.ModuleImport is not null)))))
             {
                 throw new NotSupportedException(
                     "The L1 native operation requires the selected ordinary MethodDef and Copy-layout profile.");

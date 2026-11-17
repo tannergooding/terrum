@@ -407,7 +407,8 @@ public static partial class TrRmExecutableCompiler
 
         ValidateA2SourceTypeDeclarationMap(program);
         _ = FixedLayoutStorage.Validate(program.Structures,
-            program.NativeFixedArrayTypes);
+            program.NativeFixedArrayTypes,
+            enumDefinitions: program.EnumDefinitions);
 
         var declarationProgram = program with {
             Functions = [],

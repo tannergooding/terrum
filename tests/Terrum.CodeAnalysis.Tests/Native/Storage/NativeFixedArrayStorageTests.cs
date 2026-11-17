@@ -784,12 +784,13 @@ internal sealed class NativeFixedArrayStorageTests
                 mut [uint32; const (Count())] values = [10, 20, 30];
                 return int32(values[2]);
             }
-            [ConstEval] uint64 Count() { return Add(1, 2); }
-            [ConstEval] uint64 Add(uint64 left, uint64 right) {
-                return left + right;
+            [ConstEval] uint64 Count() { return Combine(1, 2); }
+            [ConstEval] uint64 Combine(uint64 left, uint64 right) {
+                return left | right;
             }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source), policy);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+                CoreEvaluationFormTestHelpers.Options(policy));
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = compilation.Program
@@ -826,7 +827,8 @@ internal sealed class NativeFixedArrayStorageTests
             }
             """;
         var overflowCompilation = Compilation.Create(
-            SyntaxTree.Parse(overflowingCall));
+            SyntaxTree.Parse(overflowingCall),
+            CoreEvaluationFormTestHelpers.Options());
         Assert.That(overflowCompilation.Diagnostics.Any(static diagnostic =>
             diagnostic.Code == "TRM3030"), Is.True,
             string.Join(Environment.NewLine, overflowCompilation.Diagnostics));
@@ -837,7 +839,8 @@ internal sealed class NativeFixedArrayStorageTests
             int32 Main() { return 0; }
             """;
         var signatureCompilation = Compilation.Create(
-            SyntaxTree.Parse(signatureArray));
+            SyntaxTree.Parse(signatureArray),
+            CoreEvaluationFormTestHelpers.Options());
         Assert.That(signatureCompilation.Diagnostics.Any(static diagnostic =>
             diagnostic.Code == "TRM3030"), Is.True,
             string.Join(Environment.NewLine,
@@ -871,7 +874,8 @@ internal sealed class NativeFixedArrayStorageTests
             """;
         var fieldOverflowCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(fieldOverflowCall),
-            LayoutOptions(BoundRuntimePolicy.FailFast));
+            CoreEvaluationFormTestHelpers.WithConstEval(
+                LayoutOptions(BoundRuntimePolicy.FailFast)));
         Assert.That(fieldOverflowCompilation.Diagnostics.Any(
             static diagnostic => diagnostic.Code == "TRM3030"), Is.True,
             string.Join(Environment.NewLine,
@@ -886,14 +890,15 @@ internal sealed class NativeFixedArrayStorageTests
             struct Table {
                 private [uint32; const (Count())] Items;
             }
-            [ConstEval] uint64 Count() { return Add(1, 2); }
-            [ConstEval] uint64 Add(uint64 left, uint64 right) {
-                return left + right;
+            [ConstEval] uint64 Count() { return Combine(1, 2); }
+            [ConstEval] uint64 Combine(uint64 left, uint64 right) {
+                return left | right;
             }
             public int32 Value() { return 42; }
             """;
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
-            LayoutOptions(BoundRuntimePolicy.FailFast));
+                CoreEvaluationFormTestHelpers.WithConstEval(
+                    LayoutOptions(BoundRuntimePolicy.FailFast)));
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = compilation.Program
@@ -933,14 +938,15 @@ internal sealed class NativeFixedArrayStorageTests
                 struct Table {
                     private Row<uint32> Items;
                 }
-                [ConstEval] uint64 Count() { return Add(1, 2); }
-                [ConstEval] uint64 Add(uint64 left, uint64 right) {
-                    return left + right;
+                [ConstEval] uint64 Count() { return Combine(1, 2); }
+                [ConstEval] uint64 Combine(uint64 left, uint64 right) {
+                    return left | right;
                 }
             }
             """);
         var compilation = Compilation.Create([entry, definitions],
-            LayoutOptions(BoundRuntimePolicy.FailFast));
+            CoreEvaluationFormTestHelpers.WithConstEval(
+                LayoutOptions(BoundRuntimePolicy.FailFast)));
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1788,6 +1794,8 @@ internal sealed class NativeFixedArrayStorageTests
     [TestCase("uint32")]
     [TestCase("uint64")]
     [TestCase("uint128")]
+    [TestCase("nint")]
+    [TestCase("nuint")]
     public void FixedArrayPreservesEveryIndexWidth(string indexType)
     {
         var source = $$"""
@@ -1817,6 +1825,8 @@ internal sealed class NativeFixedArrayStorageTests
     [TestCase("uint32")]
     [TestCase("uint64")]
     [TestCase("uint128")]
+    [TestCase("nint")]
+    [TestCase("nuint")]
     public void FixedArrayPointerAddressPreservesEveryIndexWidth(string indexType)
     {
         var source = $$"""
@@ -1847,6 +1857,8 @@ internal sealed class NativeFixedArrayStorageTests
     [TestCase("uint32(3)")]
     [TestCase("uint64(3)")]
     [TestCase("uint128(3)")]
+    [TestCase("nint(3)")]
+    [TestCase("nuint(3)")]
     public void FixedArrayRejectsEndIndices(string indexExpression)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse($$"""

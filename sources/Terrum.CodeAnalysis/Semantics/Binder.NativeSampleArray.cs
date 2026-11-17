@@ -1,5 +1,6 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
+using System;
 using System.Collections.Immutable;
 using System.Linq;
 using Terrum.CodeAnalysis.Lexing;
@@ -11,6 +12,51 @@ namespace Terrum.CodeAnalysis.Semantics;
 internal sealed partial class Binder
 {
     private bool _isBindingNativeFixedArrayValue;
+
+    private static ImmutableArray<SyntaxNode> GetIndexArguments(
+        SyntaxNode indexExpression)
+    {
+        if (indexExpression.Kind != SyntaxKind.IndexExpression
+            || indexExpression.Children.Length != 4
+            || indexExpression.Children[2] is not SyntaxNode {
+                Kind: SyntaxKind.IndexArgumentList,
+            } arguments)
+        {
+            throw new InvalidOperationException(
+                "An index expression requires an index-argument list.");
+        }
+
+        return [.. arguments.Children.OfType<SyntaxNode>()];
+    }
+
+    private static SyntaxNode? GetSingleIndexArgument(
+        SyntaxNode indexExpression)
+    {
+        var arguments = GetIndexArguments(indexExpression);
+        return arguments.Length == 1 ? arguments[0] : null;
+    }
+
+    private static SyntaxNode CreateIndexCallArgumentList(
+        SyntaxNode indexExpression, SyntaxNode? finalArgument = null)
+    {
+        var indexArguments = GetIndexArguments(indexExpression);
+        var arguments = ImmutableArray.CreateBuilder<SyntaxElement>(
+            indexArguments.Length + (finalArgument is null ? 0 : 1));
+        foreach (var indexArgument in indexArguments)
+        {
+            arguments.Add(new SyntaxNode(SyntaxKind.Argument,
+                [indexArgument], indexArgument.Span.End));
+        }
+        if (finalArgument is not null)
+        {
+            arguments.Add(new SyntaxNode(SyntaxKind.Argument,
+                [finalArgument], finalArgument.Span.End));
+        }
+
+        return new SyntaxNode(SyntaxKind.ArgumentList,
+            arguments.MoveToImmutable(),
+            finalArgument?.Span.End ?? indexExpression.Span.End);
+    }
 
     private bool TryBindNativeFixedArrayType(SyntaxNode node, out PrimitiveType arrayType,
         out PrimitiveType elementType, out ulong elementCount)
@@ -75,7 +121,7 @@ internal sealed partial class Binder
                 constant.Bits.Low, _structs, _nativeFixedArrayTypes,
                 _nativeFixedArrayTypeIndexes,
                 out var resolvedArrayType, out _,
-                _checkedReferenceTypes))
+                _checkedReferenceTypes, _enumDefinitions))
         {
             Report("TRM3030", "A fixed-array extent must be an exact closed uint64 value with a valid layout.",
                 node.Span);
@@ -113,7 +159,8 @@ internal sealed partial class Binder
     {
         if (!NativeFixedArrayContract.TryGetLayout(arrayType, elementType,
                 elementCount, _structs, _nativeFixedArrayTypes,
-                out var layout, _checkedReferenceTypes))
+                out var layout, _checkedReferenceTypes,
+                _enumDefinitions))
         {
             Report("TRM3030", "The fixed-array carrier has no valid layout.", node.Span);
             return ErrorExpression(node.Span);

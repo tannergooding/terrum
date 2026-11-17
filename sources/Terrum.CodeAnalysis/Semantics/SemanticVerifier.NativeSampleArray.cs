@@ -23,10 +23,7 @@ public static partial class SemanticVerifier
 
             var copyType = function.Variables[variable].Type;
             if (!NativeFixedArrayContract.TryGetLayout(
-                    copyType,
-                    program.Structures, program.NativeFixedArrayTypes,
-                    out var copyLayout,
-                    program.CheckedReferenceTypes)
+                    copyType, program, out var copyLayout)
                 || !NativeFixedArrayContract.MatchesLayout(copyLayout,
                     program)
                 || expression.Type != copyLayout.CarrierType
@@ -213,8 +210,7 @@ public static partial class SemanticVerifier
             || !initialized[read.Variable]
             || function.Variables[read.Variable].Type != arrayType
             || !NativeFixedArrayContract.TryGetLayout(arrayType,
-                program.Structures, program.NativeFixedArrayTypes,
-                out var layout, program.CheckedReferenceTypes)
+                program, out var layout)
             || !NativeFixedArrayContract.MatchesLayout(layout, program)
             || !NativeFixedArrayContract.IsRootlessCopyFieldType(arrayType,
                 program.Structures, program.NativeFixedArrayTypes,
@@ -1344,8 +1340,7 @@ public static partial class SemanticVerifier
         }
 
         if (!NativeFixedArrayContract.TryGetLayout(address.CarrierType,
-                program.Structures, program.NativeFixedArrayTypes,
-                out var rootLayout, program.CheckedReferenceTypes)
+                program, out var rootLayout)
             || !TryGetNativeFixedArrayArrayPrefix(address.Variable,
                 address.FieldPlace, rootLayout, function, program,
                 out var arrayPrefix))
@@ -1366,8 +1361,7 @@ public static partial class SemanticVerifier
         }
 
         if (!NativeFixedArrayContract.TryGetLayout(address.CarrierType,
-                program.Structures, program.NativeFixedArrayTypes,
-                out var rootLayout, program.CheckedReferenceTypes)
+                program, out var rootLayout)
             || !TryGetNativeFixedArrayArrayPrefix(address.Variable,
                 address.FieldPlace, rootLayout, program,
                 out var arrayPrefix))
@@ -1868,7 +1862,7 @@ public static partial class SemanticVerifier
 
         var elementSize = ValueLayout.Size(elementType, program.Structures,
             program.CheckedReferenceTypes, program.NativeLoweringAgreement,
-            program.NativeFixedArrayTypes);
+            program.NativeFixedArrayTypes, program.EnumDefinitions);
         if (!NativeFixedArrayContract.IsRootlessCopyFieldType(
                 ownerType, program.Structures,
                 program.NativeFixedArrayTypes,

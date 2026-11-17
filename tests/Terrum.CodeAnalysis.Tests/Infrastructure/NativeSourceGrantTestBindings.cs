@@ -140,6 +140,8 @@ internal sealed class NativeSourceGrantTestBindings
         PrimitiveType.UInt32 => typeof(uint),
         PrimitiveType.Int64 => typeof(long),
         PrimitiveType.UInt64 => typeof(ulong),
+        PrimitiveType.NativeInt => typeof(nint),
+        PrimitiveType.NativeUInt => typeof(nuint),
         _ => throw new NotSupportedException($"'{type}' is not a scalar source-grant test export type."),
     };
 

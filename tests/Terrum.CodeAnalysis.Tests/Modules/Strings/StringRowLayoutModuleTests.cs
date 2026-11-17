@@ -26,11 +26,17 @@ internal sealed class StringRowLayoutModuleTests
                 int32 length = Host.Expected[record + 1];
                 int32 expectedEncoding = Host.Expected[record + 2];
                 if (expectedEncoding < 0) {
-                    if (TryGetStringRowLayout(start, length, init var encoding, init var contentByteLength)) {
+                    init int32 rejectedEncoding;
+                    init int32 rejectedContentByteLength;
+                    if (TryGetStringRowLayout(start, length,
+                        ref init rejectedEncoding, ref init rejectedContentByteLength)) {
                         return 1;
                     }
                 } else {
-                    if (!TryGetStringRowLayout(start, length, init var encoding, init var contentByteLength)) {
+                    init int32 encoding;
+                    init int32 contentByteLength;
+                    if (!TryGetStringRowLayout(start, length,
+                        ref init encoding, ref init contentByteLength)) {
                         return 2;
                     }
                     if (encoding != expectedEncoding

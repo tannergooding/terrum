@@ -15,6 +15,7 @@ using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
+using Terrum.CodeAnalysis.Tests.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 using Terrum.CodeAnalysis.Text;
@@ -49,6 +50,7 @@ internal sealed class NativeSourceGrantLibraryTests
     private const string BasedIntegerFloat32BitsExport = "Terrum.CodeAnalysis.GetBasedIntegerFloat32BitsOrMinusOne";
     private const string BasedIntegerFloat64BitsExport = "Terrum.CodeAnalysis.GetBasedIntegerFloat64BitsOrMinusOne";
     private const string LineCountExport = "Terrum.CodeAnalysis.GetSourceLineCount";
+    private const string GuardedSourceReadExport = "Terrum.CodeAnalysis.ReadSourceIfInRange";
     private const string CanParseUInt64Export = "Terrum.CodeAnalysis.Numerics64.CanParseUInt64Base";
     private const string ParseUInt64Export = "Terrum.CodeAnalysis.Numerics64.ParseUInt64Base";
     private const string CanParseInt64Export = "Terrum.CodeAnalysis.Numerics64.CanParseInt64Base";
@@ -59,6 +61,23 @@ internal sealed class NativeSourceGrantLibraryTests
     private const string ParseInt32Export = "Terrum.CodeAnalysis.Numerics64.ParseInt32Base";
     private const string CanParseChar16Export = "Terrum.CodeAnalysis.Numerics64.CanParseChar16Base";
     private const string ParseChar16Export = "Terrum.CodeAnalysis.Numerics64.ParseChar16Base";
+    private static bool AssertCheckedExceptionsRejectsUnprovedSourceGrant(
+        Compilation compilation, BoundRuntimePolicy policy, params string[] exportNames)
+    {
+        if (policy != BoundRuntimePolicy.CheckedExceptions)
+        {
+            return false;
+        }
+
+        var program = compilation.Program;
+        Assert.That(program, Is.TypeOf<BoundProgram>());
+        var exception = Assert.Throws<ArgumentException>(() =>
+            NativeEmitter.EmitLibraryWithSourceGrant((BoundProgram)program!, exportNames,
+                NativeRuntimePolicy.CheckedExceptions))!;
+        Assert.That(exception.Data["Terrum.InvalidEffect"], Is.EqualTo("NoThrow"));
+        return true;
+    }
+
     private static readonly string[] LineCountSamples = [
         "",
         "plain",
@@ -148,10 +167,14 @@ internal sealed class NativeSourceGrantLibraryTests
         var sourceRangePath = TerrumProjectPaths.RepositoryFile(RepositoryRoot(), "sources/Terrum.CodeAnalysis.Terrum/Text/SourceRange.terrum");
         var rangeCompilation = Compilation.CreateLibrary(
             [SyntaxTree.Parse(File.ReadAllText(sourceRangePath), sourceRangePath)],
-            [sourceBuffer], BoundRuntimePolicy.FailFast);
+            [sourceBuffer], new CompilationOptions {
+                RuntimePolicy = BoundRuntimePolicy.FailFast,
+                LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+            });
         var rangeProgram = ((global::System.Func<BoundProgram>)(() => {
             var __nunitActual3 = rangeCompilation.Program;
-            Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+            Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>(),
+                string.Join(Environment.NewLine, rangeCompilation.Diagnostics));
             return (BoundProgram)__nunitActual3!;
         }))();
         _ = Assert.Throws<NotSupportedException>(() => NativeEmitter.EmitLibraryWithSourceGrant(rangeProgram,
@@ -168,9 +191,9 @@ internal sealed class NativeSourceGrantLibraryTests
                     value = 0;
                     return false;
                 }
-                public bool TryInitializeSource(int32 at, init ref<int32> value) {
+                public bool TryInitializeSource(int32 at, ref<init int32> value) {
                     if (at < Host.Source.Length) {
-                        value = int32(Host.Source[at]);
+                        *value = int32(Host.Source[at]);
                         return true;
                     }
                     return false;
@@ -193,7 +216,8 @@ internal sealed class NativeSourceGrantLibraryTests
                 namespace Terrum.CodeAnalysis;
                 public OwnedInt32Buffer CreateOwnedSourceResult() {
                     require Host.Source.Length == 1;
-                    require OwnedInt32Buffer.TryCreate(1, out var value);
+                    init OwnedInt32Buffer value;
+                    require OwnedInt32Buffer.TryCreate(1, ref init value);
                     return move value;
                 }
                 """)],
@@ -264,6 +288,12 @@ internal sealed class NativeSourceGrantLibraryTests
                 """)],
             [sourceBuffer], policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        if (AssertCheckedExceptionsRejectsUnprovedSourceGrant(
+            compilation, policy, "Terrum.CodeAnalysis.ReadFromSourceEnd"))
+        {
+            return;
+        }
+
         var program = ((global::System.Func<BoundProgram>)(() => {
             var __nunitActual8 = compilation.Program;
             Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>());
@@ -313,6 +343,59 @@ internal sealed class NativeSourceGrantLibraryTests
     }
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public void GuardedInvocationBufferIndexCanBeExportedAsNoFailure(BoundRuntimePolicy policy)
+    {
+        Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
+        var sourceBuffer = new HostBuffer("Source", PrimitiveType.Char16, [], false) {
+            IsInvocationScoped = true,
+        };
+        var compilation = Compilation.CreateLibrary(
+            [SyntaxTree.Parse("""
+                namespace Terrum.CodeAnalysis;
+                public int32 ReadSourceIfInRange(int32 start) {
+                    if (start < 0 || start >= Host.Source.Length) { return 0; }
+                    return int32(Host.Source[start]);
+                }
+                """)],
+            [sourceBuffer], policy);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var actual = compilation.Program;
+            Assert.That(actual, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)actual!;
+        }))();
+        var artifact = NativeEmitter.EmitLibraryWithSourceGrant(program,
+            [GuardedSourceReadExport], (NativeRuntimePolicy)policy);
+        Assert.That(global::System.Linq.Enumerable.Single(artifact.Exports).SourceDependent, Is.True);
+
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-source-grant-guarded-read-{Guid.NewGuid():N}.dll");
+        File.WriteAllBytes(path, artifact.Image);
+        try
+        {
+            var module = NativeLibrary.Load(path);
+            try
+            {
+                var bindings = new NativeSourceGrantTestBindings(module,
+                    [.. artifact.Exports.Select(static export => (export.Name, export.SourceDependent,
+                        export.ReturnType, export.ParameterTypes))]);
+                Assert.That(bindings.Invoke<int>(GuardedSourceReadExport, ['A', 'B'], 0), Is.EqualTo((int)'A'));
+                Assert.That(bindings.Invoke<int>(GuardedSourceReadExport, ['A', 'B'], 1), Is.EqualTo((int)'B'));
+                Assert.That(bindings.Invoke<int>(GuardedSourceReadExport, ['A', 'B'], 2), Is.Zero);
+                Assert.That(bindings.Invoke<int>(GuardedSourceReadExport, ['A', 'B'], -1), Is.Zero);
+                Assert.That(bindings.Invoke<int>(GuardedSourceReadExport, [], 0), Is.Zero);
+            }
+            finally
+            {
+                NativeLibrary.Free(module);
+            }
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public void SourceLineCountMatchesHostedTextLines(BoundRuntimePolicy policy)
     {
         Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
@@ -325,6 +408,11 @@ internal sealed class NativeSourceGrantLibraryTests
             IsInvocationScoped = true,
         }], (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        if (AssertCheckedExceptionsRejectsUnprovedSourceGrant(compilation, policy, LineCountExport))
+        {
+            return;
+        }
+
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
             ((global::System.Func<BoundProgram>)(() => {
                 var __nunitActual9 = compilation.Program;
@@ -537,7 +625,8 @@ internal sealed class NativeSourceGrantLibraryTests
     }
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
-    public void PackedStringEscapeMatchesHostedEscapeContract(BoundRuntimePolicy policy)
+    public void PackedStringEscapeMatchesHostedEscapeContractAndChecksExportProof(
+        BoundRuntimePolicy policy)
     {
         Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
         var root = RepositoryRoot();
@@ -559,12 +648,18 @@ internal sealed class NativeSourceGrantLibraryTests
             }],
             (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
-            ((global::System.Func<BoundProgram>)(() => {
-                var __nunitActual13 = compilation.Program;
-                Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>());
-                return (BoundProgram)__nunitActual13!;
-            }))(),
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual13 = compilation.Program;
+            Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual13!;
+        }))();
+        if (AssertCheckedExceptionsRejectsUnprovedSourceGrant(
+            compilation, policy, AnalyzeStringEscapePackedExport))
+        {
+            return;
+        }
+
+        var artifact = NativeEmitter.EmitLibraryWithSourceGrant(program,
             [AnalyzeStringEscapePackedExport], (NativeRuntimePolicy)policy);
         var export = global::System.Linq.Enumerable.Single(artifact.Exports);
         Assert.That(export.SourceDependent, Is.True);
@@ -665,6 +760,12 @@ internal sealed class NativeSourceGrantLibraryTests
             }],
             (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        if (AssertCheckedExceptionsRejectsUnprovedSourceGrant(
+            compilation, policy, AnalyzeCharacterLiteralPackedExport, CharacterLiteralScalarExport))
+        {
+            return;
+        }
+
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
             ((global::System.Func<BoundProgram>)(() => {
                 var __nunitActual14 = compilation.Program;
@@ -778,6 +879,12 @@ internal sealed class NativeSourceGrantLibraryTests
             }],
             (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        if (AssertCheckedExceptionsRejectsUnprovedSourceGrant(
+            compilation, policy, StringLiteralScalarCountExport))
+        {
+            return;
+        }
+
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
             ((global::System.Func<BoundProgram>)(() => {
                 var __nunitActual15 = compilation.Program;
@@ -894,6 +1001,12 @@ internal sealed class NativeSourceGrantLibraryTests
             }],
             (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        if (AssertCheckedExceptionsRejectsUnprovedSourceGrant(
+            compilation, policy, StringLiteralScalarAtExport))
+        {
+            return;
+        }
+
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
             ((global::System.Func<BoundProgram>)(() => {
                 var __nunitActual16 = compilation.Program;
@@ -1006,6 +1119,13 @@ internal sealed class NativeSourceGrantLibraryTests
             }],
             (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        if (AssertCheckedExceptionsRejectsUnprovedSourceGrant(
+            compilation, policy, StringLiteralEncodedLengthExport, StringNameRowByteLengthExport,
+            StringNamespaceRowByteLengthExport))
+        {
+            return;
+        }
+
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
             ((global::System.Func<BoundProgram>)(() => {
                 var __nunitActual17 = compilation.Program;
@@ -1224,6 +1344,11 @@ internal sealed class NativeSourceGrantLibraryTests
             IsInvocationScoped = true,
         }], (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        if (AssertCheckedExceptionsRejectsUnprovedSourceGrant(compilation, policy, SourceOffsetExport))
+        {
+            return;
+        }
+
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
             ((global::System.Func<BoundProgram>)(() => {
                 var __nunitActual18 = compilation.Program;
@@ -1281,6 +1406,12 @@ internal sealed class NativeSourceGrantLibraryTests
             IsInvocationScoped = true,
         }], (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        if (AssertCheckedExceptionsRejectsUnprovedSourceGrant(
+            compilation, policy, SourceLineNumberExport, SourceCharacterPositionExport, SourceOffsetExport))
+        {
+            return;
+        }
+
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
             ((global::System.Func<BoundProgram>)(() => {
                 var __nunitActual19 = compilation.Program;
@@ -1357,6 +1488,12 @@ internal sealed class NativeSourceGrantLibraryTests
             IsInvocationScoped = true,
         }], (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        if (AssertCheckedExceptionsRejectsUnprovedSourceGrant(
+            compilation, policy, SourceOffsetExport, SourceLineContentEndExport, SourceLineEndExport))
+        {
+            return;
+        }
+
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
             ((global::System.Func<BoundProgram>)(() => {
                 var __nunitActual21 = compilation.Program;
@@ -1672,6 +1809,12 @@ internal sealed class NativeSourceGrantLibraryTests
             Assert.That(__nunitActual22, Is.TypeOf<BoundProgram>());
             return (BoundProgram)__nunitActual22!;
         }))();
+        if (AssertCheckedExceptionsRejectsUnprovedSourceGrant(
+            compilation, policy, DecodeScalarExport, ReadScalarExport))
+        {
+            return;
+        }
+
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(program,
             [DecodeScalarExport, ReadScalarExport], (NativeRuntimePolicy)policy);
 

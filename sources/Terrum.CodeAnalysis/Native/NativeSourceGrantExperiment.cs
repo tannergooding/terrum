@@ -51,6 +51,10 @@ internal static class NativeSourceGrantExperiment
             var function = program.Functions[index];
             calls[index] = [];
             VisitStatement(function.Body, index);
+            foreach (var clause in function.DeclarationContractClauses)
+            {
+                VisitExpression(clause.Predicate, index);
+            }
         }
 
         bool changed;
@@ -129,6 +133,7 @@ internal static class NativeSourceGrantExperiment
                     VisitExpression(unsafeExpression.Expression, function);
                     break;
                 case BoundConstant:
+                case BoundContractReturnValue:
                 case BoundRead:
                     break;
                 case BoundBufferLength length when length.Buffer == 0:
@@ -168,7 +173,8 @@ internal static class NativeSourceGrantExperiment
 
     private static bool Scalar(PrimitiveType type) =>
         type is PrimitiveType.Void or PrimitiveType.Bool or PrimitiveType.Char16
-            or PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64;
+            or PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
+            or PrimitiveType.NativeInt or PrimitiveType.NativeUInt;
 
     private static NotSupportedException Unsupported() =>
         new("The provisional source-grant DLL experiment supports only self-contained structured scalar bodies.");

@@ -11,6 +11,7 @@ using System.Reflection.PortableExecutable;
 using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading.Tasks;
 using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
@@ -692,6 +693,48 @@ internal sealed class NativeSourceGrantExperimentTests
         _ = Assert.Throws<ArgumentException>(() => EmitExperiment(
             program with { Functions = program.Functions.SetItem(0, external) }, [ReadExport], NativeRuntimePolicy.FailFast));
     }
+
+    [Test]
+    public async Task NativeWidthSourceGrantScalarsRetainTheirNativeAbiTypesAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string signedName = "NativeWidthSignedForSourceAbiTest";
+        const string unsignedName = "NativeWidthUnsignedForSourceAbiTest";
+        const string signedExport = "Terrum.CodeAnalysis." + signedName;
+        const string unsignedExport = "Terrum.CodeAnalysis." + unsignedName;
+        var program = Compile(BoundRuntimePolicy.FailFast, [], $$"""
+            public nint {{signedName}}(nint value) { return value; }
+            public nuint {{unsignedName}}(nuint value) { return value; }
+            """);
+        var (Image, _, Exports) = EmitExperiment(program,
+            [signedExport, unsignedExport], NativeRuntimePolicy.FailFast);
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"terrum-source-grant-native-width-{Guid.NewGuid():N}.dll");
+        await File.WriteAllBytesAsync(path, Image).ConfigureAwait(true);
+        try
+        {
+            var module = NativeLibrary.Load(path);
+            try
+            {
+                var bindings = new NativeSourceGrantTestBindings(module, Exports);
+                Assert.That(bindings.Invoke<nint>(signedExport, null,
+                    nint.MinValue), Is.EqualTo(nint.MinValue));
+                Assert.That(bindings.Invoke<nuint>(unsignedExport, null,
+                    nuint.MaxValue), Is.EqualTo(nuint.MaxValue));
+            }
+            finally
+            {
+                NativeLibrary.Free(module);
+            }
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(path)
+                .ConfigureAwait(true);
+        }
+    }
+
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public void PropagatesSourceDependenceAcrossMutuallyRecursiveCalls(BoundRuntimePolicy policy)

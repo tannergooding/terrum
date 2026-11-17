@@ -16,12 +16,26 @@ internal static class ValueLayout
     internal static ulong Size(PrimitiveType type, IReadOnlyList<BoundStruct> structures,
         IReadOnlyList<CheckedReferenceTypeDefinition>? checkedReferenceTypes = null,
         string? nativeLoweringAgreement = null,
-        IReadOnlyList<BoundNativeFixedArrayType>? fixedArrayTypes = null)
+        IReadOnlyList<BoundNativeFixedArrayType>? fixedArrayTypes = null,
+        IReadOnlyList<BoundEnumDefinition>? enumDefinitions = null)
     {
         if (BoundGenericNominalTypeTypes.IsType(type))
         {
             throw new NotSupportedException(
                 "Generic nominal types do not have a supported value layout.");
+        }
+        if (BoundEnumTypes.IsType(type))
+        {
+            var index = BoundEnumTypes.Index(type);
+            if (enumDefinitions is null
+                || (uint)index >= (uint)enumDefinitions.Count)
+            {
+                throw new NotSupportedException(
+                    "Enum value layout requires its complete definition table.");
+            }
+            return Size(enumDefinitions[index].UnderlyingType,
+                structures, checkedReferenceTypes, nativeLoweringAgreement,
+                fixedArrayTypes, enumDefinitions);
         }
 
         return type switch {
@@ -31,6 +45,8 @@ internal static class ValueLayout
             or PrimitiveType.Float32 => 4,
         PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float64 or PrimitiveType.Decimal64
             or PrimitiveType.OwnedInt32Buffer => 8,
+        PrimitiveType.NativeInt or PrimitiveType.NativeUInt
+            => checked((ulong)NativeTargetProfile.PointerSize),
         PrimitiveType.Int128 or PrimitiveType.UInt128 or PrimitiveType.Float128 or PrimitiveType.Decimal128 => 16,
         PrimitiveType.Float16 or PrimitiveType.BFloat16 => 2,
         PrimitiveType.Decimal32 => 4,
@@ -43,7 +59,7 @@ internal static class ValueLayout
         _ when NativeFixedArrayTypes.IsType(type)
             => TryGetFixedArrayLayout(type, structures, fixedArrayTypes,
                 checkedReferenceTypes,
-                out var fixedArrayLayout)
+                out var fixedArrayLayout, enumDefinitions)
                 ? fixedArrayLayout.ByteExtent : 0,
         PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
                 or PrimitiveType.NativeStorageAddress or PrimitiveType.NativeRawPointer
@@ -52,9 +68,8 @@ internal static class ValueLayout
                     => checked((ulong)NativeTargetProfile.PointerSize),
         _ when CheckedReferenceTypes.IsType(type) => checked((ulong)CheckedReferenceSize(
             type, structures, checkedReferenceTypes, nativeLoweringAgreement,
-            fixedArrayTypes)),
+            fixedArrayTypes, enumDefinitions)),
         PrimitiveType.Void => 0,
-        _ when BoundEnumTypes.IsType(type) => sizeof(int),
         _ when (int)type >= 100 && (int)type < ManagedClassTypes.First
             && (int)type - 100 < structures.Count => structures[(int)type - 100].Size,
         _ => 0,
@@ -65,12 +80,26 @@ internal static class ValueLayout
     internal static int Alignment(PrimitiveType type, IReadOnlyList<BoundStruct> structures,
         IReadOnlyList<CheckedReferenceTypeDefinition>? checkedReferenceTypes = null,
         string? nativeLoweringAgreement = null,
-        IReadOnlyList<BoundNativeFixedArrayType>? fixedArrayTypes = null)
+        IReadOnlyList<BoundNativeFixedArrayType>? fixedArrayTypes = null,
+        IReadOnlyList<BoundEnumDefinition>? enumDefinitions = null)
     {
         if (BoundGenericNominalTypeTypes.IsType(type))
         {
             throw new NotSupportedException(
                 "Generic nominal types do not have a supported value layout.");
+        }
+        if (BoundEnumTypes.IsType(type))
+        {
+            var index = BoundEnumTypes.Index(type);
+            if (enumDefinitions is null
+                || (uint)index >= (uint)enumDefinitions.Count)
+            {
+                throw new NotSupportedException(
+                    "Enum value alignment requires its complete definition table.");
+            }
+            return Alignment(enumDefinitions[index].UnderlyingType,
+                structures, checkedReferenceTypes, nativeLoweringAgreement,
+                fixedArrayTypes, enumDefinitions);
         }
 
         if (NativePointerTypes.IsType(type) || NativeFunctionPointerTypes.IsType(type))
@@ -84,24 +113,21 @@ internal static class ValueLayout
             {
                 return TryGetOptionalValueLayout(type, structures,
                         checkedReferenceTypes, nativeLoweringAgreement,
-                        fixedArrayTypes, out var optionalLayout)
+                        fixedArrayTypes, out var optionalLayout,
+                        enumDefinitions)
                     ? Math.Max(optionalLayout.Alignment,
                         optionalLayout.RequiredAlignment) : 0;
             }
 
             var size = CheckedReferenceSize(type, structures,
                 checkedReferenceTypes, nativeLoweringAgreement,
-                fixedArrayTypes);
+                fixedArrayTypes, enumDefinitions);
             return size == 0 ? 0 : nativeLoweringAgreement is null
                 ? NativeTargetProfile.PointerSize : sizeof(ulong);
         }
         if (ManagedClassTypes.IsManaged(type))
         {
             return 8;
-        }
-        if (BoundEnumTypes.IsType(type))
-        {
-            return sizeof(int);
         }
         if ((int)type < 100)
         {
@@ -112,14 +138,15 @@ internal static class ValueLayout
             }
             return type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView
                 ? 8 : checked((int)Size(type, structures,
-                    checkedReferenceTypes, nativeLoweringAgreement));
+                    checkedReferenceTypes, nativeLoweringAgreement,
+                    fixedArrayTypes, enumDefinitions));
         }
         if (NativeFixedArrayTypes.IsType(type))
         {
             if (fixedArrayTypes is null
                 || !NativeFixedArrayContract.TryGetLayout(type, structures,
                     fixedArrayTypes, out var arrayLayout,
-                    checkedReferenceTypes)
+                    checkedReferenceTypes, enumDefinitions)
                 || arrayLayout.Alignment > int.MaxValue)
             {
                 throw new NotSupportedException(
@@ -139,7 +166,8 @@ internal static class ValueLayout
     internal static int RequiredAlignment(PrimitiveType type,
         IReadOnlyList<BoundStruct> structures,
         IReadOnlyList<BoundNativeFixedArrayType>? fixedArrayTypes = null,
-        IReadOnlyList<CheckedReferenceTypeDefinition>? checkedReferenceTypes = null)
+        IReadOnlyList<CheckedReferenceTypeDefinition>? checkedReferenceTypes = null,
+        IReadOnlyList<BoundEnumDefinition>? enumDefinitions = null)
     {
         if (CheckedReferenceTypes.IsType(type)
             && CheckedReferenceTypeContract.IsOptionalValueType(type,
@@ -149,15 +177,28 @@ internal static class ValueLayout
                 ? RequiredAlignment(
                     checkedReferenceTypes[CheckedReferenceTypes.Index(type)]
                         .ReferentType, structures, fixedArrayTypes,
-                    checkedReferenceTypes)
+                    checkedReferenceTypes, enumDefinitions)
                 : 1;
+        }
+        if (BoundEnumTypes.IsType(type))
+        {
+            var index = BoundEnumTypes.Index(type);
+            if (enumDefinitions is null
+                || (uint)index >= (uint)enumDefinitions.Count)
+            {
+                throw new NotSupportedException(
+                    "Enum required alignment requires its complete definition table.");
+            }
+            return RequiredAlignment(enumDefinitions[index].UnderlyingType,
+                structures, fixedArrayTypes, checkedReferenceTypes,
+                enumDefinitions);
         }
         if (NativeFixedArrayTypes.IsType(type))
         {
             if (fixedArrayTypes is null
                 || !NativeFixedArrayContract.TryGetLayout(type, structures,
                     fixedArrayTypes, out var arrayLayout,
-                    checkedReferenceTypes)
+                    checkedReferenceTypes, enumDefinitions)
                 || arrayLayout.RequiredAlignment > int.MaxValue)
             {
                 throw new NotSupportedException(
@@ -186,7 +227,8 @@ internal static class ValueLayout
         IReadOnlyList<CheckedReferenceTypeDefinition>? checkedReferenceTypes,
         string? nativeLoweringAgreement,
         IReadOnlyList<BoundNativeFixedArrayType>? fixedArrayTypes,
-        out OptionalValueLayout layout)
+        out OptionalValueLayout layout,
+        IReadOnlyList<BoundEnumDefinition>? enumDefinitions = null)
     {
         layout = default;
         if (checkedReferenceTypes is null
@@ -201,18 +243,19 @@ internal static class ValueLayout
                 .ReferentType;
         if (!IsRootlessCopyPayload(payloadType, structures,
                 checkedReferenceTypes, fixedArrayTypes,
-                new byte[structures.Count], 0))
+                new byte[structures.Count], 0, enumDefinitions))
         {
             return false;
         }
 
         var payloadSize = Size(payloadType, structures,
-            checkedReferenceTypes, nativeLoweringAgreement, fixedArrayTypes);
+            checkedReferenceTypes, nativeLoweringAgreement, fixedArrayTypes,
+            enumDefinitions);
         var payloadAlignment = NaturalAlignment(payloadType, structures,
             checkedReferenceTypes, nativeLoweringAgreement, fixedArrayTypes,
-            [], 0);
+            [], 0, enumDefinitions);
         var requiredAlignment = RequiredAlignment(payloadType, structures,
-            fixedArrayTypes, checkedReferenceTypes);
+            fixedArrayTypes, checkedReferenceTypes, enumDefinitions);
 
         var alignment = Math.Max(1, payloadAlignment);
         var required = Math.Max(1, requiredAlignment);
@@ -239,7 +282,8 @@ internal static class ValueLayout
         IReadOnlyList<CheckedReferenceTypeDefinition>? checkedReferenceTypes,
         string? nativeLoweringAgreement,
         IReadOnlyList<BoundNativeFixedArrayType>? fixedArrayTypes,
-        HashSet<PrimitiveType> visiting, int depth)
+        HashSet<PrimitiveType> visiting, int depth,
+        IReadOnlyList<BoundEnumDefinition>? enumDefinitions)
     {
         if (depth > SemanticVerifier.MaximumDepth
             || !visiting.Add(type))
@@ -255,7 +299,7 @@ internal static class ValueLayout
                 if (fixedArrayTypes is null
                     || !TryGetFixedArrayLayout(type, structures,
                         fixedArrayTypes, checkedReferenceTypes,
-                        out _))
+                        out _, enumDefinitions))
                 {
                     throw new NotSupportedException(
                         "Fixed-array natural alignment requires its validated type table.");
@@ -266,7 +310,8 @@ internal static class ValueLayout
                 return Math.Max(1, NaturalAlignment(
                     fixedArray.ElementType, structures,
                     checkedReferenceTypes, nativeLoweringAgreement,
-                    fixedArrayTypes, visiting, depth + 1));
+                    fixedArrayTypes, visiting, depth + 1,
+                    enumDefinitions));
             }
 
             if (CheckedReferenceTypes.IsType(type))
@@ -280,11 +325,12 @@ internal static class ValueLayout
                             CheckedReferenceTypes.Index(type)].ReferentType,
                         structures, checkedReferenceTypes,
                         nativeLoweringAgreement, fixedArrayTypes, visiting,
-                        depth + 1);
+                        depth + 1, enumDefinitions);
                 }
 
                 return Alignment(type, structures, checkedReferenceTypes,
-                    nativeLoweringAgreement, fixedArrayTypes);
+                    nativeLoweringAgreement, fixedArrayTypes,
+                    enumDefinitions);
             }
 
             if (BoundGenericNominalTypeTypes.IsType(type)
@@ -296,7 +342,7 @@ internal static class ValueLayout
             {
                 return Math.Max(1, Alignment(type, structures,
                     checkedReferenceTypes, nativeLoweringAgreement,
-                    fixedArrayTypes));
+                    fixedArrayTypes, enumDefinitions));
             }
 
             var structureIndex = (int)type - 100;
@@ -314,7 +360,7 @@ internal static class ValueLayout
                 return NaturalAlignment(structure.Fields[0].Type,
                     structures, checkedReferenceTypes,
                     nativeLoweringAgreement, fixedArrayTypes, visiting,
-                    depth + 1);
+                    depth + 1, enumDefinitions);
             }
 
             if (structure.DeclaredAlignment is int declaredAlignment)
@@ -330,7 +376,8 @@ internal static class ValueLayout
             foreach (var field in structure.Fields)
             {
                 if (Size(field.Type, structures, checkedReferenceTypes,
-                        nativeLoweringAgreement, fixedArrayTypes) == 0)
+                        nativeLoweringAgreement, fixedArrayTypes,
+                        enumDefinitions) == 0)
                 {
                     continue;
                 }
@@ -338,7 +385,7 @@ internal static class ValueLayout
                 var fieldAlignment = NaturalAlignment(field.Type,
                     structures, checkedReferenceTypes,
                     nativeLoweringAgreement, fixedArrayTypes, visiting,
-                    depth + 1);
+                    depth + 1, enumDefinitions);
                 if (structure.IsSequential || structure.IsUnion)
                 {
                     fieldAlignment = Math.Min(fieldAlignment,
@@ -359,7 +406,8 @@ internal static class ValueLayout
         IReadOnlyList<BoundStruct> structures,
         IReadOnlyList<CheckedReferenceTypeDefinition> checkedReferenceTypes,
         IReadOnlyList<BoundNativeFixedArrayType>? fixedArrayTypes,
-        byte[] structureStates, int depth)
+        byte[] structureStates, int depth,
+        IReadOnlyList<BoundEnumDefinition>? enumDefinitions)
     {
         if (depth > SemanticVerifier.MaximumDepth
             || type == PrimitiveType.TokenSpan
@@ -376,7 +424,7 @@ internal static class ValueLayout
                     checkedReferenceTypes[CheckedReferenceTypes.Index(type)]
                         .ReferentType,
                     structures, checkedReferenceTypes, fixedArrayTypes,
-                    structureStates, depth + 1);
+                    structureStates, depth + 1, enumDefinitions);
         }
         if (type == PrimitiveType.Void
             || PrimitiveTypeFacts.ScalarWidth(type) > 0
@@ -390,14 +438,14 @@ internal static class ValueLayout
         if (NativeFixedArrayTypes.IsType(type))
         {
             return TryGetFixedArrayLayout(type, structures, fixedArrayTypes,
-                    checkedReferenceTypes, out _)
+                    checkedReferenceTypes, out _, enumDefinitions)
                 && fixedArrayTypes is not null
                 && IsRootlessCopyPayload(
                     fixedArrayTypes[NativeFixedArrayTypes.Index(type)]
                         .ElementType,
                     structures, checkedReferenceTypes, fixedArrayTypes,
                     structureStates,
-                    depth + 1);
+                    depth + 1, enumDefinitions);
         }
 
         var structureIndex = (int)type - 100;
@@ -428,7 +476,7 @@ internal static class ValueLayout
         {
             if (!IsRootlessCopyPayload(field.Type, structures,
                     checkedReferenceTypes, fixedArrayTypes,
-                    structureStates, depth + 1))
+                    structureStates, depth + 1, enumDefinitions))
             {
                 return false;
             }
@@ -442,7 +490,8 @@ internal static class ValueLayout
         IReadOnlyList<BoundNativeFixedArrayType>? fixedArrayTypes,
         IReadOnlyList<CheckedReferenceTypeDefinition>?
             checkedReferenceTypes,
-        out BoundNativeFixedArrayLayout layout)
+        out BoundNativeFixedArrayLayout layout,
+        IReadOnlyList<BoundEnumDefinition>? enumDefinitions = null)
     {
         if (fixedArrayTypes is not null
             && NativeFixedArrayTypes.IsType(type)
@@ -452,7 +501,8 @@ internal static class ValueLayout
             var array = fixedArrayTypes[NativeFixedArrayTypes.Index(type)];
             return NativeFixedArrayContract.TryGetLayout(type,
                 array.ElementType, array.ElementCount, structures,
-                fixedArrayTypes, out layout, checkedReferenceTypes);
+                fixedArrayTypes, out layout, checkedReferenceTypes,
+                enumDefinitions);
         }
 
         layout = default;
@@ -475,7 +525,8 @@ internal static class ValueLayout
         IReadOnlyList<BoundStruct> structures,
         IReadOnlyList<CheckedReferenceTypeDefinition>? checkedReferenceTypes,
         string? nativeLoweringAgreement,
-        IReadOnlyList<BoundNativeFixedArrayType>? fixedArrayTypes)
+        IReadOnlyList<BoundNativeFixedArrayType>? fixedArrayTypes,
+        IReadOnlyList<BoundEnumDefinition>? enumDefinitions)
     {
         if (checkedReferenceTypes is null)
         {
@@ -496,7 +547,8 @@ internal static class ValueLayout
         {
             return TryGetOptionalValueLayout(type, structures,
                 checkedReferenceTypes, nativeLoweringAgreement,
-                fixedArrayTypes, out var optionalLayout)
+                fixedArrayTypes, out var optionalLayout,
+                enumDefinitions)
                     ? optionalLayout.Size : 0;
         }
         if (nativeLoweringAgreement is not

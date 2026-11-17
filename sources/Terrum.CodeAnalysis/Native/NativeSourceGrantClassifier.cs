@@ -39,6 +39,10 @@ internal static class NativeSourceGrantClassifier
             var statements = new Stack<BoundStatement>();
             var expressions = new Stack<BoundExpression>();
             statements.Push(function.Body);
+            foreach (var clause in function.DeclarationContractClauses)
+            {
+                expressions.Push(clause.Predicate);
+            }
 
             while (statements.Count != 0 || expressions.Count != 0)
             {
@@ -58,6 +62,16 @@ internal static class NativeSourceGrantClassifier
                                 {
                                     AddCleanupCall(output.Type);
                                 }
+                                else if (argument is BoundReferenceFormation {
+                                    Place.Type: PrimitiveType.OwnedInt32Buffer,
+                                } formation
+                                    && NativeBufferIntrinsics
+                                        .IsInitializationOutputType(
+                                            formation.Type,
+                                            program.CheckedReferenceTypes))
+                                {
+                                    break;
+                                }
                             }
                             PushExpressions(call.Arguments);
                             break;
@@ -75,6 +89,13 @@ internal static class NativeSourceGrantClassifier
                         case BoundBufferRead read when read.Buffer == 0:
                             dependent[functionIndex] = true;
                             expressions.Push(read.Index);
+                            break;
+                        case BoundReferenceFormation {
+                            Place.Type: PrimitiveType.OwnedInt32Buffer,
+                        } formation
+                            when NativeBufferIntrinsics
+                                .IsInitializationOutputType(formation.Type,
+                                    program.CheckedReferenceTypes):
                             break;
                         case BoundSnapshotSpan snapshot when snapshot.SourceBuffer == 0:
                             dependent[functionIndex] = true;
@@ -148,7 +169,27 @@ internal static class NativeSourceGrantClassifier
                         case BoundBufferRead read:
                             expressions.Push(read.Index);
                             break;
-                        case BoundConstant or BoundNull or BoundRead or BoundMove or BoundReceiverLoan
+                        case BoundReferenceInitializationTest test:
+                            expressions.Push(test.Descriptor);
+                            break;
+                        case BoundReferenceFormation formation:
+                            expressions.Push(formation.Place);
+                            break;
+                        case BoundReferenceReborrow reborrow:
+                            expressions.Push(reborrow.Descriptor);
+                            break;
+                        case BoundReferenceRead read:
+                            expressions.Push(read.Descriptor);
+                            break;
+                        case BoundReferenceWrite write:
+                            expressions.Push(write.Descriptor);
+                            expressions.Push(write.Value);
+                            break;
+                        case BoundInitializationAttenuation attenuation:
+                            expressions.Push(attenuation.Descriptor);
+                            break;
+                        case BoundConstant or BoundNull or BoundRead
+                            or BoundContractReturnValue or BoundMove or BoundReceiverLoan
                             or BoundMutableReceiverLoan or BoundViewLength or BoundOutArgument
                             or BoundIsInitialized or BoundNativeFunctionAddress:
                             break;
@@ -288,12 +329,26 @@ internal static class NativeSourceGrantClassifier
             bool IsUnique(PrimitiveType type)
             {
                 return type == PrimitiveType.OwnedInt32Buffer
+                    || ((int)type >= ManagedClassTypes.First
+                        && ManagedClassTypes.IsManaged(type)
+                        && (uint)ManagedClassTypes.ClassIndex(type)
+                            < (uint)program.Classes.Length
+                        && program.Classes[ManagedClassTypes.ClassIndex(type)]
+                            .IsUnique == true)
                     || ((int)type >= 100 && (int)type < program.Structures.Length + 100
                         && program.Structures[(int)type - 100].IsUnique);
             }
 
             void AddRetirementCalls(PrimitiveType type)
             {
+                if (ManagedClassTypes.IsManaged(type))
+                {
+                    if (IsUnique(type))
+                    {
+                        throw Unsupported();
+                    }
+                    return;
+                }
                 if (type == PrimitiveType.OwnedInt32Buffer
                     || (int)type is < 100 or >= BoundEnumTypes.First
                     || !IsUnique(type))
@@ -398,7 +453,8 @@ internal static class NativeSourceGrantClassifier
         {
             if (function.Intrinsic != BoundIntrinsic.None)
             {
-                if (!IsSupportedWorkspaceIntrinsic(function))
+                if (!IsSupportedWorkspaceIntrinsic(function,
+                        program.CheckedReferenceTypes))
                 {
                     throw Unsupported();
                 }
@@ -419,7 +475,10 @@ internal static class NativeSourceGrantClassifier
                 var isOwner = variable.Type == PrimitiveType.OwnedInt32Buffer;
                 var isView = IsBufferView(variable.Type);
                 if ((!IsScalar(variable.Type) && !isOwner && !isView) || variable.IsOut
-                    || (isOwner && ((!function.IsInternal && isParameter) || variable.IsInit))
+                    || (isOwner && ((!function.IsInternal && isParameter)
+                        || (variable.IsInit
+                            && (isParameter
+                                || !variable.IsInitializationLocal))))
                     || (isView && (isParameter || variable.IsInit)))
                 {
                     throw Unsupported();
@@ -429,12 +488,19 @@ internal static class NativeSourceGrantClassifier
             var statements = new Stack<BoundStatement>();
             var expressions = new Stack<BoundExpression>();
             statements.Push(function.Body);
+            foreach (var clause in function.DeclarationContractClauses)
+            {
+                expressions.Push(clause.Predicate);
+            }
             while (statements.Count != 0 || expressions.Count != 0)
             {
                 while (expressions.Count != 0)
                 {
                     var expression = expressions.Pop();
-                    if (!IsScalar(expression.Type) && !IsWorkspaceType(expression.Type))
+                    if (!IsScalar(expression.Type)
+                        && !IsWorkspaceType(expression.Type)
+                        && !NativeBufferIntrinsics.IsInitializationOutputType(
+                            expression.Type, program.CheckedReferenceTypes))
                     {
                         throw Unsupported();
                     }
@@ -443,7 +509,7 @@ internal static class NativeSourceGrantClassifier
                         case BoundUnsafeExpression unsafeExpression:
                             expressions.Push(unsafeExpression.Expression);
                             break;
-                        case BoundConstant:
+                        case BoundConstant or BoundContractReturnValue:
                             break;
                         case BoundRead read when IsScalar(read.Type)
                             || (IsBufferView(read.Type) && IsBufferViewLocal(function, read.Variable)):
@@ -458,6 +524,13 @@ internal static class NativeSourceGrantClassifier
                         case BoundMutableReceiverLoan loan when loan.Type == PrimitiveType.OwnedInt32Buffer:
                             break;
                         case BoundOutArgument output when output.Type == PrimitiveType.OwnedInt32Buffer:
+                            break;
+                        case BoundReferenceFormation {
+                            Place.Type: PrimitiveType.OwnedInt32Buffer,
+                        } formation
+                            when NativeBufferIntrinsics
+                                .IsInitializationOutputType(formation.Type,
+                                    program.CheckedReferenceTypes):
                             break;
                         case BoundBufferLength length when length.Buffer == 0:
                             break;
@@ -524,6 +597,11 @@ internal static class NativeSourceGrantClassifier
                     case BoundLocal local:
                         expressions.Push(local.Initializer);
                         break;
+                    case BoundVacantLocal vacant
+                        when IsOwnerLocal(function, vacant.Variable)
+                            && function.Variables[vacant.Variable]
+                                .IsInitializationLocal:
+                        break;
                     case BoundExpressionStatement statement:
                         expressions.Push(statement.Expression);
                         break;
@@ -584,16 +662,21 @@ internal static class NativeSourceGrantClassifier
                 var callee = program.Functions[call.Function];
                 if (callee.Intrinsic != BoundIntrinsic.None)
                 {
-                    if (!IsSupportedWorkspaceIntrinsic(callee))
+                    if (!IsSupportedWorkspaceIntrinsic(callee,
+                            program.CheckedReferenceTypes))
                     {
                         throw Unsupported();
                     }
                     if (callee.Intrinsic == BoundIntrinsic.BufferTryCreate)
                     {
                         if (call.Arguments.Length != 2
-                            || call.Arguments[1] is not BoundOutArgument {
-                                Type: PrimitiveType.OwnedInt32Buffer,
-                            })
+                            || call.Arguments[1] is not BoundReferenceFormation {
+                                Place.Type: PrimitiveType.OwnedInt32Buffer,
+                            } output
+                            || !NativeBufferIntrinsics
+                                .IsInitializationOutputType(output.Type,
+                                    program.CheckedReferenceTypes)
+                            || output.Type != callee.Variables[1].Type)
                         {
                             throw Unsupported();
                         }
@@ -701,11 +784,14 @@ internal static class NativeSourceGrantClassifier
             }
         }
 
-        static bool IsSupportedWorkspaceIntrinsic(BoundFunction function)
+        static bool IsSupportedWorkspaceIntrinsic(BoundFunction function,
+            IReadOnlyList<CheckedReferenceTypeDefinition>
+                checkedReferenceTypes)
         {
             return function.Intrinsic is BoundIntrinsic.BufferTryCreate or BoundIntrinsic.BufferCount
                 or BoundIntrinsic.BufferRead or BoundIntrinsic.BufferSet or BoundIntrinsic.BufferTryAppend
-            && NativeBufferIntrinsics.Matches(function);
+            && NativeBufferIntrinsics.Matches(function,
+                checkedReferenceTypes);
         }
 
         static bool IsWorkspaceType(PrimitiveType type)
@@ -749,7 +835,8 @@ internal static class NativeSourceGrantClassifier
 
     internal static bool IsScalar(PrimitiveType type) =>
         type is PrimitiveType.Void or PrimitiveType.Bool or PrimitiveType.Char16
-            or PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64;
+            or PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
+            or PrimitiveType.NativeInt or PrimitiveType.NativeUInt;
 
     private static NotSupportedException Unsupported() =>
         new("The provisional source-grant DLL supports only self-contained structured scalar source-dependent functions.");

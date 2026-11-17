@@ -400,16 +400,16 @@ internal sealed class TrRmLocalAggregateLayoutProducerTests
                     body.HomeMap[2..]));
         }
 
-        var target = GetTargetMaps(targetSource,
+        var (TypeMap, FirstLocalTypeMapIndex) = GetTargetMaps(targetSource,
             "l1-type-map-first-use-baseline");
         var withUnreferencedType = GetTargetMaps(
             sourceWithUnreferencedType,
             "l1-type-map-unreferenced-type");
 
-        Assert.That(target.FirstLocalTypeMapIndex, Is.Zero);
+        Assert.That(FirstLocalTypeMapIndex, Is.Zero);
         Assert.That(withUnreferencedType.FirstLocalTypeMapIndex, Is.Zero);
         Assert.That(withUnreferencedType.TypeMap,
-            Is.EqualTo(target.TypeMap));
+            Is.EqualTo(TypeMap));
     }
 
     [Test]

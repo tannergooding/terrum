@@ -23,9 +23,11 @@ public static class FixedLayoutStorage
         IReadOnlyList<BoundNativeFixedArrayType> fixedArrays,
         IReadOnlySet<int>? duplicateNameViewIndexes = null,
         IReadOnlyList<CheckedReferenceTypeDefinition>?
-            checkedReferenceTypes = null)
+            checkedReferenceTypes = null,
+        IReadOnlyList<BoundEnumDefinition>? enumDefinitions = null)
         => Compute(structures, validateRecordedLayout: true, fixedArrays,
-            duplicateNameViewIndexes, checkedReferenceTypes).Alignments;
+            duplicateNameViewIndexes, checkedReferenceTypes,
+            enumDefinitions).Alignments;
 
     internal static ImmutableArray<BoundStruct> Materialize(
         ImmutableArray<BoundStruct> structures)
@@ -35,16 +37,21 @@ public static class FixedLayoutStorage
     internal static ImmutableArray<BoundStruct> Materialize(
         ImmutableArray<BoundStruct> structures,
         IReadOnlyList<BoundNativeFixedArrayType> fixedArrays,
-        IReadOnlySet<int>? duplicateNameViewIndexes = null)
+        IReadOnlySet<int>? duplicateNameViewIndexes = null,
+        IReadOnlyList<CheckedReferenceTypeDefinition>?
+            checkedReferenceTypes = null,
+        IReadOnlyList<BoundEnumDefinition>? enumDefinitions = null)
         => Compute(structures, validateRecordedLayout: false,
-            fixedArrays, duplicateNameViewIndexes).Structures;
+            fixedArrays, duplicateNameViewIndexes, checkedReferenceTypes,
+            enumDefinitions).Structures;
 
     private static (ImmutableArray<BoundStruct> Structures, ImmutableArray<int> Alignments)
         Compute(ImmutableArray<BoundStruct> structures, bool validateRecordedLayout,
             IReadOnlyList<BoundNativeFixedArrayType> fixedArrays,
             IReadOnlySet<int>? duplicateNameViewIndexes = null,
             IReadOnlyList<CheckedReferenceTypeDefinition>?
-                checkedReferenceTypes = null)
+                checkedReferenceTypes = null,
+            IReadOnlyList<BoundEnumDefinition>? enumDefinitions = null)
     {
         if (structures.IsDefault)
         {
@@ -92,7 +99,8 @@ public static class FixedLayoutStorage
                     depth + 1);
             }
             if (type == PrimitiveType.Void
-                || PrimitiveTypeFacts.ScalarWidth(type) > 0
+                || PrimitiveTypeFacts.ScalarWidth(type,
+                    enumDefinitions) > 0
                 || type == PrimitiveType.NativeRawPointer
                 || NativePointerTypes.IsType(type)
                 || NativeFunctionPointerTypes.IsType(type))
@@ -111,7 +119,7 @@ public static class FixedLayoutStorage
                     && NativeFixedArrayContract.TryGetLayout(type,
                         array.ElementType, array.ElementCount,
                         computedStructures, fixedArrays, out _,
-                        checkedReferenceTypes);
+                        checkedReferenceTypes, enumDefinitions);
             }
 
             var structureIndex = (int)type - 100;
@@ -154,7 +162,8 @@ public static class FixedLayoutStorage
 
             var isHiddenImportedView
                 = (duplicateNameViewIndexes?.Contains(index) ?? false)
-                    || structure.StandardTypeOrigin?.IsLookupRoot == false;
+                    || structure.StandardTypeOrigin?.IsLookupRoot == false
+                    || structure.StandardLayoutOnly;
             if (names.TryGetValue(structure.Name, out var existingHiddenView))
             {
                 if (!existingHiddenView || !isHiddenImportedView)
@@ -217,7 +226,7 @@ public static class FixedLayoutStorage
                     if (!NativeFixedArrayContract.TryGetLayout(field.Type,
                             array.ElementType, array.ElementCount, structures,
                             fixedArrays, out var layout,
-                            checkedReferenceTypes)
+                            checkedReferenceTypes, enumDefinitions)
                         || layout.Alignment > int.MaxValue
                         || layout.RequiredAlignment > int.MaxValue)
                     {
@@ -235,7 +244,8 @@ public static class FixedLayoutStorage
                     if (!IsBlittablePayload(field.Type, depth + 1)
                         || !ValueLayout.TryGetOptionalValueLayout(field.Type,
                             computedStructures, checkedReferenceTypes, null,
-                            fixedArrays, out var optionalLayout)
+                            fixedArrays, out var optionalLayout,
+                            enumDefinitions)
                         || optionalLayout.Size > int.MaxValue
                         || optionalLayout.Alignment > int.MaxValue
                         || optionalLayout.RequiredAlignment > int.MaxValue)
@@ -248,15 +258,24 @@ public static class FixedLayoutStorage
                     fieldRequiredAlignment
                         = optionalLayout.RequiredAlignment;
                 }
-                else if (PrimitiveTypeFacts.ScalarWidth(field.Type) > 0
+                else if (PrimitiveTypeFacts.ScalarWidth(field.Type,
+                        enumDefinitions) > 0
                     || field.Type is PrimitiveType.NativeUtf16ZPointer
                         or PrimitiveType.NativeUtf8ZPointer
                         or PrimitiveType.NativeRawPointer
                     || NativePointerTypes.IsType(field.Type)
                     || NativeFunctionPointerTypes.IsType(field.Type))
                 {
-                    width = ValueLayout.Size(field.Type, computedStructures);
-                    fieldAlignment = ValueLayout.Alignment(field.Type, computedStructures);
+                    width = ValueLayout.Size(field.Type,
+                        computedStructures,
+                        checkedReferenceTypes: checkedReferenceTypes,
+                        fixedArrayTypes: fixedArrays,
+                        enumDefinitions: enumDefinitions);
+                    fieldAlignment = ValueLayout.Alignment(field.Type,
+                        computedStructures,
+                        checkedReferenceTypes: checkedReferenceTypes,
+                        fixedArrayTypes: fixedArrays,
+                        enumDefinitions: enumDefinitions);
                     fieldRequiredAlignment = 1;
                 }
                 else

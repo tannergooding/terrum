@@ -121,7 +121,8 @@ public static partial class TrRmExecutableCompiler
         }
 
         _ = FixedLayoutStorage.Validate(program.Structures,
-            program.NativeFixedArrayTypes);
+            program.NativeFixedArrayTypes,
+            enumDefinitions: program.EnumDefinitions);
         var hasFloatingTypes = program.Structures.Any(static structure
                 => structure.Fields.Any(static field => IsFloat(field.Type)))
             || program.NativeFixedArrayTypes.Any(static fixedArray
@@ -1181,8 +1182,13 @@ public static partial class TrRmExecutableCompiler
                 continue;
             }
 
-            var expectedProviderSchema = expectedProviderSchemaIdentity
-                ?? throw new ArgumentOutOfRangeException(nameof(schema));
+            if (expectedProviderSchemaIdentity is null
+                && schema
+                    != TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft)
+            {
+                throw new ArgumentOutOfRangeException(nameof(schema));
+            }
+
             var provider = origin.Provider;
             var expectedDeclaration = origin.ExpectedDeclaration
                 ?? throw Unsupported(

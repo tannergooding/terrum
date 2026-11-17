@@ -22,7 +22,8 @@ public int32 ReadOwnedSourceGrantValue(int32 index)
         return 0;
     }
 
-    require OwnedInt32Buffer.TryCreate(1, out var created);
+    init OwnedInt32Buffer created;
+    require OwnedInt32Buffer.TryCreate(1, ref init created);
     mut OwnedInt32Buffer value = move created;
     require value.TryAppend(int32(Host.Source[index]));
     return ReadOwnedSourceGrantValueHelper(move value, index);
@@ -44,7 +45,8 @@ public int32 FailAfterSourceGrantOwnerMove()
         return 0;
     }
 
-    require OwnedInt32Buffer.TryCreate(1, out var created);
+    init OwnedInt32Buffer created;
+    require OwnedInt32Buffer.TryCreate(1, ref init created);
     mut OwnedInt32Buffer value = move created;
     require value.TryAppend(int32(Host.Source[0]));
     return FailAfterOwnerMoveHelper(move value, FailSourceGrantArgument());
