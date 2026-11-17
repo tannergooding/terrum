@@ -47,7 +47,7 @@ inference is selected.
 | [Native boundaries](../specs/native.md), [ABI layers](../specs/data-layout-and-abi.md#contract-layers), [stable outputs](../specs/targets/windows-x64-call-interface.md#5-stable-input-borrows-and-initialization) | A checked destination is not foreign pointer authorization. Add the scoped Terrum entry mapping below, not a universal or independently replaceable ABI. |
 | [Source-contract proposal](standard-function-pointer-source-contracts.md), [anchor proposal](standard-function-pointer-anchor-contracts.md) | Complete their checked-output parameter applicability. Preserve fixed bare defaults, inferred exact contracts, directed projection, structural anchors and their bounded predicate gates. Do not select an independently authored nondefault type spelling. |
 | [Selector codec](aggregate-native-outputs.md#exact-shared-predicate-codec), [Feature composition](predicate-feature-composition.md) | Reuse the six closed normal-result selectors and proposed bounded `10/1`. Do not reuse the foreign NativeOutput formation/publication protocol, Feature 8, DF, Body record `0C` or source-use `6`. |
-| [Metadata](../specs/il-metadata.md#metadata-logical-tables-and-row-semantics), [clauses](../specs/representation/contract-clauses.md), [registry](../specs/representation/registry.md) | Retain TypeSpec `0E`, Param `00`, existing clause shapes and owner rules. The only new Standard numeric candidates here are the narrowly scoped PlaceSelection flags below. |
+| [Metadata](../specs/il-metadata.md#metadata-logical-tables-and-row-semantics), [clauses](../specs/representation/contract-clauses.md), [registry](../specs/representation/registry.md) | Retain TypeSpec `0E`, Param `00`, existing clause shapes and owner rules. This proposal owns the narrowly scoped PlaceSelection flags below; shared direct/indirect CallSite source-use-5 input mapping is owned by [Standard register-Body initialization-destination inputs](standard-trrm-initialization-destination-callsite.md). |
 | [Complete private pointer carrier](native-function-pointer-contract-private-persistence.md) | Remains the owner of the unimplemented candidate-97 signature payload and `fnptr#i` references. Its assumption of complete private type identities needs the separate explicit checked-reference decision below before affected private transport. |
 
 The inspected
@@ -336,7 +336,7 @@ proposed owners rather than allocate a new function-pointer output table:
 | Invocation clauses | Existing MethodDef-owned Effects `0001`, OutputState `0002`, Dependency `0004` and proposed bounded `000B` attachments, with their exact extents, occurrence keys and exclusive owner ranges. OutputState's typed PredicateGraph reference selects the same anchor's phase-3 attachment; private selector ordinals are not graph row numbers. |
 | Capability closure | Retain the anchor/value/address/call companions' Features 1/2/4 and their full prerequisites; add the proposed bounded Feature `10/1` for retained selectors. Checked outputs alone do not require NativeOutput Feature 8. Required type/layout/failure semantics retain their own gates. |
 | Address formation | Companion `E9`/Body `0D` actual-target plus explicit pointer-view carrier, not an address of the anchor. No address-operation allocation changes here. |
-| Call | Existing general CallSite `02`, invoked by `90`/`E0`; captured register/Home pointer target, formal-order inputs and source-use `5=initialization destination` for each checked descriptor. Never use native-output source-use `6`. |
+| Call | Existing general CallSite `02`, invoked by `90`/`E0`; captured register/Home pointer target and formal-order inputs. Use the shared [source-use-5 descriptor and preparation mapping](standard-trrm-initialization-destination-callsite.md) for checked outputs. Never use native-output source-use `6`. |
 
 ### Initialization capability formation
 
@@ -370,11 +370,10 @@ namespace or width escape is needed. Flagless short `67` remains ordinary
 initialized-reference formation, not an initialization alias.
 
 At the source argument position, DD captures/forms the capability and its
-reservation before later arguments. A CallSite source-use-5 input selects a
-live descriptor of exact `0E` type in a register or descriptor Home, **not
-the Home containing T**. It supplies a scoped child reborrow, not a Copy of
-that descriptor. Forwarding an existing init formal uses that same input
-meaning without reading T or forming a reference to the parameter slot.
+reservation before later arguments. The shared Standard register-Body proposal
+owns the exact source-use-5 descriptor carrier and formal/preparation mapping;
+this function-pointer proposal adopts that meaning and adds only its pointer
+target and ABI obligations.
 
 Typed stores through that checked descriptor use existing SemanticStore `05`
 and `transition=Initialize`, then the ordinary replacement rules only when

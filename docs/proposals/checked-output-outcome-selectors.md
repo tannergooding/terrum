@@ -52,10 +52,10 @@ would add calls, failures and lifetime demands absent from the source model.
   requires `17/1`. Feature `10/1` supplied through `17/1` does not broaden
   the selector-only registration.
 * Canonical phase-3 ordinals place reused bounded selectors first, in their
-  existing unsigned-nodeKind order, then general selectors in first logical
-  output-relation occurrence order. Source producers use clause/branch
-  order; source-free writers retain that logical order. Physical row order
-  is not identity or a new runtime execution order.
+  existing unsigned-nodeKind order, then general selectors in the origin
+  order defined by the [derivation rule](#candidate-derivation-from-checked-ensures).
+  Source-free writers retain that logical order. Physical row order is not
+  identity or a new runtime execution order.
 
 | Retained use | Effective requirement |
 |---|---|
@@ -148,6 +148,129 @@ required coverage/disjointness. Unestablished safety or unsupported required
 relations reject; private body behavior is not a vacant-arm contract.
 Preserve these facts through shared traversal, verification and lowering.
 
+## Candidate derivation from checked ensures
+
+The accepted contracts define truth, flow and publication obligations, but
+do **not** select a unique P: equivalent sufficient conditions can have
+different expression occurrences. Recommend the following deterministic
+**declaration-local Boolean projection**, not a prover-selected predicate.
+This is an additional unapproved normalization decision, with no new syntax.
+
+1. **Take declaration inputs, not implementation paths.** Use the effective
+   per-output contract after source-default/replacement checking and the
+   checked, unoptimized bound `ensure` trees. Analyze each clause separately
+   in declaration order. Earlier declaration facts may establish access and
+   availability; a later false clause or a private body that never returns
+   cannot erase an earlier relation or an adopted default. Keep the original
+   phase-2 trees, including their checks, captures and cleanup. Projection
+   does not decide that a clause replaces a default merely because it
+   mentions a destination.
+2. **Identify public guard occurrences.** A guard atom is a maximal
+   output-free Boolean subtree with a complete, self-contained recipe under
+   this proposal's subject rules. Assign origin
+   `(ensure ordinal, root-to-node child-ordinal path)` before optimization;
+   children follow the general schema's evaluation order. Preserve selected
+   operations, policies, calls, forms, arguments and read dependencies.
+   Equal-looking calls remain different atoms; only checked copies of the
+   same surviving Boolean observation may share an origin. Same-graph
+   bindings are cloned with their definitions; a retired/cross-clause capture
+   is not substituted by its name or guessed producing expression.
+3. **Compute guarded publication facts.** For each assignment of the public
+   atoms, traverse the clause's finite Boolean/pattern truth cases, treating
+   other tests as unknown observations. Apply `!`, conditional, short-circuit
+   and eager truth rules with their actual evaluation and binding order;
+   do not inline a helper's private body or prune using its current returns.
+   Start authored state reasoning at unknown, not a private body state.
+   Keep successful true cases and their declaration-derived output facts
+   that survive phase cleanup.
+   Legal whole-T reads imply completeness on every reached successful read,
+   not just a true comparison; reading one live field is not a whole-T read.
+   A false `Initialized` test means
+   **not complete**, not vacant: state 0 additionally needs checked absence
+   or settlement of all partial acquisitions at publication. A descriptor
+   test is not a destination test. Body proofs validate these obligations
+   but do not replace unknown declaration facts with today's private writes.
+   Failed/divergent evaluation is not Boolean false or a normal case.
+
+For a formal and state S, the resulting Boolean function is exactly:
+
+```text
+P_S(assignment) is true iff
+    at least one successful declaration case is compatible, and
+    every compatible successful case establishes published state S.
+Otherwise P_S(assignment) is false.
+```
+
+Unknown state counts against both states. Thus eliminating an output/private
+test is a meet across its possible successful cases, not deletion of an
+inconvenient guard. This finite Boolean abstraction need not solve arbitrary
+numeric, alias or helper implications. Exhausted/unsupported required work
+declines emission; an incomplete case enumeration is not a weaker success.
+
+4. **Emit an occurrence tree, not a trace flag.** Order atoms by their source
+   origins and construct an ordered conditional tree for P_S by Boolean
+   cofactors. On each tree path an atom occurs at most once. Mutually
+   exclusive copies still get distinct node/operand/capture rows; no shared
+   expression nodes or synthetic public observation IDs are introduced.
+   Equal residual branches may be removed only with capture/domain validity
+   preserved. For `C(G,T,F)`, the conditional selecting T on G true, apply
+   the following reductions in listed order after that equal-branch rule;
+   `&&`/`||` denote existing AndThen/OrElse nodes, not source rewrites:
+
+```text
+C(G,true,false) -> G             C(G,false,true) -> !G
+C(G,T,false)    -> G && T        C(G,true,F)     -> G || F
+C(G,false,F)    -> !G && F        C(G,T,true)     -> !G || T
+Otherwise retain Conditional(G,T,F).
+```
+
+   Do not rewrite operations inside an atom. Remaining constants use the
+   existing typed scalar literal codec and its Feature 11 requirement.
+   Check the **derived tree's** guards and backing:
+   an eliminated output guard cannot authorize a newly exposed division,
+   dereference or helper domain. Neither provider nor caller runs this tree
+   merely because metadata contains it.
+5. **Publish exact retained consequences.** False functions contribute no
+   row, not a vacant arm. Unconditional completeness uses its existing
+   no-conditional-row encoding; unconditional vacancy needs a true
+   predicate/state-0 row. Reuse `10/1` only if the entire normalized tree is
+   exactly one of its six templates; otherwise retain `17/1`. Share graphs
+   only for the same derived recipe, occurrence origins and complete owner
+   context, never merely equal helper names. Order general relations by
+   their earliest contributing state-establishing source occurrence, then
+   successful trace order (true edge before false), formal ordinal and
+   state. Coalesce repeated identical guard/output/state consequences and
+   assign contiguous phase-3 ordinals after the bounded selector group.
+
+The producer checks the resulting relations against every effective source
+obligation, including default retention, coverage, disjointness and survival.
+Projection is not permission to drop an unrepresentable authored relation:
+if no eligible tree preserves a required conditional contract, decline the
+affected Standard path rather than emit an empty range meaning unconditional
+completion, fabricate a false marker, or narrow the caller's domain.
+These are representation/support failures, not new source restrictions.
+
+Here I denotes a whole destination `Initialized` observation and P an
+eligible source guard; the notation describes bound expressions, not new
+source forms. Negative-state entries assume the required vacancy proof:
+
+| Authored Boolean relation | Derived additional state consequences |
+|---|---|
+| `P == I` | P/complete, !P/vacant |
+| `P != I` | P/vacant, !P/complete |
+| `P ? I : true`, or `!P || I` | P/complete only |
+| `P || I` | !P/complete only |
+| `I || P` | !P/complete only **if** P remains independently publishable; no output-guard hoisting |
+| `I || true` | No state consequence; mentioning a destination does not cancel an adopted default |
+| Legal `*destination > 0` | Complete on every successful normal clause case; keep the value guarantee in phase 2 |
+
+The narrower alternative is a syntax-pattern catalog recognizing only the
+first few forms; it misses ordinary composition and is not selected.
+Arbitrary semantic guard synthesis could establish more, but needs a
+separate canonical-choice/equivalence contract. Optional stronger proofs may
+validate this projection; they cannot silently choose another P from private
+code or change the selected baseline's occurrence identities.
+
 For example, this is accepted authoring syntax with a **proposed
 GeneralPredicateGraphsDraft mapping**, not an executable-support claim:
 
@@ -197,6 +320,11 @@ These are required future cases, not qualification results.
 |---|---|
 | Boolean default and non-Boolean unconditional output | Preserve narrow true/false rows or absence of conditional rows respectively; neither requires 17 merely for that default. |
 | Example's P/!P partition; one-sided variant | First publishes complete/vacant on the selected arms; second gives no false-arm state guarantee. Both use 17/10 without a selector literal or Feature 8. |
+| Derivation truth cases | Exercise Boolean equality/inequality, both disjunction orders, conditional and eager operators; derive the table above without changing source evaluation order. |
+| Partial/descriptor/field observations | False Initialized on a partial aggregate supplies no vacant fact; descriptor or one-field initialization supplies no whole referent completeness. Require settlement before any state-0 row. |
+| Projection removes an output guard | A total scalar P may remain a classifier; reject an exposed unproved dereference/division/helper domain, not a stronger caller precondition or new evaluation. |
+| Origins and private proofs | Keep two independent identical helper occurrences distinct, permit a checked saved-Boolean copy, and retain declared relations/defaults despite private body reachability or a later false ensure. |
+| Unrepresentable conditional consequence | A required output-dependent/cross-clause-capture relation cannot become an empty unconditional contract, a false marker or an Effects-only import. |
 | General scalar status set with literals | Require 17 plus the selected 11; missing literal support rejects even on a guarded, unexecuted branch. |
 | Same-state overlap; possible complete/vacant overlap | Permit the former; source/producer verification rejects the latter or unestablished required disjointness/coverage. |
 | Ordered and skipped predicate occurrences | Preserve actual short-circuit calls, once-only observation and cleanup; an extra publication-time helper/getter invocation fails conformance. |
@@ -210,9 +338,11 @@ These are required future cases, not qualification results.
 
 On later adoption, amend the general proposal's decision, retained-graph,
 node-phase, Feature-detection and phase-execution sections by this checked
-applicability only. Reconcile the stale `000B/0037` assignment projection in
-the clause owner; integrate the phase-3 relation and coverage rules into
-clauses/logical records, metadata, binding and conformance. Keep the bounded
-composition and NativeOutput codec owners unchanged in meaning.
+applicability only. Integrate the candidate source-derivation and occurrence
+rules with the producer obligations, not as an inferred existing rule.
+Reconcile the stale `000B/0037` assignment projection in the clause owner;
+integrate the phase-3 relation and coverage rules into clauses/logical records,
+metadata, binding and conformance. Keep the bounded composition and
+NativeOutput codec owners unchanged in meaning.
 Independent Body, reference, ownership, failure and target support remains
 required; this decision supplies none of those missing implementations.
