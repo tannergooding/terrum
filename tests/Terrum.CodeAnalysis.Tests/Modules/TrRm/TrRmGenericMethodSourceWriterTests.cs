@@ -19,6 +19,24 @@ internal sealed class TrRmGenericMethodSourceWriterTests
 {
     private const string GenericMethodCallsSchemaIdentity
         = "trrm/1-draft-generic-method-calls-parameter-labels-1";
+    private const string GenericMethodCallsReceiverAccessSchemaIdentity
+        = "trrm/1-draft-generic-method-calls-parameter-labels-1-receiver-access-1";
+    private const string C1ReceiverAccessSchemaIdentity
+        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-parameter-labels-1-receiver-access-1";
+    private const string C1M1ReceiverAccessSchemaIdentity
+        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-parameter-labels-1-receiver-access-1";
+    private const string C1M1ConstructionReceiverAccessSchemaIdentity
+        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-1-parameter-labels-1-receiver-access-1";
+    private const string C1M1Construction2ReceiverAccessSchemaIdentity
+        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1";
+    private const string C1SchemaIdentity
+        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1";
+    private const string C1M1SchemaIdentity
+        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1";
+    private const string C1M1ConstructionSchemaIdentity
+        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-1";
+    private const string C1M1Construction2SchemaIdentity
+        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2";
 
     [Test]
     public void RejectsSourceGenericConstantFormalsWithoutAssignedCarrier()
@@ -162,11 +180,511 @@ internal sealed class TrRmGenericMethodSourceWriterTests
     }
 
     [Test]
+    public void EmitsAndReconstructsGenericInitializationReferenceTypes()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public void Initialize<T>(ref<init T> destination) { }
+            public void InitializeWritable<T>(ref<init write T> destination)
+                where T : write { }
+            public void InitializeOuterWritable<T>(
+                write ref<init T> destination) { }
+            public void ReadWritable<T>(ref<write T> source)
+                where T : write { }
+            public void InitializeNested<T>(
+                ref<init ref<T>> destination) { }
+            public void InitializeSpan<T>(
+                ref<init Span<T>> destination) { }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var exports = program.GenericMethodDefinitions.Select(definition =>
+            new TrRmSourceGenericMethodExport(program,
+                definition.SourceInputOrdinal, definition.Span,
+                definition.Name)).ToArray();
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "init-reference.provider", GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), exports);
+        var (typeSpecCount, typeSpecBytes) = GetSection(artifact, 0x0011);
+        var (genericParamCount, _) = GetSection(artifact, 0x0019);
+        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes,
+            checked((int)typeSpecCount), 0, 0,
+            checked((int)genericParamCount));
+        var initializationReferenceShapes
+            = new List<(bool IsOuterWritable, bool IsReferentWritable)>();
+        var hasOrdinaryReferenceSpec = false;
+        var hasOrdinaryReferenceSpecWithUnqualifiedFormal = false;
+        var hasSpanReferenceSpec = false;
+        var typeSpecRowCount = checked((int)typeSpecCount);
+        for (var rowIndex = 1; rowIndex <= typeSpecRowCount; rowIndex++)
+        {
+            var row = typeSpecs.GetRow(rowIndex);
+            hasOrdinaryReferenceSpec |= row.Length == 6
+                && row[0] == 0x07;
+            if (row.Length == 6 && row[0] == 0x07)
+            {
+                var referent = typeSpecs.GetTypeSpecRef(
+                    ReadUInt32(row, 2));
+                hasOrdinaryReferenceSpecWithUnqualifiedFormal
+                    |= referent.IsRow && referent.Form == 0x04
+                        && referent.Qualifiers == 0;
+            }
+            hasSpanReferenceSpec |= row.Length == 7
+                && row[0] == 0x0C && row[2] == 0x8A;
+            if (row.Length == 6 && row[0] == 0x0E)
+            {
+                initializationReferenceShapes.Add((
+                    (row[1] & 0x01) != 0,
+                    (typeSpecs.GetTypeSpecRef(ReadUInt32(row, 2))
+                        .Qualifiers & 0x01) != 0));
+            }
+        }
+        Assert.That(initializationReferenceShapes,
+            Does.Contain((false, false)));
+        Assert.That(initializationReferenceShapes,
+            Does.Contain((true, false)));
+        Assert.That(initializationReferenceShapes,
+            Does.Not.Contain((false, true)));
+        Assert.That(hasOrdinaryReferenceSpec, Is.True);
+        Assert.That(hasOrdinaryReferenceSpecWithUnqualifiedFormal,
+            Is.True);
+        Assert.That(hasSpanReferenceSpec, Is.True);
+
+        var reference
+            = TrRmExecutableCompiler.CreateGenericMethodCallsDraftReference(
+                artifact, "init-reference.provider");
+        Assert.That(reference.GenericMethodImports, Has.Length.EqualTo(6));
+        foreach (var import in reference.GenericMethodImports.Where(
+                    static candidate => candidate.Origin.ExportKey
+                            is not ("InitializeNested" or "ReadWritable"
+                                or "InitializeSpan")))
+        {
+            var type = import.ProofFunction.Variables[0].Type;
+            Assert.That(CheckedReferenceTypeContract.IsValidType(type,
+                reference.CheckedReferenceTypes), Is.True);
+            var definition = reference.CheckedReferenceTypes[
+                CheckedReferenceTypes.Index(type)];
+            Assert.That(definition.IsInitialization, Is.True);
+            Assert.That(definition.ReferentType,
+                Is.EqualTo(import.Formals[0].PlaceholderType));
+            Assert.That(definition.IsReferentWritable,
+                Is.False);
+            Assert.That(definition.IsWritable,
+                Is.EqualTo(import.Origin.ExportKey
+                    == "InitializeOuterWritable"));
+        }
+
+        var writableImport = reference.GenericMethodImports.Single(
+            candidate => candidate.Origin.ExportKey == "ReadWritable");
+        var writableType = writableImport.ProofFunction.Variables[0].Type;
+        var writableDefinition = reference.CheckedReferenceTypes[
+            CheckedReferenceTypes.Index(writableType)];
+        Assert.That(writableDefinition.IsInitialization, Is.False);
+        Assert.That(writableDefinition.IsWritable, Is.False);
+        Assert.That(writableDefinition.IsReferentWritable, Is.False);
+        Assert.That(writableDefinition.ReferentType,
+            Is.EqualTo(writableImport.Formals[0].PlaceholderType));
+
+        var nestedImport = reference.GenericMethodImports.Single(
+            candidate => candidate.Origin.ExportKey
+            == "InitializeNested");
+        var nestedOuterType = nestedImport.ProofFunction
+            .Variables[0].Type;
+        var nestedOuter = reference.CheckedReferenceTypes[
+            CheckedReferenceTypes.Index(nestedOuterType)];
+        Assert.That(nestedOuter.IsInitialization, Is.True);
+        Assert.That(CheckedReferenceTypes.IsType(nestedOuter.ReferentType),
+            Is.True);
+        var nestedInner = reference.CheckedReferenceTypes[
+            CheckedReferenceTypes.Index(nestedOuter.ReferentType)];
+        Assert.That(nestedInner.IsInitialization, Is.False);
+        Assert.That(nestedInner.ReferentType,
+            Is.EqualTo(nestedImport.Formals[0].PlaceholderType));
+
+        var spanImport = reference.GenericMethodImports.Single(
+            candidate => candidate.Origin.ExportKey == "InitializeSpan");
+        var spanOuter = reference.CheckedReferenceTypes[
+            CheckedReferenceTypes.Index(
+                spanImport.ProofFunction.Variables[0].Type)];
+        Assert.That(BoundSpanTypeTypes.IsType(spanOuter.ReferentType),
+            Is.True);
+        Assert.That(reference.SpanTypes[
+            BoundSpanTypeTypes.Index(spanOuter.ReferentType)].ElementType,
+            Is.EqualTo(spanImport.Formals[0].PlaceholderType));
+    }
+
+    [Test]
+    public void NormalizesRedundantWritableFormalQualifiersInStandardTypeSpecs()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public void Initialize<T>(ref<init write T> destination)
+                where T : write { }
+            public T Echo<T>(T value) { return value; }
+            public T Forward<T>(T value) where T : write {
+                return Echo<write T>(value);
+            }
+            public int32 UseDefault<T, U = write T>(int32 value)
+                where T : write { return value; }
+            public int32 UseReferenceDefault<T,
+                U = ref<init write T>>(int32 value)
+                where T : write { return value; }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var exports = program.GenericMethodDefinitions.Select(definition =>
+            new TrRmSourceGenericMethodExport(program,
+                definition.SourceInputOrdinal, definition.Span,
+                definition.Name)).ToArray();
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "write-normalization.provider", GenericMethodCallsSchemaIdentity,
+            0, Array.Empty<TrRmSourceTypeExport>(), exports);
+        var noncanonicalArtifact
+            = AddWriteQualifierToFirstReferenceFormal(artifact);
+        noncanonicalArtifact
+            = AddWriteQualifierToFirstGenericCallFormalActual(
+                noncanonicalArtifact);
+        noncanonicalArtifact
+            = AddWriteQualifierToFirstFormalDefault(noncanonicalArtifact);
+        var reference
+            = TrRmExecutableCompiler.CreateGenericMethodCallsDraftReference(
+                noncanonicalArtifact, "write-normalization.provider");
+
+        var initializeImport = reference.GenericMethodImports.Single(
+            candidate => candidate.Origin.ExportKey == "Initialize");
+        var referenceType = reference.CheckedReferenceTypes[
+            CheckedReferenceTypes.Index(
+                initializeImport.ProofFunction.Variables[0].Type)];
+        Assert.That(referenceType.IsReferentWritable, Is.False);
+
+        var defaultImport = reference.GenericMethodImports.Single(
+            candidate => candidate.Origin.ExportKey == "UseDefault");
+        var typeDefault = defaultImport.Formals[1].TypeDefault!.Term;
+        Assert.That(typeDefault.Kind,
+            Is.EqualTo(BoundGenericMethodTypeTermKind.Formal));
+        Assert.That(typeDefault.IsWritable, Is.False);
+        Assert.That(typeDefault.FormalOrdinal, Is.Zero);
+
+        var referenceDefaultImport = reference.GenericMethodImports.Single(
+            candidate => candidate.Origin.ExportKey
+                == "UseReferenceDefault");
+        var referenceDefault
+            = referenceDefaultImport.Formals[1].TypeDefault!.Term;
+        Assert.That(referenceDefault.Kind,
+            Is.EqualTo(BoundGenericMethodTypeTermKind.CheckedReference));
+        Assert.That(referenceDefault.TypeArguments.Single().IsWritable,
+            Is.False);
+
+        var forwardImport = reference.GenericMethodImports.Single(
+            candidate => candidate.Origin.ExportKey == "Forward");
+        BoundCall? forwardedCall = null;
+        Assert.That(BoundTreeTraversal.VisitExpressions(
+            forwardImport.ProofFunction.Body, expression =>
+            {
+                if (expression is BoundCall {
+                        ImportedGenericMethodCall: not null,
+                    } call)
+                {
+                    forwardedCall = call;
+                }
+            }), Is.True);
+        Assert.That(forwardedCall!.ImportedGenericMethodTypeArguments.Single(),
+            Is.EqualTo(forwardImport.Formals[0].PlaceholderType));
+    }
+
+    [Test]
+    public void EmitsAndReconstructsGenericReferenceResultDependencies()
+    {
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Terrum.CodeAnalysis;
+                [return: DependsOn(nameof(source))]
+                public ref<T> Borrow<T>(ref<T> source) {
+                    return move source;
+                }
+                [return: DependsOn(nameof(source))]
+                public ref<U> Forward<U>(ref<U> source) {
+                    return Borrow<U>(source);
+                }
+                """));
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+
+        var provider = providerCompilation.Program!;
+        var exports = provider.GenericMethodDefinitions.Select(definition =>
+            new TrRmSourceGenericMethodExport(provider,
+                definition.SourceInputOrdinal, definition.Span,
+                definition.Name)).ToArray();
+        var artifact = TrRmExecutableCompiler.EmitStandard(provider,
+            "reference-result.provider", GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), exports);
+        var reference
+            = TrRmExecutableCompiler.CreateGenericMethodCallsDraftReference(
+                artifact, "reference-result.provider");
+
+        var borrowImport = reference.GenericMethodImports.Single(
+            import => import.Origin.ExportKey == "Borrow");
+        var borrowDependency
+            = borrowImport.ProofFunction.DependencyContracts.Single();
+        Assert.That(borrowDependency.Relation,
+            Is.EqualTo(BoundDependencyRelation.DependsOn));
+        Assert.That(borrowDependency.Destination,
+            Is.EqualTo(BoundDependencyDestination.Result));
+        Assert.That(borrowDependency.Sources.Single(),
+            Is.EqualTo(new BoundDependencySource(
+                BoundDependencySourceKind.Formal, 0)));
+
+        var forwardImport = reference.GenericMethodImports.Single(
+            import => import.Origin.ExportKey == "Forward");
+        var forwardDependency
+            = forwardImport.ProofFunction.DependencyContracts.Single();
+        Assert.That(forwardDependency.Relation,
+            Is.EqualTo(BoundDependencyRelation.DependsOn));
+        Assert.That(forwardDependency.Sources.Single(),
+            Is.EqualTo(new BoundDependencySource(
+                BoundDependencySourceKind.Formal, 0)));
+
+        var consumerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Terrum.CodeAnalysis;
+                [return: DependsOn(nameof(source))]
+                public ref<T> ForwardAgain<T>(ref<T> source) {
+                    return Forward<T>(source);
+                }
+                """), reference);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        SemanticVerifier.Verify(consumerCompilation.Program!);
+
+        var storageOnlyArtifact
+            = RewriteGenericResultDependencyRelationship(artifact, 1);
+        var storageOnlyReference
+            = TrRmExecutableCompiler.CreateGenericMethodCallsDraftReference(
+                storageOnlyArtifact, "reference-result.storage-only-provider");
+        foreach (var exportKey in new[] { "Borrow", "Forward" })
+        {
+            var import = storageOnlyReference.GenericMethodImports.Single(
+                candidate => candidate.Origin.ExportKey == exportKey);
+            Assert.That(import.ProofFunction.DependencyContracts,
+                Has.Length.EqualTo(2));
+            Assert.That(import.ProofFunction.DependencyContracts[0].Relation,
+                Is.EqualTo(BoundDependencyRelation.DependsOn));
+            Assert.That(import.ProofFunction.DependencyContracts[1].Relation,
+                Is.EqualTo(BoundDependencyRelation.BorrowSourceStorage));
+            Assert.That(import.ProofFunction.DependencyContracts[1].Sources
+                .Single(), Is.EqualTo(new BoundDependencySource(
+                    BoundDependencySourceKind.Formal, 0)));
+        }
+
+        var storageConsumerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Terrum.CodeAnalysis;
+                [return: DependsOn(nameof(source))]
+                public ref<T> ForwardAgain<T>(ref<T> source) {
+                    return Forward<T>(source);
+                }
+                [return: DependsOn(nameof(source))]
+                public ref<ref<T>> ForwardNested<T>(ref<ref<T>> source) {
+                    return Borrow<ref<T>>(source);
+                }
+                """), storageOnlyReference);
+        Assert.That(storageConsumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                storageConsumerCompilation.Diagnostics));
+        SemanticVerifier.Verify(storageConsumerCompilation.Program!);
+    }
+
+    [Test]
+    public void GenericMethodResultProviderBindingPreservesStoragePermission()
+    {
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Terrum.CodeAnalysis;
+                [return: DependsOn(nameof(source))]
+                public ref<T> Borrow<T>(ref<T> source) {
+                    return move source;
+                }
+                """));
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerProgram = providerCompilation.Program!;
+        var definition = providerProgram.GenericMethodDefinitions.Single();
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, "result-permission.provider",
+            GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), [
+                new(providerProgram, definition.SourceInputOrdinal,
+                    definition.Span, "Borrow"),
+            ]);
+        var storageOnlyProviderArtifact
+            = RewriteGenericResultDependencyRelationship(providerArtifact, 1);
+
+        byte[] CreateConsumerArtifact(byte[] selectedProvider)
+        {
+            var reference = TrRmExecutableCompiler
+                .CreateGenericMethodCallsDraftReference(selectedProvider,
+                    "result-permission.provider");
+            var compilation = Compilation.CreateLibrary(
+                SyntaxTree.Parse("""
+                    using Terrum.CodeAnalysis;
+                    [return: DependsOn(nameof(source))]
+                    public ref<T> Forward<T>(ref<T> source) {
+                        return Borrow<T>(source);
+                    }
+                    """), reference);
+            Assert.That(compilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            var program = compilation.Program!;
+            var forward = program.GenericMethodDefinitions.Single();
+            return TrRmExecutableCompiler.EmitStandard(program,
+                "result-permission.consumer",
+                GenericMethodCallsSchemaIdentity, 0,
+                Array.Empty<TrRmSourceTypeExport>(), [
+                    new(program, forward.SourceInputOrdinal, forward.Span,
+                        "Forward"),
+                ]);
+        }
+
+        var broadConsumerArtifact = CreateConsumerArtifact(providerArtifact);
+        var storageProvider = new TrRmStandardArtifactInput(
+            GenericMethodCallsSchemaIdentity, storageOnlyProviderArtifact);
+        _ = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(GenericMethodCallsSchemaIdentity,
+                broadConsumerArtifact), "result-permission.consumer",
+            [storageProvider]);
+
+        var storageConsumerArtifact
+            = CreateConsumerArtifact(storageOnlyProviderArtifact);
+        var broadProvider = new TrRmStandardArtifactInput(
+            GenericMethodCallsSchemaIdentity, providerArtifact);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(
+                    GenericMethodCallsSchemaIdentity,
+                    storageConsumerArtifact),
+                "result-permission.consumer", [broadProvider]));
+    }
+
+    [Test]
+    public void GenericMethodResultProviderBindingComparesEachSource()
+    {
+        static byte[] EmitProvider(string source, string exportKey)
+        {
+            var compilation = Compilation.CreateLibrary(
+                SyntaxTree.Parse(source));
+            Assert.That(compilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            var program = compilation.Program!;
+            var definition = program.GenericMethodDefinitions.Single();
+            return TrRmExecutableCompiler.EmitStandard(program,
+                "result-matrix.provider",
+                GenericMethodCallsSchemaIdentity, 0,
+                Array.Empty<TrRmSourceTypeExport>(), [
+                    new(program, definition.SourceInputOrdinal,
+                        definition.Span, exportKey),
+                ]);
+        }
+
+        var expectedProvider = EmitProvider("""
+            using Terrum.CodeAnalysis;
+            [return: DependsOn(nameof(first), nameof(second))]
+            public ref<T> Select<T>(ref<T> first, ref<T> second) {
+                return move first;
+            }
+            """, "Select");
+        var mixedExpectedProvider
+            = RewriteGenericResultDependencyRelationship(expectedProvider, 1,
+                sourceOrdinal: 0);
+        var expectedReference = TrRmExecutableCompiler
+            .CreateGenericMethodCallsDraftReference(mixedExpectedProvider,
+                "result-matrix.provider");
+        var consumerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Terrum.CodeAnalysis;
+                [return: DependsOn(nameof(first), nameof(second))]
+                public ref<T> Forward<T>(ref<T> first, ref<T> second) {
+                    return Select<T>(first, second);
+                }
+                """), expectedReference);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerProgram = consumerCompilation.Program!;
+        var consumerDefinition
+            = consumerProgram.GenericMethodDefinitions.Single();
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            consumerProgram, "result-matrix.consumer",
+            GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), [
+                new(consumerProgram, consumerDefinition.SourceInputOrdinal,
+                    consumerDefinition.Span, "Forward"),
+            ]);
+
+        var narrowedProvider = EmitProvider("""
+            using Terrum.CodeAnalysis;
+            [return: DependsOn(nameof(right))]
+            public ref<T> Select<T>(ref<T> left, ref<T> right) {
+                return move right;
+            }
+            """, "Select");
+        _ = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(
+                GenericMethodCallsSchemaIdentity, consumerArtifact),
+            "result-matrix.consumer", [
+                new TrRmStandardArtifactInput(
+                    GenericMethodCallsSchemaIdentity, narrowedProvider),
+            ]);
+
+        var widenedProvider = EmitProvider("""
+            using Terrum.CodeAnalysis;
+            [return: DependsOn(nameof(left), nameof(right))]
+            public ref<T> Select<T>(ref<T> left, ref<T> right) {
+                return move left;
+            }
+            """, "Select");
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(
+                    GenericMethodCallsSchemaIdentity, consumerArtifact),
+                "result-matrix.consumer", [
+                    new TrRmStandardArtifactInput(
+                        GenericMethodCallsSchemaIdentity, widenedProvider),
+                ]));
+
+        var firstOnlyExpectedProvider = EmitProvider("""
+            using Terrum.CodeAnalysis;
+            [return: DependsOn(nameof(first))]
+            public ref<T> Select<T>(ref<T> first, ref<T> second) {
+                return move first;
+            }
+            """, "Select");
+        var firstOnlyConsumerArtifact
+            = CreateConsumerArtifact(firstOnlyExpectedProvider);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(
+                    GenericMethodCallsSchemaIdentity,
+                    firstOnlyConsumerArtifact),
+                "result-matrix.consumer", [
+                    new TrRmStandardArtifactInput(
+                        GenericMethodCallsSchemaIdentity, narrowedProvider),
+                ]));
+    }
+
+    [Test]
     public void EmitsAndReconstructsGenericSpanTypeArguments()
     {
         var providerCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
                 public int32 TypeOnly<T>(int32 value) { return value; }
+                public Span<T> SpanIdentity<T>(Span<T> value) {
+                    return value;
+                }
                 public int32 UseRead<T>(int32 value) {
                     return TypeOnly<Span<T>>(value);
                 }
@@ -192,6 +710,8 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         var definitions = provider.GenericMethodDefinitions;
         var typeOnly = definitions.Single(static definition =>
             definition.Name == "TypeOnly");
+        var spanIdentity = definitions.Single(static definition =>
+            definition.Name == "SpanIdentity");
         var read = definitions.Single(static definition =>
             definition.Name == "UseRead");
         var concrete = definitions.Single(static definition =>
@@ -207,6 +727,8 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             Array.Empty<TrRmSourceTypeExport>(), [
                 new(provider, typeOnly.SourceInputOrdinal, typeOnly.Span,
                     "span.type-only/v1"),
+                new(provider, spanIdentity.SourceInputOrdinal,
+                    spanIdentity.Span, "span.identity/v1"),
                 new(provider, read.SourceInputOrdinal, read.Span,
                     "span.read/v1"),
                 new(provider, concrete.SourceInputOrdinal, concrete.Span,
@@ -248,6 +770,23 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         var reference
             = TrRmExecutableCompiler.CreateGenericMethodCallsDraftReference(
                 artifact, "span.provider");
+
+        var spanIdentityImport = reference.GenericMethodImports.Single(
+            import => import.Origin.ExportKey == "span.identity/v1");
+        var spanIdentityParameter
+            = spanIdentityImport.ProofFunction.Variables[0].Type;
+        Assert.That(BoundSpanTypeTypes.IsValidType(spanIdentityParameter,
+            reference.SpanTypes), Is.True);
+        Assert.That(spanIdentityImport.ProofFunction.ReturnType,
+            Is.EqualTo(spanIdentityParameter));
+        var spanIdentityType = reference.SpanTypes[
+            BoundSpanTypeTypes.Index(spanIdentityParameter)];
+        Assert.That(spanIdentityType.ElementFormalDefinitionOrdinal,
+            Is.EqualTo(BoundSpanTypeContract
+                .ImportedFormalDefinitionOrdinal
+                - spanIdentityImport.FormalTypeOwnerOrdinal));
+        Assert.That(spanIdentityType.ElementFormalOrdinal, Is.Zero);
+        Assert.That(spanIdentityType.IsElementWritable, Is.False);
 
         static BoundCall GetGenericCall(
             BoundGenericMethodImport import)
@@ -2028,6 +2567,383 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             Has.Length.EqualTo(1));
     }
 
+    [TestCase(false, "int32", "", (byte)3)]
+    [TestCase(true, "mut int32", "write, ", (byte)4)]
+    public void G1L1R1OpenInterfaceCallsPreserveReceiverBorrow(
+        bool requiresMutableReceiver, string methodReturnType,
+        string formalRequirements, byte expectedSourceUse)
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($$"""
+            namespace Example {
+                public struct S {
+                    public mut int32 Update() { return 1; }
+                }
+                public mut class C {
+                    public int32 Read() { return 1; }
+                    public mut int32 Update() { return 1; }
+                }
+                public interface I<T> {
+                    public {{methodReturnType}} Read();
+                }
+                public int32 ReadVia<T>(T value)
+                    where T : {{formalRequirements}}I<T> {
+                    return value.via<I<T>>.Read();
+                }
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var interfaceDefinition = program.Interfaces.Single();
+        var interfaceMember = interfaceDefinition.Members.Single();
+        var interfaceExport = new TrRmSourceTypeExport("Example", "I",
+            "example.interface/I") {
+            GenericArity = interfaceDefinition.Formals.Length,
+            InterfaceMethodExports = [
+                new TrRmSourceInterfaceMethodExport(
+                    interfaceMember.SourceInputOrdinal,
+                    interfaceMember.SourceDeclarationSpan,
+                    "example.interface/I.Read"),
+            ],
+        };
+        var method = program.GenericMethodDefinitions.Single();
+        var methodExport = new TrRmSourceGenericMethodExport(program,
+            method.SourceInputOrdinal, method.Span,
+            "example.method/ReadVia");
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "interface.receiver.provider",
+            GenericMethodCallsReceiverAccessSchemaIdentity, 0,
+            [interfaceExport], [methodExport]);
+        var (methodCount, methodBytes) = GetSection(artifact, 0x0016);
+        var methods = new TrRmVariableTableIndex(methodBytes,
+            checked((int)methodCount), 28, 0);
+        var mutableMethodCount = 0;
+        for (var methodRow = 1; methodRow <= methods.Count; methodRow++)
+        {
+            if ((BinaryPrimitives.ReadUInt32LittleEndian(
+                    methods.GetRow(methodRow).Slice(12, sizeof(uint))) & 4)
+                != 0)
+            {
+                mutableMethodCount++;
+            }
+        }
+        Assert.That(mutableMethodCount,
+            Is.EqualTo(requiresMutableReceiver ? 3 : 2));
+
+        var schema
+            = TrRmArtifactSchema.GenericMethodCallsParameterLabelsReceiverAccessDraft;
+        var (sourceUse, sourceUseOffset)
+            = GetGenericCallInterfaceReceiverSourceUse(artifact, schema);
+        Assert.That(sourceUse, Is.EqualTo(expectedSourceUse));
+
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(
+                GenericMethodCallsReceiverAccessSchemaIdentity, artifact),
+            "interface.receiver.provider", []);
+        Assert.That(reference.Interfaces.Single().Members.Single()
+                .RequiresMutableReceiver,
+            Is.EqualTo(requiresMutableReceiver));
+        var imported = reference.GenericMethodImports.Single();
+        Assert.That(imported.Formals.Single().RequiresWritable,
+            Is.EqualTo(requiresMutableReceiver));
+        var importedCall = (BoundCall)((BoundReturn)imported.ProofFunction
+            .Body.Statements.Single()).Value!;
+        Assert.That(imported.ProofSupportFunctions[importedCall.Function]
+                .Variables[0].IsMutable,
+            Is.EqualTo(requiresMutableReceiver));
+        if (requiresMutableReceiver)
+        {
+            Assert.That(importedCall.Arguments[0],
+                Is.TypeOf<BoundMutableReceiverLoan>());
+        }
+        else
+        {
+            Assert.That(importedCall.Arguments[0],
+                Is.Not.TypeOf<BoundMutableReceiverLoan>());
+        }
+
+        var invalidArtifact = artifact.ToArray();
+        invalidArtifact[sourceUseOffset] = expectedSourceUse == 3
+            ? (byte)4 : (byte)3;
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(
+                    GenericMethodCallsReceiverAccessSchemaIdentity,
+                    invalidArtifact),
+                "interface.receiver.provider", []));
+    }
+
+    [TestCase(false, false, true)]
+    [TestCase(false, true, false)]
+    [TestCase(true, false, true)]
+    [TestCase(true, true, true)]
+    public void G1L1R1ProviderReplacementPreservesReceiverRequirement(
+        bool expectedMutableReceiver, bool providerMutableReceiver,
+        bool accepted)
+    {
+        var expectedArtifact = EmitG1ReceiverAccessInterfaceProvider(
+            "interface.provider", expectedMutableReceiver);
+        var providerArtifact = EmitG1ReceiverAccessInterfaceProvider(
+            "interface.provider", providerMutableReceiver);
+        var expectedInput = new TrRmStandardArtifactInput(
+            GenericMethodCallsReceiverAccessSchemaIdentity,
+            expectedArtifact);
+        var expectedReference = TrRmExecutableCompiler.CreateStandardReference(
+            expectedInput, "interface.provider", []);
+        var writableFormal = expectedMutableReceiver ? "write, " : "";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($$"""
+            namespace Consumer {
+                public int32 ReadVia<T>(T value)
+                    where T : {{writableFormal}}Example.I<T> {
+                    return value.via<Example.I<T>>.Read();
+                }
+            }
+            """), expectedReference);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var method = program.GenericMethodDefinitions.Single();
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(program,
+            "interface.consumer",
+            GenericMethodCallsReceiverAccessSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), [
+                new(program, method.SourceInputOrdinal, method.Span,
+                    "consumer.method/ReadVia"),
+            ]);
+        var (sourceUse, _) = GetGenericCallInterfaceReceiverSourceUse(
+            consumerArtifact,
+            TrRmArtifactSchema
+                .GenericMethodCallsParameterLabelsReceiverAccessDraft);
+        Assert.That(sourceUse,
+            Is.EqualTo(expectedMutableReceiver ? (byte)4 : (byte)3));
+
+        var consumerInput = new TrRmStandardArtifactInput(
+            GenericMethodCallsReceiverAccessSchemaIdentity,
+            consumerArtifact);
+        var providerInput = new TrRmStandardArtifactInput(
+            GenericMethodCallsReceiverAccessSchemaIdentity,
+            providerArtifact);
+        if (!accepted)
+        {
+            Assert.Throws<InvalidDataException>(() =>
+                TrRmExecutableCompiler.CreateStandardReference(
+                    consumerInput, "interface.consumer", [providerInput]));
+            return;
+        }
+
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            consumerInput, "interface.consumer", [providerInput]);
+        var imported = reference.GenericMethodImports.Single();
+        var importedCall = (BoundCall)((BoundReturn)imported.ProofFunction
+            .Body.Statements.Single()).Value!;
+        Assert.That(reference.Interfaces.Single().Members.Single()
+                .RequiresMutableReceiver,
+            Is.EqualTo(expectedMutableReceiver));
+        if (expectedMutableReceiver)
+        {
+            Assert.That(importedCall.Arguments[0],
+                Is.TypeOf<BoundMutableReceiverLoan>());
+        }
+    }
+
+    [TestCase(C1ReceiverAccessSchemaIdentity,
+        TrRmArtifactSchema.C1ParameterLabelsReceiverAccessDraft,
+        C1SchemaIdentity)]
+    [TestCase(C1M1ReceiverAccessSchemaIdentity,
+        TrRmArtifactSchema.C1M1ParameterLabelsReceiverAccessDraft,
+        C1M1SchemaIdentity)]
+    [TestCase(C1M1ConstructionReceiverAccessSchemaIdentity,
+        TrRmArtifactSchema.C1M1ConstructionParameterLabelsReceiverAccessDraft,
+        C1M1ConstructionSchemaIdentity)]
+    [TestCase(C1M1Construction2ReceiverAccessSchemaIdentity,
+        TrRmArtifactSchema
+            .C1M1Construction2ParameterLabelsReceiverAccessDraft,
+        C1M1Construction2SchemaIdentity)]
+    public void LabelBearingSourceEmissionPreservesGenericAndInterfaceLabels(
+        string schemaIdentity, TrRmArtifactSchema schema,
+        string unlabelledSchemaIdentity)
+    {
+        var moduleTargetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            namespace Example {
+                public interface I<T> {
+                    public T Echo(T value);
+                }
+                public T EchoVia<T>(T value) where T : I<T> {
+                    return value.via<I<T>>.Echo(value: value);
+                }
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var interfaceDefinition = program.Interfaces.Single();
+        var interfaceMember = interfaceDefinition.Members.Single();
+        var method = program.GenericMethodDefinitions.Single();
+        var typeExport = new TrRmSourceTypeExport("Example", "I",
+            "example.interface/I") {
+            GenericArity = 1,
+            InterfaceMethodExports = [
+                new(interfaceMember.SourceInputOrdinal,
+                    interfaceMember.SourceDeclarationSpan,
+                    "example.interface/I.Echo"),
+            ],
+        };
+        var methodExport = new TrRmSourceGenericMethodExport(program,
+            method.SourceInputOrdinal, method.Span,
+            "example.method/EchoVia");
+        _ = Assert.Throws<ArgumentException>(() =>
+            TrRmExecutableCompiler.EmitStandard(program,
+                "c1.labels.provider", unlabelledSchemaIdentity,
+                moduleTargetRequirement,
+                [typeExport], [methodExport]));
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "c1.labels.provider", schemaIdentity, moduleTargetRequirement,
+            [typeExport], [methodExport]);
+
+        var index = new TrRmArtifactIndex(artifact, schema);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateGenericMethodCallsDraftAndGetExecutionTables(index);
+        Assert.That(tables.MethodParameterLabels.Count,
+            Is.EqualTo(2));
+        Assert.That(tables.Features.TryGetFeature(23, out _), Is.True);
+        Assert.That(tables.Features.TryGetFeature(26, out _), Is.True);
+
+        var providerReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                artifact),
+            "c1.labels.provider", []);
+        var consumerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            namespace Consumer {
+                public T Call<T>(T value) where T : Example.I<T> {
+                    return Example.EchoVia<T>(value: value);
+                }
+                public T EchoDirect<T>(T value)
+                    where T : Example.I<T> {
+                    return value.via<Example.I<T>>.Echo(value: value);
+                }
+            }
+            """), providerReference);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+
+        var consumerProgram = consumerCompilation.Program!;
+        var consumerMethodExports = consumerProgram.GenericMethodDefinitions
+            .Select(consumerDefinition =>
+                new TrRmSourceGenericMethodExport(consumerProgram,
+                    consumerDefinition.SourceInputOrdinal,
+                    consumerDefinition.Span,
+                    "consumer.method/" + consumerDefinition.Name))
+            .ToArray();
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            consumerProgram, "c1.labels.consumer",
+            schemaIdentity, moduleTargetRequirement,
+            Array.Empty<TrRmSourceTypeExport>(),
+            consumerMethodExports);
+
+        var replacementCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                namespace Example {
+                    public interface I<T> {
+                        public T Echo(T item);
+                    }
+                    public T EchoVia<T>(T actualValue)
+                        where T : I<T> {
+                        return actualValue.via<I<T>>.Echo(
+                            item: actualValue);
+                    }
+                }
+                """));
+        Assert.That(replacementCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                replacementCompilation.Diagnostics));
+        var replacementProgram = replacementCompilation.Program!;
+        var replacementInterface = replacementProgram.Interfaces.Single();
+        var replacementMember = replacementInterface.Members.Single();
+        var replacementMethod = replacementProgram.GenericMethodDefinitions
+            .Single();
+        var replacementArtifact = TrRmExecutableCompiler.EmitStandard(
+            replacementProgram, "c1.labels.provider",
+            schemaIdentity, moduleTargetRequirement, [
+                new TrRmSourceTypeExport("Example", "I",
+                    "example.interface/I") {
+                    GenericArity = 1,
+                    InterfaceMethodExports = [
+                        new(replacementMember.SourceInputOrdinal,
+                            replacementMember.SourceDeclarationSpan,
+                            "example.interface/I.Echo"),
+                    ],
+                },
+            ], [
+                new TrRmSourceGenericMethodExport(replacementProgram,
+                    replacementMethod.SourceInputOrdinal,
+                    replacementMethod.Span, "example.method/EchoVia"),
+            ]);
+        var consumerReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(
+                    schemaIdentity, consumerArtifact),
+                "c1.labels.consumer", [
+                    new TrRmStandardArtifactInput(
+                        schemaIdentity, replacementArtifact),
+                ]);
+        var imported = consumerReference.GenericMethodImports.Single();
+        Assert.That(imported.ProofFunction.Variables[0].Name,
+            Is.EqualTo("value"));
+        Assert.That(imported.Binding!.Provider.ProofFunction.Variables[0]
+                .Name,
+            Is.EqualTo("actualValue"));
+        var interfaceCallerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                namespace Caller {
+                    public T Call<T>(T value)
+                        where T : Example.I<T> {
+                        return value.via<Example.I<T>>.Echo(
+                            value: value);
+                    }
+                }
+                """), consumerReference);
+        Assert.That(interfaceCallerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                interfaceCallerCompilation.Diagnostics));
+        _ = Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    consumerArtifact),
+                "c1.labels.consumer", [
+                    new TrRmStandardArtifactInput(
+                        unlabelledSchemaIdentity, replacementArtifact),
+                ]));
+    }
+
+    [Test]
+    public void Construction1L1R1DoesNotOmitUnmappedClassDeclarations()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public class Box {
+                public int32 Value;
+                public Box(int32 value) { Value = value; }
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        Assert.That(program.Classes, Has.Length.EqualTo(1));
+
+        _ = Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.EmitStandard(program,
+                "c1.construction1.provider",
+                C1M1ConstructionReceiverAccessSchemaIdentity,
+                TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+                Array.Empty<TrRmSourceTypeExport>(),
+                Array.Empty<TrRmSourceGenericMethodExport>()));
+    }
+
     [Test]
     public void EmitsAndReconstructsG1L1OpenInterfaceRequirementCallsThroughImport()
     {
@@ -2957,6 +3873,858 @@ internal sealed class TrRmGenericMethodSourceWriterTests
     }
 
     [Test]
+    public void RejectsProviderReplacementWithDifferentConstructedWrapperSignature()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public T Identity<T>(T value) { return move value; }
+            public T Forward<T>(T value) {
+                return Identity<T>(move value);
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var exports = program.GenericMethodDefinitions.Select(definition =>
+            new TrRmSourceGenericMethodExport(program,
+                definition.SourceInputOrdinal, definition.Span,
+                definition.Name)).ToArray();
+        var providerBase = TrRmExecutableCompiler.EmitStandard(program,
+            "constructed-generic.wrapper-provider",
+            GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), exports);
+        var consumerBase = TrRmExecutableCompiler.EmitStandard(program,
+            "constructed-generic.wrapper-consumer",
+            GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), exports);
+        var matchingProvider = AddConstructedGenericNominalMethodTypes(
+            providerBase, wrapperTypeArgumentForm: 0x07);
+        var mismatchingProvider = AddConstructedGenericNominalMethodTypes(
+            providerBase, wrapperTypeArgumentForm: 0x0C);
+        var expectedConsumer = AddConstructedGenericNominalMethodTypes(
+            consumerBase, genericTypeProviderArtifact: matchingProvider,
+            wrapperTypeArgumentForm: 0x07,
+            importGenericMethodTarget: true);
+        var consumerInput = new TrRmStandardArtifactInput(
+            GenericMethodCallsSchemaIdentity, expectedConsumer);
+
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            consumerInput, "constructed-generic.wrapper-consumer", [
+                new TrRmStandardArtifactInput(
+                    GenericMethodCallsSchemaIdentity, matchingProvider),
+            ]);
+        var forward = reference.GenericMethodImports.Single(
+            static import => import.Origin.ExportKey == "Forward");
+        BoundCall? forwardedCall = null;
+        Assert.That(BoundTreeTraversal.VisitExpressions(
+            forward.ProofFunction.Body, expression =>
+            {
+                if (expression is BoundCall {
+                    ImportedGenericMethodCall: not null,
+                } call)
+                {
+                    forwardedCall = call;
+                }
+            }), Is.True);
+        Assert.That(forwardedCall, Is.Not.Null);
+        Assert.That(forwardedCall!.ImportedGenericMethodCall!.Origin
+            .ProviderIdentity,
+            Is.EqualTo("constructed-generic.wrapper-provider"));
+        Assert.That(forwardedCall.ImportedGenericMethodCall.Origin
+            .ExportKey, Is.EqualTo("Identity"));
+
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(consumerInput,
+                "constructed-generic.wrapper-consumer", [
+                    new TrRmStandardArtifactInput(
+                        GenericMethodCallsSchemaIdentity,
+                        mismatchingProvider),
+                ]));
+    }
+
+    [Test]
+    public void CanonicalizesClosedSpanConstructedNominalInstancesAcrossReferences()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public T Identity<T>(T value) { return move value; }
+            public T Forward<T>(T value) {
+                return Identity<T>(move value);
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var providerExports = program.GenericMethodDefinitions.Select(
+            definition => new TrRmSourceGenericMethodExport(program,
+                definition.SourceInputOrdinal, definition.Span,
+                definition.Name)).ToArray();
+        var providerBase = TrRmExecutableCompiler.EmitStandard(program,
+            "constructed-generic.span-provider",
+            GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), providerExports);
+        var providerArtifact = AddConstructedGenericNominalMethodTypes(
+            providerBase, wrapperTypeArgumentForm: 0x0C,
+            closedSpanOfInt32: true);
+        var providerInput = new TrRmStandardArtifactInput(
+            GenericMethodCallsSchemaIdentity, providerArtifact);
+
+        TrRmSourceGenericMethodExport[] CreateConsumerExports(
+            string prefix) => program.GenericMethodDefinitions.Select(
+                definition => new TrRmSourceGenericMethodExport(program,
+                    definition.SourceInputOrdinal, definition.Span,
+                    prefix + "." + definition.Name)).ToArray();
+
+        byte[] CreateConsumerArtifact(string moduleIdentity, string prefix)
+        {
+            var consumerBase = TrRmExecutableCompiler.EmitStandard(program,
+                moduleIdentity, GenericMethodCallsSchemaIdentity, 0,
+                Array.Empty<TrRmSourceTypeExport>(),
+                CreateConsumerExports(prefix));
+            return AddConstructedGenericNominalMethodTypes(consumerBase,
+                prefix + ".Identity", prefix + ".Forward",
+                providerArtifact, wrapperTypeArgumentForm: 0x0C,
+                closedSpanOfInt32: true);
+        }
+
+        var firstReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(
+                GenericMethodCallsSchemaIdentity,
+                CreateConsumerArtifact(
+                    "constructed-generic.span-consumer-first", "first")),
+            "constructed-generic.span-consumer-first", [providerInput]);
+        var secondReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(
+                GenericMethodCallsSchemaIdentity,
+                CreateConsumerArtifact(
+                    "constructed-generic.span-consumer-second", "second")),
+            "constructed-generic.span-consumer-second", [providerInput]);
+        var mergedReference = ModuleCompiler.CreateReferenceSet([
+            firstReference, secondReference,
+        ]);
+        AssertCanonicalMerge(mergedReference);
+        var graphMergedReference = ModuleCompiler.MergeGraphReferences([
+            firstReference, secondReference,
+        ]);
+        AssertCanonicalMerge(graphMergedReference);
+
+        static void AssertCanonicalMerge(
+            CompilationReference mergedReference)
+        {
+            var definition = mergedReference.GenericNominalTypeDefinitions
+                .Single().Identity;
+            var instances = mergedReference.GenericNominalTypeInstances
+                .Where(instance => instance.Definition == definition)
+                .ToArray();
+            Assert.That(instances, Has.Length.EqualTo(1));
+            Assert.That(instances.Single().Arguments.Single().Type,
+                Is.EqualTo(BoundSpanTypeTypes.Type(0)));
+            Assert.That(mergedReference.SpanTypes, Has.Length.EqualTo(1));
+
+            var firstForward = mergedReference.GenericMethodImports.Single(
+                static import => import.Origin.ExportKey == "first.Forward");
+            var secondForward = mergedReference.GenericMethodImports.Single(
+                static import => import.Origin.ExportKey == "second.Forward");
+            Assert.That(firstForward.ProofFunction.ReturnType,
+                Is.EqualTo(secondForward.ProofFunction.ReturnType));
+        }
+    }
+
+    [Test]
+    public void SubstitutesConstructedNominalTypeArgumentsInGenericCallSignatures()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public T Identity<T>(T value) { return move value; }
+            public T Forward<T>(T value) {
+                return Identity<T>(move value);
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        var exports = program.GenericMethodDefinitions.Select(definition =>
+            new TrRmSourceGenericMethodExport(program,
+                definition.SourceInputOrdinal, definition.Span,
+                definition.Name)).ToArray();
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "constructed-generic.provider", GenericMethodCallsSchemaIdentity,
+            0, Array.Empty<TrRmSourceTypeExport>(), exports);
+        var constructedArtifact
+            = AddConstructedGenericNominalMethodTypes(artifact);
+        var reference
+            = TrRmExecutableCompiler.CreateGenericMethodCallsDraftReference(
+                constructedArtifact, "constructed-generic.provider");
+
+        var forward = reference.GenericMethodImports.Single(import =>
+            import.Origin.ExportKey == "Forward");
+        BoundCall? call = null;
+        Assert.That(BoundTreeTraversal.VisitExpressions(
+            forward.ProofFunction.Body, expression =>
+            {
+                if (expression is BoundCall {
+                        ImportedGenericMethodCall: not null,
+                    } genericCall)
+                {
+                    call = genericCall;
+                }
+            }), Is.True);
+        Assert.That(call, Is.Not.Null);
+        Assert.That(call!.ImportedGenericMethodTypeArguments,
+            Is.EqualTo([forward.Formals[0].PlaceholderType]));
+        Assert.That(BoundGenericNominalTypeTypes.IsType(
+            call.Arguments[0].Type), Is.True);
+        Assert.That(call.Arguments[0].Type,
+            Is.EqualTo(forward.ProofFunction.Variables[0].Type));
+        Assert.That(call.Type, Is.EqualTo(forward.ProofFunction.ReturnType));
+
+        var instance = reference.GenericNominalTypeInstances[
+            BoundGenericNominalTypeTypes.Index(call.Arguments[0].Type)];
+        Assert.That(instance.Arguments.Single().HasTypeFormalIdentity,
+            Is.True);
+        Assert.That(instance.Arguments.Single().TypeFormalDefinitionOrdinal,
+            Is.EqualTo(forward.FormalTypeOwnerOrdinal));
+        Assert.That(instance.Arguments.Single().TypeFormalOrdinal,
+            Is.Zero);
+        var nominalDefinition
+            = reference.GenericNominalTypeDefinitions.Single();
+        Assert.That(nominalDefinition.ExportKeys, Does.Contain("TBox"));
+        Assert.That(nominalDefinition.Provider!.ModuleIdentity,
+            Is.EqualTo("constructed-generic.provider"));
+
+        var foreignFormalArtifact
+            = UseForeignMethodFormalInConstructedGenericType(
+                constructedArtifact);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateGenericMethodCallsDraftReference(
+                foreignFormalArtifact, "constructed-generic.provider"));
+        var wrappedTypeArgumentArtifact
+            = AddConstructedGenericNominalMethodTypes(artifact,
+                wrapperTypeArgumentForm: 0x07);
+        var wrappedReference
+            = TrRmExecutableCompiler.CreateGenericMethodCallsDraftReference(
+                wrappedTypeArgumentArtifact,
+                "constructed-generic.provider");
+        var wrappedForward = wrappedReference.GenericMethodImports.Single(
+            static import => import.Origin.ExportKey == "Forward");
+        var wrappedInstance = wrappedReference.GenericNominalTypeInstances[
+            BoundGenericNominalTypeTypes.Index(
+                wrappedForward.ProofFunction.ReturnType)];
+        var wrappedArgument = wrappedInstance.Arguments.Single();
+        Assert.That(wrappedArgument.TypeArgumentTerm?.Kind,
+            Is.EqualTo(BoundGenericMethodTypeTermKind.CheckedReference));
+        Assert.That(wrappedArgument.HasTypeFormalOwnerIdentity, Is.True);
+        Assert.That(wrappedArgument.TypeFormalOrdinal, Is.EqualTo(-1));
+        Assert.That(wrappedArgument.TypeFormalDefinitionOrdinal,
+            Is.EqualTo(wrappedForward.FormalTypeOwnerOrdinal));
+
+        var foreignWrappedFormalArtifact
+            = UseForeignMethodFormalInConstructedGenericType(
+                wrappedTypeArgumentArtifact);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateGenericMethodCallsDraftReference(
+                foreignWrappedFormalArtifact,
+                "constructed-generic.provider"));
+
+        var wrappedConsumer = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Example;
+                private Box<ref<int32>> Use(Box<ref<int32>> value) {
+                    return Forward<int32>(move value);
+                }
+                private Box<ref<T>> Rewrap<T>(Box<ref<T>> value) {
+                    return Forward<T>(move value);
+                }
+                private Box<ref<ref<T>>> RewrapNested<T>(
+                    Box<ref<ref<T>>> value) {
+                    return Forward<ref<T>>(move value);
+                }
+                """), wrappedReference);
+        Assert.That(wrappedConsumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, wrappedConsumer.Diagnostics));
+        SemanticVerifier.Verify(wrappedConsumer.Program!);
+        var wrappedRewrap = wrappedConsumer.Program!
+            .GenericMethodDefinitions.Single(static definition =>
+                definition.Name == "Rewrap");
+        var wrappedRewrapProofFunction
+            = wrappedRewrap.ProofProgram.Functions.Single(
+                function => function.GenericMethodProofDefinitionOrdinal
+                    == wrappedRewrap.DefinitionOrdinal);
+        Assert.That(wrappedRewrapProofFunction
+            .GenericMethodProofTypeFormalOwnerOrdinal,
+            Is.EqualTo(wrappedRewrap.FormalTypeOwnerOrdinal));
+        var wrappedProofProgram = wrappedRewrap.ProofProgram;
+        var forgedNominalInstances
+            = wrappedProofProgram.GenericNominalTypeInstances.ToBuilder();
+        var forgedWrapperTerm = false;
+        for (var instanceIndex = 0;
+            instanceIndex < forgedNominalInstances.Count
+                && !forgedWrapperTerm; instanceIndex++)
+        {
+            var instance = forgedNominalInstances[instanceIndex];
+            for (var argumentOrdinal = 0;
+                argumentOrdinal < instance.Arguments.Length;
+                argumentOrdinal++)
+            {
+                var argument = instance.Arguments[argumentOrdinal];
+                if (argument.TypeArgumentTerm is
+                        BoundGenericMethodTypeTerm {
+                            Kind: BoundGenericMethodTypeTermKind
+                                .CheckedReference,
+                        } typeArgumentTerm
+                    && argument.HasTypeFormalOwnerIdentity)
+                {
+                    forgedNominalInstances[instanceIndex] = instance with {
+                        Arguments = instance.Arguments.SetItem(
+                            argumentOrdinal, argument with {
+                                TypeArgumentTerm = typeArgumentTerm with {
+                                    IsInitialization = true,
+                                },
+                            }),
+                    };
+                    forgedWrapperTerm = true;
+                    break;
+                }
+            }
+        }
+        Assert.That(forgedWrapperTerm, Is.True);
+        var forgedGenericMethodDefinitions = wrappedConsumer.Program!
+            .GenericMethodDefinitions.SetItem(
+                wrappedRewrap.DefinitionOrdinal,
+                wrappedRewrap with {
+                    ProofProgram = wrappedProofProgram with {
+                        GenericNominalTypeInstances =
+                            forgedNominalInstances.ToImmutable(),
+                    },
+                });
+        _ = Assert.Throws<ArgumentException>(() =>
+            SemanticVerifier.Verify(wrappedConsumer.Program! with {
+                GenericMethodDefinitions =
+                    forgedGenericMethodDefinitions,
+            }));
+        var uniqueWrappedReferent = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Example;
+                private Box<ref<T>> PreserveUniqueReferent<T>(
+                    Box<ref<T>> value)
+                    where T : unique {
+                    return move value;
+                }
+                """), wrappedReference);
+        Assert.That(uniqueWrappedReferent.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                uniqueWrappedReferent.Diagnostics));
+        SemanticVerifier.Verify(uniqueWrappedReferent.Program!);
+
+        var initializedReferenceArtifact
+            = AddConstructedGenericNominalMethodTypes(artifact,
+                wrapperTypeArgumentForm: 0x0E);
+        var initializedReference
+            = TrRmExecutableCompiler.CreateGenericMethodCallsDraftReference(
+                initializedReferenceArtifact,
+                "constructed-generic.provider");
+        var initializedReferenceForward
+            = initializedReference.GenericMethodImports.Single(
+                static import => import.Origin.ExportKey == "Forward");
+        var initializedReferenceArgument
+            = initializedReference.GenericNominalTypeInstances[
+                BoundGenericNominalTypeTypes.Index(
+                    initializedReferenceForward.ProofFunction.ReturnType)]
+                .Arguments.Single();
+        Assert.That(initializedReferenceArgument.TypeArgumentTerm,
+            Is.Not.Null);
+        Assert.That(initializedReferenceArgument.TypeArgumentTerm!.Kind,
+            Is.EqualTo(BoundGenericMethodTypeTermKind.CheckedReference));
+        Assert.That(initializedReferenceArgument.TypeArgumentTerm
+            .IsInitialization, Is.True);
+        var initializedReferenceConsumer = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Example;
+                private Box<ref<init int32>> Use(
+                    Box<ref<init int32>> value) {
+                    return Forward<int32>(move value);
+                }
+                private Box<ref<init T>> Rewrap<T>(
+                    Box<ref<init T>> value) {
+                    return Forward<T>(move value);
+                }
+                """), initializedReference);
+        Assert.That(initializedReferenceConsumer.HasErrors, Is.True,
+            "ref<init T> is non-Copy and cannot satisfy this TypeDef's default Copy-capable formal domain.");
+
+        var secondExports = program.GenericMethodDefinitions.Select(
+            definition => new TrRmSourceGenericMethodExport(program,
+                definition.SourceInputOrdinal, definition.Span,
+                definition.Name == "Identity"
+                    ? "second.Identity" : "second.Forward")).ToArray();
+        foreach (var (wrapperForm, expectedTermKind) in new[] {
+            ((byte)0x07,
+                BoundGenericMethodTypeTermKind.CheckedReference),
+            ((byte)0x0C, BoundGenericMethodTypeTermKind.Span),
+        })
+        {
+            var importedWrapperBaseArtifact
+                = TrRmExecutableCompiler.EmitStandard(program,
+                    "constructed-generic.imported-wrapper-base",
+                    GenericMethodCallsSchemaIdentity, 0,
+                    Array.Empty<TrRmSourceTypeExport>(), secondExports);
+            var importedWrapperArtifact
+                = AddConstructedGenericNominalMethodTypes(
+                    importedWrapperBaseArtifact, "second.Identity",
+                    "second.Forward",
+                    genericTypeProviderArtifact: constructedArtifact,
+                    wrapperTypeArgumentForm: wrapperForm);
+            var importedWrapperReference
+                = ModuleCompiler.CreateStandardReference(
+                    new TrRmStandardArtifactInput(
+                        GenericMethodCallsSchemaIdentity,
+                        importedWrapperArtifact),
+                    "constructed-generic.imported-wrapper-base", [
+                        new TrRmStandardArtifactInput(
+                            GenericMethodCallsSchemaIdentity,
+                            constructedArtifact),
+                    ]);
+            var importedWrapperForward
+                = importedWrapperReference.GenericMethodImports.Single(
+                    static import => import.Origin.ExportKey
+                        == "second.Forward");
+            var importedWrapperArgument
+                = importedWrapperReference.GenericNominalTypeInstances[
+                    BoundGenericNominalTypeTypes.Index(
+                        importedWrapperForward.ProofFunction.ReturnType)]
+                    .Arguments.Single();
+            Assert.That(importedWrapperArgument.TypeArgumentTerm?.Kind,
+                Is.EqualTo(expectedTermKind));
+            Assert.That(importedWrapperReference
+                .GenericNominalTypeDefinitions.Single().Provider!.ModuleIdentity,
+                Is.EqualTo("constructed-generic.provider"));
+        }
+
+        var spanWrapperArtifact
+            = AddConstructedGenericNominalMethodTypes(artifact,
+                wrapperTypeArgumentForm: 0x0C);
+        var spanWrapperReference
+            = TrRmExecutableCompiler.CreateGenericMethodCallsDraftReference(
+                spanWrapperArtifact, "constructed-generic.provider");
+        var spanWrapperForward = spanWrapperReference.GenericMethodImports
+            .Single(static import => import.Origin.ExportKey == "Forward");
+        var spanWrapperArgument
+            = spanWrapperReference.GenericNominalTypeInstances[
+                BoundGenericNominalTypeTypes.Index(
+                    spanWrapperForward.ProofFunction.ReturnType)]
+                .Arguments.Single();
+        Assert.That(spanWrapperArgument.TypeArgumentTerm?.Kind,
+            Is.EqualTo(BoundGenericMethodTypeTermKind.Span));
+        var spanWrapperConsumer = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Example;
+                private Box<Span<int32>> Use(Box<Span<int32>> value) {
+                    return Forward<int32>(move value);
+                }
+                private Box<Span<T>> Rewrap<T>(Box<Span<T>> value) {
+                    return Forward<T>(move value);
+                }
+                """), spanWrapperReference);
+        Assert.That(spanWrapperConsumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                spanWrapperConsumer.Diagnostics));
+        SemanticVerifier.Verify(spanWrapperConsumer.Program!);
+        var nestedSpanWrapperArtifact
+            = AddConstructedGenericNominalMethodTypes(artifact,
+                wrapperTypeArgumentForm: 0x0C,
+                nestedSpanWrapper: true);
+        var nestedSpanWrapperReference
+            = TrRmExecutableCompiler.CreateGenericMethodCallsDraftReference(
+                nestedSpanWrapperArtifact,
+                "constructed-generic.provider");
+        var nestedSpanWrapperForward
+            = nestedSpanWrapperReference.GenericMethodImports.Single(
+                static import => import.Origin.ExportKey == "Forward");
+        var nestedSpanWrapperTerm
+            = nestedSpanWrapperReference.GenericNominalTypeInstances[
+                BoundGenericNominalTypeTypes.Index(
+                    nestedSpanWrapperForward.ProofFunction.ReturnType)]
+                .Arguments.Single().TypeArgumentTerm;
+        Assert.That(nestedSpanWrapperTerm?.Kind,
+            Is.EqualTo(BoundGenericMethodTypeTermKind.Span));
+        Assert.That(nestedSpanWrapperTerm!.TypeArguments.Single().Kind,
+            Is.EqualTo(BoundGenericMethodTypeTermKind.Span));
+        var nestedSpanWrapperConsumer = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Example;
+                private Box<Span<Span<int32>>> Use(
+                    Box<Span<Span<int32>>> value) {
+                    return Forward<int32>(move value);
+                }
+                private Box<Span<Span<T>>> Rewrap<T>(
+                    Box<Span<Span<T>>> value) {
+                    return Forward<T>(move value);
+                }
+                """), nestedSpanWrapperReference);
+        Assert.That(nestedSpanWrapperConsumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                nestedSpanWrapperConsumer.Diagnostics));
+        SemanticVerifier.Verify(nestedSpanWrapperConsumer.Program!);
+
+        var optionalWrappedTypeArgumentArtifact
+            = AddConstructedGenericNominalMethodTypes(artifact,
+                wrapperTypeArgumentForm: 0x06);
+        _ = Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.CreateGenericMethodCallsDraftReference(
+                optionalWrappedTypeArgumentArtifact,
+                "constructed-generic.provider"));
+        var gcWrappedTypeArgumentArtifact
+            = AddConstructedGenericNominalMethodTypes(artifact,
+                wrapperTypeArgumentForm: 0x07,
+                wrapperTypeArgumentQualifiers: 0x02);
+        _ = Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.CreateGenericMethodCallsDraftReference(
+                gcWrappedTypeArgumentArtifact,
+                "constructed-generic.provider"));
+        var initializingSpanArgumentArtifact
+            = AddConstructedGenericNominalMethodTypes(artifact,
+                wrapperTypeArgumentForm: 0x0C,
+                spanElementInitialization: true);
+        var initializingSpanArgumentReference
+            = TrRmExecutableCompiler.CreateGenericMethodCallsDraftReference(
+                initializingSpanArgumentArtifact,
+                "constructed-generic.provider");
+        var initializingSpanForward
+            = initializingSpanArgumentReference.GenericMethodImports.Single(
+                static import => import.Origin.ExportKey == "Forward");
+        var initializingSpanTerm
+            = initializingSpanArgumentReference.GenericNominalTypeInstances[
+                BoundGenericNominalTypeTypes.Index(
+                    initializingSpanForward.ProofFunction.ReturnType)]
+                .Arguments.Single().TypeArgumentTerm;
+        Assert.That(initializingSpanTerm?.Kind,
+            Is.EqualTo(BoundGenericMethodTypeTermKind.Span));
+        Assert.That(initializingSpanTerm!.IsInitialization, Is.True);
+        var invalidInitializingSpanUse = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Example;
+                private Box<Span<init T>> Invalid<T>(
+                    Box<Span<init T>> value) {
+                    return Forward<T>(move value);
+                }
+                """), initializingSpanArgumentReference);
+        Assert.That(invalidInitializingSpanUse.HasErrors, Is.True);
+
+        var secondArtifact = TrRmExecutableCompiler.EmitStandard(program,
+            "constructed-generic.second",
+            GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), secondExports);
+        secondArtifact = AddConstructedGenericNominalMethodTypes(
+            secondArtifact, "second.Identity", "second.Forward",
+            constructedArtifact);
+        var secondReference = ModuleCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(
+                GenericMethodCallsSchemaIdentity, secondArtifact),
+            "constructed-generic.second", [
+                new TrRmStandardArtifactInput(
+                    GenericMethodCallsSchemaIdentity,
+                    constructedArtifact),
+            ]);
+        Assert.That(secondReference.GenericNominalTypeDefinitions.Single()
+            .ProviderExpectations.Single().ExportKey, Is.EqualTo("TBox"));
+        var incompatibleTypeProvider
+            = SetFirstTypeDefFormalOwnershipDomain(
+                constructedArtifact, 3);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            ModuleCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(
+                    GenericMethodCallsSchemaIdentity, secondArtifact),
+                "constructed-generic.second", [
+                    new TrRmStandardArtifactInput(
+                        GenericMethodCallsSchemaIdentity,
+                        incompatibleTypeProvider),
+                ]));
+        var secondSpanArtifact = TrRmExecutableCompiler.EmitStandard(
+            program, "constructed-generic.second-span",
+            GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), secondExports);
+        secondSpanArtifact = AddConstructedGenericNominalMethodTypes(
+            secondSpanArtifact, "second.Identity", "second.Forward");
+        var secondSpanReference
+            = TrRmExecutableCompiler.CreateGenericMethodCallsDraftReference(
+                secondSpanArtifact, "constructed-generic.second-span");
+        var mergedReference = ModuleCompiler.CreateReferenceSet([
+            reference, secondReference,
+        ]);
+        var importedOwnerOrdinals = mergedReference.GenericMethodImports
+            .Select(static import => import.FormalTypeOwnerOrdinal)
+            .ToHashSet();
+        Assert.That(importedOwnerOrdinals.Count,
+            Is.EqualTo(mergedReference.GenericMethodImports.Length));
+        Assert.That(mergedReference.GenericNominalTypeInstances
+            .SelectMany(static nominal => nominal.Arguments)
+            .Where(static argument => argument.HasTypeFormalIdentity)
+            .All(argument => importedOwnerOrdinals.Contains(
+                argument.TypeFormalDefinitionOrdinal)), Is.True);
+        Assert.That(mergedReference.GenericNominalTypeDefinitions,
+            Has.Length.EqualTo(1));
+        Assert.That(mergedReference.GenericNominalTypeDefinitions.Single()
+            .ProviderExpectations, Has.Length.EqualTo(1));
+        var mergedSecondForward = mergedReference.GenericMethodImports
+            .Single(static import => import.Origin.ExportKey
+                == "second.Forward");
+        var mergedSecondForwardInstance =
+            mergedReference.GenericNominalTypeInstances[
+                BoundGenericNominalTypeTypes.Index(
+                    mergedSecondForward.ProofFunction.ReturnType)];
+        Assert.That(mergedSecondForwardInstance.Arguments.Single()
+            .TypeFormalDefinitionOrdinal,
+            Is.EqualTo(mergedSecondForward.FormalTypeOwnerOrdinal));
+
+        var consumerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Example;
+                private Box<int32> Use(Box<int32> value) {
+                    return Forward<int32>(move value);
+                }
+                private Box<T> Rewrap<T>(Box<T> value) {
+                    return Forward<T>(move value);
+                }
+                """), reference);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        SemanticVerifier.Verify(consumerCompilation.Program!);
+        var rewrapDefinition
+            = consumerCompilation.Program!.GenericMethodDefinitions
+                .Single(static definition => definition.Name == "Rewrap");
+        var rewrapFormalArgument
+            = rewrapDefinition.ProofProgram.GenericNominalTypeInstances
+                .SelectMany(static instance => instance.Arguments)
+                .Single(argument => argument.HasTypeFormalIdentity
+                    && argument.TypeFormalDefinitionOrdinal
+                        == rewrapDefinition.FormalTypeOwnerOrdinal);
+        Assert.That(rewrapFormalArgument.TypeFormalDefinitionOrdinal,
+            Is.EqualTo(rewrapDefinition.FormalTypeOwnerOrdinal));
+        Assert.That(rewrapFormalArgument.TypeFormalOrdinal, Is.Zero);
+        var incompatibleDomainCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Example;
+                private Box<T> Invalid<T>(Box<T> value)
+                    where T : unique {
+                    return move value;
+                }
+                """), reference);
+        Assert.That(incompatibleDomainCompilation.HasErrors, Is.True);
+
+        var graphMergedReference = ModuleCompiler.MergeGraphReferences([
+            reference, secondReference,
+        ]);
+        var graphSecondForward = graphMergedReference.GenericMethodImports
+            .Single(static import => import.Origin.ExportKey
+                == "second.Forward");
+        var graphSecondForwardInstance =
+            graphMergedReference.GenericNominalTypeInstances[
+                BoundGenericNominalTypeTypes.Index(
+                    graphSecondForward.ProofFunction.ReturnType)];
+        Assert.That(graphSecondForwardInstance.Arguments.Single()
+            .TypeFormalDefinitionOrdinal,
+            Is.EqualTo(graphSecondForward.FormalTypeOwnerOrdinal));
+        Assert.That(graphMergedReference.GenericNominalTypeDefinitions,
+            Has.Length.EqualTo(1));
+        Assert.That(graphMergedReference.GenericNominalTypeDefinitions
+            .Single().ProviderExpectations, Has.Length.EqualTo(1));
+
+        var spanMergedReference = ModuleCompiler.CreateReferenceSet([
+            spanWrapperReference, secondSpanReference,
+        ]);
+        var spanMergedOwners = spanMergedReference.GenericMethodImports
+            .Select(static import => import.FormalTypeOwnerOrdinal)
+            .ToHashSet();
+        var spanMergedArguments = spanMergedReference
+            .GenericNominalTypeInstances
+            .SelectMany(static instance => instance.Arguments)
+            .Where(static argument => argument.TypeArgumentTerm is {
+                Kind: BoundGenericMethodTypeTermKind.Span,
+            }).ToArray();
+        Assert.That(spanMergedArguments.Length, Is.GreaterThanOrEqualTo(2));
+        Assert.That(spanMergedArguments.All(argument =>
+            BoundSpanTypeTypes.IsType(argument.Type)
+            && spanMergedOwners.Contains(
+                argument.TypeFormalDefinitionOrdinal)), Is.True);
+
+        var spanGraphMergedReference = ModuleCompiler.MergeGraphReferences([
+            spanWrapperReference, secondSpanReference,
+        ]);
+        var spanGraphMergedOwners = spanGraphMergedReference
+            .GenericMethodImports
+            .Select(static import => import.FormalTypeOwnerOrdinal)
+            .ToHashSet();
+        var spanGraphMergedArguments = spanGraphMergedReference
+            .GenericNominalTypeInstances
+            .SelectMany(static instance => instance.Arguments)
+            .Where(static argument => argument.TypeArgumentTerm is {
+                Kind: BoundGenericMethodTypeTermKind.Span,
+            }).ToArray();
+        Assert.That(spanGraphMergedArguments.Length,
+            Is.GreaterThanOrEqualTo(2));
+        Assert.That(spanGraphMergedArguments.All(argument =>
+            BoundSpanTypeTypes.IsType(argument.Type)
+            && spanGraphMergedOwners.Contains(
+                argument.TypeFormalDefinitionOrdinal)), Is.True);
+
+        var secondRefInitArtifact = TrRmExecutableCompiler.EmitStandard(
+            program, "constructed-generic.second-ref-init",
+            GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), secondExports);
+        secondRefInitArtifact = AddConstructedGenericNominalMethodTypes(
+            secondRefInitArtifact, "second.Identity", "second.Forward",
+            wrapperTypeArgumentForm: 0x0E);
+        var secondRefInitReference
+            = TrRmExecutableCompiler.CreateGenericMethodCallsDraftReference(
+                secondRefInitArtifact,
+                "constructed-generic.second-ref-init");
+        var referenceMergedReferences = ModuleCompiler.CreateReferenceSet([
+            wrappedReference, secondRefInitReference,
+        ]);
+        var referenceMergedMethodOwners = referenceMergedReferences
+            .GenericMethodImports
+            .Select(static import => import.FormalTypeOwnerOrdinal)
+            .ToHashSet();
+        var referenceMergedReferenceArguments
+            = referenceMergedReferences.GenericNominalTypeInstances
+                .SelectMany(static instance => instance.Arguments)
+                .Where(static argument => argument.TypeArgumentTerm is {
+                    Kind: BoundGenericMethodTypeTermKind.CheckedReference,
+                }).ToArray();
+        Assert.That(referenceMergedReferenceArguments.Length,
+            Is.GreaterThanOrEqualTo(2));
+        Assert.That(referenceMergedReferenceArguments.All(argument =>
+            CheckedReferenceTypes.IsType(argument.Type)
+            && referenceMergedMethodOwners.Contains(
+                argument.TypeFormalDefinitionOrdinal)), Is.True);
+        Assert.That(referenceMergedReferenceArguments.Select(argument =>
+            argument.TypeArgumentTerm!.IsInitialization).Distinct(),
+            Has.Length.EqualTo(2));
+        var graphMergedReferenceArguments
+            = ModuleCompiler.MergeGraphReferences([
+                wrappedReference, secondRefInitReference,
+            ]);
+        var graphMergedReferenceOwners
+            = graphMergedReferenceArguments.GenericMethodImports
+                .Select(static import => import.FormalTypeOwnerOrdinal)
+                .ToHashSet();
+        var graphReferenceArguments
+            = graphMergedReferenceArguments.GenericNominalTypeInstances
+                .SelectMany(static instance => instance.Arguments)
+                .Where(static argument => argument.TypeArgumentTerm is {
+                    Kind: BoundGenericMethodTypeTermKind.CheckedReference,
+                }).ToArray();
+        Assert.That(graphReferenceArguments.Length,
+            Is.GreaterThanOrEqualTo(2));
+        Assert.That(graphReferenceArguments.All(argument =>
+            CheckedReferenceTypes.IsType(argument.Type)
+            && graphMergedReferenceOwners.Contains(
+                argument.TypeFormalDefinitionOrdinal)), Is.True);
+        Assert.That(graphReferenceArguments.Select(argument =>
+            argument.TypeArgumentTerm!.IsInitialization).Distinct(),
+            Has.Length.EqualTo(2));
+    }
+
+    [Test]
+    public void EmitsAndReconstructsScopedGenericInitializationReferenceForwarding()
+    {
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                T Identity<T>(ref<init T> destination, T value)
+                    where T : [Blittable] {
+                    return value;
+                }
+                public T Forward<T>(ref<init T> destination, T value)
+                    where T : [Blittable] {
+                    return Identity<T>(ref init *destination, value);
+                }
+                """), new CompilationOptions {
+                LayoutCoreRegistration =
+                    Terrum.CodeAnalysis.Tests.Semantics
+                        .LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+
+        var providerProgram = providerCompilation.Program!;
+        var forward = providerProgram.GenericMethodDefinitions.Single(
+            static definition => definition.Name == "Forward");
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, "init-ref-forward.provider",
+            GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), [
+                new(providerProgram, forward.SourceInputOrdinal,
+                    forward.Span, "Forward"),
+            ]);
+        var reference = TrRmExecutableCompiler
+            .CreateGenericMethodCallsDraftReference(providerArtifact,
+                "init-ref-forward.provider", "Forward");
+
+        var importedForward = reference.GenericMethodImports.Single();
+        var call = (BoundCall)((BoundReturn)importedForward.ProofFunction
+            .Body.Statements.Single()).Value!;
+        Assert.That(call.ImportedGenericMethodCall, Is.Not.Null);
+        Assert.That(call.ImportedGenericMethodCall!.Origin.IsMethodDefTarget,
+            Is.True);
+        Assert.That(call.ImportedGenericMethodTypeArguments,
+            Is.EqualTo([importedForward.Formals[0].PlaceholderType]));
+        Assert.That(call.Arguments[0],
+            Is.TypeOf<BoundReferenceReborrow>());
+        var destinationType = call.Arguments[0].Type;
+        Assert.That(CheckedReferenceTypeContract.IsValidType(
+            destinationType, reference.CheckedReferenceTypes), Is.True);
+        Assert.That(reference.CheckedReferenceTypes[
+            CheckedReferenceTypes.Index(destinationType)].IsInitialization,
+            Is.True);
+    }
+
+    [Test]
+    public void EmitsAndReconstructsInitializationReferenceTypeActual()
+    {
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                int32 TypeOnly<T>(int32 value) { return value; }
+                public int32 Use<T>(int32 value) {
+                    return TypeOnly<ref<init T>>(value);
+                }
+                """), new CompilationOptions {
+                LayoutCoreRegistration =
+                    Terrum.CodeAnalysis.Tests.Semantics
+                        .LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+
+        var providerProgram = providerCompilation.Program!;
+        var use = providerProgram.GenericMethodDefinitions.Single(
+            static definition => definition.Name == "Use");
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, "init-ref-actual.provider",
+            GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), [
+                new(providerProgram, use.SourceInputOrdinal, use.Span, "Use"),
+            ]);
+        var reference = TrRmExecutableCompiler
+            .CreateGenericMethodCallsDraftReference(providerArtifact,
+                "init-ref-actual.provider", "Use");
+
+        var imported = reference.GenericMethodImports.Single();
+        var call = (BoundCall)((BoundReturn)imported.ProofFunction
+            .Body.Statements.Single()).Value!;
+        Assert.That(call.ImportedGenericMethodTypeArguments, Has.Length.EqualTo(1));
+        var actualType = call.ImportedGenericMethodTypeArguments[0];
+        Assert.That(CheckedReferenceTypeContract.IsValidType(actualType,
+            reference.CheckedReferenceTypes), Is.True);
+        var actualReference = reference.CheckedReferenceTypes[
+            CheckedReferenceTypes.Index(actualType)];
+        Assert.That(actualReference.IsInitialization, Is.True);
+        Assert.That(actualReference.ReferentType,
+            Is.EqualTo(imported.Formals[0].PlaceholderType));
+    }
+
+    [Test]
     public void SerializesAndConsumesGenericWriteForwardingObligation()
     {
         var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
@@ -3707,6 +5475,37 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             ], Array.Empty<TrRmSourceGenericMethodExport>());
     }
 
+    private static byte[] EmitG1ReceiverAccessInterfaceProvider(
+        string moduleIdentity, bool requiresMutableReceiver)
+    {
+        var receiverModifier = requiresMutableReceiver ? "mut " : "";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($$"""
+            namespace Example {
+                public interface I<T> {
+                    public {{receiverModifier}}int32 Read();
+                }
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var definition = program.Interfaces.Single();
+        var member = definition.Members.Single();
+        return TrRmExecutableCompiler.EmitStandard(program, moduleIdentity,
+            GenericMethodCallsReceiverAccessSchemaIdentity, 0, [
+                new TrRmSourceTypeExport("Example", "I",
+                    "example.interface/I") {
+                    GenericArity = 1,
+                    InterfaceMethodExports = [
+                        new(member.SourceInputOrdinal,
+                            member.SourceDeclarationSpan,
+                            "example.interface/I.Read"),
+                    ],
+                },
+            ], Array.Empty<TrRmSourceGenericMethodExport>());
+    }
+
     private static byte[] EmitG1OpenInterfaceCallProvider(
         string moduleIdentity, string typeExportKey, string readExportKey,
         string clearExportKey, string methodExportKey)
@@ -4243,6 +6042,1010 @@ internal sealed class TrRmGenericMethodSourceWriterTests
 
         throw new AssertionException(
             "The G1L1 Body has no open interface GenericCallTarget.");
+    }
+
+    private static (byte SourceUse, int ArtifactOffset)
+        GetGenericCallInterfaceReceiverSourceUse(byte[] artifact,
+            TrRmArtifactSchema schema)
+    {
+        var (bodyCount, bodyBytes) = GetSection(artifact, 0x0020);
+        var bodies = new TrRmVariableTableIndex(bodyBytes,
+            checked((int)bodyCount), 1, 1);
+        for (var bodyRow = 1; bodyRow <= bodies.Count; bodyRow++)
+        {
+            var row = bodies.GetRow(bodyRow);
+            if (row[0] != 0x01)
+            {
+                continue;
+            }
+
+            var body = new TrRmRegisterBodyReader(row, schema: schema);
+            for (var recordIndex = 0;
+                recordIndex < body.RecordCount; recordIndex++)
+            {
+                var record = body.GetRecord(recordIndex);
+                if (record[0] != 0x02 || record.Length < 24
+                    || record[4] != 4)
+                {
+                    continue;
+                }
+
+                var targetIndex
+                    = BinaryPrimitives.ReadUInt16LittleEndian(record[8..]);
+                var target = body.GetRecord(targetIndex);
+                if (target.Length < 5 || target[0] != 0x10
+                    || target[4] != 2)
+                {
+                    continue;
+                }
+
+                if (record[20] != 2)
+                {
+                    throw new InvalidDataException(
+                        "The G1 interface-requirement receiver is not a Home input.");
+                }
+                var artifactOffset = artifact.AsSpan().IndexOf(record);
+                if (artifactOffset < 0
+                    || artifact.AsSpan().LastIndexOf(record)
+                        != artifactOffset)
+                {
+                    throw new InvalidDataException(
+                        "The G1 interface-requirement CallSite is not unique in the artifact.");
+                }
+                return (record[21], checked(artifactOffset + 21));
+            }
+        }
+
+        throw new AssertionException(
+            "The G1 Body has no interface-requirement CallSite.");
+    }
+
+    private static byte[] AddWriteQualifierToFirstReferenceFormal(
+        byte[] artifact)
+    {
+        return RewriteTypeSpecRows(artifact, (rows, typeSpecs) =>
+        {
+            var mutated = false;
+            for (var rowIndex = 1; rowIndex <= typeSpecs.Count; rowIndex++)
+            {
+                var row = typeSpecs.GetRow(rowIndex);
+                if (row.Length != 6 || row[0] != 0x0E)
+                {
+                    continue;
+                }
+
+                var referent = typeSpecs.GetTypeSpecRef(
+                    ReadUInt32(row, 2));
+                if (!referent.IsRow || referent.Form != 0x04
+                    || referent.Qualifiers != 0)
+                {
+                    continue;
+                }
+
+                var formal = rows[referent.Row - 1].ToArray();
+                formal[1] |= 0x01;
+                rows[referent.Row - 1] = formal;
+                mutated = true;
+            }
+
+            if (!mutated)
+            {
+                throw new InvalidDataException(
+                    "The G1 artifact has no initialization-reference formal TypeSpec.");
+            }
+        });
+    }
+
+    private static byte[] AddWriteQualifierToFirstGenericCallFormalActual(
+        byte[] artifact)
+    {
+        return RewriteTypeSpecRows(artifact, (rows, typeSpecs) =>
+        {
+            var (bodyCount, bodyBytes) = GetSection(artifact, 0x0020);
+            var bodies = new TrRmVariableTableIndex(bodyBytes,
+                checked((int)bodyCount), 1, 1);
+            for (var bodyRow = 1; bodyRow <= bodies.Count; bodyRow++)
+            {
+                var bodyRowBytes = bodies.GetRow(bodyRow);
+                if (bodyRowBytes[0] != 0x01)
+                {
+                    continue;
+                }
+
+                var body = new TrRmRegisterBodyReader(bodyRowBytes,
+                    schema: TrRmArtifactSchema
+                        .GenericMethodCallsParameterLabelsDraft);
+                for (var recordIndex = 0;
+                    recordIndex < body.RecordCount; recordIndex++)
+                {
+                    var target = body.GetRecord(recordIndex);
+                    if (target[0] != 0x10 || target.Length < 20
+                        || target[4] != 1)
+                    {
+                        continue;
+                    }
+
+                    var actualCount = checked((int)ReadUInt32(target, 16));
+                    for (var ordinal = 0; ordinal < actualCount; ordinal++)
+                    {
+                        var argumentOffset = checked(
+                            20 + (checked((int)ordinal) * 8));
+                        if (target[argumentOffset] != 1)
+                        {
+                            continue;
+                        }
+
+                        var actualRef = ReadUInt32(target,
+                            argumentOffset + 4);
+                        var actual = typeSpecs.GetTypeSpecRef(actualRef);
+                        if (!actual.IsRow || actual.Form != 0x04
+                            || actual.Qualifiers != 0)
+                        {
+                            continue;
+                        }
+
+                        var formal = rows[actual.Row - 1].ToArray();
+                        formal[1] |= 0x01;
+                        rows[actual.Row - 1] = formal;
+                        return;
+                    }
+                }
+            }
+
+            throw new InvalidDataException(
+                "The G1 GenericCall has no unqualified formal TypeActual.");
+        });
+    }
+
+    private static byte[] AddWriteQualifierToFirstFormalDefault(
+        byte[] artifact)
+    {
+        return RewriteTypeSpecRows(artifact, (rows, typeSpecs) =>
+        {
+            var (genericParamCount, genericParamBytes)
+                = GetSection(artifact, 0x0019);
+            for (var row = 0; row < checked((int)genericParamCount); row++)
+            {
+                var defaultTypeSpecRef = ReadUInt32(genericParamBytes,
+                    checked((int)row * 32 + 28));
+                if (defaultTypeSpecRef == 0)
+                {
+                    continue;
+                }
+
+                var defaultType = typeSpecs.GetTypeSpecRef(
+                    defaultTypeSpecRef);
+                if (!defaultType.IsRow || defaultType.Form != 0x04
+                    || defaultType.Qualifiers != 0)
+                {
+                    continue;
+                }
+
+                var formal = rows[defaultType.Row - 1].ToArray();
+                formal[1] |= 0x01;
+                rows[defaultType.Row - 1] = formal;
+                return;
+            }
+
+            throw new InvalidDataException(
+                "The G1 artifact has no direct formal TypeDefault.");
+        });
+    }
+
+    private static byte[] RewriteTypeSpecRows(byte[] artifact,
+        Action<List<ReadOnlyMemory<byte>>, TrRmTypeSpecTableReader> rewrite)
+    {
+        var index = TrRmArtifactIndex
+            .ForGenericMethodCallsParameterLabelsDraft(artifact);
+        var (typeSpecCount, typeSpecBytes) = GetSection(artifact, 0x0011);
+        var (genericParamCount, _) = GetSection(artifact, 0x0019);
+        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes,
+            checked((int)typeSpecCount), 0, 0,
+            checked((int)genericParamCount));
+        var typeSpecRows = new TrRmVariableTableIndex(typeSpecBytes,
+            checked((int)typeSpecCount), 2, 1);
+        var rows = new List<ReadOnlyMemory<byte>>(
+            checked((int)typeSpecCount));
+        for (var row = 1; row <= typeSpecRows.Count; row++)
+        {
+            rows.Add(typeSpecRows.GetRow(row).ToArray());
+        }
+
+        rewrite(rows, typeSpecs);
+        var rewrittenTypeSpecs = TrRmVariableTableWriter.EncodeBlobs(rows);
+        var sections = new SortedDictionary<ushort, TrRmSection>();
+        for (var sectionIndex = 0; sectionIndex < index.SectionCount;
+            sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var count);
+            sections.Add(kind, kind == 0x0011
+                ? new TrRmSection(kind, flags, typeSpecCount,
+                    rewrittenTypeSpecs)
+                : new TrRmSection(kind, flags, checked((uint)count),
+                    bytes.ToArray()));
+        }
+
+        return TrRmArtifactWriter.Encode(sections.Values.ToArray(),
+            TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft);
+    }
+
+    private static byte[] RewriteGenericResultDependencyRelationship(
+        byte[] artifact, byte relationship, uint? sourceOrdinal = null)
+    {
+        if (relationship is not (1 or 2 or 3))
+        {
+            throw new ArgumentOutOfRangeException(nameof(relationship));
+        }
+
+        var index = TrRmArtifactIndex
+            .ForGenericMethodCallsParameterLabelsDraft(artifact);
+        var (contractCount, contractBytes) = GetSection(artifact, 0x0013);
+        var contractRows = new TrRmVariableTableIndex(contractBytes,
+            checked((int)contractCount), 8, 1);
+        var rows = new List<ReadOnlyMemory<byte>>(
+            checked((int)contractCount));
+        var changed = false;
+        for (var rowIndex = 1; rowIndex <= contractRows.Count; rowIndex++)
+        {
+            var row = contractRows.GetRow(rowIndex).ToArray();
+            if (row.Length == 20
+                && BinaryPrimitives.ReadUInt16LittleEndian(
+                    row.AsSpan(4, 2)) == 4
+                && row[8] == 1 && row[9] == 1 && row[11] == 1
+                && row[10] == 3
+                && (sourceOrdinal is null
+                    || ReadUInt32(row, 16) == sourceOrdinal))
+            {
+                row[10] = relationship;
+                changed = true;
+            }
+            rows.Add(row);
+        }
+
+        if (!changed)
+        {
+            throw new InvalidDataException(
+                "The G1 artifact has no ordinary-result Dependency row to rewrite.");
+        }
+
+        var rewrittenContracts = TrRmVariableTableWriter.EncodeBlobs(rows);
+        var sections = new SortedDictionary<ushort, TrRmSection>();
+        for (var sectionIndex = 0; sectionIndex < index.SectionCount;
+            sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var count);
+            sections.Add(kind, kind == 0x0013
+                ? new TrRmSection(kind, flags, contractCount,
+                    rewrittenContracts)
+                : new TrRmSection(kind, flags, checked((uint)count),
+                    bytes.ToArray()));
+        }
+
+        return TrRmArtifactWriter.Encode(sections.Values.ToArray(),
+            TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft);
+    }
+
+    private static byte[] SetFirstTypeDefFormalOwnershipDomain(
+        byte[] artifact, byte ownershipDomain)
+    {
+        var schema
+            = TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft;
+        var index = TrRmArtifactIndex
+            .ForGenericMethodCallsParameterLabelsDraft(artifact);
+        var tables
+            = TrRmStructuralMetadataValidator
+                .ValidateGenericMethodCallsDraftAndGetExecutionTables(index);
+        if (tables.TypeDefs.Count != 1
+            || tables.TypeDefs.GetGenericRange(1).Count != 1)
+        {
+            throw new InvalidDataException(
+                "The G1 constructed-type provider has an unexpected TypeDef formal range.");
+        }
+
+        var genericParamSection = GetSection(artifact, 0x0019);
+        var genericParamBytes = genericParamSection.Bytes.ToArray();
+        genericParamBytes[21] = ownershipDomain;
+        var sections = new SortedDictionary<ushort, TrRmSection>();
+        for (var sectionIndex = 0;
+            sectionIndex < index.SectionCount; sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var count);
+            sections.Add(kind, kind == 0x0019
+                ? new TrRmSection(kind, flags, genericParamSection.Count,
+                    genericParamBytes)
+                : new TrRmSection(kind, flags, checked((uint)count),
+                    bytes.ToArray()));
+        }
+
+        return TrRmArtifactWriter.Encode(sections.Values.ToArray(), schema);
+    }
+
+    private static byte[] UseForeignMethodFormalInConstructedGenericType(
+        byte[] artifact)
+    {
+        var schema
+            = TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft;
+        var index = TrRmArtifactIndex
+            .ForGenericMethodCallsParameterLabelsDraft(artifact);
+        var tables
+            = TrRmStructuralMetadataValidator
+                .ValidateGenericMethodCallsDraftAndGetExecutionTables(index);
+        if (!tables.Exports.TryGetDefinitionForKey(1, "Identity",
+                out var identityDefinition)
+            || !tables.Exports.TryGetDefinitionForKey(1, "Forward",
+                out var forwardDefinition))
+        {
+            throw new InvalidDataException(
+                "The G1 constructed-type fixture is missing its generic MethodDefs.");
+        }
+
+        var identityMethod = checked((int)(identityDefinition
+            & 0x00FF_FFFF));
+        var forwardMethod = checked((int)(forwardDefinition
+            & 0x00FF_FFFF));
+        var identitySignature
+            = tables.Methods.GetSignature(identityMethod);
+        var forwardSignature
+            = tables.Methods.GetSignature(forwardMethod);
+        var (identityFormalFirst, identityFormalCount)
+            = tables.Signatures.GetGenericRange(identitySignature);
+        var forwardTypeSpecRef
+            = tables.Signatures.GetResultTypeSpec(forwardSignature);
+        var forwardTypeSpec
+            = tables.TypeSpecs.GetTypeSpecRef(forwardTypeSpecRef);
+        if (identityFormalCount != 1
+            || !forwardTypeSpec.IsRow
+            || forwardTypeSpec.Form != 0x05)
+        {
+            throw new InvalidDataException(
+                "The G1 constructed-type fixture has an unexpected formal or result TypeSpec shape.");
+        }
+
+        var foreignFormalTypeSpecRef
+            = tables.TypeSpecs.GetConstructedArgument(
+                forwardTypeSpec.Row, 0);
+        var foreignFormalTypeSpec
+            = tables.TypeSpecs.GetTypeSpecRef(foreignFormalTypeSpecRef);
+        if (!foreignFormalTypeSpec.IsRow
+            || foreignFormalTypeSpec.Form != 0x04)
+        {
+            throw new InvalidDataException(
+                "The G1 constructed-type fixture has no method-formal argument.");
+        }
+
+        var typeSpecSection = GetSection(artifact, 0x0011);
+        var typeSpecRows = new TrRmVariableTableIndex(
+            typeSpecSection.Bytes,
+            checked((int)typeSpecSection.Count), 2, 1);
+        var rewrittenRows = new List<ReadOnlyMemory<byte>>(
+            typeSpecRows.Count);
+        for (var row = 1; row <= typeSpecRows.Count; row++)
+        {
+            var bytes = typeSpecRows.GetRow(row).ToArray();
+            if (row == foreignFormalTypeSpec.Row)
+            {
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    bytes.AsSpan(2, 4),
+                    checked((uint)identityFormalFirst));
+            }
+            rewrittenRows.Add(bytes);
+        }
+
+        var rewrittenTypeSpecs = TrRmTypeSpecTableWriter.Encode(
+            rewrittenRows, tables.TypeDefs.Count, tables.Imports.Count,
+            tables.GenericParams.Count, 0, schema, tables.Methods.Count);
+        var sections = new SortedDictionary<ushort, TrRmSection>();
+        for (var sectionIndex = 0;
+            sectionIndex < index.SectionCount; sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var count);
+            sections.Add(kind, kind == 0x0011
+                ? new TrRmSection(kind, flags,
+                    checked((uint)rewrittenRows.Count),
+                    rewrittenTypeSpecs)
+                : new TrRmSection(kind, flags, checked((uint)count),
+                    bytes.ToArray()));
+        }
+        return TrRmArtifactWriter.Encode(sections.Values.ToArray(), schema);
+    }
+
+    private static byte[] AddConstructedGenericNominalMethodTypes(
+        byte[] artifact, string identityExportKey = "Identity",
+        string forwardExportKey = "Forward",
+        byte[]? genericTypeProviderArtifact = null,
+        byte? wrapperTypeArgumentForm = null,
+        byte wrapperTypeArgumentQualifiers = 0,
+        bool spanElementInitialization = false,
+        bool nestedSpanWrapper = false,
+        bool importGenericMethodTarget = false,
+        bool closedSpanOfInt32 = false)
+    {
+        static byte[] CreateWrapperTypeSpec(byte form, uint innerTypeSpec,
+            byte qualifiers)
+            => form switch {
+                0x0C => TrRmTypeSpecTableWriter.IndexedFamily(0x8A,
+                    innerTypeSpec, qualifiers),
+                0x0E => TrRmTypeSpecTableWriter.InitializationReference(
+                    innerTypeSpec, (qualifiers & 0x01) != 0),
+                _ => TrRmTypeSpecTableWriter.Wrapped(form, innerTypeSpec,
+                    qualifiers),
+            };
+
+        var schema
+            = TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft;
+        var index = TrRmArtifactIndex.ForGenericMethodCallsParameterLabelsDraft(
+            artifact);
+        var tables
+            = TrRmStructuralMetadataValidator
+                .ValidateGenericMethodCallsDraftAndGetExecutionTables(index);
+        if (tables.Modules.Count != 1 || tables.TypeDefs.Count != 0
+            || !tables.Exports.TryGetDefinitionForKey(1, identityExportKey,
+                out var identityDefinition)
+            || !tables.Exports.TryGetDefinitionForKey(1, forwardExportKey,
+                out var forwardDefinition)
+            || (identityDefinition >> 24) != 0x16
+            || (forwardDefinition >> 24) != 0x16)
+        {
+            throw new InvalidDataException(
+                "The G1 constructed-type fixture has an unexpected Module or TypeDef shape.");
+        }
+        var importsGenericType = genericTypeProviderArtifact is not null;
+        if (importGenericMethodTarget && !importsGenericType)
+        {
+            throw new ArgumentException(
+                "The generic method target import requires a TypeDef provider.");
+        }
+        if (closedSpanOfInt32
+            && (wrapperTypeArgumentForm != 0x0C
+                || spanElementInitialization || nestedSpanWrapper))
+        {
+            throw new ArgumentException(
+                "The closed Span fixture requires a direct Span<int32> wrapper.");
+        }
+        var providerIdentity = string.Empty;
+        var providerTargetRequirement = 0u;
+        var providerRuntimePolicy = 0u;
+        if (importsGenericType)
+        {
+            var providerIndex
+                = TrRmArtifactIndex.ForGenericMethodCallsParameterLabelsDraft(
+                    genericTypeProviderArtifact!);
+            var providerTables = TrRmStructuralMetadataValidator
+                .ValidateGenericMethodCallsDraftAndGetExecutionTables(
+                    providerIndex);
+            if (providerTables.Modules.Count != 1
+                || !providerTables.Exports.TryGetDefinitionForKey(1,
+                    "TBox", out var providerTypeDefinition)
+                || (providerTypeDefinition >> 24) != 0x13)
+            {
+                throw new InvalidDataException(
+                    "The G1 constructed-type provider has no exported Box TypeDef.");
+            }
+
+            providerIdentity = providerTables.Modules.GetIdentity(1);
+            (providerTargetRequirement, providerRuntimePolicy)
+                = providerTables.Modules.GetRequirements(1);
+        }
+
+        var identityMethod = checked((int)(identityDefinition
+            & 0x00FF_FFFF));
+        var forwardMethod = checked((int)(forwardDefinition
+            & 0x00FF_FFFF));
+        var identitySignature = tables.Methods.GetSignature(identityMethod);
+        var forwardSignature = tables.Methods.GetSignature(forwardMethod);
+        var (identityFormalFirst, identityFormalCount)
+            = tables.Signatures.GetGenericRange(identitySignature);
+        var (forwardFormalFirst, forwardFormalCount)
+            = tables.Signatures.GetGenericRange(forwardSignature);
+        var (identityParamFirst, identityParamCount)
+            = tables.Signatures.GetParamRange(identitySignature);
+        var (forwardParamFirst, forwardParamCount)
+            = tables.Signatures.GetParamRange(forwardSignature);
+        if (identityFormalCount != 1 || forwardFormalCount != 1
+            || identityParamCount != 1 || forwardParamCount != 1)
+        {
+            throw new InvalidDataException(
+                "The G1 constructed-type fixture must have one type and one value formal per method.");
+        }
+
+        var (stringCount, stringBytes) = GetSection(artifact, 0x0002);
+        var strings = new TrRmStringTableReader(stringBytes,
+            checked((int)stringCount));
+        var stringRows = new List<(string Text, int Encoding)>(
+            checked((int)stringCount) + 4);
+        for (var row = 1; row <= strings.Count; row++)
+        {
+            stringRows.Add((strings.DecodeNamespace(row), 1));
+        }
+        stringRows.Add(("Example", 1));
+        var namespaceRow = stringRows.Count;
+        stringRows.Add(("Box", 1));
+        var typeNameRow = stringRows.Count;
+        stringRows.Add(("Example.Box", 1));
+        var exportKeyRow = stringRows.Count;
+        stringRows.Add(("TBox", 1));
+        var providerIdentityRow = importsGenericType
+            ? checked(stringRows.Count + 1) : 0;
+        if (importsGenericType)
+        {
+            stringRows.Add((providerIdentity, 1));
+        }
+        var typeFormalNameRow = stringRows.Count;
+        var rewrittenStrings = TrRmStringTableWriter.EncodeTextRows(
+            stringRows);
+
+        var (genericParamCount, genericParamBytes)
+            = GetSection(artifact, 0x0019);
+        var rewrittenGenericParams
+            = new byte[checked(genericParamBytes.Length + 32)];
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            rewrittenGenericParams.AsSpan(0, 4), 0x1300_0001);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            rewrittenGenericParams.AsSpan(4, 4), 0);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            rewrittenGenericParams.AsSpan(8, 4),
+            checked((uint)typeFormalNameRow));
+        rewrittenGenericParams[20] = 1;
+        rewrittenGenericParams[21] = 1;
+        rewrittenGenericParams[22] = 1;
+        genericParamBytes.CopyTo(rewrittenGenericParams, 32);
+        var shiftedIdentityFormal = checked(identityFormalFirst + 1);
+        var shiftedForwardFormal = checked(forwardFormalFirst + 1);
+
+        var (typeSpecCount, typeSpecBytes) = GetSection(artifact, 0x0011);
+        var typeSpecRows = new TrRmVariableTableIndex(typeSpecBytes,
+            checked((int)typeSpecCount), 2, 1);
+        var rewrittenTypeSpecRows = new List<ReadOnlyMemory<byte>>(
+            checked((int)typeSpecCount) + 5);
+        for (var row = 1; row <= typeSpecRows.Count; row++)
+        {
+            var bytes = typeSpecRows.GetRow(row).ToArray();
+            if (bytes[0] == 0x04)
+            {
+                var formalRow = ReadUInt32(bytes, 2);
+                BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(2, 4),
+                    checked(formalRow + 1));
+            }
+            rewrittenTypeSpecRows.Add(bytes);
+        }
+
+        var existingImportCount
+            = index.TryGetSection(0x001C, out _, out var imports)
+                ? checked((int)imports) : 0;
+        var typeDefinitionImportRow = importsGenericType
+            ? checked(existingImportCount + 1) : 0;
+        var genericMethodImportRow = importGenericMethodTarget
+            ? checked(existingImportCount + 2) : 0;
+        var boxDefinitionTypeSpec = checked(
+            (uint)rewrittenTypeSpecRows.Count + 1);
+        rewrittenTypeSpecRows.Add(TrRmTypeSpecTableWriter.Reference(
+            importsGenericType ? (byte)0x03 : (byte)0x02,
+            importsGenericType
+                ? checked((uint)typeDefinitionImportRow) : 1));
+        var identityFormalTypeSpec = checked(
+            (uint)rewrittenTypeSpecRows.Count + 1);
+        rewrittenTypeSpecRows.Add(TrRmTypeSpecTableWriter.Reference(0x04,
+            checked((uint)shiftedIdentityFormal)));
+        var identityActualTypeSpec = identityFormalTypeSpec;
+        if (wrapperTypeArgumentForm is byte wrapperForm)
+        {
+            var innerTypeSpec = closedSpanOfInt32
+                ? 0xF200_0008u : identityFormalTypeSpec;
+            if (wrapperForm == 0x0C && nestedSpanWrapper)
+            {
+                innerTypeSpec = checked(
+                    (uint)rewrittenTypeSpecRows.Count + 1);
+                rewrittenTypeSpecRows.Add(
+                    TrRmTypeSpecTableWriter.IndexedFamily(0x8A,
+                        identityFormalTypeSpec));
+            }
+            if (wrapperForm == 0x0C && spanElementInitialization)
+            {
+                innerTypeSpec = checked(
+                    (uint)rewrittenTypeSpecRows.Count + 1);
+                rewrittenTypeSpecRows.Add(
+                    TrRmTypeSpecTableWriter.Reference(0x04,
+                        checked((uint)shiftedIdentityFormal), 0x04));
+            }
+            identityActualTypeSpec = checked(
+                (uint)rewrittenTypeSpecRows.Count + 1);
+            rewrittenTypeSpecRows.Add(CreateWrapperTypeSpec(wrapperForm,
+                innerTypeSpec, wrapperTypeArgumentQualifiers));
+        }
+        var identityConstructedTypeSpec = checked(
+            (uint)rewrittenTypeSpecRows.Count + 1);
+        rewrittenTypeSpecRows.Add(TrRmTypeSpecTableWriter.Constructed(
+            boxDefinitionTypeSpec, [identityActualTypeSpec]));
+        var forwardFormalTypeSpec = checked(
+            (uint)rewrittenTypeSpecRows.Count + 1);
+        rewrittenTypeSpecRows.Add(TrRmTypeSpecTableWriter.Reference(0x04,
+            checked((uint)shiftedForwardFormal)));
+        var forwardActualTypeSpec = forwardFormalTypeSpec;
+        if (wrapperTypeArgumentForm is byte forwardWrapperForm)
+        {
+            var innerTypeSpec = closedSpanOfInt32
+                ? 0xF200_0008u : forwardFormalTypeSpec;
+            if (forwardWrapperForm == 0x0C && nestedSpanWrapper)
+            {
+                innerTypeSpec = checked(
+                    (uint)rewrittenTypeSpecRows.Count + 1);
+                rewrittenTypeSpecRows.Add(
+                    TrRmTypeSpecTableWriter.IndexedFamily(0x8A,
+                        forwardFormalTypeSpec));
+            }
+            if (forwardWrapperForm == 0x0C
+                && spanElementInitialization)
+            {
+                innerTypeSpec = checked(
+                    (uint)rewrittenTypeSpecRows.Count + 1);
+                rewrittenTypeSpecRows.Add(
+                    TrRmTypeSpecTableWriter.Reference(0x04,
+                        checked((uint)shiftedForwardFormal), 0x04));
+            }
+            forwardActualTypeSpec = checked(
+                (uint)rewrittenTypeSpecRows.Count + 1);
+            rewrittenTypeSpecRows.Add(CreateWrapperTypeSpec(
+                forwardWrapperForm, innerTypeSpec,
+                wrapperTypeArgumentQualifiers));
+        }
+        var forwardConstructedTypeSpec = checked(
+            (uint)rewrittenTypeSpecRows.Count + 1);
+        rewrittenTypeSpecRows.Add(TrRmTypeSpecTableWriter.Constructed(
+            boxDefinitionTypeSpec, [forwardActualTypeSpec]));
+        var finalImportCount = checked(existingImportCount
+            + (importsGenericType ? 1 : 0)
+            + (importGenericMethodTarget ? 1 : 0));
+        var existingModuleRefCount
+            = index.TryGetSection(0x0010, out _, out var moduleRefs)
+                ? checked((int)moduleRefs) : 0;
+        var finalModuleRefCount = checked(existingModuleRefCount
+            + (importsGenericType ? 1 : 0));
+        var rewrittenModuleRefs = Array.Empty<byte>();
+        var rewrittenImports = Array.Empty<byte>();
+        if (importsGenericType)
+        {
+            var originalModuleRefBytes
+                = index.TryGetSection(0x0010, out _, out _)
+                    ? GetSection(artifact, 0x0010).Bytes
+                    : Array.Empty<byte>();
+            rewrittenModuleRefs = new byte[checked(
+                originalModuleRefBytes.Length + 12)];
+            originalModuleRefBytes.CopyTo(rewrittenModuleRefs, 0);
+            var moduleRefRow = checked(existingModuleRefCount + 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                rewrittenModuleRefs.AsSpan(
+                    (moduleRefRow - 1) * 12, 4),
+                checked((uint)providerIdentityRow));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                rewrittenModuleRefs.AsSpan(
+                    ((moduleRefRow - 1) * 12) + 4, 4),
+                providerTargetRequirement);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                rewrittenModuleRefs.AsSpan(
+                    ((moduleRefRow - 1) * 12) + 8, 4),
+                providerRuntimePolicy);
+
+            var originalImportBytes
+                = index.TryGetSection(0x001C, out _, out _)
+                    ? GetSection(artifact, 0x001C).Bytes
+                    : Array.Empty<byte>();
+            rewrittenImports = new byte[checked(
+                originalImportBytes.Length
+                + ((importsGenericType ? 1 : 0) * 12)
+                + ((importGenericMethodTarget ? 1 : 0) * 12))];
+            originalImportBytes.CopyTo(rewrittenImports, 0);
+            var importOffset = (typeDefinitionImportRow - 1) * 12;
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                rewrittenImports.AsSpan(importOffset, 4),
+                checked((uint)moduleRefRow));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                rewrittenImports.AsSpan(importOffset + 4, 4),
+                checked((uint)exportKeyRow));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                rewrittenImports.AsSpan(importOffset + 8, 4),
+                0x1300_0001);
+            if (importGenericMethodTarget)
+            {
+                var identityImportKeyRow = stringRows.FindIndex(
+                    row => row.Text == identityExportKey) + 1;
+                if (identityImportKeyRow <= 0)
+                {
+                    throw new InvalidDataException(
+                        "The G1 constructed-type fixture has no String row for the imported method key.");
+                }
+
+                var methodImportOffset = (genericMethodImportRow - 1) * 12;
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    rewrittenImports.AsSpan(methodImportOffset, 4),
+                    checked((uint)moduleRefRow));
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    rewrittenImports.AsSpan(methodImportOffset + 4, 4),
+                    checked((uint)identityImportKeyRow));
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    rewrittenImports.AsSpan(methodImportOffset + 8, 4),
+                    identityDefinition);
+            }
+        }
+        var rewrittenTypeSpecs = TrRmTypeSpecTableWriter.Encode(
+            rewrittenTypeSpecRows, 1, finalImportCount,
+            checked((int)genericParamCount + 1), 0, schema,
+            tables.Methods.Count);
+
+        var (methodSigCount, methodSigBytes) = GetSection(artifact, 0x0017);
+        var rewrittenSignatures = methodSigBytes.ToArray();
+        for (var row = 0; row < checked((int)methodSigCount); row++)
+        {
+            var offset = row * 24;
+            var genericFirst = ReadUInt32(rewrittenSignatures, offset + 16);
+            var genericCount = ReadUInt32(rewrittenSignatures, offset + 20);
+            if (genericCount != 0)
+            {
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    rewrittenSignatures.AsSpan(offset + 16, 4),
+                    checked(genericFirst + 1));
+            }
+        }
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            rewrittenSignatures.AsSpan((identitySignature - 1) * 24, 4),
+            identityConstructedTypeSpec);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            rewrittenSignatures.AsSpan((forwardSignature - 1) * 24, 4),
+            forwardConstructedTypeSpec);
+
+        var (paramCount, paramBytes) = GetSection(artifact, 0x0018);
+        var rewrittenParams = paramBytes.ToArray();
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            rewrittenParams.AsSpan((identityParamFirst - 1) * 16 + 8, 4),
+            identityConstructedTypeSpec);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            rewrittenParams.AsSpan((forwardParamFirst - 1) * 16 + 8, 4),
+            forwardConstructedTypeSpec);
+
+        var (bodyCount, bodyBytes) = GetSection(artifact, 0x0020);
+        var bodyRows = new TrRmVariableTableIndex(bodyBytes,
+            checked((int)bodyCount), 1, 1);
+        var rewrittenBodyRows = new List<ReadOnlyMemory<byte>>(
+            bodyRows.Count);
+        for (var row = 1; row <= bodyRows.Count; row++)
+        {
+            var body = bodyRows.GetRow(row).ToArray();
+            var methodRow = row == tables.Methods.GetBodyRow(identityMethod)
+                ? identityMethod
+                : row == tables.Methods.GetBodyRow(forwardMethod)
+                    ? forwardMethod : 0;
+            if (methodRow != 0)
+            {
+                var oldFormal = methodRow == identityMethod
+                    ? identityFormalFirst : forwardFormalFirst;
+                var constructedType = methodRow == identityMethod
+                    ? identityConstructedTypeSpec
+                    : forwardConstructedTypeSpec;
+                var oldFormalTypeSpec = FindGenericFormalTypeSpec(
+                    typeSpecs, oldFormal);
+                body = RewriteGenericMethodBodyTypeMap(body,
+                    tables.Contracts.Count, schema, oldFormalTypeSpec,
+                    constructedType,
+                    methodRow == forwardMethod
+                        && importGenericMethodTarget
+                            ? 0x1600_0000u
+                                | checked((uint)identityMethod)
+                            : null,
+                    methodRow == forwardMethod
+                        && importGenericMethodTarget
+                            ? 0x1C00_0000u
+                                | checked((uint)genericMethodImportRow)
+                            : null);
+            }
+            rewrittenBodyRows.Add(body);
+        }
+        var rewrittenBodies
+            = TrRmVariableTableWriter.EncodeBlobs(rewrittenBodyRows);
+
+        var (exportCount, exportBytes) = GetSection(artifact, 0x001D);
+        var rewrittenExportCount = exportCount;
+        var rewrittenExports = exportBytes;
+        if (importGenericMethodTarget)
+        {
+            var exportRows = new TrRmVariableTableIndex(exportBytes,
+                checked((int)exportCount), 8, 4);
+            rewrittenExports = new byte[checked(exportBytes.Length - 8)];
+            rewrittenExportCount = 0;
+            var destinationOffset = 0;
+            var removedIdentityExport = false;
+            for (var row = 1; row <= exportRows.Count; row++)
+            {
+                var export = exportRows.GetRow(row);
+                if (ReadUInt32(export, 0) == identityDefinition)
+                {
+                    removedIdentityExport = true;
+                    continue;
+                }
+
+                export.CopyTo(rewrittenExports.AsSpan(destinationOffset));
+                destinationOffset += export.Length;
+                rewrittenExportCount++;
+            }
+            if (!removedIdentityExport)
+            {
+                throw new InvalidDataException(
+                    "The G1 constructed-type fixture has no Identity Export row to replace.");
+            }
+        }
+        else if (!importsGenericType)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                rewrittenExports.AsSpan(0, 4), 0x1300_0001);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                rewrittenExports.AsSpan(4, 4),
+                checked((uint)exportKeyRow));
+            exportBytes.CopyTo(rewrittenExports, 8);
+        }
+
+        var rewrittenTypeDef = new byte[44];
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            rewrittenTypeDef.AsSpan(0, 4), checked((uint)namespaceRow));
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            rewrittenTypeDef.AsSpan(4, 4), checked((uint)typeNameRow));
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            rewrittenTypeDef.AsSpan(8, 4), 0x0A);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            rewrittenTypeDef.AsSpan(20, 4), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            rewrittenTypeDef.AsSpan(24, 4), 1);
+
+        var sections = new SortedDictionary<ushort, TrRmSection>();
+        for (var sectionIndex = 0; sectionIndex < index.SectionCount;
+            sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var count);
+            sections.Add(kind, kind switch {
+                0x0002 => new TrRmSection(kind, flags,
+                    checked((uint)stringRows.Count), rewrittenStrings),
+                0x0011 => new TrRmSection(kind, flags,
+                    checked((uint)rewrittenTypeSpecRows.Count),
+                    rewrittenTypeSpecs),
+                0x0010 when importsGenericType
+                    => new TrRmSection(kind, flags,
+                        checked((uint)finalModuleRefCount),
+                        rewrittenModuleRefs),
+                0x001C when importsGenericType
+                    => new TrRmSection(kind, flags,
+                        checked((uint)finalImportCount),
+                        rewrittenImports),
+                0x0013 => new TrRmSection(kind, flags, 1,
+                    rewrittenTypeDef),
+                0x0017 => new TrRmSection(kind, flags,
+                    checked((uint)methodSigCount), rewrittenSignatures),
+                0x0018 => new TrRmSection(kind, flags, paramCount,
+                    rewrittenParams),
+                0x0019 => new TrRmSection(kind, flags,
+                    checked(genericParamCount + 1),
+                    rewrittenGenericParams),
+                0x001D => new TrRmSection(kind, flags,
+                    checked(rewrittenExportCount
+                        + (!importsGenericType ? 1u : 0u)),
+                    rewrittenExports),
+                0x0020 => new TrRmSection(kind, flags,
+                    checked((uint)bodyRows.Count), rewrittenBodies),
+                _ => new TrRmSection(kind, flags, checked((uint)count),
+                    bytes.ToArray()),
+            });
+        }
+        if (!sections.ContainsKey(0x0013))
+        {
+            sections.Add(0x0013,
+                new TrRmSection(0x0013, 0, 1, rewrittenTypeDef));
+        }
+        if (!sections.ContainsKey(0x001D))
+        {
+            sections.Add(0x001D, new TrRmSection(0x001D, 0,
+                importsGenericType ? rewrittenExportCount : 1u,
+                rewrittenExports));
+        }
+        if (importsGenericType)
+        {
+            if (!sections.ContainsKey(0x0010))
+            {
+                sections.Add(0x0010, new TrRmSection(0x0010, 0,
+                    checked((uint)finalModuleRefCount),
+                    rewrittenModuleRefs));
+            }
+            if (!sections.ContainsKey(0x001C))
+            {
+                sections.Add(0x001C, new TrRmSection(0x001C, 0,
+                    checked((uint)finalImportCount), rewrittenImports));
+            }
+        }
+
+        return TrRmArtifactWriter.Encode(sections.Values.ToArray(), schema);
+    }
+
+    private static uint FindGenericFormalTypeSpec(
+        TrRmVariableTableIndex typeSpecRows, int genericParamRow)
+    {
+        for (var row = 1; row <= typeSpecRows.Count; row++)
+        {
+            var bytes = typeSpecRows.GetRow(row);
+            if (bytes.Length == 6 && bytes[0] == 0x04
+                && ReadUInt32(bytes, 2) == (uint)genericParamRow)
+            {
+                return checked((uint)row);
+            }
+        }
+        throw new InvalidDataException(
+            "The G1 Body has no formal TypeSpec for the selected method.");
+    }
+
+    private static byte[] RewriteGenericMethodBodyTypeMap(
+        byte[] bodyBytes, int contractCount, TrRmArtifactSchema schema,
+        uint oldFormalTypeSpec, uint constructedTypeSpec,
+        uint? oldMethodToken = null, uint? newMethodToken = null)
+    {
+        var body = new TrRmRegisterBodyReader(bodyBytes, contractCount,
+            schema);
+        var typeMap = body.TypeMap.ToArray();
+        var methodMap = body.MethodMap.ToArray();
+        var oldToken = 0x1100_0000u | oldFormalTypeSpec;
+        var newToken = 0x1100_0000u | constructedTypeSpec;
+        var changed = false;
+        for (var offset = 0; offset < typeMap.Length; offset += 4)
+        {
+            if (ReadUInt32(typeMap, offset) == oldToken)
+            {
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    typeMap.AsSpan(offset, 4), newToken);
+                changed = true;
+            }
+        }
+        if (oldMethodToken is uint oldTarget
+            && newMethodToken is uint newTarget)
+        {
+            var methodMapChanged = false;
+            for (var offset = 0; offset < methodMap.Length; offset += 4)
+            {
+                if (ReadUInt32(methodMap, offset) == oldTarget)
+                {
+                    BinaryPrimitives.WriteUInt32LittleEndian(
+                        methodMap.AsSpan(offset, 4), newTarget);
+                    methodMapChanged = true;
+                }
+            }
+            if (!methodMapChanged)
+            {
+                throw new InvalidDataException(
+                    "The selected Generic MethodDef Body has no local target MethodMap entry.");
+            }
+        }
+        if (!changed)
+        {
+            throw new InvalidDataException(
+                "The selected Generic MethodDef Body has no formal TypeMap entry.");
+        }
+
+        var blocks = new List<TrRmRegisterBodyBlock>(body.BlockCount);
+        for (var blockIndex = 0; blockIndex < body.BlockCount; blockIndex++)
+        {
+            var block = body.GetBlock(blockIndex);
+            blocks.Add(new TrRmRegisterBodyBlock(ReadUInt32(block, 0),
+                ReadUInt32(block, 4),
+                BinaryPrimitives.ReadUInt16LittleEndian(block[8..])));
+        }
+        var records = new List<ReadOnlyMemory<byte>>(body.RecordCount);
+        for (var recordIndex = 0; recordIndex < body.RecordCount;
+            recordIndex++)
+        {
+            records.Add(body.GetRecord(recordIndex).ToArray());
+        }
+
+        return TrRmRegisterBodyWriter.Encode(body.HomeMap.ToArray(),
+            typeMap, methodMap, body.FieldMap.ToArray(),
+            body.ConstantMap.ToArray(), blocks, records,
+            body.Code.ToArray(), contractCount, schema);
     }
 
     private static byte[] AddWriteQualifierToFirstSpanFormal(byte[] artifact)

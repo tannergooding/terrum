@@ -92,6 +92,25 @@ internal sealed class TrRmInterfaceBaseMethodTableTests
             TrRmStructuralMetadataValidator.Validate(topLevelFixture.Artifact));
     }
 
+    [Test]
+    public void RejectsOneMethodDefReusedByMultipleInterfaceMethodRows()
+    {
+        var fixture = CreateFixture();
+        var interfaceDefBytes = (byte[])fixture.InterfaceDefs.Clone();
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            interfaceDefBytes.AsSpan(20, sizeof(uint)), 2);
+        var duplicateMethods = new byte[24];
+        fixture.InterfaceMethodBytes.CopyTo(duplicateMethods, 0);
+        fixture.InterfaceMethodBytes.CopyTo(duplicateMethods, 12);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            duplicateMethods.AsSpan(16, sizeof(uint)), 1);
+
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator.Validate(CreateArtifact(fixture,
+                fixture.InterfaceBaseBytes, duplicateMethods,
+                fixture.SignatureBytes, interfaceDefBytes, 2)));
+    }
+
     private static Fixture CreateFixture(int methodOwnerTypeDef = 1,
         uint receiverTypeSpecRef = 1)
     {
@@ -188,7 +207,9 @@ internal sealed class TrRmInterfaceBaseMethodTableTests
     }
 
     private static byte[] CreateArtifact(Fixture fixture,
-        byte[] interfaceBaseBytes, byte[] interfaceMethodBytes, byte[] signatureBytes)
+        byte[] interfaceBaseBytes, byte[] interfaceMethodBytes,
+        byte[] signatureBytes, byte[]? interfaceDefBytes = null,
+        int interfaceMethodCount = 1)
         => TrRmArtifactWriter.Encode([
             new TrRmSection(0x0001, 0, 1, fixture.Modules),
             new TrRmSection(0x0002, 0, 5, fixture.Strings),
@@ -198,8 +219,10 @@ internal sealed class TrRmInterfaceBaseMethodTableTests
             new TrRmSection(0x0016, 0, 1, fixture.Methods),
             new TrRmSection(0x0017, 0, 1, signatureBytes),
             new TrRmSection(0x0019, 0, 1, fixture.GenericParams),
-            new TrRmSection(0x0024, 0, 1, interfaceMethodBytes),
-            new TrRmSection(0x0025, 0, 1, fixture.InterfaceDefs),
+            new TrRmSection(0x0024, 0,
+                checked((uint)interfaceMethodCount), interfaceMethodBytes),
+            new TrRmSection(0x0025, 0, 1,
+                interfaceDefBytes ?? fixture.InterfaceDefs),
             new TrRmSection(0x0026, 0, 1, interfaceBaseBytes),
         ]);
 

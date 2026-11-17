@@ -35,7 +35,9 @@ public static partial class TrRmExecutableCompiler
         uint moduleTargetRequirement,
         SourceGenericMethodExports? sourceMethodExports,
         IReadOnlyList<TrRmSourceTypeExport>? sourceTypeExports,
-        TrRmArtifactSchema schema = TrRmArtifactSchema.GenericMethodCallsDraft)
+        TrRmArtifactSchema schema = TrRmArtifactSchema.GenericMethodCallsDraft,
+        TrRmArtifactSchema baseSchema = TrRmArtifactSchema.Standard,
+        bool standardInitializationReferenceBodies = false)
     {
         if (program.GenericMethodDefinitions.IsDefault)
         {
@@ -99,10 +101,12 @@ public static partial class TrRmExecutableCompiler
         }
 
         var artifact = EmitDevelopment(sourceProgram, moduleIdentity,
-            TrRmArtifactSchema.Standard, moduleTargetRequirement);
+            baseSchema, moduleTargetRequirement,
+            standardInitializationReferenceBodies:
+                standardInitializationReferenceBodies);
         if (addedSeed)
         {
-            artifact = RemoveGenericMethodEmitterSeed(artifact);
+            artifact = RemoveGenericMethodEmitterSeed(artifact, baseSchema);
         }
         var hasGenericCallTargets = ArtifactHasGenericCallTargets(artifact,
             schema);
@@ -187,9 +191,10 @@ public static partial class TrRmExecutableCompiler
             IsInternal = true,
         };
 
-    private static byte[] RemoveGenericMethodEmitterSeed(byte[] artifact)
+    private static byte[] RemoveGenericMethodEmitterSeed(byte[] artifact,
+        TrRmArtifactSchema schema)
     {
-        var artifactIndex = new TrRmArtifactIndex(artifact);
+        var artifactIndex = new TrRmArtifactIndex(artifact, schema);
         var sections = new List<TrRmSection>(artifactIndex.SectionCount);
         for (var sectionIndex = 0;
             sectionIndex < artifactIndex.SectionCount;
@@ -211,7 +216,7 @@ public static partial class TrRmExecutableCompiler
             sections.Add(new TrRmSection(kind, flags,
                 checked((uint)count), bytes.ToArray()));
         }
-        return TrRmArtifactWriter.Encode(sections);
+        return TrRmArtifactWriter.Encode(sections, schema);
     }
 
     private static BoundFunction GetSupportedOpenGenericProofFunction(
@@ -264,7 +269,6 @@ public static partial class TrRmExecutableCompiler
                 static parameter => parameter.IsMutable || parameter.IsOut
                     || parameter.IsInit || parameter.IsImplicitRef)
             || function.NoFailureProof
-            || !function.DependencyContracts.IsEmpty
             || function.NativeOutputContracts.Length != 0
             || function.DirectNativeImport is not null
             || function.NativeVTableMethod is not null
@@ -609,7 +613,9 @@ public static partial class TrRmExecutableCompiler
             return CreateStandardBodyTypeMapToken(
                 GenericMethodTypeSpecRef(type, formalTypeSpecRows,
                     builtInTypeSpecRows, typeSpecRows, spanTypes,
-                    definition.DefinitionOrdinal));
+                    definition.ProofProgram.CheckedReferenceTypes,
+                    definition.DefinitionOrdinal, definition,
+                    allowSpanType: true));
         }
 
         var homeMap = new byte[checked(function.ParameterCount * 8)];
@@ -760,21 +766,6 @@ public static partial class TrRmExecutableCompiler
             return true;
         }
 
-        PrimitiveType SubstituteTargetType(PrimitiveType type)
-        {
-            for (var ordinal = 0;
-                ordinal < targetDefinition.Formals.Length; ordinal++)
-            {
-                if (targetDefinition.Formals[ordinal].PlaceholderType
-                    == type)
-                {
-                    return call.TypeArguments[ordinal];
-                }
-            }
-
-            return type;
-        }
-
         var formalParameters = new bool[target.ParameterCount];
         var inputs = new TrRmRegisterBodyCallInput[target.ParameterCount];
         for (var argumentIndex = 0;
@@ -788,6 +779,8 @@ public static partial class TrRmExecutableCompiler
             {
                 BoundRead read => (read.Variable, (byte)1),
                 BoundMove move => (move.Variable, (byte)2),
+                BoundReferenceReborrow { Descriptor: BoundRead read }
+                    => (read.Variable, (byte)5),
                 _ => (-1, (byte)0),
             };
             if ((uint)formalIndex >= (uint)inputs.Length
@@ -795,8 +788,9 @@ public static partial class TrRmExecutableCompiler
                 || sourceUse == 0
                 || (uint)argumentVariable >= (uint)function.ParameterCount
                 || function.Variables[argumentVariable].Type != argument.Type
-                || SubstituteTargetType(
-                    target.Variables[formalIndex].Type) != argument.Type
+                || !GenericMethodTypeMatchesAfterSubstitution(
+                    target.Variables[formalIndex].Type, argument.Type,
+                    targetDefinition, definition, call.TypeArguments, 0)
                 || target.Variables[formalIndex].IsMutable
                 || target.Variables[formalIndex].IsOut
                 || target.Variables[formalIndex].IsInit
@@ -833,14 +827,18 @@ public static partial class TrRmExecutableCompiler
                     break;
                 }
             }
-            if (argumentFormalOrdinal < 0
-                ? sourceUse != 1
-                : definition.Formals[argumentFormalOrdinal]
-                        .OwnershipDomain switch {
-                    1 => sourceUse != 1,
-                    2 => sourceUse != 2,
-                    _ => true,
-                })
+            if (sourceUse == 5
+                ? !IsGenericMethodInitializationReferenceType(
+                    target.Variables[formalIndex].Type,
+                    targetDefinition.ProofProgram.CheckedReferenceTypes)
+                : argumentFormalOrdinal < 0
+                    ? sourceUse != 1
+                    : definition.Formals[argumentFormalOrdinal]
+                            .OwnershipDomain switch {
+                        1 => sourceUse != 1,
+                        2 => sourceUse != 2,
+                        _ => true,
+                    })
             {
                 throw Unsupported(
                     $"Generic MethodDef '{definition.Name}' uses a parameter Home without the required Copy or unique transfer mode.");
@@ -852,7 +850,9 @@ public static partial class TrRmExecutableCompiler
         }
 
         if (formalParameters.Any(static assigned => !assigned)
-            || SubstituteTargetType(target.ReturnType) != function.ReturnType)
+            || !GenericMethodTypeMatchesAfterSubstitution(
+                target.ReturnType, function.ReturnType, targetDefinition,
+                definition, call.TypeArguments, 0))
         {
             throw Unsupported(
                 $"Generic MethodDef '{definition.Name}' has a GenericCall signature outside the checked forwarding subset.");
@@ -870,7 +870,9 @@ public static partial class TrRmExecutableCompiler
             return CreateStandardBodyTypeMapToken(
                 GenericMethodTypeSpecRef(type, formalTypeSpecRows,
                     builtInTypeSpecRows, typeSpecRows, spanTypes,
-                    definition.DefinitionOrdinal));
+                    definition.ProofProgram.CheckedReferenceTypes,
+                    definition.DefinitionOrdinal, definition,
+                    allowSpanType: true));
         }
 
         var homeCount = function.ParameterCount
@@ -956,7 +958,8 @@ public static partial class TrRmExecutableCompiler
                 = new TrRmRegisterBodyGenericCallArgument(1,
                     GenericMethodTypeSpecRef(actual, formalTypeSpecRows,
                         builtInTypeSpecRows, typeSpecRows, spanTypes,
-                        definition.DefinitionOrdinal,
+                        definition.ProofProgram.CheckedReferenceTypes,
+                        definition.DefinitionOrdinal, definition,
                         allowSpanType: true));
         }
 
@@ -1123,7 +1126,6 @@ public static partial class TrRmExecutableCompiler
             || requirementStub.ParameterCount is < 1 or > 9
             || requirementStub.Variables[0].Type
                 != identity.ImplementingType
-            || requirementStub.Variables[0].IsMutable
             || requirementStub.Variables[0].IsOut
             || requirementStub.Variables[0].IsInit
             || requirementStub.Variables[0].IsImplicitRef
@@ -1164,7 +1166,10 @@ public static partial class TrRmExecutableCompiler
             identity.Requirement.MemberOrdinal];
         if (!StringComparer.Ordinal.Equals(requirementMember.DeclarationKey,
                 identity.Requirement.DeclarationKey)
-            || requirementMember.RequiresMutableReceiver)
+            || (requirementMember.RequiresMutableReceiver
+                && !schema.UsesMethodReceiverAccess())
+            || requirementStub.Variables[0].IsMutable
+                != requirementMember.RequiresMutableReceiver)
         {
             throw Unsupported(
                 "A G1 interface requirement has no exact local or imported InterfaceMethod target.");
@@ -1232,7 +1237,9 @@ public static partial class TrRmExecutableCompiler
 
         var callerFormal = definition.Formals[implementingFormalOrdinal];
         if (callerFormal.InterfaceConstraints.IsDefault
-            || callerFormal.OwnershipDomain != 1)
+            || callerFormal.OwnershipDomain != 1
+            || (requirementMember.RequiresMutableReceiver
+                && !callerFormal.RequiresWritable))
         {
             throw Unsupported(
                 "A G1 interface requirement receiver lacks a supported Copy formal contract.");
@@ -1277,19 +1284,37 @@ public static partial class TrRmExecutableCompiler
             var parameterIndex = call.ArgumentParameterIndices.IsDefault
                 ? argumentIndex
                 : call.ArgumentParameterIndices[argumentIndex];
+            var isReceiver = parameterIndex == 0;
+            var inputVariable = argument switch {
+                BoundRead read => read.Variable,
+                BoundReceiverLoan loan when isReceiver
+                    && !requirementMember.RequiresMutableReceiver
+                    => loan.Variable,
+                BoundMutableReceiverLoan loan when isReceiver
+                    => loan.Variable,
+                _ => -1,
+            };
             if ((uint)parameterIndex >= (uint)inputs.Length
                 || (argumentIndex == 0 && parameterIndex != 0)
                 || argumentIndices[parameterIndex]
-                || argument is not BoundRead read
-                || (uint)read.Variable >= (uint)function.ParameterCount
-                || function.Variables[read.Variable].Type != argument.Type
+                || (isReceiver
+                    ? argument is not (BoundRead or BoundReceiverLoan
+                        or BoundMutableReceiverLoan)
+                    : argument is not BoundRead)
+                || (isReceiver
+                    && requirementMember.RequiresMutableReceiver
+                    && argument is not BoundMutableReceiverLoan)
+                || (uint)inputVariable >= (uint)function.ParameterCount
+                || function.Variables[inputVariable].Type != argument.Type
                 || requirementStub.Variables[parameterIndex].Type
                     != argument.Type
-                || function.Variables[read.Variable].IsMutable
-                || function.Variables[read.Variable].IsOut
-                || function.Variables[read.Variable].IsInit
-                || function.Variables[read.Variable].IsImplicitRef
-                || requirementStub.Variables[parameterIndex].IsMutable
+                || (!isReceiver
+                    && function.Variables[inputVariable].IsMutable)
+                || function.Variables[inputVariable].IsOut
+                || function.Variables[inputVariable].IsInit
+                || function.Variables[inputVariable].IsImplicitRef
+                || (parameterIndex != 0
+                    && requirementStub.Variables[parameterIndex].IsMutable)
                 || requirementStub.Variables[parameterIndex].IsOut
                 || requirementStub.Variables[parameterIndex].IsInit
                 || requirementStub.Variables[parameterIndex]
@@ -1319,8 +1344,14 @@ public static partial class TrRmExecutableCompiler
             }
 
             argumentIndices[parameterIndex] = true;
+            var sourceUse = (byte)1;
+            if (isReceiver && schema.UsesMethodReceiverAccess())
+            {
+                sourceUse = requirementMember.RequiresMutableReceiver
+                    ? (byte)4 : (byte)3;
+            }
             inputs[parameterIndex] = new TrRmRegisterBodyCallInput(
-                2, 1, checked((ushort)read.Variable));
+                2, sourceUse, checked((ushort)inputVariable));
         }
         if (argumentIndices.Any(static assigned => !assigned)
             || requirementStub.ParameterCount != call.Arguments.Length)
@@ -1341,7 +1372,9 @@ public static partial class TrRmExecutableCompiler
             return CreateStandardBodyTypeMapToken(
                 GenericMethodTypeSpecRef(type, formalTypeSpecRows,
                     builtInTypeSpecRows, typeSpecRows, spanTypes,
-                    definition.DefinitionOrdinal));
+                    definition.ProofProgram.CheckedReferenceTypes,
+                    definition.DefinitionOrdinal, definition,
+                    allowSpanType: true));
         }
 
         var homeCount = function.ParameterCount + 1;
@@ -1525,6 +1558,38 @@ public static partial class TrRmExecutableCompiler
         var methodSection = TryGetSection(sections, 0x0016,
             out var foundMethodSection) ? foundMethodSection : default;
         var methodBytes = methodSection.Bytes.ToArray().ToList();
+        if (schema.UsesMethodReceiverAccess())
+        {
+            if (methodSection.RecordCount
+                < checked((uint)program.Functions.Length))
+            {
+                throw Invalid(
+                    "The G1 base MethodDef range does not cover its source functions.");
+            }
+
+            for (var functionIndex = 0;
+                functionIndex < program.Functions.Length; functionIndex++)
+            {
+                var function = program.Functions[functionIndex];
+                if (function.DeclaringStruct is null || function.IsStatic
+                    || function.IsConstructor || function.IsClassConstructor
+                    || function.IsCleanup || function.Variables.IsEmpty
+                    || function.Variables[0].IsInit
+                    || (!function.Variables[0].IsMutable
+                        && !ManagedClassTypes.IsWritable(
+                            function.Variables[0].Type)))
+                {
+                    continue;
+                }
+
+                var methodFlags = function.IsPrivate ? 0u
+                    : function.IsInternal ? 1u : 2u;
+                WriteUInt32(methodBytes,
+                    checked((functionIndex * 28) + 12),
+                    methodFlags | 4u);
+            }
+        }
+
         var signatureSection = TryGetSection(sections, 0x0017,
             out var foundSignatureSection) ? foundSignatureSection : default;
         var signatureBytes = signatureSection.Bytes.ToArray().ToList();
@@ -1690,7 +1755,9 @@ public static partial class TrRmExecutableCompiler
                     function.Variables[parameter].Type,
                     formalTypeSpecRows, builtInTypeSpecRows, typeSpecRows,
                     definition.ProofProgram.SpanTypes,
-                    definition.DefinitionOrdinal);
+                    definition.ProofProgram.CheckedReferenceTypes,
+                    definition.DefinitionOrdinal, definition,
+                    allowSpanType: true);
                 AppendUInt32(parameterBytes, checked((uint)signatureRow));
                 AppendUInt32(parameterBytes, checked((uint)parameter));
                 AppendUInt32(parameterBytes, typeSpecRef);
@@ -1704,7 +1771,9 @@ public static partial class TrRmExecutableCompiler
                 function.ReturnType, formalTypeSpecRows,
                 builtInTypeSpecRows, typeSpecRows,
                 definition.ProofProgram.SpanTypes,
-                definition.DefinitionOrdinal);
+                definition.ProofProgram.CheckedReferenceTypes,
+                definition.DefinitionOrdinal, definition,
+                allowSpanType: true);
             AppendUInt32(signatureBytes, resultTypeSpecRef);
             AppendUInt32(signatureBytes, 0);
             AppendUInt32(signatureBytes, checked((uint)firstParameter));
@@ -1757,10 +1826,21 @@ public static partial class TrRmExecutableCompiler
             if (effectMask != 0)
             {
                 contractFirst = contractRows.Count + 1;
-                contractCount = 1;
                 contractRows.Add(EncodeGenericMethodEffectContract(
                     methodRow, s_effectPayloads[
                         checked((int)effectMask)]));
+                contractCount++;
+            }
+            foreach (var dependencyContract
+                in EncodeGenericMethodDependencyContracts(function,
+                    methodRow))
+            {
+                if (contractFirst == 0)
+                {
+                    contractFirst = contractRows.Count + 1;
+                }
+                contractRows.Add(dependencyContract);
+                contractCount++;
             }
 
             AppendUInt32(methodBytes, 0);
@@ -1956,7 +2036,7 @@ public static partial class TrRmExecutableCompiler
         }
 
         var emissions = CaptureGenericInterfaceEmissions(program,
-            typeExports);
+            typeExports, schema);
         if (emissions.Count == 0)
         {
             return artifact;
@@ -2258,7 +2338,9 @@ public static partial class TrRmExecutableCompiler
                 AppendUInt32(methodBytes,
                     checked((uint)methodNameStringRow));
                 AppendUInt32(methodBytes, checked((uint)signatureRow));
-                AppendUInt32(methodBytes, 2);
+                AppendUInt32(methodBytes, 2u
+                    | (schema.UsesMethodReceiverAccess()
+                        && member.RequiresMutableReceiver ? 4u : 0u));
                 AppendUInt32(methodBytes, 0);
                 AppendUInt32(methodBytes, 0);
                 AppendUInt32(methodBytes, 0);
@@ -2335,7 +2417,7 @@ public static partial class TrRmExecutableCompiler
         var methods = finalMethodCount == 0 ? default
             : new TrRmMethodDefTableReader(finalMethodBytes,
                 finalMethodCount, stringTable, modules, typeDefs, signatures,
-                contractCount, bodyCount);
+                contractCount, bodyCount, schema);
 
         var genericParamBytes = finalGenericParamCount == 0 ? []
             : TrRmGenericParamTableWriter.Encode(genericParameterRows,
@@ -2426,7 +2508,8 @@ public static partial class TrRmExecutableCompiler
     private static byte[] AddImportedGenericInterfaceMetadata(
         byte[] artifact, BoundProgram program, TrRmArtifactSchema schema)
     {
-        var emissions = CaptureImportedGenericInterfaceEmissions(program);
+        var emissions = CaptureImportedGenericInterfaceEmissions(program,
+            schema);
         if (emissions.Count == 0)
         {
             return artifact;
@@ -2802,7 +2885,9 @@ public static partial class TrRmExecutableCompiler
                 AppendUInt32(methodBytes,
                     checked((uint)methodNameStringRow));
                 AppendUInt32(methodBytes, checked((uint)signatureRow));
-                AppendUInt32(methodBytes, 2);
+                AppendUInt32(methodBytes, 2u
+                    | (schema.UsesMethodReceiverAccess()
+                        && member.RequiresMutableReceiver ? 4u : 0u));
                 AppendUInt32(methodBytes, 0);
                 AppendUInt32(methodBytes, 0);
                 AppendUInt32(methodBytes, 0);
@@ -2884,7 +2969,7 @@ public static partial class TrRmExecutableCompiler
         var methods = finalMethodCount == 0 ? default
             : new TrRmMethodDefTableReader(finalMethodBytes,
                 finalMethodCount, stringTable, modules, typeDefs, signatures,
-                contractCount, GetCount(sections, 0x0020));
+                contractCount, GetCount(sections, 0x0020), schema);
         var genericParameterBytes = genericParameterRows.Count == 0 ? []
             : TrRmGenericParamTableWriter.Encode(genericParameterRows,
                 stringTable, typeDefs, methods, signatures, typeSpecs,
@@ -2981,7 +3066,8 @@ public static partial class TrRmExecutableCompiler
     }
 
     private static List<GenericImportedInterfaceEmission>
-        CaptureImportedGenericInterfaceEmissions(BoundProgram program)
+        CaptureImportedGenericInterfaceEmissions(BoundProgram program,
+            TrRmArtifactSchema schema)
     {
         var required = new Dictionary<(
             string ProviderIdentity, string ExportKey, string QualifiedName,
@@ -3092,7 +3178,7 @@ public static partial class TrRmExecutableCompiler
                     "An imported G1 interface constraint has no unique retained provider declaration.");
             }
 
-            ValidateImportedGenericInterface(matches[0]);
+            ValidateImportedGenericInterface(matches[0], schema);
             var definitionVisits = checked(1
                 + matches[0].Formals.Length
                 + matches[0].Members.Length
@@ -3118,7 +3204,7 @@ public static partial class TrRmExecutableCompiler
     }
 
     private static void ValidateImportedGenericInterface(
-        BoundInterfaceDefinition definition)
+        BoundInterfaceDefinition definition, TrRmArtifactSchema schema)
     {
         if (!definition.IsPublic
             || definition.Accessibility
@@ -3223,7 +3309,8 @@ public static partial class TrRmExecutableCompiler
                     typeExportKey)
                 || !memberExportKeys.Add(member.DeclarationKey)
                 || member.IsStatic || member.IsExternal
-                || member.RequiresMutableReceiver
+                || (member.RequiresMutableReceiver
+                    && !schema.UsesMethodReceiverAccess())
                 || member.IsPartial || member.RequiresUnsafeCaller
                 || member.DeclaredRequiresUnsafeCaller
                 || member.DoesNotReturn || member.IsAsync
@@ -3267,7 +3354,8 @@ public static partial class TrRmExecutableCompiler
 
     private static List<GenericInterfaceEmission>
         CaptureGenericInterfaceEmissions(BoundProgram program,
-            IReadOnlyList<TrRmSourceTypeExport> typeExports)
+            IReadOnlyList<TrRmSourceTypeExport> typeExports,
+            TrRmArtifactSchema schema)
     {
         var result = new List<GenericInterfaceEmission>(typeExports.Count);
         var selectors = new HashSet<(string Namespace, string Name, int Arity)>();
@@ -3383,7 +3471,8 @@ public static partial class TrRmExecutableCompiler
                     || member.Accessibility
                         != BoundInterfaceAccessibility.Public
                     || member.IsStatic || member.IsExternal
-                    || member.RequiresMutableReceiver
+                    || (member.RequiresMutableReceiver
+                        && !schema.UsesMethodReceiverAccess())
                     || member.IsPartial || member.RequiresUnsafeCaller
                     || member.DeclaredRequiresUnsafeCaller
                     || member.DoesNotReturn || member.IsAsync
@@ -4004,7 +4093,7 @@ public static partial class TrRmExecutableCompiler
         var methodCount = methodBytes.Length / 28;
         var methods = methodCount == 0 ? default
             : new TrRmMethodDefTableReader(methodBytes, methodCount, strings,
-                modules, types, signatures, contractCount, bodyCount);
+                modules, types, signatures, contractCount, bodyCount, schema);
         var genericParamBytes = genericParameterRows.Count == 0 ? []
             : TrRmGenericParamTableWriter.Encode(genericParameterRows,
                 strings, types, methods, signatures, typeSpecs,
@@ -4054,11 +4143,49 @@ public static partial class TrRmExecutableCompiler
                 builtInTypeSpecRows, typeSpecRows);
         }
 
+        if (typeDefault.Term.Kind
+            == BoundGenericMethodTypeTermKind.CheckedReference)
+        {
+            if (!typeDefault.ConstantFormalDependencies.IsEmpty
+                || typeDefault.Term.TypeArguments.Length != 1
+                || typeDefault.Term.IsGarbageCollected
+                || typeDefault.Term.IsOptional
+                || typeDefault.Term.AllowsVoid
+                || typeDefault.Term.IsElementWritable
+                || typeDefault.Term.ElementCount != 0
+                || typeDefault.Term.CallingConvention
+                    != NativeCallingConvention.Native
+                || typeDefault.Term.ParameterCount != 0
+                || typeDefault.Term.NominalTypeIdentity is not null
+                || !BoundGenericMethodTypeTerms.TryGetFormalDependencies(
+                    typeDefault.Term, out var dependencies)
+                || !dependencies.SequenceEqual(
+                    typeDefault.FormalDependencies)
+                || dependencies.Any(dependency =>
+                    dependency < 0 || dependency >= formalOrdinal))
+            {
+                throw Unsupported(
+                    $"Generic MethodDef '{definition.Name}' has a checked-reference type default outside the earlier-formal subset.");
+            }
+
+            return GenericMethodTypeDefaultSpecRef(typeDefault.Term,
+                formalOrdinal, definition, formalTypeSpecRows,
+                builtInTypeSpecRows, typeSpecRows);
+        }
+
+        var redundantWritableFormal
+            = typeDefault.Term.Kind
+                    == BoundGenericMethodTypeTermKind.Formal
+                && (uint)typeDefault.Term.FormalOrdinal
+                    < (uint)definition.Formals.Length
+                && definition.Formals[typeDefault.Term.FormalOrdinal]
+                    .RequiresWritable;
         if (!typeDefault.ConstantFormalDependencies.IsEmpty
             || typeDefault.Term.TypeArguments.IsDefaultOrEmpty
                 == false
             || !typeDefault.Term.ConstantArguments.IsEmpty
-            || typeDefault.Term.IsWritable
+            || (typeDefault.Term.IsWritable
+                && !redundantWritableFormal)
             || typeDefault.Term.IsGarbageCollected
             || typeDefault.Term.IsInitialization
             || typeDefault.Term.IsOptional
@@ -4121,6 +4248,9 @@ public static partial class TrRmExecutableCompiler
                 || term.FormalOrdinal >= formalOrdinal
                 || (uint)term.FormalOrdinal
                     >= (uint)definition.Formals.Length
+                || (term.IsWritable
+                    && !definition.Formals[term.FormalOrdinal]
+                        .RequiresWritable)
                 || !formalTypeSpecRows.TryGetValue(
                     definition.Formals[term.FormalOrdinal]
                         .PlaceholderType, out var formalTypeSpecRef))
@@ -4129,6 +4259,83 @@ public static partial class TrRmExecutableCompiler
                     $"Generic MethodDef '{definition.Name}' has a Span default that does not reference an earlier formal.");
             }
             return formalTypeSpecRef;
+        }
+
+        if (term.Kind == BoundGenericMethodTypeTermKind.CheckedReference)
+        {
+            if (term.TypeArguments.Length != 1
+                || term.IsGarbageCollected || term.IsOptional
+                || term.AllowsVoid || term.IsElementWritable
+                || term.ElementCount != 0
+                || term.CallingConvention
+                    != NativeCallingConvention.Native
+                || term.ParameterCount != 0
+                || term.NominalTypeIdentity is not null
+                || term.TypeArguments[0].AllowsVoid
+                || term.TypeArguments[0].IsOptional)
+            {
+                throw Unsupported(
+                    $"Generic MethodDef '{definition.Name}' has a checked-reference type default outside the selected TypeSpec family.");
+            }
+
+            var referentTerm = term.TypeArguments[0];
+            uint referentTypeSpecRef;
+            if (referentTerm.Kind
+                == BoundGenericMethodTypeTermKind.Formal)
+            {
+                var dependency = referentTerm.FormalOrdinal;
+                if (dependency < 0 || dependency >= formalOrdinal
+                    || (uint)dependency
+                        >= (uint)definition.Formals.Length
+                    || !formalTypeSpecRows.TryGetValue(
+                        definition.Formals[dependency].PlaceholderType,
+                        out referentTypeSpecRef))
+                {
+                    throw Unsupported(
+                        $"Generic MethodDef '{definition.Name}' has a checked-reference default that does not reference an earlier formal.");
+                }
+                if (referentTerm.IsWritable)
+                {
+                    if (!definition.Formals[dependency]
+                            .RequiresWritable)
+                    {
+                        throw Unsupported(
+                            $"Generic MethodDef '{definition.Name}' has a write-qualified referent without the formal's write requirement.");
+                    }
+                }
+            }
+            else if (referentTerm.Kind
+                == BoundGenericMethodTypeTermKind.Concrete)
+            {
+                if (referentTerm.ConcreteType == PrimitiveType.Void)
+                {
+                    throw Unsupported(
+                        "A G1 checked-reference referent cannot be void.");
+                }
+                referentTypeSpecRef = GenericMethodTypeSpecRef(
+                    referentTerm.ConcreteType, formalTypeSpecRows,
+                    builtInTypeSpecRows, typeSpecRows,
+                    definition.ProofProgram.SpanTypes,
+                    definition.ProofProgram.CheckedReferenceTypes,
+                    definition.DefinitionOrdinal, definition,
+                    allowSpanType: true,
+                    allowFormal: false);
+            }
+            else
+            {
+                referentTypeSpecRef = GenericMethodTypeDefaultSpecRef(
+                    referentTerm, formalOrdinal, definition,
+                    formalTypeSpecRows, builtInTypeSpecRows, typeSpecRows);
+            }
+
+            var typeSpecRef = checked((uint)typeSpecRows.Count + 1);
+            typeSpecRows.Add(term.IsInitialization
+                ? TrRmTypeSpecTableWriter.InitializationReference(
+                    referentTypeSpecRef, term.IsWritable)
+                : TrRmTypeSpecTableWriter.Wrapped(0x07,
+                    referentTypeSpecRef,
+                    term.IsWritable ? (byte)0x01 : (byte)0));
+            return typeSpecRef;
         }
 
         if (term.Kind == BoundGenericMethodTypeTermKind.Concrete)
@@ -4141,7 +4348,9 @@ public static partial class TrRmExecutableCompiler
             return GenericMethodTypeSpecRef(term.ConcreteType,
                 formalTypeSpecRows, builtInTypeSpecRows, typeSpecRows,
                 definition.ProofProgram.SpanTypes,
-                definition.DefinitionOrdinal, allowSpanType: true);
+                definition.ProofProgram.CheckedReferenceTypes,
+                definition.DefinitionOrdinal, definition,
+                allowSpanType: true);
         }
 
         if (term.Kind != BoundGenericMethodTypeTermKind.Span
@@ -4184,6 +4393,21 @@ public static partial class TrRmExecutableCompiler
         Dictionary<PrimitiveType, uint> builtInTypeSpecRows,
         List<ReadOnlyMemory<byte>> typeSpecRows)
     {
+        if ((qualifiers & 0x01) != 0)
+        {
+            if (elementTerm.Kind
+                    != BoundGenericMethodTypeTermKind.Formal
+                || (uint)elementTerm.FormalOrdinal
+                    >= (uint)definition.Formals.Length
+                || !definition.Formals[elementTerm.FormalOrdinal]
+                    .RequiresWritable)
+            {
+                throw Unsupported(
+                    $"Generic MethodDef '{definition.Name}' has a writable Span element without the formal's write requirement.");
+            }
+
+        }
+
         if (qualifiers == 0
             && elementTerm.Kind
                 == BoundGenericMethodTypeTermKind.Concrete
@@ -4218,7 +4442,9 @@ public static partial class TrRmExecutableCompiler
                 elementTerm.ConcreteType, formalTypeSpecRows,
                 builtInTypeSpecRows, typeSpecRows,
                 definition.ProofProgram.SpanTypes,
-                definition.DefinitionOrdinal, allowSpanType: true,
+                definition.ProofProgram.CheckedReferenceTypes,
+                definition.DefinitionOrdinal, definition,
+                allowSpanType: true,
                 allowFormal: false);
         }
         else if (elementTerm.Kind == BoundGenericMethodTypeTermKind.Span)
@@ -4371,6 +4597,154 @@ public static partial class TrRmExecutableCompiler
         return row;
     }
 
+    private static ImmutableArray<ReadOnlyMemory<byte>>
+        EncodeGenericMethodDependencyContracts(
+            BoundFunction function, int methodRow)
+    {
+        var dependencies = function.DependencyContracts;
+        if (dependencies.IsDefault)
+        {
+            throw Unsupported(
+                "A G1 Generic MethodDef has an invalid dependency-contract set.");
+        }
+        if (dependencies.IsEmpty)
+        {
+            return [];
+        }
+
+        BoundDependencyContract? dependsOn = null;
+        BoundDependencyContract? forwardsBacking = null;
+        BoundDependencyContract? borrowSourceStorage = null;
+        foreach (var dependency in dependencies)
+        {
+            if (dependency.Destination
+                    != BoundDependencyDestination.Result
+                || dependency.DestinationOrdinal is not null
+                || dependency.Sources.IsDefault
+                || dependency.Relation is not (
+                    BoundDependencyRelation.DependsOn
+                    or BoundDependencyRelation.ForwardsBacking
+                    or BoundDependencyRelation.BorrowSourceStorage))
+            {
+                throw Unsupported(
+                    "G1 generic MethodDefs currently support only ordinary result dependency contracts.");
+            }
+
+            if (dependency.Relation == BoundDependencyRelation.DependsOn)
+            {
+                if (dependsOn is not null)
+                {
+                    throw Unsupported(
+                        "A G1 generic MethodDef has multiple ordinary result DependsOn contracts.");
+                }
+                dependsOn = dependency;
+            }
+            else if (dependency.Relation
+                == BoundDependencyRelation.ForwardsBacking)
+            {
+                if (forwardsBacking is not null)
+                {
+                    throw Unsupported(
+                        "A G1 generic MethodDef has multiple ordinary result ForwardsBacking contracts.");
+                }
+                forwardsBacking = dependency;
+            }
+            else
+            {
+                if (borrowSourceStorage is not null)
+                {
+                    throw Unsupported(
+                        "A G1 generic MethodDef has multiple ordinary result BorrowSourceStorage contracts.");
+                }
+                borrowSourceStorage = dependency;
+            }
+        }
+
+        if (dependsOn is not BoundDependencyContract declared
+            || (forwardsBacking is BoundDependencyContract forwarded
+                && (declared.Sources.IsEmpty
+                    || forwarded.Sources.Distinct().Count()
+                        != forwarded.Sources.Length
+                    || !forwarded.Sources.All(declared.Sources.Contains)))
+            || (borrowSourceStorage is BoundDependencyContract borrowed
+                && (declared.Sources.IsEmpty
+                    || borrowed.Sources.Distinct().Count()
+                        != borrowed.Sources.Length
+                    || !borrowed.Sources.All(declared.Sources.Contains))))
+        {
+            throw Unsupported(
+                "A G1 generic MethodDef has a result refinement source outside its declared DependsOn set.");
+        }
+
+        var orderedSources = declared.Sources
+            .OrderBy(static source => source.Kind)
+            .ThenBy(static source => source.FormalOrdinal ?? -1)
+            .ToArray();
+        if (orderedSources.Distinct().Count() != orderedSources.Length
+            || orderedSources.Any(source =>
+                source.Kind != BoundDependencySourceKind.Formal
+                || source.FormalOrdinal is not int ordinal
+                || (uint)ordinal >= (uint)function.ParameterCount))
+        {
+            throw Unsupported(
+                "G1 generic MethodDef result dependencies must name unique method formals.");
+        }
+
+        var forwardedSources = new HashSet<BoundDependencySource>();
+        if (forwardsBacking is BoundDependencyContract backing)
+        {
+            forwardedSources.UnionWith(backing.Sources);
+        }
+        var storageSources = borrowSourceStorage
+            is BoundDependencyContract storage
+                ? storage.Sources.ToHashSet()
+                : new HashSet<BoundDependencySource>();
+        if ((orderedSources.Length == 0
+                && (!forwardedSources.IsEmpty || !storageSources.IsEmpty))
+            || storageSources.Overlaps(forwardedSources))
+        {
+            throw Unsupported(
+                "G1 generic MethodDef result dependency refinements must be nonempty and disjoint.");
+        }
+
+        var rows = ImmutableArray.CreateBuilder<ReadOnlyMemory<byte>>(
+            Math.Max(1, orderedSources.Length));
+        if (orderedSources.Length == 0)
+        {
+            rows.Add(EncodeGenericMethodDependencyRow(methodRow,
+                sourceKind: 0, relationship: 0, sourceOrdinal: 0));
+            return rows.MoveToImmutable();
+        }
+
+        foreach (var source in orderedSources)
+        {
+            var ordinal = source.FormalOrdinal!.Value;
+            rows.Add(EncodeGenericMethodDependencyRow(methodRow,
+                sourceKind: 1,
+                relationship: storageSources.Contains(source)
+                    ? (byte)1
+                    : forwardedSources.Contains(source) ? (byte)2 : (byte)3,
+                checked((uint)ordinal)));
+        }
+        return rows.MoveToImmutable();
+    }
+
+    private static ReadOnlyMemory<byte> EncodeGenericMethodDependencyRow(
+        int methodRow, byte sourceKind, byte relationship,
+        uint sourceOrdinal)
+    {
+        var row = new byte[20];
+        WriteUInt32(row, 0, 0x1600_0000u | checked((uint)methodRow));
+        BinaryPrimitives.WriteUInt16LittleEndian(row.AsSpan(4, 2), 4);
+        row[8] = 1;
+        row[9] = sourceKind;
+        row[10] = relationship;
+        row[11] = 1;
+        BinaryPrimitives.WriteUInt32LittleEndian(row.AsSpan(16),
+            sourceOrdinal);
+        return row;
+    }
+
     private static byte[] EncodeExportRows(
         List<TrRmExportRow> rows)
     {
@@ -4415,7 +4789,10 @@ public static partial class TrRmExecutableCompiler
         Dictionary<PrimitiveType, uint> builtInTypeSpecRows,
         List<ReadOnlyMemory<byte>> typeSpecRows,
         ImmutableArray<BoundSpanTypeDefinition> spanTypes,
-        int definitionOrdinal, bool allowSpanType = false,
+        ImmutableArray<CheckedReferenceTypeDefinition>
+            checkedReferenceTypes,
+        int definitionOrdinal, BoundGenericMethodDefinition definition,
+        bool allowSpanType = false,
         bool allowFormal = true)
     {
         if (BoundSpanTypeTypes.IsValidType(type, spanTypes))
@@ -4477,11 +4854,25 @@ public static partial class TrRmExecutableCompiler
                 };
             }
 
+            var isElementWritable = spanType.IsElementWritable;
+            if (isElementWritable)
+            {
+                if ((uint)spanType.ElementFormalOrdinal
+                        >= (uint)definition.Formals.Length
+                    || !definition.Formals[
+                        spanType.ElementFormalOrdinal].RequiresWritable)
+                {
+                    throw Unsupported(
+                        "A G1 writable Span element formal requires its declared write property.");
+                }
+            }
+
             var elementQualifiers = (byte)(
-                (spanType.IsElementWritable ? 0x01 : 0)
+                (isElementWritable ? 0x01 : 0)
                 | (spanType.IsInitialization ? 0x04 : 0));
             var elementTypeSpecRef = GenericMethodSpanArgumentTypeSpecRef(
-                elementTerm, elementQualifiers, definitionOrdinal,
+                elementTerm, elementQualifiers,
+                definition.Formals.Length,
                 definition, formalTypeSpecRows, builtInTypeSpecRows,
                 typeSpecRows);
 
@@ -4490,6 +4881,59 @@ public static partial class TrRmExecutableCompiler
                 elementTypeSpecRef, spanType.IsWritable ? (byte)0x01 : (byte)0));
             builtInTypeSpecRows.Add(type, typeSpecRef);
             return typeSpecRef;
+        }
+
+        if (CheckedReferenceTypeContract.IsValidCompleteType(type,
+                checkedReferenceTypes))
+        {
+            var referenceType = checkedReferenceTypes[
+                CheckedReferenceTypes.Index(type)];
+            if (referenceType.IsGarbageCollected
+                || referenceType.IsOptional
+                || referenceType.IsOptionalValue)
+            {
+                throw Unsupported(
+                    "The selected G1 profile supports only non-optional, non-GC checked-reference types.");
+            }
+            var referentTypeSpecRef = GenericMethodTypeSpecRef(
+                referenceType.ReferentType, formalTypeSpecRows,
+                builtInTypeSpecRows, typeSpecRows, spanTypes,
+                checkedReferenceTypes, definitionOrdinal, definition,
+                allowSpanType, allowFormal);
+            if (referenceType.IsReferentWritable)
+            {
+                if (!formalTypeSpecRows.ContainsKey(
+                        referenceType.ReferentType))
+                {
+                    throw Unsupported(
+                        "A G1 initialization-reference write referent must be a formal owned by the emitted Generic MethodDef.");
+                }
+                var hasWritableFormal = false;
+                foreach (var formal in definition.Formals)
+                {
+                    if (formal.PlaceholderType
+                        != referenceType.ReferentType)
+                    {
+                        continue;
+                    }
+                    hasWritableFormal = formal.RequiresWritable;
+                    break;
+                }
+                if (!hasWritableFormal)
+                {
+                    throw Unsupported(
+                        "A G1 write-qualified reference referent requires its formal's write property.");
+                }
+            }
+            var referenceTypeSpecRef = checked(
+                (uint)typeSpecRows.Count + 1);
+            typeSpecRows.Add(referenceType.IsInitialization
+                ? TrRmTypeSpecTableWriter.InitializationReference(
+                    referentTypeSpecRef, referenceType.IsWritable)
+                : TrRmTypeSpecTableWriter.Wrapped(0x07,
+                    referentTypeSpecRef,
+                    referenceType.IsWritable ? (byte)0x01 : (byte)0));
+            return referenceTypeSpecRef;
         }
 
         return allowFormal
@@ -4585,6 +5029,154 @@ public static partial class TrRmExecutableCompiler
             s_codes[typeIndex]));
         builtInTypeSpecRows.Add(type, typeSpecRef);
         return typeSpecRef;
+    }
+
+    private static bool IsGenericMethodInitializationReferenceType(
+        PrimitiveType type,
+        ImmutableArray<CheckedReferenceTypeDefinition> checkedReferenceTypes)
+    {
+        if (!CheckedReferenceTypeContract.IsValidType(type,
+                checkedReferenceTypes))
+        {
+            return false;
+        }
+
+        var reference = checkedReferenceTypes[
+            CheckedReferenceTypes.Index(type)];
+        return reference.IsInitialization
+            && !reference.IsGarbageCollected
+            && !reference.IsOptional
+            && !reference.IsOptionalValue;
+    }
+
+    private static bool GenericMethodTypeMatchesAfterSubstitution(
+        PrimitiveType targetType, PrimitiveType callerType,
+        BoundGenericMethodDefinition targetDefinition,
+        BoundGenericMethodDefinition callerDefinition,
+        ImmutableArray<PrimitiveType> typeArguments, int depth)
+    {
+        if (depth > SemanticVerifier.MaximumDepth
+            || typeArguments.Length != targetDefinition.Formals.Length)
+        {
+            return false;
+        }
+
+        for (var ordinal = 0; ordinal < targetDefinition.Formals.Length;
+            ordinal++)
+        {
+            if (targetDefinition.Formals[ordinal].PlaceholderType
+                == targetType)
+            {
+                return typeArguments[ordinal] == callerType;
+            }
+        }
+
+        var targetReferenceIsValid
+            = CheckedReferenceTypeContract.IsValidCompleteType(targetType,
+                targetDefinition.ProofProgram.CheckedReferenceTypes);
+        var callerReferenceIsValid
+            = CheckedReferenceTypeContract.IsValidCompleteType(callerType,
+                callerDefinition.ProofProgram.CheckedReferenceTypes);
+        if (targetReferenceIsValid || callerReferenceIsValid)
+        {
+            if (!targetReferenceIsValid || !callerReferenceIsValid)
+            {
+                return false;
+            }
+
+            var targetReference = targetDefinition.ProofProgram
+                .CheckedReferenceTypes[CheckedReferenceTypes.Index(
+                    targetType)];
+            var callerReference = callerDefinition.ProofProgram
+                .CheckedReferenceTypes[CheckedReferenceTypes.Index(
+                    callerType)];
+            return targetReference.IsWritable
+                    == callerReference.IsWritable
+                && targetReference.IsGarbageCollected
+                    == callerReference.IsGarbageCollected
+                && targetReference.IsInitialization
+                    == callerReference.IsInitialization
+                && targetReference.IsOptional
+                    == callerReference.IsOptional
+                && targetReference.IsOptionalValue
+                    == callerReference.IsOptionalValue
+                && targetReference.IsReferentWritable
+                    == callerReference.IsReferentWritable
+                && GenericMethodTypeMatchesAfterSubstitution(
+                    targetReference.ReferentType,
+                    callerReference.ReferentType, targetDefinition,
+                    callerDefinition, typeArguments, depth + 1);
+        }
+
+        var targetSpanIsValid = BoundSpanTypeTypes.IsValidType(targetType,
+            targetDefinition.ProofProgram.SpanTypes);
+        var callerSpanIsValid = BoundSpanTypeTypes.IsValidType(callerType,
+            callerDefinition.ProofProgram.SpanTypes);
+        if (targetSpanIsValid || callerSpanIsValid)
+        {
+            if (!targetSpanIsValid || !callerSpanIsValid)
+            {
+                return false;
+            }
+
+            var targetSpan = targetDefinition.ProofProgram.SpanTypes[
+                BoundSpanTypeTypes.Index(targetType)];
+            var callerSpan = callerDefinition.ProofProgram.SpanTypes[
+                BoundSpanTypeTypes.Index(callerType)];
+            if (targetSpan.IsElementWritable
+                    != callerSpan.IsElementWritable
+                || targetSpan.IsWritable != callerSpan.IsWritable
+                || targetSpan.IsInitialization
+                    != callerSpan.IsInitialization)
+            {
+                return false;
+            }
+
+            if (targetSpan.ElementFormalDefinitionOrdinal
+                == targetDefinition.DefinitionOrdinal)
+            {
+                var targetFormalOrdinal
+                    = targetSpan.ElementFormalOrdinal;
+                if ((uint)targetFormalOrdinal
+                        >= (uint)typeArguments.Length
+                    || targetDefinition.Formals[targetFormalOrdinal]
+                        .PlaceholderType != targetSpan.ElementType
+                    || callerSpan.ElementType
+                        != typeArguments[targetFormalOrdinal])
+                {
+                    return false;
+                }
+
+                var callerFormalOrdinal = -1;
+                for (var ordinal = 0;
+                    ordinal < callerDefinition.Formals.Length; ordinal++)
+                {
+                    if (callerDefinition.Formals[ordinal].PlaceholderType
+                        == callerSpan.ElementType)
+                    {
+                        callerFormalOrdinal = ordinal;
+                        break;
+                    }
+                }
+
+                return callerFormalOrdinal >= 0
+                    ? callerSpan.ElementFormalDefinitionOrdinal
+                        == callerDefinition.DefinitionOrdinal
+                        && callerSpan.ElementFormalOrdinal
+                            == callerFormalOrdinal
+                    : callerSpan.ElementFormalDefinitionOrdinal == -1
+                        && !targetSpan.IsElementWritable;
+            }
+
+            return targetSpan.ElementFormalDefinitionOrdinal == -1
+                && callerSpan.ElementFormalDefinitionOrdinal == -1
+                && GenericMethodTypeMatchesAfterSubstitution(
+                    targetSpan.ElementType, callerSpan.ElementType,
+                    targetDefinition, callerDefinition, typeArguments,
+                    depth + 1);
+        }
+
+        return targetType == callerType;
     }
 
     private static TrRmSection GetSection(

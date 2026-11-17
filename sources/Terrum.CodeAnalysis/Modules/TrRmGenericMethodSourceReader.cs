@@ -109,7 +109,15 @@ public static partial class TrRmExecutableCompiler
             (BoundRuntimePolicy)runtimePolicy,
             interfaces: interfaces,
             genericMethodImports: imports.ToImmutable(),
-            spanTypes: [.. context.SpanTypes]);
+            spanTypes: [.. context.SpanTypes],
+            checkedReferenceTypes:
+                [.. context.CheckedReferenceTypeDefinitions],
+            genericNominalTypeDefinitions:
+                context.GenericNominalTypeDefinitions.ToImmutable(),
+            genericNominalTypeInstances:
+                context.GenericNominalTypeInstances.ToImmutable(),
+            nativePointerTypes:
+                context.GenericNominalPointerTypes.ToImmutable());
     }
 
     private static ImmutableArray<BoundInterfaceDefinition>
@@ -888,7 +896,8 @@ public static partial class TrRmExecutableCompiler
                 interfaceMethodRow);
             var (_, methodContractCount)
                 = tables.Methods.GetContractRange(methodRow);
-            if (tables.Methods.GetFlags(methodRow) != 2
+            var methodFlags = tables.Methods.GetFlags(methodRow);
+            if ((methodFlags & 3) != 2
                 || tables.Methods.GetBodyRow(methodRow) != 0
                 || methodContractCount != 0)
             {
@@ -943,7 +952,9 @@ public static partial class TrRmExecutableCompiler
                 BoundInterfaceAccessibility.Public, false, false, false,
                 false, false, false, false, [], [], [], default, resultType,
                 [], [], parameters.MoveToImmutable(), [], [], null, null,
-                null));
+                null) {
+                RequiresMutableReceiver = (methodFlags & 4) != 0,
+            });
         }
 
         var interfaceNamespace = tables.TypeDefs.GetNamespace(typeDef);
@@ -1015,8 +1026,8 @@ public static partial class TrRmExecutableCompiler
                 || expectedMember.Accessibility
                     != providerMember.Accessibility
                 || expectedMember.IsStatic != providerMember.IsStatic
-                || expectedMember.RequiresMutableReceiver
-                    != providerMember.RequiresMutableReceiver
+                || (providerMember.RequiresMutableReceiver
+                    && !expectedMember.RequiresMutableReceiver)
                 || expectedMember.IsExternal != providerMember.IsExternal
                 || expectedMember.IsPartial != providerMember.IsPartial
                 || expectedMember.RequiresUnsafeCaller
@@ -1320,6 +1331,112 @@ public static partial class TrRmExecutableCompiler
         }
     }
 
+    private static ImmutableArray<BoundDependencyContract>
+        DecodeG1GenericMethodDependencyContracts(
+            ImmutableArray<TrRmDependencyContract> dependencies,
+            int parameterCount)
+    {
+        if (dependencies.IsDefault)
+        {
+            throw Invalid(
+                "A G1 Generic MethodDef has an invalid Dependency clause view.");
+        }
+        if (dependencies.IsEmpty)
+        {
+            return [];
+        }
+
+        var emptySources = dependencies.Where(
+            static dependency => dependency.SourceKind == 0).ToArray();
+        if (emptySources.Length != 0)
+        {
+            if (dependencies.Length != 1
+                || emptySources[0] is not {
+                    DestinationKind: 1,
+                    SourceKind: 0,
+                    Relationship: 0,
+                    Phase: 1,
+                    DestinationOrdinal: 0,
+                    SourceOrdinal: 0,
+                })
+            {
+                throw Unsupported(
+                    "G1 generic MethodDefs support only an explicit empty ordinary-result DependsOn set.");
+            }
+
+            return [
+                new BoundDependencyContract(
+                    BoundDependencyRelation.DependsOn,
+                    BoundDependencyDestination.Result, null, []),
+            ];
+        }
+
+        var sources = ImmutableArray.CreateBuilder<BoundDependencySource>(
+            dependencies.Length);
+        var forwardedSources
+            = ImmutableArray.CreateBuilder<BoundDependencySource>();
+        var storageSources
+            = ImmutableArray.CreateBuilder<BoundDependencySource>();
+        foreach (var dependency in dependencies)
+        {
+            if (dependency.DestinationKind != 1
+                || dependency.DestinationOrdinal != 0
+                || dependency.Phase != 1
+                || dependency.SourceKind != 1
+                || dependency.SourceOrdinal >= (uint)parameterCount
+                || dependency.Relationship is not (1 or 2 or 3))
+            {
+                throw Unsupported(
+                    "G1 generic MethodDefs support only ordinary-result formal dependency sources.");
+            }
+
+            var source = new BoundDependencySource(
+                BoundDependencySourceKind.Formal,
+                checked((int)dependency.SourceOrdinal));
+            sources.Add(source);
+            if (dependency.Relationship == 2)
+            {
+                forwardedSources.Add(source);
+            }
+            else if (dependency.Relationship == 1)
+            {
+                storageSources.Add(source);
+            }
+        }
+
+        var sourceSet = sources.ToImmutable()
+            .OrderBy(static source => source.FormalOrdinal)
+            .ToImmutableArray();
+        var forwardedSourceSet = forwardedSources.ToImmutable()
+            .OrderBy(static source => source.FormalOrdinal)
+            .ToImmutableArray();
+        var storageSourceSet = storageSources.ToImmutable()
+            .OrderBy(static source => source.FormalOrdinal)
+            .ToImmutableArray();
+        var contracts = ImmutableArray.CreateBuilder<
+            BoundDependencyContract>(1
+                + (forwardedSourceSet.IsEmpty ? 0 : 1)
+                + (storageSourceSet.IsEmpty ? 0 : 1));
+        contracts.Add(new BoundDependencyContract(
+            BoundDependencyRelation.DependsOn,
+            BoundDependencyDestination.Result, null, sourceSet));
+        if (!storageSourceSet.IsEmpty)
+        {
+            contracts.Add(new BoundDependencyContract(
+                BoundDependencyRelation.BorrowSourceStorage,
+                BoundDependencyDestination.Result, null,
+                storageSourceSet));
+        }
+        if (!forwardedSourceSet.IsEmpty)
+        {
+            contracts.Add(new BoundDependencyContract(
+                BoundDependencyRelation.ForwardsBacking,
+                BoundDependencyDestination.Result, null,
+                forwardedSourceSet));
+        }
+        return contracts.MoveToImmutable();
+    }
+
     private static BoundGenericMethodImport CreateGenericMethodImport(
         TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
         GenericMethodReadContext context, int artifactIndex, int moduleRow,
@@ -1552,14 +1669,19 @@ public static partial class TrRmExecutableCompiler
             if (defaultReference != 0)
             {
                 var defaultType = ResolveGenericMethodTypeSpec(
-                    context, tables.TypeSpecs, tables.GenericParams,
+                    context, artifactIndex, tables, moduleRow,
+                    tables.TypeSpecs,
+                    tables.GenericParams,
                     formalRecords, methodRow, formalTypeOwnerOrdinal,
                     defaultReference, placeholderTypes.ToImmutable(),
                     allowFormalForwarding: true, ordinal,
                     out var defaultFormalOrdinal);
                 if (!TryCreateG1GenericMethodTypeTerm(defaultType,
                         placeholderTypes.ToImmutable(), formalRecords,
-                        formalTypeOwnerOrdinal, context.SpanTypes, 0,
+                        formalTypeOwnerOrdinal, context.SpanTypes,
+                        context.CheckedReferenceTypeDefinitions,
+                        context.GenericNominalTypeDefinitions.ToImmutable(),
+                        context.GenericNominalTypeInstances, 0,
                         defaultFormalOrdinal, out var term)
                     || !BoundGenericMethodTypeTerms
                         .TryGetFormalDependencies(term,
@@ -1633,15 +1755,12 @@ public static partial class TrRmExecutableCompiler
             }
 
             var parameterType = ResolveGenericMethodTypeSpec(
-                context, tables.TypeSpecs, tables.GenericParams,
+                context, artifactIndex, tables, moduleRow,
+                tables.TypeSpecs,
+                tables.GenericParams,
                 formalRecords, methodRow, formalTypeOwnerOrdinal,
                 tables.Parameters.GetTypeSpec(paramRow), formalTypes,
                 allowFormalForwarding: false, ordinal: formalCount, out _);
-            if (BoundSpanTypeTypes.IsType(parameterType))
-            {
-                throw Unsupported(
-                    "The selected G1 profile does not admit Span values in MethodSig parameters.");
-            }
             var retainsLabel = context.Schema.UsesMethodParameterLabels()
                 && (tables.Exports.HasExportForMethod(methodRow)
                     || tables.Imports.IsExpectedDefinition(definitionId));
@@ -1665,16 +1784,13 @@ public static partial class TrRmExecutableCompiler
         }
 
         var returnType = ResolveGenericMethodTypeSpec(context,
-            tables.TypeSpecs, tables.GenericParams, formalRecords,
+            artifactIndex, tables, moduleRow, tables.TypeSpecs,
+            tables.GenericParams,
+            formalRecords,
             methodRow, formalTypeOwnerOrdinal,
             tables.Signatures.GetResultTypeSpec(signatureRow),
             formalTypes, allowFormalForwarding: false,
             ordinal: formalCount, out _);
-        if (BoundSpanTypeTypes.IsType(returnType))
-        {
-            throw Unsupported(
-                "The selected G1 profile does not admit Span values in MethodSig results.");
-        }
         var bodyRow = tables.Methods.GetBodyRow(methodRow);
         if (bodyRow == 0 && (decodeBody
                 || !tables.Imports.IsExpectedDefinition(definitionId)))
@@ -1688,12 +1804,16 @@ public static partial class TrRmExecutableCompiler
         {
             if (BinaryPrimitives.ReadUInt16LittleEndian(
                     tables.Contracts.GetRow(contractFirst + index)[4..])
-                != 1)
+                is not (1 or 4))
             {
                 throw Unsupported(
-                    "The G1 generic-method source reference currently supports Effects contracts only.");
+                    "The G1 generic-method source reference currently supports Effects and ordinary-result Dependency contracts only.");
             }
         }
+        var dependencyContracts
+            = DecodeG1GenericMethodDependencyContracts(
+                tables.Contracts.GetDependencyContracts(methodRow),
+                parameterCount);
 
         var proofVariables = variables.ToImmutable().ToBuilder();
         var bodyBytes = bodyRow == 0 ? default : tables.Bodies.GetRow(bodyRow);
@@ -1719,7 +1839,7 @@ public static partial class TrRmExecutableCompiler
                 "The selected generic MethodDef has unassigned effect bits.");
         }
         var methodName = tables.Methods.GetName(methodRow);
-        var isPublic = tables.Methods.GetFlags(methodRow) == 2;
+        var isPublic = (tables.Methods.GetFlags(methodRow) & 3) == 2;
         var proofFunction = new BoundFunction(methodName, returnType,
             proofVariables.ToImmutable(), parameterCount,
             new BoundBlock(statements, default), default) {
@@ -1727,6 +1847,7 @@ public static partial class TrRmExecutableCompiler
             IsStatic = true,
             RequiresUnsafeCaller = (effects & 4) != 0,
             DoesNotReturn = (effects & 2) != 0,
+            DependencyContracts = dependencyContracts,
         };
         var methodSignature = new BoundGenericMethodSignature(0,
             methodName, isPublic, proofFunction.RequiresUnsafeCaller,
@@ -1942,6 +2063,9 @@ public static partial class TrRmExecutableCompiler
 
         var typeArguments = ImmutableArray.CreateBuilder<PrimitiveType>(
             targetFormalCount);
+        var typeArgumentMetadata
+            = ImmutableArray.CreateBuilder<BoundGenericNominalTypeArgument>(
+                targetFormalCount);
         for (var ordinal = 0; ordinal < targetFormalCount; ordinal++)
         {
             var argumentOffset = checked(16 + (ordinal * 8));
@@ -1954,22 +2078,28 @@ public static partial class TrRmExecutableCompiler
             var typeSpecRef = BinaryPrimitives.ReadUInt32LittleEndian(
                 targetPayload.Slice(argumentOffset + 4, sizeof(uint)));
             var actual = ResolveGenericMethodTypeSpec(context,
-                tables.TypeSpecs, tables.GenericParams, callerFormalRecords,
+                artifactIndex, tables, moduleRow, tables.TypeSpecs,
+                tables.GenericParams,
+                callerFormalRecords,
                 callerMethodRow,
                 context.GetFormalTypeOwnerOrdinal(artifactIndex,
                     callerMethodRow), typeSpecRef,
                 callerFormals, allowFormalForwarding: false,
                 ordinal: callerFormals.Length, out _);
             typeArguments.Add(actual);
+            typeArgumentMetadata.Add(context.ReadGenericNominalTypeArgument(
+                tables, artifactIndex, moduleRow, typeSpecRef,
+                callerMethodRow, callerFormals, callerFormalRecords,
+                actual));
         }
         var actualTypes = typeArguments.MoveToImmutable();
-        var substitutions = new Dictionary<PrimitiveType, PrimitiveType>(
-            targetImport.Formals.Length);
-        for (var ordinal = 0; ordinal < targetImport.Formals.Length; ordinal++)
-        {
-            substitutions.Add(targetImport.Formals[ordinal].PlaceholderType,
-                actualTypes[ordinal]);
-        }
+        var actualTypeMetadata = typeArgumentMetadata.MoveToImmutable();
+        var targetFormalTypes = targetImport.Formals.Select(
+            static formal => formal.PlaceholderType).ToImmutableArray();
+        var callerFormalTypes = callerFormals;
+        var callerFormalTypeOwnerOrdinal
+            = context.GetFormalTypeOwnerOrdinal(artifactIndex,
+                callerMethodRow);
 
         var (_, parameterCount)
             = tables.Signatures.GetParamRange(targetSignature);
@@ -1989,7 +2119,7 @@ public static partial class TrRmExecutableCompiler
             var inputOffset = 16 + (ordinal * 4);
             var sourceUse = callSitePayload[inputOffset + 1];
             if (callSitePayload[inputOffset] != 2
-                || sourceUse is not (1 or 2))
+                || sourceUse is not (1 or 2 or 5))
             {
                 throw Unsupported(
                     "The G1 consumer currently supports copy or ownership-transfer parameter-Home GenericCall inputs only.");
@@ -2012,17 +2142,50 @@ public static partial class TrRmExecutableCompiler
                     "A GenericCall input does not select a caller parameter Home.");
             }
 
-            BoundExpression argument = sourceUse == 1
-                ? new BoundRead(parameterOrdinal,
-                    callerVariables[parameterOrdinal].Type, default)
-                : new BoundMove(parameterOrdinal,
-                    callerVariables[parameterOrdinal].Type, default);
             var targetParameterType = targetImport.ProofFunction
                 .Variables[ordinal].Type;
-            if (substitutions.TryGetValue(targetParameterType,
-                    out var actualParameterType))
+            if (!TrySubstituteGenericMethodType(
+                    targetParameterType, targetFormalTypes, actualTypes,
+                    actualTypeMetadata, targetImport, context,
+                    artifactIndex, callerMethodRow,
+                    callerFormalTypes, callerFormalTypeOwnerOrdinal, 0,
+                    out targetParameterType))
             {
-                targetParameterType = actualParameterType;
+                throw Unsupported(
+                    "The G1 GenericCall parameter type uses an unsupported substitution term.");
+            }
+
+            var descriptorRead = new BoundRead(parameterOrdinal,
+                callerVariables[parameterOrdinal].Type, default);
+            if (sourceUse == 5
+                && descriptorRead.Type != targetParameterType)
+            {
+                throw Invalid(
+                    "A GenericCall reborrow changes the initialization-reference type.");
+            }
+            BoundExpression argument = sourceUse switch {
+                1 => descriptorRead,
+                2 => new BoundMove(parameterOrdinal,
+                    callerVariables[parameterOrdinal].Type, default),
+                5 => new BoundReferenceReborrow(descriptorRead,
+                    targetParameterType, default),
+                _ => throw Invalid(
+                    "A GenericCall input uses an unsupported source-use kind."),
+            };
+
+            var argumentIsInitializationReference
+                = IsGenericMethodInitializationReferenceType(argument.Type,
+                    context.CheckedReferenceTypeDefinitions);
+            var targetIsInitializationReference
+                = IsGenericMethodInitializationReferenceType(
+                    targetParameterType,
+                    context.CheckedReferenceTypeDefinitions);
+            if ((sourceUse == 5)
+                != (argumentIsInitializationReference
+                    && targetIsInitializationReference))
+            {
+                throw Invalid(
+                    "A GenericCall initialization-reference input does not preserve its scoped reservation.");
             }
 
             if (argument.Type != targetParameterType)
@@ -2042,9 +2205,14 @@ public static partial class TrRmExecutableCompiler
         }
 
         var resultType = targetImport.ProofFunction.ReturnType;
-        if (substitutions.TryGetValue(resultType, out var actualResultType))
+        if (!TrySubstituteGenericMethodType(
+                resultType, targetFormalTypes, actualTypes,
+                actualTypeMetadata, targetImport,
+                context, artifactIndex, callerMethodRow, callerFormalTypes,
+                callerFormalTypeOwnerOrdinal, 0, out resultType))
         {
-            resultType = actualResultType;
+            throw Unsupported(
+                "The G1 GenericCall result type uses an unsupported substitution term.");
         }
 
         var resultHome = BinaryPrimitives.ReadUInt16LittleEndian(
@@ -2074,6 +2242,296 @@ public static partial class TrRmExecutableCompiler
         return [new BoundReturn(value, default)];
     }
 
+    private static bool TrySubstituteGenericMethodType(
+        PrimitiveType type, ImmutableArray<PrimitiveType> targetFormalTypes,
+        ImmutableArray<PrimitiveType> typeArguments,
+        ImmutableArray<BoundGenericNominalTypeArgument>
+            typeArgumentMetadata,
+        BoundGenericMethodImport targetImport,
+        GenericMethodReadContext context, int callerArtifactIndex,
+        int callerMethodRow,
+        ImmutableArray<PrimitiveType> callerFormalTypes,
+        int callerFormalTypeOwnerOrdinal, int depth,
+        out PrimitiveType substitutedType)
+    {
+        substitutedType = default;
+        if (depth > SemanticVerifier.MaximumDepth
+            || targetFormalTypes.Length != typeArguments.Length)
+        {
+            return false;
+        }
+
+        var targetFormalOrdinal = targetFormalTypes.IndexOf(type);
+        if (targetFormalOrdinal >= 0)
+        {
+            substitutedType = typeArguments[targetFormalOrdinal];
+            return true;
+        }
+
+        if (CheckedReferenceTypeContract.IsValidCompleteType(type,
+                context.CheckedReferenceTypeDefinitions))
+        {
+            var reference = context.CheckedReferenceTypeDefinitions[
+                CheckedReferenceTypes.Index(type)];
+            if (reference.IsOptional || reference.IsOptionalValue
+                || !TrySubstituteGenericMethodType(reference.ReferentType,
+                    targetFormalTypes, typeArguments, typeArgumentMetadata,
+                    targetImport,
+                    context, callerArtifactIndex, callerMethodRow,
+                    callerFormalTypes, callerFormalTypeOwnerOrdinal,
+                    depth + 1, out var referentType))
+            {
+                return false;
+            }
+
+            substitutedType = context.GetCheckedReferenceType(
+                callerArtifactIndex, callerMethodRow, referentType,
+                reference.IsWritable, reference.IsGarbageCollected,
+                reference.IsInitialization,
+                reference.IsReferentWritable);
+            return true;
+        }
+
+        if (BoundSpanTypeTypes.IsValidType(type, context.SpanTypes))
+        {
+            var span = context.SpanTypes[BoundSpanTypeTypes.Index(type)];
+            PrimitiveType elementType;
+            var targetFormalOwnerOrdinal
+                = BoundSpanTypeContract.ImportedFormalDefinitionOrdinal
+                    - targetImport.FormalTypeOwnerOrdinal;
+            if (span.ElementFormalDefinitionOrdinal
+                == targetFormalOwnerOrdinal)
+            {
+                if ((uint)span.ElementFormalOrdinal
+                    >= (uint)targetFormalTypes.Length
+                    || targetFormalTypes[span.ElementFormalOrdinal]
+                        != span.ElementType)
+                {
+                    return false;
+                }
+                elementType = typeArguments[span.ElementFormalOrdinal];
+            }
+            else if (span.ElementFormalDefinitionOrdinal == -1)
+            {
+                if (!TrySubstituteGenericMethodType(span.ElementType,
+                        targetFormalTypes, typeArguments,
+                        typeArgumentMetadata, targetImport,
+                        context, callerArtifactIndex, callerMethodRow,
+                        callerFormalTypes, callerFormalTypeOwnerOrdinal,
+                        depth + 1, out elementType))
+                {
+                    return false;
+                }
+            }
+            else
+            {
+                return false;
+            }
+
+            var elementFormalOrdinal = callerFormalTypes.IndexOf(elementType);
+            if (span.IsElementWritable && elementFormalOrdinal < 0)
+            {
+                return false;
+            }
+            substitutedType = context.GetSpanType(elementType,
+                callerFormalTypeOwnerOrdinal, elementFormalOrdinal,
+                span.IsElementWritable, span.IsWritable,
+                span.IsInitialization);
+            return true;
+        }
+
+        if (BoundGenericNominalTypeTypes.IsType(type))
+        {
+            var instanceIndex = BoundGenericNominalTypeTypes.Index(type);
+            if ((uint)instanceIndex
+                    >= (uint)context.GenericNominalTypeInstances.Count)
+            {
+                return false;
+            }
+
+            var instance = context.GenericNominalTypeInstances[
+                instanceIndex];
+            var arguments = ImmutableArray.CreateBuilder<
+                BoundGenericNominalTypeArgument>(
+                    instance.Arguments.Length);
+            var changed = false;
+            var hasOpenTypeArgumentTerm = false;
+            foreach (var argument in instance.Arguments)
+            {
+                if (argument.TypeArgumentTerm is
+                    BoundGenericMethodTypeTerm typeArgumentTerm)
+                {
+                    if (!BoundGenericMethodTypeTerms
+                            .TryGetFormalDependencies(typeArgumentTerm,
+                                out var dependencies))
+                    {
+                        return false;
+                    }
+                    hasOpenTypeArgumentTerm |= !dependencies.IsEmpty;
+                }
+            }
+
+            ImmutableArray<BoundGenericMethodTypeTerm> callerTypeArguments = [];
+            if (hasOpenTypeArgumentTerm)
+            {
+                if (typeArgumentMetadata.IsDefault
+                    || typeArgumentMetadata.Length != typeArguments.Length)
+                {
+                    return false;
+                }
+
+                var callerTypeArgumentBuilder = ImmutableArray.CreateBuilder<
+                    BoundGenericMethodTypeTerm>(typeArgumentMetadata.Length);
+                foreach (var actual in typeArgumentMetadata)
+                {
+                    if (!TryGetGenericNominalTypeArgumentTerm(actual,
+                            context.GenericNominalTypeDefinitions.ToImmutable(),
+                            context.GenericNominalTypeInstances,
+                            out var actualTerm, formalTypes: callerFormalTypes,
+                            formalTypeOwnerOrdinal:
+                                callerFormalTypeOwnerOrdinal))
+                    {
+                        return false;
+                    }
+                    callerTypeArgumentBuilder.Add(actualTerm);
+                }
+                callerTypeArguments =
+                    callerTypeArgumentBuilder.MoveToImmutable();
+            }
+
+            foreach (var argument in instance.Arguments)
+            {
+                if (argument.Kind != BoundGenericArgumentKind.Type
+                    || argument.NominalTypeIdentity is not null)
+                {
+                    arguments.Add(argument);
+                    continue;
+                }
+
+                if (argument.HasTypeFormalIdentity)
+                {
+                    if (argument.TypeFormalDefinitionOrdinal
+                            != targetImport.FormalTypeOwnerOrdinal
+                        || (uint)argument.TypeFormalOrdinal
+                            >= (uint)typeArgumentMetadata.Length
+                        || argument.Qualifiers != 0)
+                    {
+                        return false;
+                    }
+
+                    var actual = typeArgumentMetadata[
+                        argument.TypeFormalOrdinal];
+                    if (actual.Kind != BoundGenericArgumentKind.Type)
+                    {
+                        return false;
+                    }
+                    arguments.Add(actual);
+                    changed = true;
+                    continue;
+                }
+
+                if (argument.HasTypeFormalOwnerIdentity)
+                {
+                    if (argument.TypeFormalDefinitionOrdinal
+                            != targetImport.FormalTypeOwnerOrdinal
+                        || argument.TypeArgumentTerm is not
+                            BoundGenericMethodTypeTerm targetTypeTerm
+                        || callerTypeArguments.IsDefault
+                        || !BoundGenericMethodTypeTerms.TrySubstitute(
+                            targetTypeTerm, callerTypeArguments,
+                            out var callerTypeTerm)
+                        || !BoundGenericMethodTypeTerms
+                            .TryGetFormalDependencies(callerTypeTerm,
+                                out var callerFormalDependencies)
+                        || !TrySubstituteGenericMethodType(argument.Type,
+                            targetFormalTypes, typeArguments,
+                            typeArgumentMetadata, targetImport, context,
+                            callerArtifactIndex, callerMethodRow,
+                            callerFormalTypes,
+                            callerFormalTypeOwnerOrdinal, depth + 1,
+                            out var callerArgumentType))
+                    {
+                        return false;
+                    }
+
+                    var callerFormalOrdinal =
+                        callerTypeTerm.Kind
+                            == BoundGenericMethodTypeTermKind.Formal
+                            && callerFormalDependencies.Length == 1
+                            ? callerFormalDependencies[0] : -1;
+                    var rewrittenArgument = argument with {
+                        Type = callerArgumentType,
+                        TypeFormalDefinitionOrdinal =
+                            callerFormalDependencies.IsEmpty
+                                ? -1 : callerFormalTypeOwnerOrdinal,
+                        TypeFormalOrdinal = callerFormalOrdinal,
+                        TypeFormalOwnerKind =
+                            BoundGenericTypeFormalOwnerKind.GenericMethod,
+                        TypeArgumentTerm = callerTypeTerm,
+                        TypeSpecForm = 0,
+                        TypeCode = 0,
+                        ArgumentCode = 0,
+                        TypeSpecReference = 0,
+                        TypeSpecProviderIdentity = null,
+                    };
+                    changed |= callerArgumentType != argument.Type
+                        || callerFormalTypeOwnerOrdinal
+                            != argument.TypeFormalDefinitionOrdinal
+                        || !BoundGenericMethodTypeTerms.AreEquivalent(
+                            targetTypeTerm, callerTypeTerm, depth + 1);
+                    arguments.Add(rewrittenArgument);
+                    continue;
+                }
+
+                if (argument.Qualifiers != 0
+                    && targetFormalTypes.Contains(argument.Type))
+                {
+                    return false;
+                }
+                if (!TrySubstituteGenericMethodType(argument.Type,
+                        targetFormalTypes, typeArguments,
+                        typeArgumentMetadata, targetImport,
+                        context, callerArtifactIndex, callerMethodRow,
+                        callerFormalTypes, callerFormalTypeOwnerOrdinal,
+                        depth + 1, out var argumentType))
+                {
+                    return false;
+                }
+                if (argumentType != argument.Type)
+                {
+                    changed = true;
+                    arguments.Add(argument with {
+                        Type = argumentType,
+                        TypeSpecForm = 0,
+                        TypeCode = 0,
+                        ArgumentCode = 0,
+                        TypeSpecReference = 0,
+                        TypeSpecProviderIdentity = null,
+                    });
+                }
+                else
+                {
+                    arguments.Add(argument);
+                }
+            }
+
+            if (!changed)
+            {
+                substitutedType = type;
+                return true;
+            }
+
+            var substitutedArguments = arguments.MoveToImmutable();
+            substitutedType = context.GetGenericNominalTypeInstance(
+                instance.Definition, substitutedArguments,
+                instance.Qualifiers, instance.TypeSpecForm);
+            return true;
+        }
+
+        substitutedType = type;
+        return true;
+    }
+
     private static BoundCall DecodeG1InterfaceRequirementCall(
         TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
         GenericMethodReadContext context, int artifactIndex, int moduleRow,
@@ -2090,7 +2548,7 @@ public static partial class TrRmExecutableCompiler
         if (!context.Schema.UsesMethodParameterLabels())
         {
             throw Unsupported(
-                "The G1 consumer requires a complete G1L1 open interface-requirement GenericCall.");
+                "The G1 consumer requires an exact label-bearing open interface-requirement schema.");
         }
         if (targetRecord.Length != 20)
         {
@@ -2255,9 +2713,13 @@ public static partial class TrRmExecutableCompiler
 
         var expectedTypeDef = tables.TypeSpecs.GetNominalTypeDefRow(
             targetTypeSpec, tables.TypeDefs, tables.Imports);
+        var targetFlags = tables.Methods.GetFlags(targetMethodRow);
         if (expectedTypeDef != ownerTypeDef
             || tables.Methods.GetBodyRow(targetMethodRow) != 0
-            || tables.Methods.GetFlags(targetMethodRow) != 2
+            || (targetFlags & 3) != 2
+            || ((targetFlags & 4) != 0)
+                != interfaceDefinition.Members[memberOrdinal]
+                    .RequiresMutableReceiver
             || tables.Methods.GetContractRange(targetMethodRow).Count != 0)
         {
             throw Unsupported(
@@ -2286,6 +2748,12 @@ public static partial class TrRmExecutableCompiler
         {
             throw Unsupported(
                 "The selected G1 InterfaceMethod is outside the callable requirement subset.");
+        }
+        if (member.RequiresMutableReceiver
+            && !callerFormalRecords[formalOrdinal].RequiresWritable)
+        {
+            throw Invalid(
+                "A mutable interface requirement lacks writable formal evidence.");
         }
 
         PrimitiveType ResolveRequirementType(BoundInterfaceType type,
@@ -2338,7 +2806,7 @@ public static partial class TrRmExecutableCompiler
                 parameterCount + 1);
         var implementingType = callerFormals[formalOrdinal];
         targetVariables.Add(new BoundVariable("this", implementingType,
-            false, default));
+            member.RequiresMutableReceiver, default));
         for (var ordinal = 0; ordinal < parameterCount; ordinal++)
         {
             var parameter = member.Parameters[ordinal];
@@ -2384,11 +2852,17 @@ public static partial class TrRmExecutableCompiler
         for (var ordinal = 0; ordinal < inputCount; ordinal++)
         {
             var inputOffset = 16 + (ordinal * 4);
+            var expectedSourceUse = (byte)1;
+            if (ordinal == 0 && context.Schema.UsesMethodReceiverAccess())
+            {
+                expectedSourceUse = member.RequiresMutableReceiver
+                    ? (byte)4 : (byte)3;
+            }
             if (callSitePayload[inputOffset] != 2
-                || callSitePayload[inputOffset + 1] != 1)
+                || callSitePayload[inputOffset + 1] != expectedSourceUse)
             {
                 throw Unsupported(
-                    "The G1 interface-requirement CallSite supports Copy parameter-Home inputs only.");
+                    "The G1 interface-requirement CallSite input mode does not match its selected MethodDef.");
             }
 
             var homeIndex = BinaryPrimitives.ReadUInt16LittleEndian(
@@ -2423,8 +2897,12 @@ public static partial class TrRmExecutableCompiler
                 throw Unsupported(
                     "The G1 interface-requirement CallSite input lacks a Copy domain.");
             }
-            arguments.Add(new BoundRead(parameterOrdinal,
-                callerVariables[parameterOrdinal].Type, default));
+            var argumentType = callerVariables[parameterOrdinal].Type;
+            arguments.Add(ordinal == 0
+                && member.RequiresMutableReceiver
+                    ? new BoundMutableReceiverLoan(parameterOrdinal,
+                        argumentType, default)
+                    : new BoundRead(parameterOrdinal, argumentType, default));
         }
 
         var resultHome = BinaryPrimitives.ReadUInt16LittleEndian(
@@ -2627,12 +3105,38 @@ public static partial class TrRmExecutableCompiler
             "A G1 interface constraint uses an unsupported TypeSpec form.");
     }
 
+    private static bool IsGenericMethodInitializationReferenceType(
+        PrimitiveType type,
+        IReadOnlyList<CheckedReferenceTypeDefinition>
+            checkedReferenceTypes)
+    {
+        if (!CheckedReferenceTypeContract.IsValidType(type,
+                checkedReferenceTypes))
+        {
+            return false;
+        }
+
+        var reference = checkedReferenceTypes[
+            CheckedReferenceTypes.Index(type)];
+        return reference.IsInitialization
+            && !reference.IsGarbageCollected
+            && !reference.IsOptional
+            && !reference.IsOptionalValue;
+    }
+
     private static bool TryCreateG1GenericMethodTypeTerm(
         PrimitiveType type, ImmutableArray<PrimitiveType> formalTypes,
         TrRmGenericMethodFormalImport[] formalRecords,
         int formalTypeOwnerOrdinal,
-        IReadOnlyList<BoundSpanTypeDefinition> spanTypes, int depth,
-        int formalOrdinal, out BoundGenericMethodTypeTerm term)
+        IReadOnlyList<BoundSpanTypeDefinition> spanTypes,
+        IReadOnlyList<CheckedReferenceTypeDefinition>
+            checkedReferenceTypes,
+        ImmutableArray<BoundGenericNominalTypeDefinition>
+            genericNominalTypeDefinitions,
+        ImmutableArray<BoundGenericNominalTypeInstance>.Builder
+            genericNominalTypeInstances,
+        int depth, int formalOrdinal,
+        out BoundGenericMethodTypeTerm term)
     {
         term = null!;
         if (depth > SemanticVerifier.MaximumDepth
@@ -2654,6 +3158,60 @@ public static partial class TrRmExecutableCompiler
                 PrimitiveType.Void, formalOrdinal, -1, [],
                 false, false, false, false);
             return true;
+        }
+
+        if (CheckedReferenceTypeContract.IsValidType(type,
+                checkedReferenceTypes))
+        {
+            var reference = checkedReferenceTypes[
+                CheckedReferenceTypes.Index(type)];
+            if (reference.IsGarbageCollected
+                || reference.IsOptional
+                || reference.IsOptionalValue)
+            {
+                return false;
+            }
+
+            var referentFormalOrdinal = formalTypes.IndexOf(
+                reference.ReferentType);
+            if (!TryCreateG1GenericMethodTypeTerm(
+                    reference.ReferentType, formalTypes, formalRecords,
+                    formalTypeOwnerOrdinal, spanTypes,
+                    checkedReferenceTypes, genericNominalTypeDefinitions,
+                    genericNominalTypeInstances, depth + 1,
+                    referentFormalOrdinal, out var referentTerm))
+            {
+                return false;
+            }
+            if (reference.IsReferentWritable)
+            {
+                if (referentTerm.Kind
+                        != BoundGenericMethodTypeTermKind.Formal
+                    || (uint)referentTerm.FormalOrdinal
+                        >= (uint)formalRecords.Length
+                    || formalRecords[referentTerm.FormalOrdinal] is not
+                        TrRmGenericMethodFormalImport formal
+                    || !formal.RequiresWritable)
+                {
+                    return false;
+                }
+            }
+
+            term = new BoundGenericMethodTypeTerm(
+                BoundGenericMethodTypeTermKind.CheckedReference,
+                PrimitiveType.Void, -1, -1, [referentTerm],
+                reference.IsWritable, reference.IsGarbageCollected,
+                reference.IsInitialization, reference.IsOptional);
+            return true;
+        }
+
+        if (BoundGenericNominalTypeTypes.IsType(type))
+        {
+            return TryGetGenericNominalTypeArgumentTerm(
+                BoundGenericNominalTypeArgument.ForType(type),
+                genericNominalTypeDefinitions,
+                genericNominalTypeInstances, out term, depth + 1,
+                formalTypes, formalTypeOwnerOrdinal);
         }
 
         if (!BoundSpanTypeTypes.IsValidType(type, spanTypes))
@@ -2691,7 +3249,10 @@ public static partial class TrRmExecutableCompiler
         {
             if (!TryCreateG1GenericMethodTypeTerm(span.ElementType,
                     formalTypes, formalRecords, formalTypeOwnerOrdinal,
-                    spanTypes, depth + 1, -1, out elementTerm))
+                    spanTypes, checkedReferenceTypes,
+                    genericNominalTypeDefinitions,
+                    genericNominalTypeInstances, depth + 1, -1,
+                    out elementTerm))
             {
                 return false;
             }
@@ -2723,6 +3284,9 @@ public static partial class TrRmExecutableCompiler
 
     private static PrimitiveType ResolveGenericMethodTypeSpec(
         GenericMethodReadContext context,
+        int artifactIndex,
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+        int moduleRow,
         TrRmTypeSpecTableReader typeSpecs,
         TrRmGenericParamTableReader genericParams,
         TrRmGenericMethodFormalImport[] formalRecords, int methodRow,
@@ -2733,9 +3297,11 @@ public static partial class TrRmExecutableCompiler
     {
         var remaining = SemanticVerifier.MaximumAnalysisVisits;
         var resolution = ResolveGenericMethodTypeSpecCore(context,
-            typeSpecs, genericParams, formalRecords, methodRow,
+            artifactIndex, tables, moduleRow, typeSpecs, genericParams,
+            formalRecords, methodRow,
             formalTypeOwnerOrdinal, typeSpecRef, formalTypes,
-            allowFormalForwarding, ordinal, false, ref remaining, 0);
+            allowFormalForwarding, ordinal, false, false,
+            ref remaining, 0);
         if (resolution.IsWritableQualifier
             || resolution.IsInitializationQualifier)
         {
@@ -2750,13 +3316,17 @@ public static partial class TrRmExecutableCompiler
     private static G1GenericTypeSpecResolution
         ResolveGenericMethodTypeSpecCore(
             GenericMethodReadContext context,
+            int artifactIndex,
+            TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+            int moduleRow,
             TrRmTypeSpecTableReader typeSpecs,
             TrRmGenericParamTableReader genericParams,
             TrRmGenericMethodFormalImport[] formalRecords, int methodRow,
             int formalTypeOwnerOrdinal, uint typeSpecRef,
             ImmutableArray<PrimitiveType> formalTypes,
             bool allowFormalForwarding, int ordinal,
-            bool allowInitQualifier, ref int remaining, int depth)
+            bool allowInitQualifier, bool isSpanElement,
+            ref int remaining, int depth)
     {
         if (depth > SemanticVerifier.MaximumDepth || --remaining < 0)
         {
@@ -2766,13 +3336,15 @@ public static partial class TrRmExecutableCompiler
 
         var reference = typeSpecs.GetTypeSpecRef(typeSpecRef,
             allowInitQualifier: allowInitQualifier);
-        if ((reference.Qualifiers & ~0x05) != 0)
+        if ((reference.Qualifiers & ~0x07) != 0)
         {
             throw Unsupported(
                 "G1 generic MethodDef import uses unsupported TypeSpec qualifiers.");
         }
 
         var isWritableQualifier = (reference.Qualifiers & 0x01) != 0;
+        var isGarbageCollectedQualifier
+            = (reference.Qualifiers & 0x02) != 0;
         var isInitializationQualifier
             = (reference.Qualifiers & 0x04) != 0;
         if (!reference.IsRow)
@@ -2781,10 +3353,11 @@ public static partial class TrRmExecutableCompiler
                 reference.TypeCode);
             if (reference.Form == 0x01 && inlineTypeIndex >= 0)
             {
-                if (isWritableQualifier)
+                if (isWritableQualifier
+                    || isGarbageCollectedQualifier)
                 {
                     throw Unsupported(
-                        "A G1 scalar TypeSpec cannot carry write access.");
+                        "A G1 scalar TypeSpec cannot carry write or GC qualifiers.");
                 }
 
                 return new G1GenericTypeSpecResolution(
@@ -2796,10 +3369,30 @@ public static partial class TrRmExecutableCompiler
                 "G1 generic MethodDef import uses an unsupported inline TypeSpec.");
         }
 
+        if (reference.Form == 0x05)
+        {
+            if (reference.Qualifiers != 0)
+            {
+                throw Unsupported(
+                    "G1 generic MethodDef imports do not yet support qualified nominal TypeSpecs.");
+            }
+
+            var nominalType = context.ReadGenericNominalTypeSpec(
+                tables, artifactIndex, moduleRow,
+                typeSpecRef, methodRow, formalTypes, formalRecords);
+            return new G1GenericTypeSpecResolution(nominalType, -1,
+                false, false);
+        }
+
         var row = typeSpecs.GetRow(reference.Row);
         if (reference.Form == 0x0C && row.Length == 7
             && reference.TypeCode == 0x8A)
         {
+            if (isGarbageCollectedQualifier)
+            {
+                throw Unsupported(
+                    "A G1 Span TypeSpec cannot carry GC backing.");
+            }
             if (isInitializationQualifier && !allowInitQualifier)
             {
                 throw Unsupported(
@@ -2809,10 +3402,11 @@ public static partial class TrRmExecutableCompiler
             var elementReference = BinaryPrimitives
                 .ReadUInt32LittleEndian(row.Slice(3, sizeof(uint)));
             var element = ResolveGenericMethodTypeSpecCore(context,
-                typeSpecs, genericParams, formalRecords, methodRow,
+                artifactIndex, tables, moduleRow, typeSpecs,
+                genericParams, formalRecords, methodRow,
                 formalTypeOwnerOrdinal, elementReference, formalTypes,
-                allowFormalForwarding, ordinal, true, ref remaining,
-                depth + 1);
+                allowFormalForwarding, ordinal, true, true,
+                ref remaining, depth + 1);
             if (element.Type == PrimitiveType.Void)
             {
                 throw Unsupported("A G1 Span element cannot be void.");
@@ -2855,16 +3449,55 @@ public static partial class TrRmExecutableCompiler
             var typeIndex = Array.IndexOf(s_codes, reference.TypeCode);
             if (typeIndex >= 0)
             {
-                if (isWritableQualifier)
+                if (isWritableQualifier
+                    || isGarbageCollectedQualifier)
                 {
                     throw Unsupported(
-                        "A G1 scalar TypeSpec cannot carry write access.");
+                        "A G1 scalar TypeSpec cannot carry write or GC qualifiers.");
                 }
 
                 return new G1GenericTypeSpecResolution(
                     s_types[typeIndex], -1, false,
                     isInitializationQualifier);
             }
+        }
+        else if ((reference.Form is 0x07 or 0x0E)
+            && row.Length == 6)
+        {
+            var isInitializationReference = reference.Form == 0x0E;
+            if (isInitializationQualifier)
+            {
+                throw Invalid(
+                    "A G1 checked-reference TypeSpec has an invalid qualifier.");
+            }
+            if (isGarbageCollectedQualifier)
+            {
+                throw Unsupported(
+                    "G1 generic MethodDef imports do not support GC-backed reference types.");
+            }
+
+            var referentTypeSpecRef = BinaryPrimitives
+                .ReadUInt32LittleEndian(row.Slice(2, sizeof(uint)));
+            var referent = ResolveGenericMethodTypeSpecCore(context,
+                artifactIndex, tables, moduleRow, typeSpecs,
+                genericParams, formalRecords, methodRow,
+                formalTypeOwnerOrdinal, referentTypeSpecRef,
+                formalTypes, allowFormalForwarding, ordinal, false, false,
+                ref remaining, depth + 1);
+            if (referent.IsInitializationQualifier)
+            {
+                throw Unsupported(
+                    "A G1 checked-reference referent cannot carry an initialization qualifier.");
+            }
+
+            var referenceType = context.GetCheckedReferenceType(
+                artifactIndex, methodRow, referent.Type,
+                isWritable: isWritableQualifier,
+                isGarbageCollected: false,
+                isInitialization: isInitializationReference,
+                isReferentWritable: referent.IsWritableQualifier);
+            return new G1GenericTypeSpecResolution(referenceType, -1,
+                false, false);
         }
         else if (reference.Form == 0x04 && row.Length == 6)
         {
@@ -2884,6 +3517,11 @@ public static partial class TrRmExecutableCompiler
                     "A G1 generic MethodDef TypeSpec refers to a foreign or out-of-scope formal.");
             }
 
+            if (isGarbageCollectedQualifier)
+            {
+                throw Unsupported(
+                    "A G1 type formal cannot carry a GC qualifier.");
+            }
             if (isWritableQualifier
                 && ((uint)formal >= (uint)formalRecords.Length
                     || formalRecords[formal] is not
@@ -2894,6 +3532,10 @@ public static partial class TrRmExecutableCompiler
                     "A G1 write-qualified formal requires its declared write property.");
             }
 
+            if (!isSpanElement)
+            {
+                isWritableQualifier = false;
+            }
             return new G1GenericTypeSpecResolution(
                 formalTypes[formal], formal, isWritableQualifier,
                 isInitializationQualifier);

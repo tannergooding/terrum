@@ -82,6 +82,7 @@ public readonly ref struct TrRmInterfaceMethodTableReader
                 var methodDef = Read(data, 8);
                 if (owner != (uint)interfaceDef || rowOrdinal != (uint)ordinal
                     || methodDef is 0 or > 0xFF_FFFF || methodDef > methods.Count
+                    || _methodOwners[methodDef] != 0
                     || methods.GetOwnerType((int)methodDef) != ownerTypeDef
                     || signatures.GetReceiverTypeSpec(methods.GetSignature((int)methodDef)) == 0)
                 {
