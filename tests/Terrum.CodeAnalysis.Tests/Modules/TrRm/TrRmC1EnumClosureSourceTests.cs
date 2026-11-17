@@ -465,7 +465,7 @@ internal sealed class TrRmC1EnumClosureSourceTests
             .Single(row => consumerTables.TypeDefs.GetName(row) == "Packet");
         var (packetFieldStart, _) = consumerTables.TypeDefs
             .GetFieldRange(packetTypeDefRow);
-        consumerArtifact = AddEnumTypeImport(consumerArtifact,
+        consumerArtifact = AddTypeDefImport(consumerArtifact,
             schemaIdentity, "StructProvider", "type.marker",
             0x1300_0000u | checked((uint)markerTypeDefRow),
             "field.marker.id",
@@ -687,6 +687,160 @@ internal sealed class TrRmC1EnumClosureSourceTests
     }
 
     [Test]
+    public void ReemitsEN1ClassTypeDefImportsAndFieldTypeSpecs()
+    {
+        var schemaIdentity = s_schemaIdentities[0];
+        var providerTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public enum Marker : int32 { Value = 1 }
+                public class Shelf { public int32 Id; }
+            }
+            """);
+        var providerCompilation = Compilation.CreateLibrary(providerTree);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerProgram = (BoundProgram)providerCompilation.Program!;
+        var providerClassDeclaration = providerTree.Root.Children
+            .OfType<SyntaxNode>()
+            .Single(static node => node.Kind == SyntaxKind.ClassDeclaration);
+        var providerField = providerClassDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node => node.Kind == SyntaxKind.FieldDeclaration);
+        var providerClassIndex = providerProgram
+            .SourceClassProgramAssociation!.Declarations.Single(
+                declaration => declaration.Span
+                    == providerClassDeclaration.Span).ClassIndex;
+        var providerClassExport = new TrRmSourceClassExport(
+            providerProgram, providerClassIndex,
+            providerClassDeclaration.Span, "type.shelf", [
+                new TrRmSourceClassMemberExport(0, providerField.Span,
+                    "field.shelf.id"),
+            ]);
+        var providerEnumExport = CreateExport(providerProgram,
+            providerTree, 0, "Marker", ["type.marker"], "marker");
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, "ShelfProvider", schemaIdentity, 1,
+            [], [], [providerClassExport], [providerEnumExport]);
+        var providerTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                providerArtifact, SchemaFor(schemaIdentity)));
+        var providerTypeDefRow = Enumerable.Range(1,
+                providerTables.TypeDefs.Count)
+            .Single(row => providerTables.TypeDefs.GetName(row) == "Shelf");
+
+        var consumerTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public enum Shade : int8 { Dark = -1 }
+                public class Palette {
+                    public Shelf ShelfValue;
+                    public Shade ShadeValue;
+                }
+                public class Shelf { public int32 Id; }
+            }
+            """);
+        var consumerCompilation = Compilation.CreateLibrary(consumerTree);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerProgram = (BoundProgram)consumerCompilation.Program!;
+        var consumerClassDeclaration = consumerTree.Root.Children
+            .OfType<SyntaxNode>()
+            .First(static node => node.Kind == SyntaxKind.ClassDeclaration);
+        var consumerFields = consumerClassDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Where(static node => node.Kind == SyntaxKind.FieldDeclaration)
+            .ToArray();
+        var consumerClassIndex = consumerProgram
+            .SourceClassProgramAssociation!.Declarations.Single(
+                declaration => declaration.Span
+                    == consumerClassDeclaration.Span).ClassIndex;
+        var consumerClassExport = new TrRmSourceClassExport(
+            consumerProgram, consumerClassIndex,
+            consumerClassDeclaration.Span, "type.palette", [
+                new TrRmSourceClassMemberExport(0,
+                    consumerFields[0].Span, "field.palette.shelf"),
+                new TrRmSourceClassMemberExport(0,
+                    consumerFields[1].Span, "field.palette.shade"),
+            ]);
+        var consumerEnumExport = CreateExport(consumerProgram,
+            consumerTree, 0, "Shade", ["type.shade"], "shade");
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            consumerProgram, "PaletteConsumer", schemaIdentity, 1,
+            [], [], [consumerClassExport], [consumerEnumExport]);
+        var consumerTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                consumerArtifact, SchemaFor(schemaIdentity)));
+        var expectedShelfTypeDefRow = Enumerable.Range(1,
+                consumerTables.TypeDefs.Count)
+            .Single(row => consumerTables.TypeDefs.GetName(row) == "Shelf");
+        var shelfFieldRow = Enumerable.Range(1, consumerTables.Fields.Count)
+            .Single(row => consumerTables.Fields.GetName(row)
+                == "ShelfValue");
+        consumerArtifact = AddTypeDefImport(consumerArtifact,
+            schemaIdentity, "ShelfProvider", "type.shelf",
+            0x1300_0000u | checked((uint)expectedShelfTypeDefRow));
+        consumerTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                consumerArtifact, SchemaFor(schemaIdentity)));
+        Assert.That(consumerTables.Imports.Count, Is.EqualTo(1));
+        consumerArtifact = RewriteFieldTypeSpecAsImport(consumerArtifact,
+            schemaIdentity, shelfFieldRow, consumerTables.Imports.Count);
+
+        var providers = new[] {
+            new TrRmStandardArtifactInput(schemaIdentity, providerArtifact),
+        };
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
+            "PaletteConsumer", providers, ["type.palette"]);
+        Assert.That(reference.StandardClassDeclarations, Has.Length.EqualTo(2));
+        var importedShelf = reference.StandardClassDeclarations.Single(
+            declaration => declaration.Declaration.Name == "Shelf"
+                && !declaration.Expectations.IsEmpty);
+        Assert.That(importedShelf.Expectations, Has.Length.EqualTo(1));
+
+        var sourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), reference);
+        Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceFreeCompilation.Diagnostics));
+        var reemitted = TrRmExecutableCompiler.EmitStandard(
+            sourceFreeCompilation.Program!, "PaletteConsumer",
+            schemaIdentity, 1);
+        var reemittedTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                reemitted, SchemaFor(schemaIdentity)));
+        Assert.That(reemittedTables.Imports.Count, Is.EqualTo(1));
+        var reemittedShelfTypeDefRow = Enumerable.Range(1,
+                reemittedTables.TypeDefs.Count)
+            .Single(row => reemittedTables.TypeDefs.GetName(row) == "Shelf");
+        Assert.That(reemittedTables.Imports
+            .GetExpectedDefinitionForImportRow(1),
+            Is.EqualTo(0x1300_0000u
+                | checked((uint)reemittedShelfTypeDefRow)));
+        var reemittedShelfFieldRow = Enumerable.Range(1,
+                reemittedTables.Fields.Count)
+            .Single(row => reemittedTables.Fields.GetName(row)
+                == "ShelfValue");
+        var shelfType = reemittedTables.TypeSpecs.GetTypeSpecRef(
+            reemittedTables.Fields.GetTypeSpecRef(
+                reemittedShelfFieldRow));
+        Assert.That(shelfType.Form, Is.EqualTo((byte)0x03));
+        Assert.That(shelfType.Qualifiers, Is.EqualTo((byte)0x02));
+        Assert.That(shelfType.Row, Is.EqualTo(1));
+
+        var reloadedReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+            "PaletteConsumer", providers, ["type.palette"]);
+        Assert.That(reloadedReference.StandardClassDeclarations,
+            Has.Length.EqualTo(2));
+        Assert.That(reloadedReference.StandardClassDeclarations.Any(
+            declaration => declaration.Declaration.Identity.DefinitionId
+                == (0x1300_0000u
+                    | checked((uint)providerTypeDefRow))), Is.True);
+    }
+
+    [Test]
     public void ReconstructsSelectedAndClosureOnlyStandardEnumIdentities()
     {
         var secondary = SyntaxTree.Parse("""
@@ -828,7 +982,7 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var expectedModeRow = Enumerable.Range(1,
                 consumerTables.TypeDefs.Count)
             .Single(row => consumerTables.TypeDefs.GetName(row) == "Mode");
-        consumerArtifact = AddEnumTypeImport(consumerArtifact,
+        consumerArtifact = AddTypeDefImport(consumerArtifact,
             schemaIdentity, "EnumProvider", "type.mode",
             0x1300_0000u | checked((uint)expectedModeRow));
 
@@ -926,7 +1080,7 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 proxyConsumerTables.TypeDefs.Count)
             .Single(row => proxyConsumerTables.TypeDefs.GetName(row) == "Mode");
         _ = Assert.Throws<InvalidDataException>(() =>
-            AddEnumTypeImport(proxyConsumerArtifact, schemaIdentity,
+            AddTypeDefImport(proxyConsumerArtifact, schemaIdentity,
                 "EnumProvider", "type.mode",
                 0x1300_0000u | checked((uint)proxyModeRow)));
 
@@ -1042,7 +1196,7 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 primitiveType), isBigEndian: false);
     }
 
-    private static byte[] AddEnumTypeImport(byte[] artifact,
+    private static byte[] AddTypeDefImport(byte[] artifact,
         string schemaIdentity, string providerIdentity, string exportKey,
         uint expectedDefinitionId, string? fieldImportExportKey = null,
         uint? expectedFieldDefinitionId = null)
@@ -1072,7 +1226,7 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 ? new TrRmStringTableReader(originalStringBytes,
                     originalStringCount)
                 : throw new InvalidDataException(
-                    "The source enum artifact has no String table.");
+                    "The source artifact has no String table.");
         for (var row = 1; row <= stringSection.Count; row++)
         {
             var text = stringSection.DecodeNamespace(row);
@@ -1103,7 +1257,7 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 out var moduleCount))
         {
             throw new InvalidDataException(
-                "The source enum artifact has no Module table.");
+                "The source artifact has no Module table.");
         }
 
         var modules = new TrRmModuleTableReader(moduleBytes, moduleCount,
@@ -1118,7 +1272,7 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 out var typeDefCount))
         {
             throw new InvalidDataException(
-                "The source enum artifact has no TypeDef table.");
+                "The source artifact has no TypeDef table.");
         }
 
         var typeDefs = new TrRmTypeDefTableReader(typeDefBytes,
@@ -1128,7 +1282,7 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 out var featureCount))
         {
             throw new InvalidDataException(
-                "The source enum artifact has no Feature table.");
+                "The source artifact has no Feature table.");
         }
 
         var features = new TrRmFeatureTableReader(featureBytes,
@@ -1190,15 +1344,16 @@ internal sealed class TrRmC1EnumClosureSourceTests
             || importRow <= 0)
         {
             throw new InvalidDataException(
-                "The mixed enum fixture has no row-based field type reference.");
+                "The C1 field fixture has no row-based field type reference.");
         }
+        var typeSpec = tables.TypeSpecs.GetTypeSpecRef(typeSpecReference);
 
         var typeSpecRows = new ReadOnlyMemory<byte>[tables.TypeSpecs.Count];
         for (var row = 1; row <= typeSpecRows.Length; row++)
         {
             typeSpecRows[row - 1] = row == typeSpecReference
                 ? TrRmTypeSpecTableWriter.Reference(0x03,
-                    checked((uint)importRow))
+                    checked((uint)importRow), typeSpec.Qualifiers)
                 : tables.TypeSpecs.GetRow(row).ToArray();
         }
 
@@ -1225,7 +1380,7 @@ internal sealed class TrRmC1EnumClosureSourceTests
         if (!replaced)
         {
             throw new InvalidDataException(
-                "The mixed enum fixture has no TypeSpec section.");
+                "The C1 field fixture has no TypeSpec section.");
         }
 
         var result = TrRmArtifactWriter.Encode(sections, schema);
