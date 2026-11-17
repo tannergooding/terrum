@@ -12,6 +12,7 @@ internal sealed record BoundStandardClassFieldDeclaration(
     uint TypeSpecReference)
 {
     internal ImmutableArray<string> ExportKeys { get; init; } = [];
+    internal ImmutableArray<string> SelectedExportKeys { get; init; } = [];
 }
 
 internal sealed record BoundStandardClassLayoutVariant(
@@ -281,6 +282,11 @@ internal static class BoundStandardClassDeclarationContract
                     field.TypeSpecReference)
                 || field.ExportKeys.IsDefault
                 || !IsUniqueText(field.ExportKeys)
+                || field.SelectedExportKeys.IsDefault
+                || !IsUniqueText(field.SelectedExportKeys)
+                || field.SelectedExportKeys.Any(key =>
+                    !field.ExportKeys.Contains(key,
+                        StringComparer.Ordinal))
                 || !fields.TryAdd(field.DefinitionId, field))
             {
                 return false;

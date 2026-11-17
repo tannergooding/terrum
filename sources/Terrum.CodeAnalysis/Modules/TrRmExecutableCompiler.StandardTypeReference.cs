@@ -99,7 +99,7 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 return CreateC1EnumClosureSourceTypeReference(artifacts,
-                    schemaIdentities, moduleIdentity, exportKeys);
+                    schemaIdentities, moduleIdentity, exportKeys, []);
             }
 
             if (!StringComparer.Ordinal.Equals(schemaIdentities[0],
@@ -118,7 +118,7 @@ public static partial class TrRmExecutableCompiler
             }
 
             return CreateC1M1ClassSourceTypeReference(artifacts,
-                schemaIdentities, moduleIdentity, exportKeys);
+                schemaIdentities, moduleIdentity, exportKeys, []);
         }
         if (schemaIdentities[0] is not (
                 StandardForeignInvocationStorageFixedArraySchemaIdentity
@@ -165,7 +165,7 @@ public static partial class TrRmExecutableCompiler
     /// <param name="providers">The complete explicitly supplied provider artifact set.</param>
     /// <param name="typeExportKeys">The exact TypeDef ExportKeys that select source type roots.</param>
     /// <param name="fieldExportKeys">The exact FieldDef ExportKeys selected within those roots' checked type closure.</param>
-    /// <returns>The selected type and field declarations under the exact LayoutQueries or nested FieldPath schema.</returns>
+    /// <returns>The selected type and field declarations under exact LayoutQueries, nested FieldPath or EN1 schema selection.</returns>
     /// <exception cref="ArgumentNullException">An input, list or selected key is null.</exception>
     /// <exception cref="ArgumentException">A selected key is empty, duplicated, missing or has the wrong kind.</exception>
     /// <exception cref="NotSupportedException">The selected provider closure is outside the bounded projection.</exception>
@@ -190,6 +190,14 @@ public static partial class TrRmExecutableCompiler
                     StandardLayoutQueriesSchemaIdentity)))
         {
             return CreateLayoutQueriesSourceTypeReference(artifacts,
+                schemaIdentities, moduleIdentity, typeKeys, fieldKeys);
+        }
+
+        if (schemaIdentities.Length != 0
+            && schemaIdentities.All(
+                IsSelectedC1EnumClosureSchemaIdentity))
+        {
+            return CreateC1EnumClosureSourceTypeReference(artifacts,
                 schemaIdentities, moduleIdentity, typeKeys, fieldKeys);
         }
 
@@ -223,7 +231,7 @@ public static partial class TrRmExecutableCompiler
 
     private static CompilationReference CreateC1M1ClassSourceTypeReference(
         byte[][] artifacts, string[] schemaIdentities, string moduleIdentity,
-        string[] exportKeys)
+        string[] exportKeys, string[] selectedFieldExportKeys)
     {
         var isEN1 = IsSelectedC1EnumClosureSchemaIdentity(
             schemaIdentities[0]);
@@ -259,6 +267,8 @@ public static partial class TrRmExecutableCompiler
         }
 
         var selectedTypeDefs = new Dictionary<int, List<string>>();
+        var selectedFieldKeySet = selectedFieldExportKeys.ToHashSet(
+            StringComparer.Ordinal);
         foreach (var exportKey in exportKeys)
         {
             if (!rootTables.Exports.TryGetDefinitionForKey(rootModuleRow,
@@ -776,6 +786,30 @@ public static partial class TrRmExecutableCompiler
                 0x1300_0000u | checked((uint)typeDefRow));
             var declaration = CreateStandardClassTypeView(rootTables,
                 identity, rootSnapshot, typeDefRow);
+            var selectedFields
+                = ImmutableArray.CreateBuilder<
+                    BoundStandardClassFieldDeclaration>(
+                        declaration.Fields.Length);
+            foreach (var field in declaration.Fields)
+            {
+                var selectedKeys = field.ExportKeys.Where(
+                        selectedFieldKeySet.Contains)
+                    .ToImmutableArray();
+                if (!selectedKeys.IsEmpty && (field.Flags & 3) != 2)
+                {
+                    throw new ArgumentException(
+                        "A selected FieldDef ExportKey does not identify a public class field.",
+                        nameof(selectedFieldExportKeys));
+                }
+
+                selectedFields.Add(field with {
+                    SelectedExportKeys = selectedKeys,
+                });
+            }
+
+            declaration = declaration with {
+                Fields = selectedFields.MoveToImmutable(),
+            };
             classDeclarations.Add(new BoundStandardClassDeclaration(
                 declaration,
                 GetStandardTypeExportKeys(rootTables, rootModuleRow,
@@ -1014,7 +1048,7 @@ public static partial class TrRmExecutableCompiler
 
     private static CompilationReference CreateC1EnumClosureSourceTypeReference(
         byte[][] artifacts, string[] schemaIdentities, string moduleIdentity,
-        string[] selectedExportKeys)
+        string[] selectedExportKeys, string[] selectedFieldExportKeys)
     {
         var moduleValidation = ValidateStandardInputModules(artifacts,
             schemaIdentities, moduleIdentity, a3LayoutResourceLedger: null);
@@ -1045,7 +1079,8 @@ public static partial class TrRmExecutableCompiler
         if (selectedClassKeys.Count == 0 && !hasClassTypeDefs)
         {
             return CreateC1EnumClosureSourceTypeReferenceCore(artifacts,
-                schemaIdentities, moduleIdentity, selectedExportKeys);
+                schemaIdentities, moduleIdentity, selectedExportKeys,
+                selectedFieldExportKeys);
         }
 
         var classKeySet = selectedClassKeys.ToHashSet(
@@ -1053,11 +1088,76 @@ public static partial class TrRmExecutableCompiler
         var enumAndStructKeys = selectedExportKeys.Where(exportKey =>
             !classKeySet.Contains(exportKey)).ToArray();
         var classReference = CreateC1M1ClassSourceTypeReference(artifacts,
-            schemaIdentities, moduleIdentity, [.. selectedClassKeys]);
+            schemaIdentities, moduleIdentity, [.. selectedClassKeys],
+            selectedFieldExportKeys);
         var enumAndStructReference
             = CreateC1EnumClosureSourceTypeReferenceCore(artifacts,
                 schemaIdentities, moduleIdentity, enumAndStructKeys,
-                classReference);
+                selectedFieldExportKeys, classReference);
+        if (selectedFieldExportKeys.Length != 0)
+        {
+            var selectedFields = new Dictionary<string, (
+                BoundSourceTypeProviderSnapshot Provider,
+                uint DefinitionId)>(StringComparer.Ordinal);
+
+            void AddSelectedField(string key,
+                BoundSourceTypeProviderSnapshot provider,
+                uint definitionId)
+            {
+                if (selectedFields.TryGetValue(key, out var existing))
+                {
+                    if (existing.DefinitionId != definitionId
+                        || !SameA2SourceTypeProviderSnapshot(
+                            existing.Provider, provider))
+                    {
+                        throw new ArgumentException(
+                            "A selected FieldDef ExportKey is ambiguous across the selected provider closure.",
+                            nameof(selectedFieldExportKeys));
+                    }
+
+                    return;
+                }
+
+                selectedFields.Add(key, (provider, definitionId));
+            }
+
+            foreach (var declaration in
+                enumAndStructReference.StandardClassDeclarations)
+            {
+                foreach (var field in declaration.Declaration.Fields)
+                {
+                    foreach (var key in field.SelectedExportKeys)
+                    {
+                        AddSelectedField(key,
+                            declaration.Declaration.Provider,
+                            field.DefinitionId);
+                    }
+                }
+            }
+            foreach (var structure in enumAndStructReference.Structures)
+            {
+                foreach (var field in structure.Fields)
+                {
+                    if (field.StandardFieldOrigin is
+                        BoundStandardFieldOrigin fieldOrigin)
+                    {
+                        foreach (var key in fieldOrigin.SelectedExportKeys)
+                        {
+                            AddSelectedField(key, fieldOrigin.Provider,
+                                fieldOrigin.DefinitionId);
+                        }
+                    }
+                }
+            }
+            if (selectedFieldExportKeys.Any(key =>
+                    !selectedFields.ContainsKey(key)))
+            {
+                throw new ArgumentException(
+                    "A selected FieldDef ExportKey is not inside a selected class or inline-struct closure.",
+                    nameof(selectedFieldExportKeys));
+            }
+        }
+
         if (classReference.RuntimePolicy
                 != enumAndStructReference.RuntimePolicy)
         {
@@ -1070,7 +1170,7 @@ public static partial class TrRmExecutableCompiler
 
     private static CompilationReference CreateC1EnumClosureSourceTypeReferenceCore(
         byte[][] artifacts, string[] schemaIdentities, string moduleIdentity,
-        string[] selectedExportKeys,
+        string[] selectedExportKeys, string[] selectedFieldExportKeys,
         CompilationReference? standardClassReference = null)
     {
         var moduleValidation = ValidateStandardInputModules(artifacts,
@@ -1620,6 +1720,155 @@ public static partial class TrRmExecutableCompiler
                 genericNominalTypeInstances, classTypeInstanceIndexes,
                 classIdentityByRootTypeDefRow,
                 classIdentityByRootImportRow);
+        if (selectedFieldExportKeys.Length != 0 && !structures.IsEmpty)
+        {
+            var selectedFieldKeys = selectedFieldExportKeys.ToHashSet(
+                StringComparer.Ordinal);
+            var selectedStructures = new HashSet<int>();
+            var pendingStructures = new Stack<int>();
+            var structureIndexByTypeDefRow = new Dictionary<int, int>(
+                structTypeDefRows.Length);
+            for (var structureIndex = 0;
+                structureIndex < structTypeDefRows.Length;
+                structureIndex++)
+            {
+                structureIndexByTypeDefRow.Add(
+                    structTypeDefRows[structureIndex], structureIndex);
+            }
+
+            void IncludeInlineStructure(uint typeSpecReference)
+            {
+                var type = rootTables.TypeSpecs.GetTypeSpecRef(
+                    typeSpecReference);
+                int structureIndex;
+                if (type.Form == 0x02 && type.Qualifiers == 0)
+                {
+                    if (!structureIndexByTypeDefRow.TryGetValue(
+                            checked((int)type.Row), out structureIndex))
+                    {
+                        return;
+                    }
+                }
+                else if (type.Form == 0x03 && type.Qualifiers == 0)
+                {
+                    if (!structureIndexByImportRow.TryGetValue(
+                            checked((int)type.Row), out structureIndex))
+                    {
+                        return;
+                    }
+                }
+                else
+                {
+                    return;
+                }
+
+                _ = AddStructure(structureIndex);
+            }
+
+            bool AddStructure(int structureIndex)
+            {
+                if (!selectedStructures.Add(structureIndex))
+                {
+                    return false;
+                }
+
+                pendingStructures.Push(structureIndex);
+                return true;
+            }
+
+            for (var structureIndex = 0;
+                structureIndex < structTypeDefRows.Length;
+                structureIndex++)
+            {
+                if (selectedByTypeDef.ContainsKey(
+                        structTypeDefRows[structureIndex]))
+                {
+                    _ = AddStructure(structureIndex);
+                }
+            }
+            foreach (var declaration in standardClassDeclarations)
+            {
+                if (declaration.SelectedExportKeys.IsEmpty
+                    || !BoundStandardEnumDeclarationContract.SnapshotsMatch(
+                        declaration.Declaration.Provider, rootSnapshot))
+                {
+                    continue;
+                }
+
+                foreach (var field in declaration.Declaration.Fields)
+                {
+                    IncludeInlineStructure(field.TypeSpecReference);
+                }
+            }
+
+            while (pendingStructures.TryPop(out var structureIndex))
+            {
+                foreach (var field in structures[structureIndex].Fields)
+                {
+                    if (BoundEnumTypes.IsType(field.Type))
+                    {
+                        continue;
+                    }
+
+                    var fieldTypeValue = (int)field.Type;
+                    if (fieldTypeValue < 100
+                        || fieldTypeValue >= ManagedClassTypes.First)
+                    {
+                        continue;
+                    }
+
+                    var nestedIndex = fieldTypeValue - 100;
+                    if ((uint)nestedIndex < (uint)structures.Length
+                        && selectedStructures.Add(nestedIndex))
+                    {
+                        pendingStructures.Push(nestedIndex);
+                    }
+                }
+            }
+
+            var structureBuilder = structures.ToBuilder();
+            foreach (var structureIndex in selectedStructures)
+            {
+                var structure = structureBuilder[structureIndex];
+                var fields = structure.Fields.ToBuilder();
+                for (var fieldIndex = 0; fieldIndex < fields.Count;
+                    fieldIndex++)
+                {
+                    var field = fields[fieldIndex];
+                    var origin = field.StandardFieldOrigin;
+                    if (origin is null)
+                    {
+                        continue;
+                    }
+
+                    var selectedKeys = origin.ExportKeys.Where(
+                            selectedFieldKeys.Contains)
+                        .ToImmutableArray();
+                    if (selectedKeys.IsEmpty)
+                    {
+                        continue;
+                    }
+                    if (field.IsPrivate || field.IsInternal)
+                    {
+                        throw Invalid(
+                            "An EN1 selected FieldDef ExportKey does not identify a public field.");
+                    }
+
+                    fields[fieldIndex] = field with {
+                        StandardFieldOrigin = origin with {
+                            SelectedExportKeys = selectedKeys,
+                        },
+                    };
+                }
+
+                structureBuilder[structureIndex] = structure with {
+                    Fields = fields.ToImmutable(),
+                };
+            }
+
+            structures = structureBuilder.ToImmutable();
+        }
+
         var program = new BoundProgram([], -1) {
             RuntimePolicy = (BoundRuntimePolicy)rootTables.Modules
                 .GetRequirements(rootModuleRow).RuntimePolicy,

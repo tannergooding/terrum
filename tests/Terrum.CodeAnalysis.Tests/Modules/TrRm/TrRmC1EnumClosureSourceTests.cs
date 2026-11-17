@@ -162,14 +162,21 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 new TrRmSourceFieldExport("Payload", "field.packet.payload"),
             ],
         };
+        var payloadTypeExport = new TrRmSourceTypeExport("Demo",
+            "ColorPayload", "type.color-payload") {
+            FieldExports = [
+                new TrRmSourceFieldExport("Value",
+                    "field.color-payload.value"),
+            ],
+        };
         var enumExport = CreateExport(program, tree, 0, "Shade",
             ["type.shade"], "shade");
 
         foreach (var schemaIdentity in s_schemaIdentities)
         {
             var artifact = TrRmExecutableCompiler.EmitStandard(program,
-                "MixedSourceTypes", schemaIdentity, 1, [typeExport], [],
-                [], [enumExport]);
+                "MixedSourceTypes", schemaIdentity, 1,
+                [typeExport, payloadTypeExport], [], [], [enumExport]);
             var tables = TrRmStructuralMetadataValidator
                 .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
                     artifact, SchemaFor(schemaIdentity)));
@@ -187,7 +194,7 @@ internal sealed class TrRmC1EnumClosureSourceTests
             Assert.That(tables.Exports.TryGetDefinitionForKey(1,
                 "type.packet", out var packetDefinition), Is.True);
             Assert.That(tables.Exports.TryGetDefinitionForKey(1,
-                "type.color-payload", out _), Is.False);
+                "type.color-payload", out _), Is.True);
             var enumTypeDefRow = checked((int)(enumDefinition
                 & 0x00FF_FFFF));
             var packetTypeDefRow = checked((int)(packetDefinition
@@ -206,6 +213,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 "field.packet.id", out var idFieldDefinition), Is.True);
             Assert.That(tables.Exports.TryGetDefinitionForKey(1,
                 "field.packet.payload", out var payloadFieldDefinition), Is.True);
+            Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+                "field.color-payload.value", out _), Is.True);
             var idFieldRow = checked((int)(idFieldDefinition
                 & 0x00FF_FFFF));
             var payloadFieldRow = checked((int)(payloadFieldDefinition
@@ -236,9 +245,15 @@ internal sealed class TrRmC1EnumClosureSourceTests
 
             var reference = TrRmExecutableCompiler.CreateStandardReference(
                 new TrRmStandardArtifactInput(schemaIdentity, artifact),
-                "MixedSourceTypes", [], ["type.packet"]);
+                "MixedSourceTypes", [], ["type.packet"],
+                ["field.packet.id", "field.color-payload.value"]);
             Assert.That(reference.Structures, Has.Length.EqualTo(2));
             Assert.That(reference.EnumDefinitions, Has.Length.EqualTo(1));
+            var selectedPayload = reference.Structures.Single(
+                static structure => structure.Name == "Demo.ColorPayload");
+            Assert.That(selectedPayload.Fields.Single()
+                .StandardFieldOrigin!.SelectedExportKeys,
+                Is.EqualTo(["field.color-payload.value"]));
             var sourceFreeCompilation = Compilation.CreateLibrary(
                 SyntaxTree.Parse(string.Empty), reference);
             Assert.That(sourceFreeCompilation.HasErrors, Is.False,
@@ -260,11 +275,14 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 "field.packet.id", out _), Is.True);
             Assert.That(reemittedTables.Exports.TryGetDefinitionForKey(1,
                 "field.packet.payload", out _), Is.True);
+            Assert.That(reemittedTables.Exports.TryGetDefinitionForKey(1,
+                "field.color-payload.value", out _), Is.True);
 
             var reemittedReference
                 = TrRmExecutableCompiler.CreateStandardReference(
                     new TrRmStandardArtifactInput(schemaIdentity, reemitted),
-                    "MixedSourceTypes", [], ["type.packet"]);
+                    "MixedSourceTypes", [], ["type.packet"],
+                    ["field.packet.id", "field.color-payload.value"]);
             Assert.That(reemittedReference.Structures,
                 Has.Length.EqualTo(2));
             Assert.That(reemittedReference.EnumDefinitions,
@@ -945,6 +963,12 @@ internal sealed class TrRmC1EnumClosureSourceTests
             new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
             "PaletteConsumer", providers, ["type.palette"]);
         Assert.That(reference.StandardClassDeclarations, Has.Length.EqualTo(2));
+        var unselectedPalette = reference.StandardClassDeclarations.Single(
+            static declaration =>
+                !declaration.SelectedExportKeys.IsEmpty);
+        Assert.That(unselectedPalette.Declaration.Fields.Single(
+            static field => field.Name == "ShelfValue").SelectedExportKeys,
+            Is.Empty);
         var importedShelf = reference.StandardClassDeclarations.Single(
             declaration => declaration.Declaration.Name == "Shelf"
                 && !declaration.Expectations.IsEmpty);
@@ -953,6 +977,26 @@ internal sealed class TrRmC1EnumClosureSourceTests
             Has.Length.EqualTo(1));
         Assert.That(importedShelf.Expectations[0].FieldExpectations[0]
             .ExportKey, Is.EqualTo("field.shelf.id"));
+
+        var fieldSelectedReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    consumerArtifact),
+                "PaletteConsumer", providers, ["type.palette"],
+                ["field.palette.shelf"]);
+        var selectedPalette = fieldSelectedReference
+            .StandardClassDeclarations.Single(
+                static declaration =>
+                    !declaration.SelectedExportKeys.IsEmpty);
+        Assert.That(selectedPalette.Declaration.Fields.Single(
+            static field => field.Name == "ShelfValue").SelectedExportKeys,
+            Is.EqualTo(["field.palette.shelf"]));
+        Assert.Throws<ArgumentException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    consumerArtifact),
+                "PaletteConsumer", providers, ["type.palette"],
+                ["field.shelf.id"]));
 
         var sourceFreeCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(string.Empty), reference);

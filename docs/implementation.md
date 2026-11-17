@@ -1545,9 +1545,11 @@ local/imported class-handle FieldDef TypeSpecs with their exact root
 TypeSpec/provider identities. Nested structs preserve unknown class ownership
 and are rejected by Copy-sensitive verification. These class and struct routes
 are unverified under the active hold and do not cover PI1 property carriers.
-Class member FieldMap/FieldPath use, broader provider closure, class/member/Body
-production, replacement and private-origin remapping, runtime and CLI support
-remain open.
+Provisional EN1 type+field-key reference selection now retains selected local
+class fields and fields in the selected inline-struct closure, but does not yet
+bind class FieldPaths or emit class FieldMap Bodies. Broader provider closure,
+class/member/Body production, replacement and private-origin remapping, runtime
+and CLI support remain open.
 No end-to-end EN1 support is implemented.
 These source-bound definitions are not generally interoperable: source-authored
 generic classes and complete nominal conformance rules remain unsupported.
