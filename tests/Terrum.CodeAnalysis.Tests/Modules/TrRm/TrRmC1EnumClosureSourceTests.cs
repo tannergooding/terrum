@@ -280,7 +280,6 @@ internal sealed class TrRmC1EnumClosureSourceTests
     [Test]
     public void ReemitsImportedEnumStructFieldsThroughTheirImport()
     {
-        var schemaIdentity = s_schemaIdentities[0];
         var providerTree = SyntaxTree.Parse("""
             namespace Demo {
                 public enum Shade : int8 {
@@ -296,104 +295,101 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var providerProgram = (BoundProgram)providerCompilation.Program!;
         var providerEnumExport = CreateExport(providerProgram,
             providerTree, 0, "Shade", ["type.shade"], "shade");
-        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
-            providerProgram, "EnumProvider", schemaIdentity, 1,
-            [], [], [], [providerEnumExport]);
-
         var consumerTree = SyntaxTree.Parse("""
             namespace Demo {
-                public enum Shade : int8 {
-                    Dark = -1,
-                    Light = 1
-                }
                 public struct Packet {
                     public Shade Value;
                 }
             }
             """, "enum-consumer.terrum");
-        var consumerCompilation = Compilation.CreateLibrary(consumerTree);
-        Assert.That(consumerCompilation.HasErrors, Is.False,
-            string.Join(Environment.NewLine,
-                consumerCompilation.Diagnostics));
-        var consumerProgram = (BoundProgram)consumerCompilation.Program!;
         var packetExport = new TrRmSourceTypeExport("Demo", "Packet",
             "type.packet") {
             FieldExports = [
                 new TrRmSourceFieldExport("Value", "field.packet.value"),
             ],
         };
-        var expectedEnum = CreateExport(consumerProgram, consumerTree, 0,
-            "Shade", [], "shade");
-        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
-            consumerProgram, "MixedEnumConsumer", schemaIdentity, 1,
-            [packetExport], [], [], [expectedEnum]);
-        var consumerTables
-            = TrRmStructuralMetadataValidator
-                .ValidateC1AndGetExecutionTables(
-                    new TrRmArtifactIndex(consumerArtifact,
-                        SchemaFor(schemaIdentity)));
-        var packetTypeDefRow = Enumerable.Range(1,
-                consumerTables.TypeDefs.Count)
-            .Single(row => consumerTables.TypeDefs.GetName(row) == "Packet");
-        var (fieldStart, _) = consumerTables.TypeDefs
-            .GetFieldRange(packetTypeDefRow);
-        var shadeTypeDefRow = Enumerable.Range(1,
-                consumerTables.TypeDefs.Count)
-            .Single(row => consumerTables.TypeDefs.GetName(row) == "Shade");
-        consumerArtifact = AddEnumTypeImport(consumerArtifact,
-            schemaIdentity, "EnumProvider", "type.shade",
-            0x1300_0000u | checked((uint)shadeTypeDefRow));
-        consumerArtifact = RewriteFieldTypeSpecAsImport(
-            consumerArtifact, schemaIdentity, fieldStart, 1);
 
-        var providers = new[] {
-            new TrRmStandardArtifactInput(schemaIdentity, providerArtifact),
-        };
-        var reference = TrRmExecutableCompiler.CreateStandardReference(
-            new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
-            "MixedEnumConsumer", providers, ["type.packet"]);
-        Assert.That(reference.Structures, Has.Length.EqualTo(1));
-        Assert.That(reference.EnumDefinitions, Has.Length.EqualTo(1));
-        var enumOccurrence
-            = ((BoundEnumDeclarationIdentity.Standard)
-                reference.EnumDefinitions[0].Identity).Value;
-        Assert.That(enumOccurrence.Expectations, Has.Length.EqualTo(1));
+        foreach (var schemaIdentity in s_schemaIdentities)
+        {
+            var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+                providerProgram, "EnumProvider", schemaIdentity, 1,
+                [], [], [], [providerEnumExport]);
+            var providers = new[] {
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    providerArtifact),
+            };
+            var providerReference
+                = TrRmExecutableCompiler.CreateStandardReference(
+                    providers[0], "EnumProvider", [], ["type.shade"]);
+            var consumerCompilation = Compilation.CreateLibrary(
+                consumerTree, providerReference);
+            Assert.That(consumerCompilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    consumerCompilation.Diagnostics));
+            var consumerProgram
+                = (BoundProgram)consumerCompilation.Program!;
+            var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+                consumerProgram, "MixedEnumConsumer", schemaIdentity, 1,
+                [packetExport], [], [], []);
+            var consumerTables
+                = TrRmStructuralMetadataValidator
+                    .ValidateC1AndGetExecutionTables(
+                        new TrRmArtifactIndex(consumerArtifact,
+                            SchemaFor(schemaIdentity)));
+            Assert.That(consumerTables.Imports.Count, Is.EqualTo(1));
+            Assert.That(consumerTables.TypeSpecs.GetTypeSpecRef(
+                    consumerTables.Fields.GetTypeSpecRef(1)).Form,
+                Is.EqualTo((byte)0x03));
 
-        var sourceFreeCompilation = Compilation.CreateLibrary(
-            SyntaxTree.Parse(string.Empty), reference);
-        Assert.That(sourceFreeCompilation.HasErrors, Is.False,
-            string.Join(Environment.NewLine,
-                sourceFreeCompilation.Diagnostics));
-        var reemitted = TrRmExecutableCompiler.EmitStandard(
-            sourceFreeCompilation.Program!, "MixedEnumConsumer",
-            schemaIdentity, 1);
-        var reemittedTables
-            = TrRmStructuralMetadataValidator
-                .ValidateC1AndGetExecutionTables(
-                    new TrRmArtifactIndex(reemitted,
-                        SchemaFor(schemaIdentity)));
-        Assert.That(reemittedTables.Imports.Count, Is.EqualTo(1));
-        var reemittedPacketRow = Enumerable.Range(1,
-                reemittedTables.TypeDefs.Count)
-            .Single(row => reemittedTables.TypeDefs.GetName(row) == "Packet");
-        var (reemittedFieldStart, _) = reemittedTables.TypeDefs
-            .GetFieldRange(reemittedPacketRow);
-        var fieldType = reemittedTables.TypeSpecs.GetTypeSpecRef(
-            reemittedTables.Fields.GetTypeSpecRef(reemittedFieldStart));
-        Assert.That(fieldType.Form, Is.EqualTo((byte)0x03));
-        Assert.That(fieldType.Row, Is.EqualTo(1));
-
-        var reloadedReference
-            = TrRmExecutableCompiler.CreateStandardReference(
-                new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+            var reference = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    consumerArtifact),
                 "MixedEnumConsumer", providers, ["type.packet"]);
-        Assert.That(reloadedReference.Structures, Has.Length.EqualTo(1));
-        Assert.That(reloadedReference.EnumDefinitions, Has.Length.EqualTo(1));
-        var reloadedCompilation = Compilation.CreateLibrary(
-            SyntaxTree.Parse(string.Empty), reloadedReference);
-        Assert.That(reloadedCompilation.HasErrors, Is.False,
-            string.Join(Environment.NewLine,
-                reloadedCompilation.Diagnostics));
+            Assert.That(reference.Structures, Has.Length.EqualTo(1));
+            Assert.That(reference.EnumDefinitions, Has.Length.EqualTo(1));
+            var enumOccurrence
+                = ((BoundEnumDeclarationIdentity.Standard)
+                    reference.EnumDefinitions[0].Identity).Value;
+            Assert.That(enumOccurrence.Expectations, Has.Length.EqualTo(1));
+
+            var sourceFreeCompilation = Compilation.CreateLibrary(
+                SyntaxTree.Parse(string.Empty), reference);
+            Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    sourceFreeCompilation.Diagnostics));
+            var reemitted = TrRmExecutableCompiler.EmitStandard(
+                sourceFreeCompilation.Program!, "MixedEnumConsumer",
+                schemaIdentity, 1);
+            var reemittedTables
+                = TrRmStructuralMetadataValidator
+                    .ValidateC1AndGetExecutionTables(
+                        new TrRmArtifactIndex(reemitted,
+                            SchemaFor(schemaIdentity)));
+            Assert.That(reemittedTables.Imports.Count, Is.EqualTo(1));
+            var reemittedPacketRow = Enumerable.Range(1,
+                    reemittedTables.TypeDefs.Count)
+                .Single(row =>
+                    reemittedTables.TypeDefs.GetName(row) == "Packet");
+            var (reemittedFieldStart, _) = reemittedTables.TypeDefs
+                .GetFieldRange(reemittedPacketRow);
+            var fieldType = reemittedTables.TypeSpecs.GetTypeSpecRef(
+                reemittedTables.Fields.GetTypeSpecRef(reemittedFieldStart));
+            Assert.That(fieldType.Form, Is.EqualTo((byte)0x03));
+            Assert.That(fieldType.Row, Is.EqualTo(1));
+
+            var reloadedReference
+                = TrRmExecutableCompiler.CreateStandardReference(
+                    new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+                    "MixedEnumConsumer", providers, ["type.packet"]);
+            Assert.That(reloadedReference.Structures, Has.Length.EqualTo(1));
+            Assert.That(reloadedReference.EnumDefinitions,
+                Has.Length.EqualTo(1));
+            var reloadedCompilation = Compilation.CreateLibrary(
+                SyntaxTree.Parse(string.Empty), reloadedReference);
+            Assert.That(reloadedCompilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    reloadedCompilation.Diagnostics));
+        }
     }
 
     [Test]

@@ -53,7 +53,7 @@ public static partial class TrRmExecutableCompiler
             || sourceGenericMethodExports?.Exports.IsEmpty == false
             || sourceClassExports?.Exports.IsEmpty == false
             || (hasSourceTypeExports && sourceEnumExports is null)
-            || (hasSourceTypeExports && hasStandardStructViews)
+            || (sourceEnumExports is not null && hasStandardStructViews)
             || program.EntryPoint != -1 || !program.Functions.IsEmpty
             || (!program.Structures.IsEmpty && !hasSourceTypeExports
                 && !hasStandardStructViews)
@@ -105,10 +105,6 @@ public static partial class TrRmExecutableCompiler
                 definition.Identity is not
                     (BoundEnumDeclarationIdentity.Source
                     or BoundEnumDeclarationIdentity.Standard))
-            || (sourceEnumExports is not null
-                && program.EnumDefinitions.Any(static definition =>
-                    definition.Identity
-                        is not BoundEnumDeclarationIdentity.Source))
             || (sourceEnumExports is null
                 && program.EnumDefinitions.Any(static definition =>
                     definition.Identity
@@ -218,21 +214,155 @@ public static partial class TrRmExecutableCompiler
             emittedMemberCount += memberCount;
         }
 
+        C1EnumClosureEmission CreateStandardEmission(
+            int definitionIndex, BoundStandardEnumView view,
+            ImmutableArray<string> exportKeys,
+            C1EnumClosureImport? import)
+        {
+            EnsureEmissionCapacity(view.Members.Length);
+            var layouts
+                = ImmutableArray.CreateBuilder<
+                    C1EnumClosureEmissionLayout>(view.Layouts.Length);
+            foreach (var layout in view.Layouts)
+            {
+                layouts.Add(new C1EnumClosureEmissionLayout(
+                    layout.TargetProfileId,
+                    layout.TargetProfileRuleRevision, layout.Kind,
+                    layout.Flags, layout.Alignment, layout.Pack));
+            }
+
+            var members
+                = ImmutableArray.CreateBuilder<
+                    C1EnumClosureEmissionMember>(view.Members.Length);
+            foreach (var member in view.Members)
+            {
+                members.Add(new C1EnumClosureEmissionMember(
+                    member.DeclarationKey, member.Name, member.Value));
+            }
+
+            return new C1EnumClosureEmission(definitionIndex,
+                view.Namespace, view.Name, view.TypeDefFlags,
+                view.UnderlyingType, view.EnumFlags,
+                layouts.MoveToImmutable(), members.MoveToImmutable(),
+                exportKeys, import);
+        }
+
         if (sourceEnumExports is not null)
         {
             var sourceExportsByIndex = sourceEnumExports.Exports
                 .ToDictionary(static export => export.EnumIndex);
-            if (sourceExportsByIndex.Count != program.EnumDefinitions.Length)
+            var sourceDefinitionCount = program.EnumDefinitions.Count(
+                static definition => definition.Identity
+                    is BoundEnumDeclarationIdentity.Source);
+            if (sourceExportsByIndex.Count != sourceDefinitionCount)
             {
                 throw new InvalidDataException(
-                    "The EN1 source enum map does not cover the complete declaration table.");
+                    "The EN1 source enum map does not cover the complete source declaration table.");
+            }
+
+            void AddFreshStandardEnumImports(int definitionIndex,
+                BoundStandardEnumOccurrence occurrence)
+            {
+                var view = occurrence.Declaration;
+                var provider = view.Site.Snapshot;
+                if (!IsSelectedC1EnumClosureSchemaIdentity(
+                        provider.SchemaIdentity)
+                    || GetForeignInvocationSchema(provider.SchemaIdentity)
+                        != schema
+                    || provider.RuntimePolicy != (uint)program.RuntimePolicy)
+                {
+                    throw Unsupported(
+                        "A fresh EN1 source declaration requires a selected Standard enum provider with the exact schema and runtime.");
+                }
+
+                var selectedEdges = new HashSet<(
+                    string ProducerIdentity, string ExportKey,
+                    uint TargetRequirement, uint RuntimePolicy)>();
+                foreach (var expectation in occurrence.Expectations)
+                {
+                    var binding = expectation.Binding;
+                    var expected = expectation.ExpectedDeclaration;
+                    if (!BoundStandardEnumDeclarationContract
+                            .SnapshotsMatch(binding.UsingModule,
+                                expected.Site.Snapshot)
+                        || binding.ExpectedDefinitionId
+                            != expected.Site.DefinitionId
+                        || !BoundStandardEnumDeclarationContract
+                            .SnapshotsMatch(binding.Provider, provider)
+                        || binding.ProviderDefinitionId
+                            != view.Site.DefinitionId
+                        || !BoundStandardEnumDeclarationContract
+                            .ContractMatches(expected, view)
+                        || !StringComparer.Ordinal.Equals(
+                            binding.ProducerIdentity,
+                            provider.ModuleIdentity)
+                        || binding.TargetRequirement
+                            != provider.TargetRequirement
+                        || binding.RuntimePolicy != provider.RuntimePolicy
+                        || !BoundEnumTypes.IsValidModuleDeclarationKey(
+                            binding.ExportKey)
+                        || !occurrence.ExportKeys.Contains(
+                            binding.ExportKey, StringComparer.Ordinal))
+                    {
+                        throw Invalid(
+                            "A fresh EN1 source enum Import lost its checked provider expectation.");
+                    }
+
+                    _ = selectedEdges.Add((binding.ProducerIdentity,
+                        binding.ExportKey, binding.TargetRequirement,
+                        binding.RuntimePolicy));
+                    emittedEnums.Add(CreateStandardEmission(
+                        definitionIndex, expected, [],
+                        new C1EnumClosureImport(
+                            binding.ProducerIdentity, binding.ExportKey,
+                            binding.TargetRequirement,
+                            binding.RuntimePolicy)));
+                }
+
+                foreach (var exportKey in occurrence.SelectedExportKeys)
+                {
+                    var edge = (provider.ModuleIdentity, exportKey,
+                        provider.TargetRequirement, provider.RuntimePolicy);
+                    if (!selectedEdges.Add(edge))
+                    {
+                        continue;
+                    }
+
+                    emittedEnums.Add(CreateStandardEmission(
+                        definitionIndex, view, [],
+                        new C1EnumClosureImport(provider.ModuleIdentity,
+                            exportKey, provider.TargetRequirement,
+                            provider.RuntimePolicy)));
+                }
+
+                if (selectedEdges.Count == 0)
+                {
+                    throw Unsupported(
+                        "Fresh EN1 source emission cannot publish an unselected closure-only Standard enum without a retained Import edge.");
+                }
             }
 
             for (var enumIndex = 0;
                 enumIndex < program.EnumDefinitions.Length; enumIndex++)
             {
                 var definition = program.EnumDefinitions[enumIndex];
-                var sourceExport = sourceExportsByIndex[enumIndex];
+                if (definition.Identity
+                    is BoundEnumDeclarationIdentity.Standard standard)
+                {
+                    AddFreshStandardEnumImports(enumIndex,
+                        standard.Value);
+                    continue;
+                }
+
+                if (definition.Identity
+                        is not BoundEnumDeclarationIdentity.Source
+                    || !sourceExportsByIndex.TryGetValue(enumIndex,
+                        out var sourceExport))
+                {
+                    throw Invalid(
+                        "The EN1 source enum map no longer matches the checked declaration table.");
+                }
+
                 if (!ReferenceEquals(sourceExport.Definition, definition)
                     || sourceExport.MemberDeclarationKeys.IsDefault
                     || sourceExport.MemberDeclarationKeys.Length
@@ -361,40 +491,6 @@ public static partial class TrRmExecutableCompiler
                     "EN1 source-free enum emission requires a selected root Module with the exact target/runtime binding.");
             }
 
-            C1EnumClosureEmission CreateEmission(
-                int definitionIndex,
-                BoundStandardEnumView view,
-                ImmutableArray<string> exportKeys,
-                C1EnumClosureImport? import)
-            {
-                EnsureEmissionCapacity(view.Members.Length);
-                var layouts
-                    = ImmutableArray.CreateBuilder<
-                        C1EnumClosureEmissionLayout>(view.Layouts.Length);
-                foreach (var layout in view.Layouts)
-                {
-                    layouts.Add(new C1EnumClosureEmissionLayout(
-                        layout.TargetProfileId,
-                        layout.TargetProfileRuleRevision, layout.Kind,
-                        layout.Flags, layout.Alignment, layout.Pack));
-                }
-
-                var members
-                    = ImmutableArray.CreateBuilder<
-                        C1EnumClosureEmissionMember>(view.Members.Length);
-                foreach (var member in view.Members)
-                {
-                    members.Add(new C1EnumClosureEmissionMember(
-                        member.DeclarationKey, member.Name, member.Value));
-                }
-
-                return new C1EnumClosureEmission(definitionIndex,
-                    view.Namespace, view.Name, view.TypeDefFlags,
-                    view.UnderlyingType, view.EnumFlags,
-                    layouts.MoveToImmutable(), members.MoveToImmutable(),
-                    exportKeys, import);
-            }
-
             for (var definitionIndex = 0;
                 definitionIndex < program.EnumDefinitions.Length;
                 definitionIndex++)
@@ -413,7 +509,7 @@ public static partial class TrRmExecutableCompiler
                             "EN1 source-free enum emission cannot re-own a declaration from another Module.");
                     }
 
-                    emittedEnums.Add(CreateEmission(
+                    emittedEnums.Add(CreateStandardEmission(
                         definitionIndex, occurrence.Declaration,
                         occurrence.ExportKeys, null));
                     continue;
@@ -428,7 +524,7 @@ public static partial class TrRmExecutableCompiler
                         continue;
                     }
 
-                    emittedEnums.Add(CreateEmission(
+                    emittedEnums.Add(CreateStandardEmission(
                         definitionIndex, expectation.ExpectedDeclaration, [],
                         new C1EnumClosureImport(
                             binding.ProducerIdentity, binding.ExportKey,
