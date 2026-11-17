@@ -141,6 +141,14 @@ public static partial class TrRmExecutableCompiler
         = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-1-parameter-labels-1-receiver-access-1-property-initialized-state-1-enum-closure-1";
     private const string StandardC1M1Construction2L1R1PropertyInitializedStateEnumClosureSchemaIdentity
         = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-property-initialized-state-1-enum-closure-1";
+    private const string StandardC1M1ConstructionL1R1ClassInstanceLayoutSchemaIdentity
+        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-1-parameter-labels-1-receiver-access-1-enum-closure-1-class-instance-layout-1";
+    private const string StandardC1M1Construction2L1R1ClassInstanceLayoutSchemaIdentity
+        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-enum-closure-1-class-instance-layout-1";
+    private const string StandardC1M1ConstructionL1R1PropertyInitializedStateClassInstanceLayoutSchemaIdentity
+        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-1-parameter-labels-1-receiver-access-1-property-initialized-state-1-enum-closure-1-class-instance-layout-1";
+    private const string StandardC1M1Construction2L1R1PropertyInitializedStateClassInstanceLayoutSchemaIdentity
+        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-property-initialized-state-1-enum-closure-1-class-instance-layout-1";
 
     private static bool IsSelectedC1SchemaIdentity(string schemaIdentity)
         => StringComparer.Ordinal.Equals(schemaIdentity,
@@ -170,7 +178,15 @@ public static partial class TrRmExecutableCompiler
             || StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardC1M1ConstructionL1R1PropertyInitializedStateEnumClosureSchemaIdentity)
             || StringComparer.Ordinal.Equals(schemaIdentity,
-                StandardC1M1Construction2L1R1PropertyInitializedStateEnumClosureSchemaIdentity);
+                StandardC1M1Construction2L1R1PropertyInitializedStateEnumClosureSchemaIdentity)
+            || StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardC1M1ConstructionL1R1ClassInstanceLayoutSchemaIdentity)
+            || StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardC1M1Construction2L1R1ClassInstanceLayoutSchemaIdentity)
+            || StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardC1M1ConstructionL1R1PropertyInitializedStateClassInstanceLayoutSchemaIdentity)
+            || StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardC1M1Construction2L1R1PropertyInitializedStateClassInstanceLayoutSchemaIdentity);
 
     internal static bool IsSelectedC1EnumClosureSchemaIdentity(
         string schemaIdentity)
@@ -178,7 +194,19 @@ public static partial class TrRmExecutableCompiler
             StandardC1M1ConstructionL1R1EnumClosureSchemaIdentity
             or StandardC1M1Construction2L1R1EnumClosureSchemaIdentity
             or StandardC1M1ConstructionL1R1PropertyInitializedStateEnumClosureSchemaIdentity
-            or StandardC1M1Construction2L1R1PropertyInitializedStateEnumClosureSchemaIdentity;
+            or StandardC1M1Construction2L1R1PropertyInitializedStateEnumClosureSchemaIdentity
+            or StandardC1M1ConstructionL1R1ClassInstanceLayoutSchemaIdentity
+            or StandardC1M1Construction2L1R1ClassInstanceLayoutSchemaIdentity
+            or StandardC1M1ConstructionL1R1PropertyInitializedStateClassInstanceLayoutSchemaIdentity
+            or StandardC1M1Construction2L1R1PropertyInitializedStateClassInstanceLayoutSchemaIdentity;
+
+    internal static bool IsSelectedC1ClassInstanceLayoutSchemaIdentity(
+        string schemaIdentity)
+        => schemaIdentity is
+            StandardC1M1ConstructionL1R1ClassInstanceLayoutSchemaIdentity
+            or StandardC1M1Construction2L1R1ClassInstanceLayoutSchemaIdentity
+            or StandardC1M1ConstructionL1R1PropertyInitializedStateClassInstanceLayoutSchemaIdentity
+            or StandardC1M1Construction2L1R1PropertyInitializedStateClassInstanceLayoutSchemaIdentity;
 
     private static bool IsSelectedGeneralPredicateGraphsSchemaIdentity(
         string schemaIdentity)

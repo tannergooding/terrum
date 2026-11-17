@@ -940,6 +940,81 @@ internal sealed class TrRmC1EnumClosureSourceTests
     }
 
     [Test]
+    public void SelectsClassInstanceLayoutThroughExactSchemaSuccessors()
+    {
+        var sourceTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public class Box { public int32 Value; }
+            }
+            """);
+        var sourceCompilation = Compilation.CreateLibrary(sourceTree);
+        Assert.That(sourceCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceCompilation.Diagnostics));
+        var program = (BoundProgram)sourceCompilation.Program!;
+        var classDeclaration = sourceTree.Root.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var fieldDeclaration = classDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.FieldDeclaration);
+        var classIndex = program.SourceClassProgramAssociation!
+            .Declarations.Single(declaration =>
+                declaration.Span == classDeclaration.Span).ClassIndex;
+        var classExport = new TrRmSourceClassExport(program, classIndex,
+            classDeclaration.Span, "type.box", [
+                new TrRmSourceClassMemberExport(0,
+                    fieldDeclaration.Span, "field.box.value"),
+            ]);
+
+        foreach (var baseSchemaIdentity in s_schemaIdentities)
+        {
+            var schemaIdentity
+                = $"{baseSchemaIdentity}-class-instance-layout-1";
+            var artifact = TrRmExecutableCompiler.EmitStandard(program,
+                "ClassLayoutProvider", schemaIdentity, 1, [], [],
+                [classExport], []);
+            var input = new TrRmStandardArtifactInput(schemaIdentity,
+                artifact);
+            var reference = TrRmExecutableCompiler.CreateStandardReference(
+                input, "ClassLayoutProvider", [], ["type.box"],
+                ["field.box.value"]);
+            Assert.That(reference.StandardClassDeclarations.Single(
+                static declaration =>
+                    !declaration.SelectedExportKeys.IsEmpty)
+                .Declaration.Fields.Single(
+                    static field => field.Name == "Value")
+                .SelectedExportKeys, Is.EqualTo(["field.box.value"]));
+
+            var queryCompilation = Compilation.CreateLibrary(
+                SyntaxTree.Parse("""
+                    using Demo;
+                    nint Offset() {
+                        return unsafe(offsetof(Box, Value));
+                    }
+                    """), reference, new CompilationOptions {
+                    LayoutCoreRegistration
+                        = LayoutCoreRegistrationTestData.Create(),
+                });
+            Assert.That(queryCompilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    queryCompilation.Diagnostics));
+
+            var baseArtifact = TrRmExecutableCompiler.EmitStandard(program,
+                "UnusedProvider", baseSchemaIdentity, 1, [], [],
+                [classExport], []);
+            Assert.Throws<NotSupportedException>(() =>
+                TrRmExecutableCompiler.CreateStandardReference(input,
+                    "ClassLayoutProvider", [
+                        new TrRmStandardArtifactInput(baseSchemaIdentity,
+                            baseArtifact),
+                    ], ["type.box"], ["field.box.value"]));
+        }
+    }
+
+    [Test]
     public void ReemitsEN1ClassTypeDefAndFieldImportsAndTypeSpecs()
     {
         var schemaIdentity = s_schemaIdentities[0];
@@ -2034,6 +2109,14 @@ internal sealed class TrRmC1EnumClosureSourceTests
             "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-1-parameter-labels-1-receiver-access-1-property-initialized-state-1-enum-closure-1"
                 => TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft,
             "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-property-initialized-state-1-enum-closure-1"
+                => TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft,
+            "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-1-parameter-labels-1-receiver-access-1-enum-closure-1-class-instance-layout-1"
+                => TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft,
+            "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-enum-closure-1-class-instance-layout-1"
+                => TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft,
+            "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-1-parameter-labels-1-receiver-access-1-property-initialized-state-1-enum-closure-1-class-instance-layout-1"
+                => TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft,
+            "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-property-initialized-state-1-enum-closure-1-class-instance-layout-1"
                 => TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft,
             _ => throw new ArgumentOutOfRangeException(nameof(schemaIdentity)),
         };

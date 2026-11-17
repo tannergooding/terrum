@@ -647,6 +647,14 @@ public static partial class TrRmExecutableCompiler
                     => TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft,
                 StandardC1M1Construction2L1R1PropertyInitializedStateEnumClosureSchemaIdentity
                     => TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft,
+                StandardC1M1ConstructionL1R1ClassInstanceLayoutSchemaIdentity
+                    => TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft,
+                StandardC1M1Construction2L1R1ClassInstanceLayoutSchemaIdentity
+                    => TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft,
+                StandardC1M1ConstructionL1R1PropertyInitializedStateClassInstanceLayoutSchemaIdentity
+                    => TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft,
+                StandardC1M1Construction2L1R1PropertyInitializedStateClassInstanceLayoutSchemaIdentity
+                    => TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft,
                 _ => throw Unsupported(
                     "The generic-method source reference requires an exact label-bearing G1/C1 schema selection."),
             };

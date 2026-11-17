@@ -2864,7 +2864,11 @@ public static partial class TrRmExecutableCompiler
             or StandardC1M1ConstructionL1R1EnumClosureSchemaIdentity
             or StandardC1M1Construction2L1R1EnumClosureSchemaIdentity
             or StandardC1M1ConstructionL1R1PropertyInitializedStateEnumClosureSchemaIdentity
-            or StandardC1M1Construction2L1R1PropertyInitializedStateEnumClosureSchemaIdentity))
+            or StandardC1M1Construction2L1R1PropertyInitializedStateEnumClosureSchemaIdentity
+            or StandardC1M1ConstructionL1R1ClassInstanceLayoutSchemaIdentity
+            or StandardC1M1Construction2L1R1ClassInstanceLayoutSchemaIdentity
+            or StandardC1M1ConstructionL1R1PropertyInitializedStateClassInstanceLayoutSchemaIdentity
+            or StandardC1M1Construction2L1R1PropertyInitializedStateClassInstanceLayoutSchemaIdentity))
         {
             throw new ArgumentException(
                 "The exact Standard schema identity is not selected by this consumer.",
@@ -2883,6 +2887,17 @@ public static partial class TrRmExecutableCompiler
         for (var index = 0; index < providers.Count; index++)
         {
             result[index + 1] = providers[index].SchemaIdentity;
+        }
+
+        var classInstanceLayoutSchemaIdentity = result.FirstOrDefault(
+            IsSelectedC1ClassInstanceLayoutSchemaIdentity);
+        if (classInstanceLayoutSchemaIdentity is not null
+            && result.Any(schemaIdentity =>
+                !StringComparer.Ordinal.Equals(schemaIdentity,
+                    classInstanceLayoutSchemaIdentity)))
+        {
+            throw Unsupported(
+                "The EN1 class instance-layout profile requires its exact successor identity for the root and every provider artifact.");
         }
 
         if (result.Contains(StandardLocalAggregateLayoutSchemaIdentity,
@@ -2942,7 +2957,11 @@ public static partial class TrRmExecutableCompiler
             or StandardC1M1ConstructionL1R1EnumClosureSchemaIdentity
             or StandardC1M1Construction2L1R1EnumClosureSchemaIdentity
             or StandardC1M1ConstructionL1R1PropertyInitializedStateEnumClosureSchemaIdentity
-            or StandardC1M1Construction2L1R1PropertyInitializedStateEnumClosureSchemaIdentity;
+            or StandardC1M1Construction2L1R1PropertyInitializedStateEnumClosureSchemaIdentity
+            or StandardC1M1ConstructionL1R1ClassInstanceLayoutSchemaIdentity
+            or StandardC1M1Construction2L1R1ClassInstanceLayoutSchemaIdentity
+            or StandardC1M1ConstructionL1R1PropertyInitializedStateClassInstanceLayoutSchemaIdentity
+            or StandardC1M1Construction2L1R1PropertyInitializedStateClassInstanceLayoutSchemaIdentity;
 
     private static TrRmArtifactSchema GetForeignInvocationSchema(
         string schemaIdentity)
@@ -3023,6 +3042,14 @@ public static partial class TrRmExecutableCompiler
             StandardC1M1ConstructionL1R1PropertyInitializedStateEnumClosureSchemaIdentity
                 => TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft,
             StandardC1M1Construction2L1R1PropertyInitializedStateEnumClosureSchemaIdentity
+                => TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft,
+            StandardC1M1ConstructionL1R1ClassInstanceLayoutSchemaIdentity
+                => TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft,
+            StandardC1M1Construction2L1R1ClassInstanceLayoutSchemaIdentity
+                => TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft,
+            StandardC1M1ConstructionL1R1PropertyInitializedStateClassInstanceLayoutSchemaIdentity
+                => TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft,
+            StandardC1M1Construction2L1R1PropertyInitializedStateClassInstanceLayoutSchemaIdentity
                 => TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft,
             _ => throw new ArgumentException(
                 "The exact Standard schema identity is not selected by this consumer.",
