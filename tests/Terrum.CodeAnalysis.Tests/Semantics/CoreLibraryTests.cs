@@ -17,8 +17,8 @@ internal sealed class CoreLibraryTests
     private const string Core = """
         public struct int32 {
             private int32 value;
-            public static bool TryParse(int32 input, init ref<int32> result) {
-                result = input + 1;
+            public static bool TryParse(int32 input, ref<init int32> result) {
+                *result = input + 1;
                 return true;
             }
             public static int32 Identity(int32 input) { return input.value; }
@@ -40,11 +40,12 @@ internal sealed class CoreLibraryTests
         Assert.That(program.Structures, Is.Empty);
         var producer = ModuleCompiler.CreateProducer(program,
             ["int32.TryParse", "int32.TryFormat", "int32.Identity", "int32.ReadBacking"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4)), Is.EqualTo(104));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4)), Is.EqualTo(106));
         var consumer = Compilation.Create(SyntaxTree.Parse(
             """
             int32 Main() {
-                require int32.TryParse(41, init var value);
+                init int32 value;
+                require int32.TryParse(41, ref init value);
                 int32 copied = int32.Identity(value);
                 if (copied.TryFormat(40)) { return copied.ReadBacking(); }
                 return 0;
@@ -58,7 +59,7 @@ internal sealed class CoreLibraryTests
                 Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
                 return (BoundProgram)__nunitActual1!;
             }))(), producer);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumerBytes.AsSpan(4)), Is.EqualTo(104));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumerBytes.AsSpan(4)), Is.EqualTo(106));
         var linked = ModuleCompiler.Link(consumerBytes, producer);
         Assert.That(NativeJit.Execute(linked, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
 

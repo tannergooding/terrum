@@ -1,10 +1,12 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using Terrum.CodeAnalysis.Lexing;
+using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Semantics;
@@ -105,6 +107,12 @@ public enum PrimitiveType
     Decimal64,
     /// <summary>An IEEE decimal128 BID value stored as its raw one-hundred-twenty-eight-bit representation.</summary>
     Decimal128,
+    /// <summary>A signed integer whose width is selected by the target.</summary>
+    NativeInt = 47,
+    /// <summary>An unsigned integer whose width is selected by the target.</summary>
+    NativeUInt = 48,
+    /// <summary>An internal, non-storable type-identity evidence carrier.</summary>
+    TypeIdentity = 49,
 }
 
 /// <summary>Disjoint source-class type identifiers start above the complete inline-struct range.</summary>
@@ -279,6 +287,7 @@ internal enum BoundInterfaceTypeKind : byte
     TypeParameter = 2,
     Nominal = 3,
     CheckedReference = 4,
+    GenericNominal = 5,
 }
 
 internal enum BoundInterfaceTypeParameterScope : byte
@@ -336,6 +345,10 @@ internal sealed record BoundInterfaceType(
 {
     internal BoundInterfaceTypeParameterScope TypeParameterScope { get; init; }
     internal BoundModuleImport? ModuleImport { get; init; }
+    internal BoundGenericNominalTypeIdentity? GenericNominalTypeIdentity
+        { get; init; }
+    internal int SourceGenericTypeDefinitionIndex { get; init; } = -1;
+    internal bool IsGenericNominalConstantDomain { get; init; }
 }
 
 internal enum BoundInterfaceFormalKind : byte
@@ -353,12 +366,16 @@ internal sealed record BoundInterfaceFormal(
     ImmutableArray<string> AttributeTokens,
     BoundInterfaceType? ConstantType,
     BoundInterfaceType? TypeDefault,
-    BoundConstant? ConstantDefault);
+    BoundConstant? ConstantDefault)
+{
+    internal bool RequiresWritable { get; init; }
+}
 
 internal enum BoundInterfaceConstraintKind : byte
 {
     Type = 1,
     Attribute = 2,
+    Write = 3,
 }
 
 internal sealed record BoundInterfaceConstraint(
@@ -384,6 +401,7 @@ internal sealed record BoundInterfaceDefinition(
     internal ImmutableArray<string> AttributeTokens { get; init; } = [];
     internal BoundModuleImport? ModuleImport { get; init; }
     internal BoundForeignNativeInterfaceLayout? ForeignNativeInterface { get; init; }
+    internal int SourceInputOrdinal { get; init; } = -1;
 }
 
 internal sealed record BoundForeignNativeInterfaceLayout(
@@ -429,7 +447,14 @@ internal sealed record BoundInterfaceParameter(
     BoundInterfaceType Type,
     BoundInterfaceParameterMode Mode,
     ImmutableArray<string> Attributes,
-    ImmutableArray<string> AttributeTokens);
+    ImmutableArray<string> AttributeTokens)
+{
+    internal BoundConstant? DefaultValue { get; init; }
+    internal BoundExpression? DefaultExpression { get; init; }
+    internal int DefaultExpressionSourceInputOrdinal { get; init; } = -1;
+    internal bool HasPendingDefault { get; init; }
+    internal TextSpan DefaultSyntaxSpan { get; init; }
+}
 
 internal sealed record BoundInterfaceAccessor(
     BoundInterfaceAccessorKind Kind,
@@ -471,8 +496,51 @@ internal sealed record BoundInterfaceMemberDefinition(
     BoundConstant? AssociatedConstantDefault)
 {
     internal bool DeclaredRequiresUnsafeCaller { get; init; }
+    internal bool RequiresMutableReceiver { get; init; }
     internal NativeCallingConvention? NativeCallableConvention { get; init; }
+    internal int SourceInputOrdinal { get; init; } = -1;
+    internal TextSpan SourceDeclarationSpan { get; init; }
 }
+
+internal enum BoundInterfaceWitnessTargetKind : byte
+{
+    Implementation = 1,
+    Default = 2,
+    ExplicitImplementation = 3,
+}
+
+internal sealed record BoundInterfaceMemberIdentity(
+    BoundInterfaceType DeclaringInterface, int MemberOrdinal,
+    string DeclarationKey, int AccessorOrdinal = -1);
+
+internal sealed record BoundInterfaceWitnessMember(
+    BoundInterfaceMemberIdentity Requirement,
+    BoundInterfaceWitnessTargetKind TargetKind,
+    int FunctionIndex,
+    BoundInterfaceMemberIdentity? DefaultTarget)
+{
+    internal int GenericMethodDefinitionOrdinal { get; init; } = -1;
+    internal string? PendingGenericMethodName { get; init; }
+}
+
+internal sealed record BoundInterfaceAssociatedTypeBinding(
+    BoundInterfaceMemberIdentity Requirement,
+    BoundInterfaceType Type);
+
+internal sealed record BoundInterfaceAssociatedConstantBinding(
+    BoundInterfaceMemberIdentity Requirement,
+    BoundInterfaceType Type,
+    BoundConstant Value);
+
+internal sealed record BoundInterfaceWitness(
+    PrimitiveType ImplementingType,
+    BoundInterfaceType InterfaceType,
+    int SourceInputOrdinal,
+    TextSpan Span,
+    ImmutableArray<BoundInterfaceWitnessMember> Members,
+    ImmutableArray<BoundInterfaceAssociatedTypeBinding> AssociatedTypes,
+    ImmutableArray<BoundInterfaceAssociatedConstantBinding>
+        AssociatedConstants);
 
 /// <summary>The resolved overflow behavior of a source integer operation.</summary>
 internal enum BoundIntegerOverflowBehavior
@@ -499,6 +567,14 @@ public sealed record BoundProgram(ImmutableArray<BoundFunction> Functions, int E
 
     internal int SourceInputCount { get; init; }
 
+    internal bool AllowUnmaterializedInterfaceDefaults { get; init; }
+
+    internal BoundSourceClassProgramAssociation?
+        SourceClassProgramAssociation { get; init; }
+
+    internal BoundSourceEnumProgramAssociation?
+        SourceEnumProgramAssociation { get; init; }
+
     internal ImmutableArray<BoundSourceGenericTypeInstance>
         SourceGenericTypeInstances { get; init; } = [];
 
@@ -509,6 +585,12 @@ public sealed record BoundProgram(ImmutableArray<BoundFunction> Functions, int E
 
     internal BoundStandardMethodProviderClosure?
         StandardMethodProviderClosure { get; init; }
+
+    internal BoundStandardFieldProviderClosure?
+        StandardFieldProviderClosure { get; init; }
+
+    internal BoundStandardQuerySourceAssociation?
+        StandardQuerySourceAssociation { get; init; }
 
     internal ImmutableArray<BoundEnumDefinition> EnumDefinitions { get; init; } = [];
 
@@ -544,9 +626,20 @@ public sealed record BoundProgram(ImmutableArray<BoundFunction> Functions, int E
     internal CoreContractFailureIdentitySelection?
         CoreContractFailureIdentitySelection { get; init; }
 
+    internal CoreEvaluationFormIdentitySelection?
+        CoreEvaluationFormIdentitySelection { get; init; }
+
+    internal ImmutableArray<CoreEvaluationFormIdentitySelection>
+        CoreEvaluationFormIdentitySelections { get; init; } = [];
+
+    internal ImmutableArray<CoreEvaluationFormSchemaDeclarations>
+        CoreEvaluationFormSchemaProviders { get; init; } = [];
+
     internal ImmutableArray<NativeFunctionPointerSignatureDefinition> NativeFunctionPointerSignatures { get; init; } = [];
 
     internal ImmutableArray<NativePointerTypeDefinition> NativePointerTypes { get; init; } = [];
+
+    internal ImmutableArray<BoundSpanTypeDefinition> SpanTypes { get; init; } = [];
 
     internal ImmutableArray<BoundNativeFixedArrayType> NativeFixedArrayTypes { get; init; } = [];
 
@@ -560,11 +653,29 @@ public sealed record BoundProgram(ImmutableArray<BoundFunction> Functions, int E
 
     internal ImmutableArray<BoundInterfaceDefinition> Interfaces { get; init; } = [];
 
+    internal ImmutableArray<BoundInterfaceWitness> InterfaceWitnesses
+        { get; init; } = [];
+
     /// <summary>Exact provider and TypeDef identities for imported nominal declarations.</summary>
     public ImmutableArray<BoundGenericNominalTypeDefinition> GenericNominalTypeDefinitions { get; init; } = [];
 
+    internal ImmutableArray<BoundStandardClassDeclaration>
+        StandardClassDeclarations { get; init; } = [];
+
+    internal ImmutableArray<BoundGenericMethodDefinition>
+        GenericMethodDefinitions { get; init; } = [];
+
+    internal ImmutableArray<BoundGenericMethodSignature>
+        GenericMethodSignatures { get; init; } = [];
+
+    internal ImmutableArray<BoundGenericMethodOperatorProtocol>
+        GenericMethodOperatorProtocols { get; init; } = [];
+
     /// <summary>Ordered nominal TypeDef substitutions used by this program's type identities.</summary>
     public ImmutableArray<BoundGenericNominalTypeInstance> GenericNominalTypeInstances { get; init; } = [];
+
+    internal ImmutableArray<BoundGenericTypeFormalOwner>
+        GenericMethodTypeFormalOwners { get; init; } = [];
 
     /// <summary>The host-selected exact Core Task definition, without enabling Task runtime behavior.</summary>
     public CoreTaskTypeIdentity? CoreTaskType { get; init; }
@@ -598,18 +709,401 @@ public sealed record BoundProgram(ImmutableArray<BoundFunction> Functions, int E
 internal sealed record BoundSourceTypeDeclaration(int StructureIndex,
     string Namespace, string Name, BoundStruct DeclarationSnapshot);
 
+internal sealed record BoundSourceClassDeclaration(
+    int ClassIndex, int SourceInputOrdinal, TextSpan Span,
+    SyntaxTree Tree, SyntaxNode Declaration,
+    BoundClass DeclarationSnapshot)
+{
+    internal ImmutableArray<BoundSourceClassPart> Parts { get; init; } = [];
+}
+
+internal sealed record BoundSourceClassPart(
+    int SourceInputOrdinal, TextSpan Span, SyntaxTree Tree,
+    SyntaxNode Declaration, bool IsPrimary);
+
+internal sealed record BoundSourceEnumDeclarationAssociation(
+    int EnumIndex, int SourceInputOrdinal, TextSpan Span,
+    SyntaxTree Tree, SyntaxNode Declaration,
+    BoundEnumDefinition DeclarationSnapshot);
+
+internal sealed class BoundSourceEnumProgramAssociation(
+    ImmutableArray<BoundSourceEnumDeclarationAssociation> declarations)
+{
+    private BoundProgram? _program;
+
+    internal ImmutableArray<BoundSourceEnumDeclarationAssociation>
+        Declarations { get; } = declarations;
+
+    internal BoundProgram? Program => _program;
+
+    internal void Attach(BoundProgram program)
+    {
+        ArgumentNullException.ThrowIfNull(program);
+        if (_program is not null)
+        {
+            throw new InvalidOperationException(
+                "A source enum association can belong to only one checked program.");
+        }
+
+        _program = program;
+    }
+}
+
+internal sealed class BoundSourceClassProgramAssociation(
+    ImmutableArray<BoundSourceClassDeclaration> declarations)
+{
+    private BoundProgram? _program;
+
+    internal ImmutableArray<BoundSourceClassDeclaration> Declarations
+        { get; } = declarations;
+
+    internal BoundProgram? Program => _program;
+
+    internal void Attach(BoundProgram program)
+    {
+        ArgumentNullException.ThrowIfNull(program);
+        if (_program is not null)
+        {
+            throw new InvalidOperationException(
+                "A source class association can belong to only one checked program.");
+        }
+
+        _program = program;
+    }
+}
+
 internal sealed record BoundSourceGenericTypeFormal(
     int Ordinal, string Name, byte OwnershipDomain, byte NullabilityDomain,
-    bool RequiresBlittable, bool HasTypeDefault);
+    bool RequiresBlittable, bool HasTypeDefault)
+{
+    internal BoundGenericMethodFormalKind Kind { get; init; }
+        = BoundGenericMethodFormalKind.Type;
+    internal int TypeFormalOrdinal { get; init; } = -1;
+    internal int ConstantFormalOrdinal { get; init; } = -1;
+    internal BoundGenericMethodTypeTerm? ConstantDomain { get; init; }
+    internal bool HasConstantDefault { get; init; }
+    internal ImmutableArray<int> DefaultFormalDependencies
+        { get; init; } = [];
+    internal ImmutableArray<int> DefaultTypeFormalDependencies
+        { get; init; } = [];
+}
 
 internal sealed record BoundSourceGenericTypeDefinition(
     int DefinitionIndex, string Namespace, string Name, string QualifiedName,
     bool IsPublic, bool IsUnique,
-    ImmutableArray<BoundSourceGenericTypeFormal> Formals);
+    ImmutableArray<BoundSourceGenericTypeFormal> Formals)
+{
+    internal ImmutableArray<BoundGenericMethodFormalSlot> FormalOrder
+        { get; init; } = [];
+    internal ImmutableArray<BoundGenericMethodConstantFormalSignature>
+        ConstantFormals { get; init; } = [];
+    internal PrimitiveType? TransparentConstantCarrierType { get; init; }
+}
 
 internal sealed record BoundSourceGenericTypeInstance(
     int StructureIndex, int DefinitionIndex,
-    ImmutableArray<PrimitiveType> TypeArguments);
+    ImmutableArray<PrimitiveType> TypeArguments)
+{
+    internal ImmutableArray<BoundGenericMethodConstantArgument>
+        ConstantArguments { get; init; } = [];
+}
+
+internal sealed record BoundGenericMethodOperatorRequirement(
+    TokenKind Operator, int Arity, string Protocol, PrimitiveType? FixedResult,
+    int ResultTypeParameterIndex, int ProtocolOrdinal);
+
+internal sealed record BoundGenericMethodFormal(
+    int Ordinal, string Name, PrimitiveType PlaceholderType,
+    byte OwnershipDomain, byte NullabilityDomain,
+    ImmutableArray<BoundGenericMethodOperatorRequirement> Requirements)
+{
+    internal BoundGenericMethodTypeDefault? TypeDefault { get; init; }
+    internal bool RequiresBlittable { get; init; }
+    internal bool RequiresWritable { get; init; }
+    internal ImmutableArray<BoundInterfaceType> InterfaceConstraints
+        { get; init; } = [];
+}
+
+internal enum BoundGenericMethodFormalKind : byte
+{
+    Type = 1,
+    Constant = 2,
+}
+
+internal sealed record BoundGenericMethodFormalSlot(
+    int Ordinal, BoundGenericMethodFormalKind Kind,
+    int TypeFormalOrdinal, int ConstantFormalOrdinal);
+
+internal sealed record BoundGenericMethodConstantDefault(
+    int ProofFunctionIndex, ImmutableArray<int> FormalDependencies);
+
+internal sealed record BoundGenericMethodConstantFormal(
+    int Ordinal, int ConstantOrdinal, string Name,
+    BoundGenericMethodTypeTerm Domain, PrimitiveType PlaceholderType,
+    int ProofParameterIndex,
+    BoundGenericMethodConstantDefault? Default);
+
+internal enum BoundGenericMethodTypeTermKind : byte
+{
+    Concrete = 1,
+    Formal = 2,
+    CheckedReference = 3,
+    SourceGeneric = 4,
+    OptionalValue = 5,
+    ImportedGeneric = 6,
+    NativePointer = 7,
+    NativeFixedArray = 8,
+    NativeFunctionPointer = 9,
+    Span = 10,
+}
+
+internal sealed record BoundGenericMethodTypeTerm(
+    BoundGenericMethodTypeTermKind Kind, PrimitiveType ConcreteType,
+    int FormalOrdinal, int SourceGenericTypeDefinitionIndex,
+    ImmutableArray<BoundGenericMethodTypeTerm> TypeArguments,
+    bool IsWritable, bool IsGarbageCollected, bool IsInitialization,
+    bool IsOptional)
+{
+    internal BoundGenericNominalTypeIdentity? NominalTypeIdentity
+        { get; init; }
+    internal ulong ElementCount { get; init; }
+    internal NativeCallingConvention CallingConvention { get; init; }
+    internal int ParameterCount { get; init; }
+    internal bool AllowsVoid { get; init; }
+    internal bool IsElementWritable { get; init; }
+    internal ImmutableArray<BoundGenericMethodTypeConstantArgument>
+        ConstantArguments { get; init; } = [];
+}
+
+internal enum BoundGenericMethodTypeConstantArgumentKind : byte
+{
+    Value = 1,
+    Formal = 2,
+}
+
+internal enum BoundGenericTypeFormalOwnerKind : byte
+{
+    GenericMethod = 1,
+    SourceGenericType = 2,
+}
+
+internal readonly record struct BoundGenericTypeFormal(
+    int Ordinal, PrimitiveType PlaceholderType, byte OwnershipDomain,
+    byte NullabilityDomain)
+{
+    internal bool RequiresWritable { get; init; }
+    internal bool RequiresBlittable { get; init; }
+}
+
+internal readonly record struct BoundGenericTypeFormalOwner(
+    int Ordinal, ImmutableArray<BoundGenericTypeFormal> Formals)
+{
+    internal int TypeFormalCount => Formals.Length;
+}
+
+internal sealed record BoundGenericMethodTypeConstantArgument(
+    BoundGenericMethodTypeConstantArgumentKind Kind,
+    int FormalOrdinal, PrimitiveType DomainType,
+    PrimitiveType CarrierType, ScalarBits Bits)
+{
+    internal int FormalDefinitionOrdinal { get; init; } = -1;
+    internal BoundGenericTypeFormalOwnerKind FormalOwnerKind { get; init; }
+        = BoundGenericTypeFormalOwnerKind.GenericMethod;
+}
+
+internal sealed record BoundGenericMethodTypeDefault(
+    BoundGenericMethodTypeTerm Term,
+    ImmutableArray<int> FormalDependencies)
+{
+    internal ImmutableArray<int> ConstantFormalDependencies
+        { get; init; } = [];
+}
+
+internal sealed record BoundGenericMethodParameterDefault(
+    int ParameterIndex, string ParameterName, PrimitiveType ParameterType,
+    BoundExpression Value,
+    ImmutableArray<BoundGenericMethodParameterDefaultFormalDependency>
+        FormalDependencies);
+
+internal sealed record BoundGenericMethodParameterDefaultFormalDependency(
+    BoundGenericTypeFormalOwnerKind OwnerKind, int DefinitionOrdinal,
+    int ConstantFormalOrdinal, BoundGenericMethodTypeTerm Domain);
+
+internal sealed record BoundGenericMethodOperatorProtocol(
+    int DefinitionOrdinal, string Name, int SourceInputOrdinal, TextSpan Span,
+    TokenKind Operator, int Arity, bool HasSelf, bool RequiresUnsafeCaller);
+
+internal sealed record BoundGenericMethodFormalSignature(
+    int Ordinal, string Name, byte OwnershipDomain,
+    byte NullabilityDomain,
+    ImmutableArray<BoundGenericMethodOperatorRequirement> Requirements)
+{
+    internal bool HasTypeDefault { get; init; }
+    internal bool RequiresBlittable { get; init; }
+    internal bool RequiresWritable { get; init; }
+    internal ImmutableArray<BoundInterfaceType> InterfaceConstraints
+        { get; init; } = [];
+    internal ImmutableArray<int> DefaultTypeParameterDependencies
+        { get; init; } = [];
+}
+
+internal sealed record BoundGenericMethodConstantFormalSignature(
+    int Ordinal, int ConstantOrdinal, string Name,
+    BoundGenericMethodTypeTerm Domain, bool HasDefault,
+    ImmutableArray<int> DefaultFormalDependencies)
+{
+    internal ImmutableArray<int> DefaultTypeFormalDependencies
+        { get; init; } = [];
+}
+
+internal sealed record BoundGenericMethodOwner(
+    PrimitiveType ClosedType,
+    int SourceGenericTypeDefinitionIndex,
+    ImmutableArray<PrimitiveType> TypeArguments)
+{
+    internal ImmutableArray<BoundGenericMethodConstantArgument>
+        ConstantArguments { get; init; } = [];
+}
+
+internal sealed record BoundGenericMethodSignature(
+    int DefinitionOrdinal, string Name, bool IsPublic,
+    bool RequiresUnsafeCaller,
+    ImmutableArray<BoundGenericMethodFormalSignature> Formals)
+{
+    internal bool IsStatic { get; init; } = true;
+    internal bool IsMutable { get; init; }
+    internal BoundGenericMethodOwner? Owner { get; init; }
+    internal BoundEvaluationFormSchemaBinding?
+        PureEvaluationFormSchema { get; init; }
+    internal BoundEvaluationFormSchemaBinding?
+        ConstEvalSchema { get; init; }
+    internal ImmutableArray<BoundGenericMethodConstantFormalSignature>
+        ConstantFormals { get; init; } = [];
+    internal ImmutableArray<BoundGenericMethodFormalSlot> FormalOrder
+        { get; init; } = [];
+}
+
+internal enum BoundGenericMethodConstantArgumentKind : byte
+{
+    Value = 1,
+    Formal = 2,
+}
+
+internal sealed record BoundGenericMethodConstantArgument(
+    int Ordinal, int ConstantOrdinal,
+    BoundGenericMethodConstantArgumentKind Kind,
+    BoundGenericMethodTypeTerm Domain, int CallerFormalOrdinal,
+    PrimitiveType DomainType, PrimitiveType CarrierType, ScalarBits Bits)
+{
+    internal int CallerDefinitionOrdinal { get; init; } = -1;
+    internal int CallerConstantFormalOrdinal { get; init; } = -1;
+    internal BoundGenericTypeFormalOwnerKind CallerFormalOwnerKind
+        { get; init; } = BoundGenericTypeFormalOwnerKind.GenericMethod;
+}
+
+internal sealed record BoundGenericMethodInstantiation(
+    int DefinitionOrdinal, ImmutableArray<PrimitiveType> TypeArguments)
+{
+    internal ImmutableArray<BoundGenericMethodConstantArgument>
+        ConstantArguments
+        { get; init; } = [];
+}
+
+internal sealed record BoundGenericMethodDefinition(
+    int DefinitionOrdinal, string Name, bool IsPublic,
+    bool RequiresUnsafeCaller,
+    int FunctionIndex, int SourceInputOrdinal, TextSpan Span,
+    ImmutableArray<BoundGenericMethodFormal> Formals,
+    BoundProgram ProofProgram)
+{
+    internal int FormalTypeOwnerOrdinal { get; init; } = -1;
+    internal bool IsStatic { get; init; } = true;
+    internal bool IsMutable { get; init; }
+    internal BoundGenericMethodOwner? Owner { get; init; }
+    internal ImmutableArray<BoundGenericMethodConstantFormal>
+        ConstantFormals { get; init; } = [];
+    internal ImmutableArray<BoundGenericMethodFormalSlot> FormalOrder
+        { get; init; } = [];
+    internal ImmutableArray<BoundGenericMethodParameterDefault?>
+        OrdinaryParameterDefaults { get; init; } = [];
+    internal int RuntimeParameterCount { get; init; }
+}
+
+internal static class StandardGenericMethodSchema
+{
+    internal const string GenericMethodCalls
+        = "trrm/1-draft-generic-method-calls-1";
+    internal const string GenericMethodCallsParameterLabels
+        = "trrm/1-draft-generic-method-calls-parameter-labels-1";
+    internal const string GenericMethodCallsParameterLabelsReceiverAccess
+        = "trrm/1-draft-generic-method-calls-parameter-labels-1-receiver-access-1";
+
+    internal static bool IsGenericMethodCalls(string? schemaIdentity)
+        => StringComparer.Ordinal.Equals(schemaIdentity,
+                GenericMethodCalls)
+            || StringComparer.Ordinal.Equals(schemaIdentity,
+                GenericMethodCallsParameterLabels)
+            || StringComparer.Ordinal.Equals(schemaIdentity,
+                GenericMethodCallsParameterLabelsReceiverAccess);
+}
+
+internal sealed record BoundGenericMethodImportOrigin(
+    string ProviderIdentity, string ExportKey, string SchemaIdentity,
+    uint TargetRequirement, uint RuntimePolicy,
+    ImmutableArray<byte> ProviderArtifactDigest, uint MethodDefId = 0,
+    bool IsMethodDefTarget = false);
+
+internal sealed record BoundGenericMethodImportBinding(
+    int ImportRow, int ModuleRefRow, string ProviderIdentity,
+    string ExportKey, uint TargetRequirement, uint RuntimePolicy,
+    BoundGenericMethodImport Expected, BoundGenericMethodImport Provider,
+    ImmutableArray<BoundInterfaceDefinition> ExpectedInterfaceDefinitions);
+
+internal sealed class BoundGenericMethodImport
+{
+    internal BoundGenericMethodImportOrigin Origin { get; }
+    internal BoundGenericMethodSignature Signature { get; }
+    internal ImmutableArray<BoundGenericMethodFormal> Formals { get; }
+    internal IReadOnlyList<BoundSpanTypeDefinition> SpanTypes { get; }
+    internal BoundFunction ProofFunction { get; private set; }
+    internal ImmutableArray<BoundFunction> ProofSupportFunctions
+        { get; private set; } = [];
+    internal BoundGenericMethodImportBinding? Binding { get; private set; }
+    internal int FormalTypeOwnerOrdinal { get; private set; }
+
+    internal BoundGenericMethodImport(
+        BoundGenericMethodImportOrigin origin,
+        BoundGenericMethodSignature signature,
+        ImmutableArray<BoundGenericMethodFormal> formals,
+        BoundFunction proofFunction, int formalTypeOwnerOrdinal = -1,
+        IReadOnlyList<BoundSpanTypeDefinition>? spanTypes = null)
+    {
+        Origin = origin;
+        Signature = signature;
+        Formals = formals;
+        ProofFunction = proofFunction;
+        FormalTypeOwnerOrdinal = formalTypeOwnerOrdinal;
+        SpanTypes = spanTypes ?? Array.Empty<BoundSpanTypeDefinition>();
+    }
+
+    internal void CompleteProofFunction(BoundFunction proofFunction,
+        ImmutableArray<BoundFunction> proofSupportFunctions = default,
+        int? formalTypeOwnerOrdinal = null)
+    {
+        ProofFunction = proofFunction;
+        if (formalTypeOwnerOrdinal is int ownerOrdinal)
+        {
+            FormalTypeOwnerOrdinal = ownerOrdinal;
+        }
+        if (!proofSupportFunctions.IsDefault)
+        {
+            ProofSupportFunctions = proofSupportFunctions;
+        }
+    }
+
+    internal void CompleteBinding(BoundGenericMethodImportBinding binding)
+        => Binding = binding;
+}
 
 internal enum BoundDeclarationContractPhase : byte
 {
@@ -625,6 +1119,12 @@ internal sealed record BoundDeclarationContractClause(
     CoreContractFailureDeclarationIdentity? SelectedFailureClass,
     string? UsingModuleIdentity,
     TextSpan Span);
+
+internal sealed record BoundOutputStatePredicate(
+    int FormalOrdinal,
+    uint PhaseLocalOrdinal,
+    byte State,
+    BoundExpression Predicate);
 
 /// <summary>A loaded local A2 TypeDef and its retained ExportKey aliases; no keys means unpublished.</summary>
 internal sealed record BoundSourceTypePublication(int StructureIndex,
@@ -658,7 +1158,26 @@ internal sealed record BoundStandardTypeOrigin(
     BoundSourceTypeProviderSnapshot? ReferenceRoot = null,
     BoundStruct? ExpectedDeclaration = null,
     ImmutableArray<BoundNativeFixedArrayType> ExpectedFixedArrayTypes = default,
-    ImmutableArray<NativePointerTypeDefinition> ExpectedNativePointerTypes = default);
+    ImmutableArray<NativePointerTypeDefinition> ExpectedNativePointerTypes = default)
+{
+    internal ImmutableArray<string> SelectedExportKeys { get; init; }
+
+    internal ImmutableArray<BoundStruct> AdditionalExpectedDeclarations
+    {
+        get; init;
+    }
+}
+
+internal sealed record BoundStandardFieldOrigin(
+    BoundSourceTypeProviderSnapshot Provider, uint DefinitionId,
+    ImmutableArray<string> ExportKeys, bool IsLookupRoot,
+    BoundStructField? ExpectedDeclaration = null)
+{
+    internal ImmutableArray<string> SelectedExportKeys { get; init; }
+
+    internal ImmutableArray<BoundStructField>
+        AdditionalExpectedDeclarations { get; init; }
+}
 
 internal sealed record BoundStandardMethodProviderClosure(
     int RootArtifactIndex, int RootModuleRow, string RootModuleIdentity,
@@ -666,6 +1185,34 @@ internal sealed record BoundStandardMethodProviderClosure(
     ImmutableArray<BoundStandardMethodProviderModule> Modules,
     ImmutableArray<BoundStandardMethodProviderEdge> MethodEdges,
     ImmutableArray<BoundStandardTypeProviderEdge> TypeEdges);
+
+internal sealed record BoundStandardFieldProviderClosure(
+    string RootModuleIdentity, int RootModuleRow, string SchemaIdentity,
+    uint TargetRequirement, uint RuntimePolicy,
+    ImmutableArray<BoundStandardFieldProviderArtifact> Artifacts,
+    ImmutableArray<BoundStandardFieldProviderModule> Modules,
+    ImmutableArray<BoundStandardTypeProviderEdge> TypeEdges,
+    ImmutableArray<BoundStandardFieldProviderEdge> FieldEdges,
+    BoundProgram OriginalProgram);
+
+internal sealed record BoundStandardQuerySourceAssociation(
+    ImmutableArray<BoundStandardFieldProviderClosure> ProviderClosures);
+
+internal sealed record BoundStandardFieldProviderArtifact(
+    int ArtifactIndex, string SchemaIdentity,
+    ImmutableArray<byte> ArtifactSnapshot);
+
+internal sealed record BoundStandardFieldProviderModule(
+    int ArtifactIndex, int ModuleRow, string Identity,
+    uint GoverningRuleEdition, uint TargetRequirement, uint RuntimePolicy);
+
+internal sealed record BoundStandardFieldProviderEdge(
+    int ConsumerArtifactIndex, int ConsumerModuleRow, int ImportRow,
+    int ModuleRefRow, uint ExpectedDefinitionId, int ExpectedOwnerTypeDefRow,
+    int OwnerImportRow, string ProducerIdentity, string ExportKey,
+    uint TargetRequirement, uint RuntimePolicy,
+    int ProviderArtifactIndex, int ProviderModuleRow, int ProviderTypeDefRow,
+    int ExportRow, uint ActualDefinitionId);
 
 internal sealed record BoundStandardMethodProviderArtifact(
     int ArtifactIndex, string SchemaIdentity,
@@ -706,6 +1253,14 @@ public sealed record BoundClass(string Name, ImmutableArray<BoundStructField> Fi
     public bool IsInternal { get; init; }
     /// <summary>Whether writable handles to this class may be published.</summary>
     public bool IsMutable { get; init; }
+    /// <summary>
+    /// The declared handle ownership fact, or null when the selected input does not carry one.
+    /// </summary>
+    public bool? IsUnique { get; init; }
+    /// <summary>Whether the selected class input carries a complete Cleanup-selection fact.</summary>
+    public bool? HasCleanup { get; init; }
+    /// <summary>The selected automatic class Cleanup method, or null when known to be absent.</summary>
+    public string? CleanupMethod { get; init; }
 }
 
 /// <summary>A compact value type of at most sixteen bytes, with checked value fields, a compilation-local token cursor capture, or a compiler-sealed opaque payload.</summary>
@@ -714,6 +1269,7 @@ public sealed record BoundStruct(string Name, ImmutableArray<BoundStructField> F
     internal TokenSpanTypeRole TokenSpanRole { get; init; }
     internal BoundStandardTypeOrigin? StandardTypeOrigin { get; init; }
     internal int SourceGenericTypeDefinitionIndex { get; init; } = -1;
+    internal bool StandardLayoutOnly { get; init; }
 
     /// <summary>Whether the value requests declaration-order natural layout; a public commitment also requires <see cref="BlittableTargetRequirement"/>.</summary>
     public bool IsSequential { get; init; }
@@ -772,6 +1328,9 @@ public sealed record BoundStruct(string Name, ImmutableArray<BoundStructField> F
 /// <summary>A naturally aligned field whose offset and width are in bytes.</summary>
 public sealed record BoundStructField(string Name, PrimitiveType Type, ulong Offset, ulong Size)
 {
+    internal BoundStandardFieldOrigin? StandardFieldOrigin { get; init; }
+    internal string? BackingPropertyName { get; init; }
+
     /// <summary>Whether assignment is permitted after the declaring receiver's construction.</summary>
     public bool IsMutable { get; init; }
 
@@ -833,6 +1392,7 @@ internal enum BoundDependencyRelation : byte
     DependsOn = 1,
     Captures = 2,
     ForwardsBacking = 3,
+    BorrowSourceStorage = 4,
 }
 
 internal enum BoundDependencyDestination : byte
@@ -921,6 +1481,14 @@ internal sealed record BoundCopyOriginSummary(
     BoundCopyOriginSummaryKind Kind,
     ImmutableArray<BoundCopyFact> Facts);
 
+internal enum BoundPropertyAccessorKind : byte
+{
+    None,
+    Getter,
+    Setter,
+    Initializer,
+}
+
 /// <summary>A function whose parameter slots precede its local slots.</summary>
 /// <param name="Name">The declared name.</param>
 /// <param name="ReturnType">The declared result type.</param>
@@ -931,7 +1499,54 @@ internal sealed record BoundCopyOriginSummary(
 public sealed record BoundFunction(string Name, PrimitiveType ReturnType, ImmutableArray<BoundVariable> Variables,
     int ParameterCount, BoundBlock Body, TextSpan Span)
 {
+    internal BoundInterfaceMemberIdentity? InterfaceRequirement
+        { get; init; }
+    internal ImmutableArray<PrimitiveType>
+        InterfaceRequirementTypeArguments { get; init; } = [];
+    internal ImmutableArray<BoundGenericMethodFormalSlot>
+        InterfaceRequirementFormalOrder { get; init; } = [];
+    internal BoundGenericMethodInstantiation? GenericMethodInstantiation
+    {
+        get; init;
+    }
+    internal BoundGenericMethodImport? ImportedGenericMethod
+        { get; init; }
+    internal BoundEvaluationFormSchemaBinding?
+        PureEvaluationFormSchema { get; init; }
+    internal BoundEvaluationFormSchemaBinding?
+        ConstEvalSchema { get; init; }
+    internal bool IsConstEval => ConstEvalSchema is not null;
+    internal bool HasPureEvaluationForm
+        => PureEvaluationFormSchema is not null
+            || ConstEvalSchema is not null;
+    // Set only on verifier-owned clones used to check a selected Pure form.
+    internal bool IsPureEvaluationProof { get; init; }
+    internal BoundInterfaceType? ExplicitInterfaceOwner
+        { get; init; }
+    internal ImmutableArray<PrimitiveType>
+        ImportedGenericMethodTypeArguments { get; init; } = [];
+
+    internal int GenericMethodProofDefinitionOrdinal { get; init; } = -1;
+    // Imported owners can shift this identity away from the proof definition ordinal.
+    internal int GenericMethodProofTypeFormalOwnerOrdinal { get; init; } = -1;
+    internal ImmutableArray<PrimitiveType> GenericMethodProofTypeParameters
+    {
+        get; init;
+    } = [];
+    internal int GenericMethodConstantDefaultFormalOrdinal { get; init; } = -1;
+    internal ImmutableArray<int> GenericMethodConstantDefaultDependencies
+    {
+        get; init;
+    } = [];
+    internal BoundGenericMethodInstantiation? GenericMethodProofCall
+    {
+        get; init;
+    }
+
     internal int SourceInputOrdinal { get; init; } = -1;
+    internal int SourceDeclarationInputOrdinal { get; init; } = -1;
+    internal TextSpan SourceDeclarationSpan { get; init; }
+    internal bool IsPartialConstructor { get; init; }
     internal ImmutableArray<BoundFriendTarget> FriendTargets
     {
         get; init;
@@ -958,6 +1573,8 @@ public sealed record BoundFunction(string Name, PrimitiveType ReturnType, Immuta
     internal TrRmScalarGraph? IndexedBody { get; init; }
     /// <summary>The declared property member name, distinct from the callable implementation's name.</summary>
     public string? PropertyName { get; init; }
+
+    internal BoundPropertyAccessorKind PropertyAccessorKind { get; init; }
 
     /// <summary>Whether this method consumes its unique receiver during lexical cleanup.</summary>
     public bool IsCleanup { get; init; }
@@ -1032,6 +1649,14 @@ public sealed record BoundFunction(string Name, PrimitiveType ReturnType, Immuta
     internal bool ResultDependencyIncludesReceiver { get; init; }
 
     internal ImmutableArray<BoundDependencyContract> DependencyContracts { get; init; } = [];
+    internal ImmutableArray<NativeFunctionPointerSelector>
+        CheckedOutputSelectors { get; init; } = [];
+    internal ImmutableArray<NativeFunctionPointerOutputState>
+        CheckedOutputStates { get; init; } = [];
+    internal ImmutableArray<BoundOutputStatePredicate>
+        CheckedOutputStatePredicates { get; init; } = [];
+    internal bool HasPrivateCheckedOutputStateMetadata { get; init; }
+    internal bool HasStandardCheckedOutputStateMetadata { get; init; }
     internal BoundCopyOriginSummary? CopyOriginSummary { get; init; }
 }
 
@@ -1183,6 +1808,12 @@ public sealed record BoundVariable(string Name, PrimitiveType Type, bool IsMutab
     /// <summary>Whether this source parameter uses the vacant initialization loan mode.</summary>
     public bool IsInit { get; init; }
 
+    internal ImmutableArray<BoundGenericUniquePropertyFact>
+        GenericUniquePropertyWhenTrue { get; init; } = [];
+    internal ImmutableArray<BoundGenericUniquePropertyFact>
+        GenericUniquePropertyWhenFalse { get; init; } = [];
+    internal bool? GenericUniquePropertyKnownResult { get; init; }
+
     /// <summary>Whether this source parameter aliases an existing readonly scalar place.</summary>
     internal bool IsImplicitRef { get; init; }
 
@@ -1277,7 +1908,15 @@ public sealed record BoundExpressionStatement(BoundExpression Expression, TextSp
 /// <param name="Then">The true branch.</param>
 /// <param name="Else">The false branch, if present.</param>
 /// <param name="Span">The source range.</param>
-public sealed record BoundIf(BoundExpression Condition, BoundStatement Then, BoundStatement? Else, TextSpan Span) : BoundStatement(Span);
+public sealed record BoundIf(BoundExpression Condition, BoundStatement Then,
+    BoundStatement? Else, TextSpan Span) : BoundStatement(Span)
+{
+    internal ImmutableArray<BoundGenericUniquePropertyFact>
+        GenericUniquePropertyWhenTrue { get; init; } = [];
+    internal ImmutableArray<BoundGenericUniquePropertyFact>
+        GenericUniquePropertyWhenFalse { get; init; } = [];
+    internal bool? GenericUniquePropertyKnownResult { get; init; }
+}
 
 /// <summary>A structured loop with a checked condition.</summary>
 /// <param name="Condition">A boolean condition.</param>
@@ -1339,6 +1978,15 @@ public sealed record BoundDrop(int Variable, int CleanupFunction, TextSpan Span)
     public bool IsOutput { get; init; }
 }
 
+internal sealed record BoundSymbolicLifetimeEnd(
+    int Variable, string? Name, TextSpan Span) : BoundStatement(Span);
+
+internal sealed record BoundSymbolicDrop(
+    int Variable, string? Name, TextSpan Span) : BoundStatement(Span)
+{
+    public bool IsOutput { get; init; }
+}
+
 /// <summary>Retires a lexical span descriptor's dependency, without releasing its backing owner.</summary>
 public sealed record BoundDropSpan(int Variable, TextSpan Span) : BoundStatement(Span);
 
@@ -1373,10 +2021,137 @@ public abstract record BoundExpression(PrimitiveType Type, TextSpan Span)
         Func<BoundExpression, BoundExpression> rewrite) => this;
 }
 
-/// <summary>A scalar constant represented by its canonical or raw-bit payload.</summary>
+internal enum BoundQuerySubjectKind : byte
+{
+    Type = 1,
+    Place = 2,
+    FieldPathPlace = 3,
+}
+
+internal enum BoundLayoutQueryKind : byte
+{
+    SizeOf = 1,
+    AlignOf = 2,
+    OffsetOfType = 3,
+    OffsetOfPlace = 4,
+}
+
+internal readonly record struct BoundQueryFieldStep(
+    PrimitiveType OwnerType, uint FieldOrdinal, PrimitiveType FieldType,
+    bool IsUnsafeAuthorized)
+{
+    internal BoundStandardFieldOrigin? StandardFieldOrigin { get; init; }
+}
+
+internal sealed record BoundQueryFieldPath(
+    PrimitiveType RootType, ImmutableArray<BoundQueryFieldStep> Steps)
+{
+    internal PrimitiveType LeafType => Steps.IsDefaultOrEmpty
+        ? RootType : Steps[^1].FieldType;
+
+    internal bool HasValidStructure
+    {
+        get
+        {
+            if (Steps.IsDefaultOrEmpty || Steps.Length > SemanticVerifier.MaximumAnalysisVisits)
+            {
+                return false;
+            }
+
+            var ownerType = RootType;
+            foreach (var step in Steps)
+            {
+                if (step.OwnerType != ownerType
+                    || step.FieldType is PrimitiveType.Void or PrimitiveType.TypeIdentity)
+                {
+                    return false;
+                }
+                ownerType = step.FieldType;
+            }
+            return true;
+        }
+    }
+}
+
+internal sealed record BoundQuerySubject(
+    PrimitiveType Type,
+    BoundQuerySubjectKind Kind,
+    BoundExpression? PlaceExpression,
+    BoundQueryFieldPath? FieldPath,
+    bool RequiresUnsafe,
+    bool IsUnsafeAuthorized)
+{
+    internal BoundGenericMethodTypeTerm? TypeIdentityTerm { get; init; }
+
+    internal bool HasValidNestedExpressions =>
+        Type != PrimitiveType.TypeIdentity
+        && (Kind switch {
+            BoundQuerySubjectKind.Type => PlaceExpression is null
+                && (FieldPath is null || FieldPath.RootType == Type),
+            BoundQuerySubjectKind.Place => PlaceExpression is not null
+                && PlaceExpression.Type == Type
+                && (FieldPath is null || FieldPath.LeafType == Type)
+                && BoundTreeTraversal.VisitExpressionTree(
+                    PlaceExpression, static _ => { }),
+            BoundQuerySubjectKind.FieldPathPlace =>
+                PlaceExpression is null && FieldPath is not null
+                && FieldPath.LeafType == Type,
+            _ => false,
+        })
+        && (FieldPath is null || FieldPath.HasValidStructure);
+
+    internal BoundQuerySubject RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) =>
+        PlaceExpression is null ? this
+            : this with { PlaceExpression = rewrite(PlaceExpression) };
+}
+
+internal sealed record BoundTypeIdentityQuery(
+    BoundQuerySubject Subject, TextSpan Span)
+    : BoundExpression(PrimitiveType.TypeIdentity, Span)
+{
+    internal override bool HasValidNestedExpressions =>
+        Subject is not null && Subject.HasValidNestedExpressions;
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => Subject is null
+            ? this
+            : this with {
+                Subject = Subject.RewriteNestedExpressions(rewrite),
+            };
+}
+
+internal sealed record BoundLayoutQuery(
+    BoundLayoutQueryKind Kind, BoundQuerySubject Subject, TextSpan Span)
+    : BoundExpression(PrimitiveType.NativeInt, Span)
+{
+    internal override bool HasValidNestedExpressions =>
+        Subject is not null && Subject.HasValidNestedExpressions
+        && Kind switch {
+            BoundLayoutQueryKind.SizeOf or BoundLayoutQueryKind.AlignOf => true,
+            BoundLayoutQueryKind.OffsetOfType =>
+                Subject.Kind == BoundQuerySubjectKind.Type
+                    && Subject.FieldPath is not null,
+            BoundLayoutQueryKind.OffsetOfPlace =>
+                (Subject.Kind is BoundQuerySubjectKind.Place
+                    or BoundQuerySubjectKind.FieldPathPlace)
+                    && Subject.FieldPath is { Steps.Length: 1 },
+            _ => false,
+        };
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => Subject is null
+            ? this
+            : this with {
+                Subject = Subject.RewriteNestedExpressions(rewrite),
+            };
+}
+
+/// <summary>A typed constant represented by its canonical or raw-bit payload.</summary>
 public sealed record BoundConstant : BoundExpression
 {
     private readonly long? _legacyValue;
+    private readonly PrimitiveType _representationType;
 
     /// <summary>The source-compatible 64-bit payload for values whose complete representation fits.</summary>
     /// <exception cref="InvalidOperationException">The complete value uses more than sixty-four bits.</exception>
@@ -1384,6 +2159,12 @@ public sealed record BoundConstant : BoundExpression
         ?? throw new InvalidOperationException("This scalar constant requires its complete bit payload.");
 
     internal ScalarBits Bits { get; }
+    internal PrimitiveType RepresentationType => _representationType;
+    internal ImmutableArray<BoundGenericUniquePropertyFact>
+        GenericUniquePropertyWhenTrue { get; init; } = [];
+    internal ImmutableArray<BoundGenericUniquePropertyFact>
+        GenericUniquePropertyWhenFalse { get; init; } = [];
+    internal bool? GenericUniquePropertyKnownResult { get; init; }
 
     /// <summary>Creates a constant using the existing payload representation.</summary>
     /// <param name="value">The 64-bit payload using the type's existing bound representation.</param>
@@ -1400,13 +2181,34 @@ public sealed record BoundConstant : BoundExpression
             throw new ArgumentException("A wide scalar constant requires its complete bit payload.", nameof(value));
         }
         _legacyValue = value;
+        _representationType = type;
         Bits = ScalarBits.FromLegacyValue(value, type);
     }
 
     internal BoundConstant(ScalarBits bits, PrimitiveType type, TextSpan span) : base(type, span)
     {
         Bits = bits;
+        _representationType = type;
         _legacyValue = bits.TryGetLegacyValue(type, out var value) ? value : null;
+    }
+
+    internal BoundConstant(ScalarBits bits, PrimitiveType type,
+        PrimitiveType representationType, TextSpan span) : base(type, span)
+    {
+        if (type == representationType
+            || (!PrimitiveTypeFacts.IsIntegerOrWide(representationType)
+                && representationType != PrimitiveType.Bool)
+            || !bits.IsCanonicalFor(representationType))
+        {
+            throw new ArgumentException(
+                "The typed constant payload does not match its primitive carrier.",
+                nameof(bits));
+        }
+
+        Bits = bits;
+        _representationType = representationType;
+        _legacyValue = bits.TryGetLegacyValue(representationType, out var value)
+            ? value : null;
     }
 
     internal bool TryGetLegacyValue(out long value)
@@ -1479,6 +2281,17 @@ public sealed record BoundReferenceRead(BoundExpression Descriptor, PrimitiveTyp
     internal override ImmutableArray<BoundExpression> NestedExpressions => [Descriptor];
     internal override BoundExpression RewriteNestedExpressions(
         Func<BoundExpression, BoundExpression> rewrite) => this with { Descriptor = rewrite(Descriptor) };
+}
+
+/// <summary>Tests whether a checked initialization reference's exact destination is initialized.</summary>
+public sealed record BoundReferenceInitializationTest(
+    BoundExpression Descriptor, TextSpan Span)
+    : BoundExpression(PrimitiveType.Bool, Span)
+{
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [Descriptor];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite)
+        => this with { Descriptor = rewrite(Descriptor) };
 }
 
 /// <summary>Writes an exact value through a checked writable reference.</summary>
@@ -2024,6 +2837,11 @@ public sealed record BoundIsSome(BoundExpression Value, int Variable, TextSpan S
 /// <summary>Tests whether a named local or parameter currently contains an initialized value.</summary>
 public sealed record BoundIsInitialized(int Variable, TextSpan Span) : BoundExpression(PrimitiveType.Bool, Span);
 
+/// <summary>Tests the uniqueness property of one generic method type formal.</summary>
+public sealed record BoundGenericTypePropertyTest(int FormalOrdinal,
+    PrimitiveType FormalType, bool? KnownResult, TextSpan Span)
+    : BoundExpression(PrimitiveType.Bool, Span);
+
 /// <summary>Tests optional presence or captures a supported inferred value on a successful match.</summary>
 public sealed record BoundIsVariablePattern(BoundExpression Value, int Variable, bool IncludeNull, TextSpan Span)
     : BoundExpression(PrimitiveType.Bool, Span)
@@ -2037,13 +2855,20 @@ public sealed record BoundIsVariablePattern(BoundExpression Value, int Variable,
 /// <param name="Variable">The slot index.</param>
 /// <param name="Type">The slot type.</param>
 /// <param name="Span">The source range.</param>
-public sealed record BoundRead(int Variable, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+public sealed record BoundRead(int Variable, PrimitiveType Type, TextSpan Span)
+    : BoundExpression(Type, Span)
+{
+    internal int GenericCopyRefinementOrdinal { get; init; } = -1;
+}
 
 internal sealed record BoundContractReturnValue(PrimitiveType Type,
     TextSpan Span) : BoundExpression(Type, Span);
 
 /// <summary>Transfers a named unique owner and vacates its source.</summary>
-public sealed record BoundMove(int Variable, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+public sealed record BoundMove(int Variable, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span)
+{
+    internal int GenericUniqueRefinementOrdinal { get; init; } = -1;
+}
 
 /// <summary>A synchronous, nonescaping receiver loan; never a source value.</summary>
 public sealed record BoundReceiverLoan(int Variable, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
@@ -2205,6 +3030,19 @@ public sealed record BoundConditional(BoundExpression Condition, BoundExpression
         };
 }
 
+internal sealed record BoundCallDefaultArgument(
+    int ArgumentIndex, int ParameterIndex, BoundExpression Value,
+    BoundConstant? FrozenValue, int SourceInputOrdinal);
+
+internal sealed record BoundPendingInterfaceDefault(
+    BoundInterfaceMemberIdentity Requirement, int ParameterOrdinal,
+    PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span)
+{
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this;
+}
+
 /// <summary>A statically resolved direct call.</summary>
 /// <param name="Function">The callee index.</param>
 /// <param name="Arguments">Arguments evaluated once in source order.</param>
@@ -2213,8 +3051,19 @@ public sealed record BoundConditional(BoundExpression Condition, BoundExpression
 public sealed record BoundCall(int Function, ImmutableArray<BoundExpression> Arguments,
     PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span)
 {
+    internal BoundInterfaceCallIdentity? InterfaceCallIdentity
+        { get; init; }
+    internal BoundGenericMethodInstantiation? GenericMethodCall { get; init; }
+    internal BoundGenericMethodImport? ImportedGenericMethodCall
+        { get; init; }
+    internal ImmutableArray<PrimitiveType>
+        ImportedGenericMethodTypeArguments { get; init; } = [];
+
     /// <summary>Maps source-order arguments to formal argument positions when binding is non-positional.</summary>
     internal ImmutableArray<int> ArgumentParameterIndices { get; init; }
+
+    internal ImmutableArray<BoundCallDefaultArgument> DefaultedArguments
+        { get; init; }
 
     /// <summary>Per source-order argument, the backing temporary for implicit-reference materialization, or -1.</summary>
     internal ImmutableArray<int> ArgumentImplicitReferenceTemporaries { get; init; }
@@ -2232,6 +3081,7 @@ public sealed record BoundCall(int Function, ImmutableArray<BoundExpression> Arg
         {
             return parameterIndex;
         }
+
         for (var index = 0; index < ArgumentParameterIndices.Length; index++)
         {
             if (ArgumentParameterIndices[index] == parameterIndex)
@@ -2252,6 +3102,13 @@ public sealed record BoundCall(int Function, ImmutableArray<BoundExpression> Arg
         Func<BoundExpression, BoundExpression> rewrite) => Arguments.IsDefault ? this
         : this with { Arguments = [.. Arguments.Select(rewrite)] };
 }
+
+internal sealed record BoundInterfaceCallIdentity(
+    PrimitiveType ImplementingType,
+    BoundInterfaceType WitnessInterface,
+    BoundInterfaceType RequestedInterface,
+    BoundInterfaceMemberIdentity Requirement,
+    bool IsConstraintCall = false);
 
 /// <summary>A checked call through a concrete native function-pointer signature.</summary>
 public sealed record BoundIndirectCall(BoundExpression Target, ImmutableArray<BoundExpression> Arguments,

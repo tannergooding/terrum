@@ -341,9 +341,10 @@ internal sealed class NativeCoreRegistrationTests
             internal NativeCallingConvention SelectConvention() {
                 return NativeCallingConvention.Cdecl;
             }
-            """), new CompilationOptions {
-                NativeCoreRegistration = CreateRegistration(),
-            });
+            """), CoreEvaluationFormTestHelpers.WithConstEval(
+                new CompilationOptions {
+                    NativeCoreRegistration = CreateRegistration(),
+                }));
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1140,7 +1141,8 @@ internal sealed class NativeCoreRegistrationTests
                 ABI selected = Forward(ABI.Cdecl, true);
                 return 0;
             }
-            """), reference);
+            """), reference,
+            CoreEvaluationFormTestHelpers.Options());
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1323,7 +1325,8 @@ internal sealed class NativeCoreRegistrationTests
 
             [NativeCallable]
             int32 DefaultCallback(int32 value) { return value; }
-            """), reference);
+            """), reference,
+            CoreEvaluationFormTestHelpers.Options());
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1378,7 +1381,8 @@ internal sealed class NativeCoreRegistrationTests
                 Palette runtimeValue = Forward(Palette.MinusOne, true);
                 return 0;
             }
-            """), reference);
+            """), reference,
+            CoreEvaluationFormTestHelpers.Options());
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1505,7 +1509,8 @@ internal sealed class NativeCoreRegistrationTests
                 int32> callback) {
                 return 0;
             }
-            """), reference);
+            """), reference,
+            CoreEvaluationFormTestHelpers.Options());
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1794,7 +1799,8 @@ internal sealed class NativeCoreRegistrationTests
                     return callback(42);
                 }
             }
-            """), reference);
+            """), reference,
+            CoreEvaluationFormTestHelpers.Options());
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1884,7 +1890,8 @@ internal sealed class NativeCoreRegistrationTests
                 ResolutionMode: SelectMode(true),
                 ResolutionPolicy: SelectPolicy())]
             public extern int32 Read(int32 value);
-            """), reference);
+            """), reference,
+            CoreEvaluationFormTestHelpers.Options());
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));

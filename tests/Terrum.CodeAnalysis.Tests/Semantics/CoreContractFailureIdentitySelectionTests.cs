@@ -177,7 +177,7 @@ internal sealed class CoreContractFailureIdentitySelectionTests
         var moduleException = Assert.Throws<ModuleContractException>(() =>
             ModuleCompiler.CreateProducer(compilation.Program, ["Identity"]));
         Assert.That(moduleException!.Message,
-            Does.Contain("declaration contract clauses"));
+            Does.Contain("declaration clauses"));
         var trrmException = Assert.Throws<NotSupportedException>(() =>
             TrRmExecutableCompiler.EmitStandard(compilation.Program,
                 "sample.contracts", "trrm/1-draft-layout-queries-1", 1));
