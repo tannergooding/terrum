@@ -17591,11 +17591,15 @@ public static partial class SemanticVerifier
         BoundQueryFieldPath path, bool requireInlinePath,
         BoundFunction function, BoundProgram program)
     {
+        var standardClassRoot
+            = GetSelectedStandardClassDeclaration(path.RootType, program);
         if (!path.HasValidStructure
             || !ValidType(path.RootType, allowVoid: false, program)
+            || (standardClassRoot is not null && !requireInlinePath)
             || (requireInlinePath
                 && (ManagedClassTypes.IsClass(path.RootType)
-                    || !HasFields(program, path.RootType))))
+                    || (standardClassRoot is null
+                        && !HasFields(program, path.RootType)))))
         {
             throw Invalid();
         }
@@ -17604,31 +17608,117 @@ public static partial class SemanticVerifier
         for (var index = 0; index < path.Steps.Length; index++)
         {
             var step = path.Steps[index];
+            var isStandardClassField
+                = step.StandardClassFieldOrigin is not null;
             if (step.OwnerType != ownerType
-                || !HasFields(program, ownerType)
-                || (requireInlinePath
-                    && ManagedClassTypes.IsClass(ownerType))
-                || step.FieldOrdinal >= (uint)Fields(program,
-                    ownerType).Length)
+                || isStandardClassField
+                    != (index == 0 && standardClassRoot is not null)
+                || (requireInlinePath && index != 0
+                    && (ManagedClassTypes.IsClass(ownerType)
+                        || BoundGenericNominalTypeContract
+                            .IsNominalClassType(ownerType,
+                                program.GenericNominalTypeInstances,
+                                program.GenericNominalTypeDefinitions))))
             {
                 throw Invalid();
             }
 
             var fieldOrdinal = checked((int)step.FieldOrdinal);
-            var field = Fields(program, ownerType)[fieldOrdinal];
-            if (field.Type != step.FieldType
-                || !CanAccessField(function, program, ownerType,
-                    fieldOrdinal))
+            if (isStandardClassField)
             {
-                throw Invalid();
+                if (standardClassRoot is null
+                    || (uint)fieldOrdinal
+                        >= (uint)standardClassRoot.Declaration.Fields.Length)
+                {
+                    throw Invalid();
+                }
+
+                var classField = standardClassRoot.Declaration.Fields[
+                    fieldOrdinal];
+                if (!MatchesStandardClassQueryField(step, classField)
+                    || classField.Type != step.FieldType)
+                {
+                    throw Invalid();
+                }
             }
-            if (RequiresUnsafeFieldAccess(program, ownerType, field)
-                && !step.IsUnsafeAuthorized)
+            else
             {
-                throw InvalidEffect(default, "UnsafeCaller");
+                if (!HasFields(program, ownerType)
+                    || (uint)fieldOrdinal
+                        >= (uint)Fields(program, ownerType).Length)
+                {
+                    throw Invalid();
+                }
+
+                var field = Fields(program, ownerType)[fieldOrdinal];
+                if (field.Type != step.FieldType
+                    || !CanAccessField(function, program, ownerType,
+                        fieldOrdinal))
+                {
+                    throw Invalid();
+                }
+                if (RequiresUnsafeFieldAccess(program, ownerType, field)
+                    && !step.IsUnsafeAuthorized)
+                {
+                    throw InvalidEffect(default, "UnsafeCaller");
+                }
             }
-            ownerType = field.Type;
+            ownerType = step.FieldType;
         }
+    }
+
+    private static BoundStandardClassDeclaration?
+        GetSelectedStandardClassDeclaration(
+            PrimitiveType type, BoundProgram program)
+    {
+        if (!BoundGenericNominalTypeContract.IsNominalClassType(type,
+                program.GenericNominalTypeInstances,
+                program.GenericNominalTypeDefinitions))
+        {
+            return null;
+        }
+
+        var instanceIndex = BoundGenericNominalTypeTypes.Index(type);
+        if ((uint)instanceIndex
+            >= (uint)program.GenericNominalTypeInstances.Length)
+        {
+            return null;
+        }
+
+        var instance = program.GenericNominalTypeInstances[instanceIndex];
+        if (!instance.Arguments.IsEmpty || instance.Qualifiers != 0
+            || instance.TypeSpecReference != 0
+            || instance.TypeSpecProviderIdentity is not null
+            || instance.TypeSpecForm != 0)
+        {
+            return null;
+        }
+
+        var identity = instance.Definition;
+        return program.StandardClassDeclarations.FirstOrDefault(
+            declaration =>
+                declaration.Declaration.Identity == identity
+                && !declaration.SelectedExportKeys.IsEmpty
+                && declaration.Expectations.IsEmpty);
+    }
+
+    private static bool MatchesStandardClassQueryField(
+        BoundQueryFieldStep step,
+        BoundStandardClassFieldDeclaration field)
+    {
+        var origin = step.StandardClassFieldOrigin;
+        return origin is not null
+            && step.StandardFieldOrigin is null
+            && (field.Flags & 3) == 2 && (field.Flags & 8) == 0
+            && !field.SelectedExportKeys.IsEmpty
+            && origin.DefinitionId == field.DefinitionId
+            && origin.OwnerDefinitionId == field.OwnerDefinitionId
+            && StringComparer.Ordinal.Equals(origin.Name, field.Name)
+            && origin.Flags == field.Flags
+            && origin.TypeSpecReference == field.TypeSpecReference
+            && origin.Type == field.Type
+            && origin.SelectedExportKeys.SequenceEqual(
+                field.SelectedExportKeys, StringComparer.Ordinal);
     }
 
     private static void VerifyQueryPlaceExpression(

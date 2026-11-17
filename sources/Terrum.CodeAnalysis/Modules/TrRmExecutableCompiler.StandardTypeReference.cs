@@ -795,10 +795,12 @@ public static partial class TrRmExecutableCompiler
                 var selectedKeys = field.ExportKeys.Where(
                         selectedFieldKeySet.Contains)
                     .ToImmutableArray();
-                if (!selectedKeys.IsEmpty && (field.Flags & 3) != 2)
+                if (!selectedKeys.IsEmpty
+                    && ((field.Flags & 3) != 2
+                        || (field.Flags & 8) != 0))
                 {
                     throw new ArgumentException(
-                        "A selected FieldDef ExportKey does not identify a public class field.",
+                        "A selected FieldDef ExportKey does not identify a public instance class field.",
                         nameof(selectedFieldExportKeys));
                 }
 
@@ -1720,21 +1722,22 @@ public static partial class TrRmExecutableCompiler
                 genericNominalTypeInstances, classTypeInstanceIndexes,
                 classIdentityByRootTypeDefRow,
                 classIdentityByRootImportRow);
+        var structureIndexByRootTypeDefRow = new Dictionary<int, int>(
+            structTypeDefRows.Length);
+        for (var structureIndex = 0;
+            structureIndex < structTypeDefRows.Length;
+            structureIndex++)
+        {
+            structureIndexByRootTypeDefRow.Add(
+                structTypeDefRows[structureIndex], structureIndex);
+        }
+
         if (selectedFieldExportKeys.Length != 0 && !structures.IsEmpty)
         {
             var selectedFieldKeys = selectedFieldExportKeys.ToHashSet(
                 StringComparer.Ordinal);
             var selectedStructures = new HashSet<int>();
             var pendingStructures = new Stack<int>();
-            var structureIndexByTypeDefRow = new Dictionary<int, int>(
-                structTypeDefRows.Length);
-            for (var structureIndex = 0;
-                structureIndex < structTypeDefRows.Length;
-                structureIndex++)
-            {
-                structureIndexByTypeDefRow.Add(
-                    structTypeDefRows[structureIndex], structureIndex);
-            }
 
             void IncludeInlineStructure(uint typeSpecReference)
             {
@@ -1743,7 +1746,7 @@ public static partial class TrRmExecutableCompiler
                 int structureIndex;
                 if (type.Form == 0x02 && type.Qualifiers == 0)
                 {
-                    if (!structureIndexByTypeDefRow.TryGetValue(
+                    if (!structureIndexByRootTypeDefRow.TryGetValue(
                             checked((int)type.Row), out structureIndex))
                     {
                         return;
@@ -1867,6 +1870,171 @@ public static partial class TrRmExecutableCompiler
             }
 
             structures = structureBuilder.ToImmutable();
+        }
+
+        bool TryDecodeSelectedClassFieldType(uint typeSpecReference,
+            out PrimitiveType fieldType)
+        {
+            fieldType = PrimitiveType.Void;
+            var type = rootTables.TypeSpecs.GetTypeSpecRef(
+                typeSpecReference);
+            var typeSpecForm = type.Form;
+            var qualifierSource = type;
+            var depth = 0;
+            while (type.Form == 0x06 && type.Qualifiers == 0)
+            {
+                if (++depth > SemanticVerifier.MaximumDepth)
+                {
+                    throw Unsupported(
+                        "An EN1 class query FieldDef TypeSpec exceeds the nesting limit.");
+                }
+
+                var row = rootTables.TypeSpecs.GetRow(type.Row);
+                var innerTypeSpec = BinaryPrimitives
+                    .ReadUInt32LittleEndian(row[2..]);
+                type = rootTables.TypeSpecs.GetTypeSpecRef(innerTypeSpec);
+                qualifierSource = type;
+            }
+
+            if (typeSpecForm == 0xF2 && type.Form == 0xF2
+                && type.Qualifiers == 0
+                && TrRmConstantSourceValueValidator
+                    .TryGetBoundScalarType(type.TypeCode,
+                        out var scalarType)
+                && scalarType != PrimitiveType.Void)
+            {
+                fieldType = scalarType;
+                return true;
+            }
+
+            var typeRow = checked((int)type.Row);
+            var classTypeIdentity
+                = default(BoundGenericNominalTypeIdentity);
+            var hasClassIdentity = type.Form switch {
+                0x02 => classIdentityByRootTypeDefRow.TryGetValue(
+                    typeRow, out classTypeIdentity),
+                0x03 => classIdentityByRootImportRow.TryGetValue(
+                    typeRow, out classTypeIdentity),
+                _ => false,
+            };
+            if (hasClassIdentity)
+            {
+                var definition = genericNominalTypeDefinitions
+                    .FirstOrDefault(candidate =>
+                        candidate.Identity == classTypeIdentity);
+                if (definition is null || definition.NominalKind != 2
+                    || !definition.Formals.IsEmpty)
+                {
+                    throw Invalid(
+                        "An EN1 class query field has no complete nongeneric class identity.");
+                }
+
+                var key = (classTypeIdentity, rootSnapshot.ModuleIdentity,
+                    typeSpecReference);
+                if (!classTypeInstanceIndexes.TryGetValue(key,
+                        out var instanceIndex))
+                {
+                    if (genericNominalTypeInstances.Count
+                        >= BoundGenericNominalTypeTypes.MaximumCount)
+                    {
+                        throw Unsupported(
+                            "The EN1 class query type instance limit was exceeded.");
+                    }
+
+                    instanceIndex = genericNominalTypeInstances.Count;
+                    genericNominalTypeInstances.Add(
+                        new BoundGenericNominalTypeInstance(
+                            classTypeIdentity, [],
+                            qualifierSource.Qualifiers,
+                            typeSpecReference, rootSnapshot.ModuleIdentity,
+                            typeSpecForm));
+                    classTypeInstanceIndexes.Add(key, instanceIndex);
+                }
+
+                fieldType = BoundGenericNominalTypeTypes.Type(
+                    instanceIndex);
+                return true;
+            }
+
+            if (typeSpecForm != type.Form || type.Qualifiers != 0)
+            {
+                return false;
+            }
+
+            if (type.Form == 0x02
+                && structureIndexByRootTypeDefRow.TryGetValue(typeRow,
+                    out var structureIndex))
+            {
+                fieldType = (PrimitiveType)(100 + structureIndex);
+                return true;
+            }
+            if (type.Form == 0x03
+                && structureIndexByImportRow.TryGetValue(typeRow,
+                    out var importedStructureIndex))
+            {
+                fieldType = (PrimitiveType)(100
+                    + importedStructureIndex);
+                return true;
+            }
+            if (type.Form == 0x02
+                && enumIndexByTypeDefRow.TryGetValue(typeRow,
+                    out var enumIndex))
+            {
+                fieldType = BoundEnumTypes.Type(enumIndex);
+                return true;
+            }
+            if (type.Form == 0x03
+                && enumIndexByImportRow.TryGetValue(typeRow,
+                    out var importedEnumIndex))
+            {
+                fieldType = BoundEnumTypes.Type(importedEnumIndex);
+                return true;
+            }
+
+            return false;
+        }
+
+        if (selectedFieldExportKeys.Length != 0)
+        {
+            var declarations = standardClassDeclarations.ToBuilder();
+            for (var declarationIndex = 0;
+                declarationIndex < declarations.Count;
+                declarationIndex++)
+            {
+                var declaration = declarations[declarationIndex];
+                if (declaration.SelectedExportKeys.IsEmpty
+                    || !BoundStandardEnumDeclarationContract.SnapshotsMatch(
+                        declaration.Declaration.Provider, rootSnapshot))
+                {
+                    continue;
+                }
+
+                var fields = declaration.Declaration.Fields.ToBuilder();
+                for (var fieldIndex = 0; fieldIndex < fields.Count;
+                    fieldIndex++)
+                {
+                    var field = fields[fieldIndex];
+                    if (field.SelectedExportKeys.IsEmpty)
+                    {
+                        continue;
+                    }
+                    if (!TryDecodeSelectedClassFieldType(
+                            field.TypeSpecReference, out var fieldType))
+                    {
+                        continue;
+                    }
+
+                    fields[fieldIndex] = field with { Type = fieldType };
+                }
+
+                declarations[declarationIndex] = declaration with {
+                    Declaration = declaration.Declaration with {
+                        Fields = fields.ToImmutable(),
+                    },
+                };
+            }
+
+            standardClassDeclarations = declarations.ToImmutable();
         }
 
         var program = new BoundProgram([], -1) {

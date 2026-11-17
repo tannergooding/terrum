@@ -13,6 +13,7 @@ internal sealed record BoundStandardClassFieldDeclaration(
 {
     internal ImmutableArray<string> ExportKeys { get; init; } = [];
     internal ImmutableArray<string> SelectedExportKeys { get; init; } = [];
+    internal PrimitiveType Type { get; init; } = PrimitiveType.Void;
 }
 
 internal sealed record BoundStandardClassLayoutVariant(

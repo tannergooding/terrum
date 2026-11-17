@@ -2041,6 +2041,8 @@ internal readonly record struct BoundQueryFieldStep(
     bool IsUnsafeAuthorized)
 {
     internal BoundStandardFieldOrigin? StandardFieldOrigin { get; init; }
+    internal BoundStandardClassFieldDeclaration?
+        StandardClassFieldOrigin { get; init; }
 }
 
 internal sealed record BoundQueryFieldPath(

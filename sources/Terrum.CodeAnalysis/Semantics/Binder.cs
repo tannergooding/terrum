@@ -17579,6 +17579,70 @@ internal sealed partial class Binder
         }
     }
 
+    private bool TryGetSourceStandardClassDeclaration(
+        PrimitiveType type,
+        out BoundStandardClassDeclaration declaration)
+    {
+        declaration = null!;
+        if (!BoundGenericNominalTypeContract.IsNominalClassType(type,
+                _genericNominalTypeInstances,
+                _genericNominalTypeDefinitions))
+        {
+            return false;
+        }
+
+        var instanceIndex = BoundGenericNominalTypeTypes.Index(type);
+        if ((uint)instanceIndex
+            >= (uint)_genericNominalTypeInstances.Count)
+        {
+            return false;
+        }
+
+        var instance = _genericNominalTypeInstances[instanceIndex];
+        if (!instance.Arguments.IsEmpty || instance.Qualifiers != 0
+            || instance.TypeSpecReference != 0
+            || instance.TypeSpecProviderIdentity is not null
+            || instance.TypeSpecForm != 0)
+        {
+            return false;
+        }
+
+        var identity = instance.Definition;
+        foreach (var candidate in _standardClassDeclarations)
+        {
+            if (candidate.Declaration.Identity == identity
+                && !candidate.SelectedExportKeys.IsEmpty
+                && candidate.Expectations.IsEmpty)
+            {
+                declaration = candidate;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryFindStandardClassField(
+        BoundStandardClassDeclaration declaration, string name,
+        out int ordinal, out BoundStandardClassFieldDeclaration field)
+    {
+        for (var index = 0;
+            index < declaration.Declaration.Fields.Length; index++)
+        {
+            var candidate = declaration.Declaration.Fields[index];
+            if (StringComparer.Ordinal.Equals(candidate.Name, name))
+            {
+                ordinal = index;
+                field = candidate;
+                return true;
+            }
+        }
+
+        ordinal = -1;
+        field = null!;
+        return false;
+    }
+
     private BoundQueryFieldPath? BindQueryFieldPath(
         PrimitiveType rootType, SyntaxNode fieldPathSyntax)
     {
@@ -17587,12 +17651,15 @@ internal sealed partial class Binder
             .Where(static element => element.Token.Kind == TokenKind.Identifier)
             .ToArray();
         if (fieldPathSyntax.Kind != SyntaxKind.FieldPath
-            || !IsStruct(rootType) || fieldNames.Length == 0
+            || (!IsStruct(rootType)
+                && !TryGetSourceStandardClassDeclaration(rootType,
+                    out _))
+            || fieldNames.Length == 0
             || fieldNames.Length > SemanticVerifier.MaximumAnalysisVisits
             || fieldNames.Any(static element => element.Token.IsMissing))
         {
             Report("TRM3005",
-                "offsetof(Type, FieldPath) requires a nonempty inline path rooted in a value type.",
+                "offsetof(Type, FieldPath) requires a nonempty path rooted in an inline value type or selected standard class.",
                 fieldPathSyntax.Span);
             return null;
         }
@@ -17600,11 +17667,70 @@ internal sealed partial class Binder
         var steps = ImmutableArray.CreateBuilder<BoundQueryFieldStep>(
             fieldNames.Length);
         var ownerType = rootType;
+        var firstField = true;
         foreach (var fieldName in fieldNames)
         {
-            if (!IsStruct(ownerType)
-                || !TryFindField(ownerType, fieldName.Token.Name,
-                    out var field))
+            BoundStandardClassFieldDeclaration? classField = null;
+            var isStandardClassField = false;
+            int field;
+            PrimitiveType fieldType;
+            bool isUnsafeAuthorized;
+            if (IsStruct(ownerType)
+                && TryFindField(ownerType, fieldName.Token.Name,
+                    out field))
+            {
+                var definition = GetField(ownerType, field);
+                var ownerStructureIndex = (int)ownerType - 100;
+                if ((uint)ownerStructureIndex < (uint)_structs.Count
+                    && _structs[ownerStructureIndex].StandardLayoutOnly
+                    && definition.StandardFieldOrigin is null)
+                {
+                    Report("TRM3006",
+                        $"Field '{fieldName.Token.Text}' has no selected Standard FieldDef ExportKey.",
+                        fieldName.Token.Span);
+                    return null;
+                }
+
+                fieldType = definition.Type;
+                isUnsafeAuthorized = CheckFieldAccess(
+                    ownerType, field, fieldName.Token.Span);
+            }
+            else if (firstField
+                && TryGetSourceStandardClassDeclaration(ownerType,
+                    out var classDeclaration)
+                && TryFindStandardClassField(classDeclaration,
+                    fieldName.Token.Name, out field,
+                    out var selectedClassField))
+            {
+                classField = selectedClassField;
+                if ((selectedClassField.Flags & 3) != 2
+                    || (selectedClassField.Flags & 8) != 0)
+                {
+                    Report("TRM3006",
+                        $"Field '{fieldName.Token.Text}' is not an accessible public instance field.",
+                        fieldName.Token.Span);
+                    return null;
+                }
+                if (selectedClassField.SelectedExportKeys.IsEmpty)
+                {
+                    Report("TRM3006",
+                        $"Field '{fieldName.Token.Text}' has no selected Standard FieldDef ExportKey.",
+                        fieldName.Token.Span);
+                    return null;
+                }
+                if (selectedClassField.Type == PrimitiveType.Void)
+                {
+                    Report("TRM3005",
+                        $"Field '{fieldName.Token.Text}' has an unsupported TypeSpec for class layout queries.",
+                        fieldName.Token.Span);
+                    return null;
+                }
+
+                isStandardClassField = true;
+                fieldType = selectedClassField.Type;
+                isUnsafeAuthorized = false;
+            }
+            else
             {
                 Report("TRM3006",
                     $"Type '{TypeName(ownerType)}' has no inline field '{fieldName.Token.Text}'.",
@@ -17612,26 +17738,16 @@ internal sealed partial class Binder
                 return null;
             }
 
-            var definition = GetField(ownerType, field);
-            var ownerStructureIndex = (int)ownerType - 100;
-            if ((uint)ownerStructureIndex < (uint)_structs.Count
-                && _structs[ownerStructureIndex].StandardLayoutOnly
-                && definition.StandardFieldOrigin is null)
-            {
-                Report("TRM3006",
-                    $"Field '{fieldName.Token.Text}' has no selected Standard FieldDef ExportKey.",
-                    fieldName.Token.Span);
-                return null;
-            }
-
-            var isUnsafeAuthorized = CheckFieldAccess(
-                ownerType, field, fieldName.Token.Span);
             steps.Add(new BoundQueryFieldStep(ownerType,
-                checked((uint)field), definition.Type,
+                checked((uint)field), fieldType,
                 isUnsafeAuthorized) {
-                StandardFieldOrigin = definition.StandardFieldOrigin,
+                StandardFieldOrigin = isStandardClassField
+                    ? null : GetField(ownerType, field).StandardFieldOrigin,
+                StandardClassFieldOrigin = isStandardClassField
+                    ? classField : null,
             });
-            ownerType = definition.Type;
+            ownerType = fieldType;
+            firstField = false;
         }
 
         return new BoundQueryFieldPath(rootType, steps.MoveToImmutable());

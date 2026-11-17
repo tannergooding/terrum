@@ -1804,6 +1804,13 @@ internal static class BoundTreeTraversal
                             FieldType = rewriteType(step.FieldType),
                             StandardFieldOrigin = RewriteStandardFieldOrigin(
                                 step.StandardFieldOrigin, rewriteType),
+                            StandardClassFieldOrigin =
+                                step.StandardClassFieldOrigin is
+                                    BoundStandardClassFieldDeclaration
+                                    classField
+                                    ? classField with {
+                                        Type = rewriteType(classField.Type),
+                                    } : null,
                         }),
                     ],
                 } : null,

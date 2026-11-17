@@ -851,6 +851,95 @@ internal sealed class TrRmC1EnumClosureSourceTests
     }
 
     [Test]
+    public void BindsEN1ClassFieldOffsetOnlyWithExactFieldSelection()
+    {
+        var schemaIdentity = s_schemaIdentities[0];
+        var tree = SyntaxTree.Parse("""
+            namespace Demo {
+                public class Box {
+                    public int32 Value;
+                    public static int32 Count;
+                }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var fieldDeclarations = classDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Where(static node =>
+                node.Kind == SyntaxKind.FieldDeclaration).ToArray();
+        var classIndex = program.SourceClassProgramAssociation!
+            .Declarations.Single(declaration =>
+                declaration.Span == classDeclaration.Span).ClassIndex;
+        var classExport = new TrRmSourceClassExport(program, classIndex,
+            classDeclaration.Span, "type.box", [
+                new TrRmSourceClassMemberExport(0,
+                    fieldDeclarations[0].Span, "field.box.value"),
+                new TrRmSourceClassMemberExport(0,
+                    fieldDeclarations[1].Span, "field.box.count"),
+            ]);
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "ClassQuery", schemaIdentity, 1, [], [], [classExport], []);
+        var input = new TrRmStandardArtifactInput(schemaIdentity, artifact);
+        var selectedReference
+            = TrRmExecutableCompiler.CreateStandardReference(input,
+                "ClassQuery", [], ["type.box"], ["field.box.value"]);
+        var queryCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Demo;
+                nint Offset() {
+                    return unsafe(offsetof(Box, Value));
+                }
+                """), selectedReference, new CompilationOptions {
+                LayoutCoreRegistration
+                    = LayoutCoreRegistrationTestData.Create(),
+            });
+
+        Assert.That(queryCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                queryCompilation.Diagnostics));
+        var query = (BoundLayoutQuery?)null;
+        var function = queryCompilation.Program!.Functions.Single();
+        Assert.That(BoundTreeTraversal.VisitExpressions(function.Body,
+            expression => query ??= expression as BoundLayoutQuery), Is.True);
+        Assert.That(query, Is.Not.Null);
+        Assert.That(query!.Kind,
+            Is.EqualTo(BoundLayoutQueryKind.OffsetOfType));
+        Assert.That(query.Subject.FieldPath?.Steps, Has.Length.EqualTo(1));
+        var step = query.Subject.FieldPath!.Steps[0];
+        Assert.That(step.StandardClassFieldOrigin?.SelectedExportKeys,
+            Is.EqualTo(["field.box.value"]));
+        Assert.That(step.FieldType, Is.EqualTo(PrimitiveType.Int32));
+
+        var typeOnlyReference
+            = TrRmExecutableCompiler.CreateStandardReference(input,
+                "ClassQuery", [], ["type.box"]);
+        var typeOnlyCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Demo;
+                nint Offset() {
+                    return unsafe(offsetof(Box, Value));
+                }
+                """), typeOnlyReference, new CompilationOptions {
+                LayoutCoreRegistration
+                    = LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(typeOnlyCompilation.HasErrors, Is.True);
+        Assert.That(typeOnlyCompilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Message.Contains(
+                "no selected Standard FieldDef ExportKey",
+                StringComparison.Ordinal)), Is.True);
+        Assert.Throws<ArgumentException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(input,
+                "ClassQuery", [], ["type.box"], ["field.box.count"]));
+    }
+
+    [Test]
     public void ReemitsEN1ClassTypeDefAndFieldImportsAndTypeSpecs()
     {
         var schemaIdentity = s_schemaIdentities[0];
@@ -991,6 +1080,39 @@ internal sealed class TrRmC1EnumClosureSourceTests
         Assert.That(selectedPalette.Declaration.Fields.Single(
             static field => field.Name == "ShelfValue").SelectedExportKeys,
             Is.EqualTo(["field.palette.shelf"]));
+        var classHandleQuery = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Demo;
+                nint Offset() {
+                    return unsafe(offsetof(Palette, ShelfValue));
+                }
+                """), fieldSelectedReference, new CompilationOptions {
+                LayoutCoreRegistration
+                    = LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(classHandleQuery.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                classHandleQuery.Diagnostics));
+        BoundLayoutQuery? classHandleOffset = null;
+        var classHandleFunction = classHandleQuery.Program!.Functions
+            .Single();
+        Assert.That(BoundTreeTraversal.VisitExpressions(
+            classHandleFunction.Body,
+            expression => classHandleOffset ??=
+                expression as BoundLayoutQuery), Is.True);
+        var classHandleFieldType
+            = classHandleOffset!.Subject.FieldPath!.Steps.Single()
+                .FieldType;
+        Assert.That(BoundGenericNominalTypeTypes.IsType(
+            classHandleFieldType), Is.True);
+        var classHandleTypeInstance = fieldSelectedReference
+            .GenericNominalTypeInstances[
+                BoundGenericNominalTypeTypes.Index(classHandleFieldType)];
+        Assert.That(classHandleTypeInstance.Definition.ProviderIdentity,
+            Is.EqualTo("ShelfProvider"));
+        Assert.That(classHandleTypeInstance.TypeSpecProviderIdentity,
+            Is.EqualTo("PaletteConsumer"));
+        Assert.That(classHandleTypeInstance.TypeSpecReference, Is.GreaterThan(0));
         Assert.Throws<ArgumentException>(() =>
             TrRmExecutableCompiler.CreateStandardReference(
                 new TrRmStandardArtifactInput(schemaIdentity,
