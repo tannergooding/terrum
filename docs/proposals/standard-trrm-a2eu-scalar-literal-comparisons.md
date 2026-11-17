@@ -211,13 +211,8 @@ numeric operands; [schema predicates](../../sources/Terrum.CodeAnalysis/Modules/
 exclude A2EU from scalar-frozen decoding. These are implementation gaps
 after the proposed composition, not missing compare semantics.
 
-The conditional proposal records **76/76, zero skips** for existing source-free
-A2EU JIT/AOT coverage at
-`artifacts\tst\Debug\a2eu-boolean-literal-comparisons-final3\a2eu-boolean-literal-comparisons-final3.trx`.
-The active regression includes
-[`StandardA2EUConditionalJitExecutesOnlyTheSelectedNativeArm`](../../tests/Terrum.CodeAnalysis.Tests/Modules/TrRm/TrRmForeignInvocationAddressEmitterTests.cs).
-It covers no numeric-literal comparison and proves nothing about A2EU+SF1.
-No build, test or native execution is performed by this documentation task.
+Existing source-free A2EU conditional support does not exercise numeric-literal
+comparisons or A2EU+SF1.
 
 | Required future cases | Acceptance |
 |---|---|
