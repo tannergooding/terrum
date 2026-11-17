@@ -1048,6 +1048,27 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 Is.EqualTo(["field.box.value"]));
             Assert.That(NativeEmitter.EmitLibrary(loadedClassQuery,
                 ["Offset"], NativeRuntimePolicy.FailFast), Is.Not.Empty);
+            var reemittedClassQuery = TrRmExecutableCompiler.EmitStandard(
+                loadedClassQuery, "ClassLayoutConsumer", schemaIdentity, 1);
+            var reemittedTables = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                    reemittedClassQuery, SchemaFor(schemaIdentity), null,
+                    usesNativePointerLoads: false,
+                    standardSchemaIdentity: schemaIdentity));
+            Assert.That(reemittedTables.TargetLayoutDependencies.Count,
+                Is.EqualTo(1));
+            Assert.That(reemittedTables.TargetLayoutDependencyFields.Count,
+                Is.EqualTo(1));
+            Assert.That(reemittedTables.ConstantExecutions.Count, Is.Zero);
+            Assert.That(reemittedTables.TargetLayoutDependencies
+                .GetQueryKind(1), Is.EqualTo((byte)3));
+            Assert.That(reemittedTables.TargetLayoutDependencies
+                .GetFieldRange(1).Count, Is.EqualTo(1));
+            var reloadedClassQuery = TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    reemittedClassQuery), "ClassLayoutConsumer", [input]);
+            Assert.That(reloadedClassQuery.Functions.Single().Body
+                .Statements.Single(), Is.TypeOf<BoundReturn>());
 
             var staticArtifact = AsStaticClassField(artifact,
                 SchemaFor(schemaIdentity));
