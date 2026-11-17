@@ -40,10 +40,10 @@ public static void Finish(Job job)
     Terminal.WriteLine(job.Id);
 }
 
-public static bool TryRead<T>(TextSpan text, init ref<T> value)
+public static bool TryRead<T>(TextSpan text, ref<init T> value)
     where T : IParsable<T>
 {
-    return T.TryParse(text, init *value);
+    return T.TryParse(text, ref init *value);
 }
 
 public static int32 Main()
@@ -79,7 +79,9 @@ public static int32 Main()
         Terminal.WriteLine(number);
     }
 
-    if (!TryRead<decimal32>("0.1", init var price))
+    init decimal32 price;
+
+    if (!TryRead<decimal32>("0.1", ref init price))
     {
         Terminal.WriteLine("Invalid decimal input.", output: TerminalOutput.Error);
 

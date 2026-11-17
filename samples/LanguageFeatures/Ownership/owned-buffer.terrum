@@ -36,7 +36,8 @@ unique struct BufferOwner
 
 int32 Main()
 {
-    require OwnedInt32Buffer.TryCreate(3, out var created);
+    init OwnedInt32Buffer created;
+    require OwnedInt32Buffer.TryCreate(3, ref init created);
     mut OwnedInt32Buffer words = move created;
     if (!words.TryAppend(30) || !words.TryAppend(12))
     {

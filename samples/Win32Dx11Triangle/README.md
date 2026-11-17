@@ -41,8 +41,8 @@ Both entries require Windows x64 and the D3D11 runtime, and load
 clears context bindings before releasing COM resources and destroys the window
 before unregistering its class.
 
-The source uses the implemented legacy `bool`/`out` ownership-output profile;
-these signatures are not canonical target `init ref<T>` declarations.
+The source still uses the implemented legacy `bool`/`out` native-output
+profile; those signatures do not use canonical `ref<init T>` contracts.
 Ordinary CLI tests bind and emit both entry points without opening a window.
 Window execution is separately gated and is not implied by emission.
 

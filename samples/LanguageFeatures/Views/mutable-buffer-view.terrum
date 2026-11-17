@@ -1,6 +1,7 @@
 int32 Main()
 {
-    require OwnedInt32Buffer.TryCreate(2, out var created);
+    init OwnedInt32Buffer created;
+    require OwnedInt32Buffer.TryCreate(2, ref init created);
     mut OwnedInt32Buffer values = move created;
     require values.TryAppend(40);
     require values.TryAppend(1);

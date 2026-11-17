@@ -8,9 +8,9 @@ using Terrum.Numerics;
 using Terrum.Numerics.Tensors;
 
 public static TVector AddBias<TVector, TMask>(TVector value, float32 bias)
-    where TVector : [FixedSimdMember<float32, TMask>], [Copy],
+    where TVector : [FixedSimdMember<float32, TMask>],
                     IAdditionOperators<TVector, TVector, TVector>
-    where TMask : [FixedSimdMaskFor<TVector, float32>], [Copy]
+    where TMask : [FixedSimdMaskFor<TVector, float32>]
 {
     return value + TVector.Splat(bias);
 }

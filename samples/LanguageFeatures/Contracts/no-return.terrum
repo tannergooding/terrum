@@ -4,19 +4,20 @@ void Reject()
     require false;
 }
 
-bool TrySelect(bool success, out int32 value)
+bool TrySelect(bool success, ref<init int32> value)
 {
     if (!success)
     {
         return false;
     }
-    value = 42;
+    *value = 42;
     return true;
 }
 
 int32 Select(bool success)
 {
-    if (!TrySelect(success, out var value))
+    init int32 value;
+    if (!TrySelect(success, ref init value))
     {
         Reject();
     }

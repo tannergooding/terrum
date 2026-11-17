@@ -1,6 +1,7 @@
 public int32 Middle() {
     int32 leaf = Leaf();
-    require OwnedInt32Buffer.TryCreate(2, out var created);
+    init OwnedInt32Buffer created;
+    require OwnedInt32Buffer.TryCreate(2, ref init created);
     mut OwnedInt32Buffer buffer = move created;
     require buffer.TryAppend(leaf);
     require buffer.TryAppend(1);

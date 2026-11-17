@@ -15,25 +15,27 @@ int64 Sum(int64 first, int64 second, int64 third, int64 fourth, int64 fifth)
     return first + second + third + fourth + fifth;
 }
 
-bool TryWide(bool success, out WideNumber result)
+bool TryWide(bool success, ref<init WideNumber> result)
 {
     if (!success)
     {
         return false;
     }
-    result = new WideNumber(int64.MinValue, uint64.MaxValue);
+    *result = new WideNumber(int64.MinValue, uint64.MaxValue);
     return true;
 }
 
-bool ForwardWide(bool success, out WideNumber result)
+bool ForwardWide(bool success, ref<init WideNumber> result)
 {
-    return TryWide(success, out result);
+    return TryWide(success, ref init *result);
 }
 
 int32 Main()
 {
-    require ForwardWide(true, out var value);
-    if (ForwardWide(false, out var ignored))
+    init WideNumber value;
+    require ForwardWide(true, ref init value);
+    init WideNumber ignored;
+    if (ForwardWide(false, ref init ignored))
     {
         return 1;
     }

@@ -13,13 +13,13 @@ struct Scalar
     }
 }
 
-bool TrySelect(bool success, int32 input, out int32 value)
+bool TrySelect(bool success, int32 input, ref<init int32> value)
 {
     if (!success)
     {
         return false;
     }
-    value = input & 255;
+    *value = input & 255;
     return true;
 }
 
@@ -30,11 +30,13 @@ int32 Main()
     {
         return -1;
     }
-    if (TrySelect(false, 0, out var unpublished))
+    init int32 unpublished;
+    if (TrySelect(false, 0, ref init unpublished))
     {
         return -2;
     }
-    if (TrySelect(true, 298, out var result))
+    init int32 result;
+    if (TrySelect(true, 298, ref init result))
     {
         return result;
     }
