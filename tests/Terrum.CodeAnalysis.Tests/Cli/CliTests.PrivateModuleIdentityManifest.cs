@@ -1,0 +1,662 @@
+// Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
+
+using System;
+using System.IO;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using System.Threading.Tasks;
+using NUnit.Framework;
+using Terrum.CodeAnalysis.Tests.Infrastructure;
+
+namespace Terrum.CodeAnalysis.Tests.Cli;
+
+internal sealed partial class CliTests
+{
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
+    public async Task CompileModuleIdentityManifestBindsOrderedFileInputsAsync(
+        string policy)
+    {
+        var directory = TestArtifactPaths.CreateDirectory(
+            "terrum-private-identity-manifest-");
+        var primarySource = Path.Combine(directory, "primary.terrum");
+        var additionalSource = Path.Combine(directory, "additional.terrum");
+        var consumerSource = Path.Combine(directory, "consumer.terrum");
+        var producerManifest = Path.Combine(directory, "producer.json");
+        var consumerManifest = Path.Combine(directory, "consumer.json");
+        var producerArtifact = Path.Combine(directory, "producer.trm");
+        var consumerArtifact = Path.Combine(directory, "consumer.trm");
+        var mismatchedOutput = Path.Combine(directory, "mismatched.trm");
+        var primaryBytes = Encoding.UTF8.GetBytes(
+            "public struct Cell { private int32 Value; } "
+            + "public enum Shade : int32 { Red = 0, Blue = 1 } "
+            + "public int32 AddOne(int32 value) { return value + 1; }");
+        var additionalBytes = Encoding.UTF8.GetBytes(
+            "public int32 Twice(int32 value) { return value * 2; }");
+        var consumerBytes = Encoding.UTF8.GetBytes(
+            "public int32 ReadCell(Cell value) { return 0; } "
+            + "public Shade CopyShade(Shade value) { return value; } "
+            + "public int32 Main() { return AddOne(Twice(20)); }");
+        try
+        {
+            await File.WriteAllBytesAsync(primarySource, primaryBytes)
+                .ConfigureAwait(false);
+            await File.WriteAllBytesAsync(additionalSource,
+                additionalBytes).ConfigureAwait(false);
+            await File.WriteAllBytesAsync(consumerSource, consumerBytes)
+                .ConfigureAwait(false);
+            await File.WriteAllTextAsync(producerManifest,
+                CreateManifest("ManifestProvider", [
+                    Digest(primaryBytes), Digest(additionalBytes),
+                ], null, [
+                    new {
+                        kind = "struct",
+                        qualifiedName = "Cell",
+                        localDeclarationKey = "types.cell",
+                        isExported = true,
+                    },
+                ], [], [
+                    new {
+                        qualifiedName = "Shade",
+                        localDeclarationKey = "types.shade",
+                        isExported = true,
+                        memberDeclarationKeys = new[] {
+                            "members.shade.red", "members.shade.blue",
+                        },
+                    },
+                ])).ConfigureAwait(false);
+
+            var (producerExit, producerOutput, producerError)
+                = await RunAsync([], [
+                    "compile-module", "producer", primarySource, "AddOne",
+                    "--source", additionalSource, "--export", "Twice",
+                    "-o", producerArtifact, "--runtime", policy,
+                    "--private-identity-manifest", producerManifest,
+                    "--json",
+                ]).ConfigureAwait(false);
+            Assert.That(producerExit, Is.EqualTo(0),
+                producerOutput + producerError);
+            Assert.That(producerError, Is.Empty);
+            using (var document = JsonDocument.Parse(producerOutput))
+            {
+                Assert.That(document.RootElement.GetProperty("success")
+                    .GetBoolean(), Is.True);
+                Assert.That(document.RootElement.GetProperty("runtimePolicy")
+                    .GetString(), Is.EqualTo(policy));
+            }
+
+            var producerBytes = await File.ReadAllBytesAsync(producerArtifact)
+                .ConfigureAwait(false);
+            await File.WriteAllTextAsync(consumerManifest,
+                CreateManifest("ManifestConsumer", [Digest(consumerBytes)],
+                    Digest(producerBytes), [], [
+                        new {
+                            kind = "struct",
+                            qualifiedName = "Cell",
+                            localDeclarationKey = "types.cell.consumer",
+                            selectedModuleIdentity = "ManifestProvider",
+                            selectedExportKey = "types.cell",
+                        },
+                        new {
+                            kind = "enum",
+                            qualifiedName = "Shade",
+                            localDeclarationKey = "types.shade.consumer",
+                            selectedModuleIdentity = "ManifestProvider",
+                            selectedExportKey = "types.shade",
+                        },
+                    ], [])).ConfigureAwait(false);
+            var (consumerExit, consumerOutput, consumerError)
+                = await RunAsync([], [
+                    "compile-module", "consumer", consumerSource,
+                    producerArtifact, "-o", consumerArtifact, "--runtime",
+                    policy, "--private-identity-manifest", consumerManifest,
+                    "--json",
+                ]).ConfigureAwait(false);
+            Assert.That(consumerExit, Is.EqualTo(0),
+                consumerOutput + consumerError);
+            Assert.That(consumerError, Is.Empty);
+            using (var document = JsonDocument.Parse(consumerOutput))
+            {
+                Assert.That(document.RootElement.GetProperty("success")
+                    .GetBoolean(), Is.True);
+                Assert.That(document.RootElement.GetProperty("runtimePolicy")
+                    .GetString(), Is.EqualTo(policy));
+            }
+
+            var (runExit, _, runError) = await RunAsync([], [
+                "run-module", consumerArtifact, producerArtifact,
+                "--runtime", policy,
+            ]).ConfigureAwait(false);
+            Assert.That(runExit, Is.EqualTo(41), runError);
+
+            var sentinel = "preserve existing artifact"u8.ToArray();
+            await File.WriteAllBytesAsync(mismatchedOutput, sentinel)
+                .ConfigureAwait(false);
+            var (mismatchExit, mismatchOutput, mismatchError)
+                = await RunAsync([], [
+                    "compile-module", "producer", additionalSource, "AddOne",
+                    "--source", primarySource, "--export", "Twice",
+                    "-o", mismatchedOutput, "--runtime", policy,
+                    "--private-identity-manifest", producerManifest,
+                    "--json",
+                ]).ConfigureAwait(false);
+            Assert.That(mismatchExit, Is.EqualTo(2));
+            Assert.That(mismatchError, Is.Empty);
+            using (var document = JsonDocument.Parse(mismatchOutput))
+            {
+                Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM2001"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(mismatchedOutput)
+                .ConfigureAwait(false), Is.EqualTo(sentinel));
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(false);
+        }
+    }
+
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
+    public async Task CompileModuleIdentityManifestCarriesRawUnionReturnCoverageAsync(
+        string policy)
+    {
+        var directory = TestArtifactPaths.CreateDirectory(
+            "terrum-private-identity-raw-union-layout-");
+        var providerSource = Path.Combine(directory, "provider.terrum");
+        var providerManifest = Path.Combine(directory, "provider.json");
+        var layoutManifest = Path.Combine(directory, "layout.json");
+        var providerArtifact = Path.Combine(directory, "provider.trm");
+        var consumerSource = Path.Combine(directory, "consumer.terrum");
+        var consumerManifest = Path.Combine(directory, "consumer.json");
+        var consumerArtifact = Path.Combine(directory, "consumer.trm");
+        var replacementSource = Path.Combine(directory,
+            "replacement-provider.terrum");
+        var replacementManifest = Path.Combine(directory,
+            "replacement-provider.json");
+        var replacementArtifact = Path.Combine(directory,
+            "replacement-provider.trm");
+        var providerBytes = Encoding.UTF8.GetBytes("""
+            [Blittable]
+            [Layout(LayoutKind.Union)]
+            public struct RawWord {
+                public mut uint32 Narrow;
+                public mut uint64 Wide;
+            }
+
+            public RawWord MakeWide() {
+                init mut RawWord value;
+                unsafe { value.Wide = uint64(0x1122334455667788); }
+                return value;
+            }
+            """);
+        var consumerBytes = Encoding.UTF8.GetBytes("""
+            int32 Main() {
+                mut RawWord value = MakeWide();
+                unsafe {
+                    return value.Wide == uint64(0x1122334455667788)
+                        ? 0 : 1;
+                }
+            }
+            """);
+        object LayoutKindMember(string name, int ordinal)
+            => new {
+                owner = new { kind = "enum", qualifiedName = "LayoutKind" },
+                enumIdentity = new {
+                    providerIdentity = "LayoutCore",
+                    exportKey = "LayoutKind",
+                    kind = "enum-type",
+                },
+                memberOrdinal = ordinal,
+                memberIdentity = new {
+                    providerIdentity = "LayoutCore",
+                    exportKey = $"LayoutKind.{name}",
+                    kind = "enum-member",
+                },
+                memberDeclarationKey = $"layout-kind/member/{name}",
+            };
+        var layoutKindMembers = new[] {
+            LayoutKindMember("Auto", 0),
+            LayoutKindMember("Sequential", 1),
+            LayoutKindMember("Union", 2),
+            LayoutKindMember("Transparent", 3),
+        };
+        try
+        {
+            await File.WriteAllBytesAsync(providerSource, providerBytes)
+                .ConfigureAwait(false);
+            await File.WriteAllBytesAsync(consumerSource, consumerBytes)
+                .ConfigureAwait(false);
+            await File.WriteAllTextAsync(layoutManifest,
+                CreateLayoutCoreManifest("RawUnionProvider")
+                    .Replace("sample.layout-core", "LayoutCore",
+                        StringComparison.Ordinal))
+                .ConfigureAwait(false);
+            await File.WriteAllTextAsync(providerManifest,
+                CreateManifest("RawUnionProvider", [Digest(providerBytes)],
+                    null, [
+                        new {
+                            kind = "struct",
+                            qualifiedName = "RawWord",
+                            localDeclarationKey = "types.rawword",
+                            isExported = true,
+                        },
+                    ], [
+                        new {
+                            kind = "enum",
+                            qualifiedName = "LayoutKind",
+                            localDeclarationKey = "types.layout-kind",
+                            selectedModuleIdentity = "LayoutCore",
+                            selectedExportKey = "LayoutKind",
+                        },
+                    ], [], layoutKindMembers)).ConfigureAwait(false);
+
+            var (producerExit, producerOutput, producerError)
+                = await RunAsync([], [
+                    "compile-module", "producer", providerSource, "MakeWide",
+                    "-o", providerArtifact, "--runtime", policy,
+                    "--layout-core-manifest", layoutManifest,
+                    "--private-identity-manifest", providerManifest, "--json",
+                ]).ConfigureAwait(false);
+            Assert.That(producerExit, Is.Zero,
+                producerOutput + producerError);
+            Assert.That(producerError, Is.Empty);
+
+            var providerArtifactBytes
+                = await File.ReadAllBytesAsync(providerArtifact)
+                    .ConfigureAwait(false);
+            await File.WriteAllTextAsync(consumerManifest,
+                CreateManifest("RawUnionConsumer", [Digest(consumerBytes)],
+                    Digest(providerArtifactBytes), [], [
+                        new {
+                            kind = "struct",
+                            qualifiedName = "RawWord",
+                            localDeclarationKey = "types.rawword.consumer",
+                            selectedModuleIdentity = "RawUnionProvider",
+                            selectedExportKey = "types.rawword",
+                        },
+                    ], [])).ConfigureAwait(false);
+            var (consumerExit, consumerOutput, consumerError)
+                = await RunAsync([], [
+                    "compile-module", "consumer", consumerSource,
+                    providerArtifact, "-o", consumerArtifact, "--runtime",
+                    policy, "--private-identity-manifest", consumerManifest,
+                    "--json",
+                ]).ConfigureAwait(false);
+            Assert.That(consumerExit, Is.Zero,
+                consumerOutput + consumerError);
+            Assert.That(consumerError, Is.Empty);
+
+            var (runExit, _, runError) = await RunAsync([], [
+                "run-module", consumerArtifact, providerArtifact,
+                "--runtime", policy,
+            ]).ConfigureAwait(false);
+            Assert.That(runExit, Is.Zero, runError);
+
+            var replacementBytes = Encoding.UTF8.GetBytes("""
+                [Blittable]
+                [Layout(LayoutKind.Union)]
+                public struct RawWord {
+                    public mut uint32 Narrow;
+                    public mut uint64 Wide;
+                }
+
+                public RawWord MakeWide() {
+                    init mut RawWord value;
+                    unsafe { value.Narrow = uint32(0x55667788); }
+                    return value;
+                }
+                """);
+            await File.WriteAllBytesAsync(replacementSource,
+                replacementBytes).ConfigureAwait(false);
+            await File.WriteAllTextAsync(replacementManifest,
+                CreateManifest("RawUnionProvider",
+                    [Digest(replacementBytes)], null, [
+                        new {
+                            kind = "struct",
+                            qualifiedName = "RawWord",
+                            localDeclarationKey = "types.rawword",
+                            isExported = true,
+                        },
+                    ], [
+                        new {
+                            kind = "enum",
+                            qualifiedName = "LayoutKind",
+                            localDeclarationKey = "types.layout-kind",
+                            selectedModuleIdentity = "LayoutCore",
+                            selectedExportKey = "LayoutKind",
+                        },
+                    ], [], layoutKindMembers)).ConfigureAwait(false);
+            var (replacementExit, replacementOutput, replacementError)
+                = await RunAsync([], [
+                    "compile-module", "producer", replacementSource,
+                    "MakeWide", "-o", replacementArtifact, "--runtime",
+                    policy, "--layout-core-manifest", layoutManifest,
+                    "--private-identity-manifest", replacementManifest,
+                    "--json",
+                ]).ConfigureAwait(false);
+            Assert.That(replacementExit, Is.Zero,
+                replacementOutput + replacementError);
+            Assert.That(replacementError, Is.Empty);
+
+            var (replacementRunExit, _, replacementRunError)
+                = await RunAsync([], [
+                    "run-module", consumerArtifact, replacementArtifact,
+                    "--runtime", policy,
+                ]).ConfigureAwait(false);
+            Assert.That(replacementRunExit, Is.Not.Zero,
+                replacementRunError);
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(false);
+        }
+    }
+
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
+    public async Task CompileModuleIdentityManifestBindsCoreEnumMembersAsync(
+        string policy)
+    {
+        var directory = TestArtifactPaths.CreateDirectory(
+            "terrum-private-identity-core-enum-");
+        var sourcePath = Path.Combine(directory, "source.terrum");
+        var layoutManifest = Path.Combine(directory, "layout.json");
+        var identityManifest = Path.Combine(directory, "identity.json");
+        var artifact = Path.Combine(directory, "module.trm");
+        var sourceBytes = Encoding.UTF8.GetBytes("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Cell {
+                public int32 Value;
+                public Cell(int32 value) { Value = value; }
+            }
+            public int32 Read(Cell value) { return value.Value; }
+            public LayoutKind LayoutOf() { return LayoutKind.Sequential; }
+            """);
+        var layoutCoreManifest = CreateLayoutCoreManifest(
+                "CoreEnumMemberProvider")
+            .Replace("sample.layout-core", "LayoutCore",
+                StringComparison.Ordinal);
+        object EnumMember(string name, int ordinal)
+            => new {
+                owner = new { kind = "enum", qualifiedName = "LayoutKind" },
+                enumIdentity = new {
+                    providerIdentity = "LayoutCore",
+                    exportKey = "LayoutKind",
+                    kind = "enum-type",
+                },
+                memberOrdinal = ordinal,
+                memberIdentity = new {
+                    providerIdentity = "LayoutCore",
+                    exportKey = $"LayoutKind.{name}",
+                    kind = "enum-member",
+                },
+                memberDeclarationKey = $"layout-kind/member/{name}",
+            };
+        var enumMembers = new[] {
+            EnumMember("Auto", 0),
+            EnumMember("Sequential", 1),
+            EnumMember("Union", 2),
+            EnumMember("Transparent", 3),
+        };
+        try
+        {
+            await File.WriteAllBytesAsync(sourcePath, sourceBytes)
+                .ConfigureAwait(false);
+            await File.WriteAllTextAsync(layoutManifest,
+                layoutCoreManifest).ConfigureAwait(false);
+            await File.WriteAllTextAsync(identityManifest,
+                CreateManifest("CoreEnumMemberProvider",
+                    [Digest(sourceBytes)], null, [
+                        new {
+                            kind = "struct",
+                            qualifiedName = "Cell",
+                            localDeclarationKey = "types.cell",
+                            isExported = true,
+                        },
+                    ], [
+                        new {
+                            kind = "enum",
+                            qualifiedName = "LayoutKind",
+                            localDeclarationKey = "types.layout-kind",
+                            selectedModuleIdentity = "LayoutCore",
+                            selectedExportKey = "LayoutKind",
+                        },
+                    ], [], enumMembers)).ConfigureAwait(false);
+
+            var (exit, output, error) = await RunAsync([], [
+                "compile-module", "producer", sourcePath, "Read",
+                "--export", "LayoutOf", "-o", artifact, "--runtime", policy,
+                "--layout-core-manifest", layoutManifest,
+                "--private-identity-manifest", identityManifest, "--json",
+            ]).ConfigureAwait(false);
+            Assert.That(exit, Is.Zero, output + error);
+            Assert.That(error, Is.Empty);
+            using var document = JsonDocument.Parse(output);
+            Assert.That(document.RootElement.GetProperty("success")
+                .GetBoolean(), Is.True);
+            Assert.That(document.RootElement.GetProperty("runtimePolicy")
+                .GetString(), Is.EqualTo(policy));
+            Assert.That(File.Exists(artifact), Is.True);
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(false);
+        }
+    }
+
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
+    public async Task CompileModuleConsumerCannotSelectCoreEnumMembersAsync(
+        string policy)
+    {
+        var directory = TestArtifactPaths.CreateDirectory(
+            "terrum-private-identity-core-enum-consumer-");
+        var producerSource = Path.Combine(directory, "producer.terrum");
+        var consumerSource = Path.Combine(directory, "consumer.terrum");
+        var producerManifest = Path.Combine(directory, "producer.json");
+        var layoutManifest = Path.Combine(directory, "layout.json");
+        var identityManifest = Path.Combine(directory, "consumer-identity.json");
+        var producerArtifact = Path.Combine(directory, "producer.trm");
+        var consumerArtifact = Path.Combine(directory, "consumer.trm");
+        var producerBytes = Encoding.UTF8.GetBytes(
+            "public int32 Value() { return 7; }");
+        var consumerBytes = Encoding.UTF8.GetBytes(
+            "public LayoutKind GetLayoutKind() { return LayoutKind.Sequential; }");
+        var preservedOutput = "preserve existing artifact"u8.ToArray();
+        try
+        {
+            await File.WriteAllBytesAsync(producerSource, producerBytes)
+                .ConfigureAwait(false);
+            await File.WriteAllBytesAsync(consumerSource, consumerBytes)
+                .ConfigureAwait(false);
+            await File.WriteAllTextAsync(producerManifest,
+                CreateManifest("ManifestProducer", [Digest(producerBytes)],
+                    null, [], [], [])).ConfigureAwait(false);
+            var (producerExit, producerOutput, producerError)
+                = await RunAsync([], [
+                    "compile-module", "producer", producerSource, "Value",
+                    "-o", producerArtifact, "--runtime", policy,
+                    "--private-identity-manifest", producerManifest,
+                    "--json",
+                ]).ConfigureAwait(false);
+            Assert.That(producerExit, Is.Zero,
+                producerOutput + producerError);
+
+            var layoutCoreManifest = CreateLayoutCoreManifest(
+                    "ManifestConsumer")
+                .Replace("sample.layout-core", "LayoutCore",
+                    StringComparison.Ordinal);
+            await File.WriteAllTextAsync(layoutManifest,
+                layoutCoreManifest).ConfigureAwait(false);
+            var producerArtifactBytes = await File.ReadAllBytesAsync(
+                producerArtifact).ConfigureAwait(false);
+            var enumMembers = new object[] {
+                new {
+                    owner = new {
+                        kind = "enum",
+                        qualifiedName = "LayoutKind",
+                    },
+                    enumIdentity = new {
+                        providerIdentity = "LayoutCore",
+                        exportKey = "LayoutKind",
+                        kind = "enum-type",
+                    },
+                    memberOrdinal = 0,
+                    memberIdentity = new {
+                        providerIdentity = "LayoutCore",
+                        exportKey = "LayoutKind.Auto",
+                        kind = "enum-member",
+                    },
+                    memberDeclarationKey = "layout-kind/member/Auto",
+                },
+                new {
+                    owner = new {
+                        kind = "enum",
+                        qualifiedName = "LayoutKind",
+                    },
+                    enumIdentity = new {
+                        providerIdentity = "LayoutCore",
+                        exportKey = "LayoutKind",
+                        kind = "enum-type",
+                    },
+                    memberOrdinal = 1,
+                    memberIdentity = new {
+                        providerIdentity = "LayoutCore",
+                        exportKey = "LayoutKind.Sequential",
+                        kind = "enum-member",
+                    },
+                    memberDeclarationKey = "layout-kind/member/Sequential",
+                },
+                new {
+                    owner = new {
+                        kind = "enum",
+                        qualifiedName = "LayoutKind",
+                    },
+                    enumIdentity = new {
+                        providerIdentity = "LayoutCore",
+                        exportKey = "LayoutKind",
+                        kind = "enum-type",
+                    },
+                    memberOrdinal = 2,
+                    memberIdentity = new {
+                        providerIdentity = "LayoutCore",
+                        exportKey = "LayoutKind.Union",
+                        kind = "enum-member",
+                    },
+                    memberDeclarationKey = "layout-kind/member/Union",
+                },
+                new {
+                    owner = new {
+                        kind = "enum",
+                        qualifiedName = "LayoutKind",
+                    },
+                    enumIdentity = new {
+                        providerIdentity = "LayoutCore",
+                        exportKey = "LayoutKind",
+                        kind = "enum-type",
+                    },
+                    memberOrdinal = 3,
+                    memberIdentity = new {
+                        providerIdentity = "LayoutCore",
+                        exportKey = "LayoutKind.Transparent",
+                        kind = "enum-member",
+                    },
+                    memberDeclarationKey = "layout-kind/member/Transparent",
+                },
+            };
+            await File.WriteAllTextAsync(identityManifest,
+                CreateManifest("ManifestConsumer", [Digest(consumerBytes)],
+                    Digest(producerArtifactBytes), [], [
+                        new {
+                            kind = "enum",
+                            qualifiedName = "LayoutKind",
+                            localDeclarationKey = "types.layout-kind",
+                            selectedModuleIdentity = "LayoutCore",
+                            selectedExportKey = "LayoutKind",
+                        },
+                    ], [])).ConfigureAwait(false);
+            await File.WriteAllBytesAsync(consumerArtifact, preservedOutput)
+                .ConfigureAwait(false);
+
+            var (consumerExit, consumerOutput, consumerError)
+                = await RunAsync([], [
+                    "compile-module", "consumer", consumerSource,
+                    producerArtifact, "-o", consumerArtifact, "--runtime",
+                    policy, "--layout-core-manifest", layoutManifest,
+                    "--private-identity-manifest", identityManifest,
+                    "--json",
+                ]).ConfigureAwait(false);
+            Assert.That(consumerExit, Is.EqualTo(2),
+                consumerOutput + consumerError);
+            Assert.That(consumerError, Is.Empty);
+            using var document = JsonDocument.Parse(consumerOutput);
+            Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                .GetProperty("code").GetString(), Is.EqualTo("TRM2001"));
+            Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                .GetProperty("message").GetString(),
+                Does.Contain("select a Core enum identity directly"));
+            Assert.That(await File.ReadAllBytesAsync(consumerArtifact)
+                .ConfigureAwait(false), Is.EqualTo(preservedOutput));
+
+            await File.WriteAllTextAsync(identityManifest,
+                CreateManifest("ManifestConsumer", [Digest(consumerBytes)],
+                    Digest(producerArtifactBytes), [], [
+                        new {
+                            kind = "enum",
+                            qualifiedName = "LayoutKind",
+                            localDeclarationKey = "types.layout-kind",
+                            selectedModuleIdentity = "LayoutCore",
+                            selectedExportKey = "LayoutKind",
+                        },
+                    ], [], enumMembers)).ConfigureAwait(false);
+            var (assignmentExit, assignmentOutput, assignmentError)
+                = await RunAsync([], [
+                    "compile-module", "consumer", consumerSource,
+                    producerArtifact, "-o", consumerArtifact, "--runtime",
+                    policy, "--private-identity-manifest", identityManifest,
+                    "--json",
+                ]).ConfigureAwait(false);
+            Assert.That(assignmentExit, Is.EqualTo(2),
+                assignmentOutput + assignmentError);
+            Assert.That(assignmentError, Is.Empty);
+            using var assignmentDocument
+                = JsonDocument.Parse(assignmentOutput);
+            Assert.That(assignmentDocument.RootElement
+                .GetProperty("diagnostics")[0].GetProperty("code")
+                .GetString(), Is.EqualTo("TRM2001"));
+            Assert.That(assignmentDocument.RootElement
+                .GetProperty("diagnostics")[0].GetProperty("message")
+                .GetString(), Does.Contain("cannot assign Core enum-member"));
+            Assert.That(await File.ReadAllBytesAsync(consumerArtifact)
+                .ConfigureAwait(false), Is.EqualTo(preservedOutput));
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(false);
+        }
+    }
+
+    private static string CreateManifest(string usingModuleIdentity,
+        string[] sourceSha256, string? referenceProducerSha256,
+        object[] definitions, object[] imports,
+        object[] sourceEnumDefinitions, object[]? enumMembers = null)
+        => JsonSerializer.Serialize(new {
+            schemaVersion = 1,
+            usingModuleIdentity,
+            sourceSha256,
+            referenceProducerSha256,
+            definitions,
+            imports,
+            enumMembers = enumMembers ?? Array.Empty<object>(),
+            sourceEnumDefinitions,
+        });
+
+    private static string Digest(byte[] bytes)
+        => Convert.ToHexString(SHA256.HashData(bytes));
+}

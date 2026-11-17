@@ -629,7 +629,8 @@ public static partial class NativeModuleCompiler
                     $"Direct native module import '{function.Name}' has no selected provider binding.");
             }
             if (!function.IsExternal || !DirectNativeImportContract.IsValidPrivateWindows(function, program.Structures,
-                program.NativeFunctionPointerSignatures, program.NativePointerTypes))
+                program.NativeFunctionPointerSignatures,
+                program.NativePointerTypes, program.EnumDefinitions))
             {
                 throw new ModuleContractException(
                     "Graph producer contains an invalid direct native import declaration.");

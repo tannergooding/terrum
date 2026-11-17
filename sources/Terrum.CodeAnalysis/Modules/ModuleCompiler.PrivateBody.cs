@@ -179,6 +179,24 @@ public static partial class ModuleCompiler
                 writer.Write((byte)1);
                 writer.Write(read.Variable);
                 break;
+            case BoundReferenceRead referenceRead:
+                if (!TryGetPrivateReferenceType(
+                        referenceRead.Descriptor.Type,
+                        moduleWriter.CheckedReferenceTypes,
+                        out var referenceType)
+                    || referenceType.IsOptional
+                    || referenceType.IsGarbageCollected
+                    || referenceType.IsInitialization
+                    || referenceType.ReferentType != referenceRead.Type)
+                {
+                    throw new ModuleContractException(
+                        "Private referent field place has an invalid checked-reference descriptor.");
+                }
+                writer.Write((byte)4);
+                PutPrivateBorrowDescriptor(writer,
+                    referenceRead.Descriptor, names, ref remaining,
+                    depth + 1, inUnsafe);
+                break;
             case BoundFieldRead field:
                 var (fieldType, isUnsafe, fieldWritable) =
                     GetPrivateField(moduleWriter.Structures,
@@ -706,14 +724,17 @@ public static partial class ModuleCompiler
             ?? moduleWriter.CurrentVariables[path.Variable].Type;
         if (!NativeFixedArrayContract.MatchesPath(rootType,
                 path.Projections, moduleWriter.Structures,
-                moduleWriter.NativeFixedArrayTypes, out _, out var leafLayout)
+                moduleWriter.NativeFixedArrayTypes, out _, out var leafLayout,
+                moduleWriter.CheckedReferenceTypes,
+                moduleWriter.EnumDefinitions)
             || leafLayout.ElementType != path.Type
             || path.Projections.Any(projection =>
                 !IsRevision100RuntimeArrayLayout(projection.Layout,
                     moduleWriter.Structures,
                     moduleWriter.NativeFixedArrayTypes,
                     moduleWriter.NativePointerTypes,
-                    moduleWriter.NativeFunctionPointerSignatures)
+                    moduleWriter.NativeFunctionPointerSignatures,
+                    moduleWriter.EnumDefinitions)
                 || !IsRevision100IndexType(projection.Index.Type)
                 || (projection.Index is BoundConstant
                     && !NativeFixedArrayContract.IsConstantIndexInRange(
@@ -809,7 +830,8 @@ public static partial class ModuleCompiler
                 ?? writer.CurrentVariables[pathWrite.Variable].Type;
             if (!NativeFixedArrayContract.MatchesPath(rootType,
                     pathWrite.Projections, writer.Structures,
-                    writer.NativeFixedArrayTypes, out _, out var leafLayout)
+                    writer.NativeFixedArrayTypes, out _, out var leafLayout,
+                    writer.CheckedReferenceTypes, writer.EnumDefinitions)
                 || (pathWrite.FieldPlace is not null
                     && TryGetPrivatePlaceRootVariable(pathWrite.FieldPlace,
                         out var fieldRoot)
@@ -834,7 +856,8 @@ public static partial class ModuleCompiler
                 if (!IsRevision100RuntimeArrayLayout(projection.Layout,
                         writer.Structures, writer.NativeFixedArrayTypes,
                         writer.NativePointerTypes,
-                        writer.NativeFunctionPointerSignatures)
+                        writer.NativeFunctionPointerSignatures,
+                        writer.EnumDefinitions)
                     && !IsPrivate106NestedArrayValueLocal(
                         projection.Layout.CarrierType,
                         writer.CurrentReturnType, writer.CurrentVariables,
@@ -1257,7 +1280,8 @@ public static partial class ModuleCompiler
                     throw new ModuleFormatException(
                         "Private referent place has an invalid descriptor type.");
                 }
-                return new(kind, null, descriptor,
+                return new(kind, new BoundReferenceRead(descriptor,
+                    descriptorType.ReferentType, span), descriptor,
                     descriptorType.ReferentType,
                     descriptorType.IsWritable, true, -1,
                     new BoundPrivateReferentPlace(descriptor,
@@ -1464,13 +1488,15 @@ public static partial class ModuleCompiler
         var coverageProgram = CreatePrivate106CoverageProgram(reader);
         if (!NativeFixedArrayContract.MatchesPath(rootType,
                 path.Projections, reader.Structures,
-                reader.NativeFixedArrayTypes, out _, out var leafLayout)
+                reader.NativeFixedArrayTypes, out _, out var leafLayout,
+                reader.CheckedReferenceTypes, reader.EnumDefinitions)
             || leafLayout.ElementType != path.Type
             || path.Projections.Any(projection =>
                 (!IsRevision100RuntimeArrayLayout(projection.Layout,
                         reader.Structures, reader.NativeFixedArrayTypes,
                         reader.NativePointerTypes,
-                        reader.NativeFunctionPointerSignatures)
+                        reader.NativeFunctionPointerSignatures,
+                        reader.EnumDefinitions)
                     && !(reader.FormatVersion
                             == CheckedReferenceVersion
                         && IsPrivate106NestedArrayValueLocal(

@@ -46,7 +46,8 @@ public static partial class ModuleCompiler
         {
             _ = FixedLayoutStorage.Validate(module.Structures,
                 module.NativeFixedArrayTypes,
-                checkedReferenceTypes: module.CheckedReferenceTypes);
+                checkedReferenceTypes: module.CheckedReferenceTypes,
+                enumDefinitions: module.EnumDefinitions);
         }
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
         {

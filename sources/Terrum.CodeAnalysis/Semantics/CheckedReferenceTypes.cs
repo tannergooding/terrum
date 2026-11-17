@@ -10,7 +10,8 @@ internal sealed record CheckedReferenceTypeDefinition(
     bool IsGarbageCollected,
     bool IsInitialization,
     bool IsOptional,
-    bool IsOptionalValue = false);
+    bool IsOptionalValue = false,
+    bool IsReferentWritable = false);
 
 internal static class CheckedReferenceTypes
 {
@@ -153,7 +154,9 @@ internal static class SourceOptionalTypes
 
 internal static class CheckedReferenceTypeContract
 {
-    internal static bool IsValidTable(ImmutableArray<CheckedReferenceTypeDefinition> referenceTypes)
+    internal static bool IsValidTable(
+        ImmutableArray<CheckedReferenceTypeDefinition> referenceTypes,
+        IReadOnlyList<NativePointerTypeDefinition>? nativePointerTypes = null)
     {
         if (referenceTypes.IsDefault || referenceTypes.Length > SemanticVerifier.MaximumAnalysisVisits)
         {
@@ -163,7 +166,8 @@ internal static class CheckedReferenceTypeContract
         var states = new byte[referenceTypes.Length];
         for (var index = 0; index < referenceTypes.Length; index++)
         {
-            if (!IsValidReference(index, referenceTypes, states, 0))
+            if (!IsValidReference(index, referenceTypes, nativePointerTypes,
+                states, 0))
             {
                 return false;
             }
@@ -232,25 +236,28 @@ internal static class CheckedReferenceTypeContract
     }
 
     internal static bool IsSupportedWriteValueType(PrimitiveType type,
-        IReadOnlyList<BoundStruct> structures, int enumDefinitionCount)
+        IReadOnlyList<BoundStruct> structures, int enumDefinitionCount,
+        IReadOnlyList<NativePointerTypeDefinition>? nativePointerTypes = null)
     {
         return IsSupportedWriteValueType(type, structures, enumDefinitionCount,
-            []);
+            [], nativePointerTypes);
     }
 
     private static bool IsSupportedWriteValueType(PrimitiveType type,
         IReadOnlyList<BoundStruct> structures, int enumDefinitionCount,
-        ImmutableArray<CheckedReferenceTypeDefinition> referenceTypes)
+        ImmutableArray<CheckedReferenceTypeDefinition> referenceTypes,
+        IReadOnlyList<NativePointerTypeDefinition>? nativePointerTypes)
     {
         var states = new byte[structures.Count];
         return IsSupportedWriteValueType(type, structures, enumDefinitionCount,
-            referenceTypes, states, 0);
+            referenceTypes, nativePointerTypes, states, 0);
     }
 
     internal static bool IsSupportedReferenceStoreValueType(
         PrimitiveType type, IReadOnlyList<BoundStruct> structures,
         IReadOnlyList<BoundClass> classes, int enumDefinitionCount,
-        ImmutableArray<CheckedReferenceTypeDefinition> referenceTypes)
+        ImmutableArray<CheckedReferenceTypeDefinition> referenceTypes,
+        IReadOnlyList<NativePointerTypeDefinition>? nativePointerTypes = null)
     {
         if (SourceOptionalTypes.IsOptionalReference(type, referenceTypes))
         {
@@ -263,7 +270,7 @@ internal static class CheckedReferenceTypeContract
         }
 
         if (IsSupportedWriteValueType(type, structures, enumDefinitionCount,
-                referenceTypes)
+                referenceTypes, nativePointerTypes)
             || type == PrimitiveType.OwnedInt32Buffer)
         {
             return true;
@@ -296,24 +303,32 @@ internal static class CheckedReferenceTypeContract
         IReadOnlyList<BoundClass> classes, int enumDefinitionCount,
         ImmutableArray<CheckedReferenceTypeDefinition> referenceTypes,
         string? nativeLoweringAgreement,
-        IReadOnlyList<BoundNativeFixedArrayType>? fixedArrayTypes)
+        IReadOnlyList<BoundNativeFixedArrayType>? fixedArrayTypes,
+        IReadOnlyList<NativePointerTypeDefinition>? nativePointerTypes = null)
     {
         return IsOptionalValueType(type, referenceTypes)
             ? ValueLayout.TryGetOptionalValueLayout(type, structures,
                 referenceTypes, nativeLoweringAgreement, fixedArrayTypes,
                 out _)
             : IsSupportedReferenceStoreValueType(type, structures, classes,
-                enumDefinitionCount, referenceTypes);
+                enumDefinitionCount, referenceTypes, nativePointerTypes);
     }
 
     private static bool IsSupportedWriteValueType(PrimitiveType type,
         IReadOnlyList<BoundStruct> structures, int enumDefinitionCount,
         ImmutableArray<CheckedReferenceTypeDefinition> referenceTypes,
+        IReadOnlyList<NativePointerTypeDefinition>? nativePointerTypes,
         byte[] states, int depth)
     {
         if (type == PrimitiveType.TokenSpan)
         {
             return true;
+        }
+        if (NativePointerTypes.IsType(type))
+        {
+            return nativePointerTypes is not null
+                && (uint)NativePointerTypes.Index(type)
+                    < (uint)nativePointerTypes.Count;
         }
         if (CheckedReferenceTypes.IsType(type))
         {
@@ -350,7 +365,7 @@ internal static class CheckedReferenceTypeContract
         foreach (var field in structure.Fields)
         {
             if (!IsSupportedWriteValueType(field.Type, structures, enumDefinitionCount,
-                referenceTypes, states, depth + 1))
+                referenceTypes, nativePointerTypes, states, depth + 1))
             {
                 return false;
             }
@@ -380,6 +395,7 @@ internal static class CheckedReferenceTypeContract
     private static bool IsValidReference(
         int index,
         ImmutableArray<CheckedReferenceTypeDefinition> referenceTypes,
+        IReadOnlyList<NativePointerTypeDefinition>? nativePointerTypes,
         byte[] states,
         int depth)
     {
@@ -396,6 +412,11 @@ internal static class CheckedReferenceTypeContract
         var referenceType = referenceTypes[index];
         if (referenceType is null || (referenceType.ReferentType == PrimitiveType.Void
                 && !referenceType.IsOptionalValue)
+            || (NativePointerTypes.IsType(referenceType.ReferentType)
+                && nativePointerTypes is not null
+                && (uint)NativePointerTypes.Index(
+                        referenceType.ReferentType)
+                        >= (uint)nativePointerTypes.Count)
             || (referenceType.IsGarbageCollected
                 && referenceType.IsInitialization)
             || (referenceType.IsOptionalValue
@@ -414,7 +435,7 @@ internal static class CheckedReferenceTypeContract
         states[index] = 1;
         if (CheckedReferenceTypes.IsType(referenceType.ReferentType)
             && !IsValidReference(CheckedReferenceTypes.Index(referenceType.ReferentType),
-                referenceTypes, states, depth + 1))
+                referenceTypes, nativePointerTypes, states, depth + 1))
         {
             return false;
         }

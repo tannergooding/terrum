@@ -19,6 +19,7 @@ public static partial class ModuleCompiler
         {
             result.Add(origin.PrivateType);
         }
+
         if (inputs is not null)
         {
             foreach (var import in inputs.Imports)
@@ -32,6 +33,13 @@ public static partial class ModuleCompiler
                     result.Add(definition.Type);
                 }
             }
+            foreach (var (type, assignment) in inputs.SourceEnumAssignments)
+            {
+                if (assignment.IsExported)
+                {
+                    result.Add(type);
+                }
+            }
         }
         return [.. result.Distinct()];
     }
@@ -43,7 +51,8 @@ public static partial class ModuleCompiler
     {
         var hasExplicitInputs = inputs is not null
             && (!inputs.Definitions.IsEmpty || !inputs.Imports.IsEmpty
-                || !inputs.EnumMembers.IsEmpty);
+                || !inputs.EnumMembers.IsEmpty
+                || !inputs.SourceEnumDefinitions.IsEmpty);
         var hasInheritedOrigins
             = !sourceProgram.PrivateNominalTypeOrigins.IsEmpty;
         var selectsRevision105 = !module.CheckedReferenceTypes.IsEmpty
@@ -68,7 +77,10 @@ public static partial class ModuleCompiler
             && !HasNominalCheckedReferenceTypeClosure(
                 module.CheckedReferenceTypes, module.Structures,
                 module.Classes, module.NativeFunctionPointerSignatures,
-                module.NativePointerTypes, module.NativeFixedArrayTypes))
+                module.NativePointerTypes, module.NativeFixedArrayTypes)
+            && !module.EnumDefinitions.Any(static definition =>
+                definition.Identity
+                    is BoundEnumDeclarationIdentity.Source))
         {
             return [];
         }
@@ -108,6 +120,12 @@ public static partial class ModuleCompiler
                     .Select(definition => RemapPrivateNominalType(
                         definition.Type, sourceProgram.Structures,
                         module.Structures, sourceProgram.EnumDefinitions,
+                        module.EnumDefinitions)))
+                .Concat(inputs.SourceEnumAssignments
+                    .Where(static item => item.Assignment.IsExported)
+                    .Select(item => RemapPrivateNominalType(item.Type,
+                        sourceProgram.Structures, module.Structures,
+                        sourceProgram.EnumDefinitions,
                         module.EnumDefinitions)));
         var requiredTypes = CollectPrivateNominalTypeClosure(module,
             inheritedRoots.Concat(inputRoots));
@@ -157,6 +175,23 @@ public static partial class ModuleCompiler
                     import.LocalDeclarationKey,
                     import.SelectedModuleIdentity,
                     import.SelectedExportKey));
+            }
+
+            foreach (var (type, assignment) in inputs.SourceEnumAssignments)
+            {
+                var privateType = RemapPrivateNominalType(type,
+                    sourceProgram.Structures, module.Structures,
+                    sourceProgram.EnumDefinitions,
+                    module.EnumDefinitions);
+                if (!assignment.IsExported
+                    && !requiredTypes.Contains(privateType))
+                {
+                    continue;
+                }
+                AddOrigin(new BoundPrivateNominalTypeOrigin(privateType,
+                    BoundPrivateNominalOriginKind.OwnedDefinition,
+                    assignment.IsExported, inputs.UsingModuleIdentity,
+                    assignment.LocalDeclarationKey));
             }
         }
 
@@ -326,8 +361,10 @@ public static partial class ModuleCompiler
             var matches = destinationEnumDefinitions.Select(
                     (definition, index) => (definition, index))
                 .Where(item => item.definition is not null
-                    && BoundEnumTypes.AreEquivalent(sourceDefinition,
-                        item.definition))
+                    && (BoundEnumTypes.AreEquivalent(sourceDefinition,
+                            item.definition)
+                        || SamePrivateEnumIdentity(sourceDefinition,
+                            item.definition)))
                 .Select(static item => item.index)
                 .ToArray();
             if (matches.Length != 1)
@@ -340,7 +377,8 @@ public static partial class ModuleCompiler
         return RemapType(type, sourceStructures, destinationStructures);
     }
 
-    private static Module ProjectPrivateEnumDefinitions(Module module)
+    private static Module ProjectPrivateEnumDefinitions(Module module,
+        PrivateModuleIdentityInputs? inputs)
     {
         var sourceDefinitions = module.EnumDefinitions;
         if (sourceDefinitions.IsDefaultOrEmpty)
@@ -375,15 +413,21 @@ public static partial class ModuleCompiler
                 definitions.Count);
             mapping[sourceIndex] = BoundEnumTypes.Index(destinationType);
             var sourceDefinition = sourceDefinitions[sourceIndex];
-            definitions.Add(sourceDefinition.Identity
-                is BoundEnumDeclarationIdentity.Private
-                    ? CreatePrivateEnumDefinition(sourceDefinition,
-                        origin with { PrivateType = destinationType })
-                    : sourceDefinition);
+            definitions.Add(sourceDefinition.Identity switch {
+                BoundEnumDeclarationIdentity.Private
+                    => CreatePrivateEnumDefinition(sourceDefinition,
+                        origin with { PrivateType = destinationType }),
+                BoundEnumDeclarationIdentity.Source source
+                    => CreatePrivateSourceEnumDefinition(sourceDefinition,
+                        source.Value, origin with {
+                            PrivateType = destinationType,
+                        }, inputs),
+                _ => sourceDefinition,
+            });
         }
 
         return RemapModuleEnumTypes(module, [.. mapping],
-            definitions.ToImmutable());
+            definitions.ToImmutable(), inputs);
     }
 
     private static BoundEnumDefinition CreatePrivateEnumDefinition(
@@ -393,11 +437,69 @@ public static partial class ModuleCompiler
             definition.UnderlyingType, [
                 .. definition.Members.Select(static member =>
                     new BoundPrivateEnumMemberSnapshot(member.Name,
-                        member.Value, member.IsPublic,
-                        member.DeclarationKey)),
+                        checked((int)member.Value), member.IsPublic,
+                        member.DeclarationKey ?? throw new ModuleContractException(
+                            "A private enum member has no declaration key."))),
             ], definition.IsPublic, definition.IsPrimary,
             definition.IsFlags, definition.BlittableTargetRequirement,
             definition.ModuleImport);
+
+    private static BoundEnumDefinition CreatePrivateSourceEnumDefinition(
+        BoundEnumDefinition definition,
+        BoundSourceEnumDeclarationHandle sourceDeclaration,
+        BoundPrivateNominalTypeOrigin origin,
+        PrivateModuleIdentityInputs? inputs)
+    {
+        if (inputs is null
+            || origin.OriginKind
+                != BoundPrivateNominalOriginKind.OwnedDefinition
+            || !inputs.TryGetSourceEnumAssignment(sourceDeclaration,
+                out var assignment)
+            || assignment.LocalDeclarationKey
+                != origin.LocalDeclarationKey
+            || assignment.IsExported != origin.IsExported
+            || inputs.UsingModuleIdentity != origin.UsingModuleIdentity
+            || !definition.IsPublic || !definition.IsPrimary
+            || sourceDeclaration.IsFileLocal
+            || definition.UnderlyingType != PrimitiveType.Int32
+            || definition.ModuleImport is not null
+            || assignment.MemberDeclarationKeys.IsDefault
+            || assignment.MemberDeclarationKeys.Length
+                != definition.Members.Length)
+        {
+            throw new ModuleContractException(
+                "A source enum requires its complete checked private identity and member-key assignment.");
+        }
+
+        var members = ImmutableArray.CreateBuilder<
+            BoundPrivateEnumMemberSnapshot>(definition.Members.Length);
+        for (var index = 0; index < definition.Members.Length; index++)
+        {
+            var member = definition.Members[index];
+            var key = assignment.MemberDeclarationKeys[index];
+            if (member.Identity
+                    is not BoundEnumMemberIdentity.Source sourceMember
+                || !ReferenceEquals(sourceMember.Value.Owner,
+                    sourceDeclaration)
+                || !sourceMember.Value.IsValid
+                || member.DeclarationKey is not null
+                || !PrivateModuleIdentityInputs.IsValidEnumMemberKey(key))
+            {
+                throw new ModuleContractException(
+                    "A source enum private member map differs from its checked declaration snapshot.");
+            }
+
+            members.Add(new BoundPrivateEnumMemberSnapshot(member.Name,
+                checked((int)member.Value), member.IsPublic, key));
+        }
+
+        return BoundEnumDefinition.CreatePrivate(origin,
+            definition.Name, definition.UnderlyingType,
+            members.MoveToImmutable(), definition.IsPublic,
+            definition.IsPrimary, definition.IsFlags,
+            definition.BlittableTargetRequirement,
+            definition.ModuleImport);
+    }
 
     private static BoundEnumDefinition RemapPrivateEnumDefinition(
         BoundEnumDefinition definition, PrimitiveType privateType)
@@ -435,6 +537,54 @@ public static partial class ModuleCompiler
                         == pair.Second.DeclarationKey);
     }
 
+    private static bool SamePrivateEnumIdentity(
+        BoundEnumDefinition left, BoundEnumDefinition right)
+    {
+        if (left.Identity
+                is not BoundEnumDeclarationIdentity.Private leftPrivate
+            || right.Identity
+                is not BoundEnumDeclarationIdentity.Private rightPrivate
+            || !SamePrivateEnumContractShape(left, right))
+        {
+            return false;
+        }
+
+        var leftOrigin = leftPrivate.Value.Origin;
+        var rightOrigin = rightPrivate.Value.Origin;
+        if ((leftOrigin with { PrivateType = default })
+            == (rightOrigin with { PrivateType = default }))
+        {
+            return true;
+        }
+
+        return Selects(rightOrigin, leftOrigin)
+            || Selects(leftOrigin, rightOrigin);
+
+        static bool Selects(BoundPrivateNominalTypeOrigin selectedOrigin,
+            BoundPrivateNominalTypeOrigin importedOrigin)
+        {
+            var selectedModule = selectedOrigin.OriginKind
+                    == BoundPrivateNominalOriginKind.OwnedDefinition
+                && selectedOrigin.IsExported
+                ? selectedOrigin.UsingModuleIdentity
+                : selectedOrigin.OriginKind
+                    == BoundPrivateNominalOriginKind.ImportedExpectation
+                    ? selectedOrigin.SelectedModuleIdentity : null;
+            var selectedExport = selectedOrigin.OriginKind
+                    == BoundPrivateNominalOriginKind.OwnedDefinition
+                && selectedOrigin.IsExported
+                ? selectedOrigin.LocalDeclarationKey
+                : selectedOrigin.OriginKind
+                    == BoundPrivateNominalOriginKind.ImportedExpectation
+                    ? selectedOrigin.SelectedExportKey : null;
+            return importedOrigin.OriginKind
+                    == BoundPrivateNominalOriginKind.ImportedExpectation
+                && selectedModule is not null && selectedExport is not null
+                && importedOrigin.SelectedModuleIdentity == selectedModule
+                && importedOrigin.SelectedExportKey == selectedExport;
+        }
+    }
+
     private static ImmutableArray<int> CreatePrivateEnumTypeMapping(
         ImmutableArray<BoundEnumDefinition> sourceDefinitions,
         ImmutableArray<BoundEnumDefinition> destinationDefinitions)
@@ -469,47 +619,7 @@ public static partial class ModuleCompiler
                 return leftCore.Value == rightCore.Value
                     && BoundEnumTypes.AreEquivalent(left, right);
             }
-            if (left.Identity
-                    is BoundEnumDeclarationIdentity.Private leftPrivate
-                && right.Identity
-                    is BoundEnumDeclarationIdentity.Private rightPrivate)
-            {
-                var leftOrigin = leftPrivate.Value.Origin;
-                var rightOrigin = rightPrivate.Value.Origin;
-                var sameOrigin = (leftOrigin with {
-                        PrivateType = default,
-                    }) == (rightOrigin with {
-                        PrivateType = default,
-                    });
-                var sourceModule
-                    = leftOrigin.OriginKind
-                            == BoundPrivateNominalOriginKind.OwnedDefinition
-                        && leftOrigin.IsExported
-                        ? leftOrigin.UsingModuleIdentity
-                        : leftOrigin.OriginKind
-                            == BoundPrivateNominalOriginKind.ImportedExpectation
-                            ? leftOrigin.SelectedModuleIdentity : null;
-                var sourceExport
-                    = leftOrigin.OriginKind
-                            == BoundPrivateNominalOriginKind.OwnedDefinition
-                        && leftOrigin.IsExported
-                        ? leftOrigin.LocalDeclarationKey
-                        : leftOrigin.OriginKind
-                            == BoundPrivateNominalOriginKind.ImportedExpectation
-                            ? leftOrigin.SelectedExportKey : null;
-                var importsSelectedOrigin
-                    = rightOrigin.OriginKind
-                            == BoundPrivateNominalOriginKind
-                                .ImportedExpectation
-                        && sourceModule is not null
-                        && sourceExport is not null
-                        && rightOrigin.SelectedModuleIdentity
-                            == sourceModule
-                        && rightOrigin.SelectedExportKey == sourceExport;
-                return (sameOrigin || importsSelectedOrigin)
-                    && SamePrivateEnumContractShape(left, right);
-            }
-            return false;
+            return SamePrivateEnumIdentity(left, right);
         }
     }
 
@@ -996,7 +1106,10 @@ public static partial class ModuleCompiler
         var mapping = new int[sourceClasses.Length];
         Array.Fill(mapping, -1);
         var selected = origins.Where(static origin =>
-                ManagedClassTypes.IsClass(origin.PrivateType))
+                ManagedClassTypes.IsClass(origin.PrivateType)
+                && (origin.OriginKind
+                        != BoundPrivateNominalOriginKind.OwnedDefinition
+                    || origin.IsExported))
             .Select(static origin =>
                 ManagedClassTypes.ClassIndex(origin.PrivateType))
             .Distinct()
@@ -1302,7 +1415,7 @@ public static partial class ModuleCompiler
                     }))
             {
                 throw new ModuleFormatException(
-                    "Private nominal closure contains an invalid Body.");
+                    $"Private nominal closure contains an invalid Body for '{function.Name}'.");
             }
         }
 
@@ -2028,15 +2141,16 @@ public static partial class ModuleCompiler
             writer.Write(definition.Members.Length);
             foreach (var member in definition.Members)
             {
-                if (!PrivateModuleIdentityInputs.IsValidEnumMemberKey(
-                        member.DeclarationKey))
+                if (member.DeclarationKey is not string declarationKey
+                    || !PrivateModuleIdentityInputs.IsValidEnumMemberKey(
+                        declarationKey))
                 {
                     throw new ModuleContractException(
                         "Private nominal enum member key is invalid.");
                 }
-                PutString(writer, member.DeclarationKey);
+                PutString(writer, declarationKey);
                 PutString(writer, member.Name);
-                writer.Write(member.Value);
+                writer.Write(checked((int)member.Value));
             }
         }
     }

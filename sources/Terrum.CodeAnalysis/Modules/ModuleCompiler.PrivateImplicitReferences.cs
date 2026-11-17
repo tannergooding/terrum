@@ -110,7 +110,8 @@ public static partial class ModuleCompiler
             CheckedReferenceTypes = [.. referenceTypes],
         };
         if (!CheckedReferenceTypeContract.IsValidTable(
-                canonicalProgram.CheckedReferenceTypes))
+                canonicalProgram.CheckedReferenceTypes,
+                canonicalProgram.NativePointerTypes))
         {
             throw new ModuleContractException(
                 "Canonical implicit-reference types are invalid.");

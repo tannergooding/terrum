@@ -44,7 +44,7 @@ internal sealed class PrivateNominalClassPointerFieldTests
         var fixedArrayTypes = new List<BoundNativeFixedArrayType>();
         Assert.That(NativeFixedArrayContract.TryCreateType(enumType, 2,
                 program.Structures, fixedArrayTypes, out var arrayType,
-                out _),
+                out _, enumDefinitions: program.EnumDefinitions),
             Is.True);
         var pointerType = program.Classes.Single().Fields.Single().Type;
         var pointerIndex = NativePointerTypes.Index(pointerType);
@@ -120,7 +120,7 @@ internal sealed class PrivateNominalClassPointerFieldTests
             Is.EqualTo(BoundEnumTypes.Type(0)));
         Assert.That(persistedClassReference.ExpectedSnapshot
                 .EnumDefinitions.Single().Members.Single().Value,
-            Is.EqualTo(1));
+            Is.EqualTo(new System.Numerics.BigInteger(1)));
 
         var changedReference = new CompilationReference(
             program.Structures, [], BoundRuntimePolicy.FailFast,

@@ -149,6 +149,13 @@ public sealed partial class PrivateModuleIdentityInputs
         ArgumentNullException.ThrowIfNull(imports);
         ArgumentNullException.ThrowIfNull(enumMembers);
         ArgumentNullException.ThrowIfNull(sourceEnumDefinitions);
+        if (BoundEnumTypes.HasStandardDeclarations(
+                program.EnumDefinitions))
+        {
+            throw new ModuleContractException(
+                "Standard enum origins cannot be assigned private nominal identities.");
+        }
+
         if (!IsValidModuleIdentity(usingModuleIdentity))
         {
             throw new ArgumentException(

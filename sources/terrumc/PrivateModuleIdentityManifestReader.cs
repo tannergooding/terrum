@@ -113,12 +113,18 @@ internal static class PrivateModuleIdentityManifestReader
                 path, "$"), path);
             var imports = ReadImports(Property(root, "imports", path, "$"),
                 path);
+            var enumMembers = ReadEnumMembers(Property(root, "enumMembers",
+                path, "$"), path);
+            if (!producer && !enumMembers.IsEmpty)
+            {
+                throw Invalid(path, "$.enumMembers",
+                    "consumer manifests cannot assign Core enum-member identities");
+            }
 
             return new PrivateModuleIdentityManifest(
                 usingModuleIdentity, sourceSha256,
                 referenceProducerSha256, definitions, imports,
-                ReadEnumMembers(Property(root, "enumMembers", path, "$"),
-                    path),
+                enumMembers,
                 ReadSourceEnumDefinitions(Property(root,
                     "sourceEnumDefinitions", path, "$"), path));
         }

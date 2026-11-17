@@ -598,10 +598,13 @@ public static partial class NativeModuleCompiler
                     || (isDirectNativeModuleImport
                         && (declaration.DirectNativeImport is null
                             || !DirectNativeImportContract.IsValidPrivateWindows(function, program.Structures,
-                                program.NativeFunctionPointerSignatures, program.NativePointerTypes)
+                                program.NativeFunctionPointerSignatures,
+                                program.NativePointerTypes,
+                                program.EnumDefinitions)
                             || !DirectNativeImportContract.IsValidPrivateWindows(declaration, providerReference.Structures,
                                 providerReference.NativeFunctionPointerSignatures,
-                                providerReference.NativePointerTypes)
+                                providerReference.NativePointerTypes,
+                                providerReference.EnumDefinitions)
                             || !ModuleCompiler.SameNativeOutputContracts(
                                 function.NativeOutputRole, function.NativeOutputContracts,
                                 declaration.NativeOutputRole, declaration.NativeOutputContracts,
@@ -658,7 +661,8 @@ public static partial class NativeModuleCompiler
                 || moduleImport.ExportKey != function.Name
                 || moduleImport.RuntimePolicy != (uint)program.RuntimePolicy
                 || !DirectNativeImportContract.IsValidPrivateWindows(function, program.Structures,
-                    program.NativeFunctionPointerSignatures, program.NativePointerTypes))
+                    program.NativeFunctionPointerSignatures,
+                    program.NativePointerTypes, program.EnumDefinitions))
             {
                 throw new ModuleContractException(
                     $"Direct native module import '{function.Name}' lacks a checked provider binding.");

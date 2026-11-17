@@ -80,7 +80,7 @@ public static partial class ModuleCompiler
         if (sourceArrays.Length is > SemanticVerifier.MaximumAnalysisVisits
             or > NativeFixedArrayTypes.MaximumCount
             || !CheckedReferenceTypeContract.IsValidTable(
-                checkedReferenceTypes))
+                checkedReferenceTypes, module.NativePointerTypes))
         {
             throw new ModuleFormatException(
                 "Private fixed-array or checked-reference type table is invalid.");
@@ -90,7 +90,7 @@ public static partial class ModuleCompiler
             if (!NativeFixedArrayContract.TryGetLayout(
                     NativeFixedArrayTypes.Type(index),
                     module.Structures, sourceArrays, out _,
-                    checkedReferenceTypes))
+                    checkedReferenceTypes, module.EnumDefinitions))
             {
                 throw new ModuleFormatException(
                     "Private fixed-array type row has invalid geometry.");
@@ -384,7 +384,8 @@ public static partial class ModuleCompiler
         };
         if (!NativeFixedArrayContract.IsValidTable(result.Structures,
                 result.NativeFixedArrayTypes,
-                result.CheckedReferenceTypes))
+                result.CheckedReferenceTypes,
+                result.EnumDefinitions))
         {
             throw new ModuleContractException(
                 "Canonical fixed-array identities do not preserve their layouts.");
@@ -459,7 +460,8 @@ public static partial class ModuleCompiler
         IReadOnlyList<BoundNativeFixedArrayType> fixedArrays,
         IReadOnlyList<NativePointerTypeDefinition> pointerTypes,
         IReadOnlyList<NativeFunctionPointerSignatureDefinition>
-            functionPointers)
+            functionPointers,
+        IReadOnlyList<BoundEnumDefinition>? enumDefinitions = null)
     {
         var depth = 0;
         var current = type;
@@ -467,9 +469,11 @@ public static partial class ModuleCompiler
         {
             if (++depth > SemanticVerifier.MaximumDepth
                 || !NativeFixedArrayContract.TryGetLayout(current,
-                    structures, fixedArrays, out var layout)
+                    structures, fixedArrays, out var layout,
+                    enumDefinitions: enumDefinitions)
                 || !NativeFixedArrayContract.MatchesLayout(layout,
-                    structures, fixedArrays)
+                    structures, fixedArrays,
+                    enumDefinitions: enumDefinitions)
                 || layout.ElementCount == 0
                 || layout.ElementStride == 0
                 || layout.ByteExtent == 0)
@@ -485,7 +489,8 @@ public static partial class ModuleCompiler
 
             return depth > 1
                 && IsRevision100RuntimeArrayLayout(layout, structures,
-                    fixedArrays, pointerTypes, functionPointers);
+                    fixedArrays, pointerTypes, functionPointers,
+                    enumDefinitions);
         }
 
         return false;
@@ -521,7 +526,8 @@ public static partial class ModuleCompiler
         if (!NativeFixedArrayTypes.IsType(type)
             || !NativeFixedArrayContract.TryGetLayout(type,
                 program.Structures, program.NativeFixedArrayTypes,
-                out var localLayout)
+                out var localLayout, program.CheckedReferenceTypes,
+                program.EnumDefinitions)
             || localLayout.ByteExtent
                 > (ulong)ValueLayout.MaximumStructureSize
             || !NativeFixedArrayContract.IsRootlessCopyFieldType(type,
@@ -577,7 +583,9 @@ public static partial class ModuleCompiler
                 if (!visited.Add(item.Type)
                     || !NativeFixedArrayContract.TryGetLayout(item.Type,
                         program.Structures,
-                        program.NativeFixedArrayTypes, out var layout))
+                        program.NativeFixedArrayTypes, out var layout,
+                        program.CheckedReferenceTypes,
+                        program.EnumDefinitions))
                 {
                     continue;
                 }
@@ -612,7 +620,8 @@ public static partial class ModuleCompiler
         IReadOnlyList<BoundNativeFixedArrayType> fixedArrays,
         IReadOnlyList<NativePointerTypeDefinition> pointerTypes,
         IReadOnlyList<NativeFunctionPointerSignatureDefinition>
-            functionPointers)
+            functionPointers,
+        IReadOnlyList<BoundEnumDefinition>? enumDefinitions = null)
     {
         var pending = new Stack<(BoundExpression Initializer,
             PrimitiveType ExpectedType, int Depth)>();
@@ -625,11 +634,14 @@ public static partial class ModuleCompiler
                 || item.Initializer.Type != item.ExpectedType
                 || !NativeFixedArrayTypes.IsType(item.ExpectedType)
                 || !NativeFixedArrayContract.TryGetLayout(item.ExpectedType,
-                    structures, fixedArrays, out var layout)
+                    structures, fixedArrays, out var layout,
+                    enumDefinitions: enumDefinitions)
                 || !NativeFixedArrayContract.MatchesType(item.ExpectedType,
-                    layout, structures, fixedArrays)
+                    layout, structures, fixedArrays,
+                    enumDefinitions: enumDefinitions)
                 || !NativeFixedArrayContract.MatchesLayout(layout,
-                    structures, fixedArrays)
+                    structures, fixedArrays,
+                    enumDefinitions: enumDefinitions)
                 || layout.ElementCount == 0
                 || layout.ElementStride == 0
                 || layout.ByteExtent == 0)
@@ -679,7 +691,8 @@ public static partial class ModuleCompiler
             }
 
             if (!IsRevision100RuntimeArrayLayout(layout, structures,
-                    fixedArrays, pointerTypes, functionPointers))
+                    fixedArrays, pointerTypes, functionPointers,
+                    enumDefinitions))
             {
                 return false;
             }
@@ -795,7 +808,8 @@ public static partial class ModuleCompiler
             if (IsAddressOnlyNestedBackingType(variableType,
                     program.Structures, program.NativeFixedArrayTypes,
                     program.NativePointerTypes,
-                    program.NativeFunctionPointerSignatures)
+                    program.NativeFunctionPointerSignatures,
+                    program.EnumDefinitions)
                 && !(private106ArrayValueContext
                     && !addressedArrayVariables.Contains(variable)
                     && IsPrivate106NestedArrayValueLocal(variableType,
@@ -836,7 +850,8 @@ public static partial class ModuleCompiler
                                 program.Structures,
                                 program.NativeFixedArrayTypes,
                                 program.NativePointerTypes,
-                                program.NativeFunctionPointerSignatures)
+                                program.NativeFunctionPointerSignatures,
+                                program.EnumDefinitions)
                             || ContainsAddressToVariable(initializer,
                                 local.Variable))
                         {
@@ -918,7 +933,8 @@ public static partial class ModuleCompiler
                             program.Structures,
                             program.NativeFixedArrayTypes,
                             program.NativePointerTypes,
-                            program.NativeFunctionPointerSignatures)
+                            program.NativeFunctionPointerSignatures,
+                            program.EnumDefinitions)
                         && TryGetPrivateFixedArrayLeafFieldType(
                             leafLayout.ElementType, pathWrite.LeafFields,
                             program.Structures,
@@ -1042,7 +1058,8 @@ public static partial class ModuleCompiler
                             program.Structures,
                             program.NativeFixedArrayTypes,
                             program.NativePointerTypes,
-                            program.NativeFunctionPointerSignatures))
+                            program.NativeFunctionPointerSignatures,
+                            program.EnumDefinitions))
                     {
                         valid = false;
                         failure

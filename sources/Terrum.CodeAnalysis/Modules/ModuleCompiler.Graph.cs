@@ -82,6 +82,62 @@ public static partial class ModuleCompiler
         }
         var enumDefinitions = MergePrivateEnumDefinitions(references,
             out var enumMappings);
+        var genericNominalDefinitions =
+            ImmutableArray.CreateBuilder<BoundGenericNominalTypeDefinition>();
+        var genericNominalDefinitionIdentities =
+            new Dictionary<BoundGenericNominalTypeIdentity, int>();
+        foreach (var reference in references)
+        {
+            foreach (var definition in reference.GenericNominalTypeDefinitions)
+            {
+                if (genericNominalDefinitionIdentities.TryGetValue(
+                        definition.Identity, out var existingIndex))
+                {
+                    var existingDefinition
+                        = genericNominalDefinitions[existingIndex];
+                    if (!BoundGenericNominalTypeContract
+                            .AreEquivalentDefinitions(existingDefinition,
+                                definition))
+                    {
+                        throw new ModuleContractException(
+                            $"Conflicting generic nominal identity '{definition.Identity}'.");
+                    }
+
+                    var expectations
+                        = existingDefinition.ProviderExpectations.IsDefault
+                            ? [] : existingDefinition.ProviderExpectations;
+                    var newExpectations
+                        = definition.ProviderExpectations.IsDefault
+                            ? [] : definition.ProviderExpectations;
+                    foreach (var expectation in newExpectations)
+                    {
+                        if (!expectations.Any(existingExpectation =>
+                                BoundGenericNominalTypeContract
+                                    .AreEquivalentProviderExpectations(
+                                        existingExpectation,
+                                        expectation)))
+                        {
+                            expectations = [.. expectations, expectation];
+                        }
+                    }
+                    genericNominalDefinitions[existingIndex]
+                        = existingDefinition with {
+                            ProviderExpectations = expectations,
+                            Provider = existingDefinition.Provider
+                                ?? definition.Provider,
+                            ExportKeys = existingDefinition.ExportKeys
+                                    .IsDefaultOrEmpty
+                                ? definition.ExportKeys
+                                : existingDefinition.ExportKeys,
+                        };
+                    continue;
+                }
+
+                genericNominalDefinitionIdentities.Add(definition.Identity,
+                    genericNominalDefinitions.Count);
+                genericNominalDefinitions.Add(definition);
+            }
+        }
         var classMappings = MergeClassTypeMappings(references,
             out var sourceClasses);
         var nativeFunctionPointerSignatures =
@@ -185,9 +241,111 @@ public static partial class ModuleCompiler
             RemapMergedNativeFixedArrayTypeDefinitions(references, combined,
                 destinationTypes, fixedArrayMappings, nativePointerMappings,
                 functionPointerMappings, checkedReferenceMappings,
-                classMappings, enumMappings, checkedReferenceTypes);
+                classMappings, enumMappings, checkedReferenceTypes,
+                enumDefinitions);
+        var allGenericNominalDefinitions =
+            genericNominalDefinitions.ToImmutable();
+        var allGenericNominalInstances =
+            ImmutableArray.CreateBuilder<BoundGenericNominalTypeInstance>();
+        var genericNominalInstanceReferenceIndexes =
+            ImmutableArray.CreateBuilder<int>();
+        var genericNominalTypeMappings = new int[references.Count][];
+        var genericNominalTypeStates = new byte[references.Count][];
+        var genericNominalTypeIndexes =
+            new Dictionary<string, PrimitiveType>(StringComparer.Ordinal);
+        var genericNominalFormalOwnerMappings
+            = CreateSpanFormalOwnerMappings(references);
+        for (var provider = 0; provider < references.Count; provider++)
+        {
+            var sourceInstances =
+                references[provider].GenericNominalTypeInstances;
+            genericNominalTypeMappings[provider]
+                = new int[sourceInstances.Length];
+            Array.Fill(genericNominalTypeMappings[provider], -1);
+            genericNominalTypeStates[provider]
+                = new byte[sourceInstances.Length];
+            for (var instanceIndex = 0;
+                instanceIndex < sourceInstances.Length; instanceIndex++)
+            {
+                _ = MapGenericNominalTypeInstance(provider, instanceIndex);
+            }
+        }
+        var genericNominalMappedCombined = combined.ToBuilder();
+        for (var index = 0; index < genericNominalMappedCombined.Count; index++)
+        {
+            var provider = originals[
+                genericNominalMappedCombined[index].Name].ReferenceIndex;
+            genericNominalMappedCombined[index]
+                = BoundTreeTraversal.RewriteTypes(
+                    genericNominalMappedCombined[index],
+                    type => RemapGenericNominalType(provider, type));
+        }
+        combined = genericNominalMappedCombined.ToImmutable();
+        var spanTypeMerge = MergeSpanTypeDefinitions(references,
+            (provider, spanType) =>
+            {
+                if (spanType.ElementFormalDefinitionOrdinal
+                    <= BoundSpanTypeContract
+                        .ImportedFormalDefinitionOrdinal)
+                {
+                    return spanType.ElementType;
+                }
+
+                var reference = references[provider];
+                var elementType = RemapType(spanType.ElementType,
+                    reference.Structures, combined,
+                    destinationTypes: destinationTypes);
+                elementType = RemapNativeFixedArrayType(elementType,
+                    fixedArrayMappings[provider]);
+                elementType = RemapNativeFunctionPointerType(elementType,
+                    functionPointerMappings[provider]);
+                elementType = RemapNativePointerType(elementType,
+                    nativePointerMappings[provider]);
+                elementType = RemapManagedClassType(elementType,
+                    classMappings[provider]);
+                elementType = RemapCheckedReferenceType(elementType,
+                    checkedReferenceMappings[provider]);
+                elementType = RemapEnumType(elementType,
+                    enumMappings[provider]);
+                return RemapGenericNominalType(provider, elementType);
+            }, genericNominalFormalOwnerMappings);
+        var spanRemappedGenericNominalInstances
+            = allGenericNominalInstances.ToBuilder();
+        for (var instanceIndex = 0;
+            instanceIndex < spanRemappedGenericNominalInstances.Count;
+            instanceIndex++)
+        {
+            var provider
+                = genericNominalInstanceReferenceIndexes[instanceIndex];
+            spanRemappedGenericNominalInstances[instanceIndex]
+                = BoundTreeTraversal.RewriteTypes(
+                    spanRemappedGenericNominalInstances[instanceIndex],
+                    type => RemapSpanType(type,
+                        spanTypeMerge.TypeMappings[provider]));
+        }
+        var mixedTypeMerge = CanonicalizeMixedSpanAndGenericNominalTypes(
+            spanRemappedGenericNominalInstances.ToImmutable(),
+            genericNominalInstanceReferenceIndexes.ToImmutable(),
+            genericNominalTypeMappings, spanTypeMerge);
+        spanRemappedGenericNominalInstances
+            = mixedTypeMerge.GenericNominalTypes.ToBuilder();
+        spanTypeMerge = mixedTypeMerge.SpanTypes;
+        var spanMappedCombined = combined.ToBuilder();
+        for (var index = 0; index < spanMappedCombined.Count; index++)
+        {
+            var provider = originals[spanMappedCombined[index].Name]
+                .ReferenceIndex;
+            spanMappedCombined[index] = BoundTreeTraversal.RewriteTypes(
+                BoundTreeTraversal.RewriteTypes(spanMappedCombined[index],
+                    type => RemapGenericNominalType(provider, type)),
+                type => RemapSpanType(type,
+                    spanTypeMerge.TypeMappings[provider]));
+        }
+        combined = spanMappedCombined.ToImmutable();
         var combinedClassesBuilder = ImmutableArray.CreateBuilder<BoundClass>(
             sourceClasses.Length);
+        var combinedClassReferenceIndexes
+            = ImmutableArray.CreateBuilder<int>(sourceClasses.Length);
         var addedClassMappings = new HashSet<int>();
         for (var provider = 0; provider < references.Count; provider++)
         {
@@ -232,9 +390,29 @@ public static partial class ModuleCompiler
                 mappedClass = RemapEnumTypes(mappedClass,
                     enumMappings[provider]);
                 combinedClassesBuilder.Add(mappedClass);
+                combinedClassReferenceIndexes.Add(provider);
             }
         }
         var combinedClasses = combinedClassesBuilder.MoveToImmutable();
+        var spanMappedClasses = combinedClasses.ToBuilder();
+        for (var index = 0; index < spanMappedClasses.Count; index++)
+        {
+            var provider = combinedClassReferenceIndexes[index];
+            spanMappedClasses[index] = BoundTreeTraversal.RewriteTypes(
+                spanMappedClasses[index], type => RemapSpanType(
+                    RemapGenericNominalType(provider, type),
+                    spanTypeMerge.TypeMappings[provider]));
+        }
+        combinedClasses = spanMappedClasses.ToImmutable();
+        var spanTypeImportRemappers = new SpanTypeImportRemapper[
+            references.Count];
+        for (var provider = 0; provider < references.Count; provider++)
+        {
+            var mappedProvider = provider;
+            spanTypeImportRemappers[provider]
+                = new SpanTypeImportRemapper(provider, spanTypeMerge,
+                    type => RemapGenericNominalType(mappedProvider, type));
+        }
         var functions = ImmutableArray.CreateBuilder<BoundFunction>(functionCount);
         for (var provider = 0; provider < references.Count; provider++)
         {
@@ -255,12 +433,17 @@ public static partial class ModuleCompiler
                     functionPointerMappings[provider]);
                 remappedFunction = RemapEnumTypes(remappedFunction,
                     enumMappings[provider]);
-                functions.Add(BoundTreeTraversal.RewriteTypes(
+                remappedFunction = BoundTreeTraversal.RewriteTypes(
+                    remappedFunction,
+                    type => RemapGenericNominalType(provider, type));
+                var spanMappedFunction = BoundTreeTraversal.RewriteTypes(
                     BoundTreeTraversal.RewriteTypes(remappedFunction,
                         type => RemapManagedClassType(type,
                             classMappings[provider])),
                     type => RemapCheckedReferenceType(type,
-                        checkedReferenceMappings[provider])));
+                        checkedReferenceMappings[provider]));
+                functions.Add(spanTypeImportRemappers[provider]
+                    .RemapFunction(spanMappedFunction));
             }
         }
         var nominalOrigins =
@@ -332,13 +515,25 @@ public static partial class ModuleCompiler
             fixedArrayMappings, classMappings, enumMappings,
             checkedReferenceMappings);
         if (!NativeFixedArrayContract.IsValidTable(combined,
-                nativeFixedArrayTypes, checkedReferenceTypes)
+                nativeFixedArrayTypes, checkedReferenceTypes,
+                enumDefinitions)
             || !NativePointerTypeContract.IsValidTable(nativePointerTypes,
                 combined, nativeFunctionPointerSignatures,
-                nativeFixedArrayTypes, checkedReferenceTypes))
+                nativeFixedArrayTypes, checkedReferenceTypes,
+                enumDefinitions))
         {
             throw new ModuleContractException(
                 "Combined graph array and pointer metadata is invalid.");
+        }
+        var (evaluationFormSelections, evaluationFormProviders)
+            = MergeCoreEvaluationFormContexts(references);
+        var genericMethodImports = ImmutableArray.CreateBuilder<
+            BoundGenericMethodImport>();
+        for (var provider = 0; provider < references.Count; provider++)
+        {
+            genericMethodImports.AddRange(
+                spanTypeImportRemappers[provider].RemapImports(
+                    references[provider]));
         }
         return new CompilationReference(combined, functions.MoveToImmutable(), references[0].RuntimePolicy,
             nativeFunctionPointerSignatures: nativeFunctionPointerSignatures,
@@ -348,7 +543,147 @@ public static partial class ModuleCompiler
             enumDefinitions: enumDefinitions,
             privateNominalTypeOrigins: privateNominalTypeOrigins,
             classes: combinedClasses,
-            privateClassReferences: privateClassReferences.ToImmutable());
+            privateClassReferences: privateClassReferences.ToImmutable(),
+            genericNominalTypeDefinitions: allGenericNominalDefinitions,
+            genericNominalTypeInstances:
+                spanRemappedGenericNominalInstances.ToImmutable(),
+            genericMethodImports: [
+                .. genericMethodImports,
+            ],
+            coreEvaluationFormIdentitySelections:
+                evaluationFormSelections,
+            coreEvaluationFormSchemaProviders:
+                evaluationFormProviders,
+            spanTypes: spanTypeMerge.Types);
+
+        BoundGenericNominalTypeArgument
+            RemapGenericNominalTypeFormalArgument(
+            BoundGenericNominalTypeArgument argument,
+            ImmutableArray<int> formalOwnerMapping)
+        {
+            if (!argument.HasTypeFormalOwnerIdentity
+                || (uint)argument.TypeFormalDefinitionOrdinal
+                    >= (uint)formalOwnerMapping.Length
+                || formalOwnerMapping[
+                    argument.TypeFormalDefinitionOrdinal] < 0)
+            {
+                throw new ModuleContractException(
+                    "A generic nominal type argument has no merged method-formal owner.");
+            }
+
+            return argument with {
+                TypeFormalDefinitionOrdinal = formalOwnerMapping[
+                    argument.TypeFormalDefinitionOrdinal],
+            };
+        }
+
+        int MapGenericNominalTypeInstance(int provider, int instanceIndex)
+        {
+            var sourceInstances =
+                references[provider].GenericNominalTypeInstances;
+            if ((uint)instanceIndex >= (uint)sourceInstances.Length)
+            {
+                throw new ModuleContractException(
+                    "A generic nominal type reference has an invalid source instance index.");
+            }
+            if (genericNominalTypeStates[provider][instanceIndex] == 1)
+            {
+                throw new ModuleContractException(
+                    "Generic nominal type substitutions are cyclic.");
+            }
+            if (genericNominalTypeStates[provider][instanceIndex] == 2)
+            {
+                return genericNominalTypeMappings[provider][instanceIndex];
+            }
+
+            genericNominalTypeStates[provider][instanceIndex] = 1;
+            var sourceInstance = sourceInstances[instanceIndex];
+            var remappedInstance = BoundTreeTraversal.RewriteTypes(
+                sourceInstance,
+                type => RemapGenericNominalTypeArgument(provider, type));
+            remappedInstance = remappedInstance with {
+                Arguments = [.. remappedInstance.Arguments.Select(argument =>
+                    argument.HasTypeFormalOwnerIdentity
+                        ? RemapGenericNominalTypeFormalArgument(argument,
+                            genericNominalFormalOwnerMappings[provider])
+                        : argument)],
+            };
+            var key = BoundGenericNominalTypeContract.CreateUseKey(
+                remappedInstance.Definition, remappedInstance.Arguments,
+                remappedInstance.Qualifiers, remappedInstance.TypeSpecForm);
+            if (remappedInstance.Arguments.Any(static argument =>
+                    argument.Kind == BoundGenericArgumentKind.Type
+                    && (BoundSpanTypeTypes.IsType(argument.Type)
+                        || (argument.TypeArgumentTerm is
+                                BoundGenericMethodTypeTerm typeArgumentTerm
+                            && BoundGenericMethodTypeTerms.ContainsKind(
+                                typeArgumentTerm,
+                                BoundGenericMethodTypeTermKind.Span)))))
+            {
+                key += "\u001Fspan-owner:"
+                    + provider.ToString(
+                        System.Globalization.CultureInfo.InvariantCulture);
+            }
+            if (!genericNominalTypeIndexes.TryGetValue(key, out var type))
+            {
+                if (allGenericNominalInstances.Count
+                    >= BoundGenericNominalTypeTypes.MaximumCount)
+                {
+                    throw new ModuleContractException(
+                        "The merged generic nominal type instance limit was exceeded.");
+                }
+                type = BoundGenericNominalTypeTypes.Type(
+                    allGenericNominalInstances.Count);
+                allGenericNominalInstances.Add(remappedInstance);
+                genericNominalInstanceReferenceIndexes.Add(provider);
+                genericNominalTypeIndexes.Add(key, type);
+            }
+
+            var mappedIndex = BoundGenericNominalTypeTypes.Index(type);
+            genericNominalTypeMappings[provider][instanceIndex]
+                = mappedIndex;
+            genericNominalTypeStates[provider][instanceIndex] = 2;
+            return mappedIndex;
+        }
+
+        PrimitiveType RemapGenericNominalType(int provider,
+            PrimitiveType type)
+        {
+            if (BoundGenericNominalTypeTypes.IsType(type))
+            {
+                var mappedIndex = MapGenericNominalTypeInstance(provider,
+                    BoundGenericNominalTypeTypes.Index(type));
+                return BoundGenericNominalTypeTypes.Type(mappedIndex);
+            }
+
+            return type;
+        }
+
+        PrimitiveType RemapGenericNominalTypeArgument(int provider,
+            PrimitiveType type)
+        {
+            if (BoundGenericNominalTypeTypes.IsType(type))
+            {
+                return RemapGenericNominalType(provider, type);
+            }
+
+            var reference = references[provider];
+            var mapped = RemapType(type, reference.Structures, combined,
+                destinationTypes: destinationTypes);
+            mapped = RemapNativeFixedArrayType(mapped,
+                fixedArrayMappings[provider]);
+            mapped = RemapNativeFunctionPointerType(mapped,
+                functionPointerMappings[provider]);
+            mapped = RemapNativePointerType(mapped,
+                nativePointerMappings[provider]);
+            mapped = RemapNativeFixedArrayType(mapped,
+                fixedArrayMappings[provider]);
+            mapped = RemapManagedClassType(mapped,
+                classMappings[provider]);
+            mapped = RemapCheckedReferenceType(mapped,
+                checkedReferenceMappings[provider]);
+            return RemapEnumType(mapped, enumMappings[provider]);
+        }
     }
 
     /// <summary>Stores a verified DLL implementation with symbolic imports and no fabricated entry point.</summary>
@@ -358,6 +693,7 @@ public static partial class ModuleCompiler
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentNullException.ThrowIfNull(exports);
+        ArgumentNullException.ThrowIfNull(dependencies);
         if (identityInputs is not null && !identityInputs.IsFor(program))
         {
             throw new ArgumentException(
@@ -394,14 +730,18 @@ public static partial class ModuleCompiler
             destinationCheckedReferenceTypes:
                 program.CheckedReferenceTypes,
             sourceCheckedReferenceTypes:
-                dependencies.CheckedReferenceTypes);
+                dependencies.CheckedReferenceTypes,
+            destinationEnumDefinitions: program.EnumDefinitions,
+            sourceEnumDefinitions: dependencies.EnumDefinitions);
         _ = MapNativePointerTypes(program.NativePointerTypes, program.Structures,
             program.NativeFunctionPointerSignatures, dependencies.NativePointerTypes,
             dependencies.Structures, dependencies.NativeFunctionPointerSignatures,
             program.NativeFixedArrayTypes,
             dependencies.NativeFixedArrayTypes,
             program.CheckedReferenceTypes,
-            dependencies.CheckedReferenceTypes);
+            dependencies.CheckedReferenceTypes,
+            program.EnumDefinitions,
+            dependencies.EnumDefinitions);
         if (program.EntryPoint != -1 || program.RequiresSourceGrant || !program.Buffers.IsDefaultOrEmpty
             || dependencies.RequiresSourceGrant
             || program.RuntimePolicy != dependencies.RuntimePolicy)
@@ -413,6 +753,8 @@ public static partial class ModuleCompiler
         {
             throw new ModuleContractException("Graph library exports must be distinct functions.");
         }
+        RejectExportedEvaluationFormContracts(program, names,
+            "Native graph");
         var unmatchedExports = new HashSet<string>(names, StringComparer.Ordinal);
         IReadOnlyDictionary<string, BoundFunction>? available = null;
         var hasPrivateManagedState = HasPrivateManagedState(program);
@@ -429,7 +771,8 @@ public static partial class ModuleCompiler
                 _ = unmatchedExports.Remove(function.Name);
             }
             if (hasPrivateManagedState && (function.IsExternal || isExport)
-                && !ManagedExportShape.Supported(function, program.Structures))
+                && !ManagedExportShape.Supported(function, program.Structures,
+                    program.CheckedReferenceTypes))
             {
                 throw new ModuleContractException($"Managed graph boundary '{function.Name}' requires public Copy values.");
             }
@@ -445,7 +788,8 @@ public static partial class ModuleCompiler
                 if (function.DirectNativeImport is not null && !function.IsModuleReference)
                 {
                     if (!DirectNativeImportContract.IsValidPrivateWindows(function, program.Structures,
-                        program.NativeFunctionPointerSignatures, program.NativePointerTypes))
+                        program.NativeFunctionPointerSignatures,
+                        program.NativePointerTypes, program.EnumDefinitions))
                     {
                         throw new ModuleContractException(
                             $"Graph library direct import '{function.Name}' is invalid.");
@@ -463,11 +807,14 @@ public static partial class ModuleCompiler
                         program.CheckedReferenceTypes);
                 var expectedRawUnionReturnCoverage
                     = function.RawUnionReturnCoverage;
+                var functionContract = Contract(function,
+                    program.Structures,
+                    program.NativeFunctionPointerSignatures,
+                    program.NativePointerTypes,
+                    program.NativeFixedArrayTypes);
                 if (available is null || !available.TryGetValue(function.Name, out var actual)
                     || !CompatibleContract(
-                        Contract(function, program.Structures, program.NativeFunctionPointerSignatures,
-                            program.NativePointerTypes,
-                            program.NativeFixedArrayTypes),
+                        functionContract,
                         Contract(actual, dependencies.Structures,
                             dependencies.NativeFunctionPointerSignatures,
                             dependencies.NativePointerTypes,
@@ -477,6 +824,16 @@ public static partial class ModuleCompiler
                         actual.NativeOutputContracts, program.Structures, dependencies.Structures,
                         program.NativeFunctionPointerSignatures, program.NativePointerTypes,
                         dependencies.NativeFunctionPointerSignatures, dependencies.NativePointerTypes)
+                    || !PrivateGeneralDependencyContractsSatisfy(
+                        GetPrivateGeneralDependencyContracts(function),
+                        GetPrivateGeneralDependencyContracts(actual),
+                        functionContract)
+                    || !PrivateCheckedOutputStateVectorsMatch(
+                        function, functionContract, actual,
+                        Contract(actual, dependencies.Structures,
+                            dependencies.NativeFunctionPointerSignatures,
+                            dependencies.NativePointerTypes,
+                            dependencies.NativeFixedArrayTypes))
                     || !SameDirectNativeImportDescriptor(
                         expectedDirectNativeImport, program.Structures,
                         program.NativeFunctionPointerSignatures,
@@ -524,7 +881,8 @@ public static partial class ModuleCompiler
                 identityInputs));
         var structures = SelectStructures(program.Structures, required);
         var checkedReferenceTypes = RemapCheckedReferenceTypeDefinitions(
-            program.CheckedReferenceTypes, program.Structures, structures);
+            program.CheckedReferenceTypes, program.Structures, structures,
+            nativePointerTypes: program.NativePointerTypes);
         var nativePointerTypes = RemapNativePointerTypeDefinitions(program.NativePointerTypes,
             program.Structures, structures);
         var nativeFunctionPointerSignatures
@@ -582,14 +940,28 @@ public static partial class ModuleCompiler
             var remapped = RemapFunction(function, program.Structures, structures);
             var isGraphImport = function.IsExternal
                 && (function.DirectNativeImport is null || function.IsModuleReference);
+            var moduleContract = Contract(remapped, structures,
+                nativeFunctionPointerSignatures, nativePointerTypes,
+                nativeFixedArrayTypes);
+            var (checkedOutputSelectors, checkedOutputStates) =
+                GetPrivateCheckedOutputStateVectors(remapped, moduleContract,
+                    remapped.CheckedOutputSelectors,
+                    remapped.CheckedOutputStates);
             functions.Add(new ModuleFunction(function.Name,
-                Contract(remapped, structures, nativeFunctionPointerSignatures,
-                    nativePointerTypes, nativeFixedArrayTypes),
-                isGraphImport ? null : remapped, isGraphImport) {
+                moduleContract, isGraphImport ? null : remapped,
+                isGraphImport) {
                 HasOwnershipTransfer = isGraphImport
                     ? ownershipTransfers[index] : Compilation.HasOwnershipTransfer(function, program.Structures),
                 NativeOutputRole = remapped.NativeOutputRole,
                 NativeOutputContracts = remapped.NativeOutputContracts,
+                GeneralDependencyContracts =
+                    GetPrivateGeneralDependencyContracts(remapped),
+                CheckedOutputSelectors = checkedOutputSelectors,
+                CheckedOutputStates = checkedOutputStates,
+                HasPrivateCheckedOutputStateMetadata =
+                    remapped.HasPrivateCheckedOutputStateMetadata
+                    || !remapped.CheckedOutputSelectors.IsEmpty
+                    || !remapped.CheckedOutputStates.IsEmpty,
                 ExpectedDirectNativeImport = isGraphImport
                     ? ExpectedDirectNativeImport(remapped) : null,
                 ExpectedCopyOriginSummaryData = isGraphImport
@@ -658,7 +1030,10 @@ public static partial class ModuleCompiler
                     || !Exportable(function, module.Structures,
                         module.NativePointerTypes,
                         module.NativeFixedArrayTypes)
-                    || (hasPrivateManagedState && !ManagedExportShape.Supported(function, module.Structures)))
+                    || (hasPrivateManagedState
+                        && !ManagedExportShape.Supported(function,
+                            module.Structures,
+                            module.CheckedReferenceTypes)))
                 {
                     throw new ModuleFormatException($"Graph export '{item.Name}' has no public implementation.");
                 }
@@ -786,14 +1161,18 @@ public static partial class ModuleCompiler
             destinationCheckedReferenceTypes:
                 module.CheckedReferenceTypes,
             sourceCheckedReferenceTypes:
-                dependencies.CheckedReferenceTypes);
+                dependencies.CheckedReferenceTypes,
+            destinationEnumDefinitions: module.EnumDefinitions,
+            sourceEnumDefinitions: dependencies.EnumDefinitions);
         var dependencyNativePointerMapping = MapNativePointerTypes(module.NativePointerTypes,
             module.Structures, module.NativeFunctionPointerSignatures, dependencies.NativePointerTypes,
             dependencies.Structures, dependencies.NativeFunctionPointerSignatures,
             module.NativeFixedArrayTypes,
             dependencies.NativeFixedArrayTypes,
             module.CheckedReferenceTypes,
-            dependencies.CheckedReferenceTypes);
+            dependencies.CheckedReferenceTypes,
+            module.EnumDefinitions,
+            dependencies.EnumDefinitions);
         if (ValidateGraphImports(module, dependencies, hasPrivateManagedState,
             dependencyFunctionPointerMapping, out var dependencyFunctions))
         {
@@ -914,6 +1293,11 @@ public static partial class ModuleCompiler
         {
             throw new ModuleContractException("Graph library and dependency runtime policies differ.");
         }
+        var dependencyCheckedReferenceMapping
+            = module.FormatVersion == CheckedReferenceVersion
+                ? MapCheckedReferenceTypeRows(module, dependencies)
+                    .ToArray()
+                : [];
         IReadOnlyDictionary<string, BoundFunction>? availableFunctions = null;
         IReadOnlyDictionary<string, BoundStruct> dependencyTypes = dependencies.Structures.IsEmpty
             ? ImmutableDictionary<string, BoundStruct>.Empty
@@ -948,6 +1332,8 @@ public static partial class ModuleCompiler
             {
                 actualContract = RemapPrivate105FunctionPointerReferences(
                     actualContract, dependencyFunctionPointerMapping);
+                actualContract = RemapPrivateCheckedReferenceContract(
+                    actualContract, dependencyCheckedReferenceMapping);
             }
             var actualReturnTypeInModule = actual.ReturnType;
             if ((int)actualReturnTypeInModule is >= 100
@@ -963,6 +1349,10 @@ public static partial class ModuleCompiler
                     module.Structures, dependencies.Structures,
                     module.NativeFunctionPointerSignatures, module.NativePointerTypes,
                     dependencies.NativeFunctionPointerSignatures, dependencies.NativePointerTypes)
+                || !PrivateGeneralDependencyContractsSatisfy(
+                    item.GeneralDependencyContracts,
+                    GetPrivateGeneralDependencyContracts(actual),
+                    item.Contract)
                 || (module.FormatVersion == CheckedReferenceVersion
                     && !SameDirectNativeImportDescriptor(
                         item.ExpectedDirectNativeImport, module.Structures,
@@ -992,7 +1382,10 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleContractException($"Incompatible graph import '{item.Name}'.");
             }
-            if (hasPrivateManagedState && !ManagedExportShape.Supported(actual, dependencies.Structures))
+            if (hasPrivateManagedState
+                && !ManagedExportShape.Supported(actual,
+                    dependencies.Structures,
+                    dependencies.CheckedReferenceTypes))
             {
                 hasUnsupportedManagedImport = true;
             }

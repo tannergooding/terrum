@@ -26,10 +26,17 @@ public static partial class ModuleCompiler
         byte SourceKind, byte SourceView, int SourceOrdinal,
         ImmutableArray<int> SourcePath);
 
+    private readonly record struct Private106GeneralDependencyRow(
+        byte DestinationKind, byte SourceKind, byte Relationship, byte Phase,
+        uint DestinationOrdinal, uint SourceOrdinal);
+
     internal readonly record struct Private106FunctionMetadata(
         ImmutableArray<byte> RawUnionReturnCoverage,
         DirectNativeImport? ExpectedDirectNativeImport,
-        Private105CopyOriginSummaryData? CopyOriginSummary);
+        Private105CopyOriginSummaryData? CopyOriginSummary,
+        ImmutableArray<BoundDependencyContract> GeneralDependencyContracts,
+        ImmutableArray<NativeFunctionPointerSelector> CheckedOutputSelectors,
+        ImmutableArray<NativeFunctionPointerOutputState> CheckedOutputStates);
 
     private static void WritePrivateCheckedReferenceTypes(
         BinaryWriter writer,
@@ -54,7 +61,8 @@ public static partial class ModuleCompiler
             throw new ModuleContractException(
                 "The selected private checked-reference table is invalid.");
         }
-        if (!CheckedReferenceTypeContract.IsValidTable(referenceTypes))
+        if (!CheckedReferenceTypeContract.IsValidTable(
+                referenceTypes, pointerTypes))
         {
             throw new ModuleContractException(
                 "The selected private checked-reference table is invalid.");
@@ -63,7 +71,8 @@ public static partial class ModuleCompiler
         for (var index = 0; index < referenceTypes.Length; index++)
         {
             var referenceType = referenceTypes[index];
-            if ((!(referenceType.IsOptionalValue
+            if (referenceType.IsReferentWritable
+                || (!(referenceType.IsOptionalValue
                         && referenceType.ReferentType == PrimitiveType.Void)
                     && !IsValidPrivateReferenceValueType(
                         referenceType.ReferentType, referenceTypes, structures,
@@ -221,7 +230,7 @@ public static partial class ModuleCompiler
         }
 
         var result = referenceTypes.MoveToImmutable();
-        if (!CheckedReferenceTypeContract.IsValidTable(result))
+        if (!CheckedReferenceTypeContract.IsValidTable(result, pointerTypes))
         {
             throw new ModuleFormatException(
                 "Private checked-reference type table is invalid.");
@@ -254,7 +263,8 @@ public static partial class ModuleCompiler
         {
             return (module, []);
         }
-        if (!CheckedReferenceTypeContract.IsValidTable(source))
+        if (!CheckedReferenceTypeContract.IsValidTable(
+                source, module.NativePointerTypes))
         {
             throw new ModuleContractException(
                 "The module checked-reference type table is invalid.");
@@ -487,12 +497,8 @@ public static partial class ModuleCompiler
                         : null;
             functions.Add(item with {
                 Function = function,
-                Contract = function is null
-                    ? RemapPrivateCheckedReferenceContract(item.Contract,
-                        mapping)
-                    : Contract(function, structures,
-                        functionPointerSignatures, pointerTypes,
-                        fixedArrayTypes, private105: true),
+                Contract = RemapPrivateCheckedReferenceContract(
+                    item.Contract, mapping),
                 NativeOutputContracts = item.NativeOutputContracts.IsDefault
                     ? default
                     : [.. item.NativeOutputContracts.Select(output =>
@@ -517,7 +523,7 @@ public static partial class ModuleCompiler
             Functions = functions.MoveToImmutable(),
         };
         if (!CheckedReferenceTypeContract.IsValidTable(
-                result.CheckedReferenceTypes))
+                result.CheckedReferenceTypes, result.NativePointerTypes))
         {
             throw new ModuleContractException(
                 "Canonical checked-reference type table is invalid.");
@@ -601,6 +607,65 @@ public static partial class ModuleCompiler
         }
         _ = builder.Append(contract.AsSpan(offset));
         return builder.ToString();
+    }
+
+    private static ImmutableArray<int> MapCheckedReferenceTypeRows(
+        Module destination, CompilationReference source)
+    {
+        if (!CheckedReferenceTypeContract.IsValidTable(
+                destination.CheckedReferenceTypes,
+                destination.NativePointerTypes)
+            || !CheckedReferenceTypeContract.IsValidTable(
+                source.CheckedReferenceTypes,
+                source.NativePointerTypes))
+        {
+            throw new ModuleContractException(
+                "A provider checked-reference type table is invalid.");
+        }
+
+        var sourceEnumMapping = CreatePrivateEnumTypeMapping(
+            source.EnumDefinitions, destination.EnumDefinitions);
+        var mappings = ImmutableArray.CreateBuilder<int>(
+            source.CheckedReferenceTypes.Length);
+        for (var sourceIndex = 0;
+            sourceIndex < source.CheckedReferenceTypes.Length;
+            sourceIndex++)
+        {
+            var sourceName = TypeName(
+                CheckedReferenceTypes.Type(sourceIndex), source.Structures,
+                source.NativeFunctionPointerSignatures,
+                source.NativePointerTypes, source.NativeFixedArrayTypes,
+                source.Classes,
+                checkedReferenceTypes: source.CheckedReferenceTypes,
+                enumMapping: sourceEnumMapping);
+            var destinationIndex = -1;
+            for (var candidate = 0;
+                candidate < destination.CheckedReferenceTypes.Length;
+                candidate++)
+            {
+                if (sourceName != TypeName(
+                        CheckedReferenceTypes.Type(candidate),
+                        destination.Structures,
+                        destination.NativeFunctionPointerSignatures,
+                        destination.NativePointerTypes,
+                        destination.NativeFixedArrayTypes,
+                        destination.Classes,
+                        checkedReferenceTypes:
+                            destination.CheckedReferenceTypes))
+                {
+                    continue;
+                }
+                if (destinationIndex >= 0)
+                {
+                    throw new ModuleContractException(
+                        "A checked-reference type has multiple structurally equivalent destination rows.");
+                }
+                destinationIndex = candidate;
+            }
+            mappings.Add(destinationIndex);
+        }
+
+        return mappings.MoveToImmutable();
     }
 
     private static bool HasNominalCheckedReferenceTypeClosure(
@@ -951,6 +1016,48 @@ public static partial class ModuleCompiler
                     summaryWriter.Structures,
                     summaryWriter.CheckedReferenceTypes)
             : item.ExpectedCopyOriginSummaryData;
+        var nativeOutputContracts = item.NativeOutputContracts.IsDefault
+            ? item.Function?.NativeOutputContracts ?? default
+            : item.NativeOutputContracts;
+        var generalDependencyContracts = function is BoundFunction dependencyFunction
+            ? PrivateNativeOutputDependenciesMatch(dependencyFunction)
+                ? GetPrivateGeneralDependencyContracts(dependencyFunction)
+                : throw new ModuleContractException(
+                    "Private NativeOutput rows differ from their declaration Dependency contracts.")
+            : item.GeneralDependencyContracts;
+        var generalDependencyRows = CreatePrivate106GeneralDependencyRows(
+            generalDependencyContracts, item.Contract,
+            nativeOutputContracts);
+        var (checkedOutputSelectors, checkedOutputStates) =
+            GetPrivateCheckedOutputStateVectors(item.Function,
+                item.Contract, item.CheckedOutputSelectors,
+                item.CheckedOutputStates,
+                item.HasPrivateCheckedOutputStateMetadata);
+        if (writer is not ModuleWriter outputStateWriter)
+        {
+            throw new ModuleContractException(
+                "Private checked output-state metadata has no module type context.");
+        }
+        var checkedOutputOwner = function
+            ?? outputStateWriter.SourceProgram?.Functions.FirstOrDefault(
+                sourceFunction => sourceFunction.Name == item.Name);
+        if (checkedOutputSelectors.Length > MaximumNodes
+            || checkedOutputStates.Length > MaximumNodes
+            || !PrivateCheckedOutputFormalTypesAreValid(
+                checkedOutputOwner, item.Contract,
+                outputStateWriter.Structures, outputStateWriter.Classes,
+                outputStateWriter.NativeFunctionPointerSignatures,
+                outputStateWriter.NativePointerTypes,
+                outputStateWriter.NativeFixedArrayTypes,
+                outputStateWriter.CheckedReferenceTypes,
+                outputStateWriter.SourceProgram)
+            || !PrivateCheckedOutputDependenciesAreValid(
+                generalDependencyContracts, function, item.Contract,
+                nativeOutputContracts, checkedOutputStates))
+        {
+            throw new ModuleContractException(
+                "Private checked output-state vectors or output dependencies are invalid.");
+        }
         var hasPrivateDependencyContract = item.Contract.Contains(
             "|dependency:", StringComparison.Ordinal);
         var hasVTableParameterContract = item.Contract.Contains(
@@ -972,7 +1079,8 @@ public static partial class ModuleCompiler
                                 .IsValidPrivateWindows(function,
                                     importWriter.Structures,
                                     importWriter.NativeFunctionPointerSignatures,
-                                    importWriter.NativePointerTypes)))
+                                    importWriter.NativePointerTypes,
+                                    importWriter.EnumDefinitions)))
                     || (function.NativeVTableMethod
                         is NativeVTableMethodDefinition nativeVTableMethod
                         && !nativeVTableMethod.Outputs.IsEmpty)
@@ -983,9 +1091,6 @@ public static partial class ModuleCompiler
                             || !NativeFunctionPointerContract.MatchesFunction(
                                 function, functionPointerType,
                                     functionWriter.NativeFunctionPointerSignatures)))
-                    || (!function.DependencyContracts.IsEmpty
-                        && !HasOnlyRevision92NativeOutputDependencyContracts(
-                            function))
                     || !function.ResultDependencyParameters.IsEmpty
                     || function.ResultDependencyIncludesReceiver
                     || function.ReturnsForwardedBacking
@@ -1014,9 +1119,38 @@ public static partial class ModuleCompiler
                 $"The current private 106 writer slice requires local declarations without unimplemented publication or provenance carriers ({details}).");
         }
 
-        writer.Write(0); // general Dependency count
-        writer.Write(0); // checkedSelectorCount
-        writer.Write(0); // checkedOutputStateCount
+        writer.Write(generalDependencyRows.Length);
+        foreach (var dependency in generalDependencyRows)
+        {
+            writer.Write(dependency.DestinationKind);
+            writer.Write(dependency.SourceKind);
+            writer.Write(dependency.Relationship);
+            writer.Write(dependency.Phase);
+            writer.Write(dependency.DestinationOrdinal);
+            writer.Write(dependency.SourceOrdinal);
+        }
+        writer.Write(checkedOutputSelectors.Length);
+        foreach (var selector in checkedOutputSelectors.OrderBy(
+            static selector => selector.PhaseLocalOrdinal))
+        {
+            writer.Write(selector.PhaseTag);
+            writer.Write((byte)0);
+            writer.Write((ushort)0);
+            writer.Write(selector.PhaseLocalOrdinal);
+            writer.Write((uint)selector.NodeKind);
+        }
+        writer.Write(checkedOutputStates.Length);
+        foreach (var outputState in checkedOutputStates.OrderBy(
+            static outputState => outputState.FormalOrdinal)
+            .ThenBy(static outputState => outputState.SelectorOrdinal))
+        {
+            writer.Write(outputState.FormalOrdinal);
+            writer.Write(outputState.SelectorOrdinal);
+            writer.Write(outputState.State);
+            writer.Write((byte)0);
+            writer.Write((byte)0);
+            writer.Write((byte)0);
+        }
         WritePrivate106RawUnionReturnCoverage(writer, item);
         WritePrivate105CopyOriginSummary(writer, copyOriginSummary);
         writer.Write((byte)0); // no foreign-interface member variant
@@ -1042,6 +1176,1250 @@ public static partial class ModuleCompiler
             }
         }
     }
+
+    private static ImmutableArray<BoundDependencyContract>
+        GetPrivateGeneralDependencyContracts(BoundFunction function)
+    {
+        var dependencies = function.DependencyContracts;
+        var outputs = function.NativeOutputContracts;
+        if (dependencies.IsDefault || outputs.IsDefault)
+        {
+            return default;
+        }
+
+        var outputFormals = new HashSet<int>();
+        foreach (var output in outputs)
+        {
+            if (output is null || output.FormalOrdinal < 0
+                || !outputFormals.Add(output.FormalOrdinal))
+            {
+                return default;
+            }
+        }
+
+        var result = ImmutableArray.CreateBuilder<BoundDependencyContract>(
+            dependencies.Length);
+        foreach (var dependency in dependencies)
+        {
+            if (dependency is null || dependency.Sources.IsDefault)
+            {
+                return default;
+            }
+            if (dependency.Destination
+                    == BoundDependencyDestination.InitializedOutput
+                && dependency.DestinationOrdinal is int outputOrdinal
+                && outputFormals.Contains(outputOrdinal)
+                && dependency.Relation is BoundDependencyRelation.DependsOn
+                    or BoundDependencyRelation.ForwardsBacking)
+            {
+                continue;
+            }
+            result.Add(dependency);
+        }
+        return result.ToImmutable();
+    }
+
+    private static bool HasPrivateGeneralDependencyContracts(Module module)
+    {
+        foreach (var item in module.Functions)
+        {
+            var dependencies = item.Function is BoundFunction function
+                ? GetPrivateGeneralDependencyContracts(function)
+                : item.GeneralDependencyContracts;
+            if (dependencies.IsDefault || !dependencies.IsEmpty)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static bool HasPrivateCheckedOutputStateVectors(Module module)
+    {
+        foreach (var item in module.Functions)
+        {
+            if (item.HasPrivateCheckedOutputStateMetadata
+                || item.Function?.HasPrivateCheckedOutputStateMetadata == true
+                || (item.Function is BoundFunction function
+                    && (!function.CheckedOutputSelectors.IsEmpty
+                        || !function.CheckedOutputStates.IsEmpty)))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static (ImmutableArray<NativeFunctionPointerSelector> Selectors,
+        ImmutableArray<NativeFunctionPointerOutputState> OutputStates)
+        GetPrivateCheckedOutputStateVectors(
+        BoundFunction? function, string contract,
+        ImmutableArray<NativeFunctionPointerSelector> selectors,
+        ImmutableArray<NativeFunctionPointerOutputState> outputStates,
+        bool hasExplicitVectors = false)
+    {
+        if (function is not null
+            && (function.HasPrivateCheckedOutputStateMetadata
+                || !function.CheckedOutputSelectors.IsEmpty
+                || !function.CheckedOutputStates.IsEmpty))
+        {
+            selectors = function.CheckedOutputSelectors;
+            outputStates = function.CheckedOutputStates;
+            hasExplicitVectors |=
+                function.HasPrivateCheckedOutputStateMetadata;
+        }
+        if (selectors.IsDefault || outputStates.IsDefault)
+        {
+            throw new ModuleContractException(
+                "Private checked output-state vectors are uninitialized.");
+        }
+
+        var parameterCount = PrivateDependencySignature(contract).ParameterCount;
+        var outputFormals = GetPrivateCheckedOutputFormals(function, contract);
+
+        if (!selectors.IsEmpty || !outputStates.IsEmpty)
+        {
+            if (!ValidatePrivateCheckedOutputStateVectors(contract,
+                    outputFormals, selectors, outputStates,
+                    checked((uint)parameterCount)))
+            {
+                throw new ModuleContractException(
+                    "Private checked output-state vectors contradict their declaration.");
+            }
+            return (selectors, outputStates);
+        }
+
+        if (hasExplicitVectors)
+        {
+            if (!ValidatePrivateCheckedOutputStateVectors(contract,
+                    outputFormals, selectors, outputStates,
+                    checked((uint)parameterCount)))
+            {
+                throw new ModuleContractException(
+                    "Private empty checked output-state vectors contradict their declaration.");
+            }
+            return (selectors, outputStates);
+        }
+
+        var returnType = function?.ReturnType
+            ?? PrivateDependencyReturnType(contract);
+        if (returnType != PrimitiveType.Bool || outputFormals.IsEmpty)
+        {
+            return ([], []);
+        }
+
+        var defaultSelectors = ImmutableArray.Create(
+            new NativeFunctionPointerSelector(3, 0, 1),
+            new NativeFunctionPointerSelector(3, 1, 2));
+        var defaultOutputStates
+            = ImmutableArray.CreateBuilder<
+                NativeFunctionPointerOutputState>(
+                    checked(outputFormals.Length * 2));
+        foreach (var formalOrdinal in outputFormals)
+        {
+            defaultOutputStates.Add(
+                new NativeFunctionPointerOutputState(formalOrdinal, 0, 1));
+            defaultOutputStates.Add(
+                new NativeFunctionPointerOutputState(formalOrdinal, 1, 0));
+        }
+        var normalizedOutputStates = defaultOutputStates.MoveToImmutable();
+        if (!ValidatePrivateCheckedOutputStateVectors(contract,
+                outputFormals, defaultSelectors, normalizedOutputStates,
+                checked((uint)parameterCount)))
+        {
+            throw new ModuleContractException(
+                "Private Boolean checked output defaults are invalid.");
+        }
+        return (defaultSelectors, normalizedOutputStates);
+    }
+
+    private static ImmutableArray<uint> GetPrivateCheckedOutputFormals(
+        BoundFunction? function, string contract)
+    {
+        var (parameterCount, hasReceiverSource,
+            hasReceiverDestination) = PrivateDependencySignature(contract);
+        var outputFormals = ImmutableArray.CreateBuilder<uint>();
+        if (function is not null)
+        {
+            var parameterOffset = hasReceiverDestination ? 1 : 0;
+            if (parameterOffset + parameterCount > function.Variables.Length)
+            {
+                throw new ModuleContractException(
+                    "Private checked output-state owner has an invalid parameter layout.");
+            }
+            for (var formalOrdinal = 0;
+                formalOrdinal < parameterCount; formalOrdinal++)
+            {
+                if (function.Variables[formalOrdinal + parameterOffset].IsInit)
+                {
+                    outputFormals.Add(checked((uint)formalOrdinal));
+                }
+            }
+        }
+        else
+        {
+            var parts = contract.Split('|');
+            var contractParameterOffset = hasReceiverSource ? 1 : 0;
+            for (var formalOrdinal = 0;
+                formalOrdinal < parameterCount; formalOrdinal++)
+            {
+                var partIndex = checked(8 + contractParameterOffset
+                    + formalOrdinal);
+                if (partIndex >= parts.Length)
+                {
+                    throw new ModuleFormatException(
+                        "Private checked output-state contract is missing a formal.");
+                }
+                if (parts[partIndex].StartsWith("init:",
+                    StringComparison.Ordinal))
+                {
+                    outputFormals.Add(checked((uint)formalOrdinal));
+                }
+            }
+        }
+        return outputFormals.ToImmutable();
+    }
+
+    private static bool PrivateCheckedOutputFormalTypesAreValid(
+        BoundFunction? function, string contract,
+        ImmutableArray<BoundStruct> structures,
+        ImmutableArray<BoundClass> classes,
+        ImmutableArray<NativeFunctionPointerSignatureDefinition>
+            functionPointerSignatures,
+        ImmutableArray<NativePointerTypeDefinition> nativePointerTypes,
+        ImmutableArray<BoundNativeFixedArrayType> fixedArrayTypes,
+        ImmutableArray<CheckedReferenceTypeDefinition>
+            checkedReferenceTypes,
+        BoundProgram? program = null)
+    {
+        var (parameterCount, hasReceiverSource,
+            hasReceiverDestination) = PrivateDependencySignature(contract);
+        var outputFormals = GetPrivateCheckedOutputFormals(function, contract);
+        if (function is not null)
+        {
+            var parameterOffset = hasReceiverDestination ? 1 : 0;
+            if (parameterOffset + parameterCount > function.Variables.Length)
+            {
+                return false;
+            }
+            foreach (var formalOrdinal in outputFormals)
+            {
+                var type = function.Variables[
+                    checked((int)formalOrdinal) + parameterOffset].Type;
+                if (!IsValidPrivateCheckedOutputFormalType(type, structures,
+                        classes, checkedReferenceTypes, nativePointerTypes,
+                        program))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        var parts = contract.Split('|');
+        var contractParameterOffset = hasReceiverSource ? 1 : 0;
+        foreach (var formalOrdinal in outputFormals)
+        {
+            var partIndex = checked(8 + contractParameterOffset
+                + checked((int)formalOrdinal));
+            if (partIndex >= parts.Length
+                || !parts[partIndex].StartsWith("init:",
+                    StringComparison.Ordinal)
+                || !TryParsePrivateCheckedOutputFormalType(
+                    parts[partIndex].AsSpan("init:".Length), structures,
+                    classes, functionPointerSignatures, nativePointerTypes,
+                    fixedArrayTypes, checkedReferenceTypes, program,
+                    out var type)
+                || !IsValidPrivateCheckedOutputFormalType(type, structures,
+                    classes, checkedReferenceTypes, nativePointerTypes,
+                    program))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static bool TryParsePrivateCheckedOutputFormalType(
+        ReadOnlySpan<char> typeName, ImmutableArray<BoundStruct> structures,
+        ImmutableArray<BoundClass> classes,
+        ImmutableArray<NativeFunctionPointerSignatureDefinition>
+            functionPointerSignatures,
+        ImmutableArray<NativePointerTypeDefinition> nativePointerTypes,
+        ImmutableArray<BoundNativeFixedArrayType> fixedArrayTypes,
+        ImmutableArray<CheckedReferenceTypeDefinition>
+            checkedReferenceTypes,
+        BoundProgram? program, out PrimitiveType type)
+    {
+        if (int.TryParse(typeName,
+                System.Globalization.NumberStyles.AllowLeadingSign,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var typeValue))
+        {
+            type = (PrimitiveType)typeValue;
+            return IsValidPrivateCheckedOutputFormalType(type, structures,
+                classes, checkedReferenceTypes, nativePointerTypes, program);
+        }
+        if (typeName.StartsWith("ctype#".AsSpan(),
+                StringComparison.Ordinal)
+            && int.TryParse(typeName["ctype#".Length..],
+                System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var checkedReferenceIndex)
+            && (uint)checkedReferenceIndex
+                < (uint)checkedReferenceTypes.Length)
+        {
+            type = CheckedReferenceTypes.Type(checkedReferenceIndex);
+            return IsValidPrivateCheckedOutputFormalType(type, structures,
+                classes, checkedReferenceTypes, nativePointerTypes, program);
+        }
+
+        for (var index = 0; index < structures.Length; index++)
+        {
+            var candidate = (PrimitiveType)(100 + index);
+            if (typeName.SequenceEqual(ContractType(candidate, structures,
+                    functionPointerSignatures, nativePointerTypes,
+                    fixedArrayTypes, private105: true).AsSpan())
+                && IsValidPrivateCheckedOutputFormalType(candidate,
+                    structures, classes, checkedReferenceTypes,
+                    nativePointerTypes, program))
+            {
+                type = candidate;
+                return true;
+            }
+        }
+        type = default;
+        return false;
+    }
+
+    private static bool IsValidPrivateCheckedOutputFormalType(
+        PrimitiveType type, ImmutableArray<BoundStruct> structures,
+        ImmutableArray<BoundClass> classes,
+        ImmutableArray<CheckedReferenceTypeDefinition>
+            checkedReferenceTypes,
+        ImmutableArray<NativePointerTypeDefinition> nativePointerTypes,
+        BoundProgram? program)
+    {
+        if (!CheckedReferenceTypeContract.IsValidType(type,
+                checkedReferenceTypes))
+        {
+            return false;
+        }
+
+        var reference = checkedReferenceTypes[
+            CheckedReferenceTypes.Index(type)];
+        return reference.IsInitialization
+            && !reference.IsGarbageCollected
+            && !reference.IsOptional
+            && IsValidPrivateCheckedOutputReferentType(
+                reference.ReferentType, structures, classes,
+                nativePointerTypes, program);
+    }
+
+    private static bool IsValidPrivateCheckedOutputReferentType(
+        PrimitiveType type, ImmutableArray<BoundStruct> structures,
+        ImmutableArray<BoundClass> classes,
+        ImmutableArray<NativePointerTypeDefinition> nativePointerTypes,
+        BoundProgram? program) =>
+        type is PrimitiveType.Bool or PrimitiveType.Char16
+            or PrimitiveType.Int32 or PrimitiveType.UInt32
+            or PrimitiveType.Int64 or PrimitiveType.UInt64
+            or PrimitiveType.NativeInt or PrimitiveType.NativeUInt
+            or PrimitiveType.Float32 or PrimitiveType.Float64
+            or PrimitiveType.OwnedInt32Buffer
+            or PrimitiveType.ManagedNode
+            or PrimitiveType.WriteManagedNode
+            || ((int)type >= 100
+                && (int)type - 100 < structures.Length)
+            || (ManagedClassTypes.IsManaged(type)
+                && (uint)ManagedClassTypes.ClassIndex(type)
+                    < (uint)classes.Length)
+            || (NativePointerTypes.IsType(type)
+                && (uint)NativePointerTypes.Index(type)
+                    < (uint)nativePointerTypes.Length)
+            || (program is not null
+                && BoundGenericNominalTypeContract.IsCoreTaskType(type,
+                    program.GenericNominalTypeInstances,
+                    program.CoreTaskType));
+
+    private static PrimitiveType PrivateDependencyReturnType(string contract)
+    {
+        var parts = contract.Split('|');
+        return parts.Length > 1
+            && int.TryParse(parts[1],
+                System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var typeValue)
+            ? (PrimitiveType)typeValue
+            : PrimitiveType.Void;
+    }
+
+    private static bool ValidatePrivateCheckedOutputStateVectors(
+        string contract, ImmutableArray<uint> outputFormals,
+        ImmutableArray<NativeFunctionPointerSelector> selectors,
+        ImmutableArray<NativeFunctionPointerOutputState> outputStates,
+        uint maximumFormalCount = uint.MaxValue,
+        bool requireDeclaredOutputFormals = true)
+    {
+        if (selectors.IsDefault || outputStates.IsDefault)
+        {
+            return false;
+        }
+        var returnType = PrivateDependencyReturnType(contract);
+        var nodeKinds = returnType switch
+        {
+            PrimitiveType.Bool => new HashSet<byte>([1, 2]),
+            PrimitiveType.Int32 => new HashSet<byte>([3, 4, 5, 6]),
+            PrimitiveType.UInt32 => new HashSet<byte>([3, 4]),
+            _ => new HashSet<byte>(),
+        };
+        var selectorOrdinals = new HashSet<uint>();
+        foreach (var selector in selectors)
+        {
+            if (selector.PhaseTag != 3
+                || !nodeKinds.Contains(selector.NodeKind)
+                || !selectorOrdinals.Add(selector.PhaseLocalOrdinal))
+            {
+                return false;
+            }
+        }
+        if (selectorOrdinals.Any(ordinal => ordinal >= (uint)selectors.Length))
+        {
+            return false;
+        }
+        for (var ordinal = 0; ordinal < selectors.Length; ordinal++)
+        {
+            if (!selectorOrdinals.Contains(checked((uint)ordinal)))
+            {
+                return false;
+            }
+        }
+
+        var outputFormalSet = outputFormals.ToHashSet();
+        var rowsByFormal = new Dictionary<uint,
+            List<NativeFunctionPointerOutputState>>();
+        var occurrenceKeys = new HashSet<(uint FormalOrdinal,
+            uint SelectorOrdinal)>();
+        foreach (var outputState in outputStates)
+        {
+            if (outputState.FormalOrdinal >= maximumFormalCount
+                || (requireDeclaredOutputFormals
+                    && !outputFormalSet.Contains(outputState.FormalOrdinal))
+                || outputState.State is not (0 or 1)
+                || !selectorOrdinals.Contains(outputState.SelectorOrdinal)
+                || !occurrenceKeys.Add((outputState.FormalOrdinal,
+                    outputState.SelectorOrdinal)))
+            {
+                return false;
+            }
+            if (!rowsByFormal.TryGetValue(outputState.FormalOrdinal,
+                    out var rows))
+            {
+                rows = [];
+                rowsByFormal.Add(outputState.FormalOrdinal, rows);
+            }
+            rows.Add(outputState);
+        }
+
+        foreach (var rows in rowsByFormal.Values)
+        {
+            if (rows.Count != 2 || rows[0].State == rows[1].State)
+            {
+                return false;
+            }
+
+            var firstSelector = selectors.Single(selector =>
+                selector.PhaseLocalOrdinal == rows[0].SelectorOrdinal);
+            var secondSelector = selectors.Single(selector =>
+                selector.PhaseLocalOrdinal == rows[1].SelectorOrdinal);
+            var pair = (firstSelector.NodeKind, rows[0].State,
+                secondSelector.NodeKind, rows[1].State);
+            var validPair = returnType switch
+            {
+                PrimitiveType.Bool => pair is (1, 1, 2, 0)
+                    or (2, 0, 1, 1),
+                PrimitiveType.Int32 => pair is (3, 1, 4, 0)
+                    or (4, 0, 3, 1) or (5, 1, 6, 0)
+                    or (6, 0, 5, 1),
+                PrimitiveType.UInt32 => pair is (3, 1, 4, 0)
+                    or (4, 0, 3, 1),
+                _ => false,
+            };
+            if (!validPair)
+            {
+                return false;
+            }
+        }
+
+        return outputStates.IsEmpty || !selectors.IsEmpty;
+    }
+
+    private static bool PrivateCheckedOutputDependenciesAreValid(
+        ImmutableArray<BoundDependencyContract> dependencies,
+        BoundFunction? function, string contract,
+        ImmutableArray<NativeOutputContract> nativeOutputContracts,
+        ImmutableArray<NativeFunctionPointerOutputState> outputStates)
+    {
+        if (dependencies.IsDefault || nativeOutputContracts.IsDefault
+            || outputStates.IsDefault)
+        {
+            return false;
+        }
+
+        var (parameterCount, _, _) = PrivateDependencySignature(contract);
+        var initFormals = GetPrivateCheckedOutputFormals(function, contract)
+            .ToHashSet();
+        var nativeOutputFormals = new HashSet<int>();
+        foreach (var output in nativeOutputContracts)
+        {
+            if (output is null || output.FormalOrdinal < 0
+                || output.FormalOrdinal >= parameterCount
+                || !nativeOutputFormals.Add(output.FormalOrdinal))
+            {
+                return false;
+            }
+        }
+        var statesByFormal = outputStates
+            .GroupBy(static state => state.FormalOrdinal)
+            .ToDictionary(static group => group.Key,
+                static group => group.ToArray());
+        foreach (var dependency in dependencies)
+        {
+            if (dependency is null || dependency.Sources.IsDefault)
+            {
+                return false;
+            }
+            if (dependency.Destination
+                    != BoundDependencyDestination.InitializedOutput)
+            {
+                continue;
+            }
+            if (dependency.DestinationOrdinal is not int formalOrdinal
+                || (uint)formalOrdinal >= (uint)parameterCount
+                || nativeOutputFormals.Contains(formalOrdinal)
+                || !initFormals.Contains(checked((uint)formalOrdinal)))
+            {
+                return false;
+            }
+            if (dependency.Relation
+                    == BoundDependencyRelation.Captures
+                && statesByFormal.TryGetValue(
+                    checked((uint)formalOrdinal), out var formalStates)
+                && !formalStates.Any(static state => state.State == 1))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static bool PrivateCheckedOutputStateVectorsMatch(
+        ImmutableArray<NativeFunctionPointerSelector> expectedSelectors,
+        ImmutableArray<NativeFunctionPointerOutputState> expectedOutputStates,
+        ImmutableArray<NativeFunctionPointerSelector> actualSelectors,
+        ImmutableArray<NativeFunctionPointerOutputState> actualOutputStates)
+        => !expectedSelectors.IsDefault && !expectedOutputStates.IsDefault
+            && !actualSelectors.IsDefault && !actualOutputStates.IsDefault
+            && expectedSelectors.OrderBy(
+                static selector => selector.PhaseLocalOrdinal)
+                .SequenceEqual(actualSelectors.OrderBy(
+                    static selector => selector.PhaseLocalOrdinal))
+            && expectedOutputStates.OrderBy(
+                static outputState => outputState.FormalOrdinal)
+                .ThenBy(static outputState => outputState.SelectorOrdinal)
+                .SequenceEqual(actualOutputStates.OrderBy(
+                    static outputState => outputState.FormalOrdinal)
+                    .ThenBy(static outputState =>
+                        outputState.SelectorOrdinal));
+
+    private static bool PrivateCheckedOutputStateVectorsMatch(
+        BoundFunction expectedFunction, string expectedContract,
+        BoundFunction actualFunction, string actualContract)
+    {
+        var (expectedSelectors, expectedOutputStates) =
+            GetPrivateCheckedOutputStateVectors(expectedFunction,
+                expectedContract, expectedFunction.CheckedOutputSelectors,
+                expectedFunction.CheckedOutputStates);
+        var (actualSelectors, actualOutputStates) =
+            GetPrivateCheckedOutputStateVectors(actualFunction,
+                actualContract, actualFunction.CheckedOutputSelectors,
+                actualFunction.CheckedOutputStates);
+        return PrivateCheckedOutputStateVectorsMatch(expectedSelectors,
+            expectedOutputStates, actualSelectors, actualOutputStates);
+    }
+
+    private static bool PrivateNativeOutputDependenciesMatch(
+        BoundFunction function)
+    {
+        var dependencies = function.DependencyContracts;
+        var outputs = function.NativeOutputContracts;
+        if (dependencies.IsDefault || outputs.IsDefault)
+        {
+            return false;
+        }
+
+        foreach (var output in outputs)
+        {
+            if (output is null || output.Dependencies.IsDefault)
+            {
+                return false;
+            }
+            var projected = NativeOutputContractValidator.CreateDependencies(
+                dependencies, output.FormalOrdinal);
+            if (projected.IsDefault
+                || !projected.SequenceEqual(output.Dependencies))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static ImmutableArray<Private106GeneralDependencyRow>
+        CreatePrivate106GeneralDependencyRows(
+        ImmutableArray<BoundDependencyContract> dependencies,
+        string contract,
+        ImmutableArray<NativeOutputContract> nativeOutputContracts)
+    {
+        if (dependencies.IsDefault || nativeOutputContracts.IsDefault)
+        {
+            throw new ModuleContractException(
+                "Private general Dependency contracts are uninitialized.");
+        }
+
+        var (parameterCount, hasReceiverSource,
+            hasReceiverDestination) = PrivateDependencySignature(contract);
+        var maximumRows = PrivateGeneralDependencyRowCountLimit(
+            parameterCount, hasReceiverSource);
+
+        var outputFormals = new HashSet<int>();
+        foreach (var output in nativeOutputContracts)
+        {
+            if (output is null || output.FormalOrdinal < 0
+                || output.FormalOrdinal >= parameterCount
+                || !outputFormals.Add(output.FormalOrdinal))
+            {
+                throw new ModuleContractException(
+                    "Private general Dependency NativeOutput references are invalid.");
+            }
+        }
+
+        foreach (var dependency in dependencies)
+        {
+            if (dependency is null || dependency.Sources.IsDefault
+                || dependency.Relation is not (
+                    BoundDependencyRelation.DependsOn
+                    or BoundDependencyRelation.Captures
+                    or BoundDependencyRelation.ForwardsBacking
+                    or BoundDependencyRelation.BorrowSourceStorage))
+            {
+                throw new ModuleContractException(
+                    "Private general Dependency contract is uninitialized.");
+            }
+        }
+
+        var rows = new List<Private106GeneralDependencyRow>();
+        var refinementRows = new List<Private106GeneralDependencyRow>();
+        foreach (var dependency in dependencies)
+        {
+            var (destinationKind, destinationOrdinal) =
+                PrivateGeneralDependencyDestination(dependency,
+                    parameterCount, hasReceiverDestination);
+            if (dependency.Relation is BoundDependencyRelation.DependsOn
+                or BoundDependencyRelation.Captures)
+            {
+                var phase = PrivateGeneralDependencyPhase(
+                    dependency.Relation, destinationKind);
+                if (destinationKind == 2 && phase == 1
+                    && outputFormals.Contains(
+                        checked((int)destinationOrdinal)))
+                {
+                    throw new ModuleContractException(
+                        "Private NativeOutput phase-1 dependencies must remain in their output contract.");
+                }
+
+                if (dependency.Sources.IsEmpty)
+                {
+                    rows.Add(new Private106GeneralDependencyRow(
+                        destinationKind, 0, 0, phase, destinationOrdinal, 0));
+                    continue;
+                }
+
+                foreach (var source in dependency.Sources)
+                {
+                    var (sourceKind, sourceOrdinal) =
+                        PrivateGeneralDependencySource(source,
+                            parameterCount, hasReceiverSource);
+                    rows.Add(new Private106GeneralDependencyRow(
+                        destinationKind, sourceKind, 3, phase,
+                        destinationOrdinal, sourceOrdinal));
+                }
+                continue;
+            }
+
+            if (dependency.Sources.IsEmpty)
+            {
+                throw new ModuleContractException(
+                    "Private Dependency refinements require at least one source.");
+            }
+
+            var relationshipCode = dependency.Relation
+                == BoundDependencyRelation.ForwardsBacking ? (byte)2 : (byte)1;
+            foreach (var source in dependency.Sources)
+            {
+                var (sourceKind, sourceOrdinal) =
+                    PrivateGeneralDependencySource(source,
+                        parameterCount, hasReceiverSource);
+                var hasBaseRelationship = false;
+                foreach (var relationship in dependencies)
+                {
+                    if (relationship.Relation is not (
+                            BoundDependencyRelation.DependsOn
+                            or BoundDependencyRelation.Captures)
+                        || relationship.Sources.IsDefault
+                        || relationship.Destination != dependency.Destination
+                        || relationship.DestinationOrdinal
+                            != dependency.DestinationOrdinal
+                        || !relationship.Sources.Contains(source))
+                    {
+                        continue;
+                    }
+
+                    var (relationshipDestinationKind,
+                        relationshipDestinationOrdinal)
+                        = PrivateGeneralDependencyDestination(relationship,
+                            parameterCount, hasReceiverDestination);
+                    var phase = PrivateGeneralDependencyPhase(
+                        relationship.Relation, relationshipDestinationKind);
+                    if (relationshipDestinationKind != destinationKind
+                        || relationshipDestinationOrdinal != destinationOrdinal)
+                    {
+                        continue;
+                    }
+                    if (destinationKind == 2 && phase == 1
+                        && outputFormals.Contains(
+                            checked((int)destinationOrdinal)))
+                    {
+                        throw new ModuleContractException(
+                            "Private NativeOutput phase-1 dependencies must remain in their output contract.");
+                    }
+
+                    refinementRows.Add(new Private106GeneralDependencyRow(
+                        destinationKind, sourceKind, relationshipCode, phase,
+                        destinationOrdinal, sourceOrdinal));
+                    hasBaseRelationship = true;
+                }
+                if (!hasBaseRelationship)
+                {
+                    throw new ModuleContractException(
+                        "Private Dependency refinement does not refine a declared source.");
+                }
+            }
+        }
+
+        foreach (var refinement in refinementRows)
+        {
+            var match = rows.FindIndex(row =>
+                row.DestinationKind == refinement.DestinationKind
+                && row.DestinationOrdinal == refinement.DestinationOrdinal
+                && row.Phase == refinement.Phase
+                && row.SourceKind == refinement.SourceKind
+                && row.SourceOrdinal == refinement.SourceOrdinal
+                && row.Relationship == 3);
+            if (match < 0)
+            {
+                throw new ModuleContractException(
+                    "Private Dependency refinements are conflicting or do not refine a declared source.");
+            }
+            rows[match] = rows[match] with {
+                Relationship = refinement.Relationship,
+            };
+        }
+
+        rows.Sort(static (left, right) =>
+        {
+            var comparison = left.DestinationKind.CompareTo(
+                right.DestinationKind);
+            if (comparison != 0)
+            {
+                return comparison;
+            }
+            comparison = left.DestinationOrdinal.CompareTo(
+                right.DestinationOrdinal);
+            if (comparison != 0)
+            {
+                return comparison;
+            }
+            comparison = left.Phase.CompareTo(right.Phase);
+            if (comparison != 0)
+            {
+                return comparison;
+            }
+            comparison = left.SourceKind.CompareTo(right.SourceKind);
+            return comparison != 0
+                ? comparison
+                : left.SourceOrdinal.CompareTo(right.SourceOrdinal);
+        });
+
+        var previous = default(Private106GeneralDependencyRow);
+        var hasPrevious = false;
+        foreach (var row in rows)
+        {
+            if (hasPrevious
+                && previous.DestinationKind == row.DestinationKind
+                && previous.DestinationOrdinal == row.DestinationOrdinal
+                && previous.Phase == row.Phase
+                && previous.SourceKind == row.SourceKind
+                && previous.SourceOrdinal == row.SourceOrdinal)
+            {
+                throw new ModuleContractException(
+                    "Private general Dependency rows contain a duplicate occurrence key.");
+            }
+            previous = row;
+            hasPrevious = true;
+        }
+        for (var start = 0; start < rows.Count;)
+        {
+            var first = rows[start];
+            var end = start + 1;
+            while (end < rows.Count
+                && rows[end].DestinationKind == first.DestinationKind
+                && rows[end].DestinationOrdinal == first.DestinationOrdinal
+                && rows[end].Phase == first.Phase)
+            {
+                end++;
+            }
+            if (first.SourceKind == 0 && end - start != 1)
+            {
+                throw new ModuleContractException(
+                    "Private empty Dependency source coexists with nonempty sources.");
+            }
+            start = end;
+        }
+        if (rows.Count > maximumRows)
+        {
+            throw new ModuleContractException(
+                "Private general Dependency rows exceed the declaration bound.");
+        }
+        return [.. rows];
+    }
+
+    private static (byte Kind, uint Ordinal)
+        PrivateGeneralDependencyDestination(
+        BoundDependencyContract dependency, int parameterCount,
+        bool hasReceiverDestination)
+        => dependency.Destination switch
+        {
+            BoundDependencyDestination.Result
+                when dependency.DestinationOrdinal is null or 0
+                => (1, 0),
+            BoundDependencyDestination.InitializedOutput
+                when dependency.DestinationOrdinal is int outputOrdinal
+                    && (uint)outputOrdinal < (uint)parameterCount
+                => (2, checked((uint)outputOrdinal)),
+            BoundDependencyDestination.RetainedFormal
+                when dependency.DestinationOrdinal is int formalOrdinal
+                    && (uint)formalOrdinal < (uint)parameterCount
+                => (3, checked((uint)formalOrdinal)),
+            BoundDependencyDestination.Receiver
+                when hasReceiverDestination
+                    && dependency.DestinationOrdinal is null or 0
+                => (4, 0),
+            _ => throw new ModuleContractException(
+                "Private general Dependency destination is not representable."),
+        };
+
+    private static byte PrivateGeneralDependencyPhase(
+        BoundDependencyRelation relation, byte destinationKind)
+        => (relation, destinationKind) switch
+        {
+            (BoundDependencyRelation.DependsOn, 1 or 2) => 1,
+            (BoundDependencyRelation.Captures, 1 or 2 or 3 or 4) => 2,
+            _ => throw new ModuleContractException(
+                "Private general Dependency destination/phase pair is not assigned."),
+        };
+
+    private static (byte Kind, uint Ordinal) PrivateGeneralDependencySource(
+        BoundDependencySource source, int parameterCount,
+        bool hasReceiverSource)
+        => source.Kind switch
+        {
+            BoundDependencySourceKind.Formal
+                when source.FormalOrdinal is int formalOrdinal
+                    && (uint)formalOrdinal < (uint)parameterCount
+                => (1, checked((uint)formalOrdinal)),
+            BoundDependencySourceKind.Receiver
+                when hasReceiverSource && source.FormalOrdinal is null
+                => (2, 0),
+            _ => throw new ModuleContractException(
+                "Private general Dependency source is not representable."),
+        };
+
+    private static ImmutableArray<BoundDependencyContract>
+        ReadPrivate106GeneralDependencyContracts(
+        BinaryReader reader, string contract,
+        ImmutableArray<NativeOutputContract> nativeOutputContracts)
+    {
+        if (nativeOutputContracts.IsDefault)
+        {
+            throw new ModuleFormatException(
+                "Private general Dependency rows have no output-contract collection.");
+        }
+
+        var (parameterCount, hasReceiverSource,
+            hasReceiverDestination) = PrivateDependencySignature(contract);
+        var maximumRows = PrivateGeneralDependencyRowCountLimit(
+            parameterCount, hasReceiverSource);
+        var rowCount = CountRows(reader, maximumRows, 12,
+            "general Dependency rows");
+        var outputFormals = new HashSet<int>();
+        foreach (var output in nativeOutputContracts)
+        {
+            if (output is null || output.FormalOrdinal < 0
+                || output.FormalOrdinal >= parameterCount
+                || !outputFormals.Add(output.FormalOrdinal))
+            {
+                throw new ModuleFormatException(
+                    "Private general Dependency NativeOutput references are invalid.");
+            }
+        }
+
+        var rows = new List<Private106GeneralDependencyRow>(rowCount);
+        var occurrenceKeys = new HashSet<(
+            byte DestinationKind, uint DestinationOrdinal, byte Phase,
+            byte SourceKind, uint SourceOrdinal)>();
+        for (var index = 0; index < rowCount; index++)
+        {
+            var row = new Private106GeneralDependencyRow(
+                reader.ReadByte(), reader.ReadByte(), reader.ReadByte(),
+                reader.ReadByte(), reader.ReadUInt32(), reader.ReadUInt32());
+            if (!IsValidPrivateGeneralDependencyRow(row, parameterCount,
+                    hasReceiverSource, hasReceiverDestination)
+                || (row.DestinationKind == 2 && row.Phase == 1
+                    && outputFormals.Contains(
+                        checked((int)row.DestinationOrdinal)))
+                || !occurrenceKeys.Add((row.DestinationKind,
+                    row.DestinationOrdinal, row.Phase, row.SourceKind,
+                    row.SourceOrdinal)))
+            {
+                throw new ModuleFormatException(
+                    "Private general Dependency row is malformed or duplicates an occurrence key.");
+            }
+            rows.Add(row);
+        }
+
+        rows.Sort(static (left, right) =>
+        {
+            var comparison = left.DestinationKind.CompareTo(
+                right.DestinationKind);
+            if (comparison != 0)
+            {
+                return comparison;
+            }
+            comparison = left.DestinationOrdinal.CompareTo(
+                right.DestinationOrdinal);
+            if (comparison != 0)
+            {
+                return comparison;
+            }
+            comparison = left.Phase.CompareTo(right.Phase);
+            if (comparison != 0)
+            {
+                return comparison;
+            }
+            comparison = left.SourceKind.CompareTo(right.SourceKind);
+            return comparison != 0
+                ? comparison
+                : left.SourceOrdinal.CompareTo(right.SourceOrdinal);
+        });
+
+        var result = ImmutableArray.CreateBuilder<BoundDependencyContract>();
+        var offset = 0;
+        while (offset < rows.Count)
+        {
+            var first = rows[offset];
+            var end = offset + 1;
+            while (end < rows.Count
+                && rows[end].DestinationKind == first.DestinationKind
+                && rows[end].DestinationOrdinal == first.DestinationOrdinal
+                && rows[end].Phase == first.Phase)
+            {
+                end++;
+            }
+
+            var emptySource = first.SourceKind == 0;
+            if (emptySource && end - offset != 1)
+            {
+                throw new ModuleFormatException(
+                    "Private empty Dependency source coexists with nonempty sources.");
+            }
+
+            var sources = ImmutableArray.CreateBuilder<BoundDependencySource>(
+                emptySource ? 0 : end - offset);
+            var forwardedSources
+                = ImmutableArray.CreateBuilder<BoundDependencySource>();
+            var storageSources
+                = ImmutableArray.CreateBuilder<BoundDependencySource>();
+            for (var index = offset; index < end; index++)
+            {
+                var row = rows[index];
+                if (row.SourceKind == 0)
+                {
+                    continue;
+                }
+                var source = row.SourceKind switch
+                {
+                    1 => new BoundDependencySource(
+                        BoundDependencySourceKind.Formal,
+                        checked((int)row.SourceOrdinal)),
+                    2 => new BoundDependencySource(
+                        BoundDependencySourceKind.Receiver, null),
+                    _ => throw new ModuleFormatException(
+                        "Private Dependency row has an unknown source kind."),
+                };
+                sources.Add(source);
+                if (row.Relationship == 2)
+                {
+                    forwardedSources.Add(source);
+                }
+                else if (row.Relationship == 1)
+                {
+                    storageSources.Add(source);
+                }
+            }
+
+            var (destination, destinationOrdinal) =
+                PrivateGeneralDependencyDestination(first);
+            var relation = first.Phase switch
+            {
+                1 => BoundDependencyRelation.DependsOn,
+                2 => BoundDependencyRelation.Captures,
+                _ => throw new ModuleFormatException(
+                    "Private general Dependency phase is not supported."),
+            };
+            result.Add(new BoundDependencyContract(relation, destination,
+                destinationOrdinal, sources.MoveToImmutable()));
+            if (forwardedSources.Count != 0)
+            {
+                result.Add(new BoundDependencyContract(
+                    BoundDependencyRelation.ForwardsBacking, destination,
+                    destinationOrdinal, forwardedSources.ToImmutable()));
+            }
+            if (storageSources.Count != 0)
+            {
+                result.Add(new BoundDependencyContract(
+                    BoundDependencyRelation.BorrowSourceStorage, destination,
+                    destinationOrdinal, storageSources.ToImmutable()));
+            }
+            offset = end;
+        }
+
+        return result.ToImmutable();
+    }
+
+    internal static bool PrivateGeneralDependencyContractsSatisfy(
+        ImmutableArray<BoundDependencyContract> expected,
+        ImmutableArray<BoundDependencyContract> actual,
+        string contract)
+    {
+        if (expected.IsDefault || actual.IsDefault)
+        {
+            return false;
+        }
+
+        ImmutableArray<Private106GeneralDependencyRow> expectedRows;
+        ImmutableArray<Private106GeneralDependencyRow> actualRows;
+        try
+        {
+            expectedRows = CreatePrivate106GeneralDependencyRows(expected,
+                contract, []);
+            actualRows = CreatePrivate106GeneralDependencyRows(actual,
+                contract, []);
+        }
+        catch (ModuleContractException)
+        {
+            return false;
+        }
+
+        var expectedOffset = 0;
+        var actualOffset = 0;
+        while (expectedOffset < expectedRows.Length
+            && actualOffset < actualRows.Length)
+        {
+            var expectedFirst = expectedRows[expectedOffset];
+            var actualFirst = actualRows[actualOffset];
+            if (!SamePrivateGeneralDependencyGroup(expectedFirst, actualFirst))
+            {
+                return false;
+            }
+
+            var expectedEnd = expectedOffset + 1;
+            while (expectedEnd < expectedRows.Length
+                && SamePrivateGeneralDependencyGroup(expectedFirst,
+                    expectedRows[expectedEnd]))
+            {
+                expectedEnd++;
+            }
+            var actualEnd = actualOffset + 1;
+            while (actualEnd < actualRows.Length
+                && SamePrivateGeneralDependencyGroup(actualFirst,
+                    actualRows[actualEnd]))
+            {
+                actualEnd++;
+            }
+
+            var expectedEmpty = expectedFirst.SourceKind == 0;
+            var actualEmpty = actualFirst.SourceKind == 0;
+            if (expectedEmpty)
+            {
+                if (!actualEmpty || expectedEnd - expectedOffset != 1
+                    || actualEnd - actualOffset != 1)
+                {
+                    return false;
+                }
+            }
+            else if (actualEmpty)
+            {
+                if (actualEnd - actualOffset != 1)
+                {
+                    return false;
+                }
+            }
+            else
+            {
+                for (var actualIndex = actualOffset;
+                    actualIndex < actualEnd; actualIndex++)
+                {
+                    var actualRow = actualRows[actualIndex];
+                    var matchingExpected = -1;
+                    for (var expectedIndex = expectedOffset;
+                        expectedIndex < expectedEnd; expectedIndex++)
+                    {
+                        var expectedRow = expectedRows[expectedIndex];
+                        if (expectedRow.SourceKind == actualRow.SourceKind
+                            && expectedRow.SourceOrdinal
+                                == actualRow.SourceOrdinal)
+                        {
+                            matchingExpected = expectedIndex;
+                            break;
+                        }
+                    }
+                    if (matchingExpected < 0
+                        || (((actualRow.Relationship
+                                    & ~expectedRows[matchingExpected]
+                                        .Relationship) & 0x03) != 0))
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            expectedOffset = expectedEnd;
+            actualOffset = actualEnd;
+        }
+
+        return expectedOffset == expectedRows.Length
+            && actualOffset == actualRows.Length;
+    }
+
+    private static bool SamePrivateGeneralDependencyGroup(
+        Private106GeneralDependencyRow left,
+        Private106GeneralDependencyRow right)
+        => left.DestinationKind == right.DestinationKind
+            && left.DestinationOrdinal == right.DestinationOrdinal
+            && left.Phase == right.Phase;
+
+    private static bool IsValidPrivateGeneralDependencyRow(
+        Private106GeneralDependencyRow row, int parameterCount,
+        bool hasReceiverSource, bool hasReceiverDestination)
+    {
+        var destinationValid = row.DestinationKind switch
+        {
+            1 => row.DestinationOrdinal == 0,
+            2 or 3 => row.DestinationOrdinal < (uint)parameterCount,
+            4 => hasReceiverDestination && row.DestinationOrdinal == 0,
+            _ => false,
+        };
+        if (!destinationValid || row.Phase is not (1 or 2))
+        {
+            return false;
+        }
+
+        var phaseValid = row.Phase switch
+        {
+            1 => row.DestinationKind is 1 or 2,
+            2 => row.DestinationKind is 1 or 2 or 3 or 4,
+            _ => false,
+        };
+        if (!phaseValid)
+        {
+            return false;
+        }
+
+        if (row.SourceKind == 0)
+        {
+            return row.Relationship == 0 && row.SourceOrdinal == 0;
+        }
+
+        if (row.Relationship is not (1 or 2 or 3))
+        {
+            return false;
+        }
+        return row.SourceKind switch
+        {
+            1 => row.SourceOrdinal < (uint)parameterCount,
+            2 => hasReceiverSource && row.SourceOrdinal == 0,
+            _ => false,
+        };
+    }
+
+    private static (int ParameterCount, bool HasReceiverSource,
+        bool HasReceiverDestination) PrivateDependencySignature(
+        string contract)
+    {
+        var parts = contract.Split('|');
+        if (parts.Length < 8 || parts[2] is not ("C" or "F")
+            || parts[4] is not ("S" or "I") || parts[5].Length == 0)
+        {
+            throw new ModuleFormatException(
+                "Private general Dependency owner has an invalid signature.");
+        }
+        var hasReceiverDestination = parts[4] == "I" && parts[5] != "-";
+        var hasReceiverSource = hasReceiverDestination && parts[2] == "F";
+        var formalCount = ContractParameterCount(contract);
+        var parameterCount = formalCount - (hasReceiverSource ? 1 : 0);
+        if (parameterCount < 0)
+        {
+            throw new ModuleFormatException(
+                "Private general Dependency owner has an invalid receiver formal.");
+        }
+        return (parameterCount, hasReceiverSource,
+            hasReceiverDestination);
+    }
+
+    private static int PrivateGeneralDependencyRowCountLimit(
+        int parameterCount, bool hasReceiverSource)
+    {
+        var maximumRows = 3L * (2L + (2L * parameterCount))
+            * Math.Max(1L,
+                (long)parameterCount + (hasReceiverSource ? 1L : 0L));
+        return (int)Math.Min(MaximumNodes, maximumRows);
+    }
+
+    private static (BoundDependencyDestination Destination,
+        int? DestinationOrdinal) PrivateGeneralDependencyDestination(
+        Private106GeneralDependencyRow row)
+        => row.DestinationKind switch
+        {
+            1 => (BoundDependencyDestination.Result, null),
+            2 => (BoundDependencyDestination.InitializedOutput,
+                checked((int)row.DestinationOrdinal)),
+            3 => (BoundDependencyDestination.RetainedFormal,
+                checked((int)row.DestinationOrdinal)),
+            4 => (BoundDependencyDestination.Receiver, null),
+            _ => throw new ModuleFormatException(
+                "Private general Dependency destination is not assigned."),
+        };
 
     private static Private105CopyOriginSummaryData
         CreatePrivate105CopyOriginSummaryData(BoundFunction function,
@@ -1862,7 +3240,9 @@ public static partial class ModuleCompiler
 
     private static Private106FunctionMetadata
         ReadPrivateRevision106FunctionMetadata(
-        BinaryReader reader, bool import, bool hasBody)
+        BinaryReader reader, bool import, bool hasBody,
+        string contract,
+        ImmutableArray<NativeOutputContract> nativeOutputContracts)
     {
         if (reader is not ModuleReader {
                 FormatVersion: CheckedReferenceVersion,
@@ -1876,17 +3256,19 @@ public static partial class ModuleCompiler
                 "A private revision 106 bodyless declaration must be an import.");
         }
 
-        var dependencyCount = Count(reader, MaximumNodes);
-        var selectorCount = Count(reader, MaximumNodes);
-        var outputStateCount = Count(reader, MaximumNodes);
+        var generalDependencyContracts =
+            ReadPrivate106GeneralDependencyContracts(reader, contract,
+                nativeOutputContracts);
+        var (checkedOutputSelectors, checkedOutputStates) =
+            ReadPrivate106CheckedOutputStateVectors(reader, contract,
+                hasBody, generalDependencyContracts,
+                nativeOutputContracts);
         var rawUnionReturnCoverage
             = ReadPrivate106RawUnionReturnCoverage(reader);
         var copyOriginSummary = ReadPrivate105CopyOriginSummary(reader);
         var foreignInterfaceVariant = reader.ReadByte();
         var hasDirectImportExpectation = GetBool(reader);
-        if (dependencyCount != 0 || selectorCount != 0
-            || outputStateCount != 0
-            || foreignInterfaceVariant != 0)
+        if (foreignInterfaceVariant != 0)
         {
             throw new ModuleFormatException(
                 "Private revision 106 declaration metadata exceeds the current checked-reference type-table slice.");
@@ -1895,7 +3277,8 @@ public static partial class ModuleCompiler
         if (!hasDirectImportExpectation)
         {
             return new Private106FunctionMetadata(rawUnionReturnCoverage,
-                null, copyOriginSummary);
+                null, copyOriginSummary, generalDependencyContracts,
+                checkedOutputSelectors, checkedOutputStates);
         }
         if (!import || hasBody)
         {
@@ -1935,7 +3318,100 @@ public static partial class ModuleCompiler
             rawUnionReturnCoverage,
             new DirectNativeImport(libraryName, exportName, []) {
                 Parameters = parameters.MoveToImmutable(),
-            }, copyOriginSummary);
+            }, copyOriginSummary, generalDependencyContracts,
+            checkedOutputSelectors, checkedOutputStates);
+    }
+
+    private static (
+        ImmutableArray<NativeFunctionPointerSelector> Selectors,
+        ImmutableArray<NativeFunctionPointerOutputState> OutputStates)
+        ReadPrivate106CheckedOutputStateVectors(
+        BinaryReader reader, string contract, bool hasBody,
+        ImmutableArray<BoundDependencyContract> dependencies,
+        ImmutableArray<NativeOutputContract> nativeOutputContracts)
+    {
+        var (parameterCount, _, _) = PrivateDependencySignature(contract);
+        var selectorCount = CountRows(reader, MaximumNodes, 12,
+            "checked output selectors");
+        var selectors = ImmutableArray.CreateBuilder<
+            NativeFunctionPointerSelector>(selectorCount);
+        for (var index = 0; index < selectorCount; index++)
+        {
+            var phaseTag = reader.ReadByte();
+            var flags = reader.ReadByte();
+            var reserved = reader.ReadUInt16();
+            var ordinal = reader.ReadUInt32();
+            var nodeKind = reader.ReadUInt32();
+            if (flags != 0 || reserved != 0 || nodeKind > byte.MaxValue)
+            {
+                throw new ModuleFormatException(
+                    "Private checked output selector is noncanonical.");
+            }
+            selectors.Add(new NativeFunctionPointerSelector(phaseTag,
+                ordinal, checked((byte)nodeKind)));
+        }
+
+        var outputStateCount = CountRows(reader, MaximumNodes, 12,
+            "checked output states");
+        var outputStates = ImmutableArray.CreateBuilder<
+            NativeFunctionPointerOutputState>(outputStateCount);
+        for (var index = 0; index < outputStateCount; index++)
+        {
+            var formalOrdinal = reader.ReadUInt32();
+            var selectorOrdinal = reader.ReadUInt32();
+            var state = reader.ReadByte();
+            var reserved = reader.ReadBytes(3);
+            if (reserved.Length != 3
+                || reserved[0] != 0 || reserved[1] != 0
+                || reserved[2] != 0)
+            {
+                throw new ModuleFormatException(
+                    "Private checked output state has nonzero reserved bytes.");
+            }
+            outputStates.Add(new NativeFunctionPointerOutputState(
+                formalOrdinal, selectorOrdinal, state));
+        }
+
+        var normalizedSelectors = selectors
+            .OrderBy(static selector => selector.PhaseLocalOrdinal)
+            .ToImmutableArray();
+        var normalizedOutputStates = outputStates
+            .OrderBy(static outputState => outputState.FormalOrdinal)
+            .ThenBy(static outputState => outputState.SelectorOrdinal)
+            .ToImmutableArray();
+        var outputFormals = hasBody
+            ? []
+            : GetPrivateCheckedOutputFormals(null, contract);
+        if (!hasBody
+            && (reader is not ModuleReader outputTypeReader
+                || !PrivateCheckedOutputFormalTypesAreValid(null, contract,
+                    outputTypeReader.Structures, outputTypeReader.Classes,
+                    outputTypeReader.NativeFunctionPointerSignatures,
+                    outputTypeReader.NativePointerTypes,
+                    outputTypeReader.NativeFixedArrayTypes,
+                    outputTypeReader.CheckedReferenceTypes)))
+        {
+            throw new ModuleFormatException(
+                "Private checked output formal has an unsupported type.");
+        }
+        if (!ValidatePrivateCheckedOutputStateVectors(contract,
+                outputFormals, normalizedSelectors, normalizedOutputStates,
+                checked((uint)parameterCount), requireDeclaredOutputFormals:
+                    !hasBody))
+        {
+            throw new ModuleFormatException(
+                "Private checked output-state vectors contradict their declaration.");
+        }
+        if (!hasBody
+            && !PrivateCheckedOutputDependenciesAreValid(
+                dependencies, null, contract, nativeOutputContracts,
+                normalizedOutputStates))
+        {
+            throw new ModuleFormatException(
+                "Private checked output dependencies lack a valid publication state.");
+        }
+
+        return (normalizedSelectors, normalizedOutputStates);
     }
 
     private static ImmutableArray<byte>
