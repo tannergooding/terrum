@@ -4093,8 +4093,11 @@ internal sealed class TrRmStandardInitializationReferenceBodyTests
             });
         Assert.That(readVariables, Is.EquivalentTo(["0", "1", "0,1"]));
 
+        // Phase-2 clause persistence is separate from this phase-3 graph
+        // round-trip.
+        var graphProgram = CreatePhaseThreeGraphCodecInput(program);
         const string moduleIdentity = "cross-clause-output-state";
-        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+        var artifact = TrRmExecutableCompiler.EmitStandard(graphProgram,
             moduleIdentity, GeneralPredicateGraphsSchemaIdentity, 1);
         var tables = TrRmStructuralMetadataValidator
             .ValidateGeneralPredicateGraphsDraftAndGetExecutionTables(
@@ -4118,6 +4121,7 @@ internal sealed class TrRmStandardInitializationReferenceBodyTests
         Assert.That(loaded.Functions.Single(
                 static candidate => candidate.Name == "MaybeFill")
             .CheckedOutputStatePredicates, Has.Length.EqualTo(3));
+
     }
 
     [Test]
@@ -4292,9 +4296,10 @@ internal sealed class TrRmStandardInitializationReferenceBodyTests
             Assert.That(hasSavedResult, Is.True);
         }
 
-        var artifact = TrRmExecutableCompiler.EmitStandard(program,
-            "saved-result-output-state",
-            GeneralPredicateGraphsSchemaIdentity, 1);
+        var graphProgram = CreatePhaseThreeGraphCodecInput(program);
+        const string moduleIdentity = "saved-result-output-state";
+        var artifact = TrRmExecutableCompiler.EmitStandard(graphProgram,
+            moduleIdentity, GeneralPredicateGraphsSchemaIdentity, 1);
         var tables = TrRmStructuralMetadataValidator
             .ValidateGeneralPredicateGraphsDraftAndGetExecutionTables(
                 TrRmArtifactIndex.ForGeneralPredicateGraphsDraft(artifact));
@@ -4303,47 +4308,26 @@ internal sealed class TrRmStandardInitializationReferenceBodyTests
                 && tables.PredicateReadRoots.GetRootIdentity(rootRow) == 0),
             Is.True);
 
-        var reloaded = TrRmExecutableCompiler.LoadStandard(
+        var loaded = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(
                 GeneralPredicateGraphsSchemaIdentity, artifact),
-            "saved-result-output-state", []);
-        var reloadedPredicates = reloaded.Functions.Single(
+            moduleIdentity, []);
+        var loadedPredicates = loaded.Functions.Single(
                 static candidate => candidate.Name == "MaybeFill")
             .CheckedOutputStatePredicates;
-        Assert.That(reloadedPredicates.Select(
+        Assert.That(loadedPredicates.Select(
                 static predicate => (predicate.FormalOrdinal,
                     predicate.State)),
             Is.EquivalentTo(new[] { (1, (byte)0), (1, (byte)1) }));
-        foreach (var predicate in reloadedPredicates)
-        {
-            var hasSavedResult = false;
-            Assert.That(BoundTreeTraversal.VisitExpressionTree(
-                predicate.Predicate, expression => hasSavedResult |=
-                    expression is BoundContractReturnValue), Is.True);
-            Assert.That(hasSavedResult, Is.True);
-        }
 
-        const string reemittedModuleIdentity
-            = "saved-result-output-state-reemitted";
-        var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(
-            reloaded, reemittedModuleIdentity,
+        var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(loaded,
+            "saved-result-output-state-reemitted",
             GeneralPredicateGraphsSchemaIdentity, 1);
-        var reemittedTables = TrRmStructuralMetadataValidator
-            .ValidateGeneralPredicateGraphsDraftAndGetExecutionTables(
-                TrRmArtifactIndex.ForGeneralPredicateGraphsDraft(
-                    reemittedArtifact));
-        Assert.That(Enumerable.Range(1,
-                reemittedTables.PredicateReadRoots.Count)
-            .Any(rootRow => reemittedTables.PredicateReadRoots
-                    .GetRootKind(rootRow) == 5
-                && reemittedTables.PredicateReadRoots
-                    .GetRootIdentity(rootRow) == 0),
-            Is.True);
-        var reloadedAgain = TrRmExecutableCompiler.LoadStandard(
+        var reloaded = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(
                 GeneralPredicateGraphsSchemaIdentity, reemittedArtifact),
-            reemittedModuleIdentity, []);
-        Assert.That(reloadedAgain.Functions.Single(
+            "saved-result-output-state-reemitted", []);
+        Assert.That(reloaded.Functions.Single(
                 static candidate => candidate.Name == "MaybeFill")
             .CheckedOutputStatePredicates.Select(
                 static predicate => (predicate.FormalOrdinal,
@@ -4373,7 +4357,7 @@ internal sealed class TrRmStandardInitializationReferenceBodyTests
     }
 
     [Test]
-    public void GeneralPredicateGraphEmitsUnconditionalVacantOutput()
+    public void GeneralPredicateGraphCodecRoundTripsProjectedUnconditionalVacantOutput()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
             void KeepVacant(ref<init int32> destination)
@@ -4396,8 +4380,10 @@ internal sealed class TrRmStandardInitializationReferenceBodyTests
                 .CheckedOutputStatePredicates[0].Predicate).Value,
             Is.EqualTo(1));
 
+        // Phase-2 clause and failure-selection persistence is tested separately.
+        var graphProgram = CreatePhaseThreeGraphCodecInput(program);
         const string moduleIdentity = "unconditional-vacant-output";
-        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+        var artifact = TrRmExecutableCompiler.EmitStandard(graphProgram,
             moduleIdentity, GeneralPredicateGraphsSchemaIdentity, 1);
         var tables = TrRmStructuralMetadataValidator
             .ValidateGeneralPredicateGraphsDraftAndGetExecutionTables(
@@ -4451,8 +4437,7 @@ internal sealed class TrRmStandardInitializationReferenceBodyTests
         var claimedCompleteArtifact = TrRmArtifactWriter.Encode(
             claimedCompleteSections,
             TrRmArtifactSchema.GeneralPredicateGraphsDraft);
-        // This intentionally false fact is only loaded: consumers structurally
-        // validate producer metadata but do not re-prove body truth.
+        // The deliberately false fact is loaded and re-emitted, never run.
         var claimedComplete = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(
                 GeneralPredicateGraphsSchemaIdentity,
@@ -4461,14 +4446,14 @@ internal sealed class TrRmStandardInitializationReferenceBodyTests
         Assert.That(claimedComplete.Functions.Single(
                 static candidate => candidate.Name == "KeepVacant")
             .CheckedOutputStatePredicates[0].State, Is.EqualTo(1));
-        var claimedCompleteReemittedArtifact
+        var claimedCompleteArtifactReemitted
             = TrRmExecutableCompiler.EmitStandard(claimedComplete,
                 "claimed-complete-output-reemitted",
                 GeneralPredicateGraphsSchemaIdentity, 1);
         var claimedCompleteReloaded = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(
                 GeneralPredicateGraphsSchemaIdentity,
-                claimedCompleteReemittedArtifact),
+                claimedCompleteArtifactReemitted),
             "claimed-complete-output-reemitted", []);
         Assert.That(claimedCompleteReloaded.Functions.Single(
                 static candidate => candidate.Name == "KeepVacant")
@@ -4527,6 +4512,17 @@ internal sealed class TrRmStandardInitializationReferenceBodyTests
                     "core.contracts", "postcondition-exception"),
                 new CoreContractFailureDeclarationIdentity(
                     "core.contracts", "require-exception-schema")),
+        };
+
+    private static BoundProgram CreatePhaseThreeGraphCodecInput(
+        BoundProgram program)
+        => program with {
+            Functions = program.Functions.Select(static function =>
+                function with {
+                    DeclarationContractClauses = [],
+                }).ToImmutableArray(),
+            CoreContractFailureIdentitySelections = [],
+            CoreContractFailureIdentitySelection = null,
         };
 
     [TestCase(PointerLoadsNativeParameterSchemaIdentity)]

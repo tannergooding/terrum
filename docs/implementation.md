@@ -540,6 +540,9 @@ across clauses.
 The Standard producer and source-free re-emitter preserve rootless scalar
 predicates with an empty read footprint for either OutputState value. Loading
 checks the graph and relation shape without re-proving the producer's body.
+Nontrivial source declaration-clause emission remains gated until the separate
+phase-2 clause path is implemented; the current graph-codec tests isolate
+phase-3 metadata from that clause payload.
 This composition does not select the LayoutQueries source/provider/query-Body
 profile. Phase-2 ensure persistence, checked conversions, bit reinterpretation,
 calls, captures, places, broader cross-clause value coverage, complete
