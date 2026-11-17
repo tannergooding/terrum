@@ -69,7 +69,9 @@ internal static class BoundInterfaceContract
                             || member.Accessibility
                                 != BoundInterfaceAccessibility.Public
                             || member.IsStatic || member.IsExternal
-                            || member.IsPartial || !member.RequiresUnsafeCaller
+                            || member.IsPartial
+                            || !member.DeclaredRequiresUnsafeCaller
+                            || !member.RequiresUnsafeCaller
                             || member.NativeCallableConvention is null
                             || member.IsAsync || member.HasBody
                             || !member.TypeParameters.IsEmpty

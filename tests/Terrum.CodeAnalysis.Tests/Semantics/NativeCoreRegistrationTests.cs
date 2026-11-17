@@ -133,6 +133,18 @@ internal sealed class NativeCoreRegistrationTests
         _ = Assert.Throws<ArgumentException>(() =>
             SemanticVerifier.VerifyLibrary(missingConvention));
 
+        var missingDeclaredUnsafe = compilation.Program with {
+            Interfaces = compilation.Program.Interfaces.SetItem(0,
+                foreignDefinition with {
+                    Members = foreignDefinition.Members.SetItem(0,
+                        foreignMember with {
+                            DeclaredRequiresUnsafeCaller = false,
+                        }),
+                }),
+        };
+        _ = Assert.Throws<ArgumentException>(() =>
+            SemanticVerifier.VerifyLibrary(missingDeclaredUnsafe));
+
         var aliased = Compilation.CreateLibrary(SyntaxTree.Parse("""
             alias ForeignInterface = Terrum.Interop.ForeignNativeInterface;
             [Terrum.Interop.NativeCallable]
