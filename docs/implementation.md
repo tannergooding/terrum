@@ -118,14 +118,14 @@ referenced local or imported nongeneric struct TypeDefs as dependencies.
 Generic TypeDef dependencies and interface/witness edges remain unsupported.
 Source class capture now retains exact compiler-owned declaration anchors and
 validates explicit class/member keys. The bounded C1M1 source emitter publishes
-captured local class TypeDefs and fields with scalar, local class-handle and
-plain auto-layout local-struct closure. It does not emit class MethodDefs,
-Bodies or construction records.
+captured local class TypeDefs, fields, and explicitly mapped public FieldDef
+ExportKeys with scalar, local class-handle and plain auto-layout local-struct
+closure. It does not emit class MethodDefs, Bodies or construction records.
 The exact C1M1 construction successor has a
 class-free emission route and a Construction `0003` reader/writer that checks
 I/P signatures, owner/mutability agreement, direct instance FieldDef
-guarantees, bodyful actuals and bodyless imported expectations. Class
-TypeDef/member/MethodDef/Body publication, independent carrier TypeSpec
+guarantees, bodyful actuals and bodyless imported expectations. Construction
+successor class member/MethodDef/Body closure, independent carrier TypeSpec
 verification, generic TypeDef dependencies, broader remapping/replacement,
 interfaces/witnesses and runtime execution remain open.
 The checked development and Standard TRRM type-reference
@@ -518,9 +518,10 @@ Within the separate unapproved `GeneralPredicateGraphsDraft` candidate, the
 structural consumer now also admits general phase-3 graphs under Feature 17/1
 for `OutputState` rows targeting checked initialization destinations. It
 requires each such graph to be referenced, and rejects output-root reads,
-raw `NativeOutput` cells and function-pointer anchors. This does not add
-source `ensure` projection or emission, semantic re-proof, runtime graph
-evaluation, or Standard-profile support.
+raw `NativeOutput` cells and function-pointer anchors. Source projection and
+emission cover only the bounded source subset described below; full source
+`ensure` projection, semantic re-proof, runtime graph evaluation and
+Standard-profile support remain open.
 The distinct provisional composition
 `trrm/1-draft-init-reference-bodies-general-predicate-graphs-1` now emits,
 loads and re-emits the bounded initialization-Body forms against the

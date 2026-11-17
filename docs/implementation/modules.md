@@ -135,15 +135,17 @@ provider snapshots, comparing mutability, field TypeSpecs and declared
 Layouts. The metadata remains outside executable `BoundProgram.Classes`;
 provider-only class declarations are not lookup roots. Type-only re-emission
 rebuilds the selected class TypeDefs, TypeSpec/FieldDef/Layout maps and exact
-ModuleRef/Import/Export rows, then revalidates the provider closure. C1 remains
+ModuleRef/Import/Export rows, then revalidates the provider closure and
+preserves mapped public FieldDef ExportKeys. C1 remains
 unchanged. The C1M1 construction successor routes class-free emission and
 validates Construction `0003` initializer/projection rows, class-handle
 qualifications, direct instance FieldDef guarantees, and actual/imported Body
 state. Compiler-owned source-class anchors and explicit member-key capture
-are implemented, but class TypeDef/member/MethodDef/Body publication,
-provider closure, independent carrier TypeSpec verification, private local
-type dependencies, broader remapping/replacement, interfaces/witnesses and
-runtime support remain open.
+are implemented, but complete class member/MethodDef/Body closure, provider
+closure for methods and Bodies, independent carrier TypeSpec verification,
+private local type dependencies, broader remapping/replacement,
+interfaces/witnesses and runtime support remain open. The bounded C1M1 source
+emitter publishes mapped public FieldDef ExportKeys.
 The current C1M1 source-class writer requires known aliasable ownership and
 refuses unique classes; its TypeDef view carries no ownership fact, so imported
 class kind alone cannot satisfy Copy/unique-dependent admission. The separate

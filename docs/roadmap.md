@@ -56,6 +56,10 @@ prerequisite has already been met.
    The accepted first implementation gate is the restricted fail-fast,
    single-module profile in the [implementation reference](implementation.md);
    complete its schemas, metadata and runtime dependencies before adoption.
+   Cross-module field-backed Standard Bodies use the separately selected
+   [B+I field-layout composition](proposals/standard-trrm-init-reference-field-layout-composition.md),
+   provisionally implemented under its exact identity. It remains unapproved
+   and does not widen the original B+I or L1 profiles.
    Do not infer sharing permission from `static` or adopt source forms without
    their state, lifetime and publication machinery.
    Preserve uniform generic/concrete reference matching and supply checked
@@ -71,8 +75,11 @@ prerequisite has already been met.
    value records and independent-consumer support before claiming general
    execution; additional domains and beyond-floor rules remain separate work.
    Preserve the assigned TypeIdentity `DE`/comparison flow through generic
-   proof and constant folding, and implement Count shape constants versus
-   live witnessed calls without a universal Count opcode.
+   proof and constant folding, including closed source `StructDecl` constant
+   actuals. Do not infer activated physical forms from logical source support;
+   complete assigned records and independent consumers before general
+   execution. Implement Count shape constants versus live witnessed calls
+   without a universal Count opcode.
 4. **Resources/graphs.** Implement the accepted distinction between stable,
    shared normal backing and explicit GC-backed class/box/root forms, including
    exact-place roots, stable reborrows, backing-specific Cleanup and the
@@ -95,13 +102,31 @@ prerequisite has already been met.
    establish dynamic-layout or private-layout replacement support. The
    [CG-005 gate](implementation/conformance-gaps.md#cg-005) tracks that work.
 6. **General separate compilation — binding contracts.** Implement the
-   selected source call/inference algorithm, witness/default resolution and
-   qualified interface forms; complete their physical identity, dispatch and
+   selected source call/inference algorithm, including accepted generic
+   member-call postfix forms, witness/default resolution and qualified
+   interface forms; complete their physical identity, dispatch and
    replacement records. Include exact FieldDef Import/Export owner,
    substitution, field-type and layout-membership checks for FieldPath use;
    retain TypeIdentity's exact generic evidence obligations without a
-   reflection or dictionary ABI shortcut. Adapter, family and additional declaration/lookup
-   choices remain pending rather than adopting convenient host behavior. The staged,
+   reflection or dictionary ABI shortcut. Source-free G1/C1 label
+   preservation depends on the unapproved
+   [G1L1/C1-family profile proposal](proposals/standard-trrm-g1-interface-parameter-labels.md).
+   The version-1/version-3 CLI source maps pair only with G1L1. Bounded
+   C1L1R1/C1M1L1R1/Construction-1L1R1/Construction-2L1R1 generic/interface label routes use the
+   typed API. The separate [class-source CLI proposal](proposals/standard-trrm-c1-class-source-cli-transport.md)
+   is unapproved and unimplemented; transport depends on complete
+   class/member/Body closure and targets Construction-1/2 L1R1 and PI1 successors.
+   A separate [C1 enum-closure proposal](proposals/standard-trrm-c1-enum-closure-composition.md)
+   defines enum-bearing EN1 successors and class-manifest v2; this route also
+   remains unimplemented.
+   Complete G1L1 before C1L1, C1M1L1,
+   Construction-1L1 and Construction-2L1.
+   The complete phase-1/2 failure route selects Construction-2L1 only as the
+   unapproved
+   [failure-profile direction](proposals/standard-trrm-declaration-predicate-failure-profile.md);
+   these candidates do not amend accepted specifications. Adapter, family
+   and additional declaration/lookup choices remain pending rather than
+   adopting convenient host behavior. The staged,
    Windows x64 FFI direction crosses this area and runtime safety: raw
    caller-unsafe imports, general stable storage/pointers, explicit native
    entries/function pointers, generic vtable calls and authored applications.
@@ -275,7 +300,7 @@ Extend the verified executable corpus and semantic checks in coherent slices;
 keep diagnostics and source mappings useful on incomplete input. Preserve
 checked managed access, unique-owner mutation, field-view dependencies and
 natural buffer-element alignment when widening the implemented subset.
-General `out` to `init ref<T>` migration remains scheduled. The existing
+General `out` to `ref<init T>` migration remains scheduled. The existing
 conditional-init subset is not general reference support. Bounded static
 exports do not imply `func`, general `fnptr`, tuples, callable witnesses or
 contextual lambdas. Fixed-signature callables precede generic scalar/SIMD

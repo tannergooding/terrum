@@ -101,6 +101,30 @@ CA2266 because they use `dotnet run --file`, not Unix shebang execution.
 `.editorconfig` explicitly requires `var` even when a type is
 not apparent; that repository rule takes precedence over personal defaults.
 
+### Compiler-primitive Core configuration
+
+The Windows compiler-primitive targets compile distinct logical Modules with
+explicit project-selected Layout/evaluation manifest pairs:
+
+| Target | Logical Module | Manifest properties |
+|---|---|---|
+| `BuildNativeCompilerPrimitives` | `terrum.compiler-primitives` | `LayoutCoreTestManifest`, `EvaluationCoreTestManifest` |
+| `BuildNativeCompilerPrimitivesSourceGrant` | `terrum.compiler-primitives.source-grant` | `SourceGrantLayoutCoreTestManifest` |
+
+The fixtures under `tests\Fixtures\LayoutCore` and
+`tests\Fixtures\EvaluationCore` explicitly supply those identities and matching
+local catalog origins. Authority and schema contracts are shared, not the
+using Module or source binding snapshot. No identity comes from a path,
+output filename or `--corelib` default.
+
+Required-manifest validation runs before incremental target skipping.
+Each target tracks only its own manifest pair and path/content-hash state
+file. Changing a selection invalidates only its owning target's output;
+a missing/empty required manifest errors even when that output exists.
+Invoking one target does not require the other target's configuration.
+The [host manifest direction](proposals/core-evaluation-forms-cli-selection.md)
+remains unapproved and provisional.
+
 ## Native qualification
 
 Ordinary NUnit tests use public compiler APIs, .NET unmanaged callers and

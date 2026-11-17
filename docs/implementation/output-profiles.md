@@ -25,7 +25,7 @@ conditional `out` or `init ref<T>`. Custom conditional postcondition-driven
 `Copy` outputs are outside this profile; explicit postconditions remain
 governed by the general outcome rules above.
 
-Compilation-local `[Copy]` templates also admit ordinary `out T` with a fixed
+Compilation-local default-domain generic templates also admit ordinary `out T` with a fixed
 `int32`, `uint32`, `int64`, `uint64`, `char16`, or `void` result, provided the
 concrete `T` satisfies the existing non-Boolean `out` shape. The result is not
 a success discriminator; every normal return fully initializes the output, and
@@ -39,10 +39,10 @@ postcondition-driven generic `Copy` outputs remain outside this profile;
 Boolean publication rules are unchanged. Mixed generic `out`/`init` calls are
 governed separately below.
 
-Compilation-local `[Copy]` templates admit `float32` and `float64` as concrete
+Compilation-local default-domain generic templates admit `float32` and `float64` as concrete
 generic type arguments. Their substituted `T` values may be passed, returned,
 assigned, and published through the existing specialization and output-mode
-rules, including forwarding through nested `[Copy]` helpers. This does not
+rules, including forwarding through nested generic helpers. This does not
 grant symbolic `T` arithmetic, comparison, conversion, or other primitive
 operator rights, or widen shared `Copy` predicates. Floating fields in
 concrete dependencies reached while proving a generic body are governed by
@@ -51,7 +51,7 @@ arguments does not itself widen that profile. Public generic exports or
 witnesses, source-free TRRM, and scalar-frontend verification or emission also
 remain outside this hosted profile.
 
-While proving a compilation-local `[Copy]` generic body, the compiler may
+While proving a compilation-local generic body over default-domain formals, the compiler may
 hydrate reached `float32` and `float64` leaves only in non-unique `Copy`-struct
 descriptors and reached top-level or struct-owned concrete callable signatures.
 Hydration preserves descriptor identity, fields, layout, visibility,
@@ -64,7 +64,7 @@ eligibility or results, generic scalar parameter tables, `ConstEval`, scalar
 floating getters, public generic ABI, source-free TRRM, or scalar-frontend
 verification or emission.
 
-Compilation-local `[Copy]` templates also admit `init ref<T>` outputs with a
+Compilation-local default-domain generic templates also admit `init ref<T>` outputs with a
 fixed `int32`, `uint32`, `int64`, `uint64`, `char16`, or `void` result. Every
 normal return, including implicit `void` fallthrough, must fully initialize
 the destination; exceptional departure publishes none, leaving it vacant and
@@ -72,7 +72,7 @@ unreadable. Boolean results keep their conditional rule: `true` publishes and
 `false` leaves the destination vacant. Calls must use `init` with vacant
 storage, and type inference remains unchanged: explicit type arguments, typed
 inputs, or an already typed vacant destination may establish `T`; `init var`
-alone cannot. The existing `[Copy]` eligibility includes
+alone cannot. the default-domain Copy eligibility includes
 compilation-private managed-handle specializations and their rooting and
 cleanup. Closed private specializations survive compatible semantic-module and
 native-graph producer replacements without changing output-mode metadata or
@@ -82,7 +82,7 @@ witnesses, source-free TRRM, and scalar-frontend verification or emission.
 Mixed modes are governed separately below.
 
 A separate fixed-floating result profile admits `float32` and `float64` as
-results for compilation-local `[Copy]` templates with at least one
+results for compilation-local default-domain generic templates with at least one
 generic-typed output, provided all generic outputs use one mode and the
 template has no fixed-valued output side parameters. A floating result is not
 a success discriminator: every output must be fully initialized on every
@@ -96,7 +96,7 @@ It defines no new arithmetic or NaN-payload contract. Generic mixed-output and
 fixed-side-output combinations with floating results remain outside this
 single-mode, no-side profile.
 
-A compilation-local `[Copy]` template may combine generic `out T` and
+A compilation-local default-domain generic template may combine generic `out T` and
 `init ref<U>` output formals when its result is fixed `int32`, `uint32`,
 `int64`, `uint64`, `char16`, or `void`. Every output must be fully initialized
 on every normal return, including implicit `void` fallthrough. Each formal
@@ -114,7 +114,7 @@ side parameters, unique or owning values, formal-valued results, public generic
 exports or witnesses, source-free TRRM, scalar-frontend verification or
 emission remain outside this profile.
 
-A compilation-local `[Copy]` template may also add fixed scalar output
+A compilation-local default-domain generic template may also add fixed scalar output
 parameters alongside at least one generic-typed output when its result is a
 fixed `int32`, `uint32`, `int64`, `uint64`, `char16`, or `void`. Fixed output
 types are limited to `bool`, `char16`, `int32`, `uint32`, `int64`, `uint64`,
@@ -132,7 +132,7 @@ generic `init`. Boolean-result behavior is unchanged; floating results,
 formal-valued results, and templates without a generic-typed output remain
 outside this profile.
 
-A compilation-local `[Copy]` template may combine a fixed `float32` or
+A compilation-local default-domain generic template may combine a fixed `float32` or
 `float64` result with generic outputs using mixed `out` and `init ref<T>` modes
 and fixed scalar output parameters, provided at least one generic-typed output
 is present. For example, a template may combine `out T` with `init ref<U>`.
@@ -170,7 +170,7 @@ current-schema profile.
 |---|---|
 | Types | `bool`, `char16`, `int32`, `uint32`, `int64`, `uint64`, `float32`, `float64` values and scalar places; `void` or supported scalar results |
 | Output calls | Module-local initialization outputs; Boolean results conditionally publish, non-Boolean/void results require normal-return initialization |
-| General Bodies | One straight-line block or one direct Boolean-call split with two terminal arms; independently audited place state |
+| General Bodies | One straight-line block or one three-block split on a scalar Boolean expression; a direct Boolean output call correlates destinations with its result, and a terminal true arm may have a false-path continuation; no general join or arbitrary CFG |
 | Places | Output formals then local places, exact types, vacant activation and initialization; entry/inherited state counts as use ordinal zero |
 | Operations | Existing admitted scalar values, comparisons, checked/wrapping integer add/subtract/multiply/negate, checked divide/remainder/shifts/conversions, loads, initialization and local calls; no general place escape |
 | Failure | Existing Fail reason 1; no checked handling, ownership cleanup, exceptional output publication or general output forwarding |
@@ -178,6 +178,50 @@ current-schema profile.
 | Unsafe scope | Experimental opcode `0x2E` marks the one-block suffix or conditional entry and its terminal successors; not the accepted indexed region `0x06` |
 | Native correlation | Exact producing call, result and destination versions; direct zero comparisons or verified one-parameter predicates for `NonZero`/signed `NonNegative` |
 | Invalidation | Status/destination overwrite, another output call, or an unmodeled pointer write invalidates the bounded proof |
+
+The separate unapproved Standard profile `trrm/1-draft-init-reference-bodies-1`
+currently round-trips one-block scalar `ref<init T>` stores (including
+multiple destinations), direct-Home DD and source-use-5 calls, plus a bounded
+three-block Boolean provider/caller branch with true/live and false/vacant
+state. Same-profile source MethodDef binding and re-emission are supported,
+and the same-module path has FailFast native library execution coverage.
+The distinct provisional
+`trrm/1-draft-init-reference-bodies-general-predicate-graphs-1` composition
+also emits, loads and re-emits these bounded Body forms against the
+GeneralPredicateGraphsDraft schema while preserving Feature 10/1 default
+OutputState rows. A general phase-3 `SubjectValue` Boolean-input selector
+tree (including the supported Boolean operations and Conditional) also
+survives same-profile provider binding and re-emission; native lowering does
+not evaluate it. Both exact profiles also emit, load and source-free re-emit a
+typed `ref<init ptr<int32>>` cell store with exact pointee identity and
+Feature 1/2 closure. Imported pointer-cell providers bind through the
+source-use-5 Home input, load and source-free re-emit in the same profile, and
+reject a provider with a different pointer referent. Loaded same-module Bodies
+execute in FailFast PE libraries under both identities, preserving the pointer
+value without changing the pointee. Provider-linked native execution and AOT
+remain open. The profile does not select the LayoutQueries
+source/provider/query-Body profile. Open gates are phase-1/2 clause
+persistence (including explicit/default phase-1 plans and phase-2 identity/
+construction maps), source-derived phase-3 projection, other graph nodes,
+complete remapping/provider dependencies, provider-linked execution/AOT,
+Span, hidden preparation, general CFG joins, CheckedExceptions and failure
+cleanup. Neither identity is a Development fallback.
+
+The distinct provisional C1 and C1M1 identities select that same bounded
+init-Body subset with exact schema routing; the C1 Feature catalog recognizes
+GeneralPredicateGraphs and GenericMethodCalls together. GenericCall
+producer/consumer support remains open. C1M1 accepts TypeDef flag `0x80` only
+on class rows; the explicit type-root reference route now binds non-generic
+class TypeDef Imports through exact providers and compares the complete field
+TypeSpecs, declared Layouts and mutability facts without lowering class
+objects. Type-only re-emission rebuilds the supported class/Import rows and
+revalidates their provider closure. C1 remains unchanged. The exact C1M1
+construction successor now parses and writes Construction `0003` I/P roles,
+checks class-handle qualification and FieldDef guarantees, and routes
+class-free emission; source capture validates checked class/member anchors.
+Class TypeDef/member/MethodDef/Body publication, provider binding, independent
+carrier verification, private local type dependencies, broader remapping/
+replacement, interface/witness closure and runtime support remain open.
 
 The native path requires candidate NativeBoundaryContracts and
 RootlessNativeValues requirements. It admits initialized scalar backing and
