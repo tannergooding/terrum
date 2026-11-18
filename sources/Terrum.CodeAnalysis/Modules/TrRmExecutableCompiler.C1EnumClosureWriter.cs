@@ -184,7 +184,8 @@ public static partial class TrRmExecutableCompiler
         NativePointerTypeDefinition pointer)
         => pointer.PointeeType == PrimitiveType.Void
             ? pointer.IsWritable
-            : PrimitiveTypeFacts.IsBuiltInScalar(pointer.PointeeType);
+            : PrimitiveTypeFacts.IsBuiltInScalar(pointer.PointeeType)
+                || IsC1EnumClosureStructType(pointer.PointeeType);
 
     private static int GetEN1ClassQueryRootTypeDefRow(
         BoundGenericNominalTypeInstance instance,
@@ -272,6 +273,17 @@ public static partial class TrRmExecutableCompiler
         {
             SemanticVerifier.Verify(program);
         }
+        if (!program.NativePointerTypes.IsEmpty
+            && !NativePointerTypeContract.IsValidTable(
+                program.NativePointerTypes, program.Structures,
+                program.NativeFunctionPointerSignatures,
+                program.NativeFixedArrayTypes,
+                program.CheckedReferenceTypes, program.EnumDefinitions))
+        {
+            throw new InvalidDataException(
+                "The EN1 native pointer type table is invalid.");
+        }
+
         var classQueryFunction = GetEN1ClassLayoutQueryFunction(program,
             schemaIdentity);
         bool HasStandardClassTypeSpecProvider(
@@ -2044,7 +2056,7 @@ public static partial class TrRmExecutableCompiler
                                 program.NativePointerTypes[pointerIndex]))
                         {
                             throw Unsupported(
-                                "EN1 class fields require a covered scalar-pointee native data pointer.");
+                                "EN1 class fields require a covered native data pointer with a scalar or non-generic struct pointee.");
                         }
 
                         if (moduleTargetRequirement
@@ -2053,6 +2065,25 @@ public static partial class TrRmExecutableCompiler
                         {
                             throw Unsupported(
                                 "EN1 native data pointer fields require the selected Windows x64 target.");
+                        }
+
+                        if (TryGetEN1SourceStructFieldType(
+                                program.NativePointerTypes[pointerIndex]
+                                    .PointeeType,
+                                out var pointerStructureIndex))
+                        {
+                            if ((uint)pointerStructureIndex
+                                    >= (uint)program.Structures.Length
+                                || !IsSupportedSourceStruct(
+                                    program.Structures[
+                                        pointerStructureIndex]))
+                            {
+                                throw Unsupported(
+                                    "EN1 native pointers require retained non-generic struct pointees.");
+                            }
+
+                            pendingStructureIndexes.Enqueue(
+                                pointerStructureIndex);
                         }
 
                         continue;
@@ -2150,7 +2181,7 @@ public static partial class TrRmExecutableCompiler
                                 program.NativePointerTypes[pointerIndex]))
                         {
                             throw Unsupported(
-                                "EN1 struct fields require a covered scalar-pointee native data pointer.");
+                                "EN1 struct fields require a covered native data pointer with a scalar or non-generic struct pointee.");
                         }
 
                         if (moduleTargetRequirement
@@ -2159,6 +2190,25 @@ public static partial class TrRmExecutableCompiler
                         {
                             throw Unsupported(
                                 "EN1 native data pointer fields require the selected Windows x64 target.");
+                        }
+
+                        if (TryGetEN1SourceStructFieldType(
+                                program.NativePointerTypes[pointerIndex]
+                                    .PointeeType,
+                                out var pointerStructureIndex))
+                        {
+                            if ((uint)pointerStructureIndex
+                                    >= (uint)program.Structures.Length
+                                || !IsSupportedSourceStruct(
+                                    program.Structures[
+                                        pointerStructureIndex]))
+                            {
+                                throw Unsupported(
+                                    "EN1 native pointers require retained non-generic struct pointees.");
+                            }
+
+                            pendingStructureIndexes.Enqueue(
+                                pointerStructureIndex);
                         }
 
                         continue;
@@ -2392,6 +2442,11 @@ public static partial class TrRmExecutableCompiler
                 throw new InvalidDataException(
                     "An EN1 Standard class FieldDef has no validated root artifact.");
             }
+            if (depth > SemanticVerifier.MaximumDepth)
+            {
+                throw Unsupported(
+                    "EN1 class TypeSpec remapping exceeds the checked nesting limit.");
+            }
 
             var type = standardClassRootTables.TypeSpecs.GetTypeSpecRef(
                 sourceTypeSpec);
@@ -2425,29 +2480,31 @@ public static partial class TrRmExecutableCompiler
             {
                 var pointee = standardClassRootTables.TypeSpecs
                     .GetTypeSpecRef(pointeeTypeSpecReference);
-                if (pointee.Form != 0xF2 || pointee.Qualifiers != 0
-                    || !TrRmConstantSourceValueValidator
-                        .TryGetBoundScalarType(pointee.TypeCode, out _))
+                if (type.Form == 0x01
+                    && (pointee.Form != 0xF2
+                        || pointee.Qualifiers != 0
+                        || !TrRmConstantSourceValueValidator
+                            .TryGetBoundScalarType(pointee.TypeCode,
+                                out _)))
                 {
                     throw Unsupported(
-                        "The EN1 class TypeSpec remapper supports only scalar-pointee native data pointers.");
+                        "An inline EN1 native pointer TypeSpec requires a scalar pointee.");
                 }
 
+                var remappedPointeeTypeSpecReference = type.Form == 0x0C
+                    ? RemapStandardClassTypeSpecReference(
+                        pointeeTypeSpecReference, depth + 1)
+                    : pointeeTypeSpecReference;
                 var pointerTypeSpecRow
                     = checked((uint)typeSpecRows.Count + 1);
                 typeSpecRows.Add(type.Form == 0x0C
                     ? TrRmTypeSpecTableWriter.IndexedFamily(0x8C,
-                        pointeeTypeSpecReference, type.Qualifiers)
+                        remappedPointeeTypeSpecReference, type.Qualifiers)
                     : TrRmTypeSpecTableWriter.InlineFamily(0x8C,
                         type.ArgumentCode, type.Qualifiers));
                 standardClassTypeSpecRows.Add(sourceTypeSpec,
                     pointerTypeSpecRow);
                 return pointerTypeSpecRow;
-            }
-            if (depth > SemanticVerifier.MaximumDepth)
-            {
-                throw Unsupported(
-                    "EN1 class TypeSpec remapping exceeds the checked nesting limit.");
             }
             if (standardClassTypeSpecRows.TryGetValue(sourceTypeSpec,
                     out var existingTypeSpec))
@@ -2686,21 +2743,36 @@ public static partial class TrRmExecutableCompiler
                 if (!IsSupportedEN1FieldPointer(pointer))
                 {
                     throw Unsupported(
-                        "EN1 class fields require a covered scalar-pointee native data pointer.");
+                        "EN1 class fields require a covered native data pointer with a scalar or non-generic struct pointee.");
                 }
 
-                var pointeeTypeCode = pointer.PointeeType
-                        == PrimitiveType.Void
-                    ? (byte)0
-                    : checked((byte)(
-                        GetC1M1SourceScalarTypeSpecReference(
-                            pointer.PointeeType) & 0xFF));
-                var pointerTypeSpecRow
+                var qualifiers
+                    = pointer.IsWritable ? (byte)1 : (byte)0;
+                if (pointer.PointeeType == PrimitiveType.Void
+                    || PrimitiveTypeFacts.IsBuiltInScalar(
+                        pointer.PointeeType))
+                {
+                    var pointeeTypeCode = pointer.PointeeType
+                            == PrimitiveType.Void
+                        ? (byte)0
+                        : checked((byte)(
+                            GetC1M1SourceScalarTypeSpecReference(
+                                pointer.PointeeType) & 0xFF));
+                    var pointerTypeSpecRow
+                        = checked((uint)typeSpecRows.Count + 1);
+                    typeSpecRows.Add(
+                        TrRmTypeSpecTableWriter.InlineFamily(0x8C,
+                            pointeeTypeCode, qualifiers));
+                    return pointerTypeSpecRow;
+                }
+
+                var pointeeTypeSpecReference
+                    = FieldTypeSpecReference(pointer.PointeeType);
+                var indexedPointerTypeSpecRow
                     = checked((uint)typeSpecRows.Count + 1);
-                typeSpecRows.Add(TrRmTypeSpecTableWriter.InlineFamily(
-                    0x8C, pointeeTypeCode,
-                    pointer.IsWritable ? (byte)1 : (byte)0));
-                return pointerTypeSpecRow;
+                typeSpecRows.Add(TrRmTypeSpecTableWriter.IndexedFamily(
+                    0x8C, pointeeTypeSpecReference, qualifiers));
+                return indexedPointerTypeSpecRow;
             }
 
             if (type == PrimitiveType.NativeRawPointer)
