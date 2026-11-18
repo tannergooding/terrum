@@ -416,6 +416,103 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
+    public void EmitsReadonlyInstanceScalarParameterReturnHomeBody()
+    {
+        var tree = SyntaxTree.Parse("""
+            public class Box {
+                public int32 Value;
+                public Box(int32 value = 7) { Value = value; }
+                public int32 Echo(void marker = (), int32 value = 13) {
+                    return value;
+                }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node => node.Kind == SyntaxKind.ClassDeclaration);
+        var members = classDeclaration.Children.OfType<SyntaxNode>();
+        var field = members.Single(static node =>
+            node.Kind == SyntaxKind.FieldDeclaration);
+        var constructor = members.Single(static node =>
+            node.Kind == SyntaxKind.ConstructorDeclaration);
+        var echo = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Echo"));
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "InstanceReturnHome",
+            C1M1Construction2ClassParameterDefaultsSchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, 0,
+                    classDeclaration.Span, "BoxKey", [
+                        new TrRmSourceClassMemberExport(0, field.Span,
+                            "Box.Value"),
+                        new TrRmSourceClassMemberExport(0,
+                            constructor.Span, "Box.Initialize") {
+                            ConstructionProjectionExportKey = "Box.Create",
+                        },
+                        new TrRmSourceClassMemberExport(0, echo.Span,
+                            "Box.Echo"),
+                    ]),
+            ]);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                        artifact));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1, "Box.Echo",
+            out var echoDefinition), Is.True);
+        var echoMethodRow = checked((int)(echoDefinition & 0x00FF_FFFF));
+        var echoBodyRow = tables.Methods.GetBodyRow(echoMethodRow);
+        Assert.That(echoBodyRow, Is.GreaterThan(0));
+        tables.ValidateRegisterBodyMapsForMethod(echoMethodRow);
+        var echoBody = tables.Bodies.GetRegisterBody(echoBodyRow);
+        Assert.That(echoBody.HomeCount, Is.EqualTo(3));
+        Assert.That(echoBody.HomeMap[0], Is.EqualTo(1));
+        Assert.That(echoBody.HomeMap[8], Is.EqualTo(2));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+                echoBody.HomeMap.Slice(12, sizeof(ushort))), Is.Zero);
+        Assert.That(echoBody.HomeMap[16], Is.EqualTo(2));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+                echoBody.HomeMap.Slice(20, sizeof(ushort))), Is.EqualTo(1));
+        Assert.That(echoBody.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] { 0xEB, 0, 2, 0 }));
+
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(
+                C1M1Construction2ClassParameterDefaultsSchemaIdentity,
+                artifact),
+            "InstanceReturnHome", [], ["BoxKey"]);
+        var consumer = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            int32 Use(Box value) { return value.Echo(); }
+            """), reference);
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
+        var use = ((BoundProgram)consumer.Program!).Functions.Single(
+            static function => function.Name == "Use");
+        var calls = new List<BoundCall>();
+        Assert.That(BoundTreeTraversal.VisitExpressions(use.Body,
+            expression =>
+            {
+                if (expression is BoundCall call)
+                {
+                    calls.Add(call);
+                }
+            }), Is.True);
+        Assert.That(calls, Has.Count.EqualTo(1));
+        var arguments = calls[0].Arguments;
+        Assert.That(arguments, Has.Length.EqualTo(3));
+        Assert.That(arguments[1], Is.TypeOf<BoundConstant>());
+        Assert.That(((BoundConstant)arguments[1]).Type,
+            Is.EqualTo(PrimitiveType.Void));
+        Assert.That(((BoundConstant)arguments[2]).Value, Is.EqualTo(13));
+    }
+
+    [Test]
     public void BindsImportedClassMethodDefaultFromSelectedView()
     {
         var tree = SyntaxTree.Parse("""

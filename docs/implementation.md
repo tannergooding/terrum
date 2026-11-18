@@ -142,10 +142,14 @@ role-2 projection P MethodDefs, MethodSigs, Params, Construction clauses,
 Feature 25 and Bodies for one non-partial constructor per class whose fields
 are initialized directly from scalar parameters. It preserves explicit I/P
 ExportKeys and does not substitute `ClassTryCreate`; keyed and private-P
-producer regressions are added but unverified under the hold. Ordinary method emission also supports parameterized static scalar methods
-with real Bodies and empty unit-returning instance methods with receiver and
-parameter Homes. Source binding now admits ordinary by-value Unit parameters
-and `()` defaults; the CM1 producer/reader preserves their logical signature
+producer regressions are added but unverified under the hold.
+Ordinary method emission also supports parameterized static scalar methods
+with real Bodies, empty unit-returning instance methods, and readonly
+instance methods returning an explicit scalar parameter through ReturnHome
+with receiver/formal Homes in declaration order. The Unit-before-value
+instance regression remains unverified under the hold. Source binding now
+admits ordinary by-value Unit parameters and `()` defaults; the CM1
+producer/reader preserves their logical signature
 positions and zero-width SF1 values, while Windows x64 lowering omits only
 their payload positions. Focused source, metadata and JIT regressions are
 added but remain unverified under the active hold. The provisional CM1 route carries checked defaults for its
@@ -160,8 +164,9 @@ owner TypeDef Import to the same selected provider, comparing signatures,
 effects, modes and construction roles after TypeSpec remapping while retaining
 separate expected/provider defaults and Import aliases. Provider-source-free
 caller and compatible/incompatible provider regressions are added but remain
-unverified under the active hold. Instance method Bodies beyond the empty
-unit subset, field access/calls, properties, multiple/partial constructors,
+unverified under the active hold. Other instance method Bodies beyond the
+empty-unit and direct scalar-parameter ReturnHome subsets, field access/calls,
+properties, multiple/partial constructors,
 class-backed field initialization, source-free class method re-emission and
 its replacement/remapping paths, class FieldDef Imports, CLI transport,
 independent carrier TypeSpec verification, generic TypeDef dependencies,

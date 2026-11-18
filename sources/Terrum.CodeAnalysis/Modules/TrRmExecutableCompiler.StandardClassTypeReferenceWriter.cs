@@ -25,7 +25,8 @@ public static partial class TrRmExecutableCompiler
         int InitializerMethodDefRow, int ProjectionMethodDefRow);
 
     private sealed record C1M1Construction2SourceMethod(
-        BoundFunction Function, int MethodDefRow);
+        BoundFunction Function, int MethodDefRow,
+        int DirectReturnHome = -1);
 
     private readonly record struct C1M1ParameterSurfaceRow(
         int MethodDefRow, int Ordinal, string Name,
@@ -877,8 +878,18 @@ public static partial class TrRmExecutableCompiler
                             && methodFunction.ParameterCount >= 1
                             && methodFunction.ReturnType
                                 == PrimitiveType.Void;
+                    var directReturnHome = -1;
+                    var isSupportedDirectReturnInstanceMethod
+                        = !methodFunction.IsStatic
+                            && methodFunction.ReturnType
+                                != PrimitiveType.Void
+                            && methodFunction.ParameterCount
+                                == methodFunction.Variables.Length
+                            && TryGetC1M1Construction2DirectParameterReturn(
+                                methodFunction, out directReturnHome);
                     if ((!methodFunction.IsStatic
-                            && !isSupportedNoOpInstanceMethod)
+                            && !isSupportedNoOpInstanceMethod
+                            && !isSupportedDirectReturnInstanceMethod)
                         || methodFunction.IsClassConstructor
                         || methodFunction.IsConstructor
                         || methodFunction.IsExternal
@@ -931,15 +942,18 @@ public static partial class TrRmExecutableCompiler
                             && methodFunction.IsInternal))
                     {
                         throw Unsupported(
-                            "The bounded Construction-2 class method producer supports only effect-free scalar static methods or empty unit instance methods.");
+                            "The bounded Construction-2 class method producer supports effect-free scalar static methods, empty unit instance methods and readonly instance methods returning one scalar value parameter.");
                     }
 
                     if (methodFunction.ReturnType != PrimitiveType.Void)
                     {
                         if (!methodFunction.IsStatic)
                         {
-                            throw Unsupported(
-                                "The bounded Construction-2 instance method producer supports only unit-returning methods.");
+                            if (!isSupportedDirectReturnInstanceMethod)
+                            {
+                                throw Unsupported(
+                                    "The bounded Construction-2 instance method producer supports only unit or direct scalar-parameter results.");
+                            }
                         }
 
                         _ = GetC1M1SourceScalarTypeSpecReference(
@@ -985,6 +999,33 @@ public static partial class TrRmExecutableCompiler
                         {
                             throw Unsupported(
                                 "The bounded Construction-2 instance method producer requires its exact nominal class receiver.");
+                        }
+
+                        for (var variableIndex = 1;
+                            variableIndex < methodFunction.Variables.Length;
+                            variableIndex++)
+                        {
+                            var variable
+                                = methodFunction.Variables[variableIndex];
+                            var isUnitParameter
+                                = variable.Type == PrimitiveType.Void
+                                    && variableIndex
+                                        < methodFunction.ParameterCount;
+                            if ((variable.Type == PrimitiveType.Void
+                                    && !isUnitParameter)
+                                || variable.IsOut || variable.IsInit
+                                || variable.IsImplicitRef
+                                || variable.IsInitializationLocal)
+                            {
+                                throw Unsupported(
+                                    "The bounded Construction-2 instance method producer supports only scalar value parameters.");
+                            }
+
+                            if (!isUnitParameter)
+                            {
+                                _ = GetC1M1SourceScalarTypeSpecReference(
+                                    variable.Type);
+                            }
                         }
                     }
 
@@ -1057,7 +1098,9 @@ public static partial class TrRmExecutableCompiler
 
                     construction2SourceMethods.Add(
                         new C1M1Construction2SourceMethod(
-                            methodFunction, methodRow));
+                            methodFunction, methodRow,
+                            isSupportedDirectReturnInstanceMethod
+                                ? directReturnHome : -1));
                 }
             }
 
@@ -1095,9 +1138,13 @@ public static partial class TrRmExecutableCompiler
                 bodyRows.Add(method.Function.IsStatic
                     ? EncodeC1M1Construction2StaticMethodBody(
                         method.Function)
-                    : EncodeC1M1Construction2NoOpInstanceMethodBody(
-                        method.Function,
+                    : method.DirectReturnHome >= 0
+                    ? EncodeC1M1Construction2InstanceMethodBody(
+                        method.Function, method.DirectReturnHome,
                         Construction2ValueTypeSpecReference,
+                        contractRows.Count, schema)
+                    : EncodeC1M1Construction2NoOpInstanceMethodBody(
+                        method.Function, Construction2ValueTypeSpecReference,
                         contractRows.Count, schema));
                 methodRows[method.MethodDefRow - 1]
                     = methodRows[method.MethodDefRow - 1]
@@ -1742,6 +1789,71 @@ public static partial class TrRmExecutableCompiler
             new Dictionary<PrimitiveType, int>());
     }
 
+    private static byte[] EncodeC1M1Construction2InstanceMethodBody(
+        BoundFunction function, int returnHomeIndex,
+        Func<PrimitiveType, uint> typeSpecReferenceFor, int contractCount,
+        TrRmArtifactSchema schema)
+    {
+        if (function.IsStatic
+            || function.ParameterCount != function.Variables.Length
+            || returnHomeIndex <= 0
+            || returnHomeIndex >= function.ParameterCount
+            || function.Variables[returnHomeIndex].Type
+                != function.ReturnType)
+        {
+            throw Unsupported(
+                "A Construction-2 instance ReturnHome must select a typed explicit value parameter.");
+        }
+
+        var typeTokens = new uint[function.ParameterCount];
+        var homeMap = new byte[checked(function.ParameterCount * 8)];
+        for (var parameter = 0; parameter < function.ParameterCount;
+            parameter++)
+        {
+            var variable = function.Variables[parameter];
+            if (variable.IsOut || variable.IsInit
+                || variable.IsImplicitRef
+                || variable.IsInitializationLocal)
+            {
+                throw Unsupported(
+                    "A Construction-2 instance ReturnHome requires value receiver and parameter Homes.");
+            }
+
+            typeTokens[parameter] = CreateStandardBodyTypeMapToken(
+                typeSpecReferenceFor(variable.Type));
+        }
+
+        var maps = TrRmRegisterBodyMapBuilder.Create(typeTokens, []);
+        for (var parameter = 0; parameter < function.ParameterCount;
+            parameter++)
+        {
+            var offset = parameter * 8;
+            homeMap[offset] = parameter == 0 ? (byte)1 : (byte)2;
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                homeMap.AsSpan(offset + 2, 2),
+                maps.GetTypeMapIndex(typeTokens[parameter]));
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                homeMap.AsSpan(offset + 4, 2),
+                parameter == 0 ? (ushort)0
+                    : checked((ushort)(parameter - 1)));
+        }
+
+        var records = new ReadOnlyMemory<byte>[] {
+            new(new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 }),
+        };
+        var code = new byte[] { 0xEB, 0, 0, 0 };
+        BinaryPrimitives.WriteUInt16LittleEndian(code.AsSpan(2),
+            checked((ushort)returnHomeIndex));
+        return TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
+            default, default, default,
+            [new TrRmRegisterBodyBlock(0,
+                checked((uint)code.Length), 0)],
+            records, code, contractCount: contractCount,
+            schema: schema,
+            generalPredicateGraphsInitializationReferenceBodies
+                : schema.UsesGeneralPredicateGraphs());
+    }
+
     private static byte[] EncodeC1M1Construction2NoOpInstanceMethodBody(
         BoundFunction function,
         Func<PrimitiveType, uint> typeSpecReferenceFor,
@@ -1800,6 +1912,67 @@ public static partial class TrRmExecutableCompiler
             schema: schema,
             generalPredicateGraphsInitializationReferenceBodies
                 : schema.UsesGeneralPredicateGraphs());
+    }
+
+    private static bool TryGetC1M1Construction2DirectParameterReturn(
+        BoundFunction function, out int returnHomeIndex)
+    {
+        returnHomeIndex = -1;
+        if (function.ReturnType == PrimitiveType.Void
+            || function.ParameterCount != function.Variables.Length
+            || function.ParameterCount < 2
+            || function.Variables[0].IsMutable)
+        {
+            return false;
+        }
+
+        BoundRead? returnedRead = null;
+        var isSupported = true;
+        Visit(function.Body);
+        if (!isSupported || returnedRead is null
+            || returnedRead.Variable <= 0
+            || returnedRead.Variable >= function.ParameterCount
+            || returnedRead.Type != function.ReturnType
+            || function.Variables[returnedRead.Variable].Type
+                != function.ReturnType)
+        {
+            return false;
+        }
+
+        returnHomeIndex = returnedRead.Variable;
+        return true;
+
+        void Visit(BoundBlock block)
+        {
+            if (!block.RetiredManagedLocals.IsEmpty)
+            {
+                isSupported = false;
+                return;
+            }
+
+            foreach (var statement in block.Statements)
+            {
+                if (!isSupported || returnedRead is not null)
+                {
+                    isSupported = false;
+                    return;
+                }
+
+                if (statement is BoundBlock nested)
+                {
+                    Visit(nested);
+                }
+                else if (statement is BoundReturn { Value: BoundRead read })
+                {
+                    returnedRead = read;
+                }
+                else
+                {
+                    isSupported = false;
+                    return;
+                }
+            }
+        }
     }
 
     private static void RequireC1M1Construction2NoOpUnitBody(

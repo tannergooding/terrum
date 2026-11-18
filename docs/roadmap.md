@@ -118,8 +118,11 @@ prerequisite has already been met.
    class/member/Body closure and targets Construction-1/2 L1R1 and PI1 successors.
    Construction-2 source production now emits a bounded real initializer I /
    projection P pair for direct scalar parameter-to-field initialization,
-   parameterized static scalar methods, and empty unit instance methods with
-   receiver/parameter Homes. Ordinary by-value Unit parameters and `()`
+   parameterized static scalar methods, empty unit instance methods, and a
+   readonly instance method returning one explicit scalar parameter through
+   ReturnHome with receiver/formal Homes in declaration order. The
+   Unit-before-value instance regression remains unverified under the active
+   hold. Ordinary by-value Unit parameters and `()`
    defaults now retain logical positions through source binding, CM1 metadata
    and Windows x64 payload elision; focused source/metadata/JIT regressions
    remain unverified under the active hold. The provisional
