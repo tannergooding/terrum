@@ -828,7 +828,10 @@ internal sealed class NoThrowTests
                     int32 snapshot = Value;
                 }
             }
-            public int32 Use(Owner owner) { return 42; }
+            public int32 Use(Owner owner) {
+                Owner local = owner;
+                return 42;
+            }
             """), new CompilationOptions {
             RuntimePolicy = BoundRuntimePolicy.CheckedExceptions,
         });

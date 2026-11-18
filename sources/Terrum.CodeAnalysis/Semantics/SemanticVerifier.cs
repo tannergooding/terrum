@@ -7601,10 +7601,13 @@ public static partial class SemanticVerifier
                             == program.Classes[
                                 ManagedClassTypes.ClassIndex(
                                     field.Receiver.Type)].Name
+                        && !field.IsUnsafeAuthorized
                         && (PrimitiveTypeFacts.IsBuiltInScalar(field.Type)
                             || BoundEnumTypes.IsType(field.Type))))
                 && (uint)field.Field < (uint)Fields(program, field.Receiver.Type).Length
                 && Fields(program, field.Receiver.Type)[field.Field].Type == field.Type
+                && !Fields(program, field.Receiver.Type)[field.Field]
+                    .RequiresUnsafeCaller
                 && CanAccessField(function, program,
                     field.Receiver.Type, field.Field)
                 && CleanupExpressionCanBeProvenNonThrowing(
