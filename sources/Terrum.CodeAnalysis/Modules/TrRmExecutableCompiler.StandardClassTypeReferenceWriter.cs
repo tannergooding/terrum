@@ -2008,6 +2008,27 @@ public static partial class TrRmExecutableCompiler
         byte[] homeMap = [];
         byte[] constantMap = [];
         byte[] code;
+        (int LeftHome, int RightHome) SetInt32BinaryHomes(
+            int leftVariable, int rightVariable)
+        {
+            var typeToken = CreateStandardBodyTypeMapToken(
+                typeSpecReferenceFor(PrimitiveType.Int32));
+            var homeCount = leftVariable == rightVariable ? 1 : 2;
+            typeTokens = new uint[homeCount];
+            homeMap = new byte[homeCount * 8];
+            for (var home = 0; home < homeCount; home++)
+            {
+                var variable = home == 0 ? leftVariable : rightVariable;
+                typeTokens[home] = typeToken;
+                homeMap[home * 8] = 2;
+                BinaryPrimitives.WriteUInt16LittleEndian(
+                    homeMap.AsSpan(home * 8 + 4, 2),
+                    checked((ushort)variable));
+            }
+
+            return (0, homeCount == 1 ? 0 : 1);
+        }
+
         if (function.ReturnType == PrimitiveType.Void)
         {
             if (returnValue is not null
@@ -2061,6 +2082,8 @@ public static partial class TrRmExecutableCompiler
             && binary.Operator is TokenKind.Ampersand or TokenKind.Pipe
                 or TokenKind.Caret)
         {
+            var (leftHome, rightHome)
+                = SetInt32BinaryHomes(left.Variable, right.Variable);
             var operation = binary.Operator switch
             {
                 TokenKind.Ampersand => (byte)0x01,
@@ -2072,18 +2095,78 @@ public static partial class TrRmExecutableCompiler
             var instructions = new List<byte>(14);
             instructions.Add(0xD5);
             instructions.Add(0);
-            instructions.Add(checked((byte)left.Variable));
-            instructions.Add(checked((byte)(left.Variable >> 8)));
+            instructions.Add(checked((byte)leftHome));
+            instructions.Add(0);
             instructions.Add(0xD5);
             instructions.Add(1);
-            instructions.Add(checked((byte)right.Variable));
-            instructions.Add(checked((byte)(right.Variable >> 8)));
+            instructions.Add(checked((byte)rightHome));
+            instructions.Add(0);
             const byte destinationRegister = 0;
             const byte leftRegister = 0;
             const byte rightRegister = 1;
             var payload = (ushort)(destinationRegister | (0x0F << 4)
                 | (leftRegister << 8) | (rightRegister << 12));
             instructions.Add(0xC1);
+            instructions.Add(operation);
+            instructions.Add((byte)payload);
+            instructions.Add((byte)(payload >> 8));
+            instructions.Add(0x17);
+            instructions.Add(0);
+            code = instructions.ToArray();
+        }
+        else if (returnValue is BoundBinary arithmetic
+            && function.ReturnType == PrimitiveType.Int32
+            && arithmetic.Type == PrimitiveType.Int32
+            && arithmetic.Left is BoundRead arithmeticLeft
+            && arithmetic.Right is BoundRead arithmeticRight
+            && arithmeticLeft.Type == PrimitiveType.Int32
+            && arithmeticRight.Type == PrimitiveType.Int32
+            && (uint)arithmeticLeft.Variable
+                < (uint)function.ParameterCount
+            && (uint)arithmeticRight.Variable
+                < (uint)function.ParameterCount
+            && function.Variables[arithmeticLeft.Variable].Type
+                == PrimitiveType.Int32
+            && function.Variables[arithmeticRight.Variable].Type
+                == PrimitiveType.Int32
+            && arithmetic.Operator is TokenKind.Plus or TokenKind.Minus
+                or TokenKind.Star)
+        {
+            var (leftHome, rightHome) = SetInt32BinaryHomes(
+                arithmeticLeft.Variable, arithmeticRight.Variable);
+            var operation = (arithmetic.Operator,
+                arithmetic.OverflowBehavior) switch
+            {
+                (TokenKind.Plus,
+                    BoundIntegerOverflowBehavior.Checked) => (byte)0x01,
+                (TokenKind.Minus,
+                    BoundIntegerOverflowBehavior.Checked) => (byte)0x02,
+                (TokenKind.Star,
+                    BoundIntegerOverflowBehavior.Checked) => (byte)0x03,
+                (TokenKind.Plus,
+                    BoundIntegerOverflowBehavior.Wrapping) => (byte)0x05,
+                (TokenKind.Minus,
+                    BoundIntegerOverflowBehavior.Wrapping) => (byte)0x06,
+                (TokenKind.Star,
+                    BoundIntegerOverflowBehavior.Wrapping) => (byte)0x07,
+                _ => throw Unsupported(
+                    "The selected static register Body does not encode this integer overflow policy."),
+            };
+            var instructions = new List<byte>(14);
+            instructions.Add(0xD5);
+            instructions.Add(0);
+            instructions.Add(checked((byte)leftHome));
+            instructions.Add(0);
+            instructions.Add(0xD5);
+            instructions.Add(1);
+            instructions.Add(checked((byte)rightHome));
+            instructions.Add(0);
+            const byte destinationRegister = 0;
+            const byte leftRegister = 0;
+            const byte rightRegister = 1;
+            var payload = (ushort)(destinationRegister | (0x0F << 4)
+                | (leftRegister << 8) | (rightRegister << 12));
+            instructions.Add(0xC0);
             instructions.Add(operation);
             instructions.Add((byte)payload);
             instructions.Add((byte)(payload >> 8));
@@ -2123,14 +2206,24 @@ public static partial class TrRmExecutableCompiler
         else
         {
             throw Unsupported(
-                "The bounded Construction-2 static register Body supports direct value-formal or fixed-scalar returns.");
+                "The bounded Construction-2 static register Body supports direct value-formal, int32 binary, or fixed-scalar returns.");
         }
 
         var maps = TrRmRegisterBodyMapBuilder.Create(typeTokens, []);
         if (homeMap.Length != 0)
         {
-            BinaryPrimitives.WriteUInt16LittleEndian(homeMap.AsSpan(2),
-                maps.GetTypeMapIndex(typeTokens[0]));
+            if (typeTokens.Length != homeMap.Length / 8)
+            {
+                throw new InvalidDataException(
+                    "A static register Body HomeMap must have one TypeMap token per Home.");
+            }
+
+            for (var home = 0; home < typeTokens.Length; home++)
+            {
+                BinaryPrimitives.WriteUInt16LittleEndian(
+                    homeMap.AsSpan(home * 8 + 2, 2),
+                    maps.GetTypeMapIndex(typeTokens[home]));
+            }
         }
 
         var records = new ReadOnlyMemory<byte>[] {

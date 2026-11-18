@@ -724,6 +724,18 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 public static int32 StaticXor(int32 left, int32 right) {
                     return left ^ right;
                 }
+                public static int32 Add(int32 left, int32 right) {
+                    return left + right;
+                }
+                public static int32 Subtract(int32 left, int32 right) {
+                    return right - left;
+                }
+                public static int32 Multiply(int32 left, int32 right) {
+                    return left * right;
+                }
+                public static int32 Double(int32 value) {
+                    return value + value;
+                }
                 public int32 XorAfterCall(int32 left, int32 right) {
                     return Xor(left, right) ^ right;
                 }
@@ -756,6 +768,22 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name == "StaticXor"));
+        var add = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Add"));
+        var subtract = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Subtract"));
+        var multiply = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Multiply"));
+        var doubleValue = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Double"));
         var xorAfterCall = members.Single(static node =>
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
@@ -784,6 +812,14 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                             "Box.Xor"),
                         new TrRmSourceClassMemberExport(0, staticXor.Span,
                             "Box.StaticXor"),
+                        new TrRmSourceClassMemberExport(0, add.Span,
+                            "Box.Add"),
+                        new TrRmSourceClassMemberExport(0, subtract.Span,
+                            "Box.Subtract"),
+                        new TrRmSourceClassMemberExport(0, multiply.Span,
+                            "Box.Multiply"),
+                        new TrRmSourceClassMemberExport(0, doubleValue.Span,
+                            "Box.Double"),
                         new TrRmSourceClassMemberExport(0,
                             xorAfterCall.Span, "Box.XorAfterCall"),
                         new TrRmSourceClassMemberExport(0,
@@ -833,6 +869,118 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 0xD5, 0, 0, 0,
                 0xD5, 1, 1, 0,
                 0xC1, 0x03, 0xF0, 0x10,
+                0x17, 0,
+            }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1, "Box.Add",
+            out var addDefinition), Is.True);
+        var addMethodRow
+            = checked((int)(addDefinition & 0x00FF_FFFF));
+        var addBodyRow = tables.Methods.GetBodyRow(addMethodRow);
+        Assert.That(addBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(addBodyRow,
+            tables.Contracts.Count);
+        var addBody = tables.Bodies.GetRegisterBody(addBodyRow,
+            tables.Contracts.Count);
+        Assert.That(addBody.HomeCount, Is.EqualTo(2));
+        var addFunction = program.Functions.Single(
+            static function => function.Name == "Add");
+        var addBinary = (BoundBinary)((BoundReturn)
+            addFunction.Body.Statements.Single()).Value!;
+        static byte GetArithmeticControl(BoundBinary binary)
+            => (binary.Operator, binary.OverflowBehavior) switch
+        {
+            (TokenKind.Plus, BoundIntegerOverflowBehavior.Checked)
+                => 0x01,
+            (TokenKind.Minus, BoundIntegerOverflowBehavior.Checked)
+                => 0x02,
+            (TokenKind.Star, BoundIntegerOverflowBehavior.Checked)
+                => 0x03,
+            (TokenKind.Plus, BoundIntegerOverflowBehavior.Wrapping)
+                => 0x05,
+            (TokenKind.Minus, BoundIntegerOverflowBehavior.Wrapping)
+                => 0x06,
+            (TokenKind.Star, BoundIntegerOverflowBehavior.Wrapping)
+                => 0x07,
+            _ => throw new InvalidOperationException(
+                "The arithmetic fixture must use a supported operation and overflow policy."),
+        };
+        var addControl = GetArithmeticControl(addBinary);
+        Assert.That(addBody.GetBlockCode(0).ToArray(), Is.EqualTo(
+            new byte[] {
+                0xD5, 0, 0, 0,
+                0xD5, 1, 1, 0,
+                0xC0, addControl, 0xF0, 0x10,
+                0x17, 0,
+            }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.Subtract", out var subtractDefinition), Is.True);
+        var subtractMethodRow
+            = checked((int)(subtractDefinition & 0x00FF_FFFF));
+        var subtractBodyRow = tables.Methods.GetBodyRow(subtractMethodRow);
+        Assert.That(subtractBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(subtractBodyRow,
+            tables.Contracts.Count);
+        var subtractBody = tables.Bodies.GetRegisterBody(subtractBodyRow,
+            tables.Contracts.Count);
+        Assert.That(subtractBody.HomeCount, Is.EqualTo(2));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+                subtractBody.HomeMap.AsSpan(4, 2)),
+            Is.EqualTo(1));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+                subtractBody.HomeMap.AsSpan(12, 2)),
+            Is.Zero);
+        var subtractFunction = program.Functions.Single(
+            static function => function.Name == "Subtract");
+        var subtractBinary = (BoundBinary)((BoundReturn)
+            subtractFunction.Body.Statements.Single()).Value!;
+        Assert.That(subtractBody.GetBlockCode(0).ToArray(), Is.EqualTo(
+            new byte[] {
+                0xD5, 0, 0, 0,
+                0xD5, 1, 1, 0,
+                0xC0, GetArithmeticControl(subtractBinary), 0xF0, 0x10,
+                0x17, 0,
+            }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.Multiply", out var multiplyDefinition), Is.True);
+        var multiplyMethodRow
+            = checked((int)(multiplyDefinition & 0x00FF_FFFF));
+        var multiplyBodyRow = tables.Methods.GetBodyRow(multiplyMethodRow);
+        Assert.That(multiplyBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(multiplyBodyRow,
+            tables.Contracts.Count);
+        var multiplyBody = tables.Bodies.GetRegisterBody(multiplyBodyRow,
+            tables.Contracts.Count);
+        var multiplyFunction = program.Functions.Single(
+            static function => function.Name == "Multiply");
+        var multiplyBinary = (BoundBinary)((BoundReturn)
+            multiplyFunction.Body.Statements.Single()).Value!;
+        Assert.That(multiplyBody.GetBlockCode(0).ToArray(), Is.EqualTo(
+            new byte[] {
+                0xD5, 0, 0, 0,
+                0xD5, 1, 1, 0,
+                0xC0, GetArithmeticControl(multiplyBinary), 0xF0, 0x10,
+                0x17, 0,
+            }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.Double", out var doubleDefinition), Is.True);
+        var doubleMethodRow
+            = checked((int)(doubleDefinition & 0x00FF_FFFF));
+        var doubleBodyRow = tables.Methods.GetBodyRow(doubleMethodRow);
+        Assert.That(doubleBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(doubleBodyRow,
+            tables.Contracts.Count);
+        var doubleBody = tables.Bodies.GetRegisterBody(doubleBodyRow,
+            tables.Contracts.Count);
+        Assert.That(doubleBody.HomeCount, Is.EqualTo(1));
+        var doubleFunction = program.Functions.Single(
+            static function => function.Name == "Double");
+        var doubleBinary = (BoundBinary)((BoundReturn)
+            doubleFunction.Body.Statements.Single()).Value!;
+        Assert.That(doubleBody.GetBlockCode(0).ToArray(), Is.EqualTo(
+            new byte[] {
+                0xD5, 0, 0, 0,
+                0xD5, 1, 0, 0,
+                0xC0, GetArithmeticControl(doubleBinary), 0xF0, 0x10,
                 0x17, 0,
             }));
         Assert.That(tables.Exports.TryGetDefinitionForKey(1,
@@ -908,6 +1056,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         var consumer = Compilation.CreateLibrary(SyntaxTree.Parse("""
             int32 Use(Box value) { return value.Xor(2, 3); }
             int32 UseStaticXor() { return Box.StaticXor(4, 5); }
+            int32 UseAdd() { return Box.Add(4, 5); }
+            int32 UseSubtract() { return Box.Subtract(7, 3); }
+            int32 UseMultiply() { return Box.Multiply(4, 5); }
+            int32 UseDouble() { return Box.Double(4); }
             int32 UseAfterCall(Box value) {
                 return value.XorAfterCall(2, 3);
             }
