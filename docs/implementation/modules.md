@@ -103,10 +103,11 @@ This does not admit fresh generic TypeDef source declarations. Source-free
 generic MethodDef re-emission now has the provisional explicit selector and
 bounded writer path from the
 [selection proposal](../proposals/standard-trrm-source-free-generic-method-export-selection.md);
-public alias/helper/import, constructed-nominal, provider-replacement,
-source-free binding and JIT regressions are added but remain unverified under
-the active hold. Direct same-root MethodDef helper Bodies are included without
-publishing helper exports, and external bodyless MethodDef Imports retain
+public alias/helper/import, constructed-nominal, result-dependency,
+provider-replacement, source-free binding and JIT regressions are added but
+remain unverified under the active hold. Direct same-root MethodDef helper
+Bodies are included without publishing helper exports, and external bodyless
+MethodDef Imports retain
 their exact provider keys; broader helper, provider and nominal remapping
 remain open. The writer copies all retained TypeDef Import expectation views; a
 reference-set emission regression is added but remains unverified under the

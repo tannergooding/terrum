@@ -233,26 +233,8 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         var providerArtifact = TrRmExecutableCompiler.EmitStandard(provider,
             providerIdentity, GenericMethodCallsSchemaIdentity, 0,
             Array.Empty<TrRmSourceTypeExport>(), sourceExports);
-        var (providerStringCount, providerStringBytes)
-            = GetSection(providerArtifact, 0x0002);
-        var providerStrings = new TrRmStringTableReader(
-            providerStringBytes, checked((int)providerStringCount));
-        var (providerExportCount, providerExportBytes)
-            = GetSection(providerArtifact, 0x001D);
-        var methodDefId = 0u;
-        for (var index = 0;
-            index < checked((int)providerExportCount); index++)
-        {
-            var offset = checked((int)index * 8);
-            var key = providerStrings.DecodeName(checked((int)ReadUInt32(
-                providerExportBytes, offset + 4)));
-            if (key == "identity.api/v1")
-            {
-                methodDefId = ReadUInt32(providerExportBytes, offset);
-                break;
-            }
-        }
-        Assert.That(methodDefId >> 24, Is.EqualTo(0x16));
+        var methodDefId = GetExportedMethodDefId(providerArtifact,
+            "identity.api/v1");
 
         var rootReference = TrRmExecutableCompiler.CreateStandardReference(
             new TrRmStandardArtifactInput(GenericMethodCallsSchemaIdentity,
@@ -424,22 +406,8 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             string.Join(Environment.NewLine,
                 sourceFreeCompilation.Diagnostics));
         var sourceFreeProgram = sourceFreeCompilation.Program!;
-        var (stringCount, stringBytes) = GetSection(providerArtifact, 0x0002);
-        var strings = new TrRmStringTableReader(stringBytes,
-            checked((int)stringCount));
-        var (exportCount, exportBytes) = GetSection(providerArtifact, 0x001D);
-        var methodDefId = 0u;
-        for (var index = 0; index < checked((int)exportCount); index++)
-        {
-            var offset = checked(index * 8);
-            if (strings.DecodeName(checked((int)ReadUInt32(exportBytes,
-                    offset + 4))) == "Accept")
-            {
-                methodDefId = ReadUInt32(exportBytes, offset);
-                break;
-            }
-        }
-        Assert.That(methodDefId >> 24, Is.EqualTo(0x16));
+        var methodDefId = GetExportedMethodDefId(providerArtifact,
+            "Accept");
 
         var selection = new TrRmRetainedGenericMethodExport(
             sourceFreeProgram, providerIdentity,
@@ -492,6 +460,76 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                 using Example;
                 public Box<T> Use<T>(Box<T> value) {
                     return Accept<T>(move value);
+                }
+                """), reemittedReference);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+    }
+
+    [Test]
+    public void ReemitsRetainedGenericReferenceResultDependency()
+    {
+        const string providerIdentity = "retained-reference.provider";
+        const string outputIdentity = "retained-reference.reemitted";
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Terrum.CodeAnalysis;
+                [return: DependsOn(nameof(source))]
+                public ref<T> Borrow<T>(ref<T> source) {
+                    return move source;
+                }
+                """));
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+
+        var provider = providerCompilation.Program!;
+        var borrow = provider.GenericMethodDefinitions.Single();
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(provider,
+            providerIdentity, GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(),
+            [new TrRmSourceGenericMethodExport(provider,
+                borrow.SourceInputOrdinal, borrow.Span, "Borrow")]);
+        var rootReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(GenericMethodCallsSchemaIdentity,
+                providerArtifact), providerIdentity,
+            Array.Empty<TrRmStandardArtifactInput>());
+        var sourceFreeProgram = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), rootReference).Program!;
+        var selection = new TrRmRetainedGenericMethodExport(
+            sourceFreeProgram, providerIdentity,
+            GenericMethodCallsSchemaIdentity,
+            ImmutableArray.CreateRange(
+                System.Security.Cryptography.SHA256.HashData(providerArtifact)),
+            GetExportedMethodDefId(providerArtifact, "Borrow"), "Borrow",
+            "BorrowCopy");
+        var reemitted = TrRmExecutableCompiler
+            .EmitStandardReemittingGenericMethods(sourceFreeProgram,
+                outputIdentity, GenericMethodCallsSchemaIdentity, 0,
+                [selection]);
+        var reemittedReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(GenericMethodCallsSchemaIdentity,
+                reemitted), outputIdentity,
+            Array.Empty<TrRmStandardArtifactInput>());
+        var reemittedBorrow
+            = reemittedReference.GenericMethodImports.Single();
+        var dependency = reemittedBorrow.ProofFunction
+            .DependencyContracts.Single();
+        Assert.That(dependency.Relation,
+            Is.EqualTo(BoundDependencyRelation.DependsOn));
+        Assert.That(dependency.Destination,
+            Is.EqualTo(BoundDependencyDestination.Result));
+        Assert.That(dependency.Sources.Single(),
+            Is.EqualTo(new BoundDependencySource(
+                BoundDependencySourceKind.Formal, 0)));
+
+        var consumerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Terrum.CodeAnalysis;
+                [return: DependsOn(nameof(source))]
+                public ref<T> ForwardAgain<T>(ref<T> source) {
+                    return Borrow<T>(source);
                 }
                 """), reemittedReference);
         Assert.That(consumerCompilation.HasErrors, Is.False,
@@ -9462,6 +9500,43 @@ internal sealed class TrRmGenericMethodSourceWriterTests
 
         return TrRmArtifactWriter.Encode(sections.Values.ToArray(),
             TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft);
+    }
+
+    private static uint GetExportedMethodDefId(byte[] artifact,
+        string exportKey)
+    {
+        var (stringCount, stringBytes) = GetSection(artifact, 0x0002);
+        var strings = new TrRmStringTableReader(stringBytes,
+            checked((int)stringCount));
+        var (exportCount, exportBytes) = GetSection(artifact, 0x001D);
+        var definitionId = 0u;
+        for (var index = 0; index < checked((int)exportCount); index++)
+        {
+            var offset = checked(index * 8);
+            if (!StringComparer.Ordinal.Equals(strings.DecodeName(
+                    checked((int)ReadUInt32(exportBytes, offset + 4))),
+                exportKey))
+            {
+                continue;
+            }
+
+            var candidate = ReadUInt32(exportBytes, offset);
+            if ((candidate >> 24) != 0x16
+                || (candidate & 0x00FF_FFFF) == 0
+                || definitionId != 0)
+            {
+                throw new AssertionException(
+                    "The selected ExportKey does not identify one MethodDef.");
+            }
+            definitionId = candidate;
+        }
+
+        if (definitionId == 0)
+        {
+            throw new AssertionException(
+                "The selected MethodDef ExportKey is missing.");
+        }
+        return definitionId;
     }
 
     private static (uint Count, byte[] Bytes) GetSection(byte[] artifact,
