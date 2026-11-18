@@ -2217,6 +2217,230 @@ internal sealed class TrRmC1EnumClosureSourceTests
     }
 
     [Test]
+    public void LowersEN1ClassQueryAcrossImportedStructProviders()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
+        var schemaIdentity
+            = $"{s_schemaIdentities[0]}-class-instance-layout-1";
+        var layoutOptions = new CompilationOptions {
+            LayoutCoreRegistration
+                = LayoutCoreRegistrationTestData.Create(),
+        };
+        var leafTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public struct Leaf {
+                    public int32 Id;
+                    public uint8 Tail;
+                }
+            }
+            """);
+        var leafCompilation = Compilation.CreateLibrary(leafTree,
+            layoutOptions);
+        Assert.That(leafCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, leafCompilation.Diagnostics));
+        var leafProgram = (BoundProgram)leafCompilation.Program!;
+        var leafExport = new TrRmSourceTypeExport("Demo", "Leaf",
+            "type.leaf") {
+            FieldExports = [
+                new TrRmSourceFieldExport("Id", "field.leaf.id"),
+                new TrRmSourceFieldExport("Tail", "field.leaf.tail"),
+            ],
+        };
+        var leafArtifact = TrRmExecutableCompiler.EmitStandard(
+            leafProgram, "LeafLayoutProvider", schemaIdentity, 1,
+            [leafExport], [], [], []);
+        var leafInput = new TrRmStandardArtifactInput(schemaIdentity,
+            leafArtifact);
+        var leafReference = TrRmExecutableCompiler.CreateStandardReference(
+            leafInput, "LeafLayoutProvider", [], ["type.leaf"], [
+                "field.leaf.id",
+                "field.leaf.tail",
+            ]);
+
+        var wrapperTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public struct Wrapper {
+                    public uint8 Prefix;
+                    public Leaf Child;
+                }
+            }
+            """);
+        var wrapperCompilation = Compilation.CreateLibrary(wrapperTree,
+            leafReference, layoutOptions);
+        Assert.That(wrapperCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                wrapperCompilation.Diagnostics));
+        var wrapperProgram = (BoundProgram)wrapperCompilation.Program!;
+        var wrapperExport = new TrRmSourceTypeExport("Demo", "Wrapper",
+            "type.wrapper") {
+            FieldExports = [
+                new TrRmSourceFieldExport("Prefix",
+                    "field.wrapper.prefix"),
+                new TrRmSourceFieldExport("Child",
+                    "field.wrapper.child"),
+            ],
+        };
+        var wrapperArtifact = TrRmExecutableCompiler.EmitStandard(
+            wrapperProgram, "WrapperLayoutProvider", schemaIdentity, 1,
+            [wrapperExport], [], [], []);
+        var wrapperInput = new TrRmStandardArtifactInput(schemaIdentity,
+            wrapperArtifact);
+        var wrapperReference
+            = TrRmExecutableCompiler.CreateStandardReference(wrapperInput,
+                "WrapperLayoutProvider", [leafInput], ["type.wrapper"], [
+                    "field.wrapper.prefix",
+                    "field.wrapper.child",
+                ]);
+
+        var boxTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public class Box {
+                    public uint8 Prefix;
+                    public Wrapper Value;
+                }
+            }
+            """);
+        var boxCompilation = Compilation.CreateLibrary(boxTree,
+            wrapperReference, layoutOptions);
+        Assert.That(boxCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, boxCompilation.Diagnostics));
+        var boxProgram = (BoundProgram)boxCompilation.Program!;
+        var boxArtifact = TrRmExecutableCompiler.EmitStandard(boxProgram,
+            "ClassLayoutProvider", schemaIdentity, 1, [], [], [
+                CreateSourceClassExport(boxProgram, boxTree, "Box",
+                    "type.box", (0, "field.box.prefix"),
+                    (1, "field.box.value")),
+            ], []);
+        var boxInput = new TrRmStandardArtifactInput(schemaIdentity,
+            boxArtifact);
+        var boxReference = TrRmExecutableCompiler.CreateStandardReference(
+            boxInput, "ClassLayoutProvider", [wrapperInput, leafInput],
+            ["type.box"], ["field.box.prefix", "field.box.value"]);
+        var queryCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Demo;
+                nint Offset() {
+                    return unsafe(offsetof(Box, Value.Child.Tail));
+                }
+                """), boxReference, layoutOptions);
+        Assert.That(queryCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                queryCompilation.Diagnostics));
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            queryCompilation.Program!, "ClassLayoutConsumer",
+            schemaIdentity, 1);
+        var providers = new[] { boxInput, wrapperInput, leafInput };
+
+        static int ExecuteOffset(BoundProgram program)
+        {
+            var returned = (BoundReturn)program.Functions.Single().Body
+                .Statements.Single();
+            var main = program.Functions.Single() with {
+                Name = "Main",
+                ReturnType = PrimitiveType.Int32,
+                Body = new BoundBlock([
+                    new BoundReturn(new BoundCast(returned.Value!,
+                        PrimitiveType.Int32, default), default),
+                ], default),
+            };
+            return NativeJit.Execute(program with {
+                Functions = [main],
+                EntryPoint = 0,
+            }, NativeRuntimePolicy.FailFast);
+        }
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
+            "ClassLayoutConsumer", providers);
+        var loadedReturn = (BoundReturn)loaded.Functions.Single().Body
+            .Statements.Single();
+        var loadedQuery = (BoundLayoutQuery)((BoundUnsafeExpression)
+            loadedReturn.Value!).Expression;
+        var fieldPath = loadedQuery.Subject.FieldPath!;
+        Assert.That(fieldPath.Steps, Has.Length.EqualTo(3));
+        Assert.That(fieldPath.Steps[0].StandardClassFieldOrigin!
+            .SelectedExportKeys, Is.EqualTo(["field.box.value"]));
+        Assert.That(fieldPath.Steps[1].StandardFieldOrigin!.Provider
+            .ModuleIdentity, Is.EqualTo("WrapperLayoutProvider"));
+        Assert.That(fieldPath.Steps[2].StandardFieldOrigin!.Provider
+            .ModuleIdentity, Is.EqualTo("LeafLayoutProvider"));
+        Assert.That(ExecuteOffset(loaded), Is.EqualTo(12));
+
+        var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(loaded,
+            "ClassLayoutConsumer", schemaIdentity, 1);
+        var reloaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                reemittedArtifact), "ClassLayoutConsumer", providers);
+        Assert.That(ExecuteOffset(reloaded), Is.EqualTo(12));
+
+        var relocatedLeafTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public struct Padding { public int64 Value; }
+                public struct Leaf {
+                    public int32 Id;
+                    public uint8 Tail;
+                }
+            }
+            """);
+        var relocatedLeafCompilation
+            = Compilation.CreateLibrary(relocatedLeafTree, layoutOptions);
+        Assert.That(relocatedLeafCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                relocatedLeafCompilation.Diagnostics));
+        var relocatedLeafArtifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)relocatedLeafCompilation.Program!,
+            "LeafLayoutProvider", schemaIdentity, 1, [
+                new TrRmSourceTypeExport("Demo", "Padding",
+                    "type.padding"),
+                leafExport,
+            ], [], [], []);
+        var relocatedLeafInput = new TrRmStandardArtifactInput(
+            schemaIdentity, relocatedLeafArtifact);
+        var relocatedProviders
+            = new[] { boxInput, wrapperInput, relocatedLeafInput };
+        var relocated = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
+            "ClassLayoutConsumer", relocatedProviders);
+        Assert.That(ExecuteOffset(relocated), Is.EqualTo(12));
+        var relocatedReemitted = TrRmExecutableCompiler.EmitStandard(
+            relocated, "ClassLayoutConsumer", schemaIdentity, 1);
+        var relocatedReloaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                relocatedReemitted), "ClassLayoutConsumer",
+            relocatedProviders);
+        Assert.That(ExecuteOffset(relocatedReloaded), Is.EqualTo(12));
+
+        var incompatibleLeafTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public struct Leaf {
+                    public int32 Id;
+                    public int64 Tail;
+                }
+            }
+            """);
+        var incompatibleLeafCompilation
+            = Compilation.CreateLibrary(incompatibleLeafTree, layoutOptions);
+        Assert.That(incompatibleLeafCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                incompatibleLeafCompilation.Diagnostics));
+        var incompatibleLeafArtifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)incompatibleLeafCompilation.Program!,
+            "LeafLayoutProvider", schemaIdentity, 1, [leafExport], [], [],
+            []);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    consumerArtifact), "ClassLayoutConsumer", [
+                    boxInput,
+                    wrapperInput,
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        incompatibleLeafArtifact),
+                ]));
+    }
+
+    [Test]
     public void IncludesUnselectedPrivateFieldsInEN1ClassOffsets()
     {
         Assume.That(OperatingSystem.IsWindows()
