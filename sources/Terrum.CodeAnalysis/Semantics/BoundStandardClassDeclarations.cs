@@ -161,6 +161,9 @@ internal static class BoundStandardClassDeclarationContract
                         StringComparer.Ordinal))
                 || (!declaration.Expectations.IsEmpty
                     && !declaration.SelectedExportKeys.IsEmpty
+                    && !StringComparer.Ordinal.Equals(
+                        declaration.Declaration.Provider.SchemaIdentity,
+                        CM1SchemaIdentity)
                     && !BoundStandardEnumDeclarationContract
                         .IsSelectedClassInstanceLayoutSchemaIdentity(
                             declaration.Declaration.Provider

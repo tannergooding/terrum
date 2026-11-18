@@ -232,6 +232,131 @@ public static partial class TrRmExecutableCompiler
         var (artifacts, schemaIdentities, selectedA3LayoutResourceLedger)
             = SnapshotStandardInputsForOperation(input, moduleIdentity,
                 providers);
+        if (StringComparer.Ordinal.Equals(schemaIdentities[0],
+                StandardC1M1Construction2L1R1ClassParameterDefaultsSchemaIdentity))
+        {
+            if (!coreExceptionIdentitySelections.IsDefaultOrEmpty
+                || !coreContractFailureIdentitySelections.IsDefaultOrEmpty)
+            {
+                throw Unsupported(
+                    "The CM1 class source reference does not compose Core exception or contract-failure selections.");
+            }
+
+            if (schemaIdentities.Any(schemaIdentity =>
+                    !StringComparer.Ordinal.Equals(schemaIdentity,
+                        StandardC1M1Construction2L1R1ClassParameterDefaultsSchemaIdentity)))
+            {
+                throw Unsupported(
+                    "The CM1 class source reference requires exact CM1 selections for every provider.");
+            }
+
+            var classImportIndex = CreateForeignInvocationIndex(
+                artifacts[0], schemaIdentities[0],
+                selectedA3LayoutResourceLedger);
+            var classImportTables = ValidateForeignInvocationArtifact(
+                classImportIndex, schemaIdentities[0],
+                selectedA3LayoutResourceLedger,
+                createA3ResourceLedger: false);
+            var classImportModuleRow = FindModuleRow(
+                classImportTables.Modules, moduleIdentity);
+            var onlyImportedClassMethods = classImportTables.Modules
+                .GetEntryMethod(classImportModuleRow) == 0
+                && classImportTables.Exports
+                    .GetExportsForModule(classImportModuleRow).IsEmpty;
+            var hasClassTypeImport = false;
+            var hasClassMethodImport = false;
+            var selectedImportedClassTypeKeys
+                = ImmutableArray.CreateBuilder<
+                    (string ProviderIdentity, string ExportKey)>();
+            var (classTypeStart, classTypeEnd)
+                = classImportTables.Modules.GetTypeDefRange(
+                    classImportModuleRow);
+            for (var typeDefRow = classTypeStart;
+                typeDefRow < classTypeEnd; typeDefRow++)
+            {
+                if (classImportTables.TypeDefs.GetKind(typeDefRow) != 2
+                    || !classImportTables.Imports.IsExpectedDefinition(
+                        0x1300_0000u | checked((uint)typeDefRow)))
+                {
+                    onlyImportedClassMethods = false;
+                }
+            }
+
+            var (classMethodStart, classMethodEnd)
+                = classImportTables.Modules.GetMethodDefRange(
+                    classImportModuleRow);
+            for (var methodRow = classMethodStart;
+                methodRow < classMethodEnd; methodRow++)
+            {
+                var ownerTypeDefRow = classImportTables.Methods
+                    .GetOwnerType(methodRow);
+                var signature = classImportTables.Methods
+                    .GetSignature(methodRow);
+                if (ownerTypeDefRow == 0
+                    || classImportTables.TypeDefs.GetKind(
+                        ownerTypeDefRow) != 2
+                    || classImportTables.Methods.GetBodyRow(methodRow) != 0
+                    || classImportTables.Signatures.GetGenericCount(
+                        signature) != 0
+                    || !classImportTables.Imports.IsExpectedDefinition(
+                        0x1600_0000u | checked((uint)methodRow))
+                    || !classImportTables.Imports.IsExpectedDefinition(
+                        0x1300_0000u
+                            | checked((uint)ownerTypeDefRow)))
+                {
+                    onlyImportedClassMethods = false;
+                }
+            }
+
+            for (var importRow = 1;
+                importRow <= classImportTables.Imports.Count; importRow++)
+            {
+                var moduleRefRow = classImportTables.Imports
+                    .GetModuleRefForImportRow(importRow);
+                if (classImportTables.ModuleRefs.GetOwnerModule(
+                        moduleRefRow) != classImportModuleRow)
+                {
+                    continue;
+                }
+
+                var expectedDefinition = classImportTables.Imports
+                    .GetExpectedDefinitionForImportRow(importRow);
+                var definitionKind = expectedDefinition >> 24;
+                if (definitionKind == 0x13)
+                {
+                    var typeDefRow = checked((int)(expectedDefinition
+                        & 0x00FF_FFFF));
+                    if (classImportTables.TypeDefs.GetKind(typeDefRow) != 2)
+                    {
+                        onlyImportedClassMethods = false;
+                        continue;
+                    }
+
+                    hasClassTypeImport = true;
+                    var binding = classImportTables.Imports
+                        .GetBindingForImportRow(importRow);
+                    selectedImportedClassTypeKeys.Add((
+                        binding.ProducerIdentity, binding.ExportKey));
+                }
+                else if (definitionKind == 0x16)
+                {
+                    hasClassMethodImport = true;
+                }
+                else
+                {
+                    onlyImportedClassMethods = false;
+                }
+            }
+
+            if (onlyImportedClassMethods && hasClassTypeImport
+                && hasClassMethodImport)
+            {
+                return CreateC1M1ClassSourceTypeReference(artifacts,
+                    schemaIdentities, moduleIdentity, [], [],
+                    selectedImportedClassTypeKeys.ToImmutable());
+            }
+        }
+
         var program = LoadStandardProgram(artifacts, schemaIdentities,
             moduleIdentity, false, selectedA3LayoutResourceLedger,
             out _, out _, out _, out _,

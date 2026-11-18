@@ -629,6 +629,36 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                         C1M1Construction2ClassParameterDefaultsSchemaIdentity,
                         incompatibleProvider),
                 ]));
+        var incompatibleEffectsProvider = AddMethodExportAlias(
+            EmitClassMethodProvider(
+                "ClassDefaultsProvider", 9, "int32",
+                readIsUnsafe: true),
+            "Box.Read", "Box.ReadAlias");
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(
+                    C1M1Construction2ClassParameterDefaultsSchemaIdentity,
+                    consumerArtifact),
+                "ClassDefaultsConsumer", [
+                    new TrRmStandardArtifactInput(
+                        C1M1Construction2ClassParameterDefaultsSchemaIdentity,
+                        incompatibleEffectsProvider),
+                ]));
+        var incompatibleReceiverProvider = AddMethodExportAlias(
+            EmitClassMethodProvider(
+                "ClassDefaultsProvider", 9, "int32",
+                readIsInstance: true),
+            "Box.Read", "Box.ReadAlias");
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(
+                    C1M1Construction2ClassParameterDefaultsSchemaIdentity,
+                    consumerArtifact),
+                "ClassDefaultsConsumer", [
+                    new TrRmStandardArtifactInput(
+                        C1M1Construction2ClassParameterDefaultsSchemaIdentity,
+                        incompatibleReceiverProvider),
+                ]));
 
         static int GetReadDefault(CompilationReference selectedReference)
         {
@@ -932,11 +962,18 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     private static byte[] EmitClassMethodProvider(string moduleIdentity,
-        int defaultValue, string readParameterType)
+        int defaultValue, string readParameterType,
+        bool readIsUnsafe = false, bool readIsInstance = false)
     {
+        var readModifiers = readIsInstance ? "public" : "public static";
+        if (readIsUnsafe)
+        {
+            readModifiers += " unsafe";
+        }
+
         var readMethod = readParameterType == "int32"
-            ? $"public static int32 Read(int32 value = {defaultValue}) {{ return value; }}"
-            : $"public static int32 Read(int64 value = {defaultValue}) {{ return 17; }}";
+            ? $"{readModifiers} int32 Read(int32 value = {defaultValue}) {{ return value; }}"
+            : $"{readModifiers} int32 Read(int64 value = {defaultValue}) {{ return 17; }}";
         var tree = SyntaxTree.Parse($$"""
             public class Box {
                 public int32 Value;

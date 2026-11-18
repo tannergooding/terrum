@@ -17699,9 +17699,16 @@ internal sealed partial class Binder
         var identity = instance.Definition;
         foreach (var candidate in _standardClassDeclarations)
         {
+            var selectedImportedClassView
+                = !candidate.Expectations.IsEmpty
+                    && StringComparer.Ordinal.Equals(
+                        candidate.Declaration.Provider.SchemaIdentity,
+                        StandardGenericMethodSchema
+                            .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaults);
             if (candidate.Declaration.Identity == identity
                 && !candidate.SelectedExportKeys.IsEmpty
-                && candidate.Expectations.IsEmpty)
+                && (candidate.Expectations.IsEmpty
+                    || selectedImportedClassView))
             {
                 declaration = candidate;
                 return true;

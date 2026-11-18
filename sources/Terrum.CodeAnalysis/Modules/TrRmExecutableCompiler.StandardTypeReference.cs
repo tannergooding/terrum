@@ -1107,7 +1107,6 @@ public static partial class TrRmExecutableCompiler
         foreach (var declaration in classDeclarations)
         {
             if (declaration.SelectedExportKeys.IsEmpty
-                || !declaration.Expectations.IsEmpty
                 || classTypeInstanceIndexes.ContainsKey(
                     declaration.Declaration.Identity))
             {
@@ -1255,6 +1254,173 @@ public static partial class TrRmExecutableCompiler
                     OrdinaryParameterDefaults =
                         defaults.ToImmutable(),
                 });
+            }
+        }
+
+        foreach (var declaration in classDeclarations)
+        {
+            if (declaration.SelectedExportKeys.IsEmpty
+                || declaration.Expectations.IsEmpty)
+            {
+                continue;
+            }
+
+            var className = string.IsNullOrEmpty(
+                    declaration.Declaration.Namespace)
+                ? declaration.Declaration.Name
+                : declaration.Declaration.Namespace + "."
+                    + declaration.Declaration.Name;
+            foreach (var classExpectation in declaration.Expectations)
+            {
+                var expectedMethods = classExpectation.ExpectedDeclaration
+                    .Methods.ToDictionary(static method => method.DefinitionId);
+                foreach (var methodGroup in classExpectation
+                    .MethodExpectations.GroupBy(
+                        static expectation => expectation.ExpectedDefinitionId))
+                {
+                    // Alias rows stay in the expectation; overload resolution needs one target.
+                    var methodExpectations = methodGroup
+                        .OrderBy(static expectation => expectation.ExportKey,
+                            StringComparer.Ordinal).ToArray();
+                    var methodExpectation = methodExpectations[0];
+                    if (methodExpectations.Any(candidate =>
+                            candidate.ProviderDefinitionId
+                                != methodExpectation.ProviderDefinitionId
+                            || !StringComparer.Ordinal.Equals(
+                                candidate.Provider.ModuleIdentity,
+                                methodExpectation.Provider.ModuleIdentity)
+                            || !candidate.Provider.ProviderArtifactDigest
+                                .AsSpan().SequenceEqual(
+                                    methodExpectation.Provider
+                                        .ProviderArtifactDigest.AsSpan())))
+                    {
+                        throw Invalid(
+                            "A class MethodDef alias group resolved through distinct provider views.");
+                    }
+
+                    if (!expectedMethods.TryGetValue(
+                            methodExpectation.ExpectedDefinitionId,
+                            out var method)
+                        || method.ConstructionRole != 0
+                        || method.GenericParameterCount != 0
+                        || (method.Flags & 3) != 2)
+                    {
+                        continue;
+                    }
+
+                    var providerBinding = methodProviderBindings.Single(
+                        candidate =>
+                            candidate.ConsumerArtifactIndex == 0
+                            && candidate.ConsumerModuleRow == rootModuleRow
+                            && candidate.ImportRow
+                                == methodExpectation.ImportRow);
+                    var providerTables = GetC1M1Tables(artifacts,
+                        schemaIdentities,
+                        providerBinding.ProviderArtifactIndex);
+                    var providerMethod = declaration.Declaration.Methods
+                        .Single(candidate => candidate.DefinitionId
+                            == methodExpectation.ProviderDefinitionId);
+                    if (method.BodyRow != 0 || providerMethod.BodyRow == 0
+                        || !TryGetScalarType(
+                            method.ReturnTypeSpecReference,
+                            out var returnType))
+                    {
+                        throw Unsupported(
+                            "The bounded CM1 class source reference supports only bodyless expected Methods with bodyful nongeneric scalar providers.");
+                    }
+
+                    var isStatic = method.ReceiverTypeSpecReference == 0;
+                    var variables
+                        = ImmutableArray.CreateBuilder<BoundVariable>(
+                            method.Parameters.Length
+                                + (isStatic ? 0 : 1));
+                    if (!isStatic)
+                    {
+                        if ((method.Flags & 4) != 0
+                            || !classTypeInstanceIndexes.TryGetValue(
+                                declaration.Declaration.Identity,
+                                out var receiverTypeIndex))
+                        {
+                            throw Unsupported(
+                                "Mutable class receivers or unselected class identities are not admitted by this bounded source reference.");
+                        }
+
+                        var receiverTypeSpec = providerTables.TypeSpecs
+                            .GetTypeSpecRef(
+                                providerMethod.ReceiverTypeSpecReference);
+                        if (!receiverTypeSpec.IsRow
+                            || receiverTypeSpec.Form is not (0x02 or 0x03)
+                            || receiverTypeSpec.Qualifiers != 0
+                            || providerTables.TypeSpecs
+                                .GetNominalTypeDefRow(
+                                    providerMethod.ReceiverTypeSpecReference,
+                                    providerTables.TypeDefs,
+                                    providerTables.Imports)
+                                != providerBinding.ProviderTypeDefRow)
+                        {
+                            throw Invalid(
+                                "A class MethodDef Import receiver does not match its selected provider class.");
+                        }
+
+                        variables.Add(new BoundVariable("this",
+                            BoundGenericNominalTypeTypes.Type(
+                                receiverTypeIndex),
+                            false, default));
+                    }
+
+                    var defaults = ImmutableArray.CreateBuilder<
+                        BoundOrdinaryParameterDefault>();
+                    for (var ordinal = 0;
+                        ordinal < method.Parameters.Length; ordinal++)
+                    {
+                        var parameter = method.Parameters[ordinal];
+                        if (parameter.Mode != 0 || parameter.Flags != 0
+                            || !TryGetScalarType(
+                                parameter.TypeSpecReference,
+                                out var parameterType))
+                        {
+                            throw Unsupported(
+                                "The bounded CM1 class source reference supports only by-value scalar imported member parameters.");
+                        }
+
+                        variables.Add(new BoundVariable(parameter.Name,
+                            parameterType, false, default));
+                        if (parameter.DefaultValue is BoundConstant value)
+                        {
+                            defaults.Add(new BoundOrdinaryParameterDefault(
+                                ordinal, value, null, -1, default,
+                                IsPending: false));
+                        }
+                    }
+
+                    var functionName = className + "." + method.Name;
+                    if (!importedFunctionNames.Add(functionName))
+                    {
+                        throw Unsupported(
+                            "The bounded CM1 class source reference does not support overloaded imported member names.");
+                    }
+
+                    functions.Add(new BoundFunction(functionName,
+                        returnType, variables.MoveToImmutable(),
+                        method.Parameters.Length + (isStatic ? 0 : 1),
+                        new BoundBlock([], default), default) {
+                        IsExternal = true,
+                        IsStatic = isStatic,
+                        DeclaringStruct = className,
+                        RequiresUnsafeCaller = (method.EffectsMask & 4) != 0,
+                        DeclaredRequiresUnsafeCaller =
+                            (method.EffectsMask & 4) != 0,
+                        DoesNotReturn = (method.EffectsMask & 2) != 0,
+                        ModuleImport = new BoundModuleImport(
+                            methodExpectation.Provider.ModuleIdentity,
+                            methodExpectation.ExportKey,
+                            methodExpectation.Provider.TargetRequirement,
+                            methodExpectation.Provider.RuntimePolicy),
+                        HasOrdinaryParameterDefaultSurface = true,
+                        OrdinaryParameterDefaults =
+                            defaults.ToImmutable(),
+                    });
+                }
             }
         }
 
