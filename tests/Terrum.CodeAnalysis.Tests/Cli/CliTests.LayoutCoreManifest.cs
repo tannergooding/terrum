@@ -419,6 +419,45 @@ internal sealed partial class CliTests
     }
 
     [Test]
+    public async Task LayoutCoreManifestRejectsChangedEnumMemberRegistrationAsync()
+    {
+        var directory = TestArtifactPaths.CreateDirectory(
+            "terrum-layout-core-manifest-enum-member-");
+        var manifestPath = Path.Combine(directory, "layout.json");
+        var outputPath = Path.Combine(directory, "module.trm");
+        var sentinel = new byte[] { 0x13, 0x37, 0x42 };
+        try
+        {
+            var manifest = CreateLayoutCoreManifest().Replace(
+                "\"name\":\"Union\",\"value\":2",
+                "\"name\":\"Union\",\"value\":3",
+                StringComparison.Ordinal);
+            await File.WriteAllTextAsync(manifestPath, manifest)
+                .ConfigureAwait(false);
+            await File.WriteAllBytesAsync(outputPath, sentinel)
+                .ConfigureAwait(false);
+
+            var (exit, result, error) = await RunAsync(
+                Encoding.UTF8.GetBytes("int32 Main() { return 0; }"),
+                "compile-module", "producer", "-", "Main", "-o",
+                outputPath, "--runtime", "fail-fast",
+                "--layout-core-manifest", manifestPath, "--json")
+                .ConfigureAwait(false);
+
+            Assert.That(exit, Is.EqualTo(2), result + error);
+            Assert.That(error, Is.Empty);
+            AssertInputDiagnosticCode(result, "TRM2001");
+            Assert.That(await File.ReadAllBytesAsync(outputPath)
+                .ConfigureAwait(false), Is.EqualTo(sentinel));
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(false);
+        }
+    }
+
+    [Test]
     public async Task PrivateModuleManifestRejectsSourceProducerAndOutputAliasesAsync()
     {
         var directory = TestArtifactPaths.CreateDirectory(
