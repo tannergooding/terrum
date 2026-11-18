@@ -323,15 +323,17 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             [leafInput]);
         Assert.That(reemittedReference.GenericMethodImports,
             Has.Length.EqualTo(2));
-        var consumerCompilation = Compilation.CreateLibrary(
+        var consumerCompilation = Compilation.Create(
             SyntaxTree.Parse("""
-                public int32 Use() {
+                int32 Main() {
                     return Identity<int32>(42);
                 }
                 """), reemittedReference);
         Assert.That(consumerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine,
                 consumerCompilation.Diagnostics));
+        Assert.That(NativeJit.Execute(consumerCompilation.Program!,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(42));
 
         var unsafeLeafCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(
@@ -398,7 +400,7 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         var providerCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
                 using Example;
-                public Box<T> Accept<T>(Box<T> value) {
+                public Box<T> Accept<T, U = Box<T>>(Box<T> value) {
                     return move value;
                 }
                 """), typeProviderReference);
@@ -463,6 +465,17 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                 reemittedAccept.ProofFunction.Variables[0].Type)];
         Assert.That(nominalInstance.Definition.ModuleIdentity,
             Is.EqualTo(typeProviderIdentity));
+        var nominalDefault
+            = reemittedAccept.Formals[1].TypeDefault!;
+        Assert.That(nominalDefault.Term.Kind,
+            Is.EqualTo(BoundGenericMethodTypeTermKind.ImportedGeneric));
+        Assert.That(nominalDefault.Term.NominalTypeIdentity!.Value
+                .ProviderIdentity,
+            Is.EqualTo(typeProviderIdentity));
+        Assert.That(nominalDefault.Term.TypeArguments.Single().FormalOrdinal,
+            Is.Zero);
+        Assert.That(nominalDefault.FormalDependencies,
+            Is.EqualTo(new[] { 0 }));
 
         var incompatibleTypeProviderInput = new TrRmStandardArtifactInput(
             GenericMethodCallsSchemaIdentity,
