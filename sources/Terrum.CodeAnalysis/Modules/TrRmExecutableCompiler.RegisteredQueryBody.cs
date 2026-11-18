@@ -289,6 +289,7 @@ public static partial class TrRmExecutableCompiler
 
         var identityMergeRegister = -1;
         var queryValueFlowResultRegister = -1;
+        var queryValueFlowResultType = PrimitiveType.Void;
         var queryValueFlowJoinBlocks = new List<int>();
         var queryValueFlowEdges
             = new List<(int BranchBlock, int TrueBlock, int FalseBlock)>();
@@ -689,6 +690,13 @@ public static partial class TrRmExecutableCompiler
 
         bool IsQueryValueFlowNode(BoundExpression expression)
         {
+            var resultType = expression.Type;
+            if (resultType is not (PrimitiveType.NativeInt
+                    or PrimitiveType.TypeIdentity))
+            {
+                return false;
+            }
+
             var pending = new Stack<BoundExpression>();
             pending.Push(expression);
             var conditionalCount = 0;
@@ -702,7 +710,8 @@ public static partial class TrRmExecutableCompiler
 
                 if (current is BoundLayoutQuery query)
                 {
-                    if (query.Type != PrimitiveType.NativeInt
+                    if (resultType != PrimitiveType.NativeInt
+                        || query.Type != PrimitiveType.NativeInt
                         || query.Kind is not (BoundLayoutQueryKind.SizeOf
                             or BoundLayoutQueryKind.AlignOf
                             or BoundLayoutQueryKind.OffsetOfType
@@ -714,8 +723,21 @@ public static partial class TrRmExecutableCompiler
                     continue;
                 }
 
+                if (current is BoundTypeIdentityQuery identity)
+                {
+                    if (resultType != PrimitiveType.TypeIdentity
+                        || identity.Type != PrimitiveType.TypeIdentity
+                        || identity.Subject.RequiresUnsafe
+                        || identity.Subject.TypeIdentityTerm is not null)
+                    {
+                        return false;
+                    }
+
+                    continue;
+                }
+
                 if (current is not BoundConditional conditional
-                    || conditional.Type != PrimitiveType.NativeInt
+                    || conditional.Type != resultType
                     || conditional.Condition is not BoundRead {
                         Type: PrimitiveType.Bool,
                     })
@@ -749,17 +771,18 @@ public static partial class TrRmExecutableCompiler
 
             var resultRegister = AllocateRegister();
             queryValueFlowResultRegister = resultRegister;
+            queryValueFlowResultType = expression.Type;
 
             (int EntryBlock, int CompletionBlock) EmitNode(
                 BoundExpression node, bool isRoot = false)
             {
-                if (node is BoundLayoutQuery query)
+                if (node is BoundLayoutQuery or BoundTypeIdentityQuery)
                 {
                     var leafBlock = blockCodes.Count;
                     var leafCode = new List<byte>();
                     blockCodes.Add(leafCode);
                     code = leafCode;
-                    if (EmitQuery(query, resultRegister) != resultRegister)
+                    if (EmitQuery(node, resultRegister) != resultRegister)
                     {
                         throw Unsupported(
                             $"Function '{function.Name}' could not preserve the query value register.");
@@ -3037,7 +3060,6 @@ public static partial class TrRmExecutableCompiler
                     $"Function '{function.Name}' has inconsistent query-value join metadata.");
             }
 
-            var typeMapIndex = GetTypeMapIndex(PrimitiveType.NativeInt);
             foreach (var joinBlock in queryValueFlowJoinBlocks)
             {
                 var entryState = new byte[13];
@@ -3045,8 +3067,18 @@ public static partial class TrRmExecutableCompiler
                 BinaryPrimitives.WriteUInt32LittleEndian(
                     entryState.AsSpan(4), 1);
                 entryState[8] = (byte)queryValueFlowResultRegister;
-                BinaryPrimitives.WriteUInt16LittleEndian(
-                    entryState.AsSpan(10), typeMapIndex);
+                if (queryValueFlowResultType
+                    == PrimitiveType.TypeIdentity)
+                {
+                    entryState[9] = 2;
+                }
+                else
+                {
+                    BinaryPrimitives.WriteUInt16LittleEndian(
+                        entryState.AsSpan(10),
+                        GetTypeMapIndex(queryValueFlowResultType));
+                }
+
                 records[joinBlock + exceptionRecordIndexOffset]
                     = entryState;
             }
@@ -3382,7 +3414,10 @@ public static partial class TrRmExecutableCompiler
                     }
                 }
 
-                if (function.ReturnType == PrimitiveType.NativeInt)
+                if (function.ReturnType == PrimitiveType.NativeInt
+                    || (function.ReturnType == PrimitiveType.Bool
+                        && body.HasTypeIdentityCarrier
+                        && body.BlockCount > 4))
                 {
                     return DecodeStandardRegisteredQueryValueControlFlow(
                         body, function, typeDefs, typeSpecs, fields,
@@ -6503,6 +6538,7 @@ public static partial class TrRmExecutableCompiler
             _nativePointerTypes;
         private readonly int[] _signatureIndexByAnchorMethod;
         private readonly int[] _structureTypeByTypeDef;
+        private readonly PrimitiveType _valueType;
         private readonly bool[] _visitedBlocks;
         private readonly bool[] _conditionRegisters;
         private int _nextEdgeRecord;
@@ -6530,6 +6566,8 @@ public static partial class TrRmExecutableCompiler
             _nativePointerTypes = nativePointerTypes;
             _signatureIndexByAnchorMethod = signatureIndexByAnchorMethod;
             _structureTypeByTypeDef = structureTypeByTypeDef;
+            _valueType = body.HasTypeIdentityCarrier
+                ? PrimitiveType.TypeIdentity : PrimitiveType.NativeInt;
             _visitedBlocks = new bool[body.BlockCount];
             _conditionRegisters = new bool[14];
             _nextEdgeRecord = body.BlockCount;
@@ -6548,11 +6586,14 @@ public static partial class TrRmExecutableCompiler
                 || _body.MethodCount != 0 || _body.ConstantCount != 0
                 || (_body.MapMask & ~0x0A) != 0
                 || (_body.MapMask & 0x02) == 0
-                || _function.ReturnType != PrimitiveType.NativeInt
+                || (_valueType == PrimitiveType.NativeInt
+                    ? _function.ReturnType != PrimitiveType.NativeInt
+                        || _body.HasTypeIdentityCarrier
+                    : _function.ReturnType != PrimitiveType.Bool)
                 || _function.ParameterCount != _function.Variables.Length)
             {
                 throw Unsupported(
-                    "The bounded Standard query consumer requires a Boolean-formal NativeInt query control-flow Body.");
+                    "The bounded Standard query consumer requires a Boolean-formal NativeInt or TypeIdentity query control-flow Body.");
             }
 
             for (var blockIndex = 0; blockIndex < _body.BlockCount;
@@ -6602,22 +6643,36 @@ public static partial class TrRmExecutableCompiler
             var record = _body.GetRecord(blockIndex);
             if (record.Length != 13 || record[0] != 0x01
                 || BinaryPrimitives.ReadUInt32LittleEndian(record[4..]) != 1
-                || record[8] >= 14 || record[9] != 0
-                || record[12] != 0)
+                || record[8] >= 14 || record[12] != 0)
             {
                 throw Invalid(
-                    "A registered-query value join must carry one ordinary NativeInt value.");
+                    "A registered-query value join must carry one supported query value.");
             }
 
-            var typeMapIndex = BinaryPrimitives.ReadUInt16LittleEndian(
-                record[10..]);
-            if (ReadStandardRegisteredQueryType(_body, typeMapIndex,
-                    _typeSpecs, _nativePointerTypes,
-                    _signatureIndexByAnchorMethod, _structureTypeByTypeDef,
-                    _imports) != PrimitiveType.NativeInt)
+            if (_valueType == PrimitiveType.TypeIdentity)
             {
-                throw Invalid(
-                    "A registered-query value join has a non-NativeInt TypeMap entry.");
+                if (record[9] != 2
+                    || BinaryPrimitives.ReadUInt16LittleEndian(
+                        record[10..]) != 0)
+                {
+                    throw Invalid(
+                        "A registered-query TypeIdentity join has an invalid carrier.");
+                }
+            }
+            else
+            {
+                var typeMapIndex = BinaryPrimitives
+                    .ReadUInt16LittleEndian(record[10..]);
+                if (record[9] != 0
+                    || ReadStandardRegisteredQueryType(_body,
+                        typeMapIndex, _typeSpecs, _nativePointerTypes,
+                        _signatureIndexByAnchorMethod,
+                        _structureTypeByTypeDef, _imports)
+                        != PrimitiveType.NativeInt)
+                {
+                    throw Invalid(
+                        "A registered-query value join has a non-NativeInt TypeMap entry.");
+                }
             }
 
             return record[8];
@@ -6738,21 +6793,63 @@ public static partial class TrRmExecutableCompiler
                             joinCode[2..]);
                 }
                 else if (joinCode.Length == 2 && joinCode[0] == 0x17
+                    && _valueType == PrimitiveType.NativeInt
                     && joinCode[1] == joinRegister)
                 {
                     completionTarget = null;
                 }
+                else if (startBlock == 0
+                    && _valueType == PrimitiveType.TypeIdentity)
+                {
+                    if (joinCode.Length != 10)
+                    {
+                        throw Unsupported(
+                            "A registered-query TypeIdentity join must feed one comparison and Return.");
+                    }
+
+                    var rightQuery
+                        = ReadStandardRegisteredTypeIdentityQuery(_body,
+                            joinCode, 0, out var rightRegister, _typeSpecs,
+                            _nativePointerTypes,
+                            _signatureIndexByAnchorMethod,
+                            _structureTypeByTypeDef, _imports);
+                    var comparisonRegister = joinCode[6] & 0x0F;
+                    var comparisonOperands = joinCode[7];
+                    if (joinCode[4] != 0xC2 || joinCode[5] is not (1 or 2)
+                        || (joinCode[6] & 0xF0) != 0xF0
+                        || (comparisonOperands & 0x0F) != joinRegister
+                        || (comparisonOperands >> 4) != rightRegister
+                        || joinCode[8] != 0x17
+                        || joinCode[9] != comparisonRegister
+                        || comparisonRegister >= 14)
+                    {
+                        throw Unsupported(
+                            "A registered-query TypeIdentity join must feed one comparison and Return.");
+                    }
+
+                    var condition = new BoundRead(conditionParameter,
+                        PrimitiveType.Bool, default);
+                    var selectedIdentity = new BoundConditional(condition,
+                        trueExpression, falseExpression,
+                        PrimitiveType.TypeIdentity, default);
+                    var comparison = new BoundBinary(
+                        joinCode[5] == 1 ? TokenKind.EqualsEquals
+                            : TokenKind.BangEquals,
+                        selectedIdentity, rightQuery, PrimitiveType.Bool,
+                        default);
+                    return (joinBlock + 1, joinBlock, null, comparison);
+                }
                 else
                 {
                     throw Unsupported(
-                        "A registered-query join must branch to its parent or return the NativeInt result.");
+                        "A registered-query join must branch to its parent or finish the selected query result.");
                 }
 
                 var condition = new BoundRead(conditionParameter,
                     PrimitiveType.Bool, default);
                 return (joinBlock + 1, joinBlock, completionTarget,
                     new BoundConditional(condition, trueExpression,
-                        falseExpression, PrimitiveType.NativeInt, default));
+                        falseExpression, _valueType, default));
             }
 
             if (!IsEmptyBlockEntry(_body.GetRecord(startBlock))
@@ -6761,7 +6858,7 @@ public static partial class TrRmExecutableCompiler
                     && (code[1] & 0x0F) != _resultRegister))
             {
                 throw Unsupported(
-                    "A registered-query branch leaf must be one NativeInt layout query.");
+                    "A registered-query branch leaf must define one selected query value.");
             }
 
             var leafRegister = code[1] & 0x0F;
@@ -6778,10 +6875,34 @@ public static partial class TrRmExecutableCompiler
 
             var leafJoin = BinaryPrimitives.ReadUInt16LittleEndian(
                 code[6..]);
-            var query = ReadStandardRegisteredQueryValueBranch(_body,
-                startBlock, _resultRegister, leafJoin, _typeDefs, _typeSpecs,
-                _fields, _fieldPaths, _imports, _nativePointerTypes,
-                _signatureIndexByAnchorMethod, _structureTypeByTypeDef);
+            BoundExpression query;
+            if (_valueType == PrimitiveType.TypeIdentity)
+            {
+                if (code[4] != 0xE3 || code[5] != 0)
+                {
+                    throw Invalid(
+                        "A TypeIdentity query leaf must branch to its join.");
+                }
+
+                query = ReadStandardRegisteredTypeIdentityQuery(_body,
+                    code[..4], 0, out var identityRegister, _typeSpecs,
+                    _nativePointerTypes, _signatureIndexByAnchorMethod,
+                    _structureTypeByTypeDef, _imports);
+                if (identityRegister != _resultRegister)
+                {
+                    throw Invalid(
+                        "Every TypeIdentity query leaf must define the joined register.");
+                }
+            }
+            else
+            {
+                query = ReadStandardRegisteredQueryValueBranch(_body,
+                    startBlock, _resultRegister, leafJoin, _typeDefs,
+                    _typeSpecs, _fields, _fieldPaths, _imports,
+                    _nativePointerTypes, _signatureIndexByAnchorMethod,
+                    _structureTypeByTypeDef);
+            }
+
             return (startBlock + 1, startBlock, leafJoin, query);
         }
 

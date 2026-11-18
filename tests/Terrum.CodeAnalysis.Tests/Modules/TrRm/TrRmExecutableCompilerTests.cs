@@ -4425,6 +4425,62 @@ internal sealed class TrRmExecutableCompilerTests
     }
 
     [Test]
+    public void StandardNestedTypeIdentityConditionalFlowRoundTripsThroughFeature13Body()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        var program = Compile("""
+            public bool SelectedNestedIdentity(bool chooseOuter,
+                bool chooseInner) {
+                return (chooseOuter
+                    ? (chooseInner ? typeof(nint) : typeof(int64))
+                    : typeof(uint64)) == typeof(int64);
+            }
+            """, library: true);
+        var artifact = TrRmExecutableCompiler.EmitStandard(program, "sample",
+            schemaIdentity, targetRequirement);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact), "sample",
+            Array.Empty<TrRmStandardArtifactInput>());
+
+        var returned = (BoundReturn)loaded.Functions.Single(
+            static function => function.Name == "SelectedNestedIdentity")
+            .Body.Statements.Single();
+        var comparison = (BoundBinary)returned.Value!;
+        var outer = (BoundConditional)comparison.Left;
+        var inner = (BoundConditional)outer.WhenTrue;
+        Assert.That(outer.Type, Is.EqualTo(PrimitiveType.TypeIdentity));
+        Assert.That(inner.Type, Is.EqualTo(PrimitiveType.TypeIdentity));
+        Assert.That(inner.WhenTrue, Is.TypeOf<BoundTypeIdentityQuery>());
+        Assert.That(inner.WhenFalse, Is.TypeOf<BoundTypeIdentityQuery>());
+        Assert.That(outer.WhenFalse, Is.TypeOf<BoundTypeIdentityQuery>());
+        Assert.DoesNotThrow(() => SemanticVerifier.VerifyLibrary(loaded));
+
+        var tables
+            = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
+                new TrRmArtifactIndex(artifact));
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(1), tables.Contracts.Count);
+        Assert.That(body.BlockCount, Is.EqualTo(7));
+        Assert.That(body.RecordCount, Is.EqualTo(9));
+        Assert.That(body.GetRecord(4)[9], Is.EqualTo(2));
+        Assert.That(body.GetRecord(6)[9], Is.EqualTo(2));
+
+        var invalidInnerCarrier
+            = RewriteStandardRegisteredQueryBodyRecords(artifact,
+                static records => {
+                    records[4][9] = 0;
+                    return records;
+                });
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    invalidInnerCarrier), "sample",
+                Array.Empty<TrRmStandardArtifactInput>()));
+    }
+
+    [Test]
     public void StandardTypeIdentityMoveAliasesPreserveFeature13BodyValues()
     {
         const string schemaIdentity = "trrm/1-draft-layout-queries-1";
