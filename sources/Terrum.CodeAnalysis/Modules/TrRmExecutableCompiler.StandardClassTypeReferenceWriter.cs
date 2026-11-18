@@ -28,7 +28,7 @@ public static partial class TrRmExecutableCompiler
         BoundFunction Function, int MethodDefRow,
         int DirectReturnHome = -1,
         int IdentityForwarderTargetFunctionIndex = -1,
-        byte[]? CompactBody = null);
+        byte[]? EncodedBody = null);
 
     private readonly record struct C1M1ParameterSurfaceRow(
         int MethodDefRow, int Ordinal, string Name,
@@ -910,12 +910,15 @@ public static partial class TrRmExecutableCompiler
                         = TryGetC1M1Construction2IdentityForwarder(
                             methodFunction, program.Functions,
                             out identityForwarderTargetFunctionIndex);
+                    var directXor = TryGetC1M1Construction2DirectXor(
+                        methodFunction);
                     if ((!methodFunction.IsStatic
                             && !isSupportedNoOpInstanceMethod
                             && !isSupportedDirectReturnInstanceMethod
                             && !isSupportedDirectFieldReadInstanceMethod
                             && !isSupportedDirectFieldWriteInstanceMethod
-                            && !isSupportedIdentityForwarder)
+                            && !isSupportedIdentityForwarder
+                            && directXor is null)
                         || methodFunction.IsClassConstructor
                         || methodFunction.IsConstructor
                         || methodFunction.IsExternal
@@ -968,7 +971,7 @@ public static partial class TrRmExecutableCompiler
                             && methodFunction.IsInternal))
                     {
                         throw Unsupported(
-                            "The bounded Construction-2 class method producer supports effect-free scalar static methods, exact identity forwarders, empty unit instance methods, readonly instance methods returning one scalar value parameter and direct scalar field reads/writes.");
+                            "The bounded Construction-2 class method producer supports effect-free scalar static methods, exact identity forwarders, readonly instance int32 XOR methods, empty unit instance methods, readonly instance methods returning one scalar value parameter and direct scalar field reads/writes.");
                     }
 
                     if (methodFunction.ReturnType != PrimitiveType.Void)
@@ -978,10 +981,11 @@ public static partial class TrRmExecutableCompiler
                             if (!isSupportedDirectReturnInstanceMethod
                                 && !isSupportedDirectFieldReadInstanceMethod
                                 && !isSupportedDirectFieldWriteInstanceMethod
-                                && !isSupportedIdentityForwarder)
+                                && !isSupportedIdentityForwarder
+                                && directXor is null)
                             {
                                 throw Unsupported(
-                                    "The bounded Construction-2 instance method producer supports only unit, direct scalar-parameter or direct scalar-field results and direct scalar-field writes.");
+                                    "The bounded Construction-2 instance method producer supports only unit, direct scalar-parameter, direct int32 XOR or direct scalar-field results and direct scalar-field writes.");
                             }
                         }
 
@@ -1082,7 +1086,7 @@ public static partial class TrRmExecutableCompiler
                             "A checked class method was assigned more than one MethodDef row.");
                     }
 
-                    byte[]? compactBody = null;
+                    byte[]? encodedBody = null;
                     if (isSupportedDirectFieldReadInstanceMethod)
                     {
                         if (!fieldDefRowByClassAndIndex.TryGetValue((
@@ -1093,7 +1097,7 @@ public static partial class TrRmExecutableCompiler
                                 "A class instance method reads a FieldDef outside its retained owner.");
                         }
 
-                        compactBody
+                        encodedBody
                             = EncodeC1M1Construction2FieldReadBody(
                                 fieldDefRow);
                     }
@@ -1118,9 +1122,17 @@ public static partial class TrRmExecutableCompiler
                         }
 
                         _ = GetC1M1SourceScalarTypeSpecReference(field.Type);
-                        compactBody
+                        encodedBody
                             = EncodeC1M1Construction2FieldWriteBody(
                                 fieldDefRow, 0, sourceUse: 1);
+                    }
+                    else if (directXor is not null)
+                    {
+                        encodedBody
+                            = EncodeC1M1Construction2DirectXorBody(
+                                methodFunction, directXor,
+                                Construction2ValueTypeSpecReference,
+                                contractRows.Count, schema);
                     }
 
                     var methodSignatureRow
@@ -1180,7 +1192,7 @@ public static partial class TrRmExecutableCompiler
                                 ? directReturnHome : -1,
                             isSupportedIdentityForwarder
                                 ? identityForwarderTargetFunctionIndex : -1,
-                            compactBody));
+                            encodedBody));
                 }
             }
 
@@ -1215,7 +1227,7 @@ public static partial class TrRmExecutableCompiler
 
             foreach (var method in construction2SourceMethods)
             {
-                var body = method.CompactBody;
+                var body = method.EncodedBody;
                 if (body is null
                     && method.IdentityForwarderTargetFunctionIndex >= 0)
                 {
@@ -1928,6 +1940,96 @@ public static partial class TrRmExecutableCompiler
         return body;
     }
 
+    private static byte[] EncodeC1M1Construction2DirectXorBody(
+        BoundFunction function, BoundBinary binary,
+        Func<PrimitiveType, uint> typeSpecReferenceFor, int contractCount,
+        TrRmArtifactSchema schema)
+    {
+        if (function.IsStatic || function.ReturnType != PrimitiveType.Int32
+            || function.ParameterCount != 3
+            || function.Variables.Length != function.ParameterCount
+            || function.Variables[0].IsMutable
+            || function.Variables[1].Type != PrimitiveType.Int32
+            || function.Variables[2].Type != PrimitiveType.Int32
+            || function.Variables[1].IsMutable
+            || function.Variables[2].IsMutable
+            || function.Variables.Skip(1).Any(static variable =>
+                variable.IsOut || variable.IsInit || variable.IsImplicitRef
+                || variable.IsInitializationLocal)
+            || binary.Type != PrimitiveType.Int32
+            || binary.Operator != TokenKind.Caret
+            || binary.Left is not BoundRead left
+            || binary.Right is not BoundRead right
+            || left.Type != PrimitiveType.Int32
+            || right.Type != PrimitiveType.Int32
+            || left.Variable is not (1 or 2)
+            || right.Variable is not (1 or 2))
+        {
+            throw Unsupported(
+                "A Construction-2 instance XOR Body requires two direct int32 parameter reads and a readonly receiver.");
+        }
+
+        var typeTokens = new uint[function.ParameterCount];
+        var homeMap = new byte[checked(function.ParameterCount * 8)];
+        for (var parameter = 0;
+            parameter < function.ParameterCount; parameter++)
+        {
+            var typeToken = CreateStandardBodyTypeMapToken(
+                typeSpecReferenceFor(function.Variables[parameter].Type));
+            typeTokens[parameter] = typeToken;
+        }
+
+        var maps = TrRmRegisterBodyMapBuilder.Create(typeTokens, []);
+        for (var parameter = 0;
+            parameter < function.ParameterCount; parameter++)
+        {
+            var offset = parameter * 8;
+            homeMap[offset] = parameter == 0 ? (byte)1 : (byte)2;
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                homeMap.AsSpan(offset + 2, 2),
+                maps.GetTypeMapIndex(typeTokens[parameter]));
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                homeMap.AsSpan(offset + 4, 2),
+                parameter == 0 ? (ushort)0
+                    : checked((ushort)(parameter - 1)));
+        }
+
+        var code = new List<byte>(14);
+        AppendHomeLoad(0, left.Variable);
+        AppendHomeLoad(1, right.Variable);
+        const byte destinationRegister = 0;
+        const byte leftRegister = 0;
+        const byte rightRegister = 1;
+        var payload = (ushort)(destinationRegister | (0x0F << 4)
+            | (leftRegister << 8) | (rightRegister << 12));
+        code.Add(0xC1);
+        code.Add(0x03);
+        code.Add((byte)payload);
+        code.Add((byte)(payload >> 8));
+        code.Add(0x17);
+        code.Add(0);
+
+        var records = new ReadOnlyMemory<byte>[] {
+            new(new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 }),
+        };
+        return TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
+            default, default, default,
+            [new TrRmRegisterBodyBlock(0,
+                checked((uint)code.Count), 0)],
+            records, code.ToArray(), contractCount: contractCount,
+            schema: schema,
+            generalPredicateGraphsInitializationReferenceBodies
+                : schema.UsesGeneralPredicateGraphs());
+
+        void AppendHomeLoad(byte destination, int homeIndex)
+        {
+            code.Add(0xD5);
+            code.Add(destination);
+            code.Add(checked((byte)homeIndex));
+            code.Add(checked((byte)(homeIndex >> 8)));
+        }
+    }
+
     private static byte[] EncodeC1M1Construction2IdentityForwarderBody(
         int targetMethodDefRow)
     {
@@ -2295,6 +2397,77 @@ public static partial class TrRmExecutableCompiler
                 })
                 {
                     returnedCall = call;
+                }
+                else
+                {
+                    isSupported = false;
+                    return;
+                }
+            }
+        }
+    }
+
+    private static BoundBinary? TryGetC1M1Construction2DirectXor(
+        BoundFunction function)
+    {
+        if (function.IsStatic || function.ReturnType != PrimitiveType.Int32
+            || function.ParameterCount != 3
+            || function.ParameterCount != function.Variables.Length
+            || function.Variables[0].IsMutable
+            || function.Variables[1].Type != PrimitiveType.Int32
+            || function.Variables[2].Type != PrimitiveType.Int32
+            || function.Variables[1].IsMutable
+            || function.Variables[2].IsMutable
+            || function.Variables.Skip(1).Any(static variable =>
+                variable.IsOut || variable.IsInit || variable.IsImplicitRef
+                || variable.IsInitializationLocal))
+        {
+            return null;
+        }
+
+        BoundBinary? returnedBinary = null;
+        var isSupported = true;
+        Visit(function.Body);
+        if (!isSupported || returnedBinary is null
+            || returnedBinary.Type != PrimitiveType.Int32
+            || returnedBinary.Operator != TokenKind.Caret
+            || returnedBinary.Left is not BoundRead left
+            || returnedBinary.Right is not BoundRead right
+            || left.Type != PrimitiveType.Int32
+            || right.Type != PrimitiveType.Int32
+            || left.Variable is not (1 or 2)
+            || right.Variable is not (1 or 2))
+        {
+            return null;
+        }
+
+        return returnedBinary;
+
+        void Visit(BoundBlock block)
+        {
+            if (!block.RetiredManagedLocals.IsEmpty)
+            {
+                isSupported = false;
+                return;
+            }
+
+            foreach (var statement in block.Statements)
+            {
+                if (!isSupported || returnedBinary is not null)
+                {
+                    isSupported = false;
+                    return;
+                }
+
+                if (statement is BoundBlock nested)
+                {
+                    Visit(nested);
+                }
+                else if (statement is BoundReturn {
+                    Value: BoundBinary binary
+                })
+                {
+                    returnedBinary = binary;
                 }
                 else
                 {

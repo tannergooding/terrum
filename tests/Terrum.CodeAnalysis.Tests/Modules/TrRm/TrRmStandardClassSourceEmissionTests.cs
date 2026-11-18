@@ -691,6 +691,85 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
+    public void EmitsRegisterBodyForReadonlyInstanceXorMethod()
+    {
+        var tree = SyntaxTree.Parse("""
+            public class Box {
+                public int32 Value;
+                public Box(int32 value) { Value = value; }
+                public int32 Xor(int32 left, int32 right) {
+                    return left ^ right;
+                }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node => node.Kind == SyntaxKind.ClassDeclaration);
+        var members = classDeclaration.Children.OfType<SyntaxNode>();
+        var field = members.Single(static node =>
+            node.Kind == SyntaxKind.FieldDeclaration);
+        var constructor = members.Single(static node =>
+            node.Kind == SyntaxKind.ConstructorDeclaration);
+        var xor = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Xor"));
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "ClassInstanceXor", C1M1Construction2SchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, 0,
+                    classDeclaration.Span, "BoxKey", [
+                        new TrRmSourceClassMemberExport(0, field.Span,
+                            "Box.Value"),
+                        new TrRmSourceClassMemberExport(0,
+                            constructor.Span, "Box.Initialize") {
+                            ConstructionProjectionExportKey = "Box.Create",
+                        },
+                        new TrRmSourceClassMemberExport(0, xor.Span,
+                            "Box.Xor"),
+                    ]),
+            ]);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex.ForC1M1Construction2Draft(artifact));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1, "Box.Xor",
+            out var xorDefinition), Is.True);
+        var xorMethodRow
+            = checked((int)(xorDefinition & 0x00FF_FFFF));
+        var bodyRow = tables.Methods.GetBodyRow(xorMethodRow);
+        Assert.That(bodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(bodyRow,
+            tables.Contracts.Count);
+        var body = tables.Bodies.GetRegisterBody(bodyRow,
+            tables.Contracts.Count);
+        Assert.That(body.HomeCount, Is.EqualTo(3));
+        Assert.That(body.MethodCount, Is.Zero);
+        Assert.That(body.HomeMap[0], Is.EqualTo(1));
+        Assert.That(body.HomeMap[8], Is.EqualTo(2));
+        Assert.That(body.HomeMap[16], Is.EqualTo(2));
+        Assert.That(body.GetBlockCode(0).ToArray(), Is.EqualTo(new byte[] {
+            0xD5, 0, 1, 0,
+            0xD5, 1, 2, 0,
+            0xC1, 0x03, 0xF0, 0x10,
+            0x17, 0,
+        }));
+
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(C1M1Construction2SchemaIdentity,
+                artifact),
+            "ClassInstanceXor", [], ["BoxKey"]);
+        var consumer = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            int32 Use(Box value) { return value.Xor(2, 3); }
+            """), reference);
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
+    }
+
+    [Test]
     public void EmitsExactIdentityForwardersForStaticAndInstanceClassMethods()
     {
         var tree = SyntaxTree.Parse("""
