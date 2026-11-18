@@ -134,6 +134,10 @@ public static partial class TrRmExecutableCompiler
                 string DeclarationKey), uint>();
         var importedGenericMethodTargetTokens
             = new Dictionary<BoundGenericMethodImport, uint>();
+        var importedNominalTypeReferences
+            = new Dictionary<BoundGenericNominalTypeIdentity, uint>();
+        var importedNominalTypeSnapshots
+            = Array.Empty<BoundSourceTypeProviderSnapshot>();
         if (sourceTypeExports is { Count: > 0 })
         {
             if (sourceMethodExports is null)
@@ -152,8 +156,10 @@ public static partial class TrRmExecutableCompiler
             artifact = AddImportedGenericInterfaceMetadata(artifact, program,
                 schema);
             artifact = AddImportedGenericMethodMetadata(artifact,
-                emissionRows, exportedInterfaceTypeSpecRows, schema,
-                out importedGenericMethodTargetTokens);
+                program, emissionRows, exportedInterfaceTypeSpecRows, schema,
+                out importedGenericMethodTargetTokens,
+                out importedNominalTypeReferences,
+                out importedNominalTypeSnapshots);
         }
         if (emissionRows.Count != 0
             || sourceTypeExports is { Count: > 0 })
@@ -179,7 +185,9 @@ public static partial class TrRmExecutableCompiler
                 sourceMethodExports, emissionRows,
                 exportedInterfaceTypeSpecRows,
                 exportedInterfaceMethodDefRows,
-                importedGenericMethodTargetTokens, schema);
+                importedGenericMethodTargetTokens,
+                importedNominalTypeReferences,
+                importedNominalTypeSnapshots, schema);
         }
         else if (hasGenericCallTargets
             || ArtifactHasGenericWriteConstraints(artifact))
@@ -2806,14 +2814,21 @@ public static partial class TrRmExecutableCompiler
     }
 
     private static byte[] AddImportedGenericMethodMetadata(
-        byte[] artifact, IReadOnlyList<GenericMethodEmission> emissions,
+        byte[] artifact, BoundProgram program,
+        IReadOnlyList<GenericMethodEmission> emissions,
         IReadOnlyDictionary<(string QualifiedName, int Arity), uint>
             exportedInterfaceTypeSpecRows,
         TrRmArtifactSchema schema,
         out Dictionary<BoundGenericMethodImport, uint>
-            importedGenericMethodTargetTokens)
+            importedGenericMethodTargetTokens,
+        out Dictionary<BoundGenericNominalTypeIdentity, uint>
+            importedNominalTypeReferences,
+        out BoundSourceTypeProviderSnapshot[]
+            importedNominalTypeSnapshots)
     {
         importedGenericMethodTargetTokens = [];
+        importedNominalTypeReferences = [];
+        importedNominalTypeSnapshots = [];
         var importedMethods
             = CaptureImportedGenericMethodEmissions(emissions);
         if (importedMethods.Count == 0)
@@ -2981,20 +2996,20 @@ public static partial class TrRmExecutableCompiler
                 "The G1L1 MethodParameterLabel table has an invalid extent.");
         }
 
+        var importedMethodRows = new int[importedMethods.Count];
+        var importedMethodNameStringRows = new int[importedMethods.Count];
         for (var importedOrdinal = 0;
             importedOrdinal < importedMethods.Count; importedOrdinal++)
         {
             var imported = importedMethods[importedOrdinal];
-            var source = imported.Source;
-            var expected = imported.Expected;
-            var signature = expected.Signature;
-            var proofFunction = expected.ProofFunction;
+            var signature = imported.Expected.Signature;
+            var proofFunction = imported.Expected.ProofFunction;
             if (!signature.IsPublic || !signature.IsStatic
                 || signature.IsMutable || signature.Owner is not null
                 || !signature.ConstantFormals.IsDefaultOrEmpty
                 || signature.FormalOrder.IsDefault
                 || signature.FormalOrder.Length
-                    != expected.Formals.Length
+                    != imported.Expected.Formals.Length
                 || !proofFunction.IsStatic
                 || proofFunction.DeclaringStruct is not null
                 || string.IsNullOrEmpty(proofFunction.Name)
@@ -3004,10 +3019,10 @@ public static partial class TrRmExecutableCompiler
                 || proofFunction.DoesNotReturn
                 || proofFunction.RequiresUnsafeCaller
                     != signature.RequiresUnsafeCaller
-                || expected.Formals.IsDefaultOrEmpty
-                || expected.Formals.Length
+                || imported.Expected.Formals.IsDefaultOrEmpty
+                || imported.Expected.Formals.Length
                     != signature.Formals.Length
-                || expected.Formals.Length > 8)
+                || imported.Expected.Formals.Length > 8)
             {
                 throw Unsupported(
                     $"Imported generic MethodDef '{proofFunction.Name}' is outside the bounded type-only Copy-value subset.");
@@ -3016,9 +3031,11 @@ public static partial class TrRmExecutableCompiler
             var moduleRefRow = GetModuleRefRow(imported.Import);
             var exportKeyStringRow = names.Count + 1;
             names.Add((imported.Import.ExportKey, 1));
-            var methodNameStringRow = names.Count + 1;
+            importedMethodNameStringRows[importedOrdinal]
+                = names.Count + 1;
             names.Add((proofFunction.Name, 1));
             var methodRow = checked(methodCount + importedOrdinal + 1);
+            importedMethodRows[importedOrdinal] = methodRow;
             var methodDefId = 0x1600_0000u | checked((uint)methodRow);
             if (!importTriples.Add((moduleRefRow,
                     imported.Import.ExportKey, methodDefId)))
@@ -3030,8 +3047,59 @@ public static partial class TrRmExecutableCompiler
             var importRow = checked(importRows.Count + 1);
             importRows.Add(new TrRmImportRow(moduleRefRow,
                 exportKeyStringRow, methodDefId));
-            importedGenericMethodTargetTokens.Add(source,
+            importedGenericMethodTargetTokens.Add(imported.Source,
                 0x1C00_0000u | checked((uint)importRow));
+        }
+
+        var preallocatedStrings = TrRmStringTableWriter.EncodeTextRows(names);
+        var preallocatedStringTable = new TrRmStringTableReader(
+            preallocatedStrings, names.Count);
+        var preallocatedModuleBytes
+            = GetSection(sections, 0x0001).Bytes.ToArray();
+        var preallocatedModules = new TrRmModuleTableReader(
+            preallocatedModuleBytes, 1, preallocatedStringTable,
+            moduleRefRows.Count, typeDefCount, methodCount, sourceFileCount,
+            featureCount);
+        var preallocatedModuleRefBytes
+            = TrRmModuleRefTableWriter.Encode(moduleRefRows,
+                preallocatedStringTable, preallocatedModules);
+        var preallocatedImportBytes
+            = new byte[checked(importRows.Count * 12)];
+        for (var row = 0; row < importRows.Count; row++)
+        {
+            var import = importRows[row];
+            var offset = row * 12;
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                preallocatedImportBytes.AsSpan(offset),
+                checked((uint)import.ModuleRefRow));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                preallocatedImportBytes.AsSpan(offset + 4),
+                checked((uint)import.ExportKeyStringRow));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                preallocatedImportBytes.AsSpan(offset + 8),
+                import.ExpectedLocalDefId);
+        }
+        SetSection(sections, 0x0002, checked((uint)names.Count),
+            preallocatedStrings);
+        SetSection(sections, 0x0010,
+            checked((uint)moduleRefRows.Count), preallocatedModuleRefBytes);
+        SetSection(sections, 0x001C, checked((uint)importRows.Count),
+            preallocatedImportBytes);
+
+        var nominalTypes = new GenericMethodNominalTypeWriter(sections,
+            names, typeSpecRows, genericParameterRows, constraintRows,
+            program, emissions, schema);
+        for (var importedOrdinal = 0;
+            importedOrdinal < importedMethods.Count; importedOrdinal++)
+        {
+            var imported = importedMethods[importedOrdinal];
+            var expected = imported.Expected;
+            var signature = expected.Signature;
+            var proofFunction = expected.ProofFunction;
+            var methodRow = importedMethodRows[importedOrdinal];
+            var methodDefId = 0x1600_0000u | checked((uint)methodRow);
+            var methodNameStringRow
+                = importedMethodNameStringRows[importedOrdinal];
 
             var importedTypeProgram
                 = emissions[0].Definition.ProofProgram;
@@ -3083,7 +3151,7 @@ public static partial class TrRmExecutableCompiler
                     importedSpanTypes,
                     importedTypeProgram.CheckedReferenceTypes, -1,
                     targetDefinition, allowSpanType: true,
-                    nominalTypes: null);
+                    nominalTypes: nominalTypes);
             }
 
             uint GetExpectedTypeDefaultRef(
@@ -3092,7 +3160,8 @@ public static partial class TrRmExecutableCompiler
                 => typeDefault is null ? 0
                     : GenericMethodTypeDefaultRef(typeDefault,
                         formalOrdinal, targetDefinition, formalTypeSpecRows,
-                        builtInTypeSpecRows, typeSpecRows, nominalTypes: null);
+                        builtInTypeSpecRows, typeSpecRows,
+                        nominalTypes: nominalTypes);
 
             if (!schema.UsesMethodParameterLabels()
                 && expected.Formals.Any(static formal =>
@@ -3288,10 +3357,15 @@ public static partial class TrRmExecutableCompiler
             AppendUInt32(methodBytes, 0);
         }
 
+        nominalTypes.Complete();
+        importedNominalTypeReferences
+            = nominalTypes.GetDefinitionReferences();
+        importedNominalTypeSnapshots = nominalTypes.GetUsedSnapshots();
+        typeDefCount = GetCount(sections, 0x0013);
+        var finalImportCount = GetCount(sections, 0x001C);
         var finalMethodCount = checked(methodCount + importedMethods.Count);
         var finalSignatureCount
             = checked(signatureCount + importedMethods.Count);
-        var finalImportCount = importRows.Count;
         var finalTypeSpecBytes = TrRmTypeSpecTableWriter.Encode(
             typeSpecRows, typeDefCount, finalImportCount,
             genericParameterRows.Count,
@@ -3301,11 +3375,13 @@ public static partial class TrRmExecutableCompiler
         var stringTable = new TrRmStringTableReader(rewrittenStrings,
             names.Count);
         var moduleBytes = GetSection(sections, 0x0001).Bytes.ToArray();
+        var finalModuleRefCount = GetCount(sections, 0x0010);
         var modules = new TrRmModuleTableReader(moduleBytes, 1,
-            stringTable, moduleRefRows.Count, typeDefCount,
+            stringTable, finalModuleRefCount, typeDefCount,
             finalMethodCount, sourceFileCount, featureCount);
-        var moduleRefBytes = TrRmModuleRefTableWriter.Encode(moduleRefRows,
-            stringTable, modules);
+        var moduleRefBytes = GetSection(sections, 0x0010).Bytes.ToArray();
+        _ = new TrRmModuleRefTableReader(moduleRefBytes,
+            finalModuleRefCount, stringTable, modules);
         var (genericParameterBytes, constraintBytes)
             = CreateGenericMetadataBytes(rewrittenStrings, names.Count,
                 moduleBytes, methodBytes.ToArray(),
@@ -3314,27 +3390,13 @@ public static partial class TrRmExecutableCompiler
                 sections, typeDefCount, finalImportCount,
                 nativeFunctionPointerSignatureCount, featureCount,
                 finalSignatureCount, parameterCount, contractRows.Count,
-                bodyCount, moduleRefRows.Count, schema);
-        var importBytes = new byte[checked(finalImportCount * 12)];
-        for (var row = 0; row < importRows.Count; row++)
-        {
-            var import = importRows[row];
-            var offset = row * 12;
-            BinaryPrimitives.WriteUInt32LittleEndian(
-                importBytes.AsSpan(offset),
-                checked((uint)import.ModuleRefRow));
-            BinaryPrimitives.WriteUInt32LittleEndian(
-                importBytes.AsSpan(offset + 4),
-                checked((uint)import.ExportKeyStringRow));
-            BinaryPrimitives.WriteUInt32LittleEndian(
-                importBytes.AsSpan(offset + 8),
-                import.ExpectedLocalDefId);
-        }
+                bodyCount, finalModuleRefCount, schema);
+        var importBytes = GetSection(sections, 0x001C).Bytes.ToArray();
 
         SetSection(sections, 0x0002, checked((uint)names.Count),
             rewrittenStrings);
         SetSection(sections, 0x0010,
-            checked((uint)moduleRefRows.Count), moduleRefBytes);
+            checked((uint)finalModuleRefCount), moduleRefBytes);
         SetSection(sections, 0x0011,
             checked((uint)typeSpecRows.Count), finalTypeSpecBytes);
         SetSection(sections, 0x0016, checked((uint)finalMethodCount),
@@ -3373,6 +3435,10 @@ public static partial class TrRmExecutableCompiler
             string DeclarationKey), uint> exportedInterfaceMethodDefRows,
         IReadOnlyDictionary<BoundGenericMethodImport, uint>
             importedGenericMethodTargetTokens,
+        IReadOnlyDictionary<BoundGenericNominalTypeIdentity, uint>
+            importedNominalTypeReferences,
+        IReadOnlyList<BoundSourceTypeProviderSnapshot>
+            importedNominalTypeSnapshots,
         TrRmArtifactSchema schema)
     {
         var index = new TrRmArtifactIndex(artifact, schema);
@@ -3553,6 +3619,8 @@ public static partial class TrRmExecutableCompiler
         var nominalTypes = new GenericMethodNominalTypeWriter(sections,
             names, typeSpecRows, genericParameterRows, constraintRows,
             program, emissions, schema);
+        nominalTypes.ImportDefinitionReferences(
+            importedNominalTypeReferences, importedNominalTypeSnapshots);
         var baseBuiltInTypeSpecRows = GetBuiltInTypeSpecRows(typeSpecRows);
         var hasBlittableConstraint = false;
         var hasWriteConstraint = constraintRows.Any(

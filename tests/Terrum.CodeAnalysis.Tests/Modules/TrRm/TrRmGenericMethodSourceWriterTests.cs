@@ -4327,6 +4327,149 @@ internal sealed class TrRmGenericMethodSourceWriterTests
     }
 
     [Test]
+    public void ReemitsImportedConstructedNominalMethodSignature()
+    {
+        var typeProviderArtifact = CreateConstructedNominalSourceProvider();
+        var typeProviderReference = TrRmExecutableCompiler
+            .CreateGenericMethodCallsDraftReference(typeProviderArtifact,
+                "constructed-source.provider");
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Example;
+                public Box<T> Accept<T>(Box<T> value) {
+                    return move value;
+                }
+                """), typeProviderReference);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerProgram = providerCompilation.Program!;
+        var accept = providerProgram.GenericMethodDefinitions.Single();
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, "nominal-method.provider",
+            GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), [
+                new(providerProgram, accept.SourceInputOrdinal, accept.Span,
+                    "Accept"),
+            ]);
+        var providerReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(
+                GenericMethodCallsSchemaIdentity, providerArtifact),
+            "nominal-method.provider", [
+                new TrRmStandardArtifactInput(
+                    GenericMethodCallsSchemaIdentity,
+                    typeProviderArtifact),
+            ]);
+        var forwarderCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Example;
+                public Box<T> Forward<T>(Box<T> value) {
+                    return Accept<T>(move value);
+                }
+                """), providerReference);
+        Assert.That(forwarderCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                forwarderCompilation.Diagnostics));
+        var forwarderProgram = forwarderCompilation.Program!;
+        var forward = forwarderProgram.GenericMethodDefinitions.Single();
+        var forwarderArtifact = TrRmExecutableCompiler.EmitStandard(
+            forwarderProgram, "nominal-method.forwarder",
+            GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), [
+                new(forwarderProgram, forward.SourceInputOrdinal,
+                    forward.Span, "Forward"),
+            ]);
+
+        var relocatedTypeProviderArtifact
+            = RelocateConstructedNominalProviderTypeDef(
+                typeProviderArtifact);
+        var forwarderInput = new TrRmStandardArtifactInput(
+            GenericMethodCallsSchemaIdentity, forwarderArtifact);
+        var methodProviderInput = new TrRmStandardArtifactInput(
+            GenericMethodCallsSchemaIdentity, providerArtifact);
+        var relocatedTypeProviderInput = new TrRmStandardArtifactInput(
+            GenericMethodCallsSchemaIdentity, relocatedTypeProviderArtifact);
+        var forwarderReference = TrRmExecutableCompiler
+            .CreateStandardReference(forwarderInput,
+                "nominal-method.forwarder", [
+                    methodProviderInput, relocatedTypeProviderInput,
+                ]);
+        var importedForward = forwarderReference.GenericMethodImports.Single(
+            static imported => imported.Origin.ExportKey == "Forward");
+        var forwardedCall = (BoundCall)((BoundReturn)
+            importedForward.ProofFunction.Body.Statements.Single()).Value!;
+        var importedTarget = forwardedCall.ImportedGenericMethodCall!;
+        var expectedTarget = importedTarget.Binding!.Expected;
+        var expectedInputType
+            = forwarderReference.GenericNominalTypeInstances[
+                BoundGenericNominalTypeTypes.Index(
+                    expectedTarget.ProofFunction.Variables[0].Type)];
+        Assert.That(expectedTarget.ProofFunction.Variables[0].Type,
+            Is.EqualTo(expectedTarget.ProofFunction.ReturnType));
+        Assert.That(expectedInputType.Definition.ModuleIdentity,
+            Is.EqualTo("constructed-source.provider"));
+        Assert.That(expectedInputType.Definition.DefinitionId,
+            Is.EqualTo(0x1300_0002u));
+        Assert.That(importedTarget.Binding.Provider.ProofFunction
+                .Variables[0].Type,
+            Is.EqualTo(expectedTarget.ProofFunction.Variables[0].Type));
+
+        var consumerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Example;
+                public Box<T> Consume<T>(Box<T> value) {
+                    return Forward<T>(move value);
+                }
+                """), forwarderReference);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerProgram = consumerCompilation.Program!;
+        var consume = consumerProgram.GenericMethodDefinitions.Single();
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            consumerProgram, "nominal-method.consumer",
+            GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), [
+                new(consumerProgram, consume.SourceInputOrdinal,
+                    consume.Span, "Consume"),
+            ]);
+        _ = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(
+                GenericMethodCallsSchemaIdentity, consumerArtifact),
+            "nominal-method.consumer", [
+                forwarderInput, methodProviderInput,
+                relocatedTypeProviderInput,
+            ]);
+
+        var replacementCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Example;
+                public int32 Accept<T>(Box<T> value) { return 1; }
+                """), typeProviderReference);
+        Assert.That(replacementCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                replacementCompilation.Diagnostics));
+        var replacementProgram = replacementCompilation.Program!;
+        var replacementAccept
+            = replacementProgram.GenericMethodDefinitions.Single();
+        var replacementArtifact = TrRmExecutableCompiler.EmitStandard(
+            replacementProgram, "nominal-method.provider",
+            GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), [
+                new(replacementProgram, replacementAccept.SourceInputOrdinal,
+                    replacementAccept.Span, "Accept"),
+            ]);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                forwarderInput, "nominal-method.forwarder", [
+                    new TrRmStandardArtifactInput(
+                        GenericMethodCallsSchemaIdentity,
+                        replacementArtifact),
+                    relocatedTypeProviderInput,
+                ]));
+    }
+
+    [Test]
     public void ReemitsImportedGenericSpanTypeDefault()
     {
         var providerCompilation = Compilation.CreateLibrary(

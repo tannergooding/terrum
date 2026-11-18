@@ -95,6 +95,73 @@ public static partial class TrRmExecutableCompiler
 
         internal List<TrRmExportRow> Exports { get; } = [];
 
+        internal Dictionary<BoundGenericNominalTypeIdentity, uint>
+            GetDefinitionReferences() => new(_definitionReferences);
+
+        internal BoundSourceTypeProviderSnapshot[] GetUsedSnapshots()
+            => [.. _usedSnapshots];
+
+        internal void ImportDefinitionReferences(
+            IReadOnlyDictionary<BoundGenericNominalTypeIdentity, uint>
+                references,
+            IReadOnlyList<BoundSourceTypeProviderSnapshot> usedSnapshots)
+        {
+            ArgumentNullException.ThrowIfNull(references);
+            ArgumentNullException.ThrowIfNull(usedSnapshots);
+            foreach (var (identity, reference) in references)
+            {
+                if (!_definitions.ContainsKey(identity)
+                    || reference == 0 || reference > _typeSpecs.Count)
+                {
+                    throw Invalid(
+                        "A G1 nominal TypeDef reference cannot be reused in this source emission.");
+                }
+
+                var typeSpec = _typeSpecs[checked((int)reference - 1)].Span;
+                if (typeSpec.Length != 6
+                    || typeSpec[0] is not (0x02 or 0x03))
+                {
+                    throw Invalid(
+                        "A G1 nominal TypeDef reference has an invalid TypeSpec form.");
+                }
+
+                var row = ReadUInt32(typeSpec, 2);
+                if (typeSpec[0] == 0x02)
+                {
+                    if (row > GetCount(_sections, 0x0013))
+                    {
+                        throw Invalid(
+                            "A G1 nominal TypeDef reference is outside the emitted TypeDef table.");
+                    }
+                }
+                else
+                {
+                    var importCount = GetCount(_sections, 0x001C);
+                    var importSection = GetSection(_sections, 0x001C);
+                    if (row == 0 || row > importCount
+                        || importSection.Bytes.Length
+                            != checked(importCount * 12)
+                        || (ReadUInt32(importSection.Bytes.Span,
+                            checked((int)(row - 1) * 12 + 8)) >> 24)
+                            != 0x13)
+                    {
+                        throw Invalid(
+                            "A G1 nominal TypeDef reference is outside the emitted TypeDef Import table.");
+                    }
+                }
+
+                if (!_definitionReferences.TryAdd(identity, reference))
+                {
+                    throw Invalid(
+                        "A G1 nominal TypeDef reference was supplied more than once.");
+                }
+            }
+            foreach (var snapshot in usedSnapshots)
+            {
+                _ = _usedSnapshots.Add(CanonicalSnapshot(snapshot));
+            }
+        }
+
         internal void Prepare(BoundGenericMethodDefinition method,
             BoundFunction function)
         {

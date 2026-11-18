@@ -65,7 +65,8 @@ and an imported terminal unit call; a source-free provider/consumer JIT
 regression is added but remains unverified. Expected imported declarations now
 retain concrete built-in and earlier-formal type defaults; source-free
 round-trip and incompatible-default replacement coverage is added but
-unverified. Constructed nominal defaults and imports, optional/GC signatures,
+unverified. Constructed nominal defaults, other constructed nominal import cases,
+optional/GC signatures,
 other dependency destinations and cleanup, and owners remain open. G1L1 imported
 MethodDef expectations now retain interface-instance constraints, and direct
 imported calls require matching caller-formal constraints; the source-free
@@ -75,6 +76,10 @@ Expected imported MethodSigs also retain non-optional/non-GC checked-reference
 and Span wrappers with their exact imported formal owner. Their source-free
 provider/consumer regression covers both `ref<T>` and `Span<T>` and remains
 unverified; optional/GC wrappers remain unsupported.
+Expected imported MethodSigs now preserve constructed nominal parameter/result
+types through checked TypeDef/Import closure. Provider-to-method-importer-to-source-free-consumer
+coverage includes TypeDef relocation and incompatible replacement, but remains
+unverified under the active hold.
 Expected imported MethodDefs also retain ordinary-result Dependency
 relationships 1/2/3; source-free ref-result forwarding coverage is added but
 remains unverified. Expected imported declarations also retain concrete

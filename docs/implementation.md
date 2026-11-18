@@ -1496,6 +1496,11 @@ declarations or exact imported expectations, ordered scalar constant actuals
 and admitted nested reference/Span actuals. Added source emission,
 source re-emission, compatible TypeDef-row relocation and incompatible
 replacement regressions are unverified under the active validation hold.
+Expected imported MethodSigs also preserve constructed nominal parameter and
+result types through checked TypeDef/Import closure.
+Provider-to-method-importer-to-source-free-consumer coverage includes TypeDef
+relocation and incompatible replacement, but remains unverified under the
+active hold.
 The writer now copies all retained TypeDef Import expectation views; a
 reference-set emission regression is added but remains unverified. Fresh
 generic TypeDef source declarations, source-free generic MethodDef re-emission,
