@@ -891,6 +891,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 public int32 ForwardInstance(int32 value) {
                     return IdentityInstance(value);
                 }
+                public void Touch(int32 value) {}
+                public void ForwardTouch(int32 value) {
+                    Touch(value);
+                }
             }
             """);
         var compilation = Compilation.CreateLibrary(tree);
@@ -920,6 +924,14 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name == "ForwardInstance"));
+        var touch = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Touch"));
+        var forwardTouch = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "ForwardTouch"));
         var artifact = TrRmExecutableCompiler.EmitStandard(program,
             "ClassIdentityForwarder", C1M1Construction2SchemaIdentity,
             TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
@@ -940,6 +952,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                             identityInstance.Span, "Box.IdentityInstance"),
                         new TrRmSourceClassMemberExport(0,
                             forwardInstance.Span, "Box.ForwardInstance"),
+                        new TrRmSourceClassMemberExport(0, touch.Span,
+                            "Box.Touch"),
+                        new TrRmSourceClassMemberExport(0, forwardTouch.Span,
+                            "Box.ForwardTouch"),
                     ]),
             ]);
         var tables = TrRmStructuralMetadataValidator
@@ -948,6 +964,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         AssertIdentityForwarder("Box.Forward", "Box.Identity", false);
         AssertIdentityForwarder("Box.ForwardInstance",
             "Box.IdentityInstance", true);
+        AssertIdentityForwarder("Box.ForwardTouch", "Box.Touch", true);
 
         var reference = TrRmExecutableCompiler.CreateStandardReference(
             new TrRmStandardArtifactInput(C1M1Construction2SchemaIdentity,
@@ -957,6 +974,9 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             int32 UseStatic() { return Box.Forward(7); }
             int32 UseInstance(Box value) {
                 return value.ForwardInstance(7);
+            }
+            void UseTouch(Box value) {
+                value.ForwardTouch(7);
             }
             """), reference);
         Assert.That(consumer.HasErrors, Is.False,

@@ -911,6 +911,11 @@ public static partial class TrRmExecutableCompiler
                         = TryGetC1M1Construction2IdentityForwarder(
                             methodFunction, program.Functions,
                             out identityForwarderTargetFunctionIndex);
+                    var isSupportedUnitIdentityForwarder
+                        = !isSupportedIdentityForwarder
+                            && TryGetC1M1Construction2UnitIdentityForwarder(
+                                methodFunction, program.Functions,
+                                out identityForwarderTargetFunctionIndex);
                     var directXor = TryGetC1M1Construction2DirectXor(
                         methodFunction);
                     var callXor
@@ -928,6 +933,7 @@ public static partial class TrRmExecutableCompiler
                             && !isSupportedDirectFieldReadInstanceMethod
                             && !isSupportedDirectFieldWriteInstanceMethod
                             && !isSupportedIdentityForwarder
+                            && !isSupportedUnitIdentityForwarder
                             && directXor is null
                             && callXor is null
                             && !localCopyReturn
@@ -995,6 +1001,7 @@ public static partial class TrRmExecutableCompiler
                                 && !isSupportedDirectFieldReadInstanceMethod
                                 && !isSupportedDirectFieldWriteInstanceMethod
                                 && !isSupportedIdentityForwarder
+                                && !isSupportedUnitIdentityForwarder
                                 && directXor is null
                                 && callXor is null
                                 && !localCopyReturn
@@ -1223,6 +1230,7 @@ public static partial class TrRmExecutableCompiler
                             isSupportedDirectReturnInstanceMethod
                                 ? directReturnHome : -1,
                             isSupportedIdentityForwarder
+                                || isSupportedUnitIdentityForwarder
                                 ? identityForwarderTargetFunctionIndex : -1,
                             encodedBody, callXor));
                 }
@@ -2748,6 +2756,91 @@ public static partial class TrRmExecutableCompiler
                 }
             }
         }
+    }
+
+    private static bool TryGetC1M1Construction2UnitIdentityForwarder(
+        BoundFunction function, ImmutableArray<BoundFunction> functions,
+        out int targetFunctionIndex)
+    {
+        targetFunctionIndex = -1;
+        if (function.ReturnType != PrimitiveType.Void
+            || function.ParameterCount != function.Variables.Length
+            || (!function.IsStatic && (function.ParameterCount == 0
+                || function.Variables[0].IsMutable))
+            || !function.Body.RetiredManagedLocals.IsEmpty)
+        {
+            return false;
+        }
+
+        BoundCall? call = null;
+        if (function.Body.Statements is [
+                BoundExpressionStatement {
+                    Expression: BoundCall singleCall,
+                },
+            ])
+        {
+            call = singleCall;
+        }
+        else if (function.Body.Statements is [
+                    BoundExpressionStatement {
+                        Expression: BoundCall callBeforeUnitReturn,
+                    },
+                    BoundReturn { Value: null },
+                ])
+        {
+            call = callBeforeUnitReturn;
+        }
+
+        if (call is null || call.Type != PrimitiveType.Void
+            || call.Arguments.Length != function.ParameterCount
+            || !call.DefaultedArguments.IsDefaultOrEmpty
+            || call.InterfaceCallIdentity is not null
+            || call.GenericMethodCall is not null
+            || call.ImportedGenericMethodCall is not null
+            || (uint)call.Function >= (uint)functions.Length)
+        {
+            return false;
+        }
+
+        var target = functions[call.Function];
+        if (target.IsStatic != function.IsStatic || target.IsExternal
+            || target.IsClassConstructor || target.IsConstructor
+            || target.IsCleanup || target.IsOperator
+            || target.ModuleImport is not null
+            || target.GenericMethodInstantiation is not null
+            || !StringComparer.Ordinal.Equals(target.DeclaringStruct,
+                function.DeclaringStruct)
+            || target.ReturnType != PrimitiveType.Void
+            || target.ParameterCount != function.ParameterCount
+            || target.Variables.Length < target.ParameterCount)
+        {
+            return false;
+        }
+
+        for (var parameter = 0;
+            parameter < function.ParameterCount; parameter++)
+        {
+            var source = function.Variables[parameter];
+            var targetParameter = target.Variables[parameter];
+            if (call.ParameterIndex(parameter) != parameter
+                || call.ImplicitReferenceTemporary(parameter) != -1
+                || call.Arguments[parameter] is not BoundRead read
+                || read.Variable != parameter
+                || read.Type != source.Type
+                || source.Type != targetParameter.Type
+                || source.IsMutable != targetParameter.IsMutable
+                || source.IsOut != targetParameter.IsOut
+                || source.IsInit != targetParameter.IsInit
+                || source.IsImplicitRef != targetParameter.IsImplicitRef
+                || source.IsInitializationLocal
+                    != targetParameter.IsInitializationLocal)
+            {
+                return false;
+            }
+        }
+
+        targetFunctionIndex = call.Function;
+        return true;
     }
 
     private static BoundBinary? TryGetC1M1Construction2DirectXor(

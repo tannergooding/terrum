@@ -144,8 +144,8 @@ are initialized directly from scalar parameters. It preserves explicit I/P
 ExportKeys and does not substitute `ClassTryCreate`; keyed and private-P
 producer regressions are added but unverified under the hold.
 Ordinary method emission also supports parameterized static scalar methods
-with real Bodies, exact same-class static and readonly-instance identity
-forwarders through assigned Body kind `05`, empty unit-returning instance
+with real Bodies, exact same-class static and readonly-instance scalar/unit
+identity forwarders through assigned Body kind `05`, empty unit-returning instance
 methods, and readonly instance methods returning an explicit scalar parameter
 through ReturnHome with receiver/formal Homes in declaration order, plus a
 readonly instance `int32` XOR Body over two explicit value formals and a
