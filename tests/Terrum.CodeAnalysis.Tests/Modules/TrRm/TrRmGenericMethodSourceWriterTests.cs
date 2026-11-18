@@ -538,6 +538,99 @@ internal sealed class TrRmGenericMethodSourceWriterTests
     }
 
     [Test]
+    public void ReemitsRetainedGenericMethodWithInterfaceRequirementBody()
+    {
+        const string providerIdentity = "retained-interface.provider";
+        const string outputIdentity = "retained-interface.reemitted";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            namespace Example {
+                public interface I<T> {
+                    public T Echo(T value);
+                }
+                public T ReadVia<T>(T value) where T : I<T> {
+                    return value.via<I<T>>.Echo(value);
+                }
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var interfaceDefinition = program.Interfaces.Single();
+        var interfaceMember = interfaceDefinition.Members.Single();
+        var method = program.GenericMethodDefinitions.Single();
+        var interfaceExport = new TrRmSourceTypeExport("Example", "I",
+            "example.interface/I") {
+            GenericArity = interfaceDefinition.Formals.Length,
+            InterfaceMethodExports = [
+                new TrRmSourceInterfaceMethodExport(
+                    interfaceMember.SourceInputOrdinal,
+                    interfaceMember.SourceDeclarationSpan,
+                    "example.interface/I.Echo"),
+            ],
+        };
+        var methodExport = new TrRmSourceGenericMethodExport(program,
+            method.SourceInputOrdinal, method.Span,
+            "example.method/ReadVia");
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(program,
+            providerIdentity, GenericMethodCallsSchemaIdentity, 0,
+            [interfaceExport], [methodExport]);
+        var providerInput = new TrRmStandardArtifactInput(
+            GenericMethodCallsSchemaIdentity, providerArtifact);
+        var providerReference = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, providerIdentity,
+            Array.Empty<TrRmStandardArtifactInput>());
+        var sourceFreeProgram = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), providerReference).Program!;
+        var selection = new TrRmRetainedGenericMethodExport(
+            sourceFreeProgram, providerIdentity,
+            GenericMethodCallsSchemaIdentity,
+            ImmutableArray.CreateRange(
+                System.Security.Cryptography.SHA256.HashData(providerArtifact)),
+            GetExportedMethodDefId(providerArtifact,
+                "example.method/ReadVia"),
+            "example.method/ReadVia", "ReadViaCopy");
+        var reemitted = TrRmExecutableCompiler
+            .EmitStandardReemittingGenericMethods(sourceFreeProgram,
+                outputIdentity, GenericMethodCallsSchemaIdentity, 0,
+                [selection]);
+        var reemittedReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(GenericMethodCallsSchemaIdentity,
+                reemitted), outputIdentity, [providerInput]);
+        var reemittedReadVia
+            = reemittedReference.GenericMethodImports.Single();
+        BoundCall? importedCall = null;
+        Assert.That(BoundTreeTraversal.VisitExpressions(
+            reemittedReadVia.ProofFunction.Body, expression =>
+            {
+                if (expression is BoundCall {
+                        InterfaceCallIdentity: not null,
+                    } call)
+                {
+                    importedCall = call;
+                }
+            }), Is.True);
+        Assert.That(importedCall, Is.Not.Null);
+        Assert.That(importedCall!.InterfaceCallIdentity!.IsConstraintCall,
+            Is.True);
+        Assert.That(reemittedReadVia.ProofSupportFunctions,
+            Has.Length.EqualTo(1));
+
+        var consumerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                namespace Consumer {
+                    public T Call<T>(T value)
+                        where T : Example.I<T> {
+                        return ReadVia<T>(value);
+                    }
+                }
+                """), reemittedReference);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+    }
+
+    [Test]
     public void EmitsAndReconstructsGenericInitializationReferenceTypes()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
