@@ -145,8 +145,9 @@ ExportKeys and does not substitute `ClassTryCreate`; keyed and private-P
 producer regressions are added but unverified under the hold.
 Ordinary static class methods now emit assigned register Body kind `01` for
 direct-formal returns, int32 bitwise operations and complement, checked or
-wrapping int32 negation and add/subtract/multiply, and fixed-SF1-constant
-returns; fixed scalar constants use the provisional `11/1` path and Blob
+wrapping int32 negation and add/subtract/multiply, checked divide/remainder,
+and fixed-SF1-constant returns; fixed scalar constants use the provisional
+`11/1` path and Blob
 section `0003`. Static int32 comparisons produce Boolean results through
 assigned C2/C3 relation predicates. Readonly instance methods with two direct
 int32 formal reads

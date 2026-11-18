@@ -2187,7 +2187,7 @@ public static partial class TrRmExecutableCompiler
             && function.Variables[arithmeticRight.Variable].Type
                 == PrimitiveType.Int32
             && arithmetic.Operator is TokenKind.Plus or TokenKind.Minus
-                or TokenKind.Star)
+                or TokenKind.Star or TokenKind.Slash or TokenKind.Percent)
         {
             var (leftHome, rightHome) = SetInt32BinaryHomes(
                 arithmeticLeft.Variable, arithmeticRight.Variable);
@@ -2200,6 +2200,10 @@ public static partial class TrRmExecutableCompiler
                     BoundIntegerOverflowBehavior.Checked) => (byte)0x02,
                 (TokenKind.Star,
                     BoundIntegerOverflowBehavior.Checked) => (byte)0x03,
+                (TokenKind.Slash,
+                    BoundIntegerOverflowBehavior.Checked) => (byte)0x0C,
+                (TokenKind.Percent,
+                    BoundIntegerOverflowBehavior.Checked) => (byte)0x0D,
                 (TokenKind.Plus,
                     BoundIntegerOverflowBehavior.Wrapping) => (byte)0x05,
                 (TokenKind.Minus,
@@ -2353,6 +2357,10 @@ public static partial class TrRmExecutableCompiler
                 => (0xC0, 0x02),
             (TokenKind.Star, BoundIntegerOverflowBehavior.Checked)
                 => (0xC0, 0x03),
+            (TokenKind.Slash, BoundIntegerOverflowBehavior.Checked)
+                => (0xC0, 0x0C),
+            (TokenKind.Percent, BoundIntegerOverflowBehavior.Checked)
+                => (0xC0, 0x0D),
             (TokenKind.Plus, BoundIntegerOverflowBehavior.Wrapping)
                 => (0xC0, 0x05),
             (TokenKind.Minus, BoundIntegerOverflowBehavior.Wrapping)
@@ -2477,7 +2485,8 @@ public static partial class TrRmExecutableCompiler
                 && binary.Type == PrimitiveType.Int32
                 && (binary.Operator is TokenKind.Ampersand
                     or TokenKind.Pipe or TokenKind.Caret or TokenKind.Plus
-                    or TokenKind.Minus or TokenKind.Star);
+                    or TokenKind.Minus or TokenKind.Star
+                    or TokenKind.Slash or TokenKind.Percent);
         if (!isComparison && !isInt32ValueOperation)
         {
             throw Unsupported(
@@ -2729,7 +2738,8 @@ public static partial class TrRmExecutableCompiler
                 && binary.Type == PrimitiveType.Int32
                 && (binary.Operator is TokenKind.Ampersand
                     or TokenKind.Pipe or TokenKind.Caret or TokenKind.Plus
-                    or TokenKind.Minus or TokenKind.Star);
+                    or TokenKind.Minus or TokenKind.Star
+                    or TokenKind.Slash or TokenKind.Percent);
         if (!isComparison && !isInt32ValueOperation)
         {
             throw Unsupported(
@@ -3008,7 +3018,8 @@ public static partial class TrRmExecutableCompiler
                 && binary.Type == PrimitiveType.Int32
                 && (binary.Operator is TokenKind.Ampersand
                     or TokenKind.Pipe or TokenKind.Caret or TokenKind.Plus
-                    or TokenKind.Minus or TokenKind.Star);
+                    or TokenKind.Minus or TokenKind.Star
+                    or TokenKind.Slash or TokenKind.Percent);
         if (!isComparison && !isInt32ValueOperation)
         {
             throw Unsupported(
@@ -3607,7 +3618,8 @@ public static partial class TrRmExecutableCompiler
                 && returnedBinary.Type == PrimitiveType.Int32
                 && (returnedBinary.Operator is TokenKind.Ampersand
                     or TokenKind.Pipe or TokenKind.Caret or TokenKind.Plus
-                    or TokenKind.Minus or TokenKind.Star);
+                    or TokenKind.Minus or TokenKind.Star
+                    or TokenKind.Slash or TokenKind.Percent);
         return isComparison || isInt32ValueOperation
             ? returnedBinary : null;
 
@@ -3760,7 +3772,8 @@ public static partial class TrRmExecutableCompiler
                 && returnedBinary.Type == PrimitiveType.Int32
                 && (returnedBinary.Operator is TokenKind.Ampersand
                     or TokenKind.Pipe or TokenKind.Caret
-                    or TokenKind.Plus or TokenKind.Minus or TokenKind.Star);
+                    or TokenKind.Plus or TokenKind.Minus or TokenKind.Star
+                    or TokenKind.Slash or TokenKind.Percent);
         if (!isComparison && !isInt32ValueOperation)
         {
             return null;
@@ -3950,7 +3963,8 @@ public static partial class TrRmExecutableCompiler
                 && binary.Type == PrimitiveType.Int32
                 && (binary.Operator is TokenKind.Ampersand
                     or TokenKind.Pipe or TokenKind.Caret or TokenKind.Plus
-                    or TokenKind.Minus or TokenKind.Star);
+                    or TokenKind.Minus or TokenKind.Star
+                    or TokenKind.Slash or TokenKind.Percent);
         return isComparison || isInt32ValueOperation;
     }
 

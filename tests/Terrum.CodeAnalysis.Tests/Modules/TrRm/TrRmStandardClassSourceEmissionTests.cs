@@ -753,6 +753,12 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 public static int32 Multiply(int32 left, int32 right) {
                     return left * right;
                 }
+                public static int32 Divide(int32 left, int32 right) {
+                    return left / right;
+                }
+                public int32 Remainder(int32 left, int32 right) {
+                    return left % right;
+                }
                 public static int32 Double(int32 value) {
                     return value + value;
                 }
@@ -880,6 +886,14 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name == "Multiply"));
+        var divide = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Divide"));
+        var remainder = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Remainder"));
         var doubleValue = members.Single(static node =>
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
@@ -992,6 +1006,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                             "Box.Subtract"),
                         new TrRmSourceClassMemberExport(0, multiply.Span,
                             "Box.Multiply"),
+                        new TrRmSourceClassMemberExport(0, divide.Span,
+                            "Box.Divide"),
+                        new TrRmSourceClassMemberExport(0, remainder.Span,
+                            "Box.Remainder"),
                         new TrRmSourceClassMemberExport(0, doubleValue.Span,
                             "Box.Double"),
                         new TrRmSourceClassMemberExport(0, negate.Span,
@@ -1102,6 +1120,24 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 0x17, 0,
             }));
         Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.Remainder", out var remainderDefinition), Is.True);
+        var remainderMethodRow
+            = checked((int)(remainderDefinition & 0x00FF_FFFF));
+        var remainderBodyRow = tables.Methods.GetBodyRow(remainderMethodRow);
+        Assert.That(remainderBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(remainderBodyRow,
+            tables.Contracts.Count);
+        var remainderBody = tables.Bodies.GetRegisterBody(remainderBodyRow,
+            tables.Contracts.Count);
+        Assert.That(remainderBody.HomeCount, Is.EqualTo(3));
+        Assert.That(remainderBody.GetBlockCode(0).ToArray(), Is.EqualTo(
+            new byte[] {
+                0xD5, 0, 1, 0,
+                0xD5, 1, 2, 0,
+                0xC0, 0x0D, 0xF0, 0x10,
+                0x17, 0,
+            }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
             "Box.Negated", out var negatedDefinition), Is.True);
         var negatedMethodRow
             = checked((int)(negatedDefinition & 0x00FF_FFFF));
@@ -1190,6 +1226,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     => 0x02,
                 (TokenKind.Star, BoundIntegerOverflowBehavior.Checked)
                     => 0x03,
+                (TokenKind.Slash, BoundIntegerOverflowBehavior.Checked)
+                    => 0x0C,
+                (TokenKind.Percent, BoundIntegerOverflowBehavior.Checked)
+                    => 0x0D,
                 (TokenKind.Plus, BoundIntegerOverflowBehavior.Wrapping)
                     => 0x05,
                 (TokenKind.Minus, BoundIntegerOverflowBehavior.Wrapping)
@@ -1291,6 +1331,24 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 0xD5, 0, 0, 0,
                 0xD5, 1, 1, 0,
                 0xC0, GetArithmeticControl(multiplyBinary), 0xF0, 0x10,
+                0x17, 0,
+            }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.Divide", out var divideDefinition), Is.True);
+        var divideMethodRow
+            = checked((int)(divideDefinition & 0x00FF_FFFF));
+        var divideBodyRow = tables.Methods.GetBodyRow(divideMethodRow);
+        Assert.That(divideBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(divideBodyRow,
+            tables.Contracts.Count);
+        var divideBody = tables.Bodies.GetRegisterBody(divideBodyRow,
+            tables.Contracts.Count);
+        Assert.That(divideBody.HomeCount, Is.EqualTo(2));
+        Assert.That(divideBody.GetBlockCode(0).ToArray(), Is.EqualTo(
+            new byte[] {
+                0xD5, 0, 0, 0,
+                0xD5, 1, 1, 0,
+                0xC0, 0x0C, 0xF0, 0x10,
                 0x17, 0,
             }));
         Assert.That(tables.Exports.TryGetDefinitionForKey(1,
@@ -1695,6 +1753,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             }
             int32 UseSubtract() { return Box.Subtract(7, 3); }
             int32 UseMultiply() { return Box.Multiply(4, 5); }
+            int32 UseDivide() { return Box.Divide(12, 3); }
+            int32 UseRemainder(Box value) {
+                return value.Remainder(12, 5);
+            }
             int32 UseDouble() { return Box.Double(4); }
             int32 UseNegate() { return Box.Negate(4); }
             int32 UseComplement() { return Box.Complement(4); }
