@@ -228,10 +228,11 @@ public static partial class TrRmExecutableCompiler
             Visit(depth);
             if ((term.IsGarbageCollected || term.IsOptional)
                 && term.Kind
-                    != BoundGenericMethodTypeTermKind.CheckedReference)
+                    is not (BoundGenericMethodTypeTermKind.CheckedReference
+                        or BoundGenericMethodTypeTermKind.ImportedGeneric))
             {
                 throw Unsupported(
-                    "G1 nominal source terms select optional and GC qualifiers only on checked references.");
+                    "G1 nominal source terms select optional and GC qualifiers only on class handles and checked references.");
             }
             uint result;
             switch (term.Kind)
@@ -255,46 +256,77 @@ public static partial class TrRmExecutableCompiler
                         || term.IsWritable || term.IsInitialization)
                     {
                         throw Unsupported(
-                            "G1 nominal source terms require an unqualified TypeDef identity.");
+                            "G1 nominal source terms require a selected TypeDef identity.");
                     }
                     var definitionRef = DefinitionReference(identity, depth + 1);
                     var definition = _definitions[identity];
+                    if ((term.IsOptional || term.IsGarbageCollected)
+                        && definition.NominalKind != 2)
+                    {
+                        throw Unsupported(
+                            "G1 optional and GC-qualified nominal terms require a class TypeDef.");
+                    }
+                    if (term.IsGarbageCollected)
+                    {
+                        throw Unsupported(
+                            "G1 generic MethodDef imports do not select GC class-handle TypeSpecs.");
+                    }
+
+                    uint constructedTypeSpecRef;
                     if (definition.Formals.IsEmpty)
                     {
-                        return definitionRef;
+                        constructedTypeSpecRef = definitionRef;
                     }
-                    var arguments = new uint[definition.Formals.Length];
-                    var typeOrdinal = 0;
-                    var constantOrdinal = 0;
-                    for (var ordinal = 0; ordinal < arguments.Length; ordinal++)
+                    else
                     {
-                        if (definition.Formals[ordinal].Kind
-                            == BoundGenericArgumentKind.Type)
+                        var arguments = new uint[definition.Formals.Length];
+                        var typeOrdinal = 0;
+                        var constantOrdinal = 0;
+                        for (var ordinal = 0; ordinal < arguments.Length;
+                            ordinal++)
                         {
-                            arguments[ordinal] = TypeTermRef(
-                                term.TypeArguments[typeOrdinal++], method,
-                                formalRows, builtInRows, depth + 1);
-                        }
-                        else
-                        {
-                            var constant = term.ConstantArguments[
-                                constantOrdinal++];
-                            if (constant.Kind
-                                != BoundGenericMethodTypeConstantArgumentKind.Value)
+                            if (definition.Formals[ordinal].Kind
+                                == BoundGenericArgumentKind.Type)
                             {
-                                throw Unsupported(
-                                    "G1 nominal source terms require closed constant actuals.");
+                                arguments[ordinal] = TypeTermRef(
+                                    term.TypeArguments[typeOrdinal++], method,
+                                    formalRows, builtInRows, depth + 1);
                             }
-                            arguments[ordinal] = ConstantArgument(
-                                BoundGenericNominalTypeArgument.ForConstant(
-                                    constant.DomainType, constant.CarrierType,
-                                    constant.Bits.Low, constant.Bits.High),
-                                method, formalRows, builtInRows, depth + 1);
+                            else
+                            {
+                                var constant = term.ConstantArguments[
+                                    constantOrdinal++];
+                                if (constant.Kind
+                                    != BoundGenericMethodTypeConstantArgumentKind.Value)
+                                {
+                                    throw Unsupported(
+                                        "G1 nominal source terms require closed constant actuals.");
+                                }
+                                arguments[ordinal] = ConstantArgument(
+                                    BoundGenericNominalTypeArgument.ForConstant(
+                                        constant.DomainType,
+                                        constant.CarrierType,
+                                        constant.Bits.Low,
+                                        constant.Bits.High),
+                                    method, formalRows, builtInRows,
+                                    depth + 1);
+                            }
                         }
+
+                        _typeSpecs.Add(TrRmTypeSpecTableWriter.Constructed(
+                            definitionRef, arguments));
+                        constructedTypeSpecRef
+                            = checked((uint)_typeSpecs.Count);
                     }
-                    _typeSpecs.Add(TrRmTypeSpecTableWriter.Constructed(
-                        definitionRef, arguments));
-                    return checked((uint)_typeSpecs.Count);
+
+                    if (term.IsOptional)
+                    {
+                        _typeSpecs.Add(TrRmTypeSpecTableWriter.Wrapped(0x06,
+                            constructedTypeSpecRef));
+                        return checked((uint)_typeSpecs.Count);
+                    }
+
+                    return constructedTypeSpecRef;
                 case BoundGenericMethodTypeTermKind.CheckedReference:
                 case BoundGenericMethodTypeTermKind.Span:
                     result = TypeTermRef(term.TypeArguments.Single(), method,
@@ -359,10 +391,11 @@ public static partial class TrRmExecutableCompiler
             }
             var instance = program.GenericNominalTypeInstances[
                 BoundGenericNominalTypeTypes.Index(type)];
-            if (instance.Qualifiers != 0 || instance.TypeSpecForm != 0)
+            if (instance.Qualifiers != 0
+                || instance.TypeSpecForm is not (0 or 0x06))
             {
                 throw Unsupported(
-                    "The G1 source writer does not emit qualified nominal wrappers.");
+                    "G1 source TypeSpecs support optional nominal wrappers only.");
             }
             var definitionRef = DefinitionReference(instance.Definition,
                 depth + 1);
@@ -373,9 +406,22 @@ public static partial class TrRmExecutableCompiler
                 throw Invalid(
                     "A G1 nominal construction has no exact formal declaration.");
             }
+            if (instance.TypeSpecForm == 0x06
+                && definition.NominalKind != 2)
+            {
+                throw Unsupported(
+                    "G1 optional nominal wrappers require a class TypeDef.");
+            }
             if (instance.Arguments.IsEmpty)
             {
-                return definitionRef;
+                if (instance.TypeSpecForm != 0x06)
+                {
+                    return definitionRef;
+                }
+
+                _typeSpecs.Add(TrRmTypeSpecTableWriter.Wrapped(0x06,
+                    definitionRef));
+                return checked((uint)_typeSpecs.Count);
             }
 
             var arguments = new uint[instance.Arguments.Length];
@@ -424,6 +470,14 @@ public static partial class TrRmExecutableCompiler
             }
             _typeSpecs.Add(TrRmTypeSpecTableWriter.Constructed(
                 definitionRef, arguments));
+            var constructedTypeSpecRef = checked((uint)_typeSpecs.Count);
+            if (instance.TypeSpecForm != 0x06)
+            {
+                return constructedTypeSpecRef;
+            }
+
+            _typeSpecs.Add(TrRmTypeSpecTableWriter.Wrapped(0x06,
+                constructedTypeSpecRef));
             return checked((uint)_typeSpecs.Count);
         }
 

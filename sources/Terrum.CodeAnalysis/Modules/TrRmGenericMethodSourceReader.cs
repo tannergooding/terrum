@@ -4065,15 +4065,45 @@ public static partial class TrRmExecutableCompiler
             if (reference.Qualifiers != 0)
             {
                 throw Unsupported(
-                    "G1 optional checked-reference wrappers do not admit outer qualifiers.");
+                    "G1 optional wrappers do not admit qualifiers on the optional node.");
             }
 
             var innerTypeSpecRef = BinaryPrimitives
                 .ReadUInt32LittleEndian(row.Slice(2, sizeof(uint)));
-            if (typeSpecs.GetTypeSpecRef(innerTypeSpecRef).Form != 0x07)
+            var innerReference
+                = typeSpecs.GetTypeSpecRef(innerTypeSpecRef);
+            var innerForm = innerReference.Form;
+            if (innerForm is 0x02 or 0x03 or 0x05)
+            {
+                if (innerReference.Qualifiers != 0)
+                {
+                    throw Unsupported(
+                        "G1 optional class handles do not preserve inner TypeSpec qualifiers.");
+                }
+
+                var optionalType = context.ReadGenericNominalTypeSpec(
+                    tables, artifactIndex, moduleRow, typeSpecRef,
+                    methodRow, formalTypes, formalRecords);
+                var optionalInstance
+                    = context.GenericNominalTypeInstances[
+                        BoundGenericNominalTypeTypes.Index(optionalType)];
+                if (!context.GenericNominalTypeDefinitions.Any(definition =>
+                        definition.Identity
+                            == optionalInstance.Definition
+                        && definition.NominalKind == 2))
+                {
+                    throw Unsupported(
+                        "G1 optional nominal wrappers are supported only for class TypeDefs.");
+                }
+
+                return new G1GenericTypeSpecResolution(optionalType, -1,
+                    false, false);
+            }
+
+            if (reference.Qualifiers != 0 || innerForm != 0x07)
             {
                 throw Unsupported(
-                    "G1 generic MethodDef imports support optional checked-reference wrappers only.");
+                    "G1 generic MethodDef imports support optional class handles and checked-reference wrappers only.");
             }
 
             var inner = ResolveGenericMethodTypeSpecCore(context,

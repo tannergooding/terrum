@@ -6014,6 +6014,27 @@ public static partial class TrRmExecutableCompiler
                 methodArtifactIndex, methodModuleRow, methodFormalRecords);
             if (argument.NominalTypeIdentity is null)
             {
+                if (argument.TypeSpecForm == 0x06
+                    && BoundGenericNominalTypeTypes.IsType(argument.Type))
+                {
+                    var innerInstance = instances[
+                        BoundGenericNominalTypeTypes.Index(argument.Type)];
+                    var innerDefinition = definitions.FirstOrDefault(
+                        definition => definition.Identity
+                            == innerInstance.Definition);
+                    if (innerDefinition is null
+                        || innerDefinition.NominalKind != 2)
+                    {
+                        throw Unsupported(
+                            "G1 optional nominal wrappers are supported only for class TypeDefs.");
+                    }
+
+                    return AddGenericNominalTypeInstance(
+                        innerInstance.Definition, innerInstance.Arguments,
+                        argument.Qualifiers, typeSpecRef, providerIdentity,
+                        0x06, instances, instanceByKey);
+                }
+
                 if (argument.TypeSpecForm != 0)
                 {
                     throw Unsupported(
@@ -6022,16 +6043,30 @@ public static partial class TrRmExecutableCompiler
                 return argument.Type;
             }
 
-            if (definitions.FirstOrDefault(definition =>
-                definition.Identity == argument.NominalTypeIdentity.Value) is not
-                { Formals.IsEmpty: true })
+            var nominalDefinition = definitions.FirstOrDefault(definition =>
+                definition.Identity == argument.NominalTypeIdentity.Value);
+            if (nominalDefinition is null
+                || !nominalDefinition.Formals.IsEmpty)
             {
                 throw new InvalidDataException(
                     "A complete TypeSpec cannot refer to an open generic nominal definition.");
             }
 
+            if (argument.TypeSpecForm == 0x06
+                && nominalDefinition.NominalKind != 2)
+            {
+                throw Unsupported(
+                    "G1 optional nominal wrappers are supported only for class TypeDefs.");
+            }
+            if (argument.TypeSpecForm is not (0 or 0x02 or 0x03 or 0x06))
+            {
+                throw Unsupported(
+                    "The generic nominal source-reference path cannot represent this complete signature TypeSpec.");
+            }
+
             return AddGenericNominalTypeInstance(argument.NominalTypeIdentity.Value,
-                [], typeSpec.Qualifiers, typeSpecRef, providerIdentity, 0,
+                [], argument.Qualifiers, typeSpecRef, providerIdentity,
+                argument.TypeSpecForm == 0x06 ? (byte)0x06 : (byte)0,
                 instances, instanceByKey);
         }
 
@@ -6623,18 +6658,28 @@ public static partial class TrRmExecutableCompiler
         if (argument.NominalTypeIdentity is
             BoundGenericNominalTypeIdentity nominalIdentity)
         {
+            if (argument.TypeSpecForm == 0x06
+                && definitions.FirstOrDefault(definition =>
+                    definition.Identity == nominalIdentity)?.NominalKind
+                    != 2)
+            {
+                return false;
+            }
+
             term = new BoundGenericMethodTypeTerm(
                 BoundGenericMethodTypeTermKind.ImportedGeneric,
                 PrimitiveType.Void, -1, -1, [],
                 false, false, false, false) {
                 NominalTypeIdentity = nominalIdentity,
+                IsOptional = argument.TypeSpecForm == 0x06,
             };
             return ApplyQualifiers(argument.Qualifiers, ref term);
         }
 
         if (argument.HasTypeFormalIdentity)
         {
-            if (formalTypeOwnerOrdinal
+            if (argument.TypeSpecForm == 0x06
+                || formalTypeOwnerOrdinal
                     != argument.TypeFormalDefinitionOrdinal
                 || formalTypes.IsDefault
                 || (uint)argument.TypeFormalOrdinal
@@ -6653,6 +6698,10 @@ public static partial class TrRmExecutableCompiler
 
         if (!formalTypes.IsDefault)
         {
+            if (argument.TypeSpecForm == 0x06)
+            {
+                return false;
+            }
             var formalOrdinal = formalTypes.IndexOf(argument.Type);
             if (formalOrdinal >= 0)
             {
@@ -6666,7 +6715,8 @@ public static partial class TrRmExecutableCompiler
 
         if (!BoundGenericNominalTypeTypes.IsType(argument.Type))
         {
-            if (argument.Type == PrimitiveType.Void)
+            if (argument.Type == PrimitiveType.Void
+                || argument.TypeSpecForm == 0x06)
             {
                 return false;
             }
@@ -6685,7 +6735,9 @@ public static partial class TrRmExecutableCompiler
         var definition = definitions.FirstOrDefault(candidate =>
             candidate.Identity == instance.Definition);
         if (definition is null || instance.Arguments.IsDefault
-            || definition.Formals.Length != instance.Arguments.Length)
+            || definition.Formals.Length != instance.Arguments.Length
+            || (instance.TypeSpecForm == 0x06
+                && definition.NominalKind != 2))
         {
             return false;
         }

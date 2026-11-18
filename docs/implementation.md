@@ -1547,9 +1547,13 @@ qualification remain open; see the
 G1 source TypeSpecs now encode and reconstruct GC-backed `ref<T>` and
 optional `ref<T>?` signatures/defaults, without selecting their runtime
 execution; a provider replacement with weakened GC default is rejected.
-Focused producer/import/forwarding and replacement regressions remain
-unverified under the active hold. Optional class
-handles/value types, GC execution, owner-type and role-2 nested substitution,
+Optional class handles in generic MethodSigs, type defaults and
+nullability-permitted TypeActuals now use the existing TypeSpec `0x06`
+wrapper, including selected source-free re-emission and provider-replacement
+checks. Focused producer/import/forwarding and replacement regressions remain
+unverified under the active hold. Optional wrappers nested as constructed
+nominal type arguments, optional value types, writable/GC-qualified nominal
+wrappers, GC execution, owner-type and role-2 nested substitution,
 interface/witness or associated-relation obligations and arbitrary Body
 control flow remain open.
 Full replacement closure, generic-import re-emission, private persistence and

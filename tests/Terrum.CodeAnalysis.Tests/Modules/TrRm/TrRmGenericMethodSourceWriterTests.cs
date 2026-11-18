@@ -2162,6 +2162,101 @@ internal sealed class TrRmGenericMethodSourceWriterTests
     }
 
     [Test]
+    public void ReemitsOptionalClassHandleInG1GenericMethodSignature()
+    {
+        const string providerIdentity = "g1.optional-class.provider";
+        const string outputIdentity = "g1.optional-class.reemitted";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public T Identity<T>(T value) { return move value; }
+            public T Forward<T>(T value) {
+                return Identity<T>(move value);
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        var exports = program.GenericMethodDefinitions.Select(definition =>
+            new TrRmSourceGenericMethodExport(program,
+                definition.SourceInputOrdinal, definition.Span,
+                definition.Name)).ToArray();
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            providerIdentity, GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), exports);
+        var optionalArtifact = AddConstructedGenericNominalMethodTypes(
+            artifact, optionalConstructedNominal: true);
+        var providerInput = new TrRmStandardArtifactInput(
+            GenericMethodCallsSchemaIdentity, optionalArtifact);
+        var reference
+            = TrRmExecutableCompiler.CreateGenericMethodCallsDraftReference(
+                optionalArtifact, providerIdentity);
+        var forward = reference.GenericMethodImports.Single(import =>
+            import.Origin.ExportKey == "Forward");
+        Assert.That(BoundGenericNominalTypeTypes.IsType(
+            forward.ProofFunction.ReturnType), Is.True);
+        Assert.That(forward.ProofFunction.Variables[0].Type,
+            Is.EqualTo(forward.ProofFunction.ReturnType));
+        var instance = reference.GenericNominalTypeInstances[
+            BoundGenericNominalTypeTypes.Index(
+                forward.ProofFunction.ReturnType)];
+        Assert.That(instance.TypeSpecForm, Is.EqualTo(0x06));
+        Assert.That(reference.GenericNominalTypeDefinitions.Single()
+            .NominalKind, Is.EqualTo(2));
+
+        var optionalValueArtifact = AddConstructedGenericNominalMethodTypes(
+            artifact, optionalConstructedNominal: true,
+            nominalTypeDefFlags: 0x06);
+        Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.CreateGenericMethodCallsDraftReference(
+                optionalValueArtifact, providerIdentity));
+
+        var sourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), reference);
+        Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceFreeCompilation.Diagnostics));
+        var sourceFreeProgram = sourceFreeCompilation.Program!;
+        var selection = new TrRmRetainedGenericMethodExport(
+            sourceFreeProgram, providerIdentity,
+            GenericMethodCallsSchemaIdentity,
+            ImmutableArray.CreateRange(
+                System.Security.Cryptography.SHA256.HashData(
+                    optionalArtifact)),
+            GetExportedMethodDefId(optionalArtifact, "Forward"),
+            "Forward", "ForwardOptional");
+        var reemitted = TrRmExecutableCompiler
+            .EmitStandardReemittingGenericMethods(sourceFreeProgram,
+                outputIdentity, GenericMethodCallsSchemaIdentity, 0,
+                [selection]);
+        var reemittedReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(
+                    GenericMethodCallsSchemaIdentity, reemitted),
+                outputIdentity, [providerInput]);
+        var reemittedForward = reemittedReference.GenericMethodImports
+            .Single(import => import.Origin.ExportKey == "ForwardOptional");
+        var reemittedInstance
+            = reemittedReference.GenericNominalTypeInstances[
+                BoundGenericNominalTypeTypes.Index(
+                    reemittedForward.ProofFunction.ReturnType)];
+        Assert.That(reemittedInstance.TypeSpecForm, Is.EqualTo(0x06));
+        Assert.That(reemittedReference.GenericNominalTypeDefinitions
+            .Single().NominalKind, Is.EqualTo(2));
+
+        var incompatibleProvider = AddConstructedGenericNominalMethodTypes(
+            artifact, optionalConstructedNominal: true,
+            includeDeclaredField: true, includeConstructedField: true);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(
+                    GenericMethodCallsSchemaIdentity, reemitted),
+                outputIdentity, [
+                    new TrRmStandardArtifactInput(
+                        GenericMethodCallsSchemaIdentity,
+                        incompatibleProvider),
+                ]));
+    }
+
+    [Test]
     public void MergesSpanFormalOwnersAcrossG1References()
     {
         static CompilationReference CreateReference(string provider,
@@ -5417,17 +5512,21 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                 ]));
     }
 
-    [Test]
-    public void ReemitsImportedConstructedNominalTypeDefault()
+    [TestCase(false)]
+    [TestCase(true)]
+    public void ReemitsImportedConstructedNominalTypeDefault(
+        bool optionalNominalDefault)
     {
         var typeProviderArtifact = CreateConstructedNominalSourceProvider();
         var typeProviderReference = TrRmExecutableCompiler
             .CreateGenericMethodCallsDraftReference(typeProviderArtifact,
                 "constructed-source.provider");
         var providerCompilation = Compilation.CreateLibrary(
-            SyntaxTree.Parse("""
+            SyntaxTree.Parse($$"""
                 using Example;
-                public int32 Identity<T, U = Box<T>>(int32 value) {
+                public int32 Identity<T, U = {{optionalNominalDefault
+                    ? "Box<T>?" : "Box<T>"}}>(int32 value)
+                    where U : null? {
                     return value;
                 }
                 """), typeProviderReference);
@@ -5490,6 +5589,8 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             = importedTarget.Binding!.Expected.Formals[1].TypeDefault!;
         Assert.That(expectedDefault.Term.Kind,
             Is.EqualTo(BoundGenericMethodTypeTermKind.ImportedGeneric));
+        Assert.That(expectedDefault.Term.IsOptional,
+            Is.EqualTo(optionalNominalDefault));
         Assert.That(expectedDefault.Term.NominalTypeIdentity!.Value
                 .ProviderIdentity,
             Is.EqualTo("constructed-source.provider"));
@@ -5505,6 +5606,8 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                     forwardedCall.ImportedGenericMethodTypeArguments[1])];
         Assert.That(defaultInstance.Definition.ModuleIdentity,
             Is.EqualTo("constructed-source.provider"));
+        Assert.That(defaultInstance.TypeSpecForm,
+            Is.EqualTo(optionalNominalDefault ? 0x06 : 0));
         Assert.That(defaultInstance.Arguments.Single()
                 .HasTypeFormalIdentity,
             Is.True);
@@ -5514,9 +5617,17 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                 .TypeFormalDefinitionOrdinal,
             Is.EqualTo(importedForward.FormalTypeOwnerOrdinal));
 
-        var replacementCompilation = Compilation.CreateLibrary(
-            SyntaxTree.Parse("""
-                public int32 Identity<T, U = T>(int32 value) {
+        var replacementCompilation = optionalNominalDefault
+            ? Compilation.CreateLibrary(SyntaxTree.Parse("""
+                using Example;
+                public int32 Identity<T, U = Box<T>>(int32 value)
+                    where U : null? {
+                    return value;
+                }
+                """), typeProviderReference)
+            : Compilation.CreateLibrary(SyntaxTree.Parse("""
+                public int32 Identity<T, U = T>(int32 value)
+                    where U : null? {
                     return value;
                 }
                 """));
@@ -5543,14 +5654,17 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                     typeProviderInput,
                 ]));
 
-        var entryCompilation = Compilation.Create(SyntaxTree.Parse(
-            "int32 Main() { return Forward<int32>(value: 42); }"),
-            forwarderReference);
-        Assert.That(entryCompilation.HasErrors, Is.False,
-            string.Join(Environment.NewLine,
-                entryCompilation.Diagnostics));
-        Assert.That(NativeJit.Execute(entryCompilation.Program!,
-            NativeRuntimePolicy.FailFast), Is.EqualTo(42));
+        if (!optionalNominalDefault)
+        {
+            var entryCompilation = Compilation.Create(SyntaxTree.Parse(
+                "int32 Main() { return Forward<int32>(value: 42); }"),
+                forwarderReference);
+            Assert.That(entryCompilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    entryCompilation.Diagnostics));
+            Assert.That(NativeJit.Execute(entryCompilation.Program!,
+                NativeRuntimePolicy.FailFast), Is.EqualTo(42));
+        }
     }
 
     [Test]
@@ -9299,6 +9413,8 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         bool importGenericMethodTarget = false,
         bool closedSpanOfInt32 = false,
         bool mixedConstantArguments = false,
+        bool optionalConstructedNominal = false,
+        uint nominalTypeDefFlags = 0x0A,
         bool includeDeclaredField = false,
         bool includeConstructedField = false)
     {
@@ -9532,6 +9648,14 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             boxDefinitionTypeSpec, mixedConstantArguments
                 ? [identityActualTypeSpec, 1, 0xF200_0009]
                 : [identityActualTypeSpec]));
+        if (optionalConstructedNominal)
+        {
+            var innerTypeSpec = identityConstructedTypeSpec;
+            identityConstructedTypeSpec = checked(
+                (uint)rewrittenTypeSpecRows.Count + 1);
+            rewrittenTypeSpecRows.Add(TrRmTypeSpecTableWriter.Wrapped(
+                0x06, innerTypeSpec));
+        }
         var forwardFormalTypeSpec = checked(
             (uint)rewrittenTypeSpecRows.Count + 1);
         rewrittenTypeSpecRows.Add(TrRmTypeSpecTableWriter.Reference(0x04,
@@ -9570,6 +9694,14 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             boxDefinitionTypeSpec, mixedConstantArguments
                 ? [forwardActualTypeSpec, 1, 0xF200_0009]
                 : [forwardActualTypeSpec]));
+        if (optionalConstructedNominal)
+        {
+            var innerTypeSpec = forwardConstructedTypeSpec;
+            forwardConstructedTypeSpec = checked(
+                (uint)rewrittenTypeSpecRows.Count + 1);
+            rewrittenTypeSpecRows.Add(TrRmTypeSpecTableWriter.Wrapped(
+                0x06, innerTypeSpec));
+        }
         var fieldTypeSpec = checked((uint)rewrittenTypeSpecRows.Count + 1);
         if (includeDeclaredField && includeConstructedField)
         {
@@ -9791,7 +9923,7 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         BinaryPrimitives.WriteUInt32LittleEndian(
             rewrittenTypeDef.AsSpan(4, 4), checked((uint)typeNameRow));
         BinaryPrimitives.WriteUInt32LittleEndian(
-            rewrittenTypeDef.AsSpan(8, 4), 0x0A);
+            rewrittenTypeDef.AsSpan(8, 4), nominalTypeDefFlags);
         BinaryPrimitives.WriteUInt32LittleEndian(
             rewrittenTypeDef.AsSpan(20, 4), 1);
         BinaryPrimitives.WriteUInt32LittleEndian(
