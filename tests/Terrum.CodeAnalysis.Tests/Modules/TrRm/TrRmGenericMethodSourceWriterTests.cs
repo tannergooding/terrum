@@ -5185,6 +5185,88 @@ internal sealed class TrRmGenericMethodSourceWriterTests
     }
 
     [Test]
+    public void RejectsIncompatibleCompositeSpanReferenceDefaultReplacement()
+    {
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                alias ReferenceSpan<T> = Span<ref<T>>;
+                public int32 Identity<T>(int32 value) {
+                    return value;
+                }
+                public int32 Use<T, U = ReferenceSpan<T>>(int32 value) {
+                    return Identity<U>(value);
+                }
+                """));
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerProgram = providerCompilation.Program!;
+        var providerExports = providerProgram.GenericMethodDefinitions
+            .Select(definition => new TrRmSourceGenericMethodExport(
+                providerProgram, definition.SourceInputOrdinal,
+                definition.Span, definition.Name))
+            .ToArray();
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, "span-default-replacement.provider",
+            GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), providerExports);
+        var providerReference = TrRmExecutableCompiler
+            .CreateGenericMethodCallsDraftReference(providerArtifact,
+                "span-default-replacement.provider");
+        var forwarderCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                public int32 Forward<T>(int32 value) {
+                    return Use<T>(value);
+                }
+                """), providerReference);
+        Assert.That(forwarderCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                forwarderCompilation.Diagnostics));
+        var forwarderProgram = forwarderCompilation.Program!;
+        var forward = forwarderProgram.GenericMethodDefinitions.Single();
+        var forwarderArtifact = TrRmExecutableCompiler.EmitStandard(
+            forwarderProgram, "span-default-replacement.forwarder",
+            GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), [
+                new(forwarderProgram, forward.SourceInputOrdinal,
+                    forward.Span, "Forward"),
+            ]);
+
+        var replacementCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                public int32 Identity<T>(int32 value) {
+                    return value;
+                }
+                public int32 Use<T, U = Span<T>>(int32 value) {
+                    return Identity<U>(value);
+                }
+                """));
+        Assert.That(replacementCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                replacementCompilation.Diagnostics));
+        var replacementProgram = replacementCompilation.Program!;
+        var replacementExports
+            = replacementProgram.GenericMethodDefinitions.Select(
+                definition => new TrRmSourceGenericMethodExport(
+                    replacementProgram, definition.SourceInputOrdinal,
+                    definition.Span, definition.Name)).ToArray();
+        var replacementArtifact = TrRmExecutableCompiler.EmitStandard(
+            replacementProgram, "span-default-replacement.provider",
+            GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), replacementExports);
+
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(
+                    GenericMethodCallsSchemaIdentity, forwarderArtifact),
+                "span-default-replacement.forwarder", [
+                    new TrRmStandardArtifactInput(
+                        GenericMethodCallsSchemaIdentity,
+                        replacementArtifact),
+                ]));
+    }
+
+    [Test]
     public void ReemitsImportedConstructedNominalTypeDefault()
     {
         var typeProviderArtifact = CreateConstructedNominalSourceProvider();
