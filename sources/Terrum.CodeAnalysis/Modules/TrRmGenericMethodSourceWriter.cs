@@ -667,6 +667,30 @@ public static partial class TrRmExecutableCompiler
         return true;
     }
 
+    private static bool IsSupportedGenericUnitArgument(
+        BoundExpression argument, BoundFunction function)
+    {
+        if (argument is BoundConstant {
+                Type: PrimitiveType.Void,
+            } constant)
+        {
+            return constant.TryGetLegacyValue(out var value)
+                && value == 0;
+        }
+
+        if (argument is not BoundRead read
+            || (uint)read.Variable >= (uint)function.ParameterCount)
+        {
+            return false;
+        }
+
+        var variable = function.Variables[read.Variable];
+        return read.Type == PrimitiveType.Void
+            && variable.Type == PrimitiveType.Void
+            && !variable.IsMutable && !variable.IsOut && !variable.IsInit
+            && !variable.IsImplicitRef;
+    }
+
     private static bool TryGetGenericMethodForwardingChain(
         BoundFunction function,
         out ImmutableArray<GenericMethodForwardingCall> calls)
@@ -1027,6 +1051,34 @@ public static partial class TrRmExecutableCompiler
             var formalIndex = genericCall.ArgumentParameterIndices.IsDefault
                 ? argumentIndex
                 : genericCall.ArgumentParameterIndices[argumentIndex];
+            if ((uint)formalIndex >= (uint)inputs.Length
+                || formalParameters[formalIndex])
+            {
+                throw Unsupported(
+                    $"Generic MethodDef '{definition.Name}' has a duplicate or invalid call input.");
+            }
+
+            if (argument.Type == PrimitiveType.Void)
+            {
+                if (!IsSupportedGenericUnitArgument(argument, function)
+                    || !GenericMethodTypeMatchesAfterSubstitution(
+                        target.Variables[formalIndex].Type, argument.Type,
+                        targetDefinition, definition, call.TypeArguments, 0)
+                    || target.Variables[formalIndex].IsMutable
+                    || target.Variables[formalIndex].IsOut
+                    || target.Variables[formalIndex].IsInit
+                    || target.Variables[formalIndex].IsImplicitRef)
+                {
+                    throw Unsupported(
+                        $"Generic MethodDef '{definition.Name}' has a unit call input outside the exact None-selector subset.");
+                }
+
+                formalParameters[formalIndex] = true;
+                inputs[formalIndex] = new TrRmRegisterBodyCallInput(
+                    0, 0, 0);
+                continue;
+            }
+
             var (argumentVariable, sourceUse) = argument switch
             {
                 BoundRead read => (read.Variable, (byte)1),
@@ -1035,9 +1087,7 @@ public static partial class TrRmExecutableCompiler
                     => (read.Variable, (byte)5),
                 _ => (-1, (byte)0),
             };
-            if ((uint)formalIndex >= (uint)inputs.Length
-                || formalParameters[formalIndex]
-                || sourceUse == 0
+            if (sourceUse == 0
                 || (uint)argumentVariable >= (uint)function.ParameterCount
                 || function.Variables[argumentVariable].Type != argument.Type
                 || !GenericMethodTypeMatchesAfterSubstitution(
@@ -1097,8 +1147,18 @@ public static partial class TrRmExecutableCompiler
             }
 
             formalParameters[formalIndex] = true;
+            var homeIndex = 0;
+            for (var parameter = 0; parameter < argumentVariable;
+                parameter++)
+            {
+                if (function.Variables[parameter].Type
+                    != PrimitiveType.Void)
+                {
+                    homeIndex++;
+                }
+            }
             inputs[formalIndex] = new TrRmRegisterBodyCallInput(
-                2, sourceUse, checked((ushort)argumentVariable));
+                2, sourceUse, checked((ushort)homeIndex));
         }
 
         if (formalParameters.Any(static assigned => !assigned)
@@ -1127,32 +1187,43 @@ public static partial class TrRmExecutableCompiler
                     allowSpanType: true, nominalTypes: nominalTypes));
         }
 
-        var homeCount = function.ParameterCount
-            + (targetDoesNotReturn || isUnitCall ? 0 : 1);
-        var homeMap = new byte[checked(homeCount * 8)];
+        var homeRows = new List<byte[]>(function.ParameterCount + 1);
         for (var parameter = 0; parameter < function.ParameterCount;
             parameter++)
         {
-            var offset = parameter * 8;
-            homeMap[offset] = 2;
+            var parameterType = function.Variables[parameter].Type;
+            if (parameterType == PrimitiveType.Void)
+            {
+                continue;
+            }
+
+            var home = new byte[8];
+            home[0] = 2;
             BinaryPrimitives.WriteUInt16LittleEndian(
-                homeMap.AsSpan(offset + 2),
-                typeMap.GetIndex(GetBodyTypeToken(
-                    function.Variables[parameter].Type)));
+                home.AsSpan(2),
+                typeMap.GetIndex(GetBodyTypeToken(parameterType)));
             BinaryPrimitives.WriteUInt16LittleEndian(
-                homeMap.AsSpan(offset + 4), checked((ushort)parameter));
+                home.AsSpan(4), checked((ushort)parameter));
+            homeRows.Add(home);
         }
 
         ushort resultHome = 0;
         if (!targetDoesNotReturn && !isUnitCall)
         {
-            resultHome = checked((ushort)function.ParameterCount);
-            var resultOffset = resultHome * 8;
-            homeMap[resultOffset] = 3;
-            homeMap[resultOffset + 1] = 1;
+            resultHome = checked((ushort)homeRows.Count);
+            var result = new byte[8];
+            result[0] = 3;
+            result[1] = 1;
             BinaryPrimitives.WriteUInt16LittleEndian(
-                homeMap.AsSpan(resultOffset + 2),
+                result.AsSpan(2),
                 typeMap.GetIndex(GetBodyTypeToken(function.ReturnType)));
+            homeRows.Add(result);
+        }
+
+        var homeMap = new byte[checked(homeRows.Count * 8)];
+        for (var homeIndex = 0; homeIndex < homeRows.Count; homeIndex++)
+        {
+            homeRows[homeIndex].CopyTo(homeMap, homeIndex * 8);
         }
 
         var targetMethodMap = new TrRmRegisterBodyTokenMapBuilder();
@@ -1197,8 +1268,7 @@ public static partial class TrRmExecutableCompiler
                         $"Generic MethodDef '{definition.Name}' forwards a caller formal without the target domain or property obligations.");
                 }
             }
-            else if (actual == PrimitiveType.Void
-                || targetFormal.OwnershipDomain == 2
+            else if (targetFormal.OwnershipDomain == 2
                 || targetFormal.RequiresWritable
                 || !targetFormal.InterfaceConstraints.IsEmpty)
             {
@@ -1373,11 +1443,17 @@ public static partial class TrRmExecutableCompiler
         for (var parameter = 0; parameter < function.ParameterCount;
             parameter++)
         {
+            var parameterType = function.Variables[parameter].Type;
+            if (parameterType == PrimitiveType.Void)
+            {
+                continue;
+            }
+
             var home = new byte[8];
             home[0] = 2;
             BinaryPrimitives.WriteUInt16LittleEndian(
                 home.AsSpan(2), typeMap.GetIndex(GetBodyTypeToken(
-                    function.Variables[parameter].Type)));
+                    parameterType)));
             BinaryPrimitives.WriteUInt16LittleEndian(
                 home.AsSpan(4), checked((ushort)parameter));
             homeIndicesByVariable[parameter] = homeRows.Count;
@@ -1441,9 +1517,37 @@ public static partial class TrRmExecutableCompiler
                         ? argumentIndex
                         : genericCall.ArgumentParameterIndices[
                             argumentIndex];
+                if ((uint)formalIndex >= (uint)inputs.Length
+                    || assignedParameters[formalIndex])
+                {
+                    throw Unsupported(
+                        $"Generic MethodDef '{definition.Name}' has a duplicate or invalid call-chain input.");
+                }
+
+                if (argument.Type == PrimitiveType.Void)
+                {
+                    if (!IsSupportedGenericUnitArgument(argument, function)
+                        || !GenericMethodTypeMatchesAfterSubstitution(
+                            target.Function.Variables[formalIndex].Type,
+                            argument.Type, targetDefinition, definition,
+                            call.TypeArguments, 0)
+                        || target.Function.Variables[formalIndex].IsMutable
+                        || target.Function.Variables[formalIndex].IsOut
+                        || target.Function.Variables[formalIndex].IsInit
+                        || target.Function.Variables[formalIndex]
+                            .IsImplicitRef)
+                    {
+                        throw Unsupported(
+                            $"Generic MethodDef '{definition.Name}' has a unit call-chain input outside the exact None-selector subset.");
+                    }
+
+                    assignedParameters[formalIndex] = true;
+                    inputs[formalIndex] = new TrRmRegisterBodyCallInput(
+                        0, 0, 0);
+                    continue;
+                }
+
                 if (argument is not BoundRead read
-                    || (uint)formalIndex >= (uint)inputs.Length
-                    || assignedParameters[formalIndex]
                     || (uint)read.Variable
                         >= (uint)(target.ResultVariable < 0
                             ? function.Variables.Length
@@ -1549,8 +1653,7 @@ public static partial class TrRmExecutableCompiler
                             $"Generic MethodDef '{definition.Name}' forwards a caller formal without satisfying the target domain.");
                     }
                 }
-                else if (actual == PrimitiveType.Void
-                    || formal.OwnershipDomain == 2
+                else if (formal.OwnershipDomain == 2
                     || formal.RequiresWritable)
                 {
                     throw Unsupported(

@@ -2128,16 +2128,43 @@ public static partial class TrRmExecutableCompiler
         for (var ordinal = 0; ordinal < parameterCount; ordinal++)
         {
             var inputOffset = 16 + (ordinal * 4);
+            var selectorKind = callSitePayload[inputOffset];
             var sourceUse = callSitePayload[inputOffset + 1];
-            if (callSitePayload[inputOffset] != 2
-                || sourceUse is not (1 or 2 or 5))
+            var selectorIndex = BinaryPrimitives.ReadUInt16LittleEndian(
+                callSitePayload.Slice(inputOffset + 2, 2));
+            var targetParameterType = targetImport.ProofFunction
+                .Variables[ordinal].Type;
+            if (!TrySubstituteGenericMethodType(
+                    targetParameterType, targetFormalTypes, actualTypes,
+                    actualTypeMetadata, targetImport, context,
+                    artifactIndex, callerMethodRow, callerFormalTypes,
+                    callerFormalTypeOwnerOrdinal, 0,
+                    out targetParameterType))
+            {
+                throw Unsupported(
+                    "The G1 GenericCall parameter type uses an unsupported substitution term.");
+            }
+
+            if (targetParameterType == PrimitiveType.Void)
+            {
+                if (selectorKind != 0 || sourceUse != 0 || selectorIndex != 0)
+                {
+                    throw Invalid(
+                        "A unit GenericCall input must use the exact None selector.");
+                }
+
+                arguments.Add(new BoundConstant(0, PrimitiveType.Void,
+                    default));
+                continue;
+            }
+
+            if (selectorKind != 2 || sourceUse is not (1 or 2 or 5))
             {
                 throw Unsupported(
                     "The G1 consumer currently supports copy or ownership-transfer parameter-Home GenericCall inputs only.");
             }
 
-            var homeIndex = BinaryPrimitives.ReadUInt16LittleEndian(
-                callSitePayload.Slice(inputOffset + 2, 2));
+            var homeIndex = selectorIndex;
             if ((uint)homeIndex >= (uint)body.HomeCount)
             {
                 throw Invalid(
@@ -2151,19 +2178,6 @@ public static partial class TrRmExecutableCompiler
             {
                 throw Invalid(
                     "A GenericCall input does not select a caller parameter Home.");
-            }
-
-            var targetParameterType = targetImport.ProofFunction
-                .Variables[ordinal].Type;
-            if (!TrySubstituteGenericMethodType(
-                    targetParameterType, targetFormalTypes, actualTypes,
-                    actualTypeMetadata, targetImport, context,
-                    artifactIndex, callerMethodRow,
-                    callerFormalTypes, callerFormalTypeOwnerOrdinal, 0,
-                    out targetParameterType))
-            {
-                throw Unsupported(
-                    "The G1 GenericCall parameter type uses an unsupported substitution term.");
             }
 
             var descriptorRead = new BoundRead(parameterOrdinal,
@@ -2618,14 +2632,39 @@ public static partial class TrRmExecutableCompiler
             var inputOffset = 16 + (ordinal * 4);
             var selectorKind = callSitePayload[inputOffset];
             var sourceUse = callSitePayload[inputOffset + 1];
+            var homeIndex = BinaryPrimitives.ReadUInt16LittleEndian(
+                callSitePayload.Slice(inputOffset + 2, 2));
+            var targetParameterType = targetImport.ProofFunction
+                .Variables[ordinal].Type;
+            if (!TrySubstituteGenericMethodType(targetParameterType,
+                    targetFormalTypes, actualTypes, actualTypeMetadata,
+                    targetImport, context, artifactIndex, callerMethodRow,
+                    callerFormals, callerFormalTypeOwnerOrdinal, 0,
+                    out targetParameterType))
+            {
+                throw Unsupported(
+                    "The G1 GenericCall parameter type uses an unsupported substitution term.");
+            }
+
+            if (targetParameterType == PrimitiveType.Void)
+            {
+                if (selectorKind != 0 || sourceUse != 0 || homeIndex != 0)
+                {
+                    throw Invalid(
+                        "A unit GenericCall input must use the exact None selector.");
+                }
+
+                arguments.Add(new BoundConstant(0, PrimitiveType.Void,
+                    default));
+                continue;
+            }
+
             if (selectorKind != 2 || sourceUse != 1)
             {
                 throw Unsupported(
                     "The G1 multi-call consumer supports Copy parameter-Home inputs only.");
             }
 
-            var homeIndex = BinaryPrimitives.ReadUInt16LittleEndian(
-                callSitePayload.Slice(inputOffset + 2, 2));
             if ((uint)homeIndex >= (uint)body.HomeCount)
             {
                 throw Invalid(
@@ -2648,17 +2687,6 @@ public static partial class TrRmExecutableCompiler
             }
 
             var argumentType = callerVariables[variable].Type;
-            var targetParameterType = targetImport.ProofFunction
-                .Variables[ordinal].Type;
-            if (!TrySubstituteGenericMethodType(targetParameterType,
-                    targetFormalTypes, actualTypes, actualTypeMetadata,
-                    targetImport, context, artifactIndex, callerMethodRow,
-                    callerFormals, callerFormalTypeOwnerOrdinal, 0,
-                    out targetParameterType))
-            {
-                throw Unsupported(
-                    "The G1 GenericCall parameter type uses an unsupported substitution term.");
-            }
             if (argumentType != targetParameterType)
             {
                 throw Invalid(

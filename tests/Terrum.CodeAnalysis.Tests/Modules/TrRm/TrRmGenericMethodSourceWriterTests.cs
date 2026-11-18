@@ -3877,10 +3877,9 @@ internal sealed class TrRmGenericMethodSourceWriterTests
     {
         var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             """
-            void Complete<T>(T value) where T : [Blittable] { return; }
-            public void Forward<T>(T callerArgument)
-                where T : [Blittable] {
-                Complete<T>(callerArgument);
+            void Complete<T>(T value, void token) { return; }
+            public void Forward<T>() where T : [Blittable] {
+                Complete<void>((), ());
                 return;
             }
             """), new CompilationOptions {
@@ -3905,7 +3904,7 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             .CreateGenericMethodCallsDraftReference(providerArtifact,
                 "forward-unit.provider", "Forward");
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse(
-            "int32 Main() { Forward<int32>(callerArgument: 42); return 42; }"),
+            "int32 Main() { Forward<int32>(); return 42; }"),
             reference,
             new CompilationOptions {
                 LayoutCoreRegistration =
@@ -3924,12 +3923,14 @@ internal sealed class TrRmGenericMethodSourceWriterTests
     {
         var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             """
-            T Identity<T>(T value) where T : [Blittable] { return value; }
-            void Complete<T>(T value) where T : [Blittable] { return; }
+            T Identity<T>(T value, void token)
+                where T : [Blittable] { return value; }
+            void Complete<T>(T value, void token)
+                where T : [Blittable] { return; }
             public void Forward<T>(T callerArgument)
                 where T : [Blittable] {
-                T intermediate = Identity<T>(callerArgument);
-                Complete<T>(intermediate);
+                T intermediate = Identity<T>(callerArgument, ());
+                Complete<T>(intermediate, ());
                 return;
             }
             """), new CompilationOptions {
