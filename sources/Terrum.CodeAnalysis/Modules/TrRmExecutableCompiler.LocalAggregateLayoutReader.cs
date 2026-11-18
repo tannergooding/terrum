@@ -5077,6 +5077,9 @@ public static partial class TrRmExecutableCompiler
         }
 
         var loops = loopsByHeader.Values.ToArray();
+        var exitTargetSetsByHeader = loops.ToDictionary(
+            static loop => loop.Header,
+            static loop => loop.ExitTargets.ToHashSet());
         var remainingLoopValidationWork
             = (long)SemanticVerifier.MaximumAnalysisVisits;
         for (var leftIndex = 0; leftIndex < loops.Length; leftIndex++)
@@ -5208,8 +5211,124 @@ public static partial class TrRmExecutableCompiler
             return join;
         }
 
+        var normalLoopExitTargetByHeader = new Dictionary<int, int>();
+        int GetNormalLoopExitTarget(LocalAggregateLayoutLoop loop,
+            IReadOnlyList<LocalAggregateLayoutLoop> outerLoops)
+        {
+            if (normalLoopExitTargetByHeader.TryGetValue(loop.Header,
+                    out var existingExitTarget))
+            {
+                return existingExitTarget;
+            }
+
+            if (outerLoops.Count == 0)
+            {
+                if (loop.ExitTargets.Length != 1)
+                {
+                    throw Unsupported(
+                        "The L1 top-level loop has multiple exit targets.");
+                }
+
+                normalLoopExitTargetByHeader.Add(loop.Header,
+                    loop.ExitTargets[0]);
+                return loop.ExitTargets[0];
+            }
+
+            var normalExitTarget = -1;
+            foreach (var target in loop.ExitTargets)
+            {
+                var isEnclosingTransfer = false;
+                foreach (var outerLoop in outerLoops)
+                {
+                    if (target == outerLoop.Header
+                        || exitTargetSetsByHeader[outerLoop.Header]
+                            .Contains(target))
+                    {
+                        isEnclosingTransfer = true;
+                        break;
+                    }
+                }
+
+                if (isEnclosingTransfer)
+                {
+                    continue;
+                }
+
+                if (outerLoops[0].Members.Contains(target)
+                    && !loop.Members.Contains(target)
+                    && normalExitTarget < 0)
+                {
+                    normalExitTarget = target;
+                    continue;
+                }
+
+                throw Unsupported(
+                    "The L1 nested loop has an unstructured or ambiguous exit target.");
+            }
+
+            if (normalExitTarget < 0)
+            {
+                throw Unsupported(
+                    "The L1 nested loop has no normal continuation within its parent loop.");
+            }
+
+            normalLoopExitTargetByHeader.Add(loop.Header,
+                normalExitTarget);
+            return normalExitTarget;
+        }
+
+        BoundStatement CreateLoopExitTransfer(
+            LocalAggregateLayoutLoop loop, int target,
+            IReadOnlyList<LocalAggregateLayoutLoop> outerLoops)
+        {
+            if (outerLoops.Count == 0)
+            {
+                if (loop.ExitTargets.Length == 1
+                    && target == loop.ExitTargets[0])
+                {
+                    return new BoundBreak(default);
+                }
+
+                throw Unsupported(
+                    "An L1 top-level loop edge leaves through an unstructured continuation.");
+            }
+
+            var normalExitTarget = GetNormalLoopExitTarget(loop,
+                outerLoops);
+            for (var index = 0; index < outerLoops.Count; index++)
+            {
+                var outerLoop = outerLoops[index];
+                var targetDepth = index + 2;
+                if (target == outerLoop.Header)
+                {
+                    return new BoundContinue(default) {
+                        TargetDepth = targetDepth,
+                    };
+                }
+
+                if (exitTargetSetsByHeader[outerLoop.Header]
+                    .Contains(target))
+                {
+                    return new BoundBreak(default) {
+                        TargetDepth = targetDepth,
+                    };
+                }
+            }
+
+            if (outerLoops[0].Members.Contains(target)
+                && !loop.Members.Contains(target)
+                && target == normalExitTarget)
+            {
+                return new BoundBreak(default);
+            }
+
+            throw Unsupported(
+                "An L1 nested loop edge leaves through an unstructured continuation.");
+        }
+
         ImmutableArray<BoundStatement> BuildPath(int start, int stop,
-            int depth, LocalAggregateLayoutLoop? activeLoop)
+            int depth, LocalAggregateLayoutLoop? activeLoop,
+            IReadOnlyList<LocalAggregateLayoutLoop> outerLoops)
         {
             if (start == stop
                 || (activeLoop is not null
@@ -5221,21 +5340,24 @@ public static partial class TrRmExecutableCompiler
             if (activeLoop is not null
                 && !activeLoop.Members.Contains(start))
             {
-                if (activeLoop.ExitTargets.Length == 1
-                    && start == activeLoop.ExitTargets[0])
-                {
-                    return [new BoundBreak(default)];
-                }
-
-                throw Unsupported(
-                    "An L1 loop edge leaves through an unstructured continuation.");
+                return [CreateLoopExitTransfer(activeLoop, start,
+                    outerLoops)];
             }
 
             if (loopsByHeader.TryGetValue(start, out var nestedLoop)
                 && (activeLoop is null
                     || nestedLoop.Header != activeLoop.Header))
             {
-                return BuildLoop(nestedLoop, stop, depth, activeLoop);
+                var nestedOuterLoops
+                    = new List<LocalAggregateLayoutLoop>(
+                        outerLoops.Count + (activeLoop is null ? 0 : 1));
+                if (activeLoop is not null)
+                {
+                    nestedOuterLoops.Add(activeLoop);
+                }
+                nestedOuterLoops.AddRange(outerLoops);
+                return BuildLoop(nestedLoop, stop, depth, activeLoop,
+                    nestedOuterLoops);
             }
 
             if ((uint)start >= (uint)blocks.Length
@@ -5263,22 +5385,15 @@ public static partial class TrRmExecutableCompiler
                 if (activeLoop is not null
                     && !activeLoop.Members.Contains(block.JumpTarget))
                 {
-                    if (activeLoop.ExitTargets.Length != 1
-                        || block.JumpTarget
-                            != activeLoop.ExitTargets[0])
-                    {
-                        throw Unsupported(
-                            "An L1 loop has multiple or unstructured exit targets.");
-                    }
-
-                    statements.Add(new BoundBreak(default));
+                    statements.Add(CreateLoopExitTransfer(activeLoop,
+                        block.JumpTarget, outerLoops));
                 }
                 else if (block.JumpTarget != stop
                     && (activeLoop is null
                         || block.JumpTarget != activeLoop.Header))
                 {
                     statements.AddRange(BuildPath(block.JumpTarget, stop,
-                        depth + 1, activeLoop));
+                        depth + 1, activeLoop, outerLoops));
                 }
 
                 _ = activeBlocks.Remove(start);
@@ -5295,26 +5410,18 @@ public static partial class TrRmExecutableCompiler
                         = !activeLoop.Members.Contains(block.FalseTarget);
                     if (trueOutside || falseOutside)
                     {
-                        if (activeLoop.ExitTargets.Length != 1
-                            || (trueOutside && block.TrueTarget
-                                != activeLoop.ExitTargets[0])
-                            || (falseOutside && block.FalseTarget
-                                != activeLoop.ExitTargets[0]))
-                        {
-                            throw Unsupported(
-                                "An L1 loop has multiple or unstructured exit targets.");
-                        }
-
                         var truePath = trueOutside
-                            ? [new BoundBreak(default)]
+                            ? [CreateLoopExitTransfer(activeLoop,
+                                block.TrueTarget, outerLoops)]
                             : BuildPath(block.TrueTarget,
                                 activeLoop.Header, depth + 1,
-                                activeLoop);
+                                activeLoop, outerLoops);
                         var falsePath = falseOutside
-                            ? [new BoundBreak(default)]
+                            ? [CreateLoopExitTransfer(activeLoop,
+                                block.FalseTarget, outerLoops)]
                             : BuildPath(block.FalseTarget,
                                 activeLoop.Header, depth + 1,
-                                activeLoop);
+                                activeLoop, outerLoops);
                         statements.Add(new BoundIf(condition,
                             new BoundBlock(truePath, default),
                             new BoundBlock(falsePath, default), default));
@@ -5331,9 +5438,9 @@ public static partial class TrRmExecutableCompiler
                     }
 
                     var loopWhenTrue = BuildPath(block.TrueTarget,
-                        loopJoin, depth + 1, activeLoop);
+                        loopJoin, depth + 1, activeLoop, outerLoops);
                     var loopWhenFalse = BuildPath(block.FalseTarget,
-                        loopJoin, depth + 1, activeLoop);
+                        loopJoin, depth + 1, activeLoop, outerLoops);
                     statements.Add(new BoundIf(condition,
                         new BoundBlock(loopWhenTrue, default),
                         new BoundBlock(loopWhenFalse, default), default));
@@ -5341,7 +5448,7 @@ public static partial class TrRmExecutableCompiler
                         && loopJoin != stop)
                     {
                         statements.AddRange(BuildPath(loopJoin, stop,
-                            depth + 1, activeLoop));
+                            depth + 1, activeLoop, outerLoops));
                     }
 
                     _ = activeBlocks.Remove(start);
@@ -5351,16 +5458,16 @@ public static partial class TrRmExecutableCompiler
                 var join = FindCommonJoin(block.TrueTarget,
                     block.FalseTarget, allowedBlocks: null);
                 var whenTrue = BuildPath(block.TrueTarget, join,
-                    depth + 1, activeLoop: null);
+                    depth + 1, activeLoop: null, outerLoops: []);
                 var whenFalse = BuildPath(block.FalseTarget, join,
-                    depth + 1, activeLoop: null);
+                    depth + 1, activeLoop: null, outerLoops: []);
                 statements.Add(new BoundIf(condition,
                     new BoundBlock(whenTrue, default),
                     new BoundBlock(whenFalse, default), default));
                 if (join >= 0 && join != stop)
                 {
                     statements.AddRange(BuildPath(join, stop,
-                        depth + 1, activeLoop: null));
+                        depth + 1, activeLoop: null, outerLoops: []));
                 }
 
                 _ = activeBlocks.Remove(start);
@@ -5372,17 +5479,19 @@ public static partial class TrRmExecutableCompiler
 
         ImmutableArray<BoundStatement> BuildLoop(
             LocalAggregateLayoutLoop loop, int stop, int depth,
-            LocalAggregateLayoutLoop? parentLoop)
+            LocalAggregateLayoutLoop? parentLoop,
+            IReadOnlyList<LocalAggregateLayoutLoop> outerLoops)
         {
-            if (loop.ExitTargets.Length > 1
-                || depth > SemanticVerifier.MaximumDepth
+            if (depth > SemanticVerifier.MaximumDepth
                 || !activeBlocks.Add(loop.Header)
                 || !visitedBlocks.Add(loop.Header))
             {
                 throw Unsupported(
-                    "The L1 loop is irreducible or has unsupported nesting/exit structure.");
+                    "The L1 loop is irreducible or exceeds structured reconstruction bounds.");
             }
 
+            var normalExitTarget
+                = GetNormalLoopExitTarget(loop, outerLoops);
             var header = blocks[loop.Header];
             var loopStatements
                 = ImmutableArray.CreateBuilder<BoundStatement>(
@@ -5404,21 +5513,16 @@ public static partial class TrRmExecutableCompiler
                         ? header.TrueTarget : header.FalseTarget;
                     var exitTarget = trueInside
                         ? header.FalseTarget : header.TrueTarget;
-                    if (loop.ExitTargets.Length != 1
-                        || exitTarget != loop.ExitTargets[0])
-                    {
-                        throw Unsupported(
-                            "An L1 loop header does not have one exact exit target.");
-                    }
-
                     var bodyPath = BuildPath(bodyTarget, loop.Header,
-                        depth + 1, loop);
+                        depth + 1, loop, outerLoops);
+                    var exitTransfer = CreateLoopExitTransfer(loop,
+                        exitTarget, outerLoops);
                     var whenTrue = trueInside
                         ? new BoundBlock(bodyPath, default)
-                        : new BoundBlock([new BoundBreak(default)], default);
+                        : new BoundBlock([exitTransfer], default);
                     var whenFalse = falseInside
                         ? new BoundBlock(bodyPath, default)
-                        : new BoundBlock([new BoundBreak(default)], default);
+                        : new BoundBlock([exitTransfer], default);
                     loopStatements.Add(new BoundIf(condition, whenTrue,
                         whenFalse, default));
                 }
@@ -5433,39 +5537,29 @@ public static partial class TrRmExecutableCompiler
                     }
 
                     var whenTrue = BuildPath(header.TrueTarget, join,
-                        depth + 1, loop);
+                        depth + 1, loop, outerLoops);
                     var whenFalse = BuildPath(header.FalseTarget, join,
-                        depth + 1, loop);
+                        depth + 1, loop, outerLoops);
                     loopStatements.Add(new BoundIf(condition,
                         new BoundBlock(whenTrue, default),
                         new BoundBlock(whenFalse, default), default));
                     if (join != loop.Header)
                     {
                         loopStatements.AddRange(BuildPath(join,
-                            loop.Header, depth + 1, loop));
+                            loop.Header, depth + 1, loop, outerLoops));
                     }
                 }
                 else
                 {
-                    if (loop.ExitTargets.Length != 1
-                        || header.TrueTarget != loop.ExitTargets[0]
-                        || header.FalseTarget != loop.ExitTargets[0])
-                    {
-                        throw Unsupported(
-                            "An L1 loop header has no internal successor or has multiple exits.");
-                    }
-
-                    loopStatements.Add(new BoundIf(condition,
-                        new BoundBlock([new BoundBreak(default)], default),
-                        new BoundBlock([new BoundBreak(default)], default),
-                        default));
+                    throw Unsupported(
+                        "An L1 loop header has no internal successor.");
                 }
             }
             else if (header.JumpTarget >= 0
                 && loop.Members.Contains(header.JumpTarget))
             {
                 loopStatements.AddRange(BuildPath(header.JumpTarget,
-                    loop.Header, depth + 1, loop));
+                    loop.Header, depth + 1, loop, outerLoops));
             }
             else
             {
@@ -5481,17 +5575,20 @@ public static partial class TrRmExecutableCompiler
                 default));
             _ = activeBlocks.Remove(loop.Header);
 
-            if (loop.ExitTargets.Length == 1
-                && loop.ExitTargets[0] != stop)
+            if (normalExitTarget != stop)
             {
-                result.AddRange(BuildPath(loop.ExitTargets[0], stop,
-                    depth + 1, parentLoop));
+                var parentOuterLoops = outerLoops.Count <= 1
+                    ? Array.Empty<LocalAggregateLayoutLoop>()
+                    : outerLoops.Skip(1).ToArray();
+                result.AddRange(BuildPath(normalExitTarget, stop,
+                    depth + 1, parentLoop, parentOuterLoops));
             }
 
             return result.ToImmutable();
         }
 
-        var body = BuildPath(0, -1, 0, activeLoop: null);
+        var body = BuildPath(0, -1, 0, activeLoop: null,
+            outerLoops: []);
         if (visitedBlocks.Count != blocks.Length)
         {
             throw Invalid(

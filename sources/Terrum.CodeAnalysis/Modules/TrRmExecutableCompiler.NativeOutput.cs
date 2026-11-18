@@ -2002,25 +2002,26 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 case BoundBreak exit:
-                    if (exit.TargetDepth != 1
-                        || loopTargets.Count == 0)
+                    if (exit.TargetDepth <= 0
+                        || exit.TargetDepth > loopTargets.Count)
                     {
                         throw Unsupported(
-                            "A direct NativeOutput break must target the nearest emitted while loop.");
+                            "A direct NativeOutput break must target an emitted while loop.");
                     }
 
-                    AppendBranch(loopTargets[^1].BreakBlock);
+                    AppendBranch(loopTargets[^exit.TargetDepth].BreakBlock);
                     return true;
 
                 case BoundContinue continuation:
-                    if (continuation.TargetDepth != 1
-                        || loopTargets.Count == 0)
+                    if (continuation.TargetDepth <= 0
+                        || continuation.TargetDepth > loopTargets.Count)
                     {
                         throw Unsupported(
-                            "A direct NativeOutput continue must target the nearest emitted while loop.");
+                            "A direct NativeOutput continue must target an emitted while loop.");
                     }
 
-                    AppendBranch(loopTargets[^1].ContinueBlock);
+                    AppendBranch(
+                        loopTargets[^continuation.TargetDepth].ContinueBlock);
                     return true;
 
                 case BoundExpressionStatement {

@@ -2936,6 +2936,79 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             Is.GreaterThan(0));
     }
 
+    [TestCase("trrm/1-draft-foreign-invocation-contracts-1")]
+    [TestCase("trrm/1-draft-foreign-invocation-storage-addresses-1")]
+    public void StandardDirectNativeOutputCallsRoundTripNamedOuterLoopTransfers(
+        string schemaIdentity)
+    {
+        const string moduleIdentity = "native-output-named-outer-loop";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll", "QueryPerformanceCounter")]
+            extern int32 QueryPerformanceCounter(
+                [Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<int64> ticks);
+
+            public int32 Probe(bool repeat, bool enterMiddle,
+                bool enterInner, bool leaveOuter, bool leaveMiddle) {
+                outer: while (repeat) {
+                    middle: while (enterMiddle) {
+                        while (enterInner) {
+                            if (leaveOuter) { break outer; }
+                            if (leaveMiddle) { break middle; }
+                            continue outer;
+                        }
+                    }
+                }
+                init mut int64 ticks;
+                unsafe { return QueryPerformanceCounter(&init ticks); }
+            }
+            """), NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity, 1);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, []);
+        var loadedFunction = loaded.Functions.Single(static function =>
+            function.Name == "Probe");
+        var breakDepths = new List<int>();
+        var continueDepths = new List<int>();
+        Assert.That(BoundTreeTraversal.VisitStatements(
+            loadedFunction.Body, statement => {
+                if (statement is BoundBreak exit)
+                {
+                    breakDepths.Add(exit.TargetDepth);
+                }
+                else if (statement is BoundContinue continuation)
+                {
+                    continueDepths.Add(continuation.TargetDepth);
+                }
+            }), Is.True);
+        Assert.That(breakDepths, Does.Contain(2));
+        Assert.That(breakDepths, Does.Contain(3));
+        Assert.That(continueDepths, Does.Contain(3));
+
+        var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity, schemaIdentity, 1);
+        var reloaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+            moduleIdentity, []);
+        Assert.That(TrRmExecutableCompiler.EmitStandard(reloaded,
+                moduleIdentity, schemaIdentity, 1),
+            Is.EqualTo(reemitted));
+        var image = NativeEmitter.EmitLibraryWithNativeImports(loaded,
+            ["Probe"], NativeRuntimePolicy.FailFast);
+        using var imageStream = new MemoryStream(image);
+        using var imageReader = new PEReader(imageStream);
+        Assert.That(imageReader.PEHeaders.PEHeader, Is.Not.Null);
+        Assert.That(imageReader.PEHeaders.PEHeader!.ImportTableDirectory.Size,
+            Is.GreaterThan(0));
+    }
+
     [Test]
     public void StandardDirectNativeOutputCallsInsideLoopAreRejected()
     {

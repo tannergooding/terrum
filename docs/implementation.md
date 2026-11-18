@@ -931,13 +931,15 @@ provider-binding support, including `if` and pretest `while` conditions formed
 from supported Boolean-Home predicates and integer comparisons involving
 zero, matching Homes or admitted call results, with logical negation and
 short-circuit `&&`/`||` edges. Loops emit explicit backedges and depth-checked
-nearest-loop `break` and `continue` transfers; the source-free loader
-reconstructs bounded reducible single-exit loop regions. Named outer transfers
-and multiple-exit loop regions remain open. Direct NativeOutput reservations
-inside a loop remain unsupported so one reservation cannot be repeated; loop,
-comparison, short-circuit and rejection regressions remain unverified under
-the active hold. General aggregate output Bodies and native-interface/vtable
-outputs remain incomplete.
+nearest- or enclosing-loop `break` and `continue` transfers. The source-free
+loader reconstructs bounded reducible nested loops whose exits are a normal
+parent continuation or an enclosing loop transfer, retaining the reconstructed
+transfer depth. Irreducible or ambiguous loop exits remain unsupported.
+Direct NativeOutput reservations inside a loop remain unsupported so one
+reservation cannot be repeated; loop, comparison, short-circuit, named outer
+transfer and rejection regressions remain unverified under the active hold.
+General aggregate output Bodies and native-interface/vtable outputs remain
+incomplete.
 [CG-004](implementation/conformance-gaps.md#cg-004) owns
 the detailed composition and qualification gates. Earlier TRRM NativeOutput
 clauses and ScalarInitOutput encoding are prototype artifacts, not a fallback
