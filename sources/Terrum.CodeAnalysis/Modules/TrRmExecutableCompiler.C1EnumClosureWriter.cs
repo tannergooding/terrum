@@ -180,7 +180,7 @@ public static partial class TrRmExecutableCompiler
         BoundFunction function)
         => GetEN1ClassLayoutQueries(function)[0].Subject.FieldPath!;
 
-    private static bool IsSupportedEN1ClassFieldPointer(
+    private static bool IsSupportedEN1FieldPointer(
         NativePointerTypeDefinition pointer)
         => pointer.PointeeType == PrimitiveType.Void
             ? pointer.IsWritable
@@ -387,7 +387,7 @@ public static partial class TrRmExecutableCompiler
             || !program.Buffers.IsEmpty
             || !program.NativeFunctionPointerSignatures.IsEmpty
             || program.NativePointerTypes.Any(pointer =>
-                !IsSupportedEN1ClassFieldPointer(pointer))
+                !IsSupportedEN1FieldPointer(pointer))
             || !program.NativeFixedArrayTypes.IsEmpty
             || !program.CheckedReferenceTypes.IsEmpty
             || !program.PrivateNominalTypeOrigins.IsEmpty
@@ -2040,22 +2040,19 @@ public static partial class TrRmExecutableCompiler
                             field.Type);
                         if ((uint)pointerIndex
                                 >= (uint)program.NativePointerTypes.Length
-                            || !IsSupportedEN1ClassFieldPointer(
+                            || !IsSupportedEN1FieldPointer(
                                 program.NativePointerTypes[pointerIndex]))
                         {
                             throw Unsupported(
                                 "EN1 class fields require a covered scalar-pointee native data pointer.");
                         }
 
-                        if (program.NativePointerTypes[pointerIndex]
-                                .PointeeType is (PrimitiveType.NativeInt
-                                    or PrimitiveType.NativeUInt)
-                            && moduleTargetRequirement
-                                != TrRmModuleTableReader
-                                    .WindowsX64NativeTargetRequirement)
+                        if (moduleTargetRequirement
+                            != TrRmModuleTableReader
+                                .WindowsX64NativeTargetRequirement)
                         {
                             throw Unsupported(
-                                "EN1 native-width pointer pointees require the selected Windows x64 target.");
+                                "EN1 native data pointer fields require the selected Windows x64 target.");
                         }
 
                         continue;
@@ -2063,6 +2060,14 @@ public static partial class TrRmExecutableCompiler
 
                     if (field.Type == PrimitiveType.NativeRawPointer)
                     {
+                        if (moduleTargetRequirement
+                            != TrRmModuleTableReader
+                                .WindowsX64NativeTargetRequirement)
+                        {
+                            throw Unsupported(
+                                "EN1 native pointer fields require the selected Windows x64 target.");
+                        }
+
                         continue;
                     }
 
@@ -2135,6 +2140,30 @@ public static partial class TrRmExecutableCompiler
                         continue;
                     }
 
+                    if (NativePointerTypes.IsType(field.Type))
+                    {
+                        var pointerIndex = NativePointerTypes.Index(
+                            field.Type);
+                        if ((uint)pointerIndex
+                                >= (uint)program.NativePointerTypes.Length
+                            || !IsSupportedEN1FieldPointer(
+                                program.NativePointerTypes[pointerIndex]))
+                        {
+                            throw Unsupported(
+                                "EN1 struct fields require a covered scalar-pointee native data pointer.");
+                        }
+
+                        if (moduleTargetRequirement
+                            != TrRmModuleTableReader
+                                .WindowsX64NativeTargetRequirement)
+                        {
+                            throw Unsupported(
+                                "EN1 native data pointer fields require the selected Windows x64 target.");
+                        }
+
+                        continue;
+                    }
+
                     if ((field.Type is PrimitiveType.NativeInt
                             or PrimitiveType.NativeUInt)
                         && moduleTargetRequirement
@@ -2143,6 +2172,19 @@ public static partial class TrRmExecutableCompiler
                     {
                         throw Unsupported(
                             "EN1 native-width struct fields require the selected Windows x64 target.");
+                    }
+
+                    if (field.Type == PrimitiveType.NativeRawPointer)
+                    {
+                        if (moduleTargetRequirement
+                            != TrRmModuleTableReader
+                                .WindowsX64NativeTargetRequirement)
+                        {
+                            throw Unsupported(
+                                "EN1 native pointer fields require the selected Windows x64 target.");
+                        }
+
+                        continue;
                     }
 
                     if (BoundEnumTypes.IsType(field.Type))
@@ -2641,7 +2683,7 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 var pointer = program.NativePointerTypes[pointerIndex];
-                if (!IsSupportedEN1ClassFieldPointer(pointer))
+                if (!IsSupportedEN1FieldPointer(pointer))
                 {
                     throw Unsupported(
                         "EN1 class fields require a covered scalar-pointee native data pointer.");

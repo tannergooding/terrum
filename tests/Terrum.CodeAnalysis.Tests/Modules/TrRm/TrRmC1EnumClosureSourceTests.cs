@@ -1705,11 +1705,9 @@ internal sealed class TrRmC1EnumClosureSourceTests
         };
         var providerTree = SyntaxTree.Parse("""
             namespace Demo {
-                [Blittable]
-                [Layout(LayoutKind.Sequential, Packing: 4)]
                 public struct Payload {
                     public uint8 Prefix;
-                    public int32 Value;
+                    public ptr<uint8> Value;
                 }
                 public class Box {
                     public uint8 Prefix;
@@ -1795,6 +1793,12 @@ internal sealed class TrRmC1EnumClosureSourceTests
         Assert.That(query.Subject.FieldPath.Steps[0]
             .StandardClassFieldOrigin!.SelectedExportKeys,
             Is.EqualTo(["field.box.data"]));
+        var pointerType = query.Subject.FieldPath.Steps[1].FieldType;
+        Assert.That(NativePointerTypes.IsType(pointerType), Is.True);
+        Assert.That(loaded.NativePointerTypes[
+            NativePointerTypes.Index(pointerType)],
+            Is.EqualTo(new NativePointerTypeDefinition(
+                PrimitiveType.UInt8, false)));
         var main = loaded.Functions.Single() with {
             Name = "Main",
             ReturnType = PrimitiveType.Int32,
@@ -1809,7 +1813,7 @@ internal sealed class TrRmC1EnumClosureSourceTests
         };
 
         Assert.That(NativeJit.Execute(executable,
-            NativeRuntimePolicy.FailFast), Is.EqualTo(8));
+            NativeRuntimePolicy.FailFast), Is.EqualTo(16));
 
         var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(loaded,
             "ClassLayoutConsumer", schemaIdentity, 1);
@@ -1833,6 +1837,13 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 expression as BoundLayoutQuery), Is.True);
         Assert.That(reloadedQuery!.Subject.FieldPath!.Steps,
             Has.Length.EqualTo(2));
+        var reloadedPointerType
+            = reloadedQuery.Subject.FieldPath.Steps[1].FieldType;
+        Assert.That(NativePointerTypes.IsType(reloadedPointerType), Is.True);
+        Assert.That(reloaded.NativePointerTypes[
+            NativePointerTypes.Index(reloadedPointerType)],
+            Is.EqualTo(new NativePointerTypeDefinition(
+                PrimitiveType.UInt8, false)));
         Assert.That(reloadedQuery.Subject.FieldPath.Steps[1]
             .StandardFieldOrigin!.SelectedExportKeys,
             Is.EqualTo(["field.payload.value"]));
@@ -2049,6 +2060,12 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 new TrRmSourceClassMemberExport(0, fields[1].Span,
                     "field.box.value"),
             ]);
+        var targetMismatch = Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.EmitStandard(providerProgram,
+                "ClassLayoutProvider", s_schemaIdentities[0], 0, [], [],
+                [classExport], []));
+        Assert.That(targetMismatch!.Message,
+            Does.Contain("Windows x64 target"));
         var providerArtifact = TrRmExecutableCompiler.EmitStandard(
             providerProgram, "ClassLayoutProvider", schemaIdentity, 1, [],
             [], [classExport], []);
@@ -2169,6 +2186,12 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 new TrRmSourceClassMemberExport(0, fields[1].Span,
                     "field.box.value"),
             ]);
+        var targetMismatch = Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.EmitStandard(providerProgram,
+                "ClassLayoutProvider", s_schemaIdentities[0], 0, [], [],
+                [classExport], []));
+        Assert.That(targetMismatch!.Message,
+            Does.Contain("Windows x64 target"));
         var providerArtifact = TrRmExecutableCompiler.EmitStandard(
             providerProgram, "ClassLayoutProvider", schemaIdentity, 1, [],
             [], [classExport], []);
