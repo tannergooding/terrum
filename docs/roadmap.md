@@ -124,8 +124,9 @@ prerequisite has already been met.
    local-copy chains feeding fixed-integer binary operations. It also
    emits empty unit instance methods,
    direct scalar FieldRead/FieldWrite descriptors, exact same-class identity
-   forwarders and same-class static/readonly CallSites followed by an int32
-   binary/comparison. Unit-before-value, field, operation, call-forwarding,
+   forwarders and same-class static/readonly fixed-integer CallSites followed
+   by a fixed-integer binary/comparison. Unit-before-value, field,
+   operation, call-forwarding,
    local and identity-forwarder regressions remain unverified under the active
    hold. Ordinary
    by-value Unit parameters and `()`
