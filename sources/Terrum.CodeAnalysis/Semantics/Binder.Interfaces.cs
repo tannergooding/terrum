@@ -4743,6 +4743,7 @@ internal sealed partial class Binder
         if (typeNode is null || nameToken is null
             || BindInterfaceType(typeNode, interfaceTypeParameters, interfaces,
                 interfaceFormalCount, methodTypeParameters, methodFormalCount,
+                allowVoid: true,
                 interfaceConstantParameters: interfaceConstantParameters,
                 methodConstantParameters: methodConstantParameters)
                 is not BoundInterfaceType type)
@@ -4765,6 +4766,17 @@ internal sealed partial class Binder
                     token.Token.Kind == TokenKind.Identifier && token.Token.Text == "implicit")
                     ? BoundInterfaceParameterMode.ImplicitRef
                     : BoundInterfaceParameterMode.Value;
+        if (type is {
+                Kind: BoundInterfaceTypeKind.Primitive,
+                PrimitiveType: PrimitiveType.Void,
+            }
+            && mode != BoundInterfaceParameterMode.Value)
+        {
+            Report("TRM3005",
+                "Unit is only supported for by-value interface parameters.",
+                parameter.Span);
+            return null;
+        }
         if (defaultSyntax is not null)
         {
             if (mode != BoundInterfaceParameterMode.Value)
@@ -4775,7 +4787,8 @@ internal sealed partial class Binder
                 return null;
             }
             if (type.Kind != BoundInterfaceTypeKind.Primitive
-                || !ConstEvalScalar(type.PrimitiveType))
+                || (type.PrimitiveType != PrimitiveType.Void
+                    && !ConstEvalScalar(type.PrimitiveType)))
             {
                 Report("TRM3005",
                     "An interface parameter default requires a supported scalar type.",
@@ -4806,7 +4819,8 @@ internal sealed partial class Binder
         SyntaxNode expression, BoundInterfaceType type)
     {
         if (type.Kind != BoundInterfaceTypeKind.Primitive
-            || !ConstEvalScalar(type.PrimitiveType))
+            || (type.PrimitiveType != PrimitiveType.Void
+                && !ConstEvalScalar(type.PrimitiveType)))
         {
             Report("TRM3005",
                 "An interface parameter default requires a supported scalar type.",
@@ -4818,12 +4832,21 @@ internal sealed partial class Binder
         var bound = BindExpression(expression, type.PrimitiveType);
         if (DiagnosticCount != diagnostics
             || bound.Type != type.PrimitiveType
-            || !CheckConstExpression(bound, out _))
+            || (type.PrimitiveType == PrimitiveType.Void
+                ? bound is not BoundConstant {
+                    Type: PrimitiveType.Void,
+                }
+                : !CheckConstExpression(bound, out _)))
         {
             Report("TRM3005",
                 "An interface parameter default must be an exact checked compile-time expression.",
                 expression.Span);
             return null;
+        }
+
+        if (type.PrimitiveType == PrimitiveType.Void)
+        {
+            return bound;
         }
 
         var folded = FoldScalarConstant(bound);

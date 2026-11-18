@@ -1315,6 +1315,12 @@ public static partial class SemanticVerifier
             {
                 throw Invalid();
             }
+            var voidParameterStart = function.IsConstructor
+                || function.IsClassConstructor
+                || (function.DeclaringStruct is not null
+                    && !function.IsStatic) ? 1 : 0;
+            var voidParameterEnd = function.ParameterCount
+                + (function.IsConstructor ? 1 : 0);
             if (function.Intrinsic is BoundIntrinsic.None or BoundIntrinsic.ClassTryCreate)
             {
                 for (var variableIndex = 0; variableIndex < function.Variables.Length; variableIndex++)
@@ -1354,8 +1360,13 @@ public static partial class SemanticVerifier
                                 || variable.IsMutable != (variable.Type == PrimitiveType.MutableInt32BufferView)
                                 || variable.IsOut || function.IsExternal
                             : !ValidType(variable.Type,
-                                    allowVoid: variableIndex >= function.ParameterCount
-                                        + (function.IsConstructor ? 1 : 0), program)
+                                    allowVoid: variableIndex >= voidParameterEnd
+                                        || (variableIndex >= voidParameterStart
+                                            && variableIndex < voidParameterEnd
+                                            && !variable.IsOut
+                                            && !variable.IsInit
+                                            && !variable.IsImplicitRef),
+                                    program)
                                 ))
                     {
                         throw Invalid();
@@ -24672,9 +24683,17 @@ public static partial class SemanticVerifier
             return defaults.IsEmpty;
         }
 
-        if (function.SourceDeclarationInputOrdinal < 0
-            || function.SourceDeclarationInputOrdinal
-                >= program.SourceInputCount
+        var isImportedClassMethod = function.IsExternal
+            && function.ModuleImport is not null
+            && function.DeclaringStruct is not null
+            && function.SourceInputOrdinal < 0
+            && function.SourceDeclarationInputOrdinal < 0
+            && function.GenericMethodInstantiation is null
+            && function.ImportedGenericMethod is null;
+        if ((!isImportedClassMethod
+                && (function.SourceDeclarationInputOrdinal < 0
+                    || function.SourceDeclarationInputOrdinal
+                        >= program.SourceInputCount))
             || function.GenericMethodProofDefinitionOrdinal >= 0
             || function.GenericMethodInstantiation is not null
             || function.ImportedGenericMethod is not null
@@ -24701,10 +24720,15 @@ public static partial class SemanticVerifier
             if (parameterDefault is null
                 || parameterDefault.ParameterOrdinal <= previousOrdinal
                 || parameterDefault.ParameterOrdinal >= parameterCount
-                || parameterDefault.SourceInputOrdinal < 0
-                || parameterDefault.SourceInputOrdinal
-                    >= program.SourceInputCount
-                || parameterDefault.Span.Start < 0
+                || (isImportedClassMethod
+                    ? parameterDefault.SourceInputOrdinal != -1
+                        || parameterDefault.Span != default
+                        || parameterDefault.Value is not BoundConstant
+                        || parameterDefault.Expression is not null
+                    : parameterDefault.SourceInputOrdinal < 0
+                        || parameterDefault.SourceInputOrdinal
+                            >= program.SourceInputCount
+                        || parameterDefault.Span.Start < 0)
                 || parameterDefault.IsPending
                 || (parameterDefault.Value is null)
                     == (parameterDefault.Expression is null))
@@ -24716,14 +24740,14 @@ public static partial class SemanticVerifier
                 receiverCount + parameterDefault.ParameterOrdinal];
             if (variable.IsOut || variable.IsInit
                 || variable.IsImplicitRef
-                || !ValidType(variable.Type, allowVoid: false, program)
+                || !ValidType(variable.Type, allowVoid: true, program)
                 || (parameterDefault.Value is BoundConstant value
                     && (value.Type != variable.Type
-                        || !ValidType(value.Type, allowVoid: false,
+                        || !ValidType(value.Type, allowVoid: true,
                             program)))
                 || (parameterDefault.Expression is BoundExpression expression
                     && (expression.Type != variable.Type
-                        || !ValidType(expression.Type, allowVoid: false,
+                        || !ValidType(expression.Type, allowVoid: true,
                             program))))
             {
                 return false;
@@ -27403,7 +27427,7 @@ public static partial class SemanticVerifier
     {
         var type = value.Type;
         var isEnum = BoundEnumTypes.IsType(type);
-        if (type is not (PrimitiveType.Bool or PrimitiveType.Char8
+        if (type is not (PrimitiveType.Void or PrimitiveType.Bool or PrimitiveType.Char8
                 or PrimitiveType.Char16 or PrimitiveType.Char32
                 or PrimitiveType.Rune or PrimitiveType.Int8
                 or PrimitiveType.Int16 or PrimitiveType.Int32
@@ -28596,7 +28620,7 @@ public static partial class SemanticVerifier
                     != proofFunction.Variables[variableIndex].Name
                 || parameterDefault.ParameterType
                     != proofFunction.Variables[variableIndex].Type
-                || !IsValidType(parameterDefault.ParameterType, false,
+                || !IsValidType(parameterDefault.ParameterType, true,
                     proofProgram)
                 || parameterDefault.Value is not BoundExpression value
                 || value.Type != parameterDefault.ParameterType
@@ -28707,7 +28731,7 @@ public static partial class SemanticVerifier
                         {
                             expressionVisits++;
                             if (expressionVisits > MaximumAnalysisVisits
-                                || !IsValidType(expression.Type, false,
+                                || !IsValidType(expression.Type, true,
                                     proofProgram))
                             {
                                 validExpression = false;

@@ -22,6 +22,21 @@ internal sealed record BoundStandardClassLayoutVariant(
     byte Flags, uint Alignment, uint Pack,
     ImmutableArray<uint> FieldDefinitionIds);
 
+internal sealed record BoundStandardClassMethodParameter(
+    string Name, uint TypeSpecReference, byte Mode, byte Flags,
+    BoundConstant? DefaultValue);
+
+internal sealed record BoundStandardClassMethodDeclaration(
+    uint DefinitionId, string Name, uint Flags,
+    uint EffectsMask, uint ReturnTypeSpecReference,
+    uint ReceiverTypeSpecReference,
+    ImmutableArray<BoundStandardClassMethodParameter> Parameters,
+    ImmutableArray<string> ExportKeys, ImmutableArray<string> SelectedExportKeys,
+    int GenericParameterCount, uint BodyRow, byte ConstructionRole,
+    uint InitializerMethodDefinitionId,
+    uint ConstructionPropertyDefinitionId,
+    ImmutableArray<uint> InitializedMemberDefinitionIds);
+
 internal sealed record BoundStandardClassTypeView(
     BoundGenericNominalTypeIdentity Identity, string Namespace, string Name,
     uint TypeDefFlags,
@@ -29,11 +44,19 @@ internal sealed record BoundStandardClassTypeView(
     ImmutableArray<BoundStandardClassLayoutVariant> Layouts,
     BoundSourceTypeProviderSnapshot Provider)
 {
+    internal ImmutableArray<BoundStandardClassMethodDeclaration> Methods
+    {
+        get; init;
+    } = [];
+
     internal bool TryGetDeclaredMutability(out bool isMutable)
     {
         if (Provider is not null
             && (StringComparer.Ordinal.Equals(Provider.SchemaIdentity,
                     "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1")
+                || StringComparer.Ordinal.Equals(Provider.SchemaIdentity,
+                    StandardGenericMethodSchema
+                        .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaults)
                 || BoundStandardEnumDeclarationContract
                     .IsSelectedSchemaIdentity(Provider.SchemaIdentity)))
         {
@@ -74,6 +97,9 @@ internal static class BoundStandardClassDeclarationContract
         = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1";
     private const string C1M1SchemaIdentity
         = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1";
+    private const string CM1SchemaIdentity
+        = StandardGenericMethodSchema
+            .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaults;
 
     internal static bool IsValidTable(
         ImmutableArray<BoundStandardClassDeclaration> declarations,
@@ -134,7 +160,12 @@ internal static class BoundStandardClassDeclarationContract
             }
             totalRows += declaration.Declaration.Fields.Length
                 + declaration.Declaration.Layouts.Length
+                + declaration.Declaration.Methods.Length
                 + declaration.Expectations.Length;
+            foreach (var method in declaration.Declaration.Methods)
+            {
+                totalRows += method.Parameters.Length;
+            }
             if (totalRows > SemanticVerifier.MaximumAnalysisVisits)
             {
                 return false;
@@ -185,7 +216,14 @@ internal static class BoundStandardClassDeclarationContract
 
                 totalRows += expectation.ExpectedDeclaration.Fields.Length
                     + expectation.ExpectedDeclaration.Layouts.Length
+                    + expectation.ExpectedDeclaration.Methods.Length
                     + expectation.FieldExpectations.Length;
+                foreach (var method
+                    in expectation.ExpectedDeclaration.Methods)
+                {
+                    totalRows += method.Parameters.Length;
+                }
+
                 if (totalRows > SemanticVerifier.MaximumAnalysisVisits)
                 {
                     return false;
@@ -248,6 +286,7 @@ internal static class BoundStandardClassDeclarationContract
             || (view.Identity.DefinitionId >> 24) != 0x13
             || !IsValidNamespace(view.Namespace) || !IsValidText(view.Name)
             || view.Fields.IsDefault || view.Layouts.IsDefault
+            || view.Methods.IsDefault
             || !IsValidSnapshot(view.Provider)
             || !StringComparer.Ordinal.Equals(view.Identity.ModuleIdentity,
                 view.Provider.ModuleIdentity)
@@ -255,6 +294,8 @@ internal static class BoundStandardClassDeclarationContract
                 C1SchemaIdentity)
                 && !StringComparer.Ordinal.Equals(view.Provider.SchemaIdentity,
                     C1M1SchemaIdentity)
+                && !StringComparer.Ordinal.Equals(view.Provider.SchemaIdentity,
+                    CM1SchemaIdentity)
                 && !BoundStandardEnumDeclarationContract
                     .IsSelectedSchemaIdentity(
                         view.Provider.SchemaIdentity))
@@ -266,6 +307,8 @@ internal static class BoundStandardClassDeclarationContract
         var schemaAllowsMutability
             = StringComparer.Ordinal.Equals(view.Provider.SchemaIdentity,
                 C1M1SchemaIdentity)
+                || StringComparer.Ordinal.Equals(view.Provider.SchemaIdentity,
+                    CM1SchemaIdentity)
                 || BoundStandardEnumDeclarationContract
                     .IsSelectedSchemaIdentity(
                         view.Provider.SchemaIdentity);
@@ -295,6 +338,134 @@ internal static class BoundStandardClassDeclarationContract
                 || !fields.TryAdd(field.DefinitionId, field))
             {
                 return false;
+            }
+        }
+
+        var methods = new Dictionary<uint,
+            BoundStandardClassMethodDeclaration>();
+        var previousMethodRow = 0u;
+        foreach (var method in view.Methods)
+        {
+            if (method is null
+                || (method.DefinitionId >> 24) != 0x16
+                || (method.DefinitionId & 0x00FF_FFFF) == 0
+                || method.DefinitionId <= previousMethodRow
+                || !IsValidText(method.Name)
+                || (method.Flags & ~7u) != 0
+                || (method.Flags & 3u) == 3
+                || (method.EffectsMask & ~6u) != 0
+                || !BoundGenericNominalTypeContract.IsTypeSpecReference(
+                    method.ReturnTypeSpecReference)
+                || (method.ReceiverTypeSpecReference != 0
+                    && !BoundGenericNominalTypeContract.IsTypeSpecReference(
+                        method.ReceiverTypeSpecReference))
+                || method.Parameters.IsDefault
+                || method.Parameters.Length
+                    > SemanticVerifier.MaximumArguments
+                || method.ExportKeys.IsDefault
+                || !IsUniqueText(method.ExportKeys)
+                || method.SelectedExportKeys.IsDefault
+                || !IsUniqueText(method.SelectedExportKeys)
+                || method.SelectedExportKeys.Any(key =>
+                    !method.ExportKeys.Contains(key,
+                        StringComparer.Ordinal))
+                || method.GenericParameterCount < 0
+                || method.BodyRow > 0x00FF_FFFF
+                || method.ConstructionRole > 3
+                || (method.ConstructionRole == 2
+                    ? (method.InitializerMethodDefinitionId >> 24) != 0x16
+                        || (method.InitializerMethodDefinitionId
+                            & 0x00FF_FFFF) == 0
+                    : method.InitializerMethodDefinitionId != 0)
+                || (method.ConstructionRole == 3
+                    ? (method.ConstructionPropertyDefinitionId >> 24)
+                            != 0x1E
+                        || (method.ConstructionPropertyDefinitionId
+                            & 0x00FF_FFFF) == 0
+                    : method.ConstructionPropertyDefinitionId != 0)
+                || method.InitializedMemberDefinitionIds.IsDefault
+                || !methods.TryAdd(method.DefinitionId, method))
+            {
+                return false;
+            }
+
+            var parameterNames = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var parameter in method.Parameters)
+            {
+                if (parameter is null || !IsValidText(parameter.Name)
+                    || !BoundGenericNominalTypeContract
+                        .IsTypeSpecReference(
+                            parameter.TypeSpecReference)
+                    || parameter.Mode > 3
+                    || (parameter.Flags & ~1) != 0
+                    || !parameterNames.Add(parameter.Name)
+                    || (parameter.DefaultValue is BoundConstant value
+                        && (value.RepresentationType != value.Type
+                            || !value.Bits.IsCanonicalFor(value.Type)
+                            || (value.Type is PrimitiveType.NativeInt
+                                or PrimitiveType.NativeUInt))))
+                {
+                    return false;
+                }
+            }
+
+            if (method.ConstructionRole != 1
+                && !method.InitializedMemberDefinitionIds.IsEmpty)
+            {
+                return false;
+            }
+            if (method.ConstructionRole == 1)
+            {
+                var initializedMembers = new HashSet<uint>();
+                foreach (var memberDefinitionId
+                    in method.InitializedMemberDefinitionIds)
+                {
+                    if ((memberDefinitionId >> 24) != 0x14
+                        || !fields.ContainsKey(memberDefinitionId)
+                        || !initializedMembers.Add(memberDefinitionId))
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            previousMethodRow = method.DefinitionId;
+        }
+
+        foreach (var method in methods.Values)
+        {
+            if (method.ConstructionRole != 2)
+            {
+                continue;
+            }
+
+            if (!methods.TryGetValue(method.InitializerMethodDefinitionId,
+                    out var initializer)
+                || initializer.ConstructionRole != 1
+                || initializer.Parameters.Length != method.Parameters.Length)
+            {
+                return false;
+            }
+
+            for (var ordinal = 0;
+                ordinal < method.Parameters.Length; ordinal++)
+            {
+                var initializerParameter
+                    = initializer.Parameters[ordinal];
+                var projectionParameter = method.Parameters[ordinal];
+                if (!StringComparer.Ordinal.Equals(
+                        initializerParameter.Name,
+                        projectionParameter.Name)
+                    || initializerParameter.Mode
+                        != projectionParameter.Mode
+                    || initializerParameter.Flags
+                        != projectionParameter.Flags
+                    || !AreEquivalentFrozenDefaults(
+                        initializerParameter.DefaultValue,
+                        projectionParameter.DefaultValue))
+                {
+                    return false;
+                }
             }
         }
 
@@ -348,6 +519,13 @@ internal static class BoundStandardClassDeclarationContract
         return hasDefault;
     }
 
+    private static bool AreEquivalentFrozenDefaults(
+        BoundConstant? left, BoundConstant? right)
+        => left is null ? right is null
+            : right is not null && left.Type == right.Type
+                && left.RepresentationType == right.RepresentationType
+                && left.Bits.Equals(right.Bits);
+
     private static bool AreEquivalentDeclarationContracts(
         BoundStandardClassTypeView expected,
         BoundStandardClassTypeView actual)
@@ -357,6 +535,7 @@ internal static class BoundStandardClassDeclarationContract
             || !StringComparer.Ordinal.Equals(expected.Name, actual.Name)
             || expected.TypeDefFlags != actual.TypeDefFlags
             || expected.Fields.Length != actual.Fields.Length
+            || expected.Methods.Length != actual.Methods.Length
             || expected.Layouts.Length != actual.Layouts.Length)
         {
             return false;
@@ -371,6 +550,49 @@ internal static class BoundStandardClassDeclarationContract
                 || expectedField.Flags != actualField.Flags)
             {
                 return false;
+            }
+        }
+
+        for (var ordinal = 0; ordinal < expected.Methods.Length; ordinal++)
+        {
+            var expectedMethod = expected.Methods[ordinal];
+            var actualMethod = actual.Methods[ordinal];
+            if (!StringComparer.Ordinal.Equals(expectedMethod.Name,
+                    actualMethod.Name)
+                || expectedMethod.Flags != actualMethod.Flags
+                || expectedMethod.EffectsMask != actualMethod.EffectsMask
+                || expectedMethod.ReturnTypeSpecReference
+                    != actualMethod.ReturnTypeSpecReference
+                || expectedMethod.ReceiverTypeSpecReference
+                    != actualMethod.ReceiverTypeSpecReference
+                || expectedMethod.GenericParameterCount
+                    != actualMethod.GenericParameterCount
+                || expectedMethod.ConstructionRole
+                    != actualMethod.ConstructionRole
+                || expectedMethod.Parameters.Length
+                    != actualMethod.Parameters.Length
+                || expectedMethod.InitializedMemberDefinitionIds.Length
+                    != actualMethod.InitializedMemberDefinitionIds.Length
+                || (expectedMethod.ConstructionPropertyDefinitionId != 0)
+                    != (actualMethod.ConstructionPropertyDefinitionId != 0))
+            {
+                return false;
+            }
+
+            for (var parameter = 0;
+                parameter < expectedMethod.Parameters.Length; parameter++)
+            {
+                var expectedParameter
+                    = expectedMethod.Parameters[parameter];
+                var actualParameter
+                    = actualMethod.Parameters[parameter];
+                if (expectedParameter.TypeSpecReference
+                        != actualParameter.TypeSpecReference
+                    || expectedParameter.Mode != actualParameter.Mode
+                    || expectedParameter.Flags != actualParameter.Flags)
+                {
+                    return false;
+                }
             }
         }
 

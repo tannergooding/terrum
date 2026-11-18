@@ -353,6 +353,11 @@ public static partial class TrRmExecutableCompiler
                 : BoundStandardClassDeclarationContract.IsValidTable(
                         standardClassDeclarations,
                         program.GenericNominalTypeDefinitions)
+                    && standardClassDeclarations.All(declaration =>
+                        declaration.Declaration.Methods.IsEmpty
+                        && declaration.Expectations.All(expectation =>
+                            expectation.ExpectedDeclaration.Methods
+                                .IsEmpty))
                     && program.GenericNominalTypeDefinitions.All(
                         definition =>
                             definition.Formals.IsEmpty

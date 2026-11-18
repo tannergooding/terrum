@@ -939,8 +939,7 @@ public static partial class TrRmExecutableCompiler
 
                 var parameterType = DecodeG1InterfaceTypeSpec(tables,
                     typeDef, formalCount,
-                    tables.Parameters.GetTypeSpec(parameterRow),
-                    isReturn: false);
+                    tables.Parameters.GetTypeSpec(parameterRow));
                 BoundConstant? defaultValue = null;
                 if (context.Schema.UsesClassParameterDefaults())
                 {
@@ -991,8 +990,7 @@ public static partial class TrRmExecutableCompiler
 
             var resultType = DecodeG1InterfaceTypeSpec(tables, typeDef,
                 formalCount,
-                tables.Signatures.GetResultTypeSpec(signatureRow),
-                isReturn: true);
+                tables.Signatures.GetResultTypeSpec(signatureRow));
             members.Add(new BoundInterfaceMemberDefinition(methodOrdinal,
                 tables.Methods.GetName(methodRow),
                 methodExportKeys[methodOrdinal],
@@ -1291,7 +1289,7 @@ public static partial class TrRmExecutableCompiler
 
     private static BoundInterfaceType DecodeG1InterfaceTypeSpec(
         TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
-        int ownerTypeDef, int formalCount, uint typeSpecRef, bool isReturn)
+        int ownerTypeDef, int formalCount, uint typeSpecRef)
     {
         var type = tables.TypeSpecs.GetTypeSpecRef(typeSpecRef);
         if (!type.IsRow || type.Qualifiers != 0)
@@ -1313,12 +1311,6 @@ public static partial class TrRmExecutableCompiler
             var primitive = s_types[typeIndex];
             if (primitive == PrimitiveType.Void)
             {
-                if (!isReturn)
-                {
-                    throw Unsupported(
-                        "A G1L1 interface parameter cannot have unit type.");
-                }
-
                 return new BoundInterfaceType(
                     BoundInterfaceTypeKind.Primitive, PrimitiveType.Void,
                     null, -1, [], false, false, false, false);
@@ -3583,7 +3575,7 @@ public static partial class TrRmExecutableCompiler
                     "The G1 InterfaceMethod has an unsupported parameter mode.");
             }
             targetVariables.Add(new BoundVariable(parameter.Name,
-                ResolveRequirementType(parameter.Type, allowVoid: false),
+                ResolveRequirementType(parameter.Type, allowVoid: true),
                 false, default));
         }
 

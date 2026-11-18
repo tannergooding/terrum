@@ -2558,11 +2558,16 @@ internal sealed partial class PeCompiler
                     _code.Store64(Slot(0));
                 }
             }
+            var abiArgument = hidden;
             for (var argument = 0; argument < function.ParameterCount; argument++)
             {
                 var slot = argument + (function.IsConstructor ? 1 : 0);
-                var abiArgument = argument + hidden;
                 var type = function.Variables[slot].Type;
+                if (type == PrimitiveType.Void)
+                {
+                    continue;
+                }
+
                 var isAddress = function.Variables[slot].IsOut || function.Variables[slot].IsImplicitRef;
                 if (abiArgument < 4)
                 {
@@ -2589,6 +2594,7 @@ internal sealed partial class PeCompiler
                     _code.Load64(_frame + 40 + (8 * (abiArgument - 4)));
                     _code.Store64(Slot(slot));
                 }
+                abiArgument++;
             }
             if (_normalBackingIncomingCallPlanSlots[i] >= 0)
             {
@@ -11390,11 +11396,28 @@ internal sealed partial class PeCompiler
                     EmitBeginNormalBackingCallPlan(
                         call, normalBackingCallPlanSlot, argumentSpills, spill);
                 }
-                for (var i = Math.Max(0, 4 - hidden); i < call.Arguments.Length; i++)
+                var registerArgumentCount = Math.Max(0, 4 - hidden);
+                var physicalArgumentIndex = 0;
+                for (var logicalArgumentIndex = 0;
+                    logicalArgumentIndex < call.Arguments.Length;
+                    logicalArgumentIndex++)
                 {
-                    var argumentIndex = call.ArgumentIndex(i);
+                    var argumentIndex = call.ArgumentIndex(
+                        logicalArgumentIndex);
+                    var argument = call.Arguments[argumentIndex];
+                    if (argument.Type == PrimitiveType.Void)
+                    {
+                        continue;
+                    }
+
+                    if (physicalArgumentIndex < registerArgumentCount)
+                    {
+                        physicalArgumentIndex++;
+                        continue;
+                    }
+
                     if (IsImplicitReferenceArgument(call, argumentIndex)
-                        || call.Arguments[argumentIndex] is BoundOutArgument or BoundReceiverLoan or BoundMutableReceiverLoan
+                        || argument is BoundOutArgument or BoundReceiverLoan or BoundMutableReceiverLoan
                         or BoundFieldLoan or BoundMutableFieldLoan or BoundNativeOutputReservation)
                     {
                         _code.Load64(Spill(argumentSpills[argumentIndex]));
@@ -11402,16 +11425,32 @@ internal sealed partial class PeCompiler
                     else
                     {
                         LoadValue(SpillOffsetForType(argumentSpills[argumentIndex],
-                            call.Arguments[argumentIndex].Type),
-                            call.Arguments[argumentIndex].Type);
+                            argument.Type), argument.Type);
                     }
-                    _code.StoreOutgoing64(32 + (8 * (i + hidden - 4)));
+                    _code.StoreOutgoing64(32 + (8 * (physicalArgumentIndex
+                        + hidden - 4)));
+                    physicalArgumentIndex++;
                 }
-                for (var i = 0; i < Math.Min(4 - hidden, call.Arguments.Length); i++)
+                physicalArgumentIndex = 0;
+                for (var logicalArgumentIndex = 0;
+                    logicalArgumentIndex < call.Arguments.Length;
+                    logicalArgumentIndex++)
                 {
-                    var argumentIndex = call.ArgumentIndex(i);
+                    var argumentIndex = call.ArgumentIndex(
+                        logicalArgumentIndex);
+                    var argument = call.Arguments[argumentIndex];
+                    if (argument.Type == PrimitiveType.Void)
+                    {
+                        continue;
+                    }
+
+                    if (physicalArgumentIndex >= registerArgumentCount)
+                    {
+                        break;
+                    }
+
                     if (IsImplicitReferenceArgument(call, argumentIndex)
-                        || call.Arguments[argumentIndex] is BoundOutArgument or BoundReceiverLoan or BoundMutableReceiverLoan
+                        || argument is BoundOutArgument or BoundReceiverLoan or BoundMutableReceiverLoan
                         or BoundFieldLoan or BoundMutableFieldLoan or BoundNativeOutputReservation)
                     {
                         _code.Load64(Spill(argumentSpills[argumentIndex]));
@@ -11419,23 +11458,25 @@ internal sealed partial class PeCompiler
                     else
                     {
                         LoadValue(SpillOffsetForType(argumentSpills[argumentIndex],
-                            call.Arguments[argumentIndex].Type),
-                            call.Arguments[argumentIndex].Type);
+                            argument.Type), argument.Type);
                     }
-                    var argumentType = call.Arguments[argumentIndex].Type;
+                    var argumentType = argument.Type;
                     var isAddress = IsImplicitReferenceArgument(call, argumentIndex)
-                        || call.Arguments[argumentIndex] is BoundOutArgument or BoundReceiverLoan
+                        || argument is BoundOutArgument or BoundReceiverLoan
                             or BoundMutableReceiverLoan or BoundFieldLoan or BoundMutableFieldLoan
                             or BoundNativeOutputReservation;
                     if (!isAddress && IsFloatingCallCarrier(argumentType))
                     {
-                        _code.MoveFloatingArgument(i + hidden, argumentType == PrimitiveType.Float64);
+                        _code.MoveFloatingArgument(
+                            physicalArgumentIndex + hidden,
+                            argumentType == PrimitiveType.Float64);
                     }
                     else
                     {
-                        _code.MoveArgument(i + hidden,
+                        _code.MoveArgument(physicalArgumentIndex + hidden,
                             isAddress || IsStruct(argumentType) || IsWide(argumentType) || IsIndirect(argumentType));
                     }
+                    physicalArgumentIndex++;
                 }
                 if (sourceHidden != 0)
                 {

@@ -119,7 +119,10 @@ prerequisite has already been met.
    Construction-2 source production now emits a bounded real initializer I /
    projection P pair for direct scalar parameter-to-field initialization,
    parameterized static scalar methods, and empty unit instance methods with
-   receiver/parameter Homes. The provisional
+   receiver/parameter Homes. Ordinary by-value Unit parameters and `()`
+   defaults now retain logical positions through source binding, CM1 metadata
+   and Windows x64 payload elision; focused source/metadata/JIT regressions
+   remain unverified under the active hold. The provisional
    [CM1 class parameter-default proposal](proposals/standard-trrm-c1-class-parameter-defaults.md)
    now has a bounded producer/reader path for class I/P/member defaults and
    inherited D1 generic/interface owners, with closed SF1 values and

@@ -144,7 +144,11 @@ are initialized directly from scalar parameters. It preserves explicit I/P
 ExportKeys and does not substitute `ClassTryCreate`; keyed and private-P
 producer regressions are added but unverified under the hold. Ordinary method emission also supports parameterized static scalar methods
 with real Bodies and empty unit-returning instance methods with receiver and
-parameter Homes. The provisional CM1 route carries checked defaults for its
+parameter Homes. Source binding now admits ordinary by-value Unit parameters
+and `()` defaults; the CM1 producer/reader preserves their logical signature
+positions and zero-width SF1 values, while Windows x64 lowering omits only
+their payload positions. Focused source, metadata and JIT regressions are
+added but remain unverified under the active hold. The provisional CM1 route carries checked defaults for its
 bounded class MethodDefs, including constructor I/P, and composes the inherited
 D1 generic MethodDef and interface owners under the exact 16-byte
 MethodParameterSurface schema. Structural validation enforces complete owner

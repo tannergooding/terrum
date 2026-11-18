@@ -654,8 +654,15 @@ internal sealed partial class Binder
                 for (var index = offset; index < function.Variables.Length; index++)
                 {
                     var parameter = function.Variables[index];
+                    var parameterOrdinal = index - offset;
+                    var parameterDefault = function.OrdinaryParameterDefaults
+                        .FirstOrDefault(candidate =>
+                            candidate.ParameterOrdinal
+                                == parameterOrdinal);
                     parameters.Add(new Parameter(parameter.Name, parameter.Type, default, parameter.IsOut,
                         parameter.IsInit, parameter.IsImplicitRef) {
+                        DefaultValue = parameterDefault?.Value,
+                        DefaultExpression = parameterDefault?.Expression,
                         IsCanonicalImplicitReference
                             = parameter.IsCanonicalImplicitReference,
                     });
@@ -667,6 +674,9 @@ internal sealed partial class Binder
                     importedFunction.IsConstructor, false, false, false,
                     importedFunction.IsStatic, importedFunction.NoFailureProof,
                     importedFunction.DoesNotReturn, importedFunction) {
+                    IsMutable = !importedFunction.IsStatic
+                        && !importedFunction.Variables.IsEmpty
+                        && importedFunction.Variables[0].IsMutable,
                     IsCleanup = function.IsCleanup,
                     IsOperator = function.IsOperator,
                     PropertyName = function.PropertyName,
@@ -1835,7 +1845,8 @@ internal sealed partial class Binder
         {
             return null;
         }
-        if (!IsConstEvalValueType(parameter.Type))
+        if (parameter.Type != PrimitiveType.Void
+            && !IsConstEvalValueType(parameter.Type))
         {
             Report("TRM3005",
                 "A parameter default must be a supported compile-time Copy value.",
@@ -1853,7 +1864,11 @@ internal sealed partial class Binder
                 syntax.Span);
             return null;
         }
-        if (!CheckConstExpression(expression, out _))
+        if (parameter.Type == PrimitiveType.Void
+                ? expression is not BoundConstant {
+                    Type: PrimitiveType.Void,
+                }
+                : !CheckConstExpression(expression, out _))
         {
             Report("TRM3005",
                 "A parameter default must be a checked compile-time expression.",
@@ -2066,7 +2081,8 @@ internal sealed partial class Binder
             return null;
         }
 
-        if (!IsConstEvalValueType(parameterType))
+        if (parameterType != PrimitiveType.Void
+            && !IsConstEvalValueType(parameterType))
         {
             Report("TRM3005",
                 "A generic method parameter default must be a supported compile-time Copy value.",
@@ -2077,7 +2093,11 @@ internal sealed partial class Binder
         var expression = BindExpression(syntax, parameterType);
         if (DiagnosticCount != diagnosticCount
             || expression.Type != parameterType
-            || !CheckConstExpression(expression, out _))
+            || (parameterType == PrimitiveType.Void
+                ? expression is not BoundConstant {
+                    Type: PrimitiveType.Void,
+                }
+                : !CheckConstExpression(expression, out _)))
         {
             Report("TRM3005",
                 "A generic method parameter default must bind to its declared type as a checked compile-time expression.",
@@ -10850,7 +10870,7 @@ internal sealed partial class Binder
             {
                 nativePointeeType = pointeeType;
             }
-            type = BindType(typeNode, allowVoid: false);
+            type = BindType(typeNode, allowVoid: true);
             if (type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView)
             {
                 Report("TRM3023", "A native buffer view cannot be a parameter.", parameter.Span);
@@ -10895,17 +10915,24 @@ internal sealed partial class Binder
                     "The provisional implicit ref implementation requires a supported scalar or non-unique struct parameter.",
                     parameter.Span);
             }
-            if (isOut && returnType != PrimitiveType.Bool
-                && type is not (PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32
-                    or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
-                   or PrimitiveType.NativeInt or PrimitiveType.NativeUInt
-                    or PrimitiveType.Float32 or PrimitiveType.Float64)
-                && (!IsStruct(type) || IsUnique(type))
-                && !(isNativeVTableMethod && NativeVTableCallContract.IsNativeValueType(type,
-                    [.. _nativeFunctionPointerSignatures], [.. _nativePointerTypes])))
+            if (isOut && (type == PrimitiveType.Void
+                || (returnType != PrimitiveType.Bool
+                    && type is not (PrimitiveType.Bool or PrimitiveType.Char16
+                        or PrimitiveType.Int32 or PrimitiveType.UInt32
+                        or PrimitiveType.Int64 or PrimitiveType.UInt64
+                        or PrimitiveType.NativeInt or PrimitiveType.NativeUInt
+                        or PrimitiveType.Float32 or PrimitiveType.Float64)
+                    && (!IsStruct(type) || IsUnique(type))
+                    && !(isNativeVTableMethod
+                        && NativeVTableCallContract.IsNativeValueType(type,
+                            [.. _nativeFunctionPointerSignatures],
+                            [.. _nativePointerTypes])))))
             {
                 Report("TRM3011",
-                    "A non-boolean output parameter requires a scalar or Copy struct type.", parameter.Span);
+                    type == PrimitiveType.Void
+                        ? "Unit cannot be used as an output parameter."
+                        : "A non-boolean output parameter requires a scalar or Copy struct type.",
+                    parameter.Span);
             }
             var initializationType = isInit
                 ? _checkedReferenceTypes[
@@ -19888,6 +19915,19 @@ internal sealed partial class Binder
                 receiver = left;
                 genericMethodName = NativeManagedNodeIntrinsics.TypeName
                     + "." + member;
+                _ = TryFindFunction(genericMethodName, out function);
+            }
+            else if (type is PrimitiveType standardClassType
+                && TryGetSourceStandardClassDeclaration(
+                    standardClassType, out var standardClassDeclaration))
+            {
+                receiver = isTypeReceiver ? null : left;
+                var className = string.IsNullOrEmpty(
+                        standardClassDeclaration.Declaration.Namespace)
+                    ? standardClassDeclaration.Declaration.Name
+                    : standardClassDeclaration.Declaration.Namespace + "."
+                        + standardClassDeclaration.Declaration.Name;
+                genericMethodName = className + "." + member;
                 _ = TryFindFunction(genericMethodName, out function);
             }
             else if (type is PrimitiveType classType && IsClass(classType))

@@ -61,6 +61,41 @@ internal sealed class UnitLocalValueTests
         }
     }
 
+    [Test]
+    public void UnitParametersDoNotConsumeNativeAbiPositions()
+    {
+        var source = """
+            int32 Sum(int32 first, void firstMarker, int32 second,
+                int32 third, void secondMarker, int32 fourth, int32 fifth,
+                void trailingMarker = ()) {
+                return first + second + third + fourth + fifth;
+            }
+            int32 Main() { return Sum(1, (), 2, 4, (), 8, 16); }
+            """;
+        foreach (var (boundPolicy, nativePolicy) in new[] {
+            (BoundRuntimePolicy.FailFast, NativeRuntimePolicy.FailFast),
+            (BoundRuntimePolicy.CheckedExceptions,
+                NativeRuntimePolicy.CheckedExceptions),
+        })
+        {
+            var compilation = Compilation.Create(SyntaxTree.Parse(source),
+                new CompilationOptions { RuntimePolicy = boundPolicy });
+            Assert.That(compilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            Assert.That(NativeJit.Execute(compilation.Program!, nativePolicy),
+                Is.EqualTo(31));
+        }
+    }
+
+    [Test]
+    public void UnitCannotBeUsedAsAnOutputParameter()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(
+            "void Invalid(out void value) {}"));
+
+        Assert.That(compilation.HasErrors, Is.True);
+    }
+
     [TestCase("void token = int32(42); return 42;")]
     [TestCase("init void token; token; return 42;")]
     [TestCase("void token = (); token = _; token = (); return 42;")]

@@ -103,10 +103,12 @@ public static partial class TrRmExecutableCompiler
             }
 
             if (!StringComparer.Ordinal.Equals(schemaIdentities[0],
-                    StandardC1M1SchemaIdentity))
+                    StandardC1M1SchemaIdentity)
+                && !StringComparer.Ordinal.Equals(schemaIdentities[0],
+                    StandardC1M1Construction2L1R1ClassParameterDefaultsSchemaIdentity))
             {
                 throw Unsupported(
-                    "Complete Standard class declarations require the exact C1M1 schema.");
+                    "Complete Standard class declarations require the exact C1M1 or CM1 schema.");
             }
 
             if (schemaIdentities.Skip(1).Any(schemaIdentity =>
@@ -243,7 +245,9 @@ public static partial class TrRmExecutableCompiler
     {
         var isEN1 = IsSelectedC1EnumClosureSchemaIdentity(
             schemaIdentities[0]);
-        if ((!isEN1 && !StringComparer.Ordinal.Equals(
+        var isCM1 = StringComparer.Ordinal.Equals(schemaIdentities[0],
+            StandardC1M1Construction2L1R1ClassParameterDefaultsSchemaIdentity);
+        if ((!isEN1 && !isCM1 && !StringComparer.Ordinal.Equals(
                     schemaIdentities[0], StandardC1M1SchemaIdentity))
             || schemaIdentities.Skip(1).Any(schemaIdentity =>
                 !StringComparer.Ordinal.Equals(schemaIdentity,
@@ -282,7 +286,8 @@ public static partial class TrRmExecutableCompiler
         var (methodStart, methodEnd)
             = rootTables.Modules.GetMethodDefRange(rootModuleRow);
         if (rootTables.Modules.GetEntryMethod(rootModuleRow) != 0
-            || (methodStart != methodEnd && !allowClassLayoutQueryBody))
+            || (methodStart != methodEnd && !allowClassLayoutQueryBody
+                && !isCM1))
         {
             throw Unsupported(
                 "The C1 metadata-only class projection requires a type-only Module without MethodDefs.");
@@ -1034,10 +1039,182 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        return new CompilationReference([], [],
+        var genericNominalTypeInstances
+            = ImmutableArray.CreateBuilder<BoundGenericNominalTypeInstance>();
+        var classTypeInstanceIndexes
+            = new Dictionary<BoundGenericNominalTypeIdentity, int>();
+        foreach (var declaration in classDeclarations)
+        {
+            if (declaration.SelectedExportKeys.IsEmpty
+                || !declaration.Expectations.IsEmpty
+                || classTypeInstanceIndexes.ContainsKey(
+                    declaration.Declaration.Identity))
+            {
+                continue;
+            }
+
+            var instanceIndex = genericNominalTypeInstances.Count;
+            classTypeInstanceIndexes.Add(
+                declaration.Declaration.Identity, instanceIndex);
+            genericNominalTypeInstances.Add(
+                new BoundGenericNominalTypeInstance(
+                    declaration.Declaration.Identity, [], 0));
+        }
+
+        var functions = ImmutableArray.CreateBuilder<BoundFunction>();
+        var importedFunctionNames = new HashSet<string>(
+            StringComparer.Ordinal);
+        foreach (var declaration in classDeclarations)
+        {
+            if (declaration.SelectedExportKeys.IsEmpty
+                || !declaration.Expectations.IsEmpty)
+            {
+                continue;
+            }
+
+            var className = string.IsNullOrEmpty(
+                    declaration.Declaration.Namespace)
+                ? declaration.Declaration.Name
+                : declaration.Declaration.Namespace + "."
+                    + declaration.Declaration.Name;
+            foreach (var method in declaration.Declaration.Methods)
+            {
+                if (method.SelectedExportKeys.IsEmpty
+                    || method.ConstructionRole != 0
+                    || (method.Flags & 3) != 2)
+                {
+                    continue;
+                }
+
+                if (method.GenericParameterCount != 0
+                    || method.BodyRow == 0
+                    || !TryGetScalarType(method.ReturnTypeSpecReference,
+                        out var returnType))
+                {
+                    throw Unsupported(
+                        "The bounded CM1 class source reference supports only bodyful nongeneric scalar member methods.");
+                }
+
+                var variables = ImmutableArray.CreateBuilder<BoundVariable>(
+                    method.Parameters.Length
+                        + (method.ReceiverTypeSpecReference == 0 ? 0 : 1));
+                var isStatic = method.ReceiverTypeSpecReference == 0;
+                if (!isStatic)
+                {
+                    if ((method.Flags & 4) != 0
+                        || !classTypeInstanceIndexes.TryGetValue(
+                            declaration.Declaration.Identity,
+                            out var receiverTypeIndex))
+                    {
+                        throw Unsupported(
+                            "Mutable class receivers or unselected class identities are not admitted by this bounded source reference.");
+                    }
+
+                    var receiverTypeSpec = rootTables.TypeSpecs
+                        .GetTypeSpecRef(
+                            method.ReceiverTypeSpecReference);
+                    if (!receiverTypeSpec.IsRow
+                        || receiverTypeSpec.Form is not (0x02 or 0x03)
+                        || receiverTypeSpec.Qualifiers != 0)
+                    {
+                        throw Unsupported(
+                            "A class method receiver requires an unqualified nominal class handle.");
+                    }
+
+                    var receiverTypeDefRow = rootTables.TypeSpecs
+                        .GetNominalTypeDefRow(
+                            method.ReceiverTypeSpecReference,
+                            rootTables.TypeDefs, rootTables.Imports);
+                    if (receiverTypeDefRow
+                            != (int)(declaration.Declaration.Identity
+                                .DefinitionId & 0x00FF_FFFF))
+                    {
+                        throw Unsupported(
+                            "A class method receiver does not match the selected class handle view.");
+                    }
+
+                    variables.Add(new BoundVariable("this",
+                        BoundGenericNominalTypeTypes.Type(receiverTypeIndex),
+                        false, default));
+                }
+
+                var defaults
+                    = ImmutableArray.CreateBuilder<
+                        BoundOrdinaryParameterDefault>();
+                for (var ordinal = 0;
+                    ordinal < method.Parameters.Length; ordinal++)
+                {
+                    var parameter = method.Parameters[ordinal];
+                    if (parameter.Mode != 0 || parameter.Flags != 0
+                        || !TryGetScalarType(parameter.TypeSpecReference,
+                            out var parameterType))
+                    {
+                        throw Unsupported(
+                            "The bounded CM1 class source reference supports only by-value scalar static member parameters.");
+                    }
+
+                    variables.Add(new BoundVariable(parameter.Name,
+                        parameterType, false, default));
+                    if (parameter.DefaultValue is BoundConstant value)
+                    {
+                        defaults.Add(new BoundOrdinaryParameterDefault(
+                            ordinal, value, null, -1, default,
+                            IsPending: false));
+                    }
+                }
+
+                var exportKey = method.SelectedExportKeys[0];
+                var functionName = className + "." + method.Name;
+                if (!importedFunctionNames.Add(functionName))
+                {
+                    throw Unsupported(
+                        "The bounded CM1 class source reference does not support overloaded static member names.");
+                }
+
+                var targetRequirement
+                    = declaration.Declaration.Provider.TargetRequirement;
+                var runtimePolicy
+                    = declaration.Declaration.Provider.RuntimePolicy;
+                functions.Add(new BoundFunction(functionName, returnType,
+                    variables.MoveToImmutable(),
+                    method.Parameters.Length + (isStatic ? 0 : 1),
+                    new BoundBlock([], default),
+                    default) {
+                    IsExternal = true,
+                    IsStatic = isStatic,
+                    DeclaringStruct = className,
+                    RequiresUnsafeCaller = (method.EffectsMask & 4) != 0,
+                    DeclaredRequiresUnsafeCaller =
+                        (method.EffectsMask & 4) != 0,
+                    DoesNotReturn = (method.EffectsMask & 2) != 0,
+                    ModuleImport = new BoundModuleImport(
+                        declaration.Declaration.Provider.ModuleIdentity,
+                        exportKey, targetRequirement, runtimePolicy),
+                    HasOrdinaryParameterDefaultSurface = true,
+                    OrdinaryParameterDefaults =
+                        defaults.ToImmutable(),
+                });
+            }
+        }
+
+        bool TryGetScalarType(uint typeSpecReference,
+            out PrimitiveType type)
+        {
+            type = PrimitiveType.Void;
+            var typeSpec = rootTables.TypeSpecs.GetTypeSpecRef(
+                typeSpecReference);
+            return typeSpec.Form == 1 && typeSpec.Row == 0
+                && typeSpec.Qualifiers == 0
+                && TrRmConstantSourceValueValidator
+                    .TryGetBoundScalarType(typeSpec.TypeCode, out type);
+        }
+
+        return new CompilationReference([], functions.ToImmutable(),
             (BoundRuntimePolicy)rootTables.Modules
                 .GetRequirements(rootModuleRow).RuntimePolicy,
             genericNominalTypeDefinitions: typeDefinitions.ToImmutable(),
+            genericNominalTypeInstances:
+                genericNominalTypeInstances.ToImmutable(),
             standardClassDeclarations: classDeclarations.ToImmutable());
     }
 
@@ -1119,11 +1296,143 @@ public static partial class TrRmExecutableCompiler
                 fieldIds.MoveToImmutable()));
         }
 
+        var (methodStart, methodEnd)
+            = tables.TypeDefs.GetMethodRange(typeDefRow);
+        var methodExportKeys = new Dictionary<uint, List<string>>();
+        foreach (var (definitionId, exportKey) in tables.Exports
+            .GetExportsForModule(provider.ModuleRow))
+        {
+            if ((definitionId >> 24) != 0x16)
+            {
+                continue;
+            }
+
+            if (!methodExportKeys.TryGetValue(definitionId,
+                    out var exportKeys))
+            {
+                exportKeys = [];
+                methodExportKeys.Add(definitionId, exportKeys);
+            }
+
+            exportKeys.Add(exportKey);
+        }
+
+        var methods = ImmutableArray.CreateBuilder<
+            BoundStandardClassMethodDeclaration>();
+        for (var methodRow = methodStart; methodRow < methodEnd;
+            methodRow++)
+        {
+            if (tables.NativeFunctionPointerAnchors
+                .IsAnchorMethodDef(methodRow))
+            {
+                continue;
+            }
+
+            var definitionId = 0x1600_0000u
+                | checked((uint)methodRow);
+            var signature = tables.Methods.GetSignature(methodRow);
+            var (parameterStart, parameterCount)
+                = tables.Signatures.GetParamRange(signature);
+            var genericParameterCount
+                = tables.Signatures.GetGenericCount(signature);
+            var hasClassParameterSurface
+                = tables.Schema.UsesClassParameterDefaults()
+                    && genericParameterCount == 0;
+            var parameters = ImmutableArray.CreateBuilder<
+                BoundStandardClassMethodParameter>(parameterCount);
+            for (var ordinal = 0; ordinal < parameterCount; ordinal++)
+            {
+                var parameterRow = parameterStart + ordinal;
+                var name = "arg" + ordinal.ToString(
+                    System.Globalization.CultureInfo.InvariantCulture);
+                BoundConstant? defaultValue = null;
+                if (hasClassParameterSurface)
+                {
+                    if (!tables.MethodParameterLabels.TryGetNameStringRow(
+                            methodRow, checked((uint)ordinal),
+                            out var nameStringRow)
+                        || !tables.MethodParameterLabels
+                            .TryGetDefaultConstantSourceRow(methodRow,
+                                checked((uint)ordinal),
+                                out var constantSourceRow))
+                    {
+                        throw Invalid(
+                            "A CM1 class MethodDef has an incomplete parameter surface.");
+                    }
+
+                    name = tables.Strings.DecodeName(nameStringRow);
+                    if (constantSourceRow != 0)
+                    {
+                        var ownerModule
+                            = tables.Methods.GetOwnerModule(methodRow);
+                        var (targetRequirement, _)
+                            = tables.Modules.GetRequirements(ownerModule);
+                        defaultValue
+                            = TrRmConstantSourceValueValidator
+                                .MaterializeFrozenScalar(
+                                    checked((int)constantSourceRow),
+                                    tables.Parameters.GetTypeSpec(
+                                        parameterRow),
+                                    ownerModule, targetRequirement,
+                                    tables.ConstantSources,
+                                    tables.FrozenValueNodes, tables.Blobs,
+                                    tables.TypeSpecs, tables.Features,
+                                    tables.Modules,
+                                    tables.A3LayoutResourceLedger);
+                    }
+                }
+
+                parameters.Add(new BoundStandardClassMethodParameter(
+                    name,
+                    tables.Parameters.GetTypeSpec(parameterRow),
+                    tables.Parameters.GetMode(parameterRow),
+                    tables.Parameters.GetFlags(parameterRow),
+                    defaultValue));
+            }
+
+            var constructionRole = (byte)0;
+            uint initializerMethodDefinitionId = 0;
+            uint constructionPropertyDefinitionId = 0;
+            var initializedMembers = ImmutableArray<uint>.Empty;
+            if (tables.Contracts.HasConstructionClause(methodRow))
+            {
+                var construction
+                    = tables.Contracts.GetConstructionClause(methodRow);
+                constructionRole = construction.RoleTag;
+                initializerMethodDefinitionId
+                    = construction.InitializerMethodDefRow == 0 ? 0
+                        : 0x1600_0000u
+                            | construction.InitializerMethodDefRow;
+                constructionPropertyDefinitionId
+                    = construction.PropertyDefRow == 0 ? 0
+                        : 0x1E00_0000u | construction.PropertyDefRow;
+                initializedMembers
+                    = construction.InitializedMemberDefIds;
+            }
+
+            var exportKeys = methodExportKeys.TryGetValue(definitionId,
+                    out var keys)
+                ? keys.ToImmutableArray() : [];
+            methods.Add(new BoundStandardClassMethodDeclaration(
+                definitionId, tables.Methods.GetName(methodRow),
+                tables.Methods.GetFlags(methodRow),
+                tables.Contracts.GetEffectsMask(methodRow),
+                tables.Signatures.GetResultTypeSpec(signature),
+                tables.Signatures.GetReceiverTypeSpec(signature),
+                parameters.MoveToImmutable(), exportKeys, exportKeys,
+                genericParameterCount,
+                checked((uint)tables.Methods.GetBodyRow(methodRow)),
+                constructionRole, initializerMethodDefinitionId,
+                constructionPropertyDefinitionId, initializedMembers));
+        }
+
         return new BoundStandardClassTypeView(identity,
             tables.TypeDefs.GetNamespace(typeDefRow),
             tables.TypeDefs.GetName(typeDefRow),
             tables.TypeDefs.GetFlags(typeDefRow), fields.MoveToImmutable(),
-            layouts.MoveToImmutable(), provider);
+            layouts.MoveToImmutable(), provider) {
+            Methods = methods.ToImmutable(),
+        };
     }
 
     private static void EnsureC1ClassDeclarationTablesSupported(
@@ -1153,10 +1462,12 @@ public static partial class TrRmExecutableCompiler
         var schemaIdentity = schemaIdentities[artifactIndex];
         if (!StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardC1M1SchemaIdentity)
+            && !StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardC1M1Construction2L1R1ClassParameterDefaultsSchemaIdentity)
             && !IsSelectedC1EnumClosureSchemaIdentity(schemaIdentity))
         {
             throw Unsupported(
-                "The C1 class provider closure requires exact C1M1 or EN1 selections.");
+                "The C1 class provider closure requires exact C1M1, CM1 or EN1 selections.");
         }
 
         var tables = ValidateForeignInvocationArtifact(

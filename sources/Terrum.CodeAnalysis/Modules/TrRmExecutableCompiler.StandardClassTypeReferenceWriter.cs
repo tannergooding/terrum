@@ -343,6 +343,10 @@ public static partial class TrRmExecutableCompiler
             return GetC1M1SourceScalarTypeSpecReference(type);
         }
 
+        uint Construction2ValueTypeSpecReference(PrimitiveType type)
+            => type == PrimitiveType.Void
+                ? 0xF200_0000u : FieldTypeSpecReference(type);
+
         int AppendC1M1Construction2Parameters(
             int signatureRow, BoundFunction function, int firstVariable)
         {
@@ -361,8 +365,7 @@ public static partial class TrRmExecutableCompiler
                 var variable = function.Variables[firstVariable + ordinal];
                 if (variable.IsMutable || variable.IsOut || variable.IsInit
                     || variable.IsImplicitRef
-                    || (variable.Type == PrimitiveType.Void
-                        && !schema.UsesClassParameterDefaults()))
+                    || variable.IsInitializationLocal)
                 {
                     throw Unsupported(
                         "The bounded Construction-2 constructor projection supports only immutable by-value parameters.");
@@ -376,8 +379,7 @@ public static partial class TrRmExecutableCompiler
         }
 
         uint ParameterTypeSpecReference(PrimitiveType type)
-            => type == PrimitiveType.Void
-                ? 0xF200_0000u : FieldTypeSpecReference(type);
+            => Construction2ValueTypeSpecReference(type);
 
         void AppendC1M1Construction2ParameterSurface(
             int methodDefRow, BoundFunction function, int firstVariable)
@@ -946,9 +948,18 @@ public static partial class TrRmExecutableCompiler
 
                     if (methodFunction.IsStatic)
                     {
-                        foreach (var variable in methodFunction.Variables)
+                        for (var variableIndex = 0;
+                            variableIndex < methodFunction.Variables.Length;
+                            variableIndex++)
                         {
-                            if (variable.Type == PrimitiveType.Void
+                            var variable
+                                = methodFunction.Variables[variableIndex];
+                            var isUnitParameter
+                                = variable.Type == PrimitiveType.Void
+                                    && variableIndex
+                                        < methodFunction.ParameterCount;
+                            if ((variable.Type == PrimitiveType.Void
+                                    && !isUnitParameter)
                                 || variable.IsOut || variable.IsInit
                                 || variable.IsImplicitRef
                                 || variable.IsInitializationLocal)
@@ -957,8 +968,11 @@ public static partial class TrRmExecutableCompiler
                                     "The bounded Construction-2 static method producer supports only scalar local storage.");
                             }
 
-                            _ = GetC1M1SourceScalarTypeSpecReference(
-                                variable.Type);
+                            if (!isUnitParameter)
+                            {
+                                _ = GetC1M1SourceScalarTypeSpecReference(
+                                    variable.Type);
+                            }
                         }
                     }
                     else
@@ -1015,6 +1029,18 @@ public static partial class TrRmExecutableCompiler
                         0, 0));
                     var methodVisibility = methodFunction.IsPrivate ? 0u
                         : methodFunction.IsInternal ? 1u : 2u;
+                    if (!methodFunction.IsStatic
+                        && methodFunction.Variables[0].IsMutable)
+                    {
+                        if (!schema.UsesMethodReceiverAccess())
+                        {
+                            throw Unsupported(
+                                "A mutable class method receiver requires the exact receiver-access successor.");
+                        }
+
+                        methodVisibility |= 4u;
+                    }
+
                     methodRows.Add(new TrRmMethodDefRow(
                         typeDefRowByClass[classIndex], 0,
                         methodSignatureRow, methodVisibility, 0, 0, 0));
@@ -1051,12 +1077,13 @@ public static partial class TrRmExecutableCompiler
             {
                 bodyRows.Add(EncodeC1M1Construction2InitializerBody(
                     initializer, fieldDefRowByClassAndIndex,
-                    FieldTypeSpecReference, contractRows.Count, schema));
+                    Construction2ValueTypeSpecReference,
+                    contractRows.Count, schema));
                 methodRows[initializer.InitializerMethodDefRow - 1]
                     = methodRows[initializer.InitializerMethodDefRow - 1]
                         with { BodyRow = bodyRows.Count };
                 bodyRows.Add(EncodeC1M1Construction2ProjectionBody(
-                    initializer, FieldTypeSpecReference,
+                    initializer, Construction2ValueTypeSpecReference,
                     contractRows.Count, schema));
                 methodRows[initializer.ProjectionMethodDefRow - 1]
                     = methodRows[initializer.ProjectionMethodDefRow - 1]
@@ -1069,7 +1096,8 @@ public static partial class TrRmExecutableCompiler
                     ? EncodeC1M1Construction2StaticMethodBody(
                         method.Function)
                     : EncodeC1M1Construction2NoOpInstanceMethodBody(
-                        method.Function, FieldTypeSpecReference,
+                        method.Function,
+                        Construction2ValueTypeSpecReference,
                         contractRows.Count, schema));
                 methodRows[method.MethodDefRow - 1]
                     = methodRows[method.MethodDefRow - 1]
@@ -1659,6 +1687,13 @@ public static partial class TrRmExecutableCompiler
                     typeTokens[parameterIndex])));
             BinaryPrimitives.WriteUInt16LittleEndian(home[4..],
                 checked((ushort)(parameterIndex - 1)));
+            if (function.Variables[parameterIndex].Type
+                == PrimitiveType.Void)
+            {
+                inputs.Add(new TrRmRegisterBodyCallInput(0, 0, 0));
+                continue;
+            }
+
             inputs.Add(new TrRmRegisterBodyCallInput(2, 1,
                 checked((ushort)homeIndex)));
         }
@@ -1726,8 +1761,7 @@ public static partial class TrRmExecutableCompiler
             parameter++)
         {
             var variable = function.Variables[parameter];
-            if (variable.Type == PrimitiveType.Void
-                || variable.IsOut || variable.IsInit
+            if (variable.IsOut || variable.IsInit
                 || variable.IsImplicitRef)
             {
                 throw Unsupported(

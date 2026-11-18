@@ -237,7 +237,7 @@ internal static class BoundInterfaceContract
         BoundConstant value)
     {
         var type = value.Type;
-        if (type is not (PrimitiveType.Bool or PrimitiveType.Char8
+        if (type is not (PrimitiveType.Void or PrimitiveType.Bool or PrimitiveType.Char8
                 or PrimitiveType.Char16 or PrimitiveType.Char32
                 or PrimitiveType.Rune or PrimitiveType.Int8
                 or PrimitiveType.Int16 or PrimitiveType.Int32
@@ -446,6 +446,8 @@ internal static class BoundInterfaceContract
                     || !IsValidType(parameter.Type, owner, definitions, isValidType,
                         owner.Formals.Length, member.TypeParameters,
                         member.TypeParameters.Length,
+                        allowVoid: parameter.Mode
+                            == BoundInterfaceParameterMode.Value,
                         genericNominalTypeDefinitions:
                             genericNominalTypeDefinitions,
                         sourceGenericTypeDefinitions:

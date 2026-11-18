@@ -1582,6 +1582,14 @@ internal sealed partial class Binder
         name = resolution == DeclaredTypeResolution.Unique
             ? IsClass(type) ? _classes[ManagedClassTypes.ClassIndex(type)].Name + "." + member
                 : IsStruct(type) ? _structs[(int)type - 100].Name + "." + member
+                : TryGetSourceStandardClassDeclaration(type,
+                    out var standardClassDeclaration)
+                    ? (string.IsNullOrEmpty(
+                        standardClassDeclaration.Declaration.Namespace)
+                        ? standardClassDeclaration.Declaration.Name
+                        : standardClassDeclaration.Declaration.Namespace
+                            + "." + standardClassDeclaration.Declaration.Name)
+                        + "." + member
                 : _genericContext is GenericInstantiation generic
                     && generic.Template.ParameterIndex(receiverName) >= 0
                     ? TypeName(type) + "." + member

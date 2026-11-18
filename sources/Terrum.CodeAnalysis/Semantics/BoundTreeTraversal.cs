@@ -90,7 +90,7 @@ internal static class BoundTreeTraversal
         bool Visit(BoundStandardClassTypeView view)
         {
             if (view is null || view.Provider is null
-                || view.Fields.IsDefault)
+                || view.Fields.IsDefault || view.Methods.IsDefault)
             {
                 return false;
             }
@@ -103,6 +103,32 @@ internal static class BoundTreeTraversal
                 }
 
                 visitor(view.Provider, field.TypeSpecReference);
+            }
+
+            foreach (var method in view.Methods)
+            {
+                if (method is null || method.Parameters.IsDefault
+                    || --remaining < 0)
+                {
+                    return false;
+                }
+
+                visitor(view.Provider, method.ReturnTypeSpecReference);
+                if (method.ReceiverTypeSpecReference != 0)
+                {
+                    visitor(view.Provider,
+                        method.ReceiverTypeSpecReference);
+                }
+
+                foreach (var parameter in method.Parameters)
+                {
+                    if (parameter is null || --remaining < 0)
+                    {
+                        return false;
+                    }
+
+                    visitor(view.Provider, parameter.TypeSpecReference);
+                }
             }
 
             return true;
