@@ -125,8 +125,9 @@ prerequisite has already been met.
    descriptors, and exact same-class static and readonly-instance identity
    forwarders through Body kind `05`, plus a readonly instance `int32` XOR
    Body over two value formals, and a readonly same-class call followed by XOR
-   through a general CallSite Body. The Unit-before-value, field-read,
-   field-write, XOR, call-forwarding, static-forwarder and receiver-forwarder
+   through a general CallSite Body, plus a scalar formal-to-local copy
+   followed by ReturnHome. The Unit-before-value, field-read, field-write, XOR,
+   call-forwarding, local-copy, static-forwarder and receiver-forwarder
    regressions remain unverified under the active hold. Ordinary
    by-value Unit parameters and `()`
    defaults now retain logical positions through source binding, CM1 metadata

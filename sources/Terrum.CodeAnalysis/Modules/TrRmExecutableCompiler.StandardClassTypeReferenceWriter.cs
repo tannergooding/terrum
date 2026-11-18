@@ -916,6 +916,9 @@ public static partial class TrRmExecutableCompiler
                     var callXor
                         = TryGetC1M1Construction2DirectCallXor(
                             methodFunction, program.Functions);
+                    var localCopyReturn
+                        = TryGetC1M1Construction2LocalCopyReturn(
+                            methodFunction);
                     if ((!methodFunction.IsStatic
                             && !isSupportedNoOpInstanceMethod
                             && !isSupportedDirectReturnInstanceMethod
@@ -923,7 +926,8 @@ public static partial class TrRmExecutableCompiler
                             && !isSupportedDirectFieldWriteInstanceMethod
                             && !isSupportedIdentityForwarder
                             && directXor is null
-                            && callXor is null)
+                            && callXor is null
+                            && !localCopyReturn)
                         || methodFunction.IsClassConstructor
                         || methodFunction.IsConstructor
                         || methodFunction.IsExternal
@@ -976,7 +980,7 @@ public static partial class TrRmExecutableCompiler
                             && methodFunction.IsInternal))
                     {
                         throw Unsupported(
-                            "The bounded Construction-2 class method producer supports effect-free scalar static methods, exact identity forwarders, readonly instance int32 XOR and same-class call-XOR methods, empty unit instance methods, readonly instance methods returning one scalar value parameter and direct scalar field reads/writes.");
+                            "The bounded Construction-2 class method producer supports effect-free scalar static methods, exact identity forwarders, readonly instance int32 XOR and same-class call-XOR methods, one scalar local-copy return, empty unit instance methods, readonly instance methods returning one scalar value parameter and direct scalar field reads/writes.");
                     }
 
                     if (methodFunction.ReturnType != PrimitiveType.Void)
@@ -988,10 +992,11 @@ public static partial class TrRmExecutableCompiler
                                 && !isSupportedDirectFieldWriteInstanceMethod
                                 && !isSupportedIdentityForwarder
                                 && directXor is null
-                                && callXor is null)
+                                && callXor is null
+                                && !localCopyReturn)
                             {
                                 throw Unsupported(
-                                    "The bounded Construction-2 instance method producer supports only unit, direct scalar-parameter, direct int32 XOR, same-class call-XOR or direct scalar-field results and direct scalar-field writes.");
+                                    "The bounded Construction-2 instance method producer supports only unit, direct scalar-parameter, direct int32 XOR, same-class call-XOR, one scalar local-copy return or direct scalar-field results and direct scalar-field writes.");
                             }
                         }
 
@@ -1137,6 +1142,14 @@ public static partial class TrRmExecutableCompiler
                         encodedBody
                             = EncodeC1M1Construction2DirectXorBody(
                                 methodFunction, directXor,
+                                Construction2ValueTypeSpecReference,
+                                contractRows.Count, schema);
+                    }
+                    else if (localCopyReturn)
+                    {
+                        encodedBody
+                            = EncodeC1M1Construction2LocalCopyReturnBody(
+                                methodFunction,
                                 Construction2ValueTypeSpecReference,
                                 contractRows.Count, schema);
                     }
@@ -2171,6 +2184,83 @@ public static partial class TrRmExecutableCompiler
         }
     }
 
+    private static byte[] EncodeC1M1Construction2LocalCopyReturnBody(
+        BoundFunction function,
+        Func<PrimitiveType, uint> typeSpecReferenceFor, int contractCount,
+        TrRmArtifactSchema schema)
+    {
+        if (function.IsStatic || function.ReturnType != PrimitiveType.Int32
+            || function.ParameterCount != 2
+            || function.Variables.Length != 3
+            || function.Variables[0].IsMutable
+            || function.Variables[1].Type != PrimitiveType.Int32
+            || function.Variables[1].IsMutable
+            || function.Variables[1].IsOut || function.Variables[1].IsInit
+            || function.Variables[1].IsImplicitRef
+            || function.Variables[1].IsInitializationLocal
+            || function.Variables[2].Type != PrimitiveType.Int32
+            || function.Variables[2].IsMutable
+            || function.Variables[2].IsOut || function.Variables[2].IsInit
+            || function.Variables[2].IsImplicitRef
+            || function.Variables[2].IsInitializationLocal
+            || function.Body.RetiredManagedLocals.Length != 0
+            || function.Body.Statements.Length != 2
+            || function.Body.Statements[0] is not BoundLocal {
+                Variable: 2,
+                Initializer: BoundRead { Variable: 1, Type: PrimitiveType.Int32 },
+            }
+            || function.Body.Statements[1] is not BoundReturn {
+                Value: BoundRead { Variable: 2, Type: PrimitiveType.Int32 },
+            })
+        {
+            throw Unsupported(
+                "A Construction-2 local-copy Body requires one initialized int32 local copied from an int32 value formal and returned directly.");
+        }
+
+        var typeTokens = new uint[function.Variables.Length];
+        var homeMap = new byte[checked(function.Variables.Length * 8)];
+        for (var variable = 0; variable < function.Variables.Length;
+            variable++)
+        {
+            var typeToken = CreateStandardBodyTypeMapToken(
+                typeSpecReferenceFor(function.Variables[variable].Type));
+            typeTokens[variable] = typeToken;
+        }
+
+        var maps = TrRmRegisterBodyMapBuilder.Create(typeTokens, []);
+        for (var variable = 0; variable < function.Variables.Length;
+            variable++)
+        {
+            var offset = variable * 8;
+            var role = variable == 0 ? (byte)1
+                : variable < function.ParameterCount ? (byte)2 : (byte)3;
+            homeMap[offset] = role;
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                homeMap.AsSpan(offset + 2, 2),
+                maps.GetTypeMapIndex(typeTokens[variable]));
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                homeMap.AsSpan(offset + 4, 2),
+                role == 2 ? checked((ushort)(variable - 1)) : (ushort)0);
+        }
+
+        byte[] code = [
+            0xD5, 0, 1, 0,
+            0xD6, 0x10, 2, 0,
+            0xEB, 0, 2, 0,
+        ];
+        ReadOnlyMemory<byte>[] records = [
+            new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 },
+        ];
+        return TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
+            default, default, default,
+            [new TrRmRegisterBodyBlock(0,
+                checked((uint)code.Length), 0)],
+            records, code, contractCount: contractCount,
+            schema: schema,
+            generalPredicateGraphsInitializationReferenceBodies
+                : schema.UsesGeneralPredicateGraphs());
+    }
+
     private static byte[] EncodeC1M1Construction2IdentityForwarderBody(
         int targetMethodDefRow)
     {
@@ -2728,6 +2818,44 @@ public static partial class TrRmExecutableCompiler
                 }
             }
         }
+    }
+
+    private static bool TryGetC1M1Construction2LocalCopyReturn(
+        BoundFunction function)
+    {
+        return !function.IsStatic
+            && function.ReturnType == PrimitiveType.Int32
+            && function.ParameterCount == 2
+            && function.Variables.Length == 3
+            && !function.Variables[0].IsMutable
+            && function.Variables[1].Type == PrimitiveType.Int32
+            && !function.Variables[1].IsMutable
+            && !function.Variables[1].IsOut
+            && !function.Variables[1].IsInit
+            && !function.Variables[1].IsImplicitRef
+            && !function.Variables[1].IsInitializationLocal
+            && function.Variables[2].Type == PrimitiveType.Int32
+            && !function.Variables[2].IsMutable
+            && !function.Variables[2].IsOut
+            && !function.Variables[2].IsInit
+            && !function.Variables[2].IsImplicitRef
+            && !function.Variables[2].IsInitializationLocal
+            && function.Body.RetiredManagedLocals.IsEmpty
+            && function.Body.Statements is [
+                BoundLocal {
+                    Variable: 2,
+                    Initializer: BoundRead {
+                        Variable: 1,
+                        Type: PrimitiveType.Int32,
+                    },
+                },
+                BoundReturn {
+                    Value: BoundRead {
+                        Variable: 2,
+                        Type: PrimitiveType.Int32,
+                    },
+                },
+            ];
     }
 
     private static bool TryGetC1M1Construction2DirectParameterReturn(
