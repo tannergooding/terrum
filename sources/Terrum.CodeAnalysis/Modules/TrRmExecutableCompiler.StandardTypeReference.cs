@@ -568,6 +568,11 @@ public static partial class TrRmExecutableCompiler
             {
                 return;
             }
+            if (type.Form == 0x01 && type.TypeCode == 0x8C
+                && type.ArgumentCode == 0 && type.Qualifiers == 0)
+            {
+                return;
+            }
             if (!type.IsRow)
             {
                 throw Unsupported(
@@ -2000,6 +2005,14 @@ public static partial class TrRmExecutableCompiler
                 && scalarType != PrimitiveType.Void)
             {
                 fieldType = scalarType;
+                return true;
+            }
+
+            if (typeSpecForm == type.Form && type.Form == 0x01
+                && type.TypeCode == 0x8C && type.ArgumentCode == 0
+                && type.Qualifiers == 0)
+            {
+                fieldType = PrimitiveType.NativeRawPointer;
                 return true;
             }
 

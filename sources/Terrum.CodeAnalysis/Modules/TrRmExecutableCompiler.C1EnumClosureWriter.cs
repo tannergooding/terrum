@@ -2027,6 +2027,11 @@ public static partial class TrRmExecutableCompiler
                         continue;
                     }
 
+                    if (field.Type == PrimitiveType.NativeRawPointer)
+                    {
+                        continue;
+                    }
+
                     if ((field.Type is PrimitiveType.NativeInt
                             or PrimitiveType.NativeUInt)
                         && moduleTargetRequirement
@@ -2318,6 +2323,23 @@ public static partial class TrRmExecutableCompiler
             {
                 return sourceTypeSpec;
             }
+            if (type.Form == 0x01 && type.TypeCode == 0x8C
+                && type.ArgumentCode == 0 && type.Qualifiers == 0)
+            {
+                if (standardClassTypeSpecRows.TryGetValue(sourceTypeSpec,
+                        out var existingPointerTypeSpec))
+                {
+                    return existingPointerTypeSpec;
+                }
+
+                var pointerTypeSpec
+                    = checked((uint)typeSpecRows.Count + 1);
+                typeSpecRows.Add(TrRmTypeSpecTableWriter.InlineFamily(
+                    0x8C, 0));
+                standardClassTypeSpecRows.Add(sourceTypeSpec,
+                    pointerTypeSpec);
+                return pointerTypeSpec;
+            }
             if (depth > SemanticVerifier.MaximumDepth)
             {
                 throw Unsupported(
@@ -2544,6 +2566,15 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 return typeSpecRow;
+            }
+
+            if (type == PrimitiveType.NativeRawPointer)
+            {
+                var pointerTypeSpecRow
+                    = checked((uint)typeSpecRows.Count + 1);
+                typeSpecRows.Add(TrRmTypeSpecTableWriter.InlineFamily(
+                    0x8C, 0));
+                return pointerTypeSpecRow;
             }
 
             return GetC1M1SourceScalarTypeSpecReference(type);
