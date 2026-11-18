@@ -1889,6 +1889,7 @@ internal sealed class TrRmC1EnumClosureSourceTests
             namespace Demo {
                 public class Box {
                     private uint8 Hidden;
+                    public uint8 Prefix;
                     public int32 Value;
                 }
             }
@@ -1910,7 +1911,7 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var classExport = new TrRmSourceClassExport(providerProgram,
             classIndex, classDeclaration.Span, "type.box", [
                 new TrRmSourceClassMemberExport(0,
-                    fields[1].Span, "field.box.value"),
+                    fields[2].Span, "field.box.value"),
             ]);
         var providerArtifact = TrRmExecutableCompiler.EmitStandard(
             providerProgram, "ClassLayoutProvider", schemaIdentity, 1, [],
@@ -1925,6 +1926,9 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 !declaration.SelectedExportKeys.IsEmpty).Declaration;
         Assert.That(classView.Fields.Single(
             static field => field.Name == "Hidden").SelectedExportKeys,
+            Is.Empty);
+        Assert.That(classView.Fields.Single(
+            static field => field.Name == "Prefix").SelectedExportKeys,
             Is.Empty);
 
         var queryCompilation = Compilation.CreateLibrary(
@@ -1959,6 +1963,27 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 Functions = [main],
                 EntryPoint = 0,
             }, NativeRuntimePolicy.FailFast), Is.EqualTo(4));
+
+        var coLocatedArtifact = TrRmExecutableCompiler.EmitStandard(
+            queryCompilation.Program!, "ClassLayoutProvider",
+            schemaIdentity, 1);
+        var coLocatedTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                coLocatedArtifact, SchemaFor(schemaIdentity), null,
+                usesNativePointerLoads: false,
+                standardSchemaIdentity: schemaIdentity));
+        var prefixFieldRow = Enumerable.Range(1,
+                coLocatedTables.Fields.Count)
+            .Single(row =>
+                coLocatedTables.Fields.GetName(row) == "Prefix");
+        var malformedPath = RewriteEN1ClassQueryFieldReference(
+            coLocatedArtifact, schemaIdentity, 1, 1, 0,
+            0x1400_0000u
+                | checked((uint)prefixFieldRow));
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    malformedPath), "ClassLayoutProvider", []));
     }
 
     [Test]
@@ -4214,6 +4239,106 @@ internal sealed class TrRmC1EnumClosureSourceTests
         }
 
         return TrRmArtifactWriter.Encode(sections, schema);
+    }
+
+    private static byte[] RewriteEN1ClassQueryFieldReference(byte[] artifact,
+        string schemaIdentity, int fieldPathRow,
+        int targetLayoutDependencyRow, int ordinal, uint replacement)
+    {
+        var schema = SchemaFor(schemaIdentity);
+        var index = new TrRmArtifactIndex(artifact, schema);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                artifact, schema, null, usesNativePointerLoads: false,
+                standardSchemaIdentity: schemaIdentity));
+        if (fieldPathRow <= 0 || fieldPathRow > tables.FieldPaths.Count
+            || targetLayoutDependencyRow <= 0
+            || targetLayoutDependencyRow
+                > tables.TargetLayoutDependencies.Count)
+        {
+            throw new ArgumentOutOfRangeException(nameof(fieldPathRow));
+        }
+
+        var pathFieldCount = tables.FieldPaths.GetFieldCount(fieldPathRow);
+        var dependencyFieldRange = tables.TargetLayoutDependencies
+            .GetFieldRange(targetLayoutDependencyRow);
+        if (ordinal < 0 || ordinal >= pathFieldCount
+            || ordinal >= dependencyFieldRange.Count
+            || pathFieldCount != dependencyFieldRange.Count)
+        {
+            throw new ArgumentOutOfRangeException(nameof(ordinal));
+        }
+
+        var originalFieldReference = tables.FieldPaths
+            .GetFieldReference(fieldPathRow, ordinal);
+        var dependencyFieldRow = dependencyFieldRange.First + ordinal;
+        if (tables.TargetLayoutDependencyFields.GetFieldReference(
+                dependencyFieldRow) != originalFieldReference)
+        {
+            throw new InvalidDataException(
+                "The EN1 FieldPath and dependency fixtures disagree.");
+        }
+
+        var fieldPathRows = new TrRmFieldPathRow[tables.FieldPaths.Count];
+        for (var row = 1; row <= fieldPathRows.Length; row++)
+        {
+            var fieldCount = tables.FieldPaths.GetFieldCount(row);
+            var fieldReferences = new uint[fieldCount];
+            for (var field = 0; field < fieldCount; field++)
+            {
+                fieldReferences[field] = tables.FieldPaths
+                    .GetFieldReference(row, field);
+            }
+
+            if (row == fieldPathRow)
+            {
+                fieldReferences[ordinal] = replacement;
+            }
+
+            fieldPathRows[row - 1] = new TrRmFieldPathRow(
+                tables.FieldPaths.GetRootTypeSpecRef(row),
+                fieldReferences);
+        }
+
+        var targetLayoutDependencyFieldReferences
+            = new uint[tables.TargetLayoutDependencyFields.Count];
+        for (var row = 1;
+            row <= targetLayoutDependencyFieldReferences.Length; row++)
+        {
+            targetLayoutDependencyFieldReferences[row - 1]
+                = tables.TargetLayoutDependencyFields
+                    .GetFieldReference(row);
+        }
+
+        targetLayoutDependencyFieldReferences[dependencyFieldRow - 1]
+            = replacement;
+        var rewrittenFieldPaths = TrRmFieldPathTableWriter.Encode(
+            fieldPathRows, tables.TypeSpecs, tables.Fields, tables.Imports);
+        var rewrittenDependencyFields
+            = TrRmTargetLayoutDependencyFieldTableWriter.Encode(
+                targetLayoutDependencyFieldReferences, tables.Fields,
+                tables.Imports);
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var entry = 0; entry < index.SectionCount; entry++)
+        {
+            index.GetSection(entry, out var kind, out var flags,
+                out var section, out var recordCount);
+            sections.Add(kind switch {
+                0x004A => new TrRmSection(kind, flags, recordCount,
+                    rewrittenDependencyFields),
+                0x004B => new TrRmSection(kind, flags, recordCount,
+                    rewrittenFieldPaths),
+                _ => new TrRmSection(kind, flags, recordCount,
+                    section.ToArray()),
+            });
+        }
+
+        var result = TrRmArtifactWriter.Encode(sections, schema);
+        _ = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                result, schema, null, usesNativePointerLoads: false,
+                standardSchemaIdentity: schemaIdentity));
+        return result;
     }
 
     private static TrRmArtifactSchema SchemaFor(string schemaIdentity)
