@@ -99,10 +99,34 @@ public static partial class TrRmExecutableCompiler
             .ToHashSet();
         var sourceStructDeclarations = program.SourceTypeDeclarations
             .ToDictionary(static declaration => declaration.StructureIndex);
-        var retainedStructureIndexes = new HashSet<int>();
         var pendingTypeDefinitions = new Queue<(bool IsClass, int Index)>(
             exportKeysByClass.Keys.Select(static classIndex =>
                 (IsClass: true, classIndex)));
+        foreach (var declaration in sourceClassProgram.Declarations)
+        {
+            if (exportKeysByClass.TryAdd(declaration.ClassIndex, []))
+            {
+                if (exportKeysByClass.Count
+                    > ManagedClassTypes.OptionalFirst
+                        - ManagedClassTypes.First)
+                {
+                    throw Unsupported(
+                        "C1M1 source class declarations exceed the local class limit.");
+                }
+
+                pendingTypeDefinitions.Enqueue((true,
+                    declaration.ClassIndex));
+            }
+        }
+
+        var retainedStructureIndexes = new HashSet<int>();
+        if (exportKeysByClass.Count
+            > ManagedClassTypes.OptionalFirst - ManagedClassTypes.First)
+        {
+            throw Unsupported(
+                "C1M1 source class declarations exceed the local class limit.");
+        }
+
         while (pendingTypeDefinitions.TryDequeue(out var pendingDefinition))
         {
             ImmutableArray<BoundStructField> pendingFields;

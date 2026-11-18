@@ -78,7 +78,8 @@ public static partial class TrRmExecutableCompiler
             IReadOnlyList<TrRmSourceTypeExport> typeExports,
             IReadOnlyList<TrRmSourceGenericMethodExport> genericMethodExports,
             IReadOnlyList<TrRmSourceClassExport> classExports,
-            IReadOnlyList<TrRmSourceEnumDeclarationExport>? enumExports = null)
+            IReadOnlyList<TrRmSourceEnumDeclarationExport>? enumExports = null,
+            bool requirePublicCallableKeys = false)
         {
             ArgumentNullException.ThrowIfNull(program);
             ArgumentException.ThrowIfNullOrEmpty(moduleIdentity);
@@ -311,11 +312,18 @@ public static partial class TrRmExecutableCompiler
                 foreach (var member in GetPublicClassMembers(program,
                     declaration))
                 {
+                    if (!requirePublicCallableKeys
+                        || member.Declaration.Kind
+                            == SyntaxKind.FieldDeclaration)
+                    {
+                        continue;
+                    }
+
                     if (!selectedMembers.Contains((classIndex,
                         member.SourceInputOrdinal, member.Declaration.Span)))
                     {
                         throw new NotSupportedException(
-                            "Every retained public class member requires an explicit source ExportKey.");
+                            "Every retained public constructor, method, and property requires an explicit source ExportKey.");
                     }
                 }
             }

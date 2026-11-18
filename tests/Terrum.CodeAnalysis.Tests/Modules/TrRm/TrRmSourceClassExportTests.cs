@@ -104,7 +104,8 @@ internal sealed class TrRmSourceClassExportTests
             ]);
         _ = Assert.Throws<NotSupportedException>(() =>
             TrRmExecutableCompiler.SourceClassExports.Capture(
-                program, "Module", [], [], [incompleteClassExport]));
+                program, "Module", [], [], [incompleteClassExport],
+                requirePublicCallableKeys: true));
     }
 
     [Test]

@@ -164,6 +164,49 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
+    public void RetainsUnselectedSourceClassesWithoutPublishingThem()
+    {
+        var tree = SyntaxTree.Parse("""
+            public class Root {
+                public int32 Value;
+                public Root(int32 value) { Value = value; }
+            }
+            public class Unselected {
+                public int32 Value;
+                public Unselected(int32 value) { Value = value; }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var rootDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(node => node.Kind == SyntaxKind.ClassDeclaration
+                && node.Children.OfType<SyntaxTokenElement>().Any(token =>
+                    token.Token.Kind == TokenKind.Identifier
+                    && token.Token.Name == "Root"));
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "SelectedClassRoot", C1M1SchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, 0,
+                    rootDeclaration.Span, "RootKey", []),
+            ]);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex.ForC1M1Draft(artifact));
+
+        Assert.That(tables.TypeDefs.Count, Is.EqualTo(2));
+        Assert.That(Enumerable.Range(1, tables.TypeDefs.Count)
+            .Select(tables.TypeDefs.GetName),
+            Is.EquivalentTo(new[] { "Root", "Unselected" }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1, "RootKey",
+            out _), Is.True);
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1, "Unselected",
+            out _), Is.False);
+    }
+
+    [Test]
     public void DoesNotPromoteCapturedClassesToTheC1Schema()
     {
         var tree = SyntaxTree.Parse("""
@@ -279,9 +322,8 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 .Token.Name;
             var memberOrdinal = 0;
             var members = declaration.Children.OfType<SyntaxNode>()
-                .Where(static member => member.Kind
-                    is SyntaxKind.FieldDeclaration
-                    or SyntaxKind.ConstructorDeclaration)
+                .Where(static member =>
+                    member.Kind == SyntaxKind.FieldDeclaration)
                 .Where(static member => member.Children
                     .OfType<SyntaxTokenElement>()
                     .Any(static token => token.Token.Kind

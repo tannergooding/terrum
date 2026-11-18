@@ -632,7 +632,8 @@ public static partial class TrRmExecutableCompiler
             moduleIdentity, methodExportSnapshot);
         var sourceClassExports = SourceClassExports.Capture(program,
             moduleIdentity, typeExportSnapshot, methodExportSnapshot,
-            classExportSnapshot);
+            classExportSnapshot,
+            requirePublicCallableKeys: !emitsClassDeclarations);
         return EmitStandardCore(program, moduleIdentity, schemaIdentity,
             moduleTargetRequirement, typeExportSnapshot,
             sourceMethodExports, sourceClassExports);
