@@ -646,23 +646,79 @@ public static partial class TrRmExecutableCompiler
             {
                 return existing;
             }
-            var row = tables.TypeSpecs.GetRow(type.Row).ToArray();
-            // Declaration edges can return to this TypeSpec through a
-            // recursive nominal field without forming a TypeSpec cycle.
-            _typeSpecs.Add(row);
+            var sourceRow = tables.TypeSpecs.GetRow(type.Row).ToArray();
+            var child = sourceRow.Length >= 6
+                ? ReadUInt32(sourceRow, 2) : 0;
+            if (type.Form == 0x05)
+            {
+                var owner = tables.TypeSpecs.GetNominalTypeDefRow(child,
+                    tables.TypeDefs, tables.Imports);
+                var (first, count)
+                    = tables.TypeDefs.GetGenericRange(owner);
+                var genericTypeSpec = CopyTypeSpec(snapshot, child,
+                    depth + 1);
+                var arguments = new uint[count];
+                for (var ordinal = 0; ordinal < count; ordinal++)
+                {
+                    var argument = ReadUInt32(sourceRow,
+                        6 + (ordinal * sizeof(uint)));
+                    arguments[ordinal] =
+                        tables.GenericParams.GetFormalKind(first + ordinal)
+                            == 1
+                            ? CopyTypeSpec(snapshot, argument, depth + 1)
+                            : CopyConstantSource(snapshot,
+                                checked((int)argument), depth + 1);
+                }
+
+                // Copying a declaration can revisit this row through a field.
+                if (_remappedRows.TryGetValue(key, out existing))
+                {
+                    return existing;
+                }
+
+                Write(sourceRow, 2, genericTypeSpec);
+                for (var ordinal = 0; ordinal < arguments.Length; ordinal++)
+                {
+                    Write(sourceRow, 6 + (ordinal * sizeof(uint)),
+                        arguments[ordinal]);
+                }
+                _typeSpecs.Add(sourceRow);
+                var constructedResult = checked((uint)_typeSpecs.Count);
+                _remappedRows.Add(key, constructedResult);
+                return constructedResult;
+            }
+
+            if (type.Form is (>= 0x06 and <= 0x0B) or 0x0C or 0x0E)
+            {
+                var childOffset = type.Form == 0x0C ? 3 : 2;
+                var remappedChild = CopyTypeSpec(snapshot,
+                    ReadUInt32(sourceRow, childOffset), depth + 1);
+                // The child can revisit this wrapper through a declaration.
+                if (_remappedRows.TryGetValue(key, out existing))
+                {
+                    return existing;
+                }
+
+                Write(sourceRow, childOffset, remappedChild);
+                _typeSpecs.Add(sourceRow);
+                var wrappedResult = checked((uint)_typeSpecs.Count);
+                _remappedRows.Add(key, wrappedResult);
+                return wrappedResult;
+            }
+
+            _typeSpecs.Add(sourceRow);
             var result = checked((uint)_typeSpecs.Count);
             _remappedRows.Add(key, result);
-            var child = row.Length >= 6 ? ReadUInt32(row, 2) : 0;
             switch (type.Form)
             {
                 case 0x01:
                     break;
                 case 0x02:
-                    Write(row, 2, CopyDefinition(snapshot,
+                    Write(sourceRow, 2, CopyDefinition(snapshot,
                         checked((int)child), depth + 1));
                     break;
                 case 0x03:
-                    Write(row, 2, CopyImport(snapshot,
+                    Write(sourceRow, 2, CopyImport(snapshot,
                         checked((int)child), depth + 1));
                     break;
                 case 0x04:
@@ -672,32 +728,7 @@ public static partial class TrRmExecutableCompiler
                         throw Unsupported(
                             "A G1 declaration TypeSpec refers to a foreign formal owner.");
                     }
-                    Write(row, 2, formal);
-                    break;
-                case 0x05:
-                    Write(row, 2, CopyTypeSpec(snapshot, child, depth + 1));
-                    var owner = tables.TypeSpecs.GetNominalTypeDefRow(
-                        child, tables.TypeDefs, tables.Imports);
-                    var (first, count)
-                        = tables.TypeDefs.GetGenericRange(owner);
-                    for (var ordinal = 0; ordinal < count; ordinal++)
-                    {
-                        var argument = ReadUInt32(row, 6 + (ordinal * 4));
-                        Write(row, 6 + (ordinal * 4),
-                            tables.GenericParams.GetFormalKind(
-                                first + ordinal) == 1
-                                ? CopyTypeSpec(snapshot, argument, depth + 1)
-                                : CopyConstantSource(snapshot,
-                                    checked((int)argument), depth + 1));
-                    }
-                    break;
-                case >= 0x06 and <= 0x0B:
-                case 0x0E:
-                    Write(row, 2, CopyTypeSpec(snapshot, child, depth + 1));
-                    break;
-                case 0x0C:
-                    Write(row, 3, CopyTypeSpec(snapshot,
-                        ReadUInt32(row, 3), depth + 1));
+                    Write(sourceRow, 2, formal);
                     break;
                 default:
                     throw Unsupported(

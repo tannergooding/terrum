@@ -4223,6 +4223,70 @@ internal sealed class TrRmGenericMethodSourceWriterTests
     }
 
     [Test]
+    public void EmitsConstructedRecursiveTypeDefFieldAfterItsTypeSpecDependencies()
+    {
+        var provider = CreateConstructedNominalSourceProvider(
+            includeConstructedField: true);
+        var reference
+            = TrRmExecutableCompiler.CreateGenericMethodCallsDraftReference(
+                provider, "constructed-source.provider");
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            using Example;
+            public Box<T> Preserve<T>(Box<T> value) {
+                return move value;
+            }
+            """), reference);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var definition = program.GenericMethodDefinitions.Single();
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "constructed-source.recursive-field",
+            GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), [
+                new TrRmSourceGenericMethodExport(program,
+                    definition.SourceInputOrdinal, definition.Span,
+                    "preserve.recursive-field/v1"),
+            ]);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateGenericMethodCallsDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForGenericMethodCallsParameterLabelsDraft(artifact));
+        Assert.That(tables.Fields.Count, Is.GreaterThan(0));
+        var fieldTypeSpecReference = Enumerable.Range(1,
+                tables.Fields.Count)
+            .Select(tables.Fields.GetTypeSpecRef)
+            .Single(typeSpecReference => tables.TypeSpecs
+                .GetTypeSpecRef(typeSpecReference).Form == 0x0C);
+        var fieldTypeSpec = tables.TypeSpecs.GetTypeSpecRef(
+            fieldTypeSpecReference);
+        var fieldPointerRow = tables.TypeSpecs.GetRow(fieldTypeSpec.Row);
+        Assert.That(fieldPointerRow[2], Is.EqualTo(0x8C));
+        var constructionReference = ReadUInt32(fieldPointerRow, 3);
+        var construction = tables.TypeSpecs.GetTypeSpecRef(
+            constructionReference);
+        Assert.That(construction.Form, Is.EqualTo(0x05));
+        var constructionRow = tables.TypeSpecs.GetRow(construction.Row);
+        var genericTypeSpec = ReadUInt32(constructionRow, 2);
+        var fieldArgumentTypeSpec = ReadUInt32(constructionRow, 6);
+        Assert.That(tables.TypeSpecs.GetTypeSpecRef(genericTypeSpec).Row,
+            Is.LessThan(construction.Row));
+        Assert.That(tables.TypeSpecs.GetTypeSpecRef(fieldArgumentTypeSpec).Row,
+            Is.LessThan(construction.Row));
+        Assert.That(construction.Row, Is.LessThan(fieldTypeSpec.Row));
+
+        var emittedReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(
+                GenericMethodCallsSchemaIdentity, artifact),
+            "constructed-source.recursive-field", [
+                new TrRmStandardArtifactInput(
+                    GenericMethodCallsSchemaIdentity, provider),
+            ]);
+        Assert.That(emittedReference.GenericMethodImports, Has.Length.EqualTo(1));
+    }
+
+    [Test]
     public void EmitsNominalForwardingAndEarlierFormalDefaults()
     {
         var provider = CreateConstructedNominalSourceProvider();
@@ -4322,7 +4386,8 @@ internal sealed class TrRmGenericMethodSourceWriterTests
     }
 
     private static byte[] CreateConstructedNominalSourceProvider(
-        bool mixedConstantArguments = false)
+        bool mixedConstantArguments = false,
+        bool includeConstructedField = false)
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
             public T Identity<T>(T value) { return move value; }
@@ -4342,7 +4407,8 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                     definition.Name)).ToArray());
         return AddConstructedGenericNominalMethodTypes(artifact,
             mixedConstantArguments: mixedConstantArguments,
-            includeDeclaredField: true);
+            includeDeclaredField: true,
+            includeConstructedField: includeConstructedField);
     }
 
     private static byte[] RelocateConstructedNominalProviderTypeDef(
@@ -6862,7 +6928,8 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         bool importGenericMethodTarget = false,
         bool closedSpanOfInt32 = false,
         bool mixedConstantArguments = false,
-        bool includeDeclaredField = false)
+        bool includeDeclaredField = false,
+        bool includeConstructedField = false)
     {
         static byte[] CreateWrapperTypeSpec(byte form, uint innerTypeSpec,
             byte qualifiers)
@@ -7133,7 +7200,23 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                 ? [forwardActualTypeSpec, 1, 0xF200_0009]
                 : [forwardActualTypeSpec]));
         var fieldTypeSpec = checked((uint)rewrittenTypeSpecRows.Count + 1);
-        if (includeDeclaredField)
+        if (includeDeclaredField && includeConstructedField)
+        {
+            var fieldTypeArgument = fieldTypeSpec;
+            rewrittenTypeSpecRows.Add(
+                TrRmTypeSpecTableWriter.Reference(0x04, 1));
+            var constructionTypeSpec = checked(
+                (uint)rewrittenTypeSpecRows.Count + 1);
+            rewrittenTypeSpecRows.Add(
+                TrRmTypeSpecTableWriter.Constructed(
+                    boxDefinitionTypeSpec, [fieldTypeArgument]));
+            fieldTypeSpec = checked(
+                (uint)rewrittenTypeSpecRows.Count + 1);
+            rewrittenTypeSpecRows.Add(
+                TrRmTypeSpecTableWriter.IndexedFamily(0x8C,
+                    constructionTypeSpec));
+        }
+        else if (includeDeclaredField)
         {
             rewrittenTypeSpecRows.Add(
                 TrRmTypeSpecTableWriter.Reference(0x04, 1));
