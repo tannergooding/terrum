@@ -1391,7 +1391,8 @@ public static partial class TrRmExecutableCompiler
             = TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
         IReadOnlyList<TrRmSourceTypeExport>? sourceTypeExports = null,
         bool standardInitializationReferenceBodies = false,
-        bool standardNativePointerLoads = false)
+        bool standardNativePointerLoads = false,
+        bool allowGenericMethodNominalTypeTables = false)
     {
         ArgumentNullException.ThrowIfNull(program);
         if (BoundEnumTypes.HasStandardDeclarations(
@@ -1542,7 +1543,12 @@ public static partial class TrRmExecutableCompiler
             throw Unsupported(
                 "The current Standard NativeExport source emitter requires scalar method signatures without other native pointer contracts.");
         }
-        if (BoundGenericNominalTypeContract.UsesAny(program))
+        if (BoundGenericNominalTypeContract.UsesAny(program)
+            && (!allowGenericMethodNominalTypeTables
+                || program.Functions.Any(static function =>
+                    BoundGenericNominalTypeTypes.IsType(function.ReturnType)
+                    || function.Variables.Any(static variable =>
+                        BoundGenericNominalTypeTypes.IsType(variable.Type)))))
         {
             throw Unsupported(
                 "The executable TRRM profile has no generic nominal signature or body lowering.");
@@ -6017,7 +6023,9 @@ public static partial class TrRmExecutableCompiler
         var typeDefRow = tables.TypeSpecs.GetNominalTypeDefRow(
             genericTypeSpecRef, tables.TypeDefs, tables.Imports);
         var typeDefImportRow = genericTypeSpec.Form == 0x03
-            ? genericTypeSpec.Row : 0;
+            ? checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+                tables.TypeSpecs.GetRow(genericTypeSpec.Row)
+                    .Slice(2, sizeof(uint)))) : 0;
         if (!TryResolveGenericNominalTypeIdentity(tables, typeDefRow,
                 providerIdentity, definitions, typeDefImportRow,
                 out var identity))
@@ -6358,7 +6366,9 @@ public static partial class TrRmExecutableCompiler
             var typeDefRow = tables.TypeSpecs.GetNominalTypeDefRow(
                 typeSpecRef, tables.TypeDefs, tables.Imports);
             var importRow = typeSpec.Form == 0x03
-                ? typeSpec.Row : 0;
+                ? checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+                    tables.TypeSpecs.GetRow(typeSpec.Row)
+                        .Slice(2, sizeof(uint)))) : 0;
             if (!TryResolveGenericNominalTypeIdentity(tables, typeDefRow,
                     providerIdentity, definitions, importRow,
                     out var identity))

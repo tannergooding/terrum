@@ -4030,6 +4030,362 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         }
     }
 
+    [TestCase(true, "T")]
+    [TestCase(false, "T")]
+    [TestCase(true, "Box<T>")]
+    [TestCase(false, "Box<T>")]
+    [TestCase(false, "ref<T>")]
+    [TestCase(false, "Span<Span<T>>")]
+    public void EmitsCheckedNominalConstructionsInSourceSignaturesAndBodies(
+        bool localDefinition, string argument)
+    {
+        var provider = CreateConstructedNominalSourceProvider();
+        var reference
+            = TrRmExecutableCompiler.CreateGenericMethodCallsDraftReference(
+                provider, "constructed-source.provider");
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($$"""
+            using Example;
+            public Box<{{argument}}> Preserve<T>(
+                Box<{{argument}}> value) {
+                return move value;
+            }
+            """), reference);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        var definition = program.GenericMethodDefinitions.Single();
+        var moduleIdentity = localDefinition
+            ? "constructed-source.provider" : "constructed-source.consumer";
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            moduleIdentity, GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), [
+                new TrRmSourceGenericMethodExport(program,
+                    definition.SourceInputOrdinal, definition.Span,
+                    "preserve.api/v1"),
+            ]);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateGenericMethodCallsDraftAndGetExecutionTables(
+                TrRmArtifactIndex.ForGenericMethodCallsParameterLabelsDraft(
+                    artifact));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "preserve.api/v1", out var exportedMethod), Is.True);
+        var methodRow = checked((int)(exportedMethod & 0x00FF_FFFF));
+        var signature = tables.Methods.GetSignature(methodRow);
+        var result = tables.Signatures.GetResultTypeSpec(signature);
+        var construction = tables.TypeSpecs.GetTypeSpecRef(result);
+        Assert.That(construction.Form, Is.EqualTo(0x05));
+        var nominalReference = ReadUInt32(
+            tables.TypeSpecs.GetRow(construction.Row), 2);
+        var nominal = tables.TypeSpecs.GetTypeSpecRef(nominalReference);
+        var nominalRow = ReadUInt32(tables.TypeSpecs.GetRow(nominal.Row), 2);
+        Assert.That(nominal.Form,
+            Is.EqualTo(localDefinition ? 0x02 : 0x03));
+        var typeDefRow = tables.TypeSpecs.GetNominalTypeDefRow(
+            nominalReference, tables.TypeDefs, tables.Imports);
+        var (firstField, endField) = tables.TypeDefs.GetFieldRange(typeDefRow);
+        Assert.That(endField - firstField, Is.EqualTo(1));
+        Assert.That(tables.Fields.GetName(firstField), Is.EqualTo("Value"));
+        Assert.That(tables.TypeDefs.GetLayoutRange(typeDefRow).Count,
+            Is.EqualTo(1));
+        if (localDefinition)
+        {
+            Assert.That(tables.Exports.TryGetDefinitionForKey(1, "TBox",
+                out var typeExport), Is.True);
+            Assert.That(typeExport,
+                Is.EqualTo(0x1300_0000u | nominalRow));
+        }
+        else
+        {
+            Assert.That(nominalRow, Is.GreaterThan(0u));
+            Assert.That(nominalRow,
+                Is.LessThanOrEqualTo((uint)tables.Imports.Count));
+            var binding = tables.Imports.GetBindingForImportRow(
+                checked((int)nominalRow));
+            Assert.That(binding.ProducerIdentity,
+                Is.EqualTo("constructed-source.provider"));
+            Assert.That(binding.ExportKey, Is.EqualTo("TBox"));
+        }
+        tables.ValidateRegisterBodyMapsForMethod(methodRow);
+
+        var input = new TrRmStandardArtifactInput(
+            GenericMethodCallsSchemaIdentity, artifact);
+        var providers = localDefinition
+            ? Array.Empty<TrRmStandardArtifactInput>()
+            : [new TrRmStandardArtifactInput(
+                GenericMethodCallsSchemaIdentity,
+                RelocateConstructedNominalProviderTypeDef(provider))];
+        var emittedReference = TrRmExecutableCompiler.CreateStandardReference(
+            input, moduleIdentity, providers);
+        var imported = emittedReference.GenericMethodImports.Single();
+        var instance = emittedReference.GenericNominalTypeInstances[
+            BoundGenericNominalTypeTypes.Index(
+                imported.ProofFunction.ReturnType)];
+        Assert.That(instance.Definition.ModuleIdentity,
+            Is.EqualTo("constructed-source.provider"));
+        Assert.That(instance.Definition.DefinitionId,
+            Is.EqualTo(localDefinition ? 0x1300_0001u : 0x1300_0002u));
+        var typeArgument = instance.Arguments.Single();
+        var formalArgument = BoundGenericNominalTypeTypes.IsType(
+                typeArgument.Type)
+            ? emittedReference.GenericNominalTypeInstances[
+                BoundGenericNominalTypeTypes.Index(typeArgument.Type)]
+                .Arguments.Single()
+            : typeArgument;
+        Assert.That(formalArgument.TypeFormalDefinitionOrdinal,
+            Is.EqualTo(imported.FormalTypeOwnerOrdinal));
+        var parameter = imported.ProofFunction.Variables[0];
+        Assert.That(parameter.Type, Is.EqualTo(imported.ProofFunction.ReturnType));
+
+        var recompiled = Compilation.CreateLibrary(SyntaxTree.Parse($$"""
+            using Example;
+            public Box<{{argument}}> Again<T>(Box<{{argument}}> value) {
+                return move value;
+            }
+            """), emittedReference);
+        Assert.That(recompiled.HasErrors, Is.False,
+            string.Join(Environment.NewLine, recompiled.Diagnostics));
+        var recompiledProgram = recompiled.Program!;
+        var recompiledDefinition
+            = recompiledProgram.GenericMethodDefinitions.Single();
+        var reemitted = TrRmExecutableCompiler.EmitStandard(
+            recompiledProgram, "constructed-source.reemitted",
+            GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), [
+                new TrRmSourceGenericMethodExport(recompiledProgram,
+                    recompiledDefinition.SourceInputOrdinal,
+                    recompiledDefinition.Span, "again.api/v1"),
+            ]);
+        var reemittedReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(GenericMethodCallsSchemaIdentity,
+                    reemitted), "constructed-source.reemitted", [
+                        new TrRmStandardArtifactInput(
+                            GenericMethodCallsSchemaIdentity,
+                            localDefinition ? artifact : provider),
+                    ]);
+        Assert.That(reemittedReference.GenericMethodImports,
+            Has.Length.EqualTo(1));
+        if (!localDefinition)
+        {
+            var incompatible = SetFirstTypeDefFormalOwnershipDomain(
+                provider, 3);
+            _ = Assert.Throws<InvalidDataException>(() =>
+                TrRmExecutableCompiler.CreateStandardReference(
+                    new TrRmStandardArtifactInput(
+                        GenericMethodCallsSchemaIdentity, reemitted),
+                    "constructed-source.reemitted", [
+                        new TrRmStandardArtifactInput(
+                            GenericMethodCallsSchemaIdentity, incompatible),
+                    ]));
+        }
+    }
+
+    [Test]
+    public void EmitsNominalForwardingAndEarlierFormalDefaults()
+    {
+        var provider = CreateConstructedNominalSourceProvider();
+        var reference
+            = TrRmExecutableCompiler.CreateGenericMethodCallsDraftReference(
+                provider, "constructed-source.provider");
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            using Example;
+            public Box<T> Preserve<T>(Box<T> value) {
+                return move value;
+            }
+            public Box<T> Relay<T>(Box<T> value) {
+                return Preserve<T>(move value);
+            }
+            public int32 WithDefault<T, U = Box<T>>(int32 value) {
+                return value;
+            }
+            """), reference);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "constructed-source.forwarding", GenericMethodCallsSchemaIdentity,
+            0, Array.Empty<TrRmSourceTypeExport>(),
+            program.GenericMethodDefinitions.Select(definition =>
+                new TrRmSourceGenericMethodExport(program,
+                    definition.SourceInputOrdinal, definition.Span,
+                    definition.Name)).ToArray());
+        var emitted = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(GenericMethodCallsSchemaIdentity,
+                artifact), "constructed-source.forwarding", [
+                    new TrRmStandardArtifactInput(
+                        GenericMethodCallsSchemaIdentity, provider),
+                ]);
+        var defaultMethod = emitted.GenericMethodImports.Single(
+            static import => import.Origin.ExportKey == "WithDefault");
+        var defaultTerm = defaultMethod.Formals[1].TypeDefault!.Term;
+        Assert.That(defaultTerm.Kind,
+            Is.EqualTo(BoundGenericMethodTypeTermKind.ImportedGeneric));
+        Assert.That(defaultTerm.NominalTypeIdentity,
+            Is.EqualTo(emitted.GenericNominalTypeDefinitions.Single().Identity));
+        Assert.That(defaultTerm.TypeArguments.Single().FormalOrdinal, Is.Zero);
+        var consumer = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            using Example;
+            private Box<ref<int32>> Use(Box<ref<int32>> value) {
+                return Relay<ref<int32>>(move value);
+            }
+            """), emitted);
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
+        SemanticVerifier.Verify(consumer.Program!);
+    }
+
+    [Test]
+    public void EmitsOrderedMixedNominalActualsFromSource()
+    {
+        var provider = CreateConstructedNominalSourceProvider(
+            mixedConstantArguments: true);
+        var reference
+            = TrRmExecutableCompiler.CreateGenericMethodCallsDraftReference(
+                provider, "constructed-source.provider");
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            using Example;
+            public Box<T, 7, int64> Preserve<T>(
+                Box<T, 7, int64> value) {
+                return move value;
+            }
+            """), reference);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        var definition = program.GenericMethodDefinitions.Single();
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "constructed-source.mixed", GenericMethodCallsSchemaIdentity,
+            0, Array.Empty<TrRmSourceTypeExport>(), [
+                new TrRmSourceGenericMethodExport(program,
+                    definition.SourceInputOrdinal, definition.Span,
+                    "preserve.mixed/v1"),
+            ]);
+        var emitted = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(GenericMethodCallsSchemaIdentity,
+                artifact), "constructed-source.mixed", [
+                    new TrRmStandardArtifactInput(
+                        GenericMethodCallsSchemaIdentity, provider),
+                ]);
+        var import = emitted.GenericMethodImports.Single();
+        var instance = emitted.GenericNominalTypeInstances[
+            BoundGenericNominalTypeTypes.Index(import.ProofFunction.ReturnType)];
+        Assert.That(instance.Arguments.Select(static argument => argument.Kind),
+            Is.EqualTo(new[] { BoundGenericArgumentKind.Type,
+                BoundGenericArgumentKind.Constant, BoundGenericArgumentKind.Type }));
+        Assert.That(instance.Arguments[0].TypeFormalOrdinal, Is.Zero);
+        Assert.That(instance.Arguments[1].ConstantLow, Is.EqualTo(7));
+        Assert.That(instance.Arguments[1].ConstantDomainType,
+            Is.EqualTo(PrimitiveType.Int32));
+        Assert.That(instance.Arguments[2].Type, Is.EqualTo(PrimitiveType.Int64));
+    }
+
+    private static byte[] CreateConstructedNominalSourceProvider(
+        bool mixedConstantArguments = false)
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public T Identity<T>(T value) { return move value; }
+            public T Forward<T>(T value) {
+                return Identity<T>(move value);
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "constructed-source.provider", GenericMethodCallsSchemaIdentity,
+            0, Array.Empty<TrRmSourceTypeExport>(),
+            program.GenericMethodDefinitions.Select(definition =>
+                new TrRmSourceGenericMethodExport(program,
+                    definition.SourceInputOrdinal, definition.Span,
+                    definition.Name)).ToArray());
+        return AddConstructedGenericNominalMethodTypes(artifact,
+            mixedConstantArguments: mixedConstantArguments,
+            includeDeclaredField: true);
+    }
+
+    private static byte[] RelocateConstructedNominalProviderTypeDef(
+        byte[] artifact)
+    {
+        var index = TrRmArtifactIndex
+            .ForGenericMethodCallsParameterLabelsDraft(artifact);
+        var sections = new SortedDictionary<ushort, TrRmSection>();
+        var (stringCount, stringBytes) = GetSection(artifact, 0x0002);
+        var strings = new TrRmStringTableReader(stringBytes,
+            checked((int)stringCount));
+        var names = new List<(string Text, int Encoding)>(strings.Count + 1);
+        for (var row = 1; row <= strings.Count; row++)
+        {
+            names.Add((strings.DecodeNamespace(row), 1));
+        }
+        names.Add(("Unrelated", 1));
+        for (var sectionIndex = 0; sectionIndex < index.SectionCount;
+            sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var count);
+            var rewritten = bytes.ToArray();
+            if (kind == 0x0002)
+            {
+                rewritten = TrRmStringTableWriter.EncodeTextRows(names);
+                count++;
+            }
+            else if (kind == 0x0013)
+            {
+                rewritten = new byte[bytes.Length + 44];
+                bytes.CopyTo(rewritten.AsSpan(44));
+                bytes[..8].CopyTo(rewritten);
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    rewritten.AsSpan(4, 4), checked((uint)names.Count));
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    rewritten.AsSpan(8, 4), 0x08);
+                count++;
+            }
+            else if (kind == 0x0011)
+            {
+                var rows = new TrRmVariableTableIndex(bytes, count, 2, 1);
+                var rewrittenRows = new List<ReadOnlyMemory<byte>>(count);
+                for (var row = 1; row <= rows.Count; row++)
+                {
+                    var type = rows.GetRow(row).ToArray();
+                    if (type[0] == 0x02)
+                    {
+                        BinaryPrimitives.WriteUInt32LittleEndian(
+                            type.AsSpan(2, 4), checked(ReadUInt32(type, 2) + 1));
+                    }
+                    rewrittenRows.Add(type);
+                }
+                rewritten = TrRmVariableTableWriter.EncodeBlobs(rewrittenRows);
+            }
+            else if (kind is 0x0014 or 0x0015)
+            {
+                var width = kind == 0x0014 ? 16 : 28;
+                for (var offset = 0; offset < rewritten.Length; offset += width)
+                {
+                    BinaryPrimitives.WriteUInt32LittleEndian(
+                        rewritten.AsSpan(offset, 4),
+                        checked(ReadUInt32(rewritten, offset) + 1));
+                }
+            }
+            else if (kind is 0x0019 or 0x001D)
+            {
+                var width = kind == 0x0019 ? 32 : 8;
+                for (var offset = 0; offset < rewritten.Length; offset += width)
+                {
+                    var definition = ReadUInt32(rewritten, offset);
+                    if ((definition >> 24) == 0x13)
+                    {
+                        BinaryPrimitives.WriteUInt32LittleEndian(
+                            rewritten.AsSpan(offset, 4), checked(definition + 1));
+                    }
+                }
+            }
+            sections.Add(kind, new TrRmSection(kind, flags,
+                checked((uint)count), rewritten));
+        }
+        return TrRmArtifactWriter.Encode(sections.Values.ToArray(),
+            TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft);
+    }
+
     [Test]
     public void SubstitutesConstructedNominalTypeArgumentsInGenericCallSignatures()
     {
@@ -6462,7 +6818,9 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         bool spanElementInitialization = false,
         bool nestedSpanWrapper = false,
         bool importGenericMethodTarget = false,
-        bool closedSpanOfInt32 = false)
+        bool closedSpanOfInt32 = false,
+        bool mixedConstantArguments = false,
+        bool includeDeclaredField = false)
     {
         static byte[] CreateWrapperTypeSpec(byte form, uint innerTypeSpec,
             byte qualifiers)
@@ -6566,22 +6924,31 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         stringRows.Add(("Box", 1));
         var typeNameRow = stringRows.Count;
         stringRows.Add(("Example.Box", 1));
-        var exportKeyRow = stringRows.Count;
         stringRows.Add(("TBox", 1));
+        var exportKeyRow = stringRows.Count;
         var providerIdentityRow = importsGenericType
             ? checked(stringRows.Count + 1) : 0;
         if (importsGenericType)
         {
             stringRows.Add((providerIdentity, 1));
         }
+        stringRows.Add(("T", 1));
         var typeFormalNameRow = stringRows.Count;
+        stringRows.Add(("Marker", 1));
+        var constantFormalNameRow = stringRows.Count;
+        stringRows.Add(("U", 1));
+        var lastFormalNameRow = stringRows.Count;
+        stringRows.Add(("Value", 1));
+        var fieldNameRow = stringRows.Count;
         var rewrittenStrings = TrRmStringTableWriter.EncodeTextRows(
             stringRows);
 
         var (genericParamCount, genericParamBytes)
             = GetSection(artifact, 0x0019);
+        var addedFormalCount = mixedConstantArguments ? 3 : 1;
         var rewrittenGenericParams
-            = new byte[checked(genericParamBytes.Length + 32)];
+            = new byte[checked(genericParamBytes.Length
+                + (addedFormalCount * 32))];
         BinaryPrimitives.WriteUInt32LittleEndian(
             rewrittenGenericParams.AsSpan(0, 4), 0x1300_0001);
         BinaryPrimitives.WriteUInt32LittleEndian(
@@ -6592,9 +6959,32 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         rewrittenGenericParams[20] = 1;
         rewrittenGenericParams[21] = 1;
         rewrittenGenericParams[22] = 1;
-        genericParamBytes.CopyTo(rewrittenGenericParams, 32);
-        var shiftedIdentityFormal = checked(identityFormalFirst + 1);
-        var shiftedForwardFormal = checked(forwardFormalFirst + 1);
+        if (mixedConstantArguments)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                rewrittenGenericParams.AsSpan(32, 4), 0x1300_0001);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                rewrittenGenericParams.AsSpan(36, 4), 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                rewrittenGenericParams.AsSpan(40, 4),
+                checked((uint)constantFormalNameRow));
+            rewrittenGenericParams[52] = 2;
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                rewrittenGenericParams.AsSpan(56, 4), 0xF200_0008);
+            rewrittenGenericParams.AsSpan(0, 32).CopyTo(
+                rewrittenGenericParams.AsSpan(64, 32));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                rewrittenGenericParams.AsSpan(68, 4), 2);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                rewrittenGenericParams.AsSpan(72, 4),
+                checked((uint)lastFormalNameRow));
+        }
+        genericParamBytes.CopyTo(rewrittenGenericParams,
+            addedFormalCount * 32);
+        var shiftedIdentityFormal = checked(identityFormalFirst
+            + addedFormalCount);
+        var shiftedForwardFormal = checked(forwardFormalFirst
+            + addedFormalCount);
 
         var (typeSpecCount, typeSpecBytes) = GetSection(artifact, 0x0011);
         var typeSpecRows = new TrRmVariableTableIndex(typeSpecBytes,
@@ -6608,7 +6998,7 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             {
                 var formalRow = ReadUInt32(bytes, 2);
                 BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(2, 4),
-                    checked(formalRow + 1));
+                    checked(formalRow + (uint)addedFormalCount));
             }
             rewrittenTypeSpecRows.Add(bytes);
         }
@@ -6659,7 +7049,9 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         var identityConstructedTypeSpec = checked(
             (uint)rewrittenTypeSpecRows.Count + 1);
         rewrittenTypeSpecRows.Add(TrRmTypeSpecTableWriter.Constructed(
-            boxDefinitionTypeSpec, [identityActualTypeSpec]));
+            boxDefinitionTypeSpec, mixedConstantArguments
+                ? [identityActualTypeSpec, 1, 0xF200_0009]
+                : [identityActualTypeSpec]));
         var forwardFormalTypeSpec = checked(
             (uint)rewrittenTypeSpecRows.Count + 1);
         rewrittenTypeSpecRows.Add(TrRmTypeSpecTableWriter.Reference(0x04,
@@ -6695,7 +7087,15 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         var forwardConstructedTypeSpec = checked(
             (uint)rewrittenTypeSpecRows.Count + 1);
         rewrittenTypeSpecRows.Add(TrRmTypeSpecTableWriter.Constructed(
-            boxDefinitionTypeSpec, [forwardActualTypeSpec]));
+            boxDefinitionTypeSpec, mixedConstantArguments
+                ? [forwardActualTypeSpec, 1, 0xF200_0009]
+                : [forwardActualTypeSpec]));
+        var fieldTypeSpec = checked((uint)rewrittenTypeSpecRows.Count + 1);
+        if (includeDeclaredField)
+        {
+            rewrittenTypeSpecRows.Add(
+                TrRmTypeSpecTableWriter.Reference(0x04, 1));
+        }
         var finalImportCount = checked(existingImportCount
             + (importsGenericType ? 1 : 0)
             + (importGenericMethodTarget ? 1 : 0));
@@ -6772,7 +7172,7 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         }
         var rewrittenTypeSpecs = TrRmTypeSpecTableWriter.Encode(
             rewrittenTypeSpecRows, 1, finalImportCount,
-            checked((int)genericParamCount + 1), 0, schema,
+            checked((int)genericParamCount + addedFormalCount), 0, schema,
             tables.Methods.Count);
 
         var (methodSigCount, methodSigBytes) = GetSection(artifact, 0x0017);
@@ -6786,7 +7186,7 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             {
                 BinaryPrimitives.WriteUInt32LittleEndian(
                     rewrittenSignatures.AsSpan(offset + 16, 4),
-                    checked(genericFirst + 1));
+                    checked(genericFirst + (uint)addedFormalCount));
             }
         }
         BinaryPrimitives.WriteUInt32LittleEndian(
@@ -6850,15 +7250,13 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         var rewrittenExports = exportBytes;
         if (importGenericMethodTarget)
         {
-            var exportRows = new TrRmVariableTableIndex(exportBytes,
-                checked((int)exportCount), 8, 4);
             rewrittenExports = new byte[checked(exportBytes.Length - 8)];
             rewrittenExportCount = 0;
             var destinationOffset = 0;
             var removedIdentityExport = false;
-            for (var row = 1; row <= exportRows.Count; row++)
+            for (var row = 0; row < exportCount; row++)
             {
-                var export = exportRows.GetRow(row);
+                var export = exportBytes.AsSpan(checked(row * 8), 8);
                 if (ReadUInt32(export, 0) == identityDefinition)
                 {
                     removedIdentityExport = true;
@@ -6877,6 +7275,7 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         }
         else if (!importsGenericType)
         {
+            rewrittenExports = new byte[checked(exportBytes.Length + 8)];
             BinaryPrimitives.WriteUInt32LittleEndian(
                 rewrittenExports.AsSpan(0, 4), 0x1300_0001);
             BinaryPrimitives.WriteUInt32LittleEndian(
@@ -6895,7 +7294,18 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         BinaryPrimitives.WriteUInt32LittleEndian(
             rewrittenTypeDef.AsSpan(20, 4), 1);
         BinaryPrimitives.WriteUInt32LittleEndian(
-            rewrittenTypeDef.AsSpan(24, 4), 1);
+            rewrittenTypeDef.AsSpan(24, 4), checked((uint)addedFormalCount));
+        if (includeDeclaredField)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                rewrittenTypeDef.AsSpan(12, 4), 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                rewrittenTypeDef.AsSpan(16, 4), 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                rewrittenTypeDef.AsSpan(28, 4), 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                rewrittenTypeDef.AsSpan(32, 4), 1);
+        }
 
         var sections = new SortedDictionary<ushort, TrRmSection>();
         for (var sectionIndex = 0; sectionIndex < index.SectionCount;
@@ -6924,7 +7334,7 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                 0x0018 => new TrRmSection(kind, flags, paramCount,
                     rewrittenParams),
                 0x0019 => new TrRmSection(kind, flags,
-                    checked(genericParamCount + 1),
+                    checked(genericParamCount + (uint)addedFormalCount),
                     rewrittenGenericParams),
                 0x001D => new TrRmSection(kind, flags,
                     checked(rewrittenExportCount
@@ -6960,6 +7370,56 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                 sections.Add(0x001C, new TrRmSection(0x001C, 0,
                     checked((uint)finalImportCount), rewrittenImports));
             }
+        }
+
+        if (includeDeclaredField)
+        {
+            var field = new byte[16];
+            BinaryPrimitives.WriteUInt32LittleEndian(field.AsSpan(0, 4), 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(field.AsSpan(4, 4),
+                checked((uint)fieldNameRow));
+            BinaryPrimitives.WriteUInt32LittleEndian(field.AsSpan(8, 4),
+                fieldTypeSpec);
+            BinaryPrimitives.WriteUInt32LittleEndian(field.AsSpan(12, 4), 2);
+            sections[0x0014] = new TrRmSection(0x0014, 0, 1, field);
+            var layout = new byte[28];
+            BinaryPrimitives.WriteUInt32LittleEndian(layout.AsSpan(0, 4), 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(layout.AsSpan(20, 4), 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(layout.AsSpan(24, 4), 1);
+            sections[0x0015] = new TrRmSection(0x0015, 0, 1, layout);
+            var member = new byte[12];
+            BinaryPrimitives.WriteUInt32LittleEndian(member.AsSpan(0, 4), 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(member.AsSpan(4, 4), 1);
+            sections[0x0023] = new TrRmSection(0x0023, 0, 1, member);
+        }
+        if (mixedConstantArguments)
+        {
+            var module = GetSection(artifact, 0x0001).Bytes.ToArray();
+            var featureCount = ReadUInt32(module, 28);
+            BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(28, 4),
+                checked(featureCount + 1));
+            sections[0x0001] = new TrRmSection(0x0001, 0, 1, module);
+            var oldFeatures = GetSection(artifact, 0x0004).Bytes;
+            var features = new byte[oldFeatures.Length + 8];
+            BinaryPrimitives.WriteUInt32LittleEndian(features.AsSpan(0, 4),
+                TrRmFeatureTableReader.TypedFrozenValuesFeatureId);
+            BinaryPrimitives.WriteUInt32LittleEndian(features.AsSpan(4, 4), 1);
+            oldFeatures.CopyTo(features, 8);
+            sections[0x0004] = new TrRmSection(0x0004, 0,
+                checked(featureCount + 1), features);
+            sections[0x0003] = new TrRmSection(0x0003, 0, 1,
+                TrRmVariableTableWriter.EncodeBlobs(
+                    new ReadOnlyMemory<byte>[] { new byte[] { 7, 0, 0, 0 } }));
+            var node = new byte[24];
+            BinaryPrimitives.WriteUInt32LittleEndian(node.AsSpan(0, 4),
+                0xF200_0008);
+            node[4] = 1;
+            BinaryPrimitives.WriteUInt32LittleEndian(node.AsSpan(8, 4), 1);
+            sections[0x003F] = new TrRmSection(0x003F, 0, 1, node);
+            var source = new byte[8];
+            BinaryPrimitives.WriteUInt32LittleEndian(source.AsSpan(0, 4), 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(source.AsSpan(4, 4), 1);
+            sections[0x0030] = new TrRmSection(0x0030, 0, 1, source);
         }
 
         return TrRmArtifactWriter.Encode(sections.Values.ToArray(), schema);

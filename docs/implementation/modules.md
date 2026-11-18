@@ -44,9 +44,22 @@ proposal](../proposals/standard-trrm-generic-typedef-source-closure.md)
 defines a candidate producer boundary; generic-class TypeDef publication
 remains separate C1/C1M1 work. Reference-set and graph composition now
 canonicalize exact mixed Span/constructed identities and reject cycles; the
-closed `Box<Span<int32>>` identity is canonicalized. Constructed TypeSpec source emission/re-emission, broader
-wrapper/owner cases, associated-relation and non-frozen constant-default
-comparison, and qualification remain open.
+closed `Box<Span<int32>>` identity is canonicalized. The selected G1 source
+writer now emits form-`05` MethodSig types, earlier-formal type defaults and
+bounded move/forwarding Body type maps from checked public TypeDef artifact
+snapshots. It copies local declaration graphs or exact imported expectations,
+including formal order, fields, declared layouts and frozen scalar constant
+actuals/defaults; nested constructions and admitted reference/Span actuals
+retain complete types and method-formal owners. Imported nominal consumers
+read the Import reference from the form-`03` payload, not the TypeSpec row
+number. Added local/imported source, nested-wrapper, mixed-actual,
+compatible provider-row relocation, source re-emission and incompatible
+replacement regressions remain unverified under the active validation hold.
+This does not admit fresh generic TypeDef source declarations or source-free
+generic MethodDef re-emission. Multiple retained TypeDef expectation views,
+contracted/interface/enum declaration copying, broader wrapper/owner cases,
+associated-relation and non-frozen constant-default comparison, and
+qualification remain open; unsupported declaration graphs refuse emission.
 
 G1 generic MethodDef result Dependency rows preserve relationship 1 (storage
 only), 2 (backing only) and 3 (union) separately through source-free decoding

@@ -103,7 +103,8 @@ public static partial class TrRmExecutableCompiler
         var artifact = EmitDevelopment(sourceProgram, moduleIdentity,
             baseSchema, moduleTargetRequirement,
             standardInitializationReferenceBodies:
-                standardInitializationReferenceBodies);
+                standardInitializationReferenceBodies,
+            allowGenericMethodNominalTypeTables: true);
         if (addedSeed)
         {
             artifact = RemoveGenericMethodEmitterSeed(artifact, baseSchema);
@@ -589,7 +590,8 @@ public static partial class TrRmExecutableCompiler
         Dictionary<PrimitiveType, uint> builtInTypeSpecRows,
         List<ReadOnlyMemory<byte>> typeSpecRows,
         ImmutableArray<BoundSpanTypeDefinition> spanTypes,
-        TrRmArtifactSchema schema)
+        TrRmArtifactSchema schema,
+        GenericMethodNominalTypeWriter nominalTypes)
     {
         if (!TryGetDirectGenericMethodMoveReturn(function,
                 out var move)
@@ -615,7 +617,7 @@ public static partial class TrRmExecutableCompiler
                     builtInTypeSpecRows, typeSpecRows, spanTypes,
                     definition.ProofProgram.CheckedReferenceTypes,
                     definition.DefinitionOrdinal, definition,
-                    allowSpanType: true));
+                    allowSpanType: true, nominalTypes: nominalTypes));
         }
 
         var homeMap = new byte[checked(function.ParameterCount * 8)];
@@ -651,7 +653,8 @@ public static partial class TrRmExecutableCompiler
         Dictionary<PrimitiveType, uint> builtInTypeSpecRows,
         List<ReadOnlyMemory<byte>> typeSpecRows,
         ImmutableArray<BoundSpanTypeDefinition> spanTypes,
-        TrRmArtifactSchema schema)
+        TrRmArtifactSchema schema,
+        GenericMethodNominalTypeWriter nominalTypes)
     {
         if (!TryGetDirectGenericCallReturn(function,
                 out var genericCall, out var resultVariable)
@@ -872,7 +875,7 @@ public static partial class TrRmExecutableCompiler
                     builtInTypeSpecRows, typeSpecRows, spanTypes,
                     definition.ProofProgram.CheckedReferenceTypes,
                     definition.DefinitionOrdinal, definition,
-                    allowSpanType: true));
+                    allowSpanType: true, nominalTypes: nominalTypes));
         }
 
         var homeCount = function.ParameterCount
@@ -960,7 +963,7 @@ public static partial class TrRmExecutableCompiler
                         builtInTypeSpecRows, typeSpecRows, spanTypes,
                         definition.ProofProgram.CheckedReferenceTypes,
                         definition.DefinitionOrdinal, definition,
-                        allowSpanType: true));
+                        allowSpanType: true, nominalTypes: nominalTypes));
         }
 
         var records = new List<ReadOnlyMemory<byte>>(3);
@@ -1074,7 +1077,8 @@ public static partial class TrRmExecutableCompiler
         IReadOnlyDictionary<(int FormalOrdinal, int ConstraintOrdinal),
             (uint ConstraintRow, uint TypeSpecRef)>
                 interfaceConstraintRowRefs,
-        TrRmArtifactSchema schema)
+        TrRmArtifactSchema schema,
+        GenericMethodNominalTypeWriter nominalTypes)
     {
         if (!schema.UsesMethodParameterLabels()
             || !TryGetDirectGenericCallReturn(function, out var call,
@@ -1374,7 +1378,7 @@ public static partial class TrRmExecutableCompiler
                     builtInTypeSpecRows, typeSpecRows, spanTypes,
                     definition.ProofProgram.CheckedReferenceTypes,
                     definition.DefinitionOrdinal, definition,
-                    allowSpanType: true));
+                    allowSpanType: true, nominalTypes: nominalTypes));
         }
 
         var homeCount = function.ParameterCount + 1;
@@ -1532,8 +1536,6 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        var rewrittenStrings = TrRmStringTableWriter.EncodeTextRows(names);
-
         var typeSpecSection = GetSection(sections, 0x0011);
         var typeDefCount = GetCount(sections, 0x0013);
         var importCount = GetCount(sections, 0x001C);
@@ -1614,7 +1616,10 @@ public static partial class TrRmExecutableCompiler
         var genericParameterRows = ReadGenericParamRows(sections);
         var constraintRows = ReadConstraintRows(sections);
         var contractRows = ReadVariableRows(sections, 0x001B, 8, 4);
-        var builtInTypeSpecRows = GetBuiltInTypeSpecRows(typeSpecRows);
+        var nominalTypes = new GenericMethodNominalTypeWriter(sections,
+            names, typeSpecRows, genericParameterRows, constraintRows,
+            program, emissions, schema);
+        var baseBuiltInTypeSpecRows = GetBuiltInTypeSpecRows(typeSpecRows);
         var hasBlittableConstraint = false;
         var hasWriteConstraint = constraintRows.Any(
             static constraint => constraint.Kind == 2
@@ -1622,6 +1627,8 @@ public static partial class TrRmExecutableCompiler
         var emissionOrdinal = 0;
         foreach (var emission in emissions)
         {
+            var builtInTypeSpecRows = new Dictionary<PrimitiveType, uint>(
+                baseBuiltInTypeSpecRows);
             var definition = emission.Definition;
             var methodRow = emission.MethodRow;
             var signatureRow = checked((int)signatureSection.RecordCount
@@ -1642,6 +1649,7 @@ public static partial class TrRmExecutableCompiler
                     $"Generic MethodDef '{definition.Name}' has an unsupported parameter shape.");
             }
 
+            nominalTypes.Prepare(definition, function);
             var firstGenericParam = genericParameterRows.Count + 1;
             var formalTypeSpecRows = new Dictionary<PrimitiveType, uint>();
             var genericParamRows = new int[definition.Formals.Length];
@@ -1738,7 +1746,7 @@ public static partial class TrRmExecutableCompiler
                 var defaultArgument = formal.TypeDefault is null ? 0u
                     : GenericMethodTypeDefaultRef(formal.TypeDefault,
                         ordinal, definition, formalTypeSpecRows,
-                        builtInTypeSpecRows, typeSpecRows);
+                        builtInTypeSpecRows, typeSpecRows, nominalTypes);
                 genericParameterRows.Add(new TrRmGenericParamRow(
                     0x1600_0000u | checked((uint)methodRow), ordinal,
                     formalNameRows[(definition.DefinitionOrdinal, ordinal)],
@@ -1757,7 +1765,7 @@ public static partial class TrRmExecutableCompiler
                     definition.ProofProgram.SpanTypes,
                     definition.ProofProgram.CheckedReferenceTypes,
                     definition.DefinitionOrdinal, definition,
-                    allowSpanType: true);
+                    allowSpanType: true, nominalTypes: nominalTypes);
                 AppendUInt32(parameterBytes, checked((uint)signatureRow));
                 AppendUInt32(parameterBytes, checked((uint)parameter));
                 AppendUInt32(parameterBytes, typeSpecRef);
@@ -1773,7 +1781,7 @@ public static partial class TrRmExecutableCompiler
                 definition.ProofProgram.SpanTypes,
                 definition.ProofProgram.CheckedReferenceTypes,
                 definition.DefinitionOrdinal, definition,
-                allowSpanType: true);
+                allowSpanType: true, nominalTypes: nominalTypes);
             AppendUInt32(signatureBytes, resultTypeSpecRef);
             AppendUInt32(signatureBytes, 0);
             AppendUInt32(signatureBytes, checked((uint)firstParameter));
@@ -1800,7 +1808,8 @@ public static partial class TrRmExecutableCompiler
                 ? EncodeGenericMethodForwardingBody(function,
                     definition, emissions, formalTypeSpecRows,
                     builtInTypeSpecRows, typeSpecRows,
-                    definition.ProofProgram.SpanTypes, schema)
+                    definition.ProofProgram.SpanTypes, schema,
+                    nominalTypes)
                 : containsInterfaceCall
                     ? EncodeGenericMethodRequirementBody(function,
                         definition, program,
@@ -1809,12 +1818,14 @@ public static partial class TrRmExecutableCompiler
                         exportedInterfaceMethodDefRows,
                         importedInterfaceMethodImportRows,
                         formalTypeSpecRows, builtInTypeSpecRows,
-                        typeSpecRows, interfaceConstraintRowRefs, schema)
+                        typeSpecRows, interfaceConstraintRowRefs, schema,
+                        nominalTypes)
                 : IsDirectGenericMethodMoveReturn(function)
                     ? EncodeGenericMethodMoveReturnBody(function,
                         definition, formalTypeSpecRows,
                         builtInTypeSpecRows, typeSpecRows,
-                        definition.ProofProgram.SpanTypes, schema)
+                        definition.ProofProgram.SpanTypes, schema,
+                        nominalTypes)
                     : EncodeBody(function, hasFloatingTypes, 0,
                         new Dictionary<PrimitiveType, int>(),
                         new Dictionary<PrimitiveType, int>()));
@@ -1854,6 +1865,16 @@ public static partial class TrRmExecutableCompiler
                 checked((uint)bodyRows.Count));
         }
 
+        nominalTypes.Complete();
+        typeDefCount = GetCount(sections, 0x0013);
+        importCount = GetCount(sections, 0x001C);
+        hasWriteConstraint |= constraintRows.Any(
+            static constraint => constraint.Kind == 2
+                && constraint.Payload == 2);
+        hasBlittableConstraint |= constraintRows.Any(
+            static constraint => constraint.Kind == 2
+                && constraint.Payload == 3);
+        var rewrittenStrings = TrRmStringTableWriter.EncodeTextRows(names);
         var removedClosedExports = new HashSet<uint>();
         for (var functionIndex = 0;
             functionIndex < program.Functions.Length; functionIndex++)
@@ -1869,6 +1890,7 @@ public static partial class TrRmExecutableCompiler
         }
 
         var exportRows = ReadExportRows(sections, removedClosedExports);
+        exportRows.AddRange(nominalTypes.Exports);
         for (var exportIndex = 0;
             exportIndex < sourceMethodExports.Exports.Length; exportIndex++)
         {
@@ -1919,6 +1941,7 @@ public static partial class TrRmExecutableCompiler
         {
             featureRows.Add(TrRmFeatureRow.LayoutQueries);
         }
+        nominalTypes.MergeFeatures(featureRows);
         var featureBytes = TrRmFeatureTableWriter.Encode(featureRows, schema);
         var featureCount = featureBytes.Length / 8;
         var moduleSection = GetSection(sections, 0x0001);
@@ -4097,10 +4120,11 @@ public static partial class TrRmExecutableCompiler
         var genericParamBytes = genericParameterRows.Count == 0 ? []
             : TrRmGenericParamTableWriter.Encode(genericParameterRows,
                 strings, types, methods, signatures, typeSpecs,
-                constraintRows.Count);
+                constraintRows.Count, GetCount(sections, 0x0030));
         var genericParams = new TrRmGenericParamTableReader(
             genericParamBytes, genericParameterRows.Count, strings, types,
-            methods, signatures, typeSpecs, constraintRows.Count);
+            methods, signatures, typeSpecs, constraintRows.Count,
+            GetCount(sections, 0x0030));
         var constraintBytes = constraintRows.Count == 0 ? []
             : TrRmConstraintTableWriter.Encode(constraintRows,
                 genericParams, typeSpecs, default);
@@ -4112,8 +4136,25 @@ public static partial class TrRmExecutableCompiler
         BoundGenericMethodDefinition definition,
         Dictionary<PrimitiveType, uint> formalTypeSpecRows,
         Dictionary<PrimitiveType, uint> builtInTypeSpecRows,
-        List<ReadOnlyMemory<byte>> typeSpecRows)
+        List<ReadOnlyMemory<byte>> typeSpecRows,
+        GenericMethodNominalTypeWriter nominalTypes)
     {
+        if (BoundGenericMethodTypeTerms.ContainsKind(typeDefault.Term,
+                BoundGenericMethodTypeTermKind.ImportedGeneric))
+        {
+            if (!typeDefault.ConstantFormalDependencies.IsEmpty
+                || !BoundGenericMethodTypeTerms.TryGetFormalDependencies(
+                    typeDefault.Term, out var dependencies)
+                || !dependencies.SequenceEqual(typeDefault.FormalDependencies)
+                || dependencies.Any(dependency =>
+                    dependency < 0 || dependency >= formalOrdinal))
+            {
+                throw Unsupported(
+                    "A G1 nominal type default has inconsistent earlier-formal dependencies.");
+            }
+            return nominalTypes.TypeTermRef(typeDefault.Term, definition,
+                formalTypeSpecRows, builtInTypeSpecRows, 0);
+        }
         if (typeDefault.Term.Kind
             == BoundGenericMethodTypeTermKind.Span)
         {
@@ -4793,8 +4834,23 @@ public static partial class TrRmExecutableCompiler
             checkedReferenceTypes,
         int definitionOrdinal, BoundGenericMethodDefinition definition,
         bool allowSpanType = false,
-        bool allowFormal = true)
+        bool allowFormal = true,
+        GenericMethodNominalTypeWriter? nominalTypes = null,
+        int depth = 0)
     {
+        if (depth > SemanticVerifier.MaximumDepth)
+        {
+            throw Unsupported(
+                "A G1 source type exceeds the supported nesting depth.");
+        }
+        if (BoundGenericNominalTypeTypes.IsType(type))
+        {
+            return nominalTypes is null
+                ? throw Unsupported(
+                    "This G1 type position does not select nominal TypeSpec emission.")
+                : nominalTypes.TypeSpecRef(type, definition,
+                    formalTypeSpecRows, builtInTypeSpecRows, depth + 1);
+        }
         if (BoundSpanTypeTypes.IsValidType(type, spanTypes))
         {
             if (!allowSpanType)
@@ -4870,11 +4926,22 @@ public static partial class TrRmExecutableCompiler
             var elementQualifiers = (byte)(
                 (isElementWritable ? 0x01 : 0)
                 | (spanType.IsInitialization ? 0x04 : 0));
-            var elementTypeSpecRef = GenericMethodSpanArgumentTypeSpecRef(
-                elementTerm, elementQualifiers,
-                definition.Formals.Length,
-                definition, formalTypeSpecRows, builtInTypeSpecRows,
-                typeSpecRows);
+            var elementTypeSpecRef = nominalTypes is null
+                ? GenericMethodSpanArgumentTypeSpecRef(
+                    elementTerm, elementQualifiers,
+                    definition.Formals.Length,
+                    definition, formalTypeSpecRows, builtInTypeSpecRows,
+                    typeSpecRows)
+                : GenericMethodTypeSpecRef(spanType.ElementType,
+                    formalTypeSpecRows, builtInTypeSpecRows, typeSpecRows,
+                    spanTypes, checkedReferenceTypes, definitionOrdinal,
+                    definition, allowSpanType: true, allowFormal,
+                    nominalTypes, depth + 1);
+            if (nominalTypes is not null && elementQualifiers != 0)
+            {
+                elementTypeSpecRef = AddGenericTypeSpecQualifiers(
+                    elementTypeSpecRef, elementQualifiers, typeSpecRows);
+            }
 
             var typeSpecRef = checked((uint)typeSpecRows.Count + 1);
             typeSpecRows.Add(TrRmTypeSpecTableWriter.IndexedFamily(0x8A,
@@ -4899,7 +4966,7 @@ public static partial class TrRmExecutableCompiler
                 referenceType.ReferentType, formalTypeSpecRows,
                 builtInTypeSpecRows, typeSpecRows, spanTypes,
                 checkedReferenceTypes, definitionOrdinal, definition,
-                allowSpanType, allowFormal);
+                allowSpanType, allowFormal, nominalTypes, depth + 1);
             if (referenceType.IsReferentWritable)
             {
                 if (!formalTypeSpecRows.ContainsKey(
@@ -5069,6 +5136,42 @@ public static partial class TrRmExecutableCompiler
             {
                 return typeArguments[ordinal] == callerType;
             }
+        }
+
+        if (BoundGenericNominalTypeTypes.IsType(targetType)
+            || BoundGenericNominalTypeTypes.IsType(callerType))
+        {
+            var targetProgram = targetDefinition.ProofProgram;
+            var callerProgram = callerDefinition.ProofProgram;
+            var targetFunction = targetProgram.Functions[
+                targetDefinition.FunctionIndex];
+            var callerFunction = callerProgram.Functions[
+                callerDefinition.FunctionIndex];
+            if (!SemanticVerifier.TryGetGenericMethodActualTypeTerm(
+                    targetType, targetFunction, targetProgram, depth + 1,
+                    out var targetTerm)
+                || !SemanticVerifier.TryGetGenericMethodActualTypeTerm(
+                    callerType, callerFunction, callerProgram, depth + 1,
+                    out var callerTerm))
+            {
+                return false;
+            }
+            var actualTerms = ImmutableArray.CreateBuilder<
+                BoundGenericMethodTypeTerm>(typeArguments.Length);
+            foreach (var argument in typeArguments)
+            {
+                if (!SemanticVerifier.TryGetGenericMethodActualTypeTerm(
+                        argument, callerFunction, callerProgram, depth + 1,
+                        out var argumentTerm))
+                {
+                    return false;
+                }
+                actualTerms.Add(argumentTerm);
+            }
+            return BoundGenericMethodTypeTerms.TrySubstitute(targetTerm,
+                    actualTerms.MoveToImmutable(), out var substituted)
+                && BoundGenericMethodTypeTerms.AreEquivalent(substituted,
+                    callerTerm, depth + 1);
         }
 
         var targetReferenceIsValid

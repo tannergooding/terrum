@@ -326,7 +326,9 @@ public static partial class TrRmExecutableCompiler
                         artifactIndex, moduleRow,
                         tables.TypeSpecs.GetNominalTypeDefRow(typeSpecRef,
                             tables.TypeDefs, tables.Imports),
-                        typeSpec.Form == 0x03 ? typeSpec.Row : 0);
+                        typeSpec.Form == 0x03
+                            ? checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+                                row.Slice(2, sizeof(uint)))) : 0);
                     break;
 
                 case 0x05:
@@ -340,7 +342,10 @@ public static partial class TrRmExecutableCompiler
                     EnsureGenericNominalTypeDefinition(tables,
                         artifactIndex, moduleRow, typeDefRow,
                         genericTypeSpec.Form == 0x03
-                            ? genericTypeSpec.Row : 0);
+                            ? checked((int)BinaryPrimitives
+                                .ReadUInt32LittleEndian(tables.TypeSpecs
+                                    .GetRow(genericTypeSpec.Row)
+                                    .Slice(2, sizeof(uint)))) : 0);
                     var (firstFormal, formalCount)
                         = tables.TypeDefs.GetGenericRange(typeDefRow);
                     if (formalCount != tables.TypeSpecs

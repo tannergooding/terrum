@@ -1487,12 +1487,18 @@ TypeDefs now decode in generic MethodSig/GenericCall signatures. Imported
 TypeDefs bind through exact ModuleRef/Import provider selections and compare
 the current generic formal/default/constraint subset, fields and layouts;
 source binding and source-free reading retain method-formal owner identity
-through reference-set and graph remapping. Source emission, re-emission,
-mixed Span/constructed argument remapping, wrapper-type argument substitution,
-associated-relation and non-frozen constant-default comparison, and
-qualification remain open; current argument support is scalar/formal/nominal
-with nested nominal construction, and wrappers fail closed. Optional and
-GC-backed TypeSpecs,
+through reference-set and graph remapping. The selected G1 source writer now
+emits constructed nominal MethodSig/default types and bounded move/forwarding
+Body type maps using checked TypeDef artifact graphs, preserving local
+declarations or exact imported expectations, ordered scalar constant actuals
+and admitted nested reference/Span actuals. Added source emission,
+source re-emission, compatible TypeDef-row relocation and incompatible
+replacement regressions are unverified under the active validation hold.
+Fresh generic TypeDef source declarations, multiple retained expectation views,
+broader declaration copying, associated-relation and non-frozen constant-default
+comparison, and qualification remain open; see the
+[module implementation boundary](implementation/modules.md#definitions-and-scope).
+Optional and GC-backed TypeSpecs,
 owner-type and role-2 nested substitution,
 interface/witness or associated-relation obligations and arbitrary Body
 control flow remain open.
