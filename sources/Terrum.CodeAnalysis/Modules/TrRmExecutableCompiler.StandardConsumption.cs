@@ -478,7 +478,7 @@ public static partial class TrRmExecutableCompiler
                             createA3ResourceLedger: false),
                         artifacts, schemaIdentities,
                         moduleValidation.Modules, rootModuleRow)
-                : new TrRmStandardFieldProviderValidation([], []);
+                : new TrRmStandardFieldProviderValidation([], [], []);
         if (IsExactForeignInvocationSchemaSet(schemaIdentities)
             || moduleValidation.HasNativeOutputProviderImports)
         {

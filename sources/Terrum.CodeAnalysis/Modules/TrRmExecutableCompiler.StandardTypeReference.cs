@@ -352,6 +352,8 @@ public static partial class TrRmExecutableCompiler
             = ImmutableArray<TrRmStandardFieldProviderBinding>.Empty;
         ImmutableArray<TrRmStandardTypeProviderBinding>
             typeProviderBindings;
+        ImmutableArray<TrRmStandardMethodProviderBinding>
+            methodProviderBindings;
         if (isEN1)
         {
             var fieldValidation
@@ -361,14 +363,19 @@ public static partial class TrRmExecutableCompiler
                         rootModuleRow);
             fieldProviderBindings = fieldValidation.FieldBindings;
             typeProviderBindings = fieldValidation.TypeBindings;
+            methodProviderBindings = fieldValidation.MethodBindings;
         }
         else
         {
-            typeProviderBindings
+            var classProviderValidation
                 = TrRmFixedArrayProviderBindingValidator
-                    .ValidateC1M1TypeDefImports(rootTables, artifacts,
+                    .ValidateC1M1ClassImports(rootTables, artifacts,
                         schemaIdentities, moduleValidation.Modules,
                         rootModuleRow);
+            typeProviderBindings
+                = classProviderValidation.TypeBindings;
+            methodProviderBindings
+                = classProviderValidation.MethodBindings;
         }
         var rootSnapshot = CreateA2SourceTypeProviderSnapshot(rootTables,
             artifacts[0], schemaIdentities[0], rootModuleRow);
@@ -506,6 +513,58 @@ public static partial class TrRmExecutableCompiler
                             fieldProviderSnapshot));
                 }
 
+                var methodExpectations
+                    = ImmutableArray.CreateBuilder<
+                        BoundStandardClassMethodExpectation>();
+                foreach (var methodBinding in methodProviderBindings)
+                {
+                    if (methodBinding.ConsumerArtifactIndex
+                            != binding.ConsumerArtifactIndex
+                        || methodBinding.ConsumerModuleRow
+                            != binding.ConsumerModuleRow
+                        || methodBinding.OwnerImportRow
+                            != binding.ImportRow
+                        || methodBinding.ExpectedOwnerTypeDefRow
+                            != binding.ExpectedTypeDefRow)
+                    {
+                        continue;
+                    }
+
+                    if (methodBinding.ProviderArtifactIndex
+                            != binding.ProviderArtifactIndex
+                        || methodBinding.ProviderModuleRow
+                            != binding.ProviderModuleRow
+                        || methodBinding.ProviderTypeDefRow
+                            != binding.ProviderTypeDefRow)
+                    {
+                        throw Invalid(
+                            "A class MethodDef Import resolved through a different provider than its owner TypeDef Import.");
+                    }
+
+                    var methodProviderTables = GetC1M1Tables(artifacts,
+                        schemaIdentities,
+                        methodBinding.ProviderArtifactIndex);
+                    var methodProviderSnapshot
+                        = CreateA2SourceTypeProviderSnapshot(
+                            methodProviderTables,
+                            artifacts[methodBinding.ProviderArtifactIndex],
+                            schemaIdentities[
+                                methodBinding.ProviderArtifactIndex],
+                            methodBinding.ProviderModuleRow);
+                    methodExpectations.Add(
+                        new BoundStandardClassMethodExpectation(
+                            methodBinding.ImportRow,
+                            methodBinding.OwnerImportRow,
+                            0x1600_0000u | checked((uint)
+                                methodBinding.ExpectedMethodDefRow),
+                            expectedDefinitionId,
+                            0x1600_0000u | checked((uint)
+                                methodBinding.ProviderMethodDefRow),
+                            providerDefinitionId,
+                            methodBinding.ExportKey,
+                            methodProviderSnapshot));
+                }
+
                 if (!classExpectationsByActualType.TryGetValue(
                         actualIdentity, out var classExpectations))
                 {
@@ -517,6 +576,8 @@ public static partial class TrRmExecutableCompiler
                     new BoundStandardClassExpectation(expectation,
                         expectedView) {
                         FieldExpectations = fieldExpectations.ToImmutable(),
+                        MethodExpectations =
+                            methodExpectations.ToImmutable(),
                     });
             }
         }
@@ -4230,7 +4291,7 @@ public static partial class TrRmExecutableCompiler
             && program.StandardFieldProviderClosure is null)
         {
             program = RetainStandardFieldProviderClosure(program,
-                new TrRmStandardFieldProviderValidation([], []),
+                new TrRmStandardFieldProviderValidation([], [], []),
                 artifacts, schemaIdentities, moduleValidation.Modules,
                 moduleRow, moduleIdentity);
         }

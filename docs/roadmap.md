@@ -127,9 +127,14 @@ prerequisite has already been met.
    now has a bounded producer/reader path for class I/P/member defaults and
    inherited D1 generic/interface owners, with closed SF1 values and
    same-view I/P checks; regressions remain unverified under the active hold.
-   Class source-free method binding/re-emission, expected/actual provider
-   replacement, broader instance Bodies and member closure, and class-source
-   CLI transport remain prerequisites to complete class binding and transport.
+   Class MethodDef Imports now bind row-scoped through the owner TypeDef Import
+   to the same selected provider, preserving expected/provider defaults and
+   Import aliases while checking remapped signatures and construction roles.
+   Provider-source-free caller and provider-replacement regressions are added
+   but remain unverified under the hold. Class source-free method
+   re-emission/remapping, broader replacement/lowering, broader instance
+   Bodies and member closure, and class-source CLI transport remain
+   prerequisites to complete class binding and transport.
    A separate [C1 enum-closure proposal](proposals/standard-trrm-c1-enum-closure-composition.md)
    defines enum-bearing EN1 successors and class-manifest v2; this route also
    remains unimplemented.

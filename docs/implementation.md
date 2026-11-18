@@ -155,12 +155,17 @@ MethodParameterSurface schema. Structural validation enforces complete owner
 coverage, Feature 11/26 closure and same-view I/P typed-payload agreement;
 generic and interface imports materialize the selected default view. Focused
 producer, malformed I/P and composition regressions remain unverified under
-the active hold. Instance method Bodies beyond the empty unit subset, field
-access/calls, properties, multiple/partial constructors, class-backed field
-initialization, source-free class method binding and re-emission, expected/
-provider class replacement, class FieldDef Imports, CLI transport, independent
-carrier TypeSpec verification, generic TypeDef dependencies, interfaces/
-witnesses outside D1, and runtime execution remain open. The user-authorized provisional
+the active hold. Class MethodDef Imports now bind row-scoped through their
+owner TypeDef Import to the same selected provider, comparing signatures,
+effects, modes and construction roles after TypeSpec remapping while retaining
+separate expected/provider defaults and Import aliases. Provider-source-free
+caller and compatible/incompatible provider regressions are added but remain
+unverified under the active hold. Instance method Bodies beyond the empty
+unit subset, field access/calls, properties, multiple/partial constructors,
+class-backed field initialization, source-free class method re-emission and
+its replacement/remapping paths, class FieldDef Imports, CLI transport,
+independent carrier TypeSpec verification, generic TypeDef dependencies,
+interfaces/witnesses outside D1, and runtime execution remain open. The user-authorized provisional
 [CM1 class parameter-default proposal](proposals/standard-trrm-c1-class-parameter-defaults.md)
 defines the exact candidate owner/schema and remains pending later review.
 The checked development and Standard TRRM type-reference

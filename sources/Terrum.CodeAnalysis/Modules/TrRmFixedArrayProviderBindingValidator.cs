@@ -25,9 +25,22 @@ internal readonly record struct TrRmStandardFieldProviderBinding(
     string ProducerIdentity, string ExportKey, uint TargetRequirement,
     uint RuntimePolicy);
 
+internal readonly record struct TrRmStandardMethodProviderBinding(
+    int ConsumerArtifactIndex, int ConsumerModuleRow, int ImportRow,
+    int ModuleRefRow, int ExpectedMethodDefRow, int ExpectedOwnerTypeDefRow,
+    int OwnerImportRow, int ProviderArtifactIndex, int ProviderModuleRow,
+    int ProviderTypeDefRow, int ProviderMethodDefRow, int ExportRow,
+    string ProducerIdentity, string ExportKey, uint TargetRequirement,
+    uint RuntimePolicy);
+
 internal readonly record struct TrRmStandardFieldProviderValidation(
     ImmutableArray<TrRmStandardTypeProviderBinding> TypeBindings,
-    ImmutableArray<TrRmStandardFieldProviderBinding> FieldBindings);
+    ImmutableArray<TrRmStandardFieldProviderBinding> FieldBindings,
+    ImmutableArray<TrRmStandardMethodProviderBinding> MethodBindings);
+
+internal readonly record struct TrRmStandardClassProviderValidation(
+    ImmutableArray<TrRmStandardTypeProviderBinding> TypeBindings,
+    ImmutableArray<TrRmStandardMethodProviderBinding> MethodBindings);
 
 internal readonly record struct TrRmStandardMethodTypeSpecPair(
     int ExpectedArtifactIndex, int ExpectedModuleRow,
@@ -40,6 +53,9 @@ internal static class TrRmFixedArrayProviderBindingValidator
         = "trrm/1-draft-layout-queries-1";
     private const string C1M1SchemaIdentity
         = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1";
+    private const string CM1SchemaIdentity
+        = StandardGenericMethodSchema
+            .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaults;
     private const string FixedArraySchemaIdentity
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
     private const string FixedArrayEmptyInitializationSchemaIdentity
@@ -63,7 +79,9 @@ internal static class TrRmFixedArrayProviderBindingValidator
 
     private static bool IsC1M1SchemaIdentity(string schemaIdentity)
         => StringComparer.Ordinal.Equals(schemaIdentity,
-            C1M1SchemaIdentity);
+                C1M1SchemaIdentity)
+            || StringComparer.Ordinal.Equals(schemaIdentity,
+                CM1SchemaIdentity);
 
     private static bool IsInitializationReferenceLocalFieldLayoutSchemaIdentity(
         string schemaIdentity)
@@ -207,6 +225,15 @@ internal static class TrRmFixedArrayProviderBindingValidator
         byte[][] artifacts, string[] schemaIdentities,
         ImmutableArray<TrRmStandardModuleSelection> modules,
         int rootModuleRow)
+        => ValidateC1M1ClassImports(consumer, artifacts, schemaIdentities,
+            modules, rootModuleRow).TypeBindings;
+
+    internal static TrRmStandardClassProviderValidation
+        ValidateC1M1ClassImports(
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables consumer,
+        byte[][] artifacts, string[] schemaIdentities,
+        ImmutableArray<TrRmStandardModuleSelection> modules,
+        int rootModuleRow)
     {
         var isC1M1ProviderSchema = schemaIdentities.Length != 0
             && IsC1M1SchemaIdentity(schemaIdentities[0]);
@@ -214,7 +241,11 @@ internal static class TrRmFixedArrayProviderBindingValidator
             && TrRmExecutableCompiler
                 .IsSelectedC1EnumClosureSchemaIdentity(
                     schemaIdentities[0]);
-        if ((consumer.Schema != TrRmArtifactSchema.C1M1Draft
+        var isC1M1ConsumerSchema = consumer.Schema is
+            TrRmArtifactSchema.C1M1Draft
+                or TrRmArtifactSchema
+                    .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft;
+        if ((!isC1M1ConsumerSchema
                 && (!consumer.Schema.UsesC1EnumClosure()
                     || !isEN1ProviderSchema))
             || artifacts.Length != schemaIdentities.Length
@@ -222,7 +253,7 @@ internal static class TrRmFixedArrayProviderBindingValidator
             || (!isC1M1ProviderSchema && !isEN1ProviderSchema))
         {
             throw new InvalidDataException(
-                "Invalid TRRM C1M1/EN1 TypeDef provider binding.");
+                "Invalid TRRM C1M1 class member provider binding.");
         }
 
         for (var artifactIndex = 1;
@@ -232,13 +263,16 @@ internal static class TrRmFixedArrayProviderBindingValidator
                     schemaIdentities[artifactIndex]))
             {
                 throw new InvalidDataException(
-                    "Invalid TRRM C1M1/EN1 TypeDef provider binding.");
+                    "Invalid TRRM C1M1 class member provider binding.");
             }
         }
 
         var context = new ValidationContext(consumer, artifacts,
             schemaIdentities, modules, a3ResourceLedger: null);
-        return context.ValidateC1M1TypeDefImports(rootModuleRow);
+        var typeBindings
+            = context.ValidateC1M1TypeDefImports(rootModuleRow);
+        return new TrRmStandardClassProviderValidation(typeBindings,
+            context.MethodProviderBindings);
     }
 
     internal static TrRmStandardTypeProviderBinding
@@ -327,6 +361,8 @@ internal static class TrRmFixedArrayProviderBindingValidator
             bool IsInlineStorage)> _visitedTypePairs;
         private readonly HashSet<(int LeftArtifact, int LeftMethod,
             int RightArtifact, int RightMethod)> _activeAnchorPairs;
+        internal ImmutableArray<TrRmStandardMethodProviderBinding>
+            MethodProviderBindings { get; private set; }
         private TrRmStructuralMetadataValidator.ValidatedExecutionTables
             _cachedProviderTables;
         private int _cachedProviderArtifactIndex;
@@ -351,6 +387,7 @@ internal static class TrRmFixedArrayProviderBindingValidator
             _visitedLocalTypes = [];
             _visitedTypePairs = [];
             _activeAnchorPairs = [];
+            MethodProviderBindings = [];
             _cachedProviderTables = default;
             _cachedProviderArtifactIndex = -1;
             _hasCachedProviderTables = false;
@@ -713,7 +750,8 @@ internal static class TrRmFixedArrayProviderBindingValidator
                     : left.ImportRow.CompareTo(right.ImportRow);
             });
             return new TrRmStandardFieldProviderValidation(
-                [.. typeBindings], [.. fieldBindings]);
+                [.. typeBindings], [.. fieldBindings],
+                MethodProviderBindings);
         }
 
         internal ImmutableArray<TrRmStandardTypeProviderBinding>
@@ -730,16 +768,6 @@ internal static class TrRmFixedArrayProviderBindingValidator
             foreach (var module in _modules)
             {
                 var tables = GetTables(module.ArtifactIndex);
-                var isRootModule = module.ArtifactIndex == 0
-                    && module.ModuleRow == rootModuleRow;
-                var (methodStart, methodEnd)
-                    = tables.Modules.GetMethodDefRange(module.ModuleRow);
-                if (!isRootModule && methodStart != methodEnd)
-                {
-                    throw new NotSupportedException(
-                        "A selected C1 type provider Module may not contain MethodDefs.");
-                }
-
                 var usedModuleRefs = new bool[tables.ModuleRefs.Count + 1];
                 var (typeDefStart, typeDefEnd)
                     = tables.Modules.GetTypeDefRange(module.ModuleRow);
@@ -770,10 +798,16 @@ internal static class TrRmFixedArrayProviderBindingValidator
 
                     var expectedDefinition = tables.Imports
                         .GetExpectedDefinitionForImportRow(importRow);
-                    if ((expectedDefinition >> 24) != 0x13)
+                    var expectedKind = expectedDefinition >> 24;
+                    if (expectedKind == 0x16)
+                    {
+                        usedModuleRefs[moduleRefRow] = true;
+                        continue;
+                    }
+                    if (expectedKind != 0x13)
                     {
                         throw new NotSupportedException(
-                            "A selected C1 class type-reference Module may retain only TypeDef Imports.");
+                            "A selected C1 class type-reference Module may retain only TypeDef and MethodDef Imports.");
                     }
 
                     var resolution = ResolveImport(module.ArtifactIndex,
@@ -823,7 +857,572 @@ internal static class TrRmFixedArrayProviderBindingValidator
                     ? result
                     : left.ImportRow.CompareTo(right.ImportRow);
             });
+            MethodProviderBindings = ValidateC1M1MethodDefImports(
+                rootModuleRow);
             return [.. orderedBindings];
+        }
+
+        private ImmutableArray<TrRmStandardMethodProviderBinding>
+            ValidateC1M1MethodDefImports(int rootModuleRow)
+        {
+            if (rootModuleRow <= 0
+                || rootModuleRow > _consumer.Modules.Count)
+            {
+                throw InvalidBinding();
+            }
+
+            var bindings = new List<TrRmStandardMethodProviderBinding>();
+            var pendingTypes = new Queue<TypeOriginPair>();
+            var methodRows = new Dictionary<(
+                int ArtifactIndex, int OwnerImportRow,
+                int ExpectedMethodDefRow), int>();
+            foreach (var ownerResolution in _imports.Values)
+            {
+                var expectedTables = GetTables(
+                    ownerResolution.Expected.ArtifactIndex);
+                var providerTables = GetTables(
+                    ownerResolution.Actual.ArtifactIndex);
+                var expectedOwnerTypeDefRow
+                    = ownerResolution.Expected.TypeDefRow;
+                var providerOwnerTypeDefRow
+                    = ownerResolution.Actual.TypeDefRow;
+                if (expectedTables.TypeDefs.GetKind(
+                        expectedOwnerTypeDefRow) != 2)
+                {
+                    continue;
+                }
+
+                var (expectedMethodFirst, expectedMethodEnd)
+                    = expectedTables.TypeDefs.GetMethodRange(
+                        expectedOwnerTypeDefRow);
+                var (providerMethodFirst, providerMethodEnd)
+                    = providerTables.TypeDefs.GetMethodRange(
+                        providerOwnerTypeDefRow);
+                if (expectedMethodEnd - expectedMethodFirst
+                    != providerMethodEnd - providerMethodFirst)
+                {
+                    throw InvalidBinding();
+                }
+
+                for (var ordinal = 0;
+                    ordinal < expectedMethodEnd - expectedMethodFirst;
+                    ordinal++)
+                {
+                    var expectedMethodRow
+                        = expectedMethodFirst + ordinal;
+                    var providerMethodRow
+                        = providerMethodFirst + ordinal;
+                    methodRows.Add((
+                        ownerResolution.Binding.ConsumerArtifactIndex,
+                        ownerResolution.Binding.ImportRow,
+                        expectedMethodRow), providerMethodRow);
+                    var methodContext = this;
+                    var methodTypesMatch = MethodDeclarationTypesMatch(
+                        ref methodContext, expectedTables,
+                            ownerResolution.Expected.ArtifactIndex,
+                            ownerResolution.Expected.ModuleRow,
+                            expectedOwnerTypeDefRow,
+                            expectedMethodRow, providerTables,
+                            ownerResolution.Actual.ArtifactIndex,
+                            ownerResolution.Actual.ModuleRow,
+                            providerOwnerTypeDefRow,
+                            providerMethodRow, pendingTypes);
+                    _cachedProviderTables
+                        = methodContext._cachedProviderTables;
+                    _cachedProviderArtifactIndex
+                        = methodContext._cachedProviderArtifactIndex;
+                    _hasCachedProviderTables
+                        = methodContext._hasCachedProviderTables;
+                    if (!methodTypesMatch)
+                    {
+                        throw InvalidBinding();
+                    }
+                }
+            }
+
+            foreach (var module in _modules)
+            {
+                var consumer = GetTables(module.ArtifactIndex);
+                for (var importRow = 1;
+                    importRow <= consumer.Imports.Count; importRow++)
+                {
+                    ConsumeWork();
+                    var moduleRefRow = consumer.Imports
+                        .GetModuleRefForImportRow(importRow);
+                    if (consumer.ModuleRefs.GetOwnerModule(moduleRefRow)
+                        != module.ModuleRow)
+                    {
+                        continue;
+                    }
+
+                    var expectedDefinition = consumer.Imports
+                        .GetExpectedDefinitionForImportRow(importRow);
+                    if ((expectedDefinition >> 24) != 0x16)
+                    {
+                        continue;
+                    }
+
+                    var expectedMethodRow = checked((int)(
+                        expectedDefinition & 0x00FF_FFFF));
+                    var expectedOwnerTypeDefRow
+                        = consumer.Methods.GetOwnerType(
+                            expectedMethodRow);
+                    if (expectedOwnerTypeDefRow == 0
+                        || consumer.TypeDefs.GetKind(
+                            expectedOwnerTypeDefRow) != 2
+                        || consumer.Signatures.GetGenericCount(
+                            consumer.Methods.GetSignature(
+                                expectedMethodRow)) != 0)
+                    {
+                        continue;
+                    }
+
+                    var importBinding = consumer.Imports
+                        .GetBindingForImportRow(importRow);
+                    var ownerImportRows = new List<int>();
+                    ImportResolution ownerResolution = default;
+                    for (var ownerImportRow = 1;
+                        ownerImportRow <= consumer.Imports.Count;
+                        ownerImportRow++)
+                    {
+                        ConsumeWork();
+                        if (consumer.Imports
+                                .GetExpectedDefinitionForImportRow(
+                                    ownerImportRow)
+                                != (0x1300_0000u
+                                    | checked((uint)expectedOwnerTypeDefRow))
+                            || !_imports.TryGetValue((
+                                    module.ArtifactIndex, ownerImportRow),
+                                out var candidateOwnerResolution))
+                        {
+                            continue;
+                        }
+
+                        var ownerBinding = consumer.Imports
+                            .GetBindingForImportRow(ownerImportRow);
+                        if (!StringComparer.Ordinal.Equals(
+                                ownerBinding.ProducerIdentity,
+                                importBinding.ProducerIdentity)
+                            || ownerBinding.TargetRequirement
+                                != importBinding.TargetRequirement
+                            || ownerBinding.RuntimePolicy
+                                != importBinding.RuntimePolicy)
+                        {
+                            continue;
+                        }
+
+                        ownerImportRows.Add(ownerImportRow);
+                        ownerResolution = candidateOwnerResolution;
+                    }
+
+                    if (ownerImportRows.Count != 1
+                        || ownerResolution.Expected.TypeDefRow
+                            != expectedOwnerTypeDefRow
+                        || !methodRows.TryGetValue((
+                                module.ArtifactIndex,
+                                ownerImportRows[0], expectedMethodRow),
+                            out var mappedProviderMethodRow))
+                    {
+                        throw InvalidBinding();
+                    }
+
+                    var selected = FindModule(
+                        importBinding.ProducerIdentity);
+                    if (selected.ArtifactIndex == module.ArtifactIndex
+                        && selected.ModuleRow == module.ModuleRow)
+                    {
+                        throw InvalidBinding();
+                    }
+
+                    var provider = GetTables(selected.ArtifactIndex);
+                    if (provider.Modules.GetRequirements(
+                            selected.ModuleRow)
+                        != (importBinding.TargetRequirement,
+                            importBinding.RuntimePolicy)
+                        || !provider.Exports.TryGetDefinitionForKey(
+                            selected.ModuleRow, importBinding.ExportKey,
+                            out var providerDefinition)
+                        || (providerDefinition >> 24) != 0x16
+                        || !provider.Exports.TryGetExportRowForKey(
+                            selected.ModuleRow, importBinding.ExportKey,
+                            out var exportRow))
+                    {
+                        throw InvalidBinding();
+                    }
+
+                    var providerMethodRow = checked((int)(
+                        providerDefinition & 0x00FF_FFFF));
+                    var providerOwnerTypeDefRow = provider.Methods
+                        .GetOwnerType(providerMethodRow);
+                    if (providerMethodRow != mappedProviderMethodRow
+                        || providerOwnerTypeDefRow
+                            != ownerResolution.Actual.TypeDefRow
+                        || provider.TypeDefs.GetKind(
+                            providerOwnerTypeDefRow) != 2
+                        || provider.TypeDefs.GetOwnerModule(
+                            providerOwnerTypeDefRow)
+                            != selected.ModuleRow
+                        || !StringComparer.Ordinal.Equals(
+                            consumer.Methods.GetName(expectedMethodRow),
+                            provider.Methods.GetName(providerMethodRow)))
+                    {
+                        throw InvalidBinding();
+                    }
+
+                    var expectedRole = 0;
+                    var providerRole = 0;
+                    var expectedHasConstruction
+                        = consumer.Contracts.HasConstructionClause(
+                            expectedMethodRow);
+                    var providerHasConstruction
+                        = provider.Contracts.HasConstructionClause(
+                            providerMethodRow);
+                    if (expectedHasConstruction != providerHasConstruction)
+                    {
+                        throw InvalidBinding();
+                    }
+                    if (expectedHasConstruction)
+                    {
+                        var expectedConstruction
+                            = consumer.Contracts.GetConstructionClause(
+                                expectedMethodRow);
+                        var providerConstruction
+                            = provider.Contracts.GetConstructionClause(
+                                providerMethodRow);
+                        expectedRole = expectedConstruction.RoleTag;
+                        providerRole = providerConstruction.RoleTag;
+                        if (expectedRole != providerRole
+                            || expectedRole == 3
+                            || ((expectedConstruction.PropertyDefRow == 0)
+                                != (providerConstruction.PropertyDefRow == 0)))
+                        {
+                            throw InvalidBinding();
+                        }
+
+                        if (expectedRole == 1
+                            && !InitializedMembersMatch(consumer,
+                                expectedOwnerTypeDefRow,
+                                expectedConstruction.InitializedMemberDefIds,
+                                provider, providerOwnerTypeDefRow,
+                                providerConstruction.InitializedMemberDefIds))
+                        {
+                            throw InvalidBinding();
+                        }
+
+                        if (expectedRole == 2
+                            && MethodOrdinal(consumer,
+                                expectedOwnerTypeDefRow,
+                                checked((int)expectedConstruction
+                                    .InitializerMethodDefRow))
+                                != MethodOrdinal(provider,
+                                    providerOwnerTypeDefRow,
+                                    checked((int)providerConstruction
+                                        .InitializerMethodDefRow)))
+                        {
+                            throw InvalidBinding();
+                        }
+                    }
+
+                    bindings.Add(new TrRmStandardMethodProviderBinding(
+                        module.ArtifactIndex, module.ModuleRow, importRow,
+                        moduleRefRow, expectedMethodRow,
+                        expectedOwnerTypeDefRow, ownerImportRows[0],
+                        selected.ArtifactIndex, selected.ModuleRow,
+                        providerOwnerTypeDefRow, providerMethodRow,
+                        exportRow, importBinding.ProducerIdentity,
+                        importBinding.ExportKey,
+                        importBinding.TargetRequirement,
+                        importBinding.RuntimePolicy));
+                }
+            }
+
+            while (pendingTypes.TryDequeue(out var pair))
+            {
+                ConsumeWork();
+                ValidateTypePair(pair, pendingTypes);
+            }
+
+            bindings.Sort(static (left, right) =>
+            {
+                var result = left.ConsumerArtifactIndex.CompareTo(
+                    right.ConsumerArtifactIndex);
+                if (result != 0)
+                {
+                    return result;
+                }
+
+                result = left.ConsumerModuleRow.CompareTo(
+                    right.ConsumerModuleRow);
+                if (result != 0)
+                {
+                    return result;
+                }
+
+                result = left.OwnerImportRow.CompareTo(
+                    right.OwnerImportRow);
+                return result != 0
+                    ? result : left.ImportRow.CompareTo(right.ImportRow);
+            });
+            return [.. bindings];
+
+            static bool MethodDeclarationTypesMatch(
+                ref ValidationContext context,
+                TrRmStructuralMetadataValidator.ValidatedExecutionTables
+                    expectedTables,
+                int expectedArtifactIndex, int expectedModuleRow,
+                int expectedOwnerTypeDefRow, int expectedMethodRow,
+                TrRmStructuralMetadataValidator.ValidatedExecutionTables
+                    providerTables,
+                int providerArtifactIndex, int providerModuleRow,
+                int providerOwnerTypeDefRow, int providerMethodRow,
+                Queue<TypeOriginPair> typePairs)
+            {
+                var expectedFlags = expectedTables.Methods.GetFlags(
+                    expectedMethodRow);
+                var providerFlags = providerTables.Methods.GetFlags(
+                    providerMethodRow);
+                var expectedSignature = expectedTables.Methods.GetSignature(
+                    expectedMethodRow);
+                var providerSignature = providerTables.Methods.GetSignature(
+                    providerMethodRow);
+                var expectedGenericCount = expectedTables.Signatures
+                    .GetGenericCount(expectedSignature);
+                var providerGenericCount = providerTables.Signatures
+                    .GetGenericCount(providerSignature);
+                if (!StringComparer.Ordinal.Equals(
+                        expectedTables.Methods.GetName(expectedMethodRow),
+                        providerTables.Methods.GetName(providerMethodRow))
+                    || expectedFlags != providerFlags
+                    || expectedTables.Contracts.GetEffectsMask(
+                        expectedMethodRow)
+                        != providerTables.Contracts.GetEffectsMask(
+                            providerMethodRow)
+                    || expectedGenericCount != providerGenericCount)
+                {
+                    return false;
+                }
+
+                var expectedReceiver = expectedTables.Signatures
+                    .GetReceiverTypeSpec(expectedSignature);
+                var providerReceiver = providerTables.Signatures
+                    .GetReceiverTypeSpec(providerSignature);
+                if ((expectedReceiver == 0) != (providerReceiver == 0))
+                {
+                    return false;
+                }
+
+                var expectedHasConstruction
+                    = expectedTables.Contracts.HasConstructionClause(
+                        expectedMethodRow);
+                var providerHasConstruction
+                    = providerTables.Contracts.HasConstructionClause(
+                        providerMethodRow);
+                if (expectedHasConstruction != providerHasConstruction)
+                {
+                    return false;
+                }
+                if (expectedHasConstruction)
+                {
+                    var expectedConstruction
+                        = expectedTables.Contracts.GetConstructionClause(
+                            expectedMethodRow);
+                    var providerConstruction
+                        = providerTables.Contracts.GetConstructionClause(
+                            providerMethodRow);
+                    if (expectedConstruction.RoleTag
+                        != providerConstruction.RoleTag
+                        || ((expectedConstruction.PropertyDefRow == 0)
+                            != (providerConstruction.PropertyDefRow == 0)))
+                    {
+                        return false;
+                    }
+
+                    if (expectedConstruction.RoleTag == 1
+                        && !InitializedMembersMatch(expectedTables,
+                            expectedOwnerTypeDefRow,
+                            expectedConstruction.InitializedMemberDefIds,
+                            providerTables, providerOwnerTypeDefRow,
+                            providerConstruction
+                                .InitializedMemberDefIds))
+                    {
+                        return false;
+                    }
+
+                    if (expectedConstruction.RoleTag == 2
+                        && MethodOrdinal(expectedTables,
+                            expectedOwnerTypeDefRow,
+                            checked((int)expectedConstruction
+                                .InitializerMethodDefRow))
+                            != MethodOrdinal(providerTables,
+                                providerOwnerTypeDefRow,
+                                checked((int)providerConstruction
+                                    .InitializerMethodDefRow)))
+                    {
+                        return false;
+                    }
+                }
+
+                var (expectedFirstParameter, expectedParameterCount)
+                    = expectedTables.Signatures.GetParamRange(
+                        expectedSignature);
+                var (providerFirstParameter, providerParameterCount)
+                    = providerTables.Signatures.GetParamRange(
+                        providerSignature);
+                if (expectedParameterCount != providerParameterCount)
+                {
+                    return false;
+                }
+
+                if (expectedGenericCount != 0)
+                {
+                    return true;
+                }
+
+                if (!MethodTypesMatch(ref context, expectedTables,
+                        expectedArtifactIndex, expectedModuleRow,
+                        expectedTables.Signatures.GetResultTypeSpec(
+                            expectedSignature),
+                        providerTables, providerArtifactIndex,
+                        providerModuleRow,
+                        providerTables.Signatures.GetResultTypeSpec(
+                            providerSignature),
+                        typePairs)
+                    || (expectedReceiver != 0
+                        && !MethodTypesMatch(ref context, expectedTables,
+                            expectedArtifactIndex, expectedModuleRow,
+                            expectedReceiver, providerTables,
+                            providerArtifactIndex, providerModuleRow,
+                            providerReceiver, typePairs)))
+                {
+                    return false;
+                }
+
+                for (var ordinal = 0;
+                    ordinal < expectedParameterCount; ordinal++)
+                {
+                    var expectedParameter
+                        = expectedFirstParameter + ordinal;
+                    var providerParameter
+                        = providerFirstParameter + ordinal;
+                    if (expectedTables.Parameters.GetMode(
+                            expectedParameter)
+                            != providerTables.Parameters.GetMode(
+                                providerParameter)
+                        || expectedTables.Parameters.GetFlags(
+                            expectedParameter)
+                            != providerTables.Parameters.GetFlags(
+                                providerParameter)
+                        || !MethodTypesMatch(ref context, expectedTables,
+                            expectedArtifactIndex, expectedModuleRow,
+                            expectedTables.Parameters.GetTypeSpec(
+                                expectedParameter),
+                            providerTables, providerArtifactIndex,
+                            providerModuleRow,
+                            providerTables.Parameters.GetTypeSpec(
+                                providerParameter), typePairs))
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+
+            static bool MethodTypesMatch(ref ValidationContext context,
+                TrRmStructuralMetadataValidator.ValidatedExecutionTables
+                    expectedTables,
+                int expectedArtifactIndex, int expectedModuleRow,
+                uint expectedTypeSpecRef,
+                TrRmStructuralMetadataValidator.ValidatedExecutionTables
+                    providerTables,
+                int providerArtifactIndex, int providerModuleRow,
+                uint providerTypeSpecRef,
+                Queue<TypeOriginPair> typePairs)
+            {
+                var reference = expectedTables.TypeSpecs
+                    .GetTypeSpecRef(expectedTypeSpecRef);
+                var isInlineStorage = false;
+                if (reference.Form is 0x02 or 0x03)
+                {
+                    var typeDefRow = expectedTables.TypeSpecs
+                        .GetNominalTypeDefRow(expectedTypeSpecRef,
+                            expectedTables.TypeDefs,
+                            expectedTables.Imports);
+                    isInlineStorage = expectedTables.TypeDefs
+                        .GetKind(typeDefRow) == 1;
+                }
+
+                return context.TypeSpecsMatch(expectedTables,
+                    expectedArtifactIndex, expectedModuleRow,
+                    expectedTypeSpecRef, providerTables,
+                    providerArtifactIndex, providerModuleRow,
+                    providerTypeSpecRef, isInlineStorage, typePairs);
+            }
+
+            static int MethodOrdinal(
+                TrRmStructuralMetadataValidator.ValidatedExecutionTables
+                    tables, int ownerTypeDefRow, int methodDefRow)
+            {
+                var (first, end)
+                    = tables.TypeDefs.GetMethodRange(ownerTypeDefRow);
+                return methodDefRow >= first && methodDefRow < end
+                    && tables.Methods.GetOwnerType(methodDefRow)
+                        == ownerTypeDefRow
+                    ? methodDefRow - first : -1;
+            }
+
+            static bool InitializedMembersMatch(
+                TrRmStructuralMetadataValidator.ValidatedExecutionTables
+                    expectedTables, int expectedOwnerTypeDefRow,
+                ImmutableArray<uint> expectedMembers,
+                TrRmStructuralMetadataValidator.ValidatedExecutionTables
+                    providerTables, int providerOwnerTypeDefRow,
+                ImmutableArray<uint> providerMembers)
+            {
+                if (expectedMembers.IsDefault || providerMembers.IsDefault
+                    || expectedMembers.Length != providerMembers.Length)
+                {
+                    return false;
+                }
+
+                var (expectedFirst, expectedEnd)
+                    = expectedTables.TypeDefs.GetFieldRange(
+                        expectedOwnerTypeDefRow);
+                var (providerFirst, providerEnd)
+                    = providerTables.TypeDefs.GetFieldRange(
+                        providerOwnerTypeDefRow);
+                for (var ordinal = 0;
+                    ordinal < expectedMembers.Length; ordinal++)
+                {
+                    var expectedField = expectedMembers[ordinal];
+                    var providerField = providerMembers[ordinal];
+                    if ((expectedField >> 24) != 0x14
+                        || (providerField >> 24) != 0x14)
+                    {
+                        return false;
+                    }
+
+                    var expectedFieldRow
+                        = checked((int)(expectedField & 0x00FF_FFFF));
+                    var providerFieldRow
+                        = checked((int)(providerField & 0x00FF_FFFF));
+                    if (expectedFieldRow < expectedFirst
+                        || expectedFieldRow >= expectedEnd
+                        || providerFieldRow < providerFirst
+                        || providerFieldRow >= providerEnd
+                        || expectedFieldRow - expectedFirst
+                            != providerFieldRow - providerFirst
+                        || expectedTables.Fields.GetOwnerTypeDef(
+                            expectedFieldRow) != expectedOwnerTypeDefRow
+                        || providerTables.Fields.GetOwnerTypeDef(
+                            providerFieldRow) != providerOwnerTypeDefRow)
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
         }
 
         internal TrRmStandardTypeProviderBinding
@@ -3040,8 +3639,13 @@ internal static class TrRmFixedArrayProviderBindingValidator
             if (IsC1M1SchemaIdentity(
                     _schemaIdentities[artifactIndex]))
             {
-                var c1m1Index = TrRmArtifactIndex.ForC1M1Draft(
-                    _artifacts[artifactIndex]);
+                var c1m1Index = StringComparer.Ordinal.Equals(
+                        _schemaIdentities[artifactIndex], CM1SchemaIdentity)
+                    ? TrRmArtifactIndex
+                        .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                            _artifacts[artifactIndex])
+                    : TrRmArtifactIndex.ForC1M1Draft(
+                        _artifacts[artifactIndex]);
                 var c1m1Tables = TrRmStructuralMetadataValidator
                     .ValidateC1AndGetExecutionTables(c1m1Index);
                 _cachedProviderTables = c1m1Tables;

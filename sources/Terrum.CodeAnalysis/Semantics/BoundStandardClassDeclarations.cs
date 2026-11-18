@@ -75,9 +75,17 @@ internal sealed record BoundStandardClassExpectation(
 {
     internal ImmutableArray<BoundStandardClassFieldExpectation>
         FieldExpectations { get; init; } = [];
+    internal ImmutableArray<BoundStandardClassMethodExpectation>
+        MethodExpectations { get; init; } = [];
 }
 
 internal sealed record BoundStandardClassFieldExpectation(
+    int ImportRow, int OwnerImportRow, uint ExpectedDefinitionId,
+    uint ExpectedOwnerDefinitionId, uint ProviderDefinitionId,
+    uint ProviderOwnerDefinitionId, string ExportKey,
+    BoundSourceTypeProviderSnapshot Provider);
+
+internal sealed record BoundStandardClassMethodExpectation(
     int ImportRow, int OwnerImportRow, uint ExpectedDefinitionId,
     uint ExpectedOwnerDefinitionId, uint ProviderDefinitionId,
     uint ProviderOwnerDefinitionId, string ExportKey,
@@ -124,6 +132,8 @@ internal static class BoundStandardClassDeclarationContract
             static definition => definition.Identity);
         var identities = new HashSet<BoundGenericNominalTypeIdentity>();
         var fieldImportKeys = new HashSet<(
+            string SchemaIdentity, string ModuleIdentity, int ImportRow)>();
+        var methodImportKeys = new HashSet<(
             string SchemaIdentity, string ModuleIdentity, int ImportRow)>();
         var totalRows = 0L;
         foreach (var declaration in declarations)
@@ -191,6 +201,7 @@ internal static class BoundStandardClassDeclarationContract
                         binding.UsingModule.ModuleIdentity,
                         binding.ImportRow))
                     || expectation.FieldExpectations.IsDefault
+                    || expectation.MethodExpectations.IsDefault
                     || (expectation.ExpectedDeclaration.TypeDefFlags & 3)
                         != 2
                     || (declaration.Declaration.TypeDefFlags & 3) != 2
@@ -217,10 +228,15 @@ internal static class BoundStandardClassDeclarationContract
                 totalRows += expectation.ExpectedDeclaration.Fields.Length
                     + expectation.ExpectedDeclaration.Layouts.Length
                     + expectation.ExpectedDeclaration.Methods.Length
-                    + expectation.FieldExpectations.Length;
+                    + expectation.FieldExpectations.Length
+                    + expectation.MethodExpectations.Length;
                 foreach (var method
                     in expectation.ExpectedDeclaration.Methods)
                 {
+                    if (method.BodyRow != 0)
+                    {
+                        return false;
+                    }
                     totalRows += method.Parameters.Length;
                 }
 
@@ -271,6 +287,75 @@ internal static class BoundStandardClassDeclarationContract
                             declaration.Declaration.Provider))
                     {
                         return false;
+                    }
+                }
+
+                var expectedMethods = expectation.ExpectedDeclaration.Methods
+                    .ToDictionary(static method => method.DefinitionId);
+                var actualMethods = declaration.Declaration.Methods
+                    .ToDictionary(static method => method.DefinitionId);
+                var methodImportRows = new HashSet<int>();
+                foreach (var methodExpectation
+                    in expectation.MethodExpectations)
+                {
+                    if (methodExpectation is null
+                        || methodExpectation.ImportRow <= 0
+                        || methodExpectation.OwnerImportRow
+                            != binding.ImportRow
+                        || methodExpectation.ExpectedOwnerDefinitionId
+                            != binding.ExpectedDefinitionId
+                        || methodExpectation.ProviderOwnerDefinitionId
+                            != declaration.Declaration.Identity
+                                .DefinitionId
+                        || (methodExpectation.ExpectedDefinitionId >> 24)
+                            != 0x16
+                        || (methodExpectation.ExpectedDefinitionId
+                            & 0x00FF_FFFF) == 0
+                        || (methodExpectation.ProviderDefinitionId >> 24)
+                            != 0x16
+                        || (methodExpectation.ProviderDefinitionId
+                            & 0x00FF_FFFF) == 0
+                        || !methodImportRows.Add(
+                            methodExpectation.ImportRow)
+                        || !methodImportKeys.Add((
+                            binding.UsingModule.SchemaIdentity,
+                            binding.UsingModule.ModuleIdentity,
+                            methodExpectation.ImportRow))
+                        || !expectedMethods.TryGetValue(
+                            methodExpectation.ExpectedDefinitionId,
+                            out var expectedMethod)
+                        || !actualMethods.TryGetValue(
+                            methodExpectation.ProviderDefinitionId,
+                            out var actualMethod)
+                        || !actualMethod.ExportKeys.Contains(
+                            methodExpectation.ExportKey,
+                            StringComparer.Ordinal)
+                        || !SnapshotsMatch(methodExpectation.Provider,
+                            declaration.Declaration.Provider)
+                        || expectedMethod.GenericParameterCount != 0
+                        || actualMethod.GenericParameterCount != 0
+                        || expectedMethod.ConstructionRole
+                            != actualMethod.ConstructionRole
+                        || expectedMethod.Parameters.Length
+                            != actualMethod.Parameters.Length)
+                    {
+                        return false;
+                    }
+
+                    for (var parameter = 0;
+                        parameter < expectedMethod.Parameters.Length;
+                        parameter++)
+                    {
+                        var expectedParameter
+                            = expectedMethod.Parameters[parameter];
+                        var actualParameter
+                            = actualMethod.Parameters[parameter];
+                        if (expectedParameter.Mode != actualParameter.Mode
+                            || expectedParameter.Flags
+                                != actualParameter.Flags)
+                        {
+                            return false;
+                        }
                     }
                 }
 
@@ -561,10 +646,6 @@ internal static class BoundStandardClassDeclarationContract
                     actualMethod.Name)
                 || expectedMethod.Flags != actualMethod.Flags
                 || expectedMethod.EffectsMask != actualMethod.EffectsMask
-                || expectedMethod.ReturnTypeSpecReference
-                    != actualMethod.ReturnTypeSpecReference
-                || expectedMethod.ReceiverTypeSpecReference
-                    != actualMethod.ReceiverTypeSpecReference
                 || expectedMethod.GenericParameterCount
                     != actualMethod.GenericParameterCount
                 || expectedMethod.ConstructionRole
@@ -586,9 +667,7 @@ internal static class BoundStandardClassDeclarationContract
                     = expectedMethod.Parameters[parameter];
                 var actualParameter
                     = actualMethod.Parameters[parameter];
-                if (expectedParameter.TypeSpecReference
-                        != actualParameter.TypeSpecReference
-                    || expectedParameter.Mode != actualParameter.Mode
+                if (expectedParameter.Mode != actualParameter.Mode
                     || expectedParameter.Flags != actualParameter.Flags)
                 {
                     return false;
