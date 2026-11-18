@@ -772,9 +772,10 @@ internal sealed partial class TrRmStandardNativeBindingPlan
                 InitializationReferencePointerLoadsNativeParameterSchemaIdentity)
             || AreEqualOrdinal(schemaIdentity,
                 InitializationReferenceGeneralPredicateGraphsPointerLoadsNativeParameterSchemaIdentity)
-            || TrRmExecutableCompiler
-                .IsSelectedC1ClassInstanceLayoutSchemaIdentity(
-                    schemaIdentity);
+            || (schemaIdentity is not null
+                && TrRmExecutableCompiler
+                    .IsSelectedC1ClassInstanceLayoutSchemaIdentity(
+                        schemaIdentity));
 
     private static bool IsExactLocalAggregateLayoutSchemaSet(
         IReadOnlyList<string> schemaIdentities)
