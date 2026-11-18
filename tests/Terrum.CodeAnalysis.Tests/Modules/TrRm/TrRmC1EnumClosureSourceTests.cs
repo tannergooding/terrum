@@ -1821,6 +1821,96 @@ internal sealed class TrRmC1EnumClosureSourceTests
     }
 
     [Test]
+    public void LowersEN1ClassFieldEnumUsingItsUnderlyingLayout()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
+        var schemaIdentity
+            = $"{s_schemaIdentities[0]}-class-instance-layout-1";
+        var providerTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public enum Marker : int32 { Value = 1 }
+                public class Box {
+                    public uint8 Prefix;
+                    public Marker Value;
+                }
+            }
+            """);
+        var providerCompilation = Compilation.CreateLibrary(providerTree);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var providerProgram = (BoundProgram)providerCompilation.Program!;
+        var classDeclaration = providerTree.Root.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var fields = classDeclaration.Children.OfType<SyntaxNode>()
+            .Where(static node => node.Kind == SyntaxKind.FieldDeclaration)
+            .ToArray();
+        var classIndex = providerProgram.SourceClassProgramAssociation!
+            .Declarations.Single(declaration =>
+                declaration.Span == classDeclaration.Span).ClassIndex;
+        var classExport = new TrRmSourceClassExport(providerProgram,
+            classIndex, classDeclaration.Span, "type.box", [
+                new TrRmSourceClassMemberExport(0, fields[0].Span,
+                    "field.box.prefix"),
+                new TrRmSourceClassMemberExport(0, fields[1].Span,
+                    "field.box.value"),
+            ]);
+        var enumExport = CreateExport(providerProgram, providerTree, 0,
+            "Marker", ["type.marker"], "marker");
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, "ClassLayoutProvider", schemaIdentity, 1, [],
+            [], [classExport], [enumExport]);
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, "ClassLayoutProvider", [], [
+                "type.box",
+                "type.marker",
+            ], [
+                "field.box.prefix",
+                "field.box.value",
+            ]);
+        var queryCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Demo;
+                nint Offset() {
+                    return unsafe(offsetof(Box, Value));
+                }
+                """), reference, new CompilationOptions {
+                LayoutCoreRegistration
+                    = LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(queryCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, queryCompilation.Diagnostics));
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            queryCompilation.Program!, "ClassLayoutConsumer",
+            schemaIdentity, 1);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                consumerArtifact), "ClassLayoutConsumer", [providerInput]);
+        var returned = (BoundReturn)loaded.Functions.Single().Body
+            .Statements.Single();
+        var main = loaded.Functions.Single() with {
+            Name = "Main",
+            ReturnType = PrimitiveType.Int32,
+            Body = new BoundBlock([
+                new BoundReturn(new BoundCast(returned.Value!,
+                    PrimitiveType.Int32, default), default),
+            ], default),
+        };
+        var executable = loaded with {
+            Functions = [main],
+            EntryPoint = 0,
+        };
+
+        Assert.That(NativeJit.Execute(executable,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(4));
+    }
+
+    [Test]
     public void ReemitsEN1ClassTypeDefAndFieldImportsAndTypeSpecs()
     {
         var schemaIdentity = s_schemaIdentities[0];
@@ -3001,8 +3091,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
                     .WriteUInt32LittleEndian(
                         typeDefBytes.AsSpan(layoutCountOffset),
                         checked((uint)(layoutCount + 1)));
-                sections.Add(new TrRmSection(kind, flags, recordCount,
-                    typeDefBytes));
+                sections.Add(new TrRmSection(kind, flags,
+                    checked((uint)recordCount), typeDefBytes));
             }
             else if (kind == 0x0015)
             {
@@ -3011,7 +3101,7 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 additionalLayout.AsSpan().CopyTo(
                     layoutBytes.AsSpan(section.Length));
                 sections.Add(new TrRmSection(kind, flags,
-                    checked(recordCount + 1), layoutBytes));
+                    checked((uint)recordCount + 1u), layoutBytes));
             }
             else if (kind == 0x0023)
             {
@@ -3021,7 +3111,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 additionalLayoutFields.AsSpan().CopyTo(
                     layoutFieldBytes.AsSpan(section.Length));
                 sections.Add(new TrRmSection(kind, flags,
-                    checked(recordCount + (uint)instanceFields.Length),
+                    checked((uint)recordCount
+                        + (uint)instanceFields.Length),
                     layoutFieldBytes));
             }
             else if (kind == 0x0048)
@@ -3038,8 +3129,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
             }
             else
             {
-                sections.Add(new TrRmSection(kind, flags, recordCount,
-                    section.ToArray()));
+                sections.Add(new TrRmSection(kind, flags,
+                    checked((uint)recordCount), section.ToArray()));
             }
         }
         if (!hasTargetProfiles)
@@ -3135,8 +3226,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
             }
             else
             {
-                sections.Add(new TrRmSection(kind, flags, recordCount,
-                    section.ToArray()));
+                sections.Add(new TrRmSection(kind, flags,
+                    checked((uint)recordCount), section.ToArray()));
             }
         }
 
