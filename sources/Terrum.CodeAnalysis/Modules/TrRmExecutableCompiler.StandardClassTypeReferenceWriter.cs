@@ -2657,7 +2657,7 @@ public static partial class TrRmExecutableCompiler
         var leftType = leftRead?.Type ?? leftConstant?.Type;
         var rightType = rightRead?.Type ?? rightConstant?.Type;
         var hasSameIntegerType
-            = leftType == operationType && rightType == leftType
+            = leftType.HasValue && rightType == leftType
                 && IsC1M1Construction2BodyIntegerType(leftType.Value);
         var isComparison
             = function.ReturnType == PrimitiveType.Bool
