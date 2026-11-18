@@ -226,7 +226,15 @@ public static partial class TrRmExecutableCompiler
                     expression = unsafeExpression.Expression;
                 }
 
-                if (expression is BoundBinary {
+                if (expression is BoundUnary {
+                        Operator: TokenKind.Bang,
+                        Type: PrimitiveType.Bool,
+                    } negation
+                    && negation.Operand.Type == PrimitiveType.Bool)
+                {
+                    pendingExpressions.Push(negation.Operand);
+                }
+                else if (expression is BoundBinary {
                         Type: PrimitiveType.Bool,
                         Operator: TokenKind.AmpersandAmpersand
                             or TokenKind.PipePipe,
@@ -1622,6 +1630,17 @@ public static partial class TrRmExecutableCompiler
             while (condition is BoundUnsafeExpression unsafeExpression)
             {
                 condition = unsafeExpression.Expression;
+            }
+
+            if (condition is BoundUnary {
+                    Operator: TokenKind.Bang,
+                    Type: PrimitiveType.Bool,
+                } negation
+                && negation.Operand.Type == PrimitiveType.Bool)
+            {
+                AppendConditionalFlow(negation.Operand, falseBlock,
+                    trueBlock);
+                return;
             }
 
             if (condition is BoundBinary {

@@ -926,13 +926,13 @@ init-output publication: each ModuleFunction owns its selector/output-state
 vectors, and phase-2 Captures must correlate with a complete normal outcome.
 Standard F/F+S register Bodies have bounded scalar/raw-pointer output and
 provider-binding support, including `if` and pretest `while` conditions formed
-from supported Boolean-Home and zero-comparison predicates with short-circuit
-`&&`/`||` edges. Loops emit explicit backedges and depth-checked `break` and
-`continue` transfers to emitted loops. Direct NativeOutput reservations inside
-a loop remain unsupported so one reservation cannot be repeated; loop,
-short-circuit and rejection regressions remain unverified under the active
-hold. General aggregate output Bodies and native-interface/vtable outputs
-remain incomplete.
+from supported Boolean-Home and zero-comparison predicates, logical negation,
+and short-circuit `&&`/`||` edges. Loops emit explicit backedges and
+depth-checked `break` and `continue` transfers to emitted loops. Direct
+NativeOutput reservations inside a loop remain unsupported so one reservation
+cannot be repeated; loop, short-circuit and rejection regressions remain
+unverified under the active hold. General aggregate output Bodies and
+native-interface/vtable outputs remain incomplete.
 [CG-004](implementation/conformance-gaps.md#cg-004) owns
 the detailed composition and qualification gates. Earlier TRRM NativeOutput
 clauses and ScalarInitOutput encoding are prototype artifacts, not a fallback

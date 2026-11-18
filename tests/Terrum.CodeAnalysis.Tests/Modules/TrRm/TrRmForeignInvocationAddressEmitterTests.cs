@@ -2643,16 +2643,25 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [TestCase("trrm/1-draft-foreign-invocation-contracts-1", false,
-        "&&", 4, 3)]
+        "repeat && enterLoop", 4, 3, 2, 3)]
     [TestCase("trrm/1-draft-foreign-invocation-contracts-1", false,
-        "||", 2, 4)]
+        "repeat || enterLoop", 2, 4, 2, 3)]
+    [TestCase("trrm/1-draft-foreign-invocation-contracts-1", false,
+        "!(repeat && enterLoop)", 4, 2, 3, 2)]
+    [TestCase("trrm/1-draft-foreign-invocation-contracts-1", false,
+        "!(repeat || enterLoop)", 3, 4, 3, 2)]
     [TestCase("trrm/1-draft-foreign-invocation-storage-addresses-1", true,
-        "&&", 4, 3)]
+        "repeat && enterLoop", 4, 3, 2, 3)]
     [TestCase("trrm/1-draft-foreign-invocation-storage-addresses-1", true,
-        "||", 2, 4)]
-    public void StandardDirectNativeOutputCallsRoundTripShortCircuitLoopConditions(
+        "repeat || enterLoop", 2, 4, 2, 3)]
+    [TestCase("trrm/1-draft-foreign-invocation-storage-addresses-1", true,
+        "!(repeat && enterLoop)", 4, 2, 3, 2)]
+    [TestCase("trrm/1-draft-foreign-invocation-storage-addresses-1", true,
+        "!(repeat || enterLoop)", 3, 4, 3, 2)]
+    public void StandardDirectNativeOutputCallsRoundTripShortCircuitAndNegatedLoopConditions(
         string schemaIdentity, bool storageAddressSchema,
-        string logicalOperator, int leftTrueTarget, int leftFalseTarget)
+        string loopCondition, int leftTrueTarget, int leftFalseTarget,
+        int rightTrueTarget, int rightFalseTarget)
     {
         const string moduleIdentity = "native-output-short-circuit-loop";
         var source = """
@@ -2664,13 +2673,13 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                 write ptr<int64> ticks);
 
             public int32 Probe(bool repeat, bool enterLoop) {
-                while (repeat OP enterLoop) {
+                while (OP) {
                     break;
                 }
                 init mut int64 ticks;
                 unsafe { return QueryPerformanceCounter(&init ticks); }
             }
-            """.Replace("OP", logicalOperator, StringComparison.Ordinal);
+            """.Replace("OP", loopCondition, StringComparison.Ordinal);
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
             NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
         Assert.That(compilation.HasErrors, Is.False,
@@ -2713,7 +2722,8 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
         Assert.That(body.BlockCount, Is.EqualTo(5));
         Assert.That(ReadConditionalTargets(1),
             Is.EqualTo((leftTrueTarget, leftFalseTarget)));
-        Assert.That(ReadConditionalTargets(4), Is.EqualTo((2, 3)));
+        Assert.That(ReadConditionalTargets(4),
+            Is.EqualTo((rightTrueTarget, rightFalseTarget)));
         Assert.That(body.GetBlockCode(2).ToArray(),
             Is.EqualTo(new byte[] { 0xE3, 0, 3, 0 }));
         Assert.That(body.GetBlockCode(3).Length, Is.GreaterThan(0));
