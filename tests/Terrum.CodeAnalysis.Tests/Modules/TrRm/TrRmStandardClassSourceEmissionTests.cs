@@ -757,6 +757,12 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     int64 second = first;
                     return second + right;
                 }
+                public static int64 Sum64ThroughLocalConstant(
+                    int64 left, int64 right) {
+                    int64 first = left;
+                    int64 second = first;
+                    return second + 7;
+                }
                 public static bool Greater64(int64 left, int64 right) {
                     return left > right;
                 }
@@ -963,6 +969,11 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name
                     == "Sum64ThroughTwoLocals"));
+        var sum64ThroughLocalConstant = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name
+                    == "Sum64ThroughLocalConstant"));
         var greater64 = members.Single(static node =>
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
@@ -1174,6 +1185,9 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                         new TrRmSourceClassMemberExport(0,
                             sum64ThroughTwoLocals.Span,
                             "Box.Sum64ThroughTwoLocals"),
+                        new TrRmSourceClassMemberExport(0,
+                            sum64ThroughLocalConstant.Span,
+                            "Box.Sum64ThroughLocalConstant"),
                         new TrRmSourceClassMemberExport(0, greater64.Span,
                             "Box.Greater64"),
                         new TrRmSourceClassMemberExport(0,
@@ -1645,6 +1659,54 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 0xD5, 0, 3, 0,
                 0xD5, 1, 1, 0,
                 0xC0, GetArithmeticControl(sum64ThroughTwoLocalsBinary),
+                0xF0, 0x10,
+                0x17, 0,
+            }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.Sum64ThroughLocalConstant",
+            out var sum64ThroughLocalConstantDefinition), Is.True);
+        var sum64ThroughLocalConstantMethodRow = checked((int)(
+            sum64ThroughLocalConstantDefinition & 0x00FF_FFFF));
+        var sum64ThroughLocalConstantBodyRow
+            = tables.Methods.GetBodyRow(
+                sum64ThroughLocalConstantMethodRow);
+        Assert.That(sum64ThroughLocalConstantBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(
+            sum64ThroughLocalConstantBodyRow, tables.Contracts.Count);
+        var sum64ThroughLocalConstantBody = tables.Bodies.GetRegisterBody(
+            sum64ThroughLocalConstantBodyRow, tables.Contracts.Count);
+        Assert.That(sum64ThroughLocalConstantBody.HomeCount, Is.EqualTo(4));
+        Assert.That(sum64ThroughLocalConstantBody.ConstantCount,
+            Is.EqualTo(1));
+        Assert.That(sum64ThroughLocalConstantBody.ConstantMap.Length,
+            Is.EqualTo(8));
+        Assert.That(tables.TypeSpecs.AreEquivalentTypeSpecRefs(
+                BinaryPrimitives.ReadUInt32LittleEndian(
+                    sum64ThroughLocalConstantBody.ConstantMap),
+                tables.Signatures.GetResultTypeSpec(
+                    tables.Methods.GetSignature(
+                        sum64ThroughLocalConstantMethodRow))),
+            Is.True);
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                sum64ThroughLocalConstantBody.ConstantMap.Slice(4)),
+            Is.GreaterThan(0u));
+        Assert.That(tables.Features.TryGetFeature(11, out _), Is.True);
+        var sum64ThroughLocalConstantFunction = program.Functions.Single(
+            static function =>
+                function.Name == "Sum64ThroughLocalConstant");
+        var sum64ThroughLocalConstantBinary = (BoundBinary)((BoundReturn)
+            sum64ThroughLocalConstantFunction.Body.Statements.Single(
+                static statement => statement is BoundReturn)).Value!;
+        Assert.That(sum64ThroughLocalConstantBody.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD5, 0, 0, 0,
+                0xD6, 0x10, 2, 0,
+                0xD5, 0, 2, 0,
+                0xD6, 0x10, 3, 0,
+                0xD5, 0, 3, 0,
+                0xD4, 1, 0, 0,
+                0xC0, GetArithmeticControl(
+                    sum64ThroughLocalConstantBinary),
                 0xF0, 0x10,
                 0x17, 0,
             }));
@@ -2474,6 +2536,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             }
             int64 UseSum64ThroughTwoLocals(int64 left, int64 right) {
                 return Box.Sum64ThroughTwoLocals(left, right);
+            }
+            int64 UseSum64ThroughLocalConstant(
+                int64 left, int64 right) {
+                return Box.Sum64ThroughLocalConstant(left, right);
             }
             int64 UseNegate64(Box value, int64 input) {
                 return value.Negate64(input);
