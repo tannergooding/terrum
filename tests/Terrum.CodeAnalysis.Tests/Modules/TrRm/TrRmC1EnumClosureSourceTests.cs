@@ -810,6 +810,40 @@ internal sealed class TrRmC1EnumClosureSourceTests
             Is.Not.Null);
         Assert.That(middleReference.EnumDefinitions, Has.Length.EqualTo(1));
 
+        var decoyTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public enum Shade : int8 { Dark = -1 }
+                public struct Decoy { public int32 Id; }
+            }
+            """);
+        var decoyCompilation = Compilation.CreateLibrary(decoyTree);
+        Assert.That(decoyCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, decoyCompilation.Diagnostics));
+        var decoyProgram = (BoundProgram)decoyCompilation.Program!;
+        var decoyArtifact = TrRmExecutableCompiler.EmitStandard(
+            decoyProgram, "StructDecoyProvider", schemaIdentity, 1, [
+                new TrRmSourceTypeExport("Demo", "Decoy", "type.decoy") {
+                    FieldExports = [
+                        new TrRmSourceFieldExport("Id",
+                            "field.leaf.id"),
+                    ],
+                },
+            ], [], [], [
+                CreateExport(decoyProgram, decoyTree, 0, "Shade",
+                    ["type.decoy.shade"], "shade"),
+            ]);
+        var redirectedFieldImport = RewriteFieldImportProvider(
+            middleArtifact, schemaIdentity, "field.leaf.id", decoyArtifact);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    redirectedFieldImport),
+                "StructMiddleProvider", [
+                    leafInput,
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        decoyArtifact),
+                ], ["type.wrapper", "type.wrapper.twin"]));
+
         var consumerTree = SyntaxTree.Parse("""
             namespace Demo {
                 public struct Packet {
@@ -5099,6 +5133,134 @@ internal sealed class TrRmC1EnumClosureSourceTests
             .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
                 result, schema, null, usesNativePointerLoads: false,
                 standardSchemaIdentity: schemaIdentity));
+        return result;
+
+        static int GetTextEncoding(string text)
+            => text.Any(static character => character > 0x7F) ? 1 : 0;
+    }
+
+    private static byte[] RewriteFieldImportProvider(byte[] artifact,
+        string schemaIdentity, string fieldExportKey,
+        byte[] replacementProviderArtifact)
+    {
+        var schema = SchemaFor(schemaIdentity);
+        var index = new TrRmArtifactIndex(artifact, schema);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(index);
+        var fieldImportRow = Enumerable.Range(1, tables.Imports.Count)
+            .First(row =>
+                (tables.Imports.GetExpectedDefinitionForImportRow(row) >> 24)
+                    == 0x14
+                && StringComparer.Ordinal.Equals(
+                    tables.Imports.GetBindingForImportRow(row).ExportKey,
+                    fieldExportKey));
+        var replacementIndex = new TrRmArtifactIndex(
+            replacementProviderArtifact, schema);
+        var replacementTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(replacementIndex);
+        if (replacementTables.Modules.Count != 1
+            || tables.Modules.Count != 1
+            || !index.TryGetSection(0x0001, out var moduleBytes,
+                out var moduleCount)
+            || !index.TryGetSection(0x0002, out var originalStringBytes,
+                out var originalStringCount)
+            || !index.TryGetSection(0x0010, out _,
+                out var originalModuleRefCount)
+            || !index.TryGetSection(0x001C, out var originalImportBytes,
+                out var originalImportCount)
+            || fieldImportRow > originalImportCount)
+        {
+            throw new InvalidDataException(
+                "The FieldDef Import provider fixture has an unexpected table shape.");
+        }
+
+        var originalStrings = new TrRmStringTableReader(
+            originalStringBytes, originalStringCount);
+        var stringRows = new List<(string Text, int Encoding)>(
+            originalStringCount + 1);
+        var stringRowsByText = new Dictionary<string, int>(
+            StringComparer.Ordinal);
+        var providerIdentityStringRow = 0;
+        for (var row = 1; row <= originalStrings.Count; row++)
+        {
+            var text = originalStrings.DecodeNamespace(row);
+            stringRows.Add((text, GetTextEncoding(text)));
+            _ = stringRowsByText.TryAdd(text, row);
+            if (StringComparer.Ordinal.Equals(text,
+                    replacementTables.Modules.GetIdentity(1)))
+            {
+                providerIdentityStringRow = row;
+            }
+        }
+        if (providerIdentityStringRow == 0)
+        {
+            providerIdentityStringRow = stringRows.Count + 1;
+            stringRows.Add((replacementTables.Modules.GetIdentity(1),
+                GetTextEncoding(replacementTables.Modules.GetIdentity(1))));
+        }
+
+        var rewrittenStrings = TrRmStringTableWriter.EncodeTextRows(
+            stringRows);
+        var stringTable = new TrRmStringTableReader(rewrittenStrings,
+            stringRows.Count);
+        var moduleRefRows = new List<TrRmModuleRefRow>(
+            originalModuleRefCount + 1);
+        for (var row = 1; row <= tables.ModuleRefs.Count; row++)
+        {
+            var (targetRequirement, runtimePolicy)
+                = tables.ModuleRefs.GetRequirements(row);
+            moduleRefRows.Add(new TrRmModuleRefRow(
+                stringRowsByText[
+                    tables.ModuleRefs.GetProducerIdentity(row)],
+                targetRequirement, runtimePolicy));
+        }
+        var (replacementTarget, replacementPolicy)
+            = replacementTables.Modules.GetRequirements(1);
+        moduleRefRows.Add(new TrRmModuleRefRow(
+            providerIdentityStringRow, replacementTarget, replacementPolicy));
+        var rewrittenModules = new TrRmModuleTableReader(moduleBytes,
+            checked((int)moduleCount), stringTable, moduleRefRows.Count,
+            tables.TypeDefs.Count, tables.Methods.Count,
+            tables.Modules.SourceFileCount, tables.Features.Count);
+        var rewrittenModuleRefs = TrRmModuleRefTableWriter.Encode(
+            moduleRefRows, stringTable, rewrittenModules);
+        var rewrittenImports = originalImportBytes.ToArray();
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(
+            rewrittenImports.AsSpan(checked((fieldImportRow - 1) * 12)),
+            checked((uint)moduleRefRows.Count));
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var sectionIndex = 0;
+            sectionIndex < index.SectionCount; sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var sectionBytes, out var recordCount);
+            if (kind == 0x0002)
+            {
+                sections.Add(new TrRmSection(kind, flags,
+                    checked((uint)stringRows.Count), rewrittenStrings));
+            }
+            else if (kind == 0x0010)
+            {
+                sections.Add(new TrRmSection(kind, flags,
+                    checked((uint)moduleRefRows.Count),
+                    rewrittenModuleRefs));
+            }
+            else if (kind == 0x001C)
+            {
+                sections.Add(new TrRmSection(kind, flags,
+                    checked((uint)originalImportCount), rewrittenImports));
+            }
+            else
+            {
+                sections.Add(new TrRmSection(kind, flags,
+                    checked((uint)recordCount), sectionBytes.ToArray()));
+            }
+        }
+
+        var result = TrRmArtifactWriter.Encode(sections, schema);
+        _ = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                result, schema));
         return result;
 
         static int GetTextEncoding(string text)
