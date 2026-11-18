@@ -825,6 +825,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     int32 copy = value;
                     return copy;
                 }
+                public static int64 Copy64Static(int64 value) {
+                    int64 copy = value;
+                    return copy;
+                }
                 public static bool LessThan(int32 left, int32 right) {
                     return left < right;
                 }
@@ -891,6 +895,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 }
                 public int32 CopyThroughLocal(int32 value) {
                     int32 copy = value;
+                    return copy;
+                }
+                public int64 Copy64ThroughLocal(int64 value) {
+                    int64 copy = value;
                     return copy;
                 }
                 public int32 XorThroughLocal(int32 left, int32 right) {
@@ -1043,6 +1051,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name == "CopyStatic"));
+        var copy64Static = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Copy64Static"));
         var lessThan = members.Single(static node =>
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
@@ -1117,6 +1129,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name == "CopyThroughLocal"));
+        var copy64ThroughLocal = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Copy64ThroughLocal"));
         var xorThroughLocal = members.Single(static node =>
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
@@ -1208,6 +1224,8 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                             "Box.Complement"),
                         new TrRmSourceClassMemberExport(0, copyStatic.Span,
                             "Box.CopyStatic"),
+                        new TrRmSourceClassMemberExport(0, copy64Static.Span,
+                            "Box.Copy64Static"),
                         new TrRmSourceClassMemberExport(0, lessThan.Span,
                             "Box.LessThan"),
                         new TrRmSourceClassMemberExport(0, equalTo.Span,
@@ -1248,6 +1266,9 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                             lessThanAfterCall.Span, "Box.LessThanAfterCall"),
                         new TrRmSourceClassMemberExport(0,
                             copyThroughLocal.Span, "Box.CopyThroughLocal"),
+                        new TrRmSourceClassMemberExport(0,
+                            copy64ThroughLocal.Span,
+                            "Box.Copy64ThroughLocal"),
                         new TrRmSourceClassMemberExport(0,
                             xorThroughLocal.Span, "Box.XorThroughLocal"),
                     ]),
@@ -1837,6 +1858,26 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 0xD6, 0x10, 1, 0,
                 0xEB, 0, 1, 0,
             }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.Copy64Static", out var copy64StaticDefinition), Is.True);
+        var copy64StaticMethodRow = checked((int)(
+            copy64StaticDefinition & 0x00FF_FFFF));
+        var copy64StaticBodyRow
+            = tables.Methods.GetBodyRow(copy64StaticMethodRow);
+        Assert.That(copy64StaticBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(copy64StaticBodyRow,
+            tables.Contracts.Count);
+        var copy64StaticBody = tables.Bodies.GetRegisterBody(
+            copy64StaticBodyRow, tables.Contracts.Count);
+        Assert.That(copy64StaticBody.HomeCount, Is.EqualTo(2));
+        Assert.That(copy64StaticBody.HomeMap[0], Is.EqualTo(2));
+        Assert.That(copy64StaticBody.HomeMap[8], Is.EqualTo(3));
+        Assert.That(copy64StaticBody.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD5, 0, 0, 0,
+                0xD6, 0x10, 1, 0,
+                0xEB, 0, 1, 0,
+            }));
         AssertComparisonBody("Box.LessThan", "LessThan", 1, 2, 0, 1);
         AssertComparisonBody("Box.EqualTo", "EqualTo", 2, 2, 0, 1);
         AssertComparisonBody("Box.LessOrEqual", "LessOrEqual", 3, 2, 0, 1);
@@ -2361,6 +2402,27 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 0xEB, 0, 2, 0,
             }));
         Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.Copy64ThroughLocal",
+            out var copy64Definition), Is.True);
+        var copy64MethodRow
+            = checked((int)(copy64Definition & 0x00FF_FFFF));
+        var copy64BodyRow = tables.Methods.GetBodyRow(copy64MethodRow);
+        Assert.That(copy64BodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(copy64BodyRow,
+            tables.Contracts.Count);
+        var copy64Body = tables.Bodies.GetRegisterBody(copy64BodyRow,
+            tables.Contracts.Count);
+        Assert.That(copy64Body.HomeCount, Is.EqualTo(3));
+        Assert.That(copy64Body.HomeMap[0], Is.EqualTo(1));
+        Assert.That(copy64Body.HomeMap[8], Is.EqualTo(2));
+        Assert.That(copy64Body.HomeMap[16], Is.EqualTo(3));
+        Assert.That(copy64Body.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD5, 0, 1, 0,
+                0xD6, 0x10, 2, 0,
+                0xEB, 0, 2, 0,
+            }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
             "Box.XorThroughLocal", out var xorLocalDefinition), Is.True);
         var xorLocalMethodRow
             = checked((int)(xorLocalDefinition & 0x00FF_FFFF));
@@ -2463,6 +2525,9 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             int32 UseNegate() { return Box.Negate(4); }
             int32 UseComplement() { return Box.Complement(4); }
             int32 UseCopyStatic() { return Box.CopyStatic(42); }
+            int64 UseCopy64Static(int64 value) {
+                return Box.Copy64Static(value);
+            }
             bool UseLessThan() { return Box.LessThan(1, 2); }
             bool UseEqualTo() { return Box.EqualTo(1, 2); }
             bool UseLessOrEqual() { return Box.LessOrEqual(1, 2); }
@@ -2506,6 +2571,9 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             }
             int32 UseLocal(Box value) {
                 return value.CopyThroughLocal(4);
+            }
+            int64 UseCopy64(Box value, int64 input) {
+                return value.Copy64ThroughLocal(input);
             }
             int32 UseLocalXor(Box value) {
                 return value.XorThroughLocal(4, 5);

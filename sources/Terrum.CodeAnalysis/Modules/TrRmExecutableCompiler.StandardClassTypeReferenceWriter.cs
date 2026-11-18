@@ -3233,19 +3233,24 @@ public static partial class TrRmExecutableCompiler
     {
         var receiverCount = function.IsStatic ? 0 : 1;
         var localVariable = receiverCount + 1;
-        if (function.ReturnType != PrimitiveType.Int32
-            || function.ParameterCount != receiverCount + 1
-            || function.Variables.Length != receiverCount + 2
+        if (function.ParameterCount != receiverCount + 1
+            || function.Variables.Length != receiverCount + 2)
+        {
+            throw Unsupported(
+                "A Construction-2 local-copy Body requires one value formal and one local.");
+        }
+
+        var operationType = function.Variables[receiverCount].Type;
+        if (!IsC1M1Construction2BodyIntegerType(operationType)
+            || function.ReturnType != operationType
             || (!function.IsStatic && function.Variables[0].IsMutable)
-            || function.Variables[receiverCount].Type
-                != PrimitiveType.Int32
             || function.Variables[receiverCount].IsMutable
             || function.Variables[receiverCount].IsOut
             || function.Variables[receiverCount].IsInit
             || function.Variables[receiverCount].IsImplicitRef
             || function.Variables[receiverCount].IsInitializationLocal
             || function.Variables[localVariable].Type
-                != PrimitiveType.Int32
+                != operationType
             || function.Variables[localVariable].IsMutable
             || function.Variables[localVariable].IsOut
             || function.Variables[localVariable].IsInit
@@ -3257,15 +3262,14 @@ public static partial class TrRmExecutableCompiler
                 BoundReturn { Value: BoundRead returnedRead },
             ]
             || local.Variable != localVariable
-            || local.Initializer is not BoundRead {
-                Type: PrimitiveType.Int32,
-            } initialRead
+            || local.Initializer is not BoundRead initialRead
+            || initialRead.Type != operationType
             || initialRead.Variable != receiverCount
-            || returnedRead.Type != PrimitiveType.Int32
+            || returnedRead.Type != operationType
             || returnedRead.Variable != localVariable)
         {
             throw Unsupported(
-                "A Construction-2 local-copy Body requires one initialized int32 local copied from an int32 value formal and returned directly.");
+                "A Construction-2 local-copy Body requires one initialized fixed-integer local copied from a same-typed value formal and returned directly.");
         }
 
         var typeTokens = new uint[function.Variables.Length];
@@ -4431,34 +4435,38 @@ public static partial class TrRmExecutableCompiler
         var receiverCount = function.IsStatic ? 0 : 1;
         var formalVariable = receiverCount;
         var localVariable = receiverCount + 1;
-        return function.ReturnType == PrimitiveType.Int32
-            && function.ParameterCount == receiverCount + 1
-            && function.Variables.Length == receiverCount + 2
+        if (function.ParameterCount != receiverCount + 1
+            || function.Variables.Length != receiverCount + 2
+            || function.Body.RetiredManagedLocals.Length != 0
+            || function.Body.Statements is not [
+                BoundLocal local,
+                BoundReturn { Value: BoundRead returnedRead },
+            ])
+        {
+            return false;
+        }
+
+        var operationType = function.Variables[formalVariable].Type;
+        return IsC1M1Construction2BodyIntegerType(operationType)
+            && function.ReturnType == operationType
             && (function.IsStatic || !function.Variables[0].IsMutable)
-            && function.Variables[formalVariable].Type
-                == PrimitiveType.Int32
             && !function.Variables[formalVariable].IsMutable
             && !function.Variables[formalVariable].IsOut
             && !function.Variables[formalVariable].IsInit
             && !function.Variables[formalVariable].IsImplicitRef
             && !function.Variables[formalVariable].IsInitializationLocal
             && function.Variables[localVariable].Type
-                == PrimitiveType.Int32
+                == operationType
             && !function.Variables[localVariable].IsMutable
             && !function.Variables[localVariable].IsOut
             && !function.Variables[localVariable].IsInit
             && !function.Variables[localVariable].IsImplicitRef
             && !function.Variables[localVariable].IsInitializationLocal
-            && function.Body.RetiredManagedLocals.IsEmpty
-            && function.Body.Statements is [
-                BoundLocal local,
-                BoundReturn { Value: BoundRead returnedRead },
-            ]
             && local.Variable == localVariable
             && local.Initializer is BoundRead initialRead
-            && initialRead.Type == PrimitiveType.Int32
+            && initialRead.Type == operationType
             && initialRead.Variable == formalVariable
-            && returnedRead.Type == PrimitiveType.Int32
+            && returnedRead.Type == operationType
             && returnedRead.Variable == localVariable;
     }
 

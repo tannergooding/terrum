@@ -120,7 +120,7 @@ prerequisite has already been met.
    direct scalar parameter-to-field initialization; assigned static and
    readonly-instance register Bodies cover direct scalar returns, fixed-width
    integer unary/binary/comparison operations, fixed constants as returns and
-   ConstantMap binary operands, scalar local-copy returns and ordered
+   ConstantMap binary operands, fixed-integer local-copy returns and ordered
    local-copy chains feeding fixed-integer binary operations. It also
    emits empty unit instance methods,
    direct scalar FieldRead/FieldWrite descriptors, exact same-class identity
