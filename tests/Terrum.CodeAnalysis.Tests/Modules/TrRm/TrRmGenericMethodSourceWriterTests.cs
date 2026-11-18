@@ -317,6 +317,43 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         Assert.That(NativeJit.Execute(consumerCompilation.Program!,
             NativeRuntimePolicy.FailFast), Is.EqualTo(42));
 
+        var compatibleLeafCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                public T Other<T>(T value) { return value; }
+                public T External<T>(T value) { return value; }
+                """));
+        Assert.That(compatibleLeafCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                compatibleLeafCompilation.Diagnostics));
+        var compatibleLeaf = compatibleLeafCompilation.Program!;
+        var compatibleLeafArtifact = TrRmExecutableCompiler.EmitStandard(
+            compatibleLeaf, leafIdentity, GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(),
+            compatibleLeaf.GenericMethodDefinitions.Select(definition =>
+                new TrRmSourceGenericMethodExport(compatibleLeaf,
+                    definition.SourceInputOrdinal, definition.Span,
+                    definition.Name)).ToArray());
+        Assert.That(GetExportedMethodDefId(compatibleLeafArtifact, "External"),
+            Is.Not.EqualTo(GetExportedMethodDefId(leafArtifact, "External")));
+        var compatibleLeafInput = new TrRmStandardArtifactInput(
+            GenericMethodCallsSchemaIdentity, compatibleLeafArtifact);
+        var compatibleReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(
+                    GenericMethodCallsSchemaIdentity, reemitted),
+                outputIdentity, [compatibleLeafInput]);
+        var compatibleConsumer = Compilation.Create(
+            SyntaxTree.Parse("""
+                int32 Main() {
+                    return Identity<int32>(42);
+                }
+                """), compatibleReference);
+        Assert.That(compatibleConsumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                compatibleConsumer.Diagnostics));
+        Assert.That(NativeJit.Execute(compatibleConsumer.Program!,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(42));
+
         var unsafeLeafCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(
                 "public unsafe T External<T>(T value) { return value; }"));
