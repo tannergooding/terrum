@@ -919,6 +919,9 @@ public static partial class TrRmExecutableCompiler
                     var directInt32Binary
                         = TryGetC1M1Construction2DirectInt32Binary(
                             methodFunction);
+                    var directInt32Unary
+                        = TryGetC1M1Construction2DirectInt32Unary(
+                            methodFunction);
                     var callXor
                         = TryGetC1M1Construction2DirectCallXor(
                             methodFunction, program.Functions);
@@ -936,6 +939,7 @@ public static partial class TrRmExecutableCompiler
                             && !isSupportedIdentityForwarder
                             && !isSupportedUnitIdentityForwarder
                             && directInt32Binary is null
+                            && directInt32Unary is null
                             && callXor is null
                             && !localCopyReturn
                             && !localXorReturn)
@@ -991,7 +995,7 @@ public static partial class TrRmExecutableCompiler
                             && methodFunction.IsInternal))
                     {
                         throw Unsupported(
-                            "The bounded Construction-2 class method producer supports effect-free scalar static methods, exact identity forwarders, readonly instance int32 XOR and same-class call-XOR methods, one scalar local-copy return, empty unit instance methods, readonly instance methods returning one scalar value parameter and direct scalar field reads/writes.");
+                            "The bounded Construction-2 class method producer supports effect-free scalar static methods, exact identity forwarders, readonly instance int32 unary/binary and same-class call-XOR methods, one scalar local-copy return, empty unit instance methods, readonly instance methods returning one scalar value parameter and direct scalar field reads/writes.");
                     }
 
                     if (methodFunction.ReturnType != PrimitiveType.Void)
@@ -1004,12 +1008,13 @@ public static partial class TrRmExecutableCompiler
                                 && !isSupportedIdentityForwarder
                                 && !isSupportedUnitIdentityForwarder
                                 && directInt32Binary is null
+                                && directInt32Unary is null
                                 && callXor is null
                                 && !localCopyReturn
                                 && !localXorReturn)
                             {
                                 throw Unsupported(
-                                    "The bounded Construction-2 instance method producer supports only unit, direct scalar-parameter, direct int32 binary, same-class call-XOR, one scalar local-copy return or direct scalar-field results and direct scalar-field writes.");
+                                    "The bounded Construction-2 instance method producer supports only unit, direct scalar-parameter, direct int32 unary/binary, same-class call-XOR, one scalar local-copy return or direct scalar-field results and direct scalar-field writes.");
                             }
                         }
 
@@ -1155,6 +1160,14 @@ public static partial class TrRmExecutableCompiler
                         encodedBody
                             = EncodeC1M1Construction2DirectInt32BinaryBody(
                                 methodFunction, directInt32Binary,
+                                Construction2ValueTypeSpecReference,
+                                contractRows.Count, schema);
+                    }
+                    else if (directInt32Unary is not null)
+                    {
+                        encodedBody
+                            = EncodeC1M1Construction2DirectInt32UnaryBody(
+                                methodFunction, directInt32Unary,
                                 Construction2ValueTypeSpecReference,
                                 contractRows.Count, schema);
                     }
@@ -2438,6 +2451,86 @@ public static partial class TrRmExecutableCompiler
         }
     }
 
+    private static byte[] EncodeC1M1Construction2DirectInt32UnaryBody(
+        BoundFunction function, BoundUnary unary,
+        Func<PrimitiveType, uint> typeSpecReferenceFor, int contractCount,
+        TrRmArtifactSchema schema)
+    {
+        if (function.IsStatic || function.ReturnType != PrimitiveType.Int32
+            || function.ParameterCount != 2
+            || function.Variables.Length != function.ParameterCount
+            || function.Variables[0].IsMutable
+            || function.Variables[1].Type != PrimitiveType.Int32
+            || function.Variables[1].IsMutable
+            || function.Variables[1].IsOut || function.Variables[1].IsInit
+            || function.Variables[1].IsImplicitRef
+            || function.Variables[1].IsInitializationLocal
+            || unary.Type != PrimitiveType.Int32
+            || unary.Operand is not BoundRead operand
+            || operand.Type != PrimitiveType.Int32
+            || operand.Variable != 1
+            || unary.Operator is not (TokenKind.Minus or TokenKind.Tilde))
+        {
+            throw Unsupported(
+                "A Construction-2 instance int32 unary Body requires one direct int32 parameter read and a readonly receiver.");
+        }
+
+        var typeTokens = new uint[function.ParameterCount];
+        var homeMap = new byte[checked(function.ParameterCount * 8)];
+        for (var parameter = 0;
+            parameter < function.ParameterCount; parameter++)
+        {
+            var typeToken = CreateStandardBodyTypeMapToken(
+                typeSpecReferenceFor(function.Variables[parameter].Type));
+            typeTokens[parameter] = typeToken;
+        }
+
+        var maps = TrRmRegisterBodyMapBuilder.Create(typeTokens, []);
+        for (var parameter = 0;
+            parameter < function.ParameterCount; parameter++)
+        {
+            var offset = parameter * 8;
+            homeMap[offset] = parameter == 0 ? (byte)1 : (byte)2;
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                homeMap.AsSpan(offset + 2, 2),
+                maps.GetTypeMapIndex(typeTokens[parameter]));
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                homeMap.AsSpan(offset + 4, 2),
+                parameter == 0 ? (ushort)0
+                    : checked((ushort)(parameter - 1)));
+        }
+
+        var (opcode, operation) = (unary.Operator,
+            unary.OverflowBehavior) switch
+        {
+            (TokenKind.Tilde, _) => ((byte)0xC1, (byte)0x04),
+            (TokenKind.Minus,
+                BoundIntegerOverflowBehavior.Checked)
+                => ((byte)0xC0, (byte)0x04),
+            (TokenKind.Minus,
+                BoundIntegerOverflowBehavior.Wrapping)
+                => ((byte)0xC0, (byte)0x08),
+            _ => throw Unsupported(
+                "The selected instance register Body does not encode this integer unary operation."),
+        };
+        var code = new byte[] {
+            0xD5, 0, 1, 0,
+            opcode, operation, 0xF0, 0xF0,
+            0x17, 0,
+        };
+        var records = new ReadOnlyMemory<byte>[] {
+            new(new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 }),
+        };
+        return TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
+            default, default, default,
+            [new TrRmRegisterBodyBlock(0,
+                checked((uint)code.Length), 0)],
+            records, code, contractCount: contractCount,
+            schema: schema,
+            generalPredicateGraphsInitializationReferenceBodies
+                : schema.UsesGeneralPredicateGraphs());
+    }
+
     private static byte[] EncodeC1M1Construction2CallXorBody(
         BoundFunction function, BoundBinary binary, int targetMethodDefRow,
         Func<PrimitiveType, uint> typeSpecReferenceFor, int contractCount,
@@ -3247,6 +3340,73 @@ public static partial class TrRmExecutableCompiler
                 })
                 {
                     returnedBinary = binary;
+                }
+                else
+                {
+                    isSupported = false;
+                    return;
+                }
+            }
+        }
+    }
+
+    private static BoundUnary? TryGetC1M1Construction2DirectInt32Unary(
+        BoundFunction function)
+    {
+        if (function.IsStatic || function.ReturnType != PrimitiveType.Int32
+            || function.ParameterCount != 2
+            || function.ParameterCount != function.Variables.Length
+            || function.Variables[0].IsMutable
+            || function.Variables[1].Type != PrimitiveType.Int32
+            || function.Variables[1].IsMutable
+            || function.Variables[1].IsOut || function.Variables[1].IsInit
+            || function.Variables[1].IsImplicitRef
+            || function.Variables[1].IsInitializationLocal)
+        {
+            return null;
+        }
+
+        BoundUnary? returnedUnary = null;
+        var isSupported = true;
+        Visit(function.Body);
+        if (!isSupported || returnedUnary is null
+            || returnedUnary.Type != PrimitiveType.Int32
+            || returnedUnary.Operator is not (TokenKind.Minus
+                or TokenKind.Tilde)
+            || returnedUnary.Operand is not BoundRead operand
+            || operand.Type != PrimitiveType.Int32
+            || operand.Variable != 1)
+        {
+            return null;
+        }
+
+        return returnedUnary;
+
+        void Visit(BoundBlock block)
+        {
+            if (!block.RetiredManagedLocals.IsEmpty)
+            {
+                isSupported = false;
+                return;
+            }
+
+            foreach (var statement in block.Statements)
+            {
+                if (!isSupported || returnedUnary is not null)
+                {
+                    isSupported = false;
+                    return;
+                }
+
+                if (statement is BoundBlock nested)
+                {
+                    Visit(nested);
+                }
+                else if (statement is BoundReturn {
+                    Value: BoundUnary unary
+                })
+                {
+                    returnedUnary = unary;
                 }
                 else
                 {

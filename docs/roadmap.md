@@ -119,7 +119,8 @@ prerequisite has already been met.
    Construction-2 source production now emits a bounded real initializer I /
    projection P pair for direct scalar parameter-to-field initialization,
    static direct-formal/unary/binary and fixed-SF1-constant register Bodies,
-   readonly instance direct int32 binary Bodies, empty unit instance methods, and a
+   readonly instance direct int32 unary/binary Bodies, empty unit instance
+   methods, and a
    readonly instance method returning one explicit scalar parameter through
    ReturnHome with receiver/formal Homes in declaration order, plus direct
    scalar instance FieldRead and mutable-receiver scalar FieldWrite

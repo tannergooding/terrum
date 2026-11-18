@@ -727,6 +727,12 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 public int32 Difference(int32 left, int32 right) {
                     return right - left;
                 }
+                public int32 Negated(int32 value) {
+                    return -value;
+                }
+                public int32 Complemented(int32 value) {
+                    return ~value;
+                }
                 public static int32 StaticXor(int32 left, int32 right) {
                     return left ^ right;
                 }
@@ -784,6 +790,14 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name == "Difference"));
+        var negated = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Negated"));
+        var complemented = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Complemented"));
         var staticXor = members.Single(static node =>
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
@@ -842,6 +856,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                             "Box.Sum"),
                         new TrRmSourceClassMemberExport(0, difference.Span,
                             "Box.Difference"),
+                        new TrRmSourceClassMemberExport(0, negated.Span,
+                            "Box.Negated"),
+                        new TrRmSourceClassMemberExport(0,
+                            complemented.Span, "Box.Complemented"),
                         new TrRmSourceClassMemberExport(0, staticXor.Span,
                             "Box.StaticXor"),
                         new TrRmSourceClassMemberExport(0, add.Span,
@@ -929,6 +947,52 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 0xD5, 0, 2, 0,
                 0xD5, 1, 1, 0,
                 0xC0, GetArithmeticControl(differenceBinary), 0xF0, 0x10,
+                0x17, 0,
+            }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.Negated", out var negatedDefinition), Is.True);
+        var negatedMethodRow
+            = checked((int)(negatedDefinition & 0x00FF_FFFF));
+        var negatedBodyRow = tables.Methods.GetBodyRow(negatedMethodRow);
+        Assert.That(negatedBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(negatedBodyRow,
+            tables.Contracts.Count);
+        var negatedBody = tables.Bodies.GetRegisterBody(negatedBodyRow,
+            tables.Contracts.Count);
+        Assert.That(negatedBody.HomeCount, Is.EqualTo(2));
+        var negatedFunction = program.Functions.Single(
+            static function => function.Name == "Negated");
+        var negatedUnary = (BoundUnary)((BoundReturn)
+            negatedFunction.Body.Statements.Single()).Value!;
+        var negatedControl = negatedUnary.OverflowBehavior switch
+        {
+            BoundIntegerOverflowBehavior.Checked => (byte)0x04,
+            BoundIntegerOverflowBehavior.Wrapping => (byte)0x08,
+            _ => throw new InvalidOperationException(
+                "The Negated fixture must use a supported integer overflow policy."),
+        };
+        Assert.That(negatedBody.GetBlockCode(0).ToArray(), Is.EqualTo(
+            new byte[] {
+                0xD5, 0, 1, 0,
+                0xC0, negatedControl, 0xF0, 0xF0,
+                0x17, 0,
+            }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.Complemented", out var complementedDefinition), Is.True);
+        var complementedMethodRow
+            = checked((int)(complementedDefinition & 0x00FF_FFFF));
+        var complementedBodyRow
+            = tables.Methods.GetBodyRow(complementedMethodRow);
+        Assert.That(complementedBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(complementedBodyRow,
+            tables.Contracts.Count);
+        var complementedBody = tables.Bodies.GetRegisterBody(
+            complementedBodyRow, tables.Contracts.Count);
+        Assert.That(complementedBody.HomeCount, Is.EqualTo(2));
+        Assert.That(complementedBody.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD5, 0, 1, 0,
+                0xC1, 0x04, 0xF0, 0xF0,
                 0x17, 0,
             }));
         Assert.That(tables.Exports.TryGetDefinitionForKey(1,
@@ -1183,6 +1247,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             int32 UseSum(Box value) { return value.Sum(4, 5); }
             int32 UseDifference(Box value) {
                 return value.Difference(7, 3);
+            }
+            int32 UseNegated(Box value) { return value.Negated(4); }
+            int32 UseComplemented(Box value) {
+                return value.Complemented(4);
             }
             int32 UseStaticXor() { return Box.StaticXor(4, 5); }
             int32 UseAdd() { return Box.Add(4, 5); }
