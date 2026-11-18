@@ -700,6 +700,56 @@ public static partial class TrRmExecutableCompiler
         return true;
     }
 
+    private static bool TryGetGenericMethodConditionalUnitCall(
+        BoundFunction function, out BoundIf? conditional,
+        out BoundCall? call)
+    {
+        conditional = null;
+        call = null;
+        var body = function.Body;
+        if (function.ReturnType != PrimitiveType.Void
+            || function.ParameterCount > 8
+            || function.Variables.Length != function.ParameterCount
+            || !body.RetiredManagedLocals.IsEmpty
+            || body.Statements.Length is < 1 or > 2
+            || (body.Statements.Length == 2
+                && body.Statements[1] is not BoundReturn {
+                    Value: null,
+                })
+            || body.Statements[0] is not BoundIf candidate
+            || candidate.Else is not null
+            || candidate.Then is not BoundBlock thenBlock
+            || thenBlock.Statements.Length != 1
+            || !thenBlock.RetiredManagedLocals.IsEmpty
+            || thenBlock.Statements[0] is not BoundExpressionStatement {
+                Expression: BoundCall candidateCall,
+            }
+            || candidateCall.Type != PrimitiveType.Void
+            || candidateCall.InterfaceCallIdentity is not null
+            || (candidateCall.GenericMethodCall is null
+                && candidateCall.ImportedGenericMethodCall is null)
+            || candidate.Condition is not BoundRead condition
+            || condition.Type != PrimitiveType.Bool
+            || (uint)condition.Variable >= (uint)function.ParameterCount)
+        {
+            return false;
+        }
+
+        var conditionVariable = function.Variables[condition.Variable];
+        if (conditionVariable.Type != PrimitiveType.Bool
+            || conditionVariable.IsMutable || conditionVariable.IsOut
+            || conditionVariable.IsInit || conditionVariable.IsImplicitRef
+            || conditionVariable.IsImplicitReferenceTemporary
+            || conditionVariable.IsInitializationLocal)
+        {
+            return false;
+        }
+
+        conditional = candidate;
+        call = candidateCall;
+        return true;
+    }
+
     private static bool IsSupportedGenericUnitArgument(
         BoundExpression argument, BoundFunction function)
     {
@@ -1326,6 +1376,128 @@ public static partial class TrRmExecutableCompiler
             records, code, schema: schema);
     }
 
+    private static byte[] EncodeGenericMethodConditionalUnitCallBody(
+        BoundFunction function, BoundGenericMethodDefinition definition,
+        IReadOnlyList<GenericMethodEmission> emissions, BoundIf conditional,
+        BoundCall call,
+        Dictionary<PrimitiveType, uint> formalTypeSpecRows,
+        Dictionary<PrimitiveType, uint> builtInTypeSpecRows,
+        List<ReadOnlyMemory<byte>> typeSpecRows,
+        ImmutableArray<BoundSpanTypeDefinition> spanTypes,
+        IReadOnlyDictionary<BoundGenericMethodImport, uint>
+            importedGenericMethodTargetTokens,
+        TrRmArtifactSchema schema,
+        GenericMethodNominalTypeWriter nominalTypes)
+    {
+        var proofProgram = definition.ProofProgram;
+        if ((uint)call.Function >= (uint)proofProgram.Functions.Length
+            || proofProgram.Functions[call.Function].DoesNotReturn)
+        {
+            throw Unsupported(
+                $"Generic MethodDef '{definition.Name}' has a conditional unit call to an unsupported or no-return target.");
+        }
+
+        var callBodyFunction = function with {
+            Body = new BoundBlock([
+                new BoundExpressionStatement(call, call.Span),
+            ], call.Span),
+        };
+        var callBodyBytes = EncodeGenericMethodForwardingBody(
+            callBodyFunction, definition, emissions, formalTypeSpecRows,
+            builtInTypeSpecRows, typeSpecRows, spanTypes,
+            importedGenericMethodTargetTokens, schema, nominalTypes);
+        var callBody = new TrRmRegisterBodyReader(callBodyBytes,
+            schema: schema);
+        var callCode = callBody.GetBlockCode(0);
+        if (callBody.BlockCount != 1 || callBody.RecordCount != 3
+            || callCode.Length != 2 || callCode[0] != 0x90
+            || callCode[1] != 2 || callBody.GetRecord(0)[0] != 0x01
+            || callBody.GetRecord(1)[0] != 0x10
+            || callBody.GetRecord(2)[0] != 0x02)
+        {
+            throw Unsupported(
+                $"Generic MethodDef '{definition.Name}' has a conditional unit call outside the direct GenericCall subset.");
+        }
+
+        var condition = (BoundRead)conditional.Condition;
+        var conditionHome = 0;
+        for (var parameter = 0; parameter < condition.Variable;
+            parameter++)
+        {
+            if (function.Variables[parameter].Type != PrimitiveType.Void)
+            {
+                conditionHome++;
+            }
+        }
+
+        if ((uint)conditionHome >= (uint)callBody.HomeCount)
+        {
+            throw Unsupported(
+                $"Generic MethodDef '{definition.Name}' has no Home for its conditional unit-call predicate.");
+        }
+
+        var conditionHomeEntry = callBody.HomeMap.Slice(
+            conditionHome * 8, 8);
+        if (conditionHomeEntry[0] != 2
+            || BinaryPrimitives.ReadUInt16LittleEndian(
+                conditionHomeEntry.Slice(4, 2)) != condition.Variable)
+        {
+            throw Unsupported(
+                $"Generic MethodDef '{definition.Name}' has an invalid conditional unit-call Home.");
+        }
+
+        var records = new List<ReadOnlyMemory<byte>>(4);
+        for (var recordIndex = 0; recordIndex < callBody.RecordCount;
+            recordIndex++)
+        {
+            records.Add(callBody.GetRecord(recordIndex).ToArray());
+        }
+
+        var edgeRecordIndex = checked((ushort)records.Count);
+        records.Add(TrRmRegisterBodyRecordWriter.EncodeConditionalEdge(
+            1, 2));
+        var conditionCode = new List<byte>(8) {
+            0xD5,
+            0,
+            (byte)conditionHome,
+            (byte)(conditionHome >> 8),
+            0xE4,
+            0,
+            (byte)edgeRecordIndex,
+            (byte)(edgeRecordIndex >> 8),
+        };
+        var thenCode = new List<byte>(callCode.ToArray());
+        AppendBranch(thenCode, 3);
+        var codeBlocks = new List<List<byte>>(4) {
+            conditionCode,
+            thenCode,
+            new List<byte> { 0xE3, 0, 3, 0 },
+            new List<byte> { 0x18, 0 },
+        };
+        var blocks = new List<TrRmRegisterBodyBlock>(codeBlocks.Count);
+        var code = new List<byte>();
+        foreach (var blockCode in codeBlocks)
+        {
+            blocks.Add(new TrRmRegisterBodyBlock(
+                checked((uint)code.Count),
+                checked((uint)blockCode.Count), 0));
+            code.AddRange(blockCode);
+        }
+
+        return TrRmRegisterBodyWriter.Encode(callBody.HomeMap.ToArray(),
+            callBody.TypeMap.ToArray(), callBody.MethodMap.ToArray(),
+            callBody.FieldMap.ToArray(), callBody.ConstantMap.ToArray(),
+            blocks, records, code.ToArray(), schema: schema);
+
+        static void AppendBranch(List<byte> blockCode, int targetBlock)
+        {
+            blockCode.Add(0xE3);
+            blockCode.Add(0);
+            blockCode.Add(checked((byte)targetBlock));
+            blockCode.Add(checked((byte)(targetBlock >> 8)));
+        }
+    }
+
     private static byte[] EncodeGenericMethodForwardingBody(
         BoundFunction function, BoundGenericMethodDefinition definition,
         IReadOnlyList<GenericMethodEmission> emissions,
@@ -1338,6 +1510,16 @@ public static partial class TrRmExecutableCompiler
         TrRmArtifactSchema schema,
         GenericMethodNominalTypeWriter nominalTypes)
     {
+        if (TryGetGenericMethodConditionalUnitCall(function,
+                out var conditional, out var conditionalCall))
+        {
+            return EncodeGenericMethodConditionalUnitCallBody(function,
+                definition, emissions, conditional!, conditionalCall!,
+                formalTypeSpecRows, builtInTypeSpecRows, typeSpecRows,
+                spanTypes, importedGenericMethodTargetTokens, schema,
+                nominalTypes);
+        }
+
         if (TryGetGenericMethodForwardingChain(function, out var callChain))
         {
             return EncodeGenericMethodForwardingChainBody(function,

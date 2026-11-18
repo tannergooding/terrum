@@ -1467,20 +1467,27 @@ explicit TypeDef and MethodDef ExportKeys for scalar or owner-formal
 signatures. The producer rejects bases, defaults, interface constraints,
 associated members, member generics, non-value modes, contracts and foreign
 dependencies. Version 1 remains G1 method-only and CG1 version 2 is unchanged;
-no GenericCall wire identity, Feature or interface ABI changed. Role-2
-GenericCall production, source-free interface binding and closed-witness
-persistence remain open, and the current G1 reader still rejects interface
-constraints and role-2 calls. `CreateStandardReference` with exact G1 provider
-artifacts also binds direct role-1 GenericCall MethodDef Imports by the
-selected Import row, ModuleRef, ExportKey and provider snapshot; aliases for
+no GenericCall wire identity, Feature or interface ABI changed. The exact
+G1L1/G1L1R1 routes now emit and source-free bind bounded role-2 open-Constraint
+calls against retained interface/requirement views; their regressions remain
+unverified under the active hold. Base G1 remains method-only and rejects
+interface declarations, constraints and role-2 calls. Closed-witness and
+projection persistence remain open.
+`CreateStandardReference` with exact G1 provider artifacts also binds direct
+role-1 GenericCall MethodDef Imports by the selected Import row, ModuleRef,
+ExportKey and provider snapshot; aliases for
 one expected MethodDef retain separate views, and ambiguous direct-stub
 selection rejects. `CreateGenericMethodCallsDraftReference`
-now consumes an exact G1 artifact by Module identity, either all generic
+now consumes an exact G1L1 artifact by Module identity, either all generic
 exports from that Module or one explicit ExportKey. It decodes compact-linear
-Bodies and the bounded GenericCall forwarding Body subset, then binds closed
-scalar calls without provider source. GenericCall substitution currently
-supports direct formal/scalar actuals plus nested Standard `ref`,
-`ref<init>` and Span TypeSpec wrappers for role-1 targets. Generic source MethodSig/Body maps preserve outer and inner Write
+Bodies and bounded G1L1 role-1 GenericCall forwarding Bodies, including
+direct and linear-call forms plus a single Boolean-parameter branch with a
+unit call and unit join; it then binds closed scalar calls without provider
+source. The conditional Body has source emission, source-free
+decoding/re-emission and JIT regressions, all unverified under the active hold.
+GenericCall substitution supports direct formal/scalar actuals plus nested
+Standard `ref`, `ref<init>` and Span TypeSpec wrappers for role-1 targets.
+Generic source MethodSig/Body maps preserve outer and inner Write
 distinctions, and the source-free reader reconstructs scoped `ref<init T>`
 reborrows. The bounded routes reject base-schema and mixed-provider-schema
 substitution. G1 result

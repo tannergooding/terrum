@@ -1952,6 +1952,14 @@ public static partial class TrRmExecutableCompiler
             return [new BoundReturn(returned, default)];
         }
 
+        if (body.BlockCount == 4 && body.RecordCount == 4)
+        {
+            return DecodeGenericMethodConditionalUnitCallBody(tables,
+                context, artifactIndex, moduleRow, callerMethodRow,
+                callerFormals, callerFormalRecords, callerReturnType,
+                callerVariables, body);
+        }
+
         if (body.BlockCount == 1 && body.RecordCount > 3)
         {
             return DecodeGenericMethodCallChainBody(tables, context,
@@ -2276,6 +2284,168 @@ public static partial class TrRmExecutableCompiler
                 new BoundReturn(null, default),
             ]
             : [new BoundReturn(value, default)];
+    }
+
+    private static ImmutableArray<BoundStatement>
+        DecodeGenericMethodConditionalUnitCallBody(
+            TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+            GenericMethodReadContext context, int artifactIndex, int moduleRow,
+            int callerMethodRow, ImmutableArray<PrimitiveType> callerFormals,
+            TrRmGenericMethodFormalImport[] callerFormalRecords,
+            PrimitiveType callerReturnType,
+            ImmutableArray<BoundVariable>.Builder callerVariables,
+            TrRmRegisterBodyReader body)
+    {
+        var conditionCode = body.GetBlockCode(0);
+        var callCode = body.GetBlockCode(1);
+        var falseCode = body.GetBlockCode(2);
+        var returnCode = body.GetBlockCode(3);
+        if (callerReturnType != PrimitiveType.Void
+            || body.RecordCount != 4
+            || conditionCode.Length != 8 || conditionCode[0] != 0xD5
+            || conditionCode[1] != 0 || conditionCode[4] != 0xE4
+            || conditionCode[5] != 0
+            || BinaryPrimitives.ReadUInt16LittleEndian(
+                conditionCode.Slice(6, 2)) != 3
+            || callCode.Length != 6 || callCode[0] != 0x90
+            || callCode[1] != 2 || callCode[2] != 0xE3
+            || callCode[3] != 0
+            || BinaryPrimitives.ReadUInt16LittleEndian(
+                callCode.Slice(4, 2)) != 3
+            || !falseCode.SequenceEqual(
+                new byte[] { 0xE3, 0, 3, 0 })
+            || !returnCode.SequenceEqual(new byte[] { 0x18, 0 })
+            || body.GetRecord(0)[0] != 0x01
+            || body.GetRecord(1)[0] != 0x10)
+        {
+            throw Unsupported(
+                "The G1 consumer requires a one-branch, unit-result GenericCall Body.");
+        }
+
+        var edge = body.GetRecord(3);
+        if (edge.Length != 8 || edge[0] != 0x06
+            || BinaryPrimitives.ReadUInt16LittleEndian(edge.Slice(4, 2))
+                != 1
+            || BinaryPrimitives.ReadUInt16LittleEndian(edge.Slice(6, 2))
+                != 2)
+        {
+            throw Invalid(
+                "The conditional GenericCall Body has an invalid true/false edge.");
+        }
+
+        var conditionHome = BinaryPrimitives.ReadUInt16LittleEndian(
+            conditionCode.Slice(2, 2));
+        if (conditionHome >= body.HomeCount)
+        {
+            throw Invalid(
+                "The conditional GenericCall Body references an invalid predicate Home.");
+        }
+
+        var conditionHomeEntry = body.HomeMap.Slice(conditionHome * 8, 8);
+        var conditionVariable = BinaryPrimitives
+            .ReadUInt16LittleEndian(conditionHomeEntry.Slice(4, 2));
+        var callerSignature = tables.Methods.GetSignature(callerMethodRow);
+        var (firstParameter, parameterCount)
+            = tables.Signatures.GetParamRange(callerSignature);
+        if (parameterCount != callerVariables.Count
+            || conditionHomeEntry[0] != 2 || conditionHomeEntry[1] != 0
+            || conditionHomeEntry[6] != 0 || conditionHomeEntry[7] != 0
+            || conditionVariable >= parameterCount
+            || conditionVariable >= callerVariables.Count
+            || callerVariables[conditionVariable].Type
+                != PrimitiveType.Bool)
+        {
+            throw Invalid(
+                "The conditional GenericCall Home does not select a Boolean MethodSig parameter.");
+        }
+
+        var expectedHome = 0;
+        var expectedConditionHome = -1;
+        for (var parameterOrdinal = 0;
+            parameterOrdinal < parameterCount; parameterOrdinal++)
+        {
+            if (callerVariables[parameterOrdinal].Type
+                == PrimitiveType.Void)
+            {
+                continue;
+            }
+
+            if (expectedHome >= body.HomeCount)
+            {
+                throw Invalid(
+                    "The conditional GenericCall Body omits a MethodSig parameter Home.");
+            }
+
+            var homeEntry = body.HomeMap.Slice(expectedHome * 8, 8);
+            var typeMapIndex = BinaryPrimitives
+                .ReadUInt16LittleEndian(homeEntry.Slice(2, 2));
+            if (homeEntry[0] != 2 || homeEntry[1] != 0
+                || BinaryPrimitives.ReadUInt16LittleEndian(
+                    homeEntry.Slice(4, 2)) != parameterOrdinal
+                || homeEntry[6] != 0 || homeEntry[7] != 0
+                || typeMapIndex >= body.TypeCount)
+            {
+                throw Invalid(
+                    "A conditional GenericCall Home does not select its MethodSig parameter.");
+            }
+
+            var parameterTypeSpec = tables.Parameters.GetTypeSpec(
+                firstParameter + parameterOrdinal);
+            var parameterTypeSpecRef = tables.TypeSpecs
+                .GetTypeSpecRef(parameterTypeSpec);
+            var typeMapToken = BinaryPrimitives.ReadUInt32LittleEndian(
+                body.TypeMap.Slice(typeMapIndex * sizeof(uint),
+                    sizeof(uint)));
+            if (typeMapToken
+                != CreateStandardBodyTypeMapToken(parameterTypeSpecRef))
+            {
+                throw Invalid(
+                    "A conditional GenericCall Home type differs from its MethodSig parameter.");
+            }
+
+            if (parameterOrdinal == conditionVariable)
+            {
+                expectedConditionHome = expectedHome;
+            }
+            expectedHome++;
+        }
+
+        if (expectedHome != body.HomeCount
+            || expectedConditionHome != conditionHome)
+        {
+            throw Invalid(
+                "The conditional GenericCall Body has an incomplete or mismatched HomeMap.");
+        }
+
+        var callSite = body.GetRecord(2);
+        if (callSite[0] != 0x02 || callSite[4] != 4 || callSite[5] != 0
+            || BinaryPrimitives.ReadUInt16LittleEndian(
+                callSite.Slice(8, 2)) != 1)
+        {
+            throw Invalid(
+                "The conditional GenericCall Body has an invalid unit CallSite.");
+        }
+
+        var decoded = DecodeDirectGenericCallForChain(tables, context,
+            artifactIndex, moduleRow, callerMethodRow, callerFormals,
+            callerFormalRecords, callerVariables.Count, callerVariables,
+            body, callSite[4..], new Dictionary<int, int>(),
+            allowUnitResult: true);
+        if (decoded.ResultType != PrimitiveType.Void
+            || decoded.ResultHome != -1)
+        {
+            throw Invalid(
+                "The conditional GenericCall Body does not have a unit result.");
+        }
+
+        var thenBody = new BoundBlock([
+            new BoundExpressionStatement(decoded.Value, default),
+        ], default);
+        return [
+            new BoundIf(new BoundRead(conditionVariable,
+                PrimitiveType.Bool, default), thenBody, null, default),
+            new BoundReturn(null, default),
+        ];
     }
 
     private static ImmutableArray<BoundStatement>

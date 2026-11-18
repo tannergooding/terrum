@@ -7350,6 +7350,114 @@ internal sealed class TrRmGenericMethodSourceWriterTests
     }
 
     [Test]
+    public void ReemitsConditionalUnitGenericCallBody()
+    {
+        const string providerIdentity = "conditional-unit.provider";
+        const string outputIdentity = "conditional-unit.reemitted";
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                public void Touch<T>() { }
+                public void MaybeTouch<T>(bool enabled) {
+                    if (enabled) {
+                        Touch<T>();
+                    }
+                }
+                """));
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+
+        var providerProgram = providerCompilation.Program!;
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, providerIdentity,
+            GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(),
+            providerProgram.GenericMethodDefinitions.Select(definition =>
+                new TrRmSourceGenericMethodExport(providerProgram,
+                    definition.SourceInputOrdinal, definition.Span,
+                    definition.Name)).ToArray());
+        var providerTables = TrRmStructuralMetadataValidator
+            .ValidateGenericMethodCallsDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForGenericMethodCallsParameterLabelsDraft(
+                        providerArtifact));
+        var providerMethodRow = Enumerable.Range(1,
+                providerTables.Methods.Count)
+            .Single(row =>
+                providerTables.Methods.GetName(row) == "MaybeTouch");
+        var providerBody = providerTables.Bodies.GetRegisterBody(
+            providerTables.Methods.GetBodyRow(providerMethodRow),
+            providerTables.Contracts.Count);
+        Assert.That(providerBody.BlockCount, Is.EqualTo(4));
+        Assert.That(providerBody.RecordCount, Is.EqualTo(4));
+        Assert.That(providerBody.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD5, 0, 0, 0, 0xE4, 0, 3, 0,
+            }));
+        Assert.That(providerBody.GetBlockCode(1).ToArray(),
+            Is.EqualTo(new byte[] {
+                0x90, 2, 0xE3, 0, 3, 0,
+            }));
+        Assert.That(providerBody.GetBlockCode(2).ToArray(),
+            Is.EqualTo(new byte[] { 0xE3, 0, 3, 0 }));
+        Assert.That(providerBody.GetBlockCode(3).ToArray(),
+            Is.EqualTo(new byte[] { 0x18, 0 }));
+        var edge = providerBody.GetRecord(3);
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(edge[4..]),
+            Is.EqualTo(1));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(edge[6..]),
+            Is.EqualTo(2));
+
+        var sourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty),
+            TrRmExecutableCompiler.CreateGenericMethodCallsDraftReference(
+                providerArtifact, providerIdentity));
+        Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceFreeCompilation.Diagnostics));
+        var sourceFreeProgram = sourceFreeCompilation.Program!;
+        var originDigest = ImmutableArray.CreateRange(
+            System.Security.Cryptography.SHA256.HashData(providerArtifact));
+        var selection = new TrRmRetainedGenericMethodExport(
+            sourceFreeProgram, providerIdentity,
+            GenericMethodCallsSchemaIdentity, originDigest,
+            GetExportedMethodDefId(providerArtifact, "MaybeTouch"),
+            "MaybeTouch", "MaybeTouchCopy");
+        var reemitted = TrRmExecutableCompiler
+            .EmitStandardReemittingGenericMethods(sourceFreeProgram,
+                outputIdentity, GenericMethodCallsSchemaIdentity, 0,
+                [selection]);
+        var reemittedTables = TrRmStructuralMetadataValidator
+            .ValidateGenericMethodCallsDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForGenericMethodCallsParameterLabelsDraft(reemitted));
+        var reemittedMethodRow = Enumerable.Range(1,
+                reemittedTables.Methods.Count)
+            .Single(row =>
+                reemittedTables.Methods.GetName(row) == "MaybeTouchCopy");
+        var reemittedBody = reemittedTables.Bodies.GetRegisterBody(
+            reemittedTables.Methods.GetBodyRow(reemittedMethodRow),
+            reemittedTables.Contracts.Count);
+        Assert.That(reemittedBody.BlockCount, Is.EqualTo(4));
+
+        var reemittedReference = TrRmExecutableCompiler
+            .CreateGenericMethodCallsDraftReference(reemitted,
+                outputIdentity);
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                MaybeTouchCopy<int32>(false);
+                MaybeTouchCopy<int32>(true);
+                return 42;
+            }
+            """), reemittedReference);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        Assert.That(NativeJit.Execute(consumerCompilation.Program!,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(42));
+    }
+
+    [Test]
     public void ImportsAllGenericExportsFromOneG1Module()
     {
         var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
