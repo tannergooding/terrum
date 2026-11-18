@@ -449,9 +449,12 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             .EmitStandardReemittingGenericMethods(sourceFreeProgram,
                 outputIdentity, GenericMethodCallsSchemaIdentity, 0,
                 [selection]);
+        var relocatedTypeProviderInput = new TrRmStandardArtifactInput(
+            GenericMethodCallsSchemaIdentity,
+            RelocateConstructedNominalProviderTypeDef(typeProviderArtifact));
         var reemittedReference = TrRmExecutableCompiler.CreateStandardReference(
             new TrRmStandardArtifactInput(GenericMethodCallsSchemaIdentity,
-                reemitted), outputIdentity, [typeProviderInput]);
+                reemitted), outputIdentity, [relocatedTypeProviderInput]);
         var reemittedAccept = reemittedReference.GenericMethodImports.Single();
         Assert.That(reemittedAccept.Origin.ExportKey,
             Is.EqualTo("AcceptCopy"));
@@ -460,6 +463,16 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                 reemittedAccept.ProofFunction.Variables[0].Type)];
         Assert.That(nominalInstance.Definition.ModuleIdentity,
             Is.EqualTo(typeProviderIdentity));
+
+        var incompatibleTypeProviderInput = new TrRmStandardArtifactInput(
+            GenericMethodCallsSchemaIdentity,
+            CreateConstructedNominalSourceProvider(
+                includeConstructedField: true));
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(
+                    GenericMethodCallsSchemaIdentity, reemitted),
+                outputIdentity, [incompatibleTypeProviderInput]));
 
         var consumerCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
