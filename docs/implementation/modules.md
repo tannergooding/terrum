@@ -62,9 +62,11 @@ value/None inputs and value or unit results. Separate source-free provider/JIT
 regressions for unit and Copy-value targets are unverified. The same imported
 target subset now works in linear GenericCall chains with value-result Homes
 and an imported terminal unit call; a source-free provider/consumer JIT
-regression is added but remains unverified.
-Broader imported defaults, interface constraints, dependencies, owners and
-constructed/reference signatures remain open.
+regression is added but remains unverified. Expected imported declarations now
+retain concrete built-in and earlier-formal type defaults; source-free
+round-trip and incompatible-default replacement coverage is added but
+unverified. Composite/wrapper defaults, interface constraints, dependencies,
+owners and constructed/reference signatures remain open.
 The writer also copies local declaration
 graphs or exact imported expectations, including formal order, fields, declared
 layouts and frozen scalar constant actuals/defaults; nested constructions and

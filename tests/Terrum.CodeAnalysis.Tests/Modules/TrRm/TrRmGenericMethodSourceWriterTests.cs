@@ -4085,6 +4085,133 @@ internal sealed class TrRmGenericMethodSourceWriterTests
     }
 
     [Test]
+    public void ReemitsImportedGenericEarlierFormalDefault()
+    {
+        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            """
+            public T Identity<T, U = T>(T value)
+                where T : [Blittable] {
+                return value;
+            }
+            """), new CompilationOptions {
+            LayoutCoreRegistration =
+                Terrum.CodeAnalysis.Tests.Semantics
+                    .LayoutCoreRegistrationTestData.Create(),
+        });
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerProgram = providerCompilation.Program!;
+        var identity = providerProgram.GenericMethodDefinitions.Single();
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, "generic-default-target.provider",
+            GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), [
+                new(providerProgram, identity.SourceInputOrdinal,
+                    identity.Span, "Identity"),
+            ]);
+        var providerReference = TrRmExecutableCompiler
+            .CreateGenericMethodCallsDraftReference(providerArtifact,
+                "generic-default-target.provider");
+        var forwarderCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                public T Forward<T>(T value) where T : [Blittable] {
+                    return Identity<T>(value);
+                }
+                """), providerReference, new CompilationOptions {
+                LayoutCoreRegistration =
+                    Terrum.CodeAnalysis.Tests.Semantics
+                        .LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(forwarderCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                forwarderCompilation.Diagnostics));
+        var forwarderProgram = forwarderCompilation.Program!;
+        var forward = forwarderProgram.GenericMethodDefinitions.Single();
+        var forwarderArtifact = TrRmExecutableCompiler.EmitStandard(
+            forwarderProgram, "generic-default-target.forwarder",
+            GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), [
+                new(forwarderProgram, forward.SourceInputOrdinal,
+                    forward.Span, "Forward"),
+            ]);
+        var forwarderReference = TrRmExecutableCompiler
+            .CreateStandardReference(new TrRmStandardArtifactInput(
+                GenericMethodCallsSchemaIdentity, forwarderArtifact),
+                "generic-default-target.forwarder", [
+                    new TrRmStandardArtifactInput(
+                        GenericMethodCallsSchemaIdentity, providerArtifact),
+                ]);
+        var importedForward = forwarderReference.GenericMethodImports.Single(
+            static imported => imported.Origin.ExportKey == "Forward");
+        var forwardedCall = (BoundCall)((BoundReturn)
+            importedForward.ProofFunction.Body.Statements.Single()).Value!;
+        var identityImport = forwardedCall.ImportedGenericMethodCall!;
+        var expectedTarget = identityImport.Binding!.Expected;
+        var providerTarget = identityImport.Binding.Provider;
+        Assert.That(expectedTarget.Formals[1].TypeDefault,
+            Is.Not.Null);
+        Assert.That(expectedTarget.Formals[1].TypeDefault!
+                .FormalDependencies,
+            Is.EqualTo(new[] { 0 }));
+        Assert.That(providerTarget.Formals[1].TypeDefault!
+                .FormalDependencies,
+            Is.EqualTo(new[] { 0 }));
+        Assert.That(forwardedCall.ImportedGenericMethodTypeArguments,
+            Has.Length.EqualTo(2));
+        Assert.That(forwardedCall.ImportedGenericMethodTypeArguments[0],
+            Is.EqualTo(forwardedCall.ImportedGenericMethodTypeArguments[1]));
+
+        var replacementCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                public T Identity<T, U = int32>(T value)
+                    where T : [Blittable] {
+                    return value;
+                }
+                """), new CompilationOptions {
+                LayoutCoreRegistration =
+                    Terrum.CodeAnalysis.Tests.Semantics
+                        .LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(replacementCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                replacementCompilation.Diagnostics));
+        var replacementProgram = replacementCompilation.Program!;
+        var replacementIdentity
+            = replacementProgram.GenericMethodDefinitions.Single();
+        var replacementArtifact = TrRmExecutableCompiler.EmitStandard(
+            replacementProgram, "generic-default-target.provider",
+            GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), [
+                new(replacementProgram,
+                    replacementIdentity.SourceInputOrdinal,
+                    replacementIdentity.Span, "Identity"),
+            ]);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(
+                    GenericMethodCallsSchemaIdentity, forwarderArtifact),
+                "generic-default-target.forwarder", [
+                    new TrRmStandardArtifactInput(
+                        GenericMethodCallsSchemaIdentity,
+                        replacementArtifact),
+                ]));
+
+        var entryCompilation = Compilation.Create(SyntaxTree.Parse(
+            "int32 Main() { return Forward<int32>(value: 42); }"),
+            forwarderReference, new CompilationOptions {
+                LayoutCoreRegistration =
+                    Terrum.CodeAnalysis.Tests.Semantics
+                        .LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(entryCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                entryCompilation.Diagnostics));
+        Assert.That(NativeJit.Execute(entryCompilation.Program!,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(42));
+    }
+
+    [Test]
     public void BindsAndExecutesSourceFreeImportedGenericForwardingChain()
     {
         var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(

@@ -1013,10 +1013,6 @@ public static partial class TrRmExecutableCompiler
                 = expectedTarget.Signature.Formals[ordinal];
             if (formal.Ordinal != ordinal
                 || formalSignature.Ordinal != ordinal
-                || formal.TypeDefault is not null
-                || formalSignature.HasTypeDefault
-                || !formalSignature
-                    .DefaultTypeParameterDependencies.IsEmpty
                 || !formal.Requirements.IsDefaultOrEmpty
                 || !formalSignature.Requirements.IsDefaultOrEmpty
                 || formal.InterfaceConstraints.IsDefault
@@ -1827,10 +1823,6 @@ public static partial class TrRmExecutableCompiler
                         || formalSignature.Ordinal != ordinal
                         || formal.OwnershipDomain != 1
                         || formal.NullabilityDomain is < 1 or > 2
-                        || formal.TypeDefault is not null
-                        || formalSignature.HasTypeDefault
-                        || !formalSignature
-                            .DefaultTypeParameterDependencies.IsEmpty
                         || !formal.Requirements.IsDefaultOrEmpty
                         || !formalSignature.Requirements.IsDefaultOrEmpty
                         || formal.InterfaceConstraints.IsDefault
@@ -2957,82 +2949,6 @@ public static partial class TrRmExecutableCompiler
             var formalGenericParamRows
                 = new Dictionary<PrimitiveType, int>(
                     expected.Formals.Length);
-            for (var formalOrdinal = 0;
-                formalOrdinal < expected.Formals.Length; formalOrdinal++)
-            {
-                var formal = expected.Formals[formalOrdinal];
-                var formalSignature
-                    = signature.Formals[formalOrdinal];
-                var formalSlot = signature.FormalOrder[formalOrdinal];
-                if (formal.Ordinal != formalOrdinal
-                    || formalSignature.Ordinal != formalOrdinal
-                    || formalSlot.Ordinal != formalOrdinal
-                    || formalSlot.Kind
-                        != BoundGenericMethodFormalKind.Type
-                    || formalSlot.TypeFormalOrdinal != formalOrdinal
-                    || formalSlot.ConstantFormalOrdinal != -1
-                    || !StringComparer.Ordinal.Equals(formal.Name,
-                        formalSignature.Name)
-                    || formal.OwnershipDomain
-                        != formalSignature.OwnershipDomain
-                    || formal.NullabilityDomain
-                        != formalSignature.NullabilityDomain
-                    || formal.RequiresWritable
-                        != formalSignature.RequiresWritable
-                    || formal.RequiresBlittable
-                        != formalSignature.RequiresBlittable
-                    || formal.TypeDefault is not null
-                    || formalSignature.HasTypeDefault
-                    || !formalSignature
-                        .DefaultTypeParameterDependencies.IsEmpty
-                    || !formal.Requirements.IsDefaultOrEmpty
-                    || !formalSignature.Requirements.IsDefaultOrEmpty
-                    || formal.InterfaceConstraints.IsDefault
-                    || !formal.InterfaceConstraints.IsEmpty
-                    || formalSignature.InterfaceConstraints.IsDefault
-                    || !formalSignature.InterfaceConstraints.IsEmpty
-                    || formal.OwnershipDomain is < 1 or > 3
-                    || formal.NullabilityDomain is < 1 or > 2)
-                {
-                    throw Unsupported(
-                        $"Imported generic MethodDef '{proofFunction.Name}' has a formal outside the selected G1 contract subset.");
-                }
-
-                var genericParamRow
-                    = checked(genericParameterRows.Count + 1);
-                var formalNameStringRow = names.Count + 1;
-                names.Add((formal.Name, 1));
-                var constraintFirst = checked(constraintRows.Count + 1);
-                if (formal.RequiresWritable)
-                {
-                    constraintRows.Add(new TrRmConstraintRow(
-                        genericParamRow, 2, 2));
-                }
-                if (formal.RequiresBlittable)
-                {
-                    constraintRows.Add(new TrRmConstraintRow(
-                        genericParamRow, 2, 3));
-                }
-                var constraintCount = constraintRows.Count
-                    - constraintFirst + 1;
-                if (constraintCount == 0)
-                {
-                    constraintFirst = 0;
-                }
-
-                genericParameterRows.Add(new TrRmGenericParamRow(
-                    methodDefId, formalOrdinal, formalNameStringRow,
-                    constraintFirst, constraintCount, 1,
-                    formal.OwnershipDomain, formal.NullabilityDomain,
-                    0, 0));
-                if (!formalGenericParamRows.TryAdd(
-                        formal.PlaceholderType, genericParamRow))
-                {
-                    throw Unsupported(
-                        $"Imported generic MethodDef '{proofFunction.Name}' has duplicate formal type identities.");
-                }
-            }
-
             var formalTypeSpecRows
                 = new Dictionary<PrimitiveType, uint>(
                     expected.Formals.Length);
@@ -3057,6 +2973,147 @@ public static partial class TrRmExecutableCompiler
                     checked((uint)genericParamRow)));
                 formalTypeSpecRows.Add(type, formalTypeSpecRef);
                 return formalTypeSpecRef;
+            }
+
+            uint GetExpectedTypeDefaultRef(
+                BoundGenericMethodTypeDefault? typeDefault,
+                int formalOrdinal)
+            {
+                if (typeDefault is null)
+                {
+                    return 0;
+                }
+
+                var term = typeDefault.Term;
+                var redundantWritableFormal
+                    = term.Kind == BoundGenericMethodTypeTermKind.Formal
+                        && (uint)term.FormalOrdinal
+                            < (uint)expected.Formals.Length
+                        && expected.Formals[term.FormalOrdinal]
+                            .RequiresWritable;
+                if (!typeDefault.ConstantFormalDependencies.IsEmpty
+                    || !term.TypeArguments.IsDefaultOrEmpty
+                    || !term.ConstantArguments.IsEmpty
+                    || (term.IsWritable && !redundantWritableFormal)
+                    || term.IsGarbageCollected
+                    || term.IsInitialization
+                    || term.IsOptional
+                    || term.ElementCount != 0
+                    || term.CallingConvention
+                        != NativeCallingConvention.Native
+                    || term.ParameterCount != 0
+                    || term.AllowsVoid
+                    || term.IsElementWritable
+                    || term.NominalTypeIdentity is not null)
+                {
+                    throw Unsupported(
+                        $"Imported generic MethodDef '{proofFunction.Name}' has a type default outside the direct-type subset.");
+                }
+
+                if (term.Kind == BoundGenericMethodTypeTermKind.Formal)
+                {
+                    var dependency = term.FormalOrdinal;
+                    if (dependency < 0 || dependency >= formalOrdinal
+                        || !typeDefault.FormalDependencies.SequenceEqual(
+                            [dependency]))
+                    {
+                        throw Unsupported(
+                            $"Imported generic MethodDef '{proofFunction.Name}' has a type default outside the earlier-formal subset.");
+                    }
+
+                    return GetExpectedTypeSpecRef(
+                        expected.Formals[dependency].PlaceholderType);
+                }
+
+                if (term.Kind == BoundGenericMethodTypeTermKind.Concrete
+                    && typeDefault.FormalDependencies.IsEmpty)
+                {
+                    return GetBuiltInTypeSpecRef(term.ConcreteType,
+                        builtInTypeSpecRows, typeSpecRows);
+                }
+
+                throw Unsupported(
+                    $"Imported generic MethodDef '{proofFunction.Name}' has a type default outside the direct-type subset.");
+            }
+
+            for (var formalOrdinal = 0;
+                formalOrdinal < expected.Formals.Length; formalOrdinal++)
+            {
+                var formal = expected.Formals[formalOrdinal];
+                var formalSignature
+                    = signature.Formals[formalOrdinal];
+                var formalSlot = signature.FormalOrder[formalOrdinal];
+                if (formal.Ordinal != formalOrdinal
+                    || formalSignature.Ordinal != formalOrdinal
+                    || formalSlot.Ordinal != formalOrdinal
+                    || formalSlot.Kind
+                        != BoundGenericMethodFormalKind.Type
+                    || formalSlot.TypeFormalOrdinal != formalOrdinal
+                    || formalSlot.ConstantFormalOrdinal != -1
+                    || !StringComparer.Ordinal.Equals(formal.Name,
+                        formalSignature.Name)
+                    || formal.OwnershipDomain
+                        != formalSignature.OwnershipDomain
+                    || formal.NullabilityDomain
+                        != formalSignature.NullabilityDomain
+                    || formal.RequiresWritable
+                        != formalSignature.RequiresWritable
+                    || formal.RequiresBlittable
+                        != formalSignature.RequiresBlittable
+                    || formalSignature.HasTypeDefault
+                        != (formal.TypeDefault is not null)
+                    || !formalSignature
+                        .DefaultTypeParameterDependencies.SequenceEqual(
+                            formal.TypeDefault?.FormalDependencies ?? [])
+                    || !formal.Requirements.IsDefaultOrEmpty
+                    || !formalSignature.Requirements.IsDefaultOrEmpty
+                    || formal.InterfaceConstraints.IsDefault
+                    || !formal.InterfaceConstraints.IsEmpty
+                    || formalSignature.InterfaceConstraints.IsDefault
+                    || !formalSignature.InterfaceConstraints.IsEmpty
+                    || formal.OwnershipDomain is < 1 or > 3
+                    || formal.NullabilityDomain is < 1 or > 2)
+                {
+                    throw Unsupported(
+                        $"Imported generic MethodDef '{proofFunction.Name}' has a formal outside the selected G1 contract subset.");
+                }
+
+                var genericParamRow
+                    = checked(genericParameterRows.Count + 1);
+                var formalNameStringRow = names.Count + 1;
+                names.Add((formal.Name, 1));
+                var defaultArgumentRef
+                    = GetExpectedTypeDefaultRef(formal.TypeDefault,
+                        formalOrdinal);
+                var constraintFirst = checked(constraintRows.Count + 1);
+                if (formal.RequiresWritable)
+                {
+                    constraintRows.Add(new TrRmConstraintRow(
+                        genericParamRow, 2, 2));
+                }
+                if (formal.RequiresBlittable)
+                {
+                    constraintRows.Add(new TrRmConstraintRow(
+                        genericParamRow, 2, 3));
+                }
+                var constraintCount = constraintRows.Count
+                    - constraintFirst + 1;
+                if (constraintCount == 0)
+                {
+                    constraintFirst = 0;
+                }
+
+                genericParameterRows.Add(new TrRmGenericParamRow(
+                    methodDefId, formalOrdinal, formalNameStringRow,
+                    constraintFirst, constraintCount, 1,
+                    formal.OwnershipDomain, formal.NullabilityDomain,
+                    0, defaultArgumentRef));
+                if (!formalGenericParamRows.TryAdd(
+                        formal.PlaceholderType, genericParamRow))
+                {
+                    throw Unsupported(
+                        $"Imported generic MethodDef '{proofFunction.Name}' has duplicate formal type identities.");
+                }
             }
 
             var firstParameter = proofFunction.ParameterCount == 0 ? 0
