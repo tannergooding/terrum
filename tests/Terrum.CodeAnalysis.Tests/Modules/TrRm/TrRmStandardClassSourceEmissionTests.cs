@@ -776,6 +776,21 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 public bool NotEqual(int32 left, int32 right) {
                     return left != right;
                 }
+                public static int32 StaticXorThroughLocal(
+                    int32 left, int32 right) {
+                    int32 copy = left;
+                    return copy ^ right;
+                }
+                public static int32 SumThroughLocal(
+                    int32 left, int32 right) {
+                    int32 copy = left;
+                    return copy + right;
+                }
+                public static bool LessThroughLocal(
+                    int32 left, int32 right) {
+                    int32 copy = left;
+                    return copy < right;
+                }
                 public int32 XorAfterCall(int32 left, int32 right) {
                     return Xor(left, right) ^ right;
                 }
@@ -876,6 +891,18 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name == "NotEqual"));
+        var staticXorThroughLocal = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "StaticXorThroughLocal"));
+        var sumThroughLocal = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "SumThroughLocal"));
+        var lessThroughLocal = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "LessThroughLocal"));
         var xorAfterCall = members.Single(static node =>
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
@@ -938,6 +965,13 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                             greaterOrEqual.Span, "Box.GreaterOrEqual"),
                         new TrRmSourceClassMemberExport(0, notEqual.Span,
                             "Box.NotEqual"),
+                        new TrRmSourceClassMemberExport(0,
+                            staticXorThroughLocal.Span,
+                            "Box.StaticXorThroughLocal"),
+                        new TrRmSourceClassMemberExport(0,
+                            sumThroughLocal.Span, "Box.SumThroughLocal"),
+                        new TrRmSourceClassMemberExport(0,
+                            lessThroughLocal.Span, "Box.LessThroughLocal"),
                         new TrRmSourceClassMemberExport(0,
                             xorAfterCall.Span, "Box.XorAfterCall"),
                         new TrRmSourceClassMemberExport(0,
@@ -1301,6 +1335,80 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             2, 1, 0);
         AssertComparisonBody("Box.NotEqual", "NotEqual", 13, 3, 0, 1);
         Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.StaticXorThroughLocal",
+            out var staticXorThroughLocalDefinition), Is.True);
+        var staticXorThroughLocalMethodRow = checked((int)(
+            staticXorThroughLocalDefinition & 0x00FF_FFFF));
+        var staticXorThroughLocalBodyRow
+            = tables.Methods.GetBodyRow(staticXorThroughLocalMethodRow);
+        Assert.That(staticXorThroughLocalBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(
+            staticXorThroughLocalBodyRow, tables.Contracts.Count);
+        var staticXorThroughLocalBody = tables.Bodies.GetRegisterBody(
+            staticXorThroughLocalBodyRow, tables.Contracts.Count);
+        Assert.That(staticXorThroughLocalBody.HomeCount, Is.EqualTo(3));
+        Assert.That(staticXorThroughLocalBody.HomeMap[0], Is.EqualTo(2));
+        Assert.That(staticXorThroughLocalBody.HomeMap[8], Is.EqualTo(2));
+        Assert.That(staticXorThroughLocalBody.HomeMap[16], Is.EqualTo(3));
+        Assert.That(staticXorThroughLocalBody.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD5, 0, 0, 0,
+                0xD6, 0x10, 2, 0,
+                0xD5, 0, 2, 0,
+                0xD5, 1, 1, 0,
+                0xC1, 0x03, 0xF0, 0x10,
+                0x17, 0,
+            }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.SumThroughLocal", out var sumThroughLocalDefinition),
+            Is.True);
+        var sumThroughLocalMethodRow = checked((int)(
+            sumThroughLocalDefinition & 0x00FF_FFFF));
+        var sumThroughLocalBodyRow
+            = tables.Methods.GetBodyRow(sumThroughLocalMethodRow);
+        Assert.That(sumThroughLocalBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(sumThroughLocalBodyRow,
+            tables.Contracts.Count);
+        var sumThroughLocalBody = tables.Bodies.GetRegisterBody(
+            sumThroughLocalBodyRow, tables.Contracts.Count);
+        var sumThroughLocalFunction = program.Functions.Single(
+            static function => function.Name == "SumThroughLocal");
+        var sumThroughLocalBinary = (BoundBinary)((BoundReturn)
+            sumThroughLocalFunction.Body.Statements.Single(
+                static statement => statement is BoundReturn)).Value!;
+        Assert.That(sumThroughLocalBody.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD5, 0, 0, 0,
+                0xD6, 0x10, 2, 0,
+                0xD5, 0, 2, 0,
+                0xD5, 1, 1, 0,
+                0xC0, GetArithmeticControl(sumThroughLocalBinary),
+                0xF0, 0x10,
+                0x17, 0,
+            }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.LessThroughLocal", out var lessThroughLocalDefinition),
+            Is.True);
+        var lessThroughLocalMethodRow = checked((int)(
+            lessThroughLocalDefinition & 0x00FF_FFFF));
+        var lessThroughLocalBodyRow
+            = tables.Methods.GetBodyRow(lessThroughLocalMethodRow);
+        Assert.That(lessThroughLocalBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(
+            lessThroughLocalBodyRow, tables.Contracts.Count);
+        var lessThroughLocalBody = tables.Bodies.GetRegisterBody(
+            lessThroughLocalBodyRow, tables.Contracts.Count);
+        Assert.That(lessThroughLocalBody.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD5, 0, 0, 0,
+                0xD6, 0x10, 2, 0,
+                0xD5, 0, 2, 0,
+                0xD5, 1, 1, 0,
+                0xC2, 0, 0xF0, 0x10,
+                0xC3, 1, 0, 0xFF,
+                0x17, 0,
+            }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
             "Box.XorAfterCall", out var xorAfterCallDefinition), Is.True);
         var xorAfterCallMethodRow
             = checked((int)(xorAfterCallDefinition & 0x00FF_FFFF));
@@ -1397,6 +1505,15 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             bool UseGreaterOrEqual() { return Box.GreaterOrEqual(1, 2); }
             bool UseNotEqual(Box value) {
                 return value.NotEqual(1, 2);
+            }
+            int32 UseStaticXorThroughLocal() {
+                return Box.StaticXorThroughLocal(1, 2);
+            }
+            int32 UseSumThroughLocal() {
+                return Box.SumThroughLocal(3, 4);
+            }
+            bool UseLessThroughLocal() {
+                return Box.LessThroughLocal(1, 2);
             }
             int32 UseAfterCall(Box value) {
                 return value.XorAfterCall(2, 3);
