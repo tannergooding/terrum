@@ -7593,9 +7593,20 @@ public static partial class SemanticVerifier
                 && function.Variables[read.Variable].Type == read.Type,
             BoundStaticFieldRead => false,
             BoundFieldRead field => HasFields(program, field.Receiver.Type)
-                && !ManagedClassTypes.IsClass(field.Receiver.Type)
+                && (!ManagedClassTypes.IsClass(field.Receiver.Type)
+                    || (field.Receiver is BoundRead { Variable: 0 }
+                        && function.Variables[0].Type
+                            == field.Receiver.Type
+                        && function.DeclaringStruct
+                            == program.Classes[
+                                ManagedClassTypes.ClassIndex(
+                                    field.Receiver.Type)].Name
+                        && (PrimitiveTypeFacts.IsBuiltInScalar(field.Type)
+                            || BoundEnumTypes.IsType(field.Type))))
                 && (uint)field.Field < (uint)Fields(program, field.Receiver.Type).Length
                 && Fields(program, field.Receiver.Type)[field.Field].Type == field.Type
+                && CanAccessField(function, program,
+                    field.Receiver.Type, field.Field)
                 && CleanupExpressionCanBeProvenNonThrowing(
                     field.Receiver, function, program, ref remaining, depth + 1),
             BoundBufferRead read => !read.IsEndRelativeOffset

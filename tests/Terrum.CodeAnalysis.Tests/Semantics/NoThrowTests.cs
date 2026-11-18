@@ -818,6 +818,30 @@ internal sealed class NoThrowTests
     }
 
     [Test]
+    public void NoFailureProofAcceptsCleanupReadingItsOwnScalarField()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public class Owner {
+                public int32 Value;
+                public Owner(int32 value) { Value = value; }
+                [Cleanup] private void Close() {
+                    int32 snapshot = Value;
+                }
+            }
+            public int32 Use(Owner owner) { return 42; }
+            """), new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.CheckedExceptions,
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                compilation.Diagnostics));
+
+        SemanticVerifier.VerifyLibrary(
+            BoundProgramTestHelpers.MarkNoFailureProof(
+                compilation.Program!, "Use"));
+    }
+
+    [Test]
     public void ConditionalOutputAssignmentRemainsRequiredWithoutNoThrow()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
