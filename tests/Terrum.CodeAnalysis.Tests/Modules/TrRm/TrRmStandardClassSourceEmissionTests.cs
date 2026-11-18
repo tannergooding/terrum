@@ -756,6 +756,12 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 public static int32 Divide(int32 left, int32 right) {
                     return left / right;
                 }
+                public static int32 AddConstant(int32 value) {
+                    return value + 7;
+                }
+                public static int32 SubtractFromConstant(int32 value) {
+                    return 7 - value;
+                }
                 public int32 Remainder(int32 left, int32 right) {
                     return left % right;
                 }
@@ -890,6 +896,14 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name == "Divide"));
+        var addConstant = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "AddConstant"));
+        var subtractFromConstant = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "SubtractFromConstant"));
         var remainder = members.Single(static node =>
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
@@ -1008,6 +1022,11 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                             "Box.Multiply"),
                         new TrRmSourceClassMemberExport(0, divide.Span,
                             "Box.Divide"),
+                        new TrRmSourceClassMemberExport(0, addConstant.Span,
+                            "Box.AddConstant"),
+                        new TrRmSourceClassMemberExport(0,
+                            subtractFromConstant.Span,
+                            "Box.SubtractFromConstant"),
                         new TrRmSourceClassMemberExport(0, remainder.Span,
                             "Box.Remainder"),
                         new TrRmSourceClassMemberExport(0, doubleValue.Span,
@@ -1349,6 +1368,61 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 0xD5, 0, 0, 0,
                 0xD5, 1, 1, 0,
                 0xC0, 0x0C, 0xF0, 0x10,
+                0x17, 0,
+            }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.AddConstant", out var addConstantDefinition), Is.True);
+        var addConstantMethodRow
+            = checked((int)(addConstantDefinition & 0x00FF_FFFF));
+        var addConstantBodyRow
+            = tables.Methods.GetBodyRow(addConstantMethodRow);
+        Assert.That(addConstantBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(addConstantBodyRow,
+            tables.Contracts.Count);
+        var addConstantBody = tables.Bodies.GetRegisterBody(
+            addConstantBodyRow, tables.Contracts.Count);
+        Assert.That(addConstantBody.HomeCount, Is.EqualTo(1));
+        Assert.That(addConstantBody.ConstantCount, Is.EqualTo(1));
+        Assert.That(addConstantBody.ConstantMap.Length, Is.EqualTo(8));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                addConstantBody.ConstantMap.Slice(4)),
+            Is.GreaterThan(0u));
+        Assert.That(tables.Features.TryGetFeature(11, out _), Is.True);
+        Assert.That(tables.Features.TryGetFeature(9, out _), Is.False);
+        var addConstantFunction = program.Functions.Single(
+            static function => function.Name == "AddConstant");
+        var addConstantBinary = (BoundBinary)((BoundReturn)
+            addConstantFunction.Body.Statements.Single()).Value!;
+        Assert.That(addConstantBody.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD5, 0, 0, 0,
+                0xD4, 1, 0, 0,
+                0xC0, GetArithmeticControl(addConstantBinary),
+                0xF0, 0x10,
+                0x17, 0,
+            }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.SubtractFromConstant",
+            out var subtractFromConstantDefinition), Is.True);
+        var subtractFromConstantMethodRow = checked((int)(
+            subtractFromConstantDefinition & 0x00FF_FFFF));
+        var subtractFromConstantBodyRow
+            = tables.Methods.GetBodyRow(subtractFromConstantMethodRow);
+        Assert.That(subtractFromConstantBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(
+            subtractFromConstantBodyRow, tables.Contracts.Count);
+        var subtractFromConstantBody = tables.Bodies.GetRegisterBody(
+            subtractFromConstantBodyRow, tables.Contracts.Count);
+        var subtractFromConstantFunction = program.Functions.Single(
+            static function => function.Name == "SubtractFromConstant");
+        var subtractFromConstantBinary = (BoundBinary)((BoundReturn)
+            subtractFromConstantFunction.Body.Statements.Single()).Value!;
+        Assert.That(subtractFromConstantBody.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD4, 0, 0, 0,
+                0xD5, 1, 0, 0,
+                0xC0, GetArithmeticControl(subtractFromConstantBinary),
+                0xF0, 0x10,
                 0x17, 0,
             }));
         Assert.That(tables.Exports.TryGetDefinitionForKey(1,
@@ -1754,6 +1828,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             int32 UseSubtract() { return Box.Subtract(7, 3); }
             int32 UseMultiply() { return Box.Multiply(4, 5); }
             int32 UseDivide() { return Box.Divide(12, 3); }
+            int32 UseAddConstant() { return Box.AddConstant(5); }
+            int32 UseSubtractFromConstant() {
+                return Box.SubtractFromConstant(2);
+            }
             int32 UseRemainder(Box value) {
                 return value.Remainder(12, 5);
             }

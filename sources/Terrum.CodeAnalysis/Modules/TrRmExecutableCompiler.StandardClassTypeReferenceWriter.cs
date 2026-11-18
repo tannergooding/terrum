@@ -2258,6 +2258,94 @@ public static partial class TrRmExecutableCompiler
             code = EncodeC1M1Construction2Int32ComparisonCode(
                 leftHome, rightHome, comparison.Operator);
         }
+        else if (returnValue is BoundBinary constantBinary
+            && function.ReturnType == PrimitiveType.Int32
+            && constantBinary.Type == PrimitiveType.Int32
+            && (constantBinary.Operator is TokenKind.Ampersand
+                or TokenKind.Pipe or TokenKind.Caret or TokenKind.Plus
+                or TokenKind.Minus or TokenKind.Star or TokenKind.Slash
+                or TokenKind.Percent))
+        {
+            var (formalRead, constant, constantOnLeft)
+                = (constantBinary.Left, constantBinary.Right) switch
+                {
+                    (BoundRead read, BoundConstant value)
+                        => (read, value, false),
+                    (BoundConstant value, BoundRead read)
+                        => (read, value, true),
+                    _ => throw Unsupported(
+                        "A Construction-2 static constant binary Body requires one direct int32 formal and one scalar constant."),
+                };
+
+            if (formalRead.Type != PrimitiveType.Int32
+                || (uint)formalRead.Variable
+                    >= (uint)function.ParameterCount
+                || function.Variables[formalRead.Variable].Type
+                    != PrimitiveType.Int32
+                || constant.Type != PrimitiveType.Int32
+                || constant.RepresentationType != PrimitiveType.Int32
+                || !constant.Bits.IsCanonicalFor(PrimitiveType.Int32))
+            {
+                throw Unsupported(
+                    "A Construction-2 static constant binary Body requires exact canonical int32 operands.");
+            }
+
+            SetInt32FormalHome(formalRead.Variable);
+            var frozenValue = frozenScalarValueBuilder.Add(constant);
+            var expectedTypeSpecRef
+                = typeSpecReferenceFor(PrimitiveType.Int32);
+            if (frozenValue.TypeSpecRef != expectedTypeSpecRef)
+            {
+                throw Unsupported(
+                    "A Construction-2 static constant binary Body requires the exact int32 TypeSpecRef.");
+            }
+
+            constantMap = new byte[8];
+            BinaryPrimitives.WriteUInt32LittleEndian(constantMap,
+                frozenValue.TypeSpecRef);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                constantMap.AsSpan(4), frozenValue.ConstantSourceRow);
+            var instructions = new List<byte>(14);
+            if (constantOnLeft)
+            {
+                instructions.Add(0xD4);
+                instructions.Add(0);
+                instructions.Add(0);
+                instructions.Add(0);
+                instructions.Add(0xD5);
+                instructions.Add(1);
+                instructions.Add(0);
+                instructions.Add(0);
+            }
+            else
+            {
+                instructions.Add(0xD5);
+                instructions.Add(0);
+                instructions.Add(0);
+                instructions.Add(0);
+                instructions.Add(0xD4);
+                instructions.Add(1);
+                instructions.Add(0);
+                instructions.Add(0);
+            }
+
+            var (opcode, operation)
+                = GetC1M1Construction2Int32BinaryEncoding(
+                    constantBinary.Operator,
+                    constantBinary.OverflowBehavior);
+            const byte destinationRegister = 0;
+            const byte leftRegister = 0;
+            const byte rightRegister = 1;
+            var payload = (ushort)(destinationRegister | (0x0F << 4)
+                | (leftRegister << 8) | (rightRegister << 12));
+            instructions.Add(opcode);
+            instructions.Add(operation);
+            instructions.Add((byte)payload);
+            instructions.Add((byte)(payload >> 8));
+            instructions.Add(0x17);
+            instructions.Add(0);
+            code = instructions.ToArray();
+        }
         else if (returnValue is BoundConstant constant)
         {
             if (constant.Type != function.ReturnType
