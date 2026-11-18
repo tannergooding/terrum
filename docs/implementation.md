@@ -142,19 +142,23 @@ role-2 projection P MethodDefs, MethodSigs, Params, Construction clauses,
 Feature 25 and Bodies for one non-partial constructor per class whose fields
 are initialized directly from scalar parameters. It preserves explicit I/P
 ExportKeys and does not substitute `ClassTryCreate`; keyed and private-P
-producer regressions are added but unverified under the hold. Ordinary method
-emission now also supports zero-parameter static scalar methods with real
-Bodies and empty unit-returning instance methods with receiver Homes and
-explicit method keys; those regressions are added but remain unverified.
-Parameterized methods, instance field access/calls, properties, multiple/partial
-constructors, class-backed field initialization, parameter defaults,
-expected/provider class binding and re-emission, class FieldDef Imports, CLI
-transport, independent carrier TypeSpec verification, generic TypeDef
-dependencies, interfaces/witnesses and runtime execution remain open. The
-user-authorized provisional
+producer regressions are added but unverified under the hold. Ordinary method emission also supports parameterized static scalar methods
+with real Bodies and empty unit-returning instance methods with receiver and
+parameter Homes. The provisional CM1 route carries checked defaults for its
+bounded class MethodDefs, including constructor I/P, and composes the inherited
+D1 generic MethodDef and interface owners under the exact 16-byte
+MethodParameterSurface schema. Structural validation enforces complete owner
+coverage, Feature 11/26 closure and same-view I/P typed-payload agreement;
+generic and interface imports materialize the selected default view. Focused
+producer, malformed I/P and composition regressions remain unverified under
+the active hold. Instance method Bodies beyond the empty unit subset, field
+access/calls, properties, multiple/partial constructors, class-backed field
+initialization, source-free class method binding and re-emission, expected/
+provider class replacement, class FieldDef Imports, CLI transport, independent
+carrier TypeSpec verification, generic TypeDef dependencies, interfaces/
+witnesses outside D1, and runtime execution remain open. The user-authorized provisional
 [CM1 class parameter-default proposal](proposals/standard-trrm-c1-class-parameter-defaults.md)
-defines a candidate exact owner/schema; no producer or consumer currently
-emits or consumes those defaults.
+defines the exact candidate owner/schema and remains pending later review.
 The checked development and Standard TRRM type-reference
 paths now carry exact generic nominal TypeDef/provider identities, formal
 domains/defaults, ordered substitutions and TypeSpec qualifications into
@@ -1592,6 +1596,12 @@ MethodDef labels, and source-free binding preserves expected labels when
 provider names differ. These routes retain Feature 23/26 closure, reject
 base-schema and mixed-provider-schema substitution, and preserve labels through
 source-free calls and re-emission.
+The separate provisional CM1 exact schema composes Construction-2 class
+I/P/member surfaces with those inherited D1 owners, using 16-byte
+MethodParameterSurface rows and closed SF1 scalar defaults. Its bounded source
+producer, structural validation, generic/interface materialization and
+same-view I/P checks are implemented but unverified; source-free class method
+binding/re-emission and provider replacement remain open.
 The `--trrm-source-generic-method-exports` CLI admits version-1 generic maps
 and version-3 interface/generic maps only under exact G1L1. The bounded C1
 generic/interface routes for C1L1R1, C1M1L1R1, Construction-1L1R1 and

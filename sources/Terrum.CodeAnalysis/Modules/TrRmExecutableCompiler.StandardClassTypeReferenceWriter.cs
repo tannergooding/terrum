@@ -870,8 +870,9 @@ public static partial class TrRmExecutableCompiler
                         = methodFunctions[0];
                     var isSupportedNoOpInstanceMethod
                         = !methodFunction.IsStatic
-                            && methodFunction.ParameterCount == 1
-                            && methodFunction.Variables.Length == 1
+                            && methodFunction.ParameterCount
+                                == methodFunction.Variables.Length
+                            && methodFunction.ParameterCount >= 1
                             && methodFunction.ReturnType
                                 == PrimitiveType.Void;
                     if ((!methodFunction.IsStatic
@@ -1712,13 +1713,47 @@ public static partial class TrRmExecutableCompiler
         int contractCount, TrRmArtifactSchema schema)
     {
         RequireC1M1Construction2NoOpUnitBody(function.Body);
-        var typeToken = CreateStandardBodyTypeMapToken(
-            typeSpecReferenceFor(function.Variables[0].Type));
-        var maps = TrRmRegisterBodyMapBuilder.Create([typeToken], []);
-        var homeMap = new byte[8];
-        homeMap[0] = 1;
-        BinaryPrimitives.WriteUInt16LittleEndian(homeMap.AsSpan(2),
-            maps.GetTypeMapIndex(typeToken));
+        if (function.ParameterCount != function.Variables.Length
+            || function.ParameterCount < 1)
+        {
+            throw Unsupported(
+                "A Construction-2 unit instance method has an invalid receiver or parameter map.");
+        }
+
+        var typeTokens = new uint[function.ParameterCount];
+        var homeMap = new byte[checked(function.ParameterCount * 8)];
+        for (var parameter = 0; parameter < function.ParameterCount;
+            parameter++)
+        {
+            var variable = function.Variables[parameter];
+            if (variable.Type == PrimitiveType.Void
+                || variable.IsOut || variable.IsInit
+                || variable.IsImplicitRef)
+            {
+                throw Unsupported(
+                    "A Construction-2 unit instance method requires value-parameter Homes.");
+            }
+
+            var typeToken = CreateStandardBodyTypeMapToken(
+                typeSpecReferenceFor(variable.Type));
+            typeTokens[parameter] = typeToken;
+        }
+
+        var maps = TrRmRegisterBodyMapBuilder.Create(typeTokens, []);
+        for (var parameter = 0; parameter < function.ParameterCount;
+            parameter++)
+        {
+            var offset = parameter * 8;
+            homeMap[offset] = parameter == 0 ? (byte)1 : (byte)2;
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                homeMap.AsSpan(offset + 2, 2),
+                maps.GetTypeMapIndex(typeTokens[parameter]));
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                homeMap.AsSpan(offset + 4, 2),
+                parameter == 0 ? (ushort)0
+                    : checked((ushort)(parameter - 1)));
+        }
+
         var records = new ReadOnlyMemory<byte>[] {
             new(new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 }),
         };
