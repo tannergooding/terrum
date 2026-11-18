@@ -241,11 +241,31 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         Assert.That(tables.Exports.TryGetDefinitionForKey(1,
             "Box.Answer", out var answer), Is.True);
         Assert.That(answer >> 24, Is.EqualTo(0x16u));
-        var answerBodyRow = tables.Methods.GetBodyRow(
-            checked((int)(answer & 0x00FF_FFFF)));
+        var answerMethodRow
+            = checked((int)(answer & 0x00FF_FFFF));
+        var answerBodyRow = tables.Methods.GetBodyRow(answerMethodRow);
         Assert.That(answerBodyRow, Is.GreaterThan(0));
         tables.Bodies.ValidateSelectedImplementation(answerBodyRow,
             tables.Contracts.Count);
+        Assert.That(tables.Bodies.GetRow(answerBodyRow)[0],
+            Is.EqualTo(0x01));
+        var answerBody = tables.Bodies.GetRegisterBody(answerBodyRow,
+            tables.Contracts.Count);
+        Assert.That(answerBody.HomeCount, Is.Zero);
+        Assert.That(answerBody.ConstantCount, Is.EqualTo(1));
+        Assert.That(answerBody.ConstantMap.Length, Is.EqualTo(8));
+        var answerSignature = tables.Methods.GetSignature(answerMethodRow);
+        Assert.That(tables.TypeSpecs.AreEquivalentTypeSpecRefs(
+                BinaryPrimitives.ReadUInt32LittleEndian(
+                    answerBody.ConstantMap),
+                tables.Signatures.GetResultTypeSpec(answerSignature)),
+            Is.True);
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                answerBody.ConstantMap.Slice(4)),
+            Is.GreaterThan(0u));
+        Assert.That(tables.Features.TryGetFeature(11, out _), Is.True);
+        Assert.That(answerBody.GetBlockCode(0).ToArray(), Is.EqualTo(
+            new byte[] { 0xD4, 0, 0, 0, 0x17, 0 }));
         Assert.That(tables.Exports.TryGetDefinitionForKey(1,
             "Box.Touch", out var touch), Is.True);
         Assert.That(touch >> 24, Is.EqualTo(0x16u));
@@ -1009,6 +1029,26 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(body[4..]),
                 Is.EqualTo(identityDefinition));
 
+            var identityBodyRow
+                = tables.Methods.GetBodyRow(identityMethodRow);
+            Assert.That(identityBodyRow, Is.GreaterThan(0));
+            tables.Bodies.ValidateSelectedImplementation(identityBodyRow,
+                tables.Contracts.Count);
+            Assert.That(tables.Bodies.GetRow(identityBodyRow)[0],
+                Is.EqualTo(0x01));
+            if (!hasReceiver)
+            {
+                var identityBody = tables.Bodies.GetRegisterBody(
+                    identityBodyRow, tables.Contracts.Count);
+                Assert.That(identityBody.HomeCount, Is.EqualTo(1));
+                Assert.That(identityBody.HomeMap[0], Is.EqualTo(2));
+                Assert.That(identityBody.GetBlockCode(0).ToArray(),
+                    Is.EqualTo(new byte[] {
+                        0xD5, 0, 0, 0,
+                        0x17, 0,
+                    }));
+            }
+
             var identitySignature
                 = tables.Methods.GetSignature(identityMethodRow);
             var forwardSignature
@@ -1114,6 +1154,30 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                                 touchUnitDeclaration.Span, "Box.TouchUnit"),
                         ]),
             ]);
+        var providerTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                        .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                            artifact));
+        Assert.That(providerTables.Features.TryGetFeature(11, out _),
+            Is.True);
+        Assert.That(providerTables.Exports.TryGetDefinitionForKey(1,
+            "Box.Unit", out var unitDefinition), Is.True);
+        var unitMethodRow
+            = checked((int)(unitDefinition & 0x00FF_FFFF));
+        var unitBodyRow = providerTables.Methods.GetBodyRow(unitMethodRow);
+        Assert.That(unitBodyRow, Is.GreaterThan(0));
+        Assert.That(providerTables.Bodies.GetRow(unitBodyRow)[0],
+            Is.EqualTo(0x01));
+        providerTables.Bodies.ValidateSelectedImplementation(unitBodyRow,
+            providerTables.Contracts.Count);
+        var unitBody = providerTables.Bodies.GetRegisterBody(unitBodyRow,
+            providerTables.Contracts.Count);
+        Assert.That(unitBody.HomeCount, Is.Zero);
+        Assert.That(unitBody.ConstantCount, Is.EqualTo(1));
+        Assert.That(unitBody.GetBlockCode(0).ToArray(), Is.EqualTo(
+            new byte[] { 0xD4, 0, 0, 0, 0x17, 0 }));
+
         var reference = TrRmExecutableCompiler.CreateStandardReference(
             new TrRmStandardArtifactInput(
                 C1M1Construction2ClassParameterDefaultsSchemaIdentity,

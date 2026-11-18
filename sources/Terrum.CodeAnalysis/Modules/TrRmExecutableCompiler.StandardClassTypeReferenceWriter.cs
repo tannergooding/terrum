@@ -1242,10 +1242,6 @@ public static partial class TrRmExecutableCompiler
             {
                 featureRows.Add(
                     TrRmFeatureRow.MethodParameterLabelsCandidate);
-                if (frozenScalarValueBuilder.ConstantSourceCount != 0)
-                {
-                    featureRows.Add(TrRmFeatureRow.TypedFrozenValues);
-                }
             }
 
             foreach (var initializer in constructionInitializers)
@@ -1314,7 +1310,9 @@ public static partial class TrRmExecutableCompiler
                 {
                     body = method.Function.IsStatic
                         ? EncodeC1M1Construction2StaticMethodBody(
-                            method.Function)
+                            method.Function, Construction2ValueTypeSpecReference,
+                            frozenScalarValueBuilder, contractRows.Count,
+                            schema)
                         : method.DirectReturnHome >= 0
                         ? EncodeC1M1Construction2InstanceMethodBody(
                             method.Function, method.DirectReturnHome,
@@ -1331,6 +1329,13 @@ public static partial class TrRmExecutableCompiler
                     = methodRows[method.MethodDefRow - 1]
                         with { BodyRow = bodyRows.Count };
             }
+
+            if (frozenScalarValueBuilder.ConstantSourceCount != 0
+                && !featureRows.Contains(TrRmFeatureRow.TypedFrozenValues))
+            {
+                featureRows.Add(TrRmFeatureRow.TypedFrozenValues);
+            }
+
         }
 
         var totalRows = (long)typeDefRows.Count + fieldRows.Count
@@ -1575,7 +1580,7 @@ public static partial class TrRmExecutableCompiler
         }
         if (frozenScalarValueTables.BlobCount != 0)
         {
-            sections.Add(new TrRmSection(0x0032, 0,
+            sections.Add(new TrRmSection(0x0003, 0,
                 checked((uint)frozenScalarValueTables.BlobCount),
                 frozenScalarValueTables.BlobSection));
         }
@@ -1952,22 +1957,147 @@ public static partial class TrRmExecutableCompiler
     }
 
     private static byte[] EncodeC1M1Construction2StaticMethodBody(
-        BoundFunction function)
+        BoundFunction function,
+        Func<PrimitiveType, uint> typeSpecReferenceFor,
+        TrRmFrozenScalarValueBuilder frozenScalarValueBuilder,
+        int contractCount, TrRmArtifactSchema schema)
     {
-        var hasFloatingTypes = IsFloat(function.ReturnType)
-            || function.Variables.Any(static variable =>
-                IsFloat(variable.Type));
-        if (!BoundTreeTraversal.VisitExpressions(function.Body,
-                expression => hasFloatingTypes
-                    |= IsFloat(expression.Type)))
+        if (!function.IsStatic
+            || function.ParameterCount != function.Variables.Length
+            || !function.Body.RetiredManagedLocals.IsEmpty)
         {
             throw Unsupported(
-                "The bounded Construction-2 static method producer cannot inspect the checked Body.");
+                "A Construction-2 static register Body requires only checked value-formal Homes.");
         }
 
-        return EncodeBody(function, hasFloatingTypes, -1,
-            new Dictionary<PrimitiveType, int>(),
-            new Dictionary<PrimitiveType, int>());
+        BoundExpression? returnValue = null;
+        if (function.Body.Statements.IsEmpty)
+        {
+            if (function.ReturnType != PrimitiveType.Void)
+            {
+                throw Unsupported(
+                    "A Construction-2 static non-unit Body requires an explicit return value.");
+            }
+        }
+        else if (function.Body.Statements is [
+                     BoundReturn statementReturn
+                 ])
+        {
+            returnValue = statementReturn.Value;
+        }
+        else
+        {
+            throw Unsupported(
+                "The bounded Construction-2 static register Body supports one direct return.");
+        }
+
+        for (var parameter = 0;
+            parameter < function.ParameterCount; parameter++)
+        {
+            var variable = function.Variables[parameter];
+            if (variable.IsOut || variable.IsInit
+                || variable.IsImplicitRef
+                || variable.IsInitializationLocal)
+            {
+                throw Unsupported(
+                    "A Construction-2 static register Body requires by-value formal Homes.");
+            }
+        }
+
+        uint[] typeTokens = [];
+        byte[] homeMap = [];
+        byte[] constantMap = [];
+        byte[] code;
+        if (function.ReturnType == PrimitiveType.Void)
+        {
+            if (returnValue is not null
+                && (returnValue.Type != PrimitiveType.Void
+                    || returnValue is not (BoundRead or BoundConstant)))
+            {
+                throw Unsupported(
+                    "A Construction-2 static unit Body can only return unit without dropping an expression effect.");
+            }
+
+            code = [0x18, 0];
+        }
+        else if (returnValue is BoundRead read)
+        {
+            if (read.Variable < 0
+                || read.Variable >= function.ParameterCount
+                || read.Type != function.ReturnType
+                || function.Variables[read.Variable].Type
+                    != function.ReturnType)
+            {
+                throw Unsupported(
+                    "A Construction-2 static Body can return only an exact value formal.");
+            }
+
+            var typeToken = CreateStandardBodyTypeMapToken(
+                typeSpecReferenceFor(read.Type));
+            typeTokens = [typeToken];
+            homeMap = new byte[8];
+            homeMap[0] = 2;
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                homeMap.AsSpan(4), checked((ushort)read.Variable));
+            code = [
+                0xD5, 0,
+                0, 0,
+                0x17, 0,
+            ];
+        }
+        else if (returnValue is BoundConstant constant)
+        {
+            if (constant.Type != function.ReturnType
+                || constant.RepresentationType != function.ReturnType
+                || !constant.Bits.IsCanonicalFor(function.ReturnType))
+            {
+                throw Unsupported(
+                    "A Construction-2 static literal Body requires an exact canonical scalar constant.");
+            }
+
+            var frozenValue = frozenScalarValueBuilder.Add(constant);
+            var expectedTypeSpecRef
+                = typeSpecReferenceFor(function.ReturnType);
+            if (frozenValue.TypeSpecRef != expectedTypeSpecRef)
+            {
+                throw Unsupported(
+                    "A Construction-2 static Body ConstantMap requires the exact result TypeSpecRef.");
+            }
+
+            constantMap = new byte[8];
+            BinaryPrimitives.WriteUInt32LittleEndian(constantMap,
+                frozenValue.TypeSpecRef);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                constantMap.AsSpan(4), frozenValue.ConstantSourceRow);
+            code = [
+                0xD4, 0, 0, 0,
+                0x17, 0,
+            ];
+        }
+        else
+        {
+            throw Unsupported(
+                "The bounded Construction-2 static register Body supports direct value-formal or fixed-scalar returns.");
+        }
+
+        var maps = TrRmRegisterBodyMapBuilder.Create(typeTokens, []);
+        if (homeMap.Length != 0)
+        {
+            BinaryPrimitives.WriteUInt16LittleEndian(homeMap.AsSpan(2),
+                maps.GetTypeMapIndex(typeTokens[0]));
+        }
+
+        var records = new ReadOnlyMemory<byte>[] {
+            new(new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 }),
+        };
+        return TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
+            default, default, constantMap,
+            [new TrRmRegisterBodyBlock(0,
+                checked((uint)code.Length), 0)],
+            records, code, contractCount: contractCount,
+            schema: schema,
+            generalPredicateGraphsInitializationReferenceBodies
+                : schema.UsesGeneralPredicateGraphs());
     }
 
     private static byte[] EncodeC1M1Construction2FieldReadBody(
