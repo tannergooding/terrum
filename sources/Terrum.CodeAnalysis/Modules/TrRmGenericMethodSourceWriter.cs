@@ -6647,7 +6647,8 @@ public static partial class TrRmExecutableCompiler
                     formalTypeSpecRows, builtInTypeSpecRows, typeSpecRows);
             }
 
-            var typeSpecRef = checked((uint)typeSpecRows.Count + 1);
+            var referenceTypeSpecRef = checked(
+                (uint)typeSpecRows.Count + 1);
             var qualifiers = (byte)((term.IsWritable ? 0x01 : 0)
                 | (term.IsGarbageCollected ? 0x02 : 0));
             typeSpecRows.Add(term.IsInitialization
@@ -6655,13 +6656,16 @@ public static partial class TrRmExecutableCompiler
                     referentTypeSpecRef, term.IsWritable)
                 : TrRmTypeSpecTableWriter.Wrapped(0x07, referentTypeSpecRef,
                     qualifiers));
-            if (term.IsOptional)
+            if (!term.IsOptional)
             {
-                typeSpecRef = checked((uint)typeSpecRows.Count + 1);
-                typeSpecRows.Add(TrRmTypeSpecTableWriter.Wrapped(0x06,
-                    checked(typeSpecRef - 1)));
+                return referenceTypeSpecRef;
             }
-            return typeSpecRef;
+
+            var optionalTypeSpecRef = checked(
+                (uint)typeSpecRows.Count + 1);
+            typeSpecRows.Add(TrRmTypeSpecTableWriter.Wrapped(0x06,
+                referenceTypeSpecRef));
+            return optionalTypeSpecRef;
         }
 
         if (term.Kind == BoundGenericMethodTypeTermKind.Concrete)
