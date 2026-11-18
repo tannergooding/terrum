@@ -23,7 +23,9 @@ public static partial class TrRmExecutableCompiler
 
     private readonly record struct GenericMethodForwardingTarget(
         BoundCall Call, BoundFunction Function,
-        BoundGenericMethodDefinition Definition, int MethodRow,
+        BoundFunction SignatureFunction,
+        BoundGenericMethodDefinition Definition,
+        ImmutableArray<PrimitiveType> TypeArguments, uint MethodToken,
         int ResultVariable);
 
     private readonly record struct GenericInterfaceEmission(
@@ -1283,6 +1285,7 @@ public static partial class TrRmExecutableCompiler
         {
             return EncodeGenericMethodForwardingChainBody(function,
                 definition, emissions, callChain,
+                importedGenericMethodTargetTokens,
                 formalTypeSpecRows, builtInTypeSpecRows, typeSpecRows,
                 spanTypes, schema, nominalTypes);
         }
@@ -1306,12 +1309,6 @@ public static partial class TrRmExecutableCompiler
         if (genericCall.ImportedGenericMethodCall
             is { } importedGenericMethod)
         {
-            if (!isUnitCall)
-            {
-                throw Unsupported(
-                    $"Generic MethodDef '{definition.Name}' has an imported GenericCall outside the unit-returning subset.");
-            }
-
             return EncodeImportedGenericMethodForwardingBody(function,
                 definition, definition.ProofProgram, genericCall,
                 resultVariable, isUnitCall, importedGenericMethod,
@@ -1706,6 +1703,8 @@ public static partial class TrRmExecutableCompiler
         BoundFunction function, BoundGenericMethodDefinition definition,
         IReadOnlyList<GenericMethodEmission> emissions,
         ImmutableArray<GenericMethodForwardingCall> callChain,
+        IReadOnlyDictionary<BoundGenericMethodImport, uint>
+            importedGenericMethodTargetTokens,
         Dictionary<PrimitiveType, uint> formalTypeSpecRows,
         Dictionary<PrimitiveType, uint> builtInTypeSpecRows,
         List<ReadOnlyMemory<byte>> typeSpecRows,
@@ -1739,11 +1738,119 @@ public static partial class TrRmExecutableCompiler
             GenericMethodForwardingCall forwardingCall)
         {
             var genericCall = forwardingCall.Call;
+            if ((uint)genericCall.Function
+                >= (uint)proofProgram.Functions.Length)
+            {
+                throw Unsupported(
+                    $"Generic MethodDef '{definition.Name}' has an unknown call-chain target.");
+            }
+
+            if (genericCall.ImportedGenericMethodCall
+                is { } importedTarget)
+            {
+                var expectedTarget = importedTarget.Binding?.Expected
+                    ?? importedTarget;
+                var typeArguments
+                    = genericCall.ImportedGenericMethodTypeArguments;
+                if (genericCall.GenericMethodCall is not null
+                    || importedTarget.Signature.Owner is not null
+                    || !importedTarget.Signature.IsStatic
+                    || importedTarget.Signature.IsMutable
+                    || !importedTarget.Signature.ConstantFormals
+                        .IsDefaultOrEmpty
+                    || !importedGenericMethodTargetTokens.TryGetValue(
+                        importedTarget, out var methodToken)
+                    || expectedTarget.ProofFunction.ParameterCount > 8
+                    || expectedTarget.ProofFunction.Variables.Length
+                        < expectedTarget.ProofFunction.ParameterCount
+                    || expectedTarget.ProofFunction.DoesNotReturn
+                    || expectedTarget.ProofFunction.RequiresUnsafeCaller
+                        != expectedTarget.Signature.RequiresUnsafeCaller
+                    || !expectedTarget.ProofFunction.DependencyContracts
+                        .IsEmpty
+                    || expectedTarget.Formals.IsDefaultOrEmpty
+                    || expectedTarget.Formals.Length
+                        != expectedTarget.Signature.Formals.Length
+                    || expectedTarget.Formals.Length > 8
+                    || typeArguments.IsDefault
+                    || typeArguments.Length
+                        != expectedTarget.Formals.Length
+                    || (!genericCall.ArgumentParameterIndices.IsDefault
+                        && genericCall.ArgumentParameterIndices.Length
+                            != genericCall.Arguments.Length))
+                {
+                    throw Unsupported(
+                        $"Generic MethodDef '{definition.Name}' has an imported call-chain target outside the bounded MethodDef Import subset.");
+                }
+
+                var target = proofProgram.Functions[genericCall.Function];
+                if (!ReferenceEquals(target.ImportedGenericMethod,
+                        importedTarget)
+                    || target.ImportedGenericMethodTypeArguments.IsDefault
+                    || !target.ImportedGenericMethodTypeArguments
+                        .SequenceEqual(typeArguments)
+                    || !target.IsStatic || target.DeclaringStruct is not null
+                    || target.DoesNotReturn
+                    || target.ParameterCount != genericCall.Arguments.Length
+                    || target.ParameterCount
+                        != expectedTarget.ProofFunction.ParameterCount
+                    || target.Variables.Length < target.ParameterCount
+                    || target.ParameterCount > 8
+                    || genericCall.Type != target.ReturnType
+                    || (target.ReturnType == PrimitiveType.Void)
+                        != (forwardingCall.ResultVariable < 0))
+                {
+                    throw Unsupported(
+                        $"Generic MethodDef '{definition.Name}' does not retain the imported call-chain specialization.");
+                }
+
+                var targetDefinition = new BoundGenericMethodDefinition(
+                    -1, expectedTarget.Signature.Name,
+                    expectedTarget.Signature.IsPublic,
+                    expectedTarget.Signature.RequiresUnsafeCaller,
+                    genericCall.Function, -1, default,
+                    expectedTarget.Formals, proofProgram) {
+                    FormalTypeOwnerOrdinal
+                        = expectedTarget.FormalTypeOwnerOrdinal,
+                    IsStatic = expectedTarget.Signature.IsStatic,
+                    FormalOrder = expectedTarget.Signature.FormalOrder,
+                    RuntimeParameterCount
+                        = expectedTarget.ProofFunction.ParameterCount,
+                };
+                for (var ordinal = 0;
+                    ordinal < expectedTarget.Formals.Length; ordinal++)
+                {
+                    var formal = expectedTarget.Formals[ordinal];
+                    var formalSignature
+                        = expectedTarget.Signature.Formals[ordinal];
+                    if (formal.Ordinal != ordinal
+                        || formalSignature.Ordinal != ordinal
+                        || formal.OwnershipDomain != 1
+                        || formal.NullabilityDomain is < 1 or > 2
+                        || formal.TypeDefault is not null
+                        || formalSignature.HasTypeDefault
+                        || !formalSignature
+                            .DefaultTypeParameterDependencies.IsEmpty
+                        || !formal.Requirements.IsDefaultOrEmpty
+                        || !formalSignature.Requirements.IsDefaultOrEmpty
+                        || formal.InterfaceConstraints.IsDefault
+                        || !formal.InterfaceConstraints.IsEmpty
+                        || formalSignature.InterfaceConstraints.IsDefault
+                        || !formalSignature.InterfaceConstraints.IsEmpty)
+                    {
+                        throw Unsupported(
+                            $"Imported generic MethodDef '{expectedTarget.Signature.Name}' has a call-chain formal outside the selected G1 contract subset.");
+                    }
+                }
+
+                return new GenericMethodForwardingTarget(genericCall,
+                    target, expectedTarget.ProofFunction, targetDefinition,
+                    typeArguments, methodToken,
+                    forwardingCall.ResultVariable);
+            }
+
             if (genericCall.GenericMethodCall
-                    is not BoundGenericMethodInstantiation call
-                || genericCall.ImportedGenericMethodCall is not null
-                || (uint)genericCall.Function
-                    >= (uint)proofProgram.Functions.Length)
+                    is not BoundGenericMethodInstantiation call)
             {
                 throw Unsupported(
                     $"Generic MethodDef '{definition.Name}' has a call-chain target outside the local type-only subset.");
@@ -1797,7 +1904,9 @@ public static partial class TrRmExecutableCompiler
             }
 
             return new GenericMethodForwardingTarget(genericCall, target,
-                targetDefinition, targetEmissions[0].MethodRow,
+                target, targetDefinition, call.TypeArguments,
+                0x1600_0000u
+                    | checked((uint)targetEmissions[0].MethodRow),
                 forwardingCall.ResultVariable);
         }
 
@@ -1893,7 +2002,7 @@ public static partial class TrRmExecutableCompiler
         foreach (var target in targets)
         {
             var genericCall = target.Call;
-            var call = genericCall.GenericMethodCall!;
+            var typeArguments = target.TypeArguments;
             var targetDefinition = target.Definition;
             var inputs = new TrRmRegisterBodyCallInput[
                 target.Function.ParameterCount];
@@ -1915,13 +2024,18 @@ public static partial class TrRmExecutableCompiler
                         $"Generic MethodDef '{definition.Name}' has a duplicate or invalid call-chain input.");
                 }
 
+                var targetParameterType
+                    = target.SignatureFunction.Variables[formalIndex].Type;
                 if (argument.Type == PrimitiveType.Void)
                 {
                     if (!IsSupportedGenericUnitArgument(argument, function)
                         || !GenericMethodTypeMatchesAfterSubstitution(
-                            target.Function.Variables[formalIndex].Type,
+                            targetParameterType,
                             argument.Type, targetDefinition, definition,
-                            call.TypeArguments, 0)
+                            typeArguments, 0)
+                        || ((target.MethodToken >> 24) == 0x1C
+                            && target.Function.Variables[formalIndex].Type
+                                != argument.Type)
                         || target.Function.Variables[formalIndex].IsMutable
                         || target.Function.Variables[formalIndex].IsOut
                         || target.Function.Variables[formalIndex].IsInit
@@ -1948,9 +2062,12 @@ public static partial class TrRmExecutableCompiler
                     || function.Variables[read.Variable].Type
                         != argument.Type
                     || !GenericMethodTypeMatchesAfterSubstitution(
-                        target.Function.Variables[formalIndex].Type,
+                        targetParameterType,
                         argument.Type, targetDefinition, definition,
-                        call.TypeArguments, 0)
+                        typeArguments, 0)
+                    || ((target.MethodToken >> 24) == 0x1C
+                        && target.Function.Variables[formalIndex].Type
+                            != argument.Type)
                     || target.Function.Variables[formalIndex].IsMutable
                     || target.Function.Variables[formalIndex].IsOut
                     || target.Function.Variables[formalIndex].IsInit
@@ -1997,9 +2114,11 @@ public static partial class TrRmExecutableCompiler
                     target.ResultVariable].Type;
             if (assignedParameters.Any(static assigned => !assigned)
                 || !GenericMethodTypeMatchesAfterSubstitution(
-                    target.Function.ReturnType,
+                    target.SignatureFunction.ReturnType,
                     resultType,
-                    targetDefinition, definition, call.TypeArguments, 0))
+                    targetDefinition, definition, typeArguments, 0)
+                || ((target.MethodToken >> 24) == 0x1C
+                    && target.Function.ReturnType != resultType))
             {
                 throw Unsupported(
                     $"Generic MethodDef '{definition.Name}' has a call-chain signature outside the checked subset.");
@@ -2007,11 +2126,11 @@ public static partial class TrRmExecutableCompiler
 
             var targetArguments
                 = new TrRmRegisterBodyGenericCallArgument[
-                    call.TypeArguments.Length];
+                    typeArguments.Length];
             for (var ordinal = 0; ordinal < targetArguments.Length;
                 ordinal++)
             {
-                var actual = call.TypeArguments[ordinal];
+                var actual = typeArguments[ordinal];
                 var formal = targetDefinition.Formals[ordinal];
                 var callerFormalOrdinal = -1;
                 for (var candidate = 0;
@@ -2062,9 +2181,7 @@ public static partial class TrRmExecutableCompiler
                             nominalTypes: nominalTypes));
             }
 
-            var methodToken = 0x1600_0000u
-                | checked((uint)target.MethodRow);
-            var methodMapIndex = methodMap.GetIndex(methodToken);
+            var methodMapIndex = methodMap.GetIndex(target.MethodToken);
             var targetRecordIndex = checked((ushort)records.Count);
             records.Add(
                 TrRmRegisterBodyRecordWriter.EncodeGenericCallTarget(

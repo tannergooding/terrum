@@ -4085,6 +4085,108 @@ internal sealed class TrRmGenericMethodSourceWriterTests
     }
 
     [Test]
+    public void BindsAndExecutesSourceFreeImportedGenericForwardingChain()
+    {
+        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            """
+            public T Identity<T>(T value, void token)
+                where T : [Blittable] {
+                return value;
+            }
+            public T Confirm<T>(T value) where T : [Blittable] {
+                return value;
+            }
+            public void Complete<T>(T value, void token)
+                where T : [Blittable] {
+                return;
+            }
+            """), new CompilationOptions {
+            LayoutCoreRegistration =
+                Terrum.CodeAnalysis.Tests.Semantics
+                    .LayoutCoreRegistrationTestData.Create(),
+        });
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerProgram = providerCompilation.Program!;
+        var providerExports = providerProgram.GenericMethodDefinitions
+            .Select(definition => new TrRmSourceGenericMethodExport(
+                providerProgram, definition.SourceInputOrdinal,
+                definition.Span, definition.Name))
+            .ToArray();
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, "generic-import-chain.provider",
+            GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), providerExports);
+        var providerReference = TrRmExecutableCompiler
+            .CreateGenericMethodCallsDraftReference(providerArtifact,
+                "generic-import-chain.provider");
+        var forwarderCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                public void Forward<T>(T value) where T : [Blittable] {
+                    T intermediate = Identity<T>(value, ());
+                    T result = Confirm<T>(intermediate);
+                    Complete<T>(result, ());
+                    return;
+                }
+                """), providerReference, new CompilationOptions {
+                LayoutCoreRegistration =
+                    Terrum.CodeAnalysis.Tests.Semantics
+                        .LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(forwarderCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                forwarderCompilation.Diagnostics));
+        var forwarderProgram = forwarderCompilation.Program!;
+        var forward = forwarderProgram.GenericMethodDefinitions.Single(
+            static definition => definition.Name == "Forward");
+        var forwarderArtifact = TrRmExecutableCompiler.EmitStandard(
+            forwarderProgram, "generic-import-chain.forwarder",
+            GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), [
+                new(forwarderProgram, forward.SourceInputOrdinal,
+                    forward.Span, "Forward"),
+            ]);
+        var forwarderReference = TrRmExecutableCompiler
+            .CreateStandardReference(new TrRmStandardArtifactInput(
+                GenericMethodCallsSchemaIdentity, forwarderArtifact),
+                "generic-import-chain.forwarder", [
+                    new TrRmStandardArtifactInput(
+                        GenericMethodCallsSchemaIdentity, providerArtifact),
+                ]);
+        var importedForward = forwarderReference.GenericMethodImports.Single(
+            static imported => imported.Origin.ExportKey == "Forward");
+        var targetExportKeys = new List<string>();
+        Assert.That(BoundTreeTraversal.VisitExpressions(
+            importedForward.ProofFunction.Body, expression =>
+            {
+                if (expression is BoundCall {
+                        ImportedGenericMethodCall: {
+                            Origin.IsMethodDefTarget: true,
+                        } target,
+                    })
+                {
+                    targetExportKeys.Add(target.Origin.ExportKey);
+                }
+            }), Is.True);
+        Assert.That(targetExportKeys,
+            Is.EquivalentTo(new[] { "Identity", "Confirm", "Complete" }));
+
+        var entryCompilation = Compilation.Create(SyntaxTree.Parse(
+            "int32 Main() { Forward<int32>(value: 42); return 42; }"),
+            forwarderReference, new CompilationOptions {
+                LayoutCoreRegistration =
+                    Terrum.CodeAnalysis.Tests.Semantics
+                        .LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(entryCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                entryCompilation.Diagnostics));
+        Assert.That(NativeJit.Execute(entryCompilation.Program!,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(42));
+    }
+
+    [Test]
     public void BindsAndExecutesSourceFreeGenericUnitForwardingChain()
     {
         var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
