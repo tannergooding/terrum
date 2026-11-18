@@ -118,10 +118,10 @@ prerequisite has already been met.
    class/member/Body closure and targets Construction-1/2 L1R1 and PI1 successors.
    Construction-2 source production emits a bounded I/P initializer for
    direct scalar parameter-to-field initialization; assigned static and
-   readonly-instance register Bodies cover direct scalar returns, int32
-   unary/binary/comparison operations, fixed constants as returns and binary
-   operands, scalar local-copy returns and ordered local-copy chains feeding
-   binary operations. It also
+   readonly-instance register Bodies cover direct scalar returns, fixed-width
+   integer unary/binary/comparison operations, fixed constants as returns and
+   ConstantMap binary operands, scalar local-copy returns and ordered
+   local-copy chains feeding int32 binary operations. It also
    emits empty unit instance methods,
    direct scalar FieldRead/FieldWrite descriptors, exact same-class identity
    forwarders and same-class static/readonly CallSites followed by an int32

@@ -143,35 +143,30 @@ Feature 25 and Bodies for one non-partial constructor per class whose fields
 are initialized directly from scalar parameters. It preserves explicit I/P
 ExportKeys and does not substitute `ClassTryCreate`; keyed and private-P
 producer regressions are added but unverified under the hold.
-Ordinary static class methods now emit assigned register Body kind `01` for
-direct-formal returns, int32 bitwise operations and complement, checked or
-wrapping int32 negation and add/subtract/multiply, checked divide/remainder,
-constant operands in int32 binary Bodies, and fixed-SF1-constant returns;
-fixed scalar constants use the provisional `11/1` path and Blob section
-`0003`. Static int32 comparisons produce Boolean results through
-assigned C2/C3 relation predicates; static and readonly-instance Boolean
-equality/inequality use assigned C2 controls. Static and readonly-instance
-binary Bodies can load scalar operands through ConstantMap. Readonly instance
-methods with two direct
-int32 formal reads
-emit Body kind `01` for bitwise operations and checked/wrapping
-add/subtract/multiply and int32-to-Boolean comparisons; one-formal methods
-support checked/wrapping negation and complement. Exact same-class static and
-readonly-instance scalar/unit
-identity forwarders through assigned Body kind `05`, empty unit-returning instance
-methods, and readonly instance methods returning an explicit scalar parameter
-through ReturnHome with receiver/formal Homes in declaration order, plus a
-readonly instance `int32` XOR Body over two explicit value formals, plus
-same-class static or readonly instance int32 calls followed by binary or
-comparison operations through general CallSite Bodies.
-Static and readonly instance methods can copy one scalar formal to one local
-and return it, or copy through ordered local chains before an int32 binary
-Body using Homes or ConstantMap operands, including comparisons; readonly
-instance methods also retain the local-fed XOR form. The Unit-before-value,
-identity-forwarder,
-XOR, call-forwarding and local
-regressions remain unverified under the hold.
-Other static and instance operations, locals and control flow remain open.
+Construction-2 class methods emit assigned register Body kind `01` for
+direct-formal returns and fixed-width integer unary/binary operations:
+bitwise, checked/wrapping negation and add/subtract/multiply, checked
+divide/remainder, and numeric comparisons. Readonly instance methods support
+the same direct integer operations; static and readonly-instance Boolean
+equality/inequality use C2 controls, while numeric comparisons use C2/C3.
+Target-native integer Body arithmetic remains outside the register validator's
+current type matrix.
+
+Static and readonly-instance fixed-integer binaries can load SF1 scalar operands
+through ConstantMap; fixed scalar returns use the provisional Feature `11/1`
+path and Blob section `0003`. Same-class static or readonly-instance int32
+calls can feed a following binary/comparison through a general CallSite.
+Static and instance bodies support one-formal local copies and ordered copy
+chains feeding int32 binary/comparison operations. Readonly instance bodies
+also return an explicit scalar parameter through ReturnHome, emit direct
+scalar FieldRead/FieldWrite descriptors, and use receiver/formal Homes in
+declaration order. Exact same-class static and readonly-instance scalar/unit
+identity forwarders use assigned Body kind `05`; empty unit instance bodies
+are emitted. These producer and imported-caller regressions remain unverified
+under the hold.
+
+Other static and instance operations, local expression forms and control flow
+remain open.
 Source binding now admits ordinary by-value Unit parameters and `()` defaults; the CM1
 producer/reader preserves their logical signature
 positions and zero-width SF1 values, while Windows x64 lowering omits only

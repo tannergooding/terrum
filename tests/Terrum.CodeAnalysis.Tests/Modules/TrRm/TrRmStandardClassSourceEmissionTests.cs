@@ -730,6 +730,9 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 public int32 Negated(int32 value) {
                     return -value;
                 }
+                public int64 Negate64(int64 value) {
+                    return -value;
+                }
                 public int32 Complemented(int32 value) {
                     return ~value;
                 }
@@ -738,6 +741,15 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 }
                 public static int32 Add(int32 left, int32 right) {
                     return left + right;
+                }
+                public static int64 Add64(int64 left, int64 right) {
+                    return left + right;
+                }
+                public static uint128 Xor128(uint128 left, uint128 right) {
+                    return left ^ right;
+                }
+                public static bool Greater64(int64 left, int64 right) {
+                    return left > right;
                 }
                 public static int32 StaticAddAfterCall(
                     int32 left, int32 right) {
@@ -885,6 +897,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name == "Negated"));
+        var negate64 = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Negate64"));
         var complemented = members.Single(static node =>
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
@@ -893,6 +909,18 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name == "StaticXor"));
+        var add64 = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Add64"));
+        var xor128 = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Xor128"));
+        var greater64 = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Greater64"));
         var add = members.Single(static node =>
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
@@ -1052,12 +1080,20 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                             "Box.Difference"),
                         new TrRmSourceClassMemberExport(0, negated.Span,
                             "Box.Negated"),
+                        new TrRmSourceClassMemberExport(0, negate64.Span,
+                            "Box.Negate64"),
                         new TrRmSourceClassMemberExport(0,
                             complemented.Span, "Box.Complemented"),
                         new TrRmSourceClassMemberExport(0, staticXor.Span,
                             "Box.StaticXor"),
                         new TrRmSourceClassMemberExport(0, add.Span,
                             "Box.Add"),
+                        new TrRmSourceClassMemberExport(0, add64.Span,
+                            "Box.Add64"),
+                        new TrRmSourceClassMemberExport(0, xor128.Span,
+                            "Box.Xor128"),
+                        new TrRmSourceClassMemberExport(0, greater64.Span,
+                            "Box.Greater64"),
                         new TrRmSourceClassMemberExport(0,
                             staticAddAfterCall.Span,
                             "Box.StaticAddAfterCall"),
@@ -1297,6 +1333,33 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 0x17, 0,
             }));
         Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.Negate64", out var negate64Definition), Is.True);
+        var negate64MethodRow
+            = checked((int)(negate64Definition & 0x00FF_FFFF));
+        var negate64BodyRow = tables.Methods.GetBodyRow(negate64MethodRow);
+        Assert.That(negate64BodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(negate64BodyRow,
+            tables.Contracts.Count);
+        var negate64Body = tables.Bodies.GetRegisterBody(negate64BodyRow,
+            tables.Contracts.Count);
+        var negate64Function = program.Functions.Single(
+            static function => function.Name == "Negate64");
+        var negate64Unary = (BoundUnary)((BoundReturn)
+            negate64Function.Body.Statements.Single()).Value!;
+        var negate64Control = negate64Unary.OverflowBehavior switch
+        {
+            BoundIntegerOverflowBehavior.Checked => (byte)0x04,
+            BoundIntegerOverflowBehavior.Wrapping => (byte)0x08,
+            _ => throw new InvalidOperationException(
+                "The Negate64 fixture must use a supported integer overflow policy."),
+        };
+        Assert.That(negate64Body.GetBlockCode(0).ToArray(), Is.EqualTo(
+            new byte[] {
+                0xD5, 0, 1, 0,
+                0xC0, negate64Control, 0xF0, 0xF0,
+                0x17, 0,
+            }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
             "Box.Complemented", out var complementedDefinition), Is.True);
         var complementedMethodRow
             = checked((int)(complementedDefinition & 0x00FF_FFFF));
@@ -1327,6 +1390,23 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             tables.Contracts.Count);
         Assert.That(staticXorBody.HomeCount, Is.EqualTo(2));
         Assert.That(staticXorBody.GetBlockCode(0).ToArray(), Is.EqualTo(
+            new byte[] {
+                0xD5, 0, 0, 0,
+                0xD5, 1, 1, 0,
+                0xC1, 0x03, 0xF0, 0x10,
+                0x17, 0,
+            }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.Xor128", out var xor128Definition), Is.True);
+        var xor128MethodRow
+            = checked((int)(xor128Definition & 0x00FF_FFFF));
+        var xor128BodyRow = tables.Methods.GetBodyRow(xor128MethodRow);
+        Assert.That(xor128BodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(xor128BodyRow,
+            tables.Contracts.Count);
+        var xor128Body = tables.Bodies.GetRegisterBody(xor128BodyRow,
+            tables.Contracts.Count);
+        Assert.That(xor128Body.GetBlockCode(0).ToArray(), Is.EqualTo(
             new byte[] {
                 0xD5, 0, 0, 0,
                 0xD5, 1, 1, 0,
@@ -1413,6 +1493,27 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 0xD5, 0, 0, 0,
                 0xD5, 1, 1, 0,
                 0xC0, addControl, 0xF0, 0x10,
+                0x17, 0,
+            }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.Add64", out var add64Definition), Is.True);
+        var add64MethodRow
+            = checked((int)(add64Definition & 0x00FF_FFFF));
+        var add64BodyRow = tables.Methods.GetBodyRow(add64MethodRow);
+        Assert.That(add64BodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(add64BodyRow,
+            tables.Contracts.Count);
+        var add64Body = tables.Bodies.GetRegisterBody(add64BodyRow,
+            tables.Contracts.Count);
+        var add64Function = program.Functions.Single(
+            static function => function.Name == "Add64");
+        var add64Binary = (BoundBinary)((BoundReturn)
+            add64Function.Body.Statements.Single()).Value!;
+        Assert.That(add64Body.GetBlockCode(0).ToArray(), Is.EqualTo(
+            new byte[] {
+                0xD5, 0, 0, 0,
+                0xD5, 1, 1, 0,
+                0xC0, GetArithmeticControl(add64Binary), 0xF0, 0x10,
                 0x17, 0,
             }));
         Assert.That(tables.Exports.TryGetDefinitionForKey(1,
@@ -1629,6 +1730,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         AssertComparisonBody("Box.EqualTo", "EqualTo", 2, 2, 0, 1);
         AssertComparisonBody("Box.LessOrEqual", "LessOrEqual", 3, 2, 0, 1);
         AssertComparisonBody("Box.GreaterThan", "GreaterThan", 4, 3, 0, 1);
+        AssertComparisonBody("Box.Greater64", "Greater64", 4, 2, 0, 1);
         AssertComparisonBody("Box.GreaterOrEqual", "GreaterOrEqual", 6,
             2, 1, 0);
         AssertComparisonBody("Box.NotEqual", "NotEqual", 13, 3, 0, 1);
@@ -2021,6 +2123,18 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             }
             int32 UseStaticXor() { return Box.StaticXor(4, 5); }
             int32 UseAdd() { return Box.Add(4, 5); }
+            int64 UseAdd64(int64 left, int64 right) {
+                return Box.Add64(left, right);
+            }
+            uint128 UseXor128(uint128 left, uint128 right) {
+                return Box.Xor128(left, right);
+            }
+            int64 UseNegate64(Box value, int64 input) {
+                return value.Negate64(input);
+            }
+            bool UseGreater64(int64 left, int64 right) {
+                return Box.Greater64(left, right);
+            }
             int32 UseStaticAddAfterCall() {
                 return Box.StaticAddAfterCall(2, 3);
             }
