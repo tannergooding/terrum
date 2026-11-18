@@ -635,13 +635,31 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var middleArtifact = TrRmExecutableCompiler.EmitStandard(
             middleProgram, "StructMiddleProvider", schemaIdentity, 1,
             [wrapperExport], [], [], []);
+        var middleTables
+            = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                    middleArtifact, SchemaFor(schemaIdentity)));
+        var importedLeafField = Enumerable.Range(1,
+                middleTables.Imports.Count)
+            .Single(row =>
+                (middleTables.Imports
+                    .GetExpectedDefinitionForImportRow(row) >> 24) == 0x14
+                && middleTables.Imports.GetBindingForImportRow(row)
+                    .ExportKey == "field.leaf.id");
+        Assert.That(middleTables.Imports.GetBindingForImportRow(
+            importedLeafField).ProducerIdentity,
+            Is.EqualTo("StructLeafProvider"));
         var middleInput = new TrRmStandardArtifactInput(schemaIdentity,
             middleArtifact);
         var middleReference = TrRmExecutableCompiler.CreateStandardReference(
             middleInput, "StructMiddleProvider", [leafInput],
             ["type.wrapper"]);
-        Assert.That(middleReference.Structures.Any(
-            static structure => structure.Name == "Demo.Leaf"), Is.True);
+        var importedLeaf = middleReference.Structures.Single(
+            static structure => structure.Name == "Demo.Leaf");
+        Assert.That(importedLeaf.StandardTypeOrigin, Is.Not.Null);
+        Assert.That(importedLeaf.Fields.Single(
+            static field => field.Name == "Id").StandardFieldOrigin,
+            Is.Not.Null);
 
         var consumerTree = SyntaxTree.Parse("""
             namespace Demo {
@@ -684,6 +702,18 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var reemitted = TrRmExecutableCompiler.EmitStandard(
             sourceFreeCompilation.Program!, "StructConsumer",
             schemaIdentity, 1);
+        var reemittedTables
+            = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                    reemitted, SchemaFor(schemaIdentity)));
+        Assert.That(Enumerable.Range(1, reemittedTables.Imports.Count)
+                .Any(row =>
+                    (reemittedTables.Imports
+                        .GetExpectedDefinitionForImportRow(row) >> 24)
+                        == 0x14
+                    && reemittedTables.Imports.GetBindingForImportRow(row)
+                        .ExportKey == "field.leaf.id"),
+            Is.True);
         var reloadedReference = TrRmExecutableCompiler.CreateStandardReference(
             new TrRmStandardArtifactInput(schemaIdentity, reemitted),
             "StructConsumer", providers, ["type.packet"]);
@@ -693,6 +723,90 @@ internal sealed class TrRmC1EnumClosureSourceTests
         Assert.That(reloadedCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine,
                 reloadedCompilation.Diagnostics));
+
+        var relocatedLeafTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public struct Padding { public int32 Value; }
+                public struct Leaf { public int32 Id; }
+            }
+            """);
+        var relocatedLeafCompilation
+            = Compilation.CreateLibrary(relocatedLeafTree);
+        Assert.That(relocatedLeafCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                relocatedLeafCompilation.Diagnostics));
+        var relocatedLeafProgram
+            = (BoundProgram)relocatedLeafCompilation.Program!;
+        var relocatedLeafArtifact = TrRmExecutableCompiler.EmitStandard(
+            relocatedLeafProgram, "StructLeafProvider", schemaIdentity, 1, [
+                new TrRmSourceTypeExport("Demo", "Padding", "type.padding"),
+                leafExport,
+            ], [], [], []);
+        var relocatedLeafTables
+            = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                    relocatedLeafArtifact, SchemaFor(schemaIdentity)));
+        var originalLeafTables
+            = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                    leafArtifact, SchemaFor(schemaIdentity)));
+        var originalLeafTypeDefinition
+            = originalLeafTables.Exports.GetExportsForModule(1)
+                .Single(static export =>
+                    export.ExportKey == "type.leaf").Definition;
+        var relocatedLeafTypeDefinition
+            = relocatedLeafTables.Exports.GetExportsForModule(1)
+                .Single(static export =>
+                    export.ExportKey == "type.leaf").Definition;
+        var originalLeafFieldDefinition
+            = originalLeafTables.Exports.GetExportsForModule(1)
+                .Single(static export =>
+                    export.ExportKey == "field.leaf.id").Definition;
+        var relocatedLeafFieldDefinition
+            = relocatedLeafTables.Exports.GetExportsForModule(1)
+                .Single(static export =>
+                    export.ExportKey == "field.leaf.id").Definition;
+        Assert.That(relocatedLeafTypeDefinition,
+            Is.Not.EqualTo(originalLeafTypeDefinition));
+        Assert.That(relocatedLeafFieldDefinition,
+            Is.Not.EqualTo(originalLeafFieldDefinition));
+
+        var relocatedLeafInput = new TrRmStandardArtifactInput(
+            schemaIdentity, relocatedLeafArtifact);
+        var relocatedProviders = new[] { middleInput, relocatedLeafInput };
+        var relocatedReference = TrRmExecutableCompiler.CreateStandardReference(
+            consumerInput, "StructConsumer", relocatedProviders,
+            ["type.packet"]);
+        var remappedLeaf = relocatedReference.Structures.Single(
+            static structure => structure.Name == "Demo.Leaf");
+        Assert.That(remappedLeaf.StandardTypeOrigin!.DefinitionId,
+            Is.EqualTo(relocatedLeafTypeDefinition));
+        Assert.That(remappedLeaf.Fields.Single(
+            static field => field.Name == "Id")
+            .StandardFieldOrigin!.DefinitionId,
+            Is.EqualTo(relocatedLeafFieldDefinition));
+        var relocatedSourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), relocatedReference);
+        Assert.That(relocatedSourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                relocatedSourceFreeCompilation.Diagnostics));
+        var relocatedReemitted = TrRmExecutableCompiler.EmitStandard(
+            relocatedSourceFreeCompilation.Program!, "StructConsumer",
+            schemaIdentity, 1);
+        var relocatedReloadedReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    relocatedReemitted), "StructConsumer",
+                relocatedProviders, ["type.packet"]);
+        var reloadedRelocatedLeaf
+            = relocatedReloadedReference.Structures.Single(
+                static structure => structure.Name == "Demo.Leaf");
+        Assert.That(reloadedRelocatedLeaf.StandardTypeOrigin!.DefinitionId,
+            Is.EqualTo(relocatedLeafTypeDefinition));
+        Assert.That(reloadedRelocatedLeaf.Fields.Single(
+            static field => field.Name == "Id")
+            .StandardFieldOrigin!.DefinitionId,
+            Is.EqualTo(relocatedLeafFieldDefinition));
 
         var incompatibleLeafTree = SyntaxTree.Parse("""
             namespace Demo {
