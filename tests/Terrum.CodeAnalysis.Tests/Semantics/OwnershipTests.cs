@@ -494,6 +494,42 @@ internal sealed class OwnershipTests
     }
 
     [Test]
+    public void PartialClassCleanupSelectionRetainsThePrimaryOwner()
+    {
+        var compilation = Compilation.CreateLibrary([
+            SyntaxTree.Parse("""
+                public partial class Owner {
+                    public int32 Value;
+                    public Owner(int32 value) { Value = value; }
+                }
+                """),
+            SyntaxTree.Parse("""
+                public partial class Owner {
+                    [Cleanup] private void Close() { }
+                }
+                """),
+        ]);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var owner = program.Classes.Single();
+        Assert.That(owner.HasCleanup, Is.True);
+        Assert.That(owner.CleanupMethod, Is.EqualTo("Owner.Close"));
+        var declaration = program.SourceClassProgramAssociation!
+            .Declarations.Single();
+        Assert.That(declaration.SourceInputOrdinal, Is.Zero);
+        Assert.That(declaration.Parts.Single(
+            static part => part.IsPrimary).SourceInputOrdinal, Is.Zero);
+        Assert.That(declaration.Parts.Single(
+            static part => !part.IsPrimary).SourceInputOrdinal, Is.EqualTo(1));
+        var cleanup = program.Functions.Single(
+            static function => function.IsCleanup);
+        Assert.That(cleanup.SourceDeclarationInputOrdinal, Is.EqualTo(1));
+        Assert.That(cleanup.DeclaringStruct, Is.EqualTo("Owner"));
+    }
+
+    [Test]
     public void ManagedClassCleanupCannotBeCalledDirectly()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
