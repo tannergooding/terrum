@@ -152,7 +152,7 @@ public static partial class TrRmExecutableCompiler
             artifact = AddImportedGenericInterfaceMetadata(artifact, program,
                 schema);
             artifact = AddImportedGenericMethodMetadata(artifact,
-                emissionRows, schema,
+                emissionRows, exportedInterfaceTypeSpecRows, schema,
                 out importedGenericMethodTargetTokens);
         }
         if (emissionRows.Count != 0
@@ -1003,6 +1003,27 @@ public static partial class TrRmExecutableCompiler
             RuntimeParameterCount
                 = expectedTarget.ProofFunction.ParameterCount,
         };
+        var callerFormalOrdinalsByTargetFormal
+            = new Dictionary<int, int>();
+        for (var targetOrdinal = 0;
+            targetOrdinal < expectedTarget.Formals.Length; targetOrdinal++)
+        {
+            var actualType = typeArguments[targetOrdinal];
+            for (var callerOrdinal = 0;
+                callerOrdinal < definition.Formals.Length; callerOrdinal++)
+            {
+                if (definition.Formals[callerOrdinal].PlaceholderType
+                    != actualType)
+                {
+                    continue;
+                }
+
+                callerFormalOrdinalsByTargetFormal.Add(targetOrdinal,
+                    callerOrdinal);
+                break;
+            }
+        }
+
         var typeArgumentsInBody
             = new TrRmRegisterBodyGenericCallArgument[typeArguments.Length];
         for (var ordinal = 0; ordinal < typeArguments.Length; ordinal++)
@@ -1016,9 +1037,11 @@ public static partial class TrRmExecutableCompiler
                 || !formal.Requirements.IsDefaultOrEmpty
                 || !formalSignature.Requirements.IsDefaultOrEmpty
                 || formal.InterfaceConstraints.IsDefault
-                || !formal.InterfaceConstraints.IsEmpty
                 || formalSignature.InterfaceConstraints.IsDefault
-                || !formalSignature.InterfaceConstraints.IsEmpty
+                || formal.InterfaceConstraints.Length
+                    != formalSignature.InterfaceConstraints.Length
+                || !formal.InterfaceConstraints.SequenceEqual(
+                    formalSignature.InterfaceConstraints)
                 || formal.OwnershipDomain != 1
                 || formal.NullabilityDomain is < 1 or > 2)
             {
@@ -1056,6 +1079,25 @@ public static partial class TrRmExecutableCompiler
                 {
                     throw Unsupported(
                         $"Generic MethodDef '{definition.Name}' forwards a caller formal without satisfying the imported target domain.");
+                }
+                foreach (var targetConstraint
+                    in formal.InterfaceConstraints)
+                {
+                    if (!TrySubstituteGenericMethodInterfaceConstraint(
+                            targetConstraint,
+                            callerFormalOrdinalsByTargetFormal,
+                            out var substitutedConstraint)
+                        || !callerFormal.InterfaceConstraints.Any(
+                            callerConstraint =>
+                                BoundInterfaceContract
+                                    .IsInInheritanceClosure(
+                                        callerConstraint,
+                                        substitutedConstraint,
+                                        definition.ProofProgram.Interfaces)))
+                    {
+                        throw Unsupported(
+                            $"Generic MethodDef '{definition.Name}' forwards a caller formal without satisfying the imported interface constraint.");
+                    }
                 }
             }
             else if (formal.OwnershipDomain == 2
@@ -1826,9 +1868,11 @@ public static partial class TrRmExecutableCompiler
                         || !formal.Requirements.IsDefaultOrEmpty
                         || !formalSignature.Requirements.IsDefaultOrEmpty
                         || formal.InterfaceConstraints.IsDefault
-                        || !formal.InterfaceConstraints.IsEmpty
                         || formalSignature.InterfaceConstraints.IsDefault
-                        || !formalSignature.InterfaceConstraints.IsEmpty)
+                        || formal.InterfaceConstraints.Length
+                            != formalSignature.InterfaceConstraints.Length
+                        || !formal.InterfaceConstraints.SequenceEqual(
+                            formalSignature.InterfaceConstraints))
                     {
                         throw Unsupported(
                             $"Imported generic MethodDef '{expectedTarget.Signature.Name}' has a call-chain formal outside the selected G1 contract subset.");
@@ -2119,6 +2163,28 @@ public static partial class TrRmExecutableCompiler
             var targetArguments
                 = new TrRmRegisterBodyGenericCallArgument[
                     typeArguments.Length];
+            var callerFormalOrdinalsByTargetFormal
+                = new Dictionary<int, int>();
+            for (var targetOrdinal = 0;
+                targetOrdinal < typeArguments.Length; targetOrdinal++)
+            {
+                var actualType = typeArguments[targetOrdinal];
+                for (var callerOrdinal = 0;
+                    callerOrdinal < definition.Formals.Length;
+                    callerOrdinal++)
+                {
+                    if (definition.Formals[callerOrdinal].PlaceholderType
+                        != actualType)
+                    {
+                        continue;
+                    }
+
+                    callerFormalOrdinalsByTargetFormal.Add(targetOrdinal,
+                        callerOrdinal);
+                    break;
+                }
+            }
+
             for (var ordinal = 0; ordinal < targetArguments.Length;
                 ordinal++)
             {
@@ -2154,9 +2220,31 @@ public static partial class TrRmExecutableCompiler
                         throw Unsupported(
                             $"Generic MethodDef '{definition.Name}' forwards a caller formal without satisfying the target domain.");
                     }
+
+                    foreach (var targetConstraint
+                        in formal.InterfaceConstraints)
+                    {
+                        if (!TrySubstituteGenericMethodInterfaceConstraint(
+                                targetConstraint,
+                                callerFormalOrdinalsByTargetFormal,
+                                out var substitutedConstraint)
+                            || !callerFormal.InterfaceConstraints.Any(
+                                callerConstraint =>
+                                    BoundInterfaceContract
+                                        .IsInInheritanceClosure(
+                                            callerConstraint,
+                                            substitutedConstraint,
+                                            definition.ProofProgram
+                                                .Interfaces)))
+                        {
+                            throw Unsupported(
+                                $"Generic MethodDef '{definition.Name}' forwards a caller formal without satisfying the target interface constraint.");
+                        }
+                    }
                 }
                 else if (formal.OwnershipDomain == 2
-                    || formal.RequiresWritable)
+                    || formal.RequiresWritable
+                    || !formal.InterfaceConstraints.IsEmpty)
                 {
                     throw Unsupported(
                         "A G1 GenericCall chain has a TypeActual outside its supported domain.");
@@ -2722,6 +2810,8 @@ public static partial class TrRmExecutableCompiler
 
     private static byte[] AddImportedGenericMethodMetadata(
         byte[] artifact, IReadOnlyList<GenericMethodEmission> emissions,
+        IReadOnlyDictionary<(string QualifiedName, int Arity), uint>
+            exportedInterfaceTypeSpecRows,
         TrRmArtifactSchema schema,
         out Dictionary<BoundGenericMethodImport, uint>
             importedGenericMethodTargetTokens)
@@ -2881,6 +2971,8 @@ public static partial class TrRmExecutableCompiler
         var genericParameterRows = ReadGenericParamRows(sections);
         var constraintRows = ReadConstraintRows(sections);
         var contractRows = ReadVariableRows(sections, 0x001B, 8, 4);
+        var importedInterfaceImportRows
+            = ReadImportedInterfaceImportRows(sections, sourceStrings);
         var methodParameterLabelBytes = TryGetSection(sections, 0x0066,
                 out var methodParameterLabelSection)
             ? methodParameterLabelSection.Bytes.ToArray().ToList() : [];
@@ -2946,12 +3038,29 @@ public static partial class TrRmExecutableCompiler
                 0x1C00_0000u | checked((uint)importRow));
 
             var genericFirst = checked(genericParameterRows.Count + 1);
-            var formalGenericParamRows
-                = new Dictionary<PrimitiveType, int>(
-                    expected.Formals.Length);
             var formalTypeSpecRows
                 = new Dictionary<PrimitiveType, uint>(
                     expected.Formals.Length);
+            var genericParamRows = new int[expected.Formals.Length];
+            for (var formalOrdinal = 0;
+                formalOrdinal < expected.Formals.Length; formalOrdinal++)
+            {
+                var formal = expected.Formals[formalOrdinal];
+                var genericParamRow = checked(
+                    (int)genericFirst + formalOrdinal);
+                genericParamRows[formalOrdinal] = genericParamRow;
+                var typeSpecRef = checked(
+                    (uint)typeSpecRows.Count + 1);
+                typeSpecRows.Add(TrRmTypeSpecTableWriter.Reference(0x04,
+                    checked((uint)genericParamRow)));
+                if (!formalTypeSpecRows.TryAdd(formal.PlaceholderType,
+                        typeSpecRef))
+                {
+                    throw Unsupported(
+                        $"Imported generic MethodDef '{proofFunction.Name}' has duplicate formal type identities.");
+                }
+            }
+
             uint GetExpectedTypeSpecRef(PrimitiveType type)
             {
                 if (formalTypeSpecRows.TryGetValue(type,
@@ -2960,19 +3069,8 @@ public static partial class TrRmExecutableCompiler
                     return formalTypeSpecRef;
                 }
 
-                if (!formalGenericParamRows.TryGetValue(type,
-                        out var genericParamRow))
-                {
-                    return GetBuiltInTypeSpecRef(type,
-                        builtInTypeSpecRows, typeSpecRows);
-                }
-
-                formalTypeSpecRef = checked(
-                    (uint)typeSpecRows.Count + 1);
-                typeSpecRows.Add(TrRmTypeSpecTableWriter.Reference(0x04,
-                    checked((uint)genericParamRow)));
-                formalTypeSpecRows.Add(type, formalTypeSpecRef);
-                return formalTypeSpecRef;
+                return GetBuiltInTypeSpecRef(type,
+                    builtInTypeSpecRows, typeSpecRows);
             }
 
             uint GetExpectedTypeDefaultRef(
@@ -3021,8 +3119,8 @@ public static partial class TrRmExecutableCompiler
                             $"Imported generic MethodDef '{proofFunction.Name}' has a type default outside the earlier-formal subset.");
                     }
 
-                    return GetExpectedTypeSpecRef(
-                        expected.Formals[dependency].PlaceholderType);
+                    return formalTypeSpecRows[
+                        expected.Formals[dependency].PlaceholderType];
                 }
 
                 if (term.Kind == BoundGenericMethodTypeTermKind.Concrete
@@ -3036,6 +3134,25 @@ public static partial class TrRmExecutableCompiler
                     $"Imported generic MethodDef '{proofFunction.Name}' has a type default outside the direct-type subset.");
             }
 
+            if (!schema.UsesMethodParameterLabels()
+                && expected.Formals.Any(static formal =>
+                    !formal.InterfaceConstraints.IsEmpty))
+            {
+                throw Unsupported(
+                    "Imported generic MethodDef interface constraints require the exact G1L1 schema.");
+            }
+
+            var targetDefinition = new BoundGenericMethodDefinition(
+                -1, signature.Name, signature.IsPublic,
+                signature.RequiresUnsafeCaller, -1, -1, default,
+                expected.Formals, emissions[0].Definition.ProofProgram) {
+                FormalTypeOwnerOrdinal = expected.FormalTypeOwnerOrdinal,
+                IsStatic = signature.IsStatic,
+                FormalOrder = signature.FormalOrder,
+                RuntimeParameterCount = proofFunction.ParameterCount,
+            };
+            var interfaceConstraintVisits
+                = SemanticVerifier.MaximumAnalysisVisits;
             for (var formalOrdinal = 0;
                 formalOrdinal < expected.Formals.Length; formalOrdinal++)
             {
@@ -3068,9 +3185,11 @@ public static partial class TrRmExecutableCompiler
                     || !formal.Requirements.IsDefaultOrEmpty
                     || !formalSignature.Requirements.IsDefaultOrEmpty
                     || formal.InterfaceConstraints.IsDefault
-                    || !formal.InterfaceConstraints.IsEmpty
                     || formalSignature.InterfaceConstraints.IsDefault
-                    || !formalSignature.InterfaceConstraints.IsEmpty
+                    || formal.InterfaceConstraints.Length
+                        != formalSignature.InterfaceConstraints.Length
+                    || !formal.InterfaceConstraints.SequenceEqual(
+                        formalSignature.InterfaceConstraints)
                     || formal.OwnershipDomain is < 1 or > 3
                     || formal.NullabilityDomain is < 1 or > 2)
                 {
@@ -3078,8 +3197,7 @@ public static partial class TrRmExecutableCompiler
                         $"Imported generic MethodDef '{proofFunction.Name}' has a formal outside the selected G1 contract subset.");
                 }
 
-                var genericParamRow
-                    = checked(genericParameterRows.Count + 1);
+                var genericParamRow = genericParamRows[formalOrdinal];
                 var formalNameStringRow = names.Count + 1;
                 names.Add((formal.Name, 1));
                 var defaultArgumentRef
@@ -3096,6 +3214,22 @@ public static partial class TrRmExecutableCompiler
                     constraintRows.Add(new TrRmConstraintRow(
                         genericParamRow, 2, 3));
                 }
+                for (var constraintOrdinal = 0;
+                    constraintOrdinal < formal.InterfaceConstraints.Length;
+                    constraintOrdinal++)
+                {
+                    var constraintTypeSpec
+                        = GenericMethodInterfaceConstraintTypeSpecRef(
+                            formal.InterfaceConstraints[constraintOrdinal],
+                            targetDefinition,
+                            exportedInterfaceTypeSpecRows,
+                            importedInterfaceImportRows,
+                            formalTypeSpecRows, genericParamRows,
+                            builtInTypeSpecRows, typeSpecRows, 0,
+                            ref interfaceConstraintVisits);
+                    constraintRows.Add(new TrRmConstraintRow(
+                        genericParamRow, 1, constraintTypeSpec));
+                }
                 var constraintCount = constraintRows.Count
                     - constraintFirst + 1;
                 if (constraintCount == 0)
@@ -3108,12 +3242,6 @@ public static partial class TrRmExecutableCompiler
                     constraintFirst, constraintCount, 1,
                     formal.OwnershipDomain, formal.NullabilityDomain,
                     0, defaultArgumentRef));
-                if (!formalGenericParamRows.TryAdd(
-                        formal.PlaceholderType, genericParamRow))
-                {
-                    throw Unsupported(
-                        $"Imported generic MethodDef '{proofFunction.Name}' has duplicate formal type identities.");
-                }
             }
 
             var firstParameter = proofFunction.ParameterCount == 0 ? 0

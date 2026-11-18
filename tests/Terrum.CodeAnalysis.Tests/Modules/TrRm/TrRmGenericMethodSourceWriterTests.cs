@@ -2514,6 +2514,121 @@ internal sealed class TrRmGenericMethodSourceWriterTests
     }
 
     [Test]
+    public void ReemitsImportedMethodInterfaceConstraints()
+    {
+        const string interfaceTypeExportKey = "example.interface/I";
+        var providerArtifact = EmitG1InterfaceProvider(
+            "interface.provider", "int32", interfaceTypeExportKey,
+            "example.interface/I.Read", "example.interface/I.Clear",
+            requiresWritable: true);
+        var providerInput = new TrRmStandardArtifactInput(
+            GenericMethodCallsSchemaIdentity, providerArtifact);
+        var providerReference = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, "interface.provider",
+            Array.Empty<TrRmStandardArtifactInput>());
+        var middleCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                namespace Consumer {
+                    public int32 Needs<T>(T value)
+                        where T : write, Example.I<write T> {
+                        return 7;
+                    }
+                }
+                """), providerReference);
+        Assert.That(middleCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                middleCompilation.Diagnostics));
+        var middleProgram = middleCompilation.Program!;
+        var needs = middleProgram.GenericMethodDefinitions.Single();
+        var middleArtifact = TrRmExecutableCompiler.EmitStandard(
+            middleProgram, "interface.middle",
+            GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), [
+                new(middleProgram, needs.SourceInputOrdinal, needs.Span,
+                    "consumer.method/Needs"),
+            ]);
+        var middleInput = new TrRmStandardArtifactInput(
+            GenericMethodCallsSchemaIdentity, middleArtifact);
+        var middleReference = TrRmExecutableCompiler.CreateStandardReference(
+            middleInput, "interface.middle", [providerInput]);
+        var relayCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                namespace Consumer {
+                    public int32 Relay<T>(T value)
+                        where T : write, Example.I<write T> {
+                        return Needs<T>(value);
+                    }
+                }
+                """), middleReference);
+        Assert.That(relayCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                relayCompilation.Diagnostics));
+        var relayProgram = relayCompilation.Program!;
+        SemanticVerifier.VerifyLibrary(relayProgram);
+        var relay = relayProgram.GenericMethodDefinitions.Single();
+        var relayArtifact = TrRmExecutableCompiler.EmitStandard(
+            relayProgram, "interface.relay",
+            GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), [
+                new(relayProgram, relay.SourceInputOrdinal, relay.Span,
+                    "consumer.method/Relay"),
+            ]);
+        var relayReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(
+                GenericMethodCallsSchemaIdentity, relayArtifact),
+            "interface.relay", [middleInput, providerInput]);
+        var importedRelay = relayReference.GenericMethodImports.Single(
+            static imported =>
+                imported.Origin.ExportKey == "consumer.method/Relay");
+        var relayCall = (BoundCall)((BoundReturn)
+            importedRelay.ProofFunction.Body.Statements.Single()).Value!;
+        var needsImport = relayCall.ImportedGenericMethodCall!;
+        Assert.That(needsImport.Origin.ProviderIdentity,
+            Is.EqualTo("interface.middle"));
+        var expectedConstraint = needsImport.Binding!.Expected.Formals[0]
+            .InterfaceConstraints.Single();
+        Assert.That(expectedConstraint.NominalName, Is.EqualTo("Example.I"));
+        Assert.That(expectedConstraint.ModuleImport!.ProducerIdentity,
+            Is.EqualTo("interface.provider"));
+        Assert.That(expectedConstraint.TypeArguments.Single().Type!
+            .IsWritable, Is.True);
+
+        var strongerMiddleCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                namespace Consumer {
+                    public int32 Needs<T>(T value)
+                        where T : write, [Blittable],
+                            Example.I<write T> {
+                        return 7;
+                    }
+                }
+                """), providerReference);
+        Assert.That(strongerMiddleCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                strongerMiddleCompilation.Diagnostics));
+        var strongerMiddleProgram = strongerMiddleCompilation.Program!;
+        var strongerNeeds
+            = strongerMiddleProgram.GenericMethodDefinitions.Single();
+        var strongerMiddleArtifact = TrRmExecutableCompiler.EmitStandard(
+            strongerMiddleProgram, "interface.middle",
+            GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), [
+                new(strongerMiddleProgram, strongerNeeds.SourceInputOrdinal,
+                    strongerNeeds.Span, "consumer.method/Needs"),
+            ]);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(
+                    GenericMethodCallsSchemaIdentity, relayArtifact),
+                "interface.relay", [
+                    new TrRmStandardArtifactInput(
+                        GenericMethodCallsSchemaIdentity,
+                        strongerMiddleArtifact),
+                    providerInput,
+                ]));
+    }
+
+    [Test]
     public void EmitsAndReconstructsG1L1OpenInterfaceRequirementCalls()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""

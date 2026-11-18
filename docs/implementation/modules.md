@@ -65,8 +65,12 @@ and an imported terminal unit call; a source-free provider/consumer JIT
 regression is added but remains unverified. Expected imported declarations now
 retain concrete built-in and earlier-formal type defaults; source-free
 round-trip and incompatible-default replacement coverage is added but
-unverified. Composite/wrapper defaults, interface constraints, dependencies,
-owners and constructed/reference signatures remain open.
+unverified. Composite/wrapper defaults, broader dependency contracts, owners
+and constructed/reference signatures remain open. G1L1 imported
+MethodDef expectations now retain interface-instance constraints, and direct
+imported calls require matching caller-formal constraints; the source-free
+three-artifact binding and incompatible-replacement regression is added but
+unverified. Closed constrained TypeActual witness evidence remains open.
 The writer also copies local declaration
 graphs or exact imported expectations, including formal order, fields, declared
 layouts and frozen scalar constant actuals/defaults; nested constructions and
