@@ -1372,6 +1372,7 @@ public static partial class TrRmExecutableCompiler
                 + checked(outputCalls.Count * 6) + 2)),
         };
         var currentCode = codeBlocks[0];
+        var loopTargets = new List<(int BreakBlock, int ContinueBlock)>();
         foreach (var local in backingLocals)
         {
             if (local.Initializer is BoundConstant scalarConstant)
@@ -1672,7 +1673,7 @@ public static partial class TrRmExecutableCompiler
         bool AlwaysTerminates(BoundStatement statement)
         {
             return statement switch {
-                BoundReturn => true,
+                BoundReturn or BoundBreak or BoundContinue => true,
                 BoundBlock block => block.Statements.Any(AlwaysTerminates),
                 BoundUnsafe unsafeBlock => AlwaysTerminates(
                     unsafeBlock.Body),
@@ -1844,13 +1845,42 @@ public static partial class TrRmExecutableCompiler
                     AppendConditionalFlow(loop.Condition, bodyBlock,
                         afterBlock);
                     SelectBlock(bodyBlock);
-                    if (!EmitStatement(loop.Body))
+                    loopTargets.Add((afterBlock, conditionBlock));
+                    var bodyReturned = EmitStatement(loop.Body);
+                    loopTargets.RemoveAt(loopTargets.Count - 1);
+                    if (!bodyReturned)
                     {
                         AppendBranch(conditionBlock);
                     }
                     SelectBlock(afterBlock);
                     return false;
                 }
+
+                case BoundBreak exit:
+                    if (exit.TargetDepth < 1
+                        || exit.TargetDepth > loopTargets.Count)
+                    {
+                        throw Unsupported(
+                            "A direct NativeOutput break has no emitted loop target.");
+                    }
+
+                    AppendBranch(
+                        loopTargets[loopTargets.Count - exit.TargetDepth]
+                            .BreakBlock);
+                    return true;
+
+                case BoundContinue continuation:
+                    if (continuation.TargetDepth < 1
+                        || continuation.TargetDepth > loopTargets.Count)
+                    {
+                        throw Unsupported(
+                            "A direct NativeOutput continue has no emitted loop target.");
+                    }
+
+                    AppendBranch(
+                        loopTargets[loopTargets.Count
+                            - continuation.TargetDepth].ContinueBlock);
+                    return true;
 
                 case BoundExpressionStatement {
                     Expression: BoundCall call,

@@ -2571,6 +2571,151 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             Is.EqualTo(artifact));
     }
 
+    [TestCase("trrm/1-draft-foreign-invocation-contracts-1", false)]
+    [TestCase("trrm/1-draft-foreign-invocation-storage-addresses-1", true)]
+    public void StandardDirectNativeOutputCallsRoundTripNearestLoopTransfers(
+        string schemaIdentity, bool storageAddressSchema)
+    {
+        const string moduleIdentity = "native-output-nearest-loop-transfers";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll", "QueryPerformanceCounter")]
+            extern int32 QueryPerformanceCounter(
+                [Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<int64> ticks);
+
+            public int32 Probe(bool repeat, bool skip) {
+                while (repeat) {
+                    if (skip) {
+                        continue;
+                    }
+                    break;
+                }
+                init mut int64 ticks;
+                unsafe { return QueryPerformanceCounter(&init ticks); }
+            }
+            """), NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity, 1);
+        var index = storageAddressSchema
+            ? TrRmArtifactIndex
+                .ForForeignInvocationStorageAddressDraft(artifact)
+            : TrRmArtifactIndex.ForForeignInvocationDraft(artifact);
+        var tables = storageAddressSchema
+            ? TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageAddressDraftAndGetExecutionTables(
+                    index)
+            : TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationDraftAndGetExecutionTables(index);
+        var methodRow = Enumerable.Range(1, tables.Methods.Count).Single(
+            row => tables.Methods.GetName(row) == "Probe");
+        tables.ValidateRegisterBodyMapsForMethod(methodRow);
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(methodRow), tables.Contracts.Count);
+        Assert.That(body.BlockCount, Is.EqualTo(7));
+        Assert.That(body.GetBlockCode(1)[^4], Is.EqualTo(0xE4));
+        Assert.That(body.GetBlockCode(2)[^4], Is.EqualTo(0xE4));
+        Assert.That(body.GetBlockCode(4).ToArray(),
+            Is.EqualTo(new byte[] { 0xE3, 0, 1, 0 }));
+        Assert.That(body.GetBlockCode(5).ToArray(),
+            Is.EqualTo(new byte[] { 0xE3, 0, 6, 0 }));
+        Assert.That(body.GetBlockCode(6).ToArray(),
+            Is.EqualTo(new byte[] { 0xE3, 0, 3, 0 }));
+        Assert.That(body.GetBlockCode(3).Length, Is.GreaterThan(0));
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, []);
+        Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
+                moduleIdentity, schemaIdentity, 1),
+            Is.EqualTo(artifact));
+        var image = NativeEmitter.EmitLibraryWithNativeImports(loaded,
+            ["Probe"], NativeRuntimePolicy.FailFast);
+        using var imageStream = new MemoryStream(image);
+        using var imageReader = new PEReader(imageStream);
+        Assert.That(imageReader.PEHeaders.PEHeader, Is.Not.Null);
+        Assert.That(imageReader.PEHeaders.PEHeader!.ImportTableDirectory.Size,
+            Is.GreaterThan(0));
+    }
+
+    [TestCase("trrm/1-draft-foreign-invocation-contracts-1", false)]
+    [TestCase("trrm/1-draft-foreign-invocation-storage-addresses-1", true)]
+    public void StandardDirectNativeOutputCallsRoundTripOuterLoopTransfers(
+        string schemaIdentity, bool storageAddressSchema)
+    {
+        const string moduleIdentity = "native-output-outer-loop-transfers";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll", "QueryPerformanceCounter")]
+            extern int32 QueryPerformanceCounter(
+                [Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<int64> ticks);
+
+            public int32 Probe(bool repeat, bool enterInner) {
+                outer: while (repeat) {
+                    while (enterInner) {
+                        if (repeat) {
+                            continue outer;
+                        } else {
+                            break outer;
+                        }
+                    }
+                    continue;
+                }
+                init mut int64 ticks;
+                unsafe { return QueryPerformanceCounter(&init ticks); }
+            }
+            """), NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity, 1);
+        var index = storageAddressSchema
+            ? TrRmArtifactIndex
+                .ForForeignInvocationStorageAddressDraft(artifact)
+            : TrRmArtifactIndex.ForForeignInvocationDraft(artifact);
+        var tables = storageAddressSchema
+            ? TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageAddressDraftAndGetExecutionTables(
+                    index)
+            : TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationDraftAndGetExecutionTables(index);
+        var methodRow = Enumerable.Range(1, tables.Methods.Count).Single(
+            row => tables.Methods.GetName(row) == "Probe");
+        tables.ValidateRegisterBodyMapsForMethod(methodRow);
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(methodRow), tables.Contracts.Count);
+        Assert.That(body.BlockCount, Is.EqualTo(10));
+        Assert.That(body.GetBlockCode(1)[^4], Is.EqualTo(0xE4));
+        Assert.That(body.GetBlockCode(4)[^4], Is.EqualTo(0xE4));
+        Assert.That(body.GetBlockCode(7).ToArray(),
+            Is.EqualTo(new byte[] { 0xE3, 0, 1, 0 }));
+        Assert.That(body.GetBlockCode(8).ToArray(),
+            Is.EqualTo(new byte[] { 0xE3, 0, 3, 0 }));
+        Assert.That(body.GetBlockCode(6).ToArray(),
+            Is.EqualTo(new byte[] { 0xE3, 0, 1, 0 }));
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, []);
+        Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
+                moduleIdentity, schemaIdentity, 1),
+            Is.EqualTo(artifact));
+        var image = NativeEmitter.EmitLibraryWithNativeImports(loaded,
+            ["Probe"], NativeRuntimePolicy.FailFast);
+        using var imageStream = new MemoryStream(image);
+        using var imageReader = new PEReader(imageStream);
+        Assert.That(imageReader.PEHeaders.PEHeader, Is.Not.Null);
+        Assert.That(imageReader.PEHeaders.PEHeader!.ImportTableDirectory.Size,
+            Is.GreaterThan(0));
+    }
+
     [Test]
     public void StandardDirectNativeOutputCallsInsideLoopAreRejected()
     {
