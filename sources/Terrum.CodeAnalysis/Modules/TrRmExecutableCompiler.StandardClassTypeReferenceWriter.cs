@@ -35,6 +35,13 @@ public static partial class TrRmExecutableCompiler
             throw Unsupported(
                 "C1M1 source declaration emission requires captured local non-generic classes without imported class, generic or interface closure.");
         }
+        if (sourceClassExports.Exports.Any(static export =>
+                export.MemberExports.Any(static member =>
+                    member.Kind != SourceClassMemberKind.Field)))
+        {
+            throw Unsupported(
+                "C1M1 source class declarations do not publish constructor, method, or property ExportKeys; use the exact construction successor.");
+        }
         if (program.Classes.Any(static @class =>
                 @class.HasCleanup is not false))
         {

@@ -14,6 +14,9 @@ namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
 internal sealed class TrRmSourceClassExportTests
 {
+    private const string C1M1SchemaIdentity
+        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1";
+
     [Test]
     public void CapturesExactPublicClassMembersAndConstructorProjectionKeys()
     {
@@ -49,6 +52,31 @@ internal sealed class TrRmSourceClassExportTests
             ]));
         Assert.That(captured.Exports[0].MemberExports[1]
             .ConstructionProjectionExportKey, Is.EqualTo("Box.Create"));
+    }
+
+    [Test]
+    public void C1M1RefusesConstructorAndMethodExportKeys()
+    {
+        var (program, _, declaration, members) = CreateProgram();
+        var classExport = new TrRmSourceClassExport(program, 0,
+            declaration.Span, "BoxKey", [
+                new TrRmSourceClassMemberExport(0,
+                    Member(members, SyntaxKind.FieldDeclaration).Span,
+                    "Box.Value"),
+                new TrRmSourceClassMemberExport(0,
+                    Member(members, SyntaxKind.ConstructorDeclaration).Span,
+                    "Box.Initialize"),
+                new TrRmSourceClassMemberExport(0,
+                    Member(members, SyntaxKind.FunctionDeclaration).Span,
+                    "Box.Read"),
+            ]);
+
+        var exception = Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.EmitStandard(program, "Module",
+                C1M1SchemaIdentity, 1, [], [], [classExport]));
+
+        Assert.That(exception!.Message,
+            Does.Contain("exact construction successor"));
     }
 
     [Test]
