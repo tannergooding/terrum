@@ -789,6 +789,35 @@ internal sealed class NoThrowTests
     }
 
     [Test]
+    public void AliasableClassRootRetirementCarriesCleanupFailure()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public class Owner {
+                public int32 Divisor;
+                public Owner(int32 divisor) { Divisor = divisor; }
+                [Cleanup] private void Close() {
+                    int32 quotient = 1 / Divisor;
+                }
+            }
+            public int32 Use() {
+                Owner owner = new Owner(0);
+                return 42;
+            }
+            """), new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.CheckedExceptions,
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                compilation.Diagnostics));
+        var program = compilation.Program!;
+        Assert.That(program.Classes.Single().HasCleanup, Is.True);
+
+        _ = Assert.Throws<ArgumentException>(() =>
+            SemanticVerifier.VerifyLibrary(
+                BoundProgramTestHelpers.MarkNoFailureProof(program, "Use")));
+    }
+
+    [Test]
     public void ConditionalOutputAssignmentRemainsRequiredWithoutNoThrow()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
