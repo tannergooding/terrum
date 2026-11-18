@@ -1594,6 +1594,12 @@ internal sealed class TrRmC1EnumClosureSourceTests
         Assert.Throws<NotSupportedException>(() =>
             NativeEmitter.EmitLibrary(unsupportedLoaded, ["Offset"],
                 NativeRuntimePolicy.FailFast));
+        Assert.Throws<NotSupportedException>(() =>
+            NativeModuleCompiler.EmitStandardLibrary(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    unsupportedConsumer), "ClassLayoutConsumer",
+                [unsupportedProviderInput], ["Offset"],
+                NativeRuntimePolicy.FailFast));
     }
 
     [Test]
