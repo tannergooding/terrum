@@ -47,14 +47,18 @@ canonicalize exact mixed Span/constructed identities and reject cycles; the
 closed `Box<Span<int32>>` identity is canonicalized. The selected G1 source
 writer now emits form-`05` MethodSig types, earlier-formal type defaults and
 bounded move/forwarding Body type maps from checked public TypeDef artifact
-snapshots. It copies local declaration graphs or exact imported expectations,
-including formal order, fields, declared layouts and frozen scalar constant
-actuals/defaults; nested constructions and admitted reference/Span actuals
-retain complete types and method-formal owners. Imported nominal consumers
-read the Import reference from the form-`03` payload, not the TypeSpec row
-number. Added local/imported source, nested-wrapper, mixed-actual,
+snapshots; a one-call forwarding Body can collapse same-typed immutable Copy
+local aliases onto the result Home. It copies local declaration graphs or exact
+imported expectations, including formal order, fields, declared layouts and
+frozen scalar constant actuals/defaults; nested constructions and admitted
+reference/Span actuals retain complete types and method-formal owners.
+Imported nominal consumers read the Import reference from the form-`03`
+payload, not the TypeSpec row number. Added local/imported source,
+nested-wrapper, mixed-actual,
 compatible provider-row relocation, source re-emission and incompatible
 replacement regressions remain unverified under the active validation hold.
+The source-free JIT Copy-alias-chain regression is also unverified under the
+hold.
 This does not admit fresh generic TypeDef source declarations or source-free
 generic MethodDef re-emission. The writer copies all retained TypeDef Import
 expectation views; a reference-set emission regression is added but remains
