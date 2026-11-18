@@ -894,10 +894,19 @@ public static partial class TrRmExecutableCompiler
                                 != PrimitiveType.Void
                             && TryGetC1M1Construction2DirectFieldRead(
                                 methodFunction, out directFieldIndex);
+                    var directFieldWriteIndex = -1;
+                    var isSupportedDirectFieldWriteInstanceMethod
+                        = !methodFunction.IsStatic
+                            && methodFunction.ReturnType
+                                == PrimitiveType.Void
+                            && TryGetC1M1Construction2DirectFieldWrite(
+                                methodFunction,
+                                out directFieldWriteIndex);
                     if ((!methodFunction.IsStatic
                             && !isSupportedNoOpInstanceMethod
                             && !isSupportedDirectReturnInstanceMethod
-                            && !isSupportedDirectFieldReadInstanceMethod)
+                            && !isSupportedDirectFieldReadInstanceMethod
+                            && !isSupportedDirectFieldWriteInstanceMethod)
                         || methodFunction.IsClassConstructor
                         || methodFunction.IsConstructor
                         || methodFunction.IsExternal
@@ -950,7 +959,7 @@ public static partial class TrRmExecutableCompiler
                             && methodFunction.IsInternal))
                     {
                         throw Unsupported(
-                            "The bounded Construction-2 class method producer supports effect-free scalar static methods, empty unit instance methods, readonly instance methods returning one scalar value parameter and direct scalar field reads.");
+                            "The bounded Construction-2 class method producer supports effect-free scalar static methods, empty unit instance methods, readonly instance methods returning one scalar value parameter and direct scalar field reads/writes.");
                     }
 
                     if (methodFunction.ReturnType != PrimitiveType.Void)
@@ -958,10 +967,11 @@ public static partial class TrRmExecutableCompiler
                         if (!methodFunction.IsStatic)
                         {
                             if (!isSupportedDirectReturnInstanceMethod
-                                && !isSupportedDirectFieldReadInstanceMethod)
+                                && !isSupportedDirectFieldReadInstanceMethod
+                                && !isSupportedDirectFieldWriteInstanceMethod)
                             {
                                 throw Unsupported(
-                                    "The bounded Construction-2 instance method producer supports only unit, direct scalar-parameter or direct scalar-field results.");
+                                    "The bounded Construction-2 instance method producer supports only unit, direct scalar-parameter or direct scalar-field results and direct scalar-field writes.");
                             }
                         }
 
@@ -1069,6 +1079,31 @@ public static partial class TrRmExecutableCompiler
                         compactBody
                             = EncodeC1M1Construction2FieldReadBody(
                                 fieldDefRow);
+                    }
+                    else if (isSupportedDirectFieldWriteInstanceMethod)
+                    {
+                        if (!fieldDefRowByClassAndIndex.TryGetValue((
+                                classIndex, directFieldWriteIndex),
+                                out var fieldDefRow))
+                        {
+                            throw new InvalidDataException(
+                                "A class instance method writes a FieldDef outside its retained owner.");
+                        }
+
+                        var field = program.Classes[classIndex]
+                            .Fields[directFieldWriteIndex];
+                        if (!field.IsMutable
+                            || field.Type
+                                != methodFunction.Variables[1].Type)
+                        {
+                            throw new InvalidDataException(
+                                "A compact class FieldWrite requires a mutable FieldDef with the exact formal type.");
+                        }
+
+                        _ = GetC1M1SourceScalarTypeSpecReference(field.Type);
+                        compactBody
+                            = EncodeC1M1Construction2FieldWriteBody(
+                                fieldDefRow, 0, sourceUse: 1);
                     }
 
                     var methodSignatureRow
@@ -1838,6 +1873,27 @@ public static partial class TrRmExecutableCompiler
         return body;
     }
 
+    private static byte[] EncodeC1M1Construction2FieldWriteBody(
+        int fieldDefRow, int formalOrdinal, byte sourceUse)
+    {
+        if (fieldDefRow <= 0 || fieldDefRow > 0xFF_FFFF
+            || formalOrdinal < 0 || formalOrdinal > ushort.MaxValue
+            || sourceUse is < 1 or > 3)
+        {
+            throw new InvalidDataException(
+                "A class field-write Body has an invalid FieldDef, formal or source-use.");
+        }
+
+        var body = new byte[12];
+        body[0] = 0x03;
+        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(4),
+            0x1400_0000u | checked((uint)fieldDefRow));
+        BinaryPrimitives.WriteUInt16LittleEndian(body.AsSpan(8),
+            checked((ushort)formalOrdinal));
+        body[10] = sourceUse;
+        return body;
+    }
+
     private static byte[] EncodeC1M1Construction2InstanceMethodBody(
         BoundFunction function, int returnHomeIndex,
         Func<PrimitiveType, uint> typeSpecReferenceFor, int contractCount,
@@ -2013,6 +2069,74 @@ public static partial class TrRmExecutableCompiler
                 })
                 {
                     returnedField = fieldRead;
+                }
+                else
+                {
+                    isSupported = false;
+                    return;
+                }
+            }
+        }
+    }
+
+    private static bool TryGetC1M1Construction2DirectFieldWrite(
+        BoundFunction function, out int fieldIndex)
+    {
+        fieldIndex = -1;
+        if (function.IsStatic || function.ReturnType != PrimitiveType.Void
+            || function.ParameterCount != 2
+            || function.Variables.Length != 2
+            || !function.Variables[0].IsMutable)
+        {
+            return false;
+        }
+
+        BoundFieldAssignment? assignment = null;
+        var returned = false;
+        var isSupported = true;
+        Visit(function.Body);
+        if (!isSupported || assignment is null || !returned
+            || assignment.Variable != 0
+            || !assignment.NestedFields.IsEmpty
+            || assignment.Value is not BoundRead value
+            || value.Variable != 1
+            || value.Type != function.Variables[1].Type)
+        {
+            return false;
+        }
+
+        fieldIndex = assignment.Field;
+        return fieldIndex >= 0;
+
+        void Visit(BoundBlock block)
+        {
+            if (!block.RetiredManagedLocals.IsEmpty)
+            {
+                isSupported = false;
+                return;
+            }
+
+            foreach (var statement in block.Statements)
+            {
+                if (!isSupported || returned)
+                {
+                    isSupported = false;
+                    return;
+                }
+
+                if (statement is BoundBlock nested)
+                {
+                    Visit(nested);
+                }
+                else if (statement is BoundFieldAssignment fieldWrite
+                    && assignment is null)
+                {
+                    assignment = fieldWrite;
+                }
+                else if (statement is BoundReturn { Value: null }
+                    && assignment is not null)
+                {
+                    returned = true;
                 }
                 else
                 {

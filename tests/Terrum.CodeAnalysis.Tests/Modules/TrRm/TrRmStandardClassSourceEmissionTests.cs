@@ -597,6 +597,100 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
+    public void EmitsCopyFieldWriteDescriptorForMutableInstanceMethod()
+    {
+        var tree = SyntaxTree.Parse("""
+            public mut class Box {
+                public mut int32 Value;
+                public Box(int32 value) { Value = value; }
+                public mut void Set(int32 value) { this.Value = value; }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node => node.Kind == SyntaxKind.ClassDeclaration);
+        var members = classDeclaration.Children.OfType<SyntaxNode>();
+        var field = members.Single(static node =>
+            node.Kind == SyntaxKind.FieldDeclaration);
+        var constructor = members.Single(static node =>
+            node.Kind == SyntaxKind.ConstructorDeclaration);
+        var set = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Set"));
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "FieldWriteInstanceMethod",
+            C1M1Construction2ClassParameterDefaultsSchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, 0,
+                    classDeclaration.Span, "BoxKey", [
+                        new TrRmSourceClassMemberExport(0, field.Span,
+                            "Box.Value"),
+                        new TrRmSourceClassMemberExport(0,
+                            constructor.Span, "Box.Initialize") {
+                            ConstructionProjectionExportKey = "Box.Create",
+                        },
+                        new TrRmSourceClassMemberExport(0, set.Span,
+                            "Box.Set"),
+                    ]),
+            ]);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                        artifact));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1, "Box.Set",
+            out var setDefinition), Is.True);
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1, "Box.Value",
+            out var fieldDefinition), Is.True);
+        var setMethodRow = checked((int)(setDefinition & 0x00FF_FFFF));
+        Assert.That(tables.Methods.GetFlags(setMethodRow) & 4u,
+            Is.EqualTo(4u));
+        var ownerTypeDefRow = tables.Methods.GetOwnerType(setMethodRow);
+        Assert.That(tables.TypeDefs.GetFlags(ownerTypeDefRow) & 0x80u,
+            Is.EqualTo(0x80u));
+        var signature = tables.Methods.GetSignature(setMethodRow);
+        var receiverTypeSpec = tables.Signatures
+            .GetReceiverTypeSpec(signature);
+        Assert.That(receiverTypeSpec, Is.Not.Zero);
+        var receiverType = tables.TypeSpecs
+            .GetTypeSpecRef(receiverTypeSpec);
+        Assert.That(receiverType.Qualifiers & 1, Is.EqualTo(1));
+        Assert.That(tables.TypeSpecs.GetNominalTypeDefRow(
+                receiverTypeSpec, tables.TypeDefs, tables.Imports),
+            Is.EqualTo(ownerTypeDefRow));
+        var (parameterStart, parameterCount)
+            = tables.Signatures.GetParamRange(signature);
+        Assert.That(parameterCount, Is.EqualTo(1));
+        var bodyRow = tables.Methods.GetBodyRow(setMethodRow);
+        Assert.That(bodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(bodyRow,
+            tables.Contracts.Count);
+        var body = tables.Bodies.GetRow(bodyRow);
+        Assert.That(body[0], Is.EqualTo(0x03));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(body[4..]),
+            Is.EqualTo(fieldDefinition));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(body[8..]),
+            Is.Zero);
+        Assert.That(body[10], Is.EqualTo(1));
+        Assert.That(body[11], Is.Zero);
+        var fieldRow = checked((int)(fieldDefinition & 0x00FF_FFFF));
+        Assert.That(tables.Fields.GetOwnerTypeDef(fieldRow),
+            Is.EqualTo(ownerTypeDefRow));
+        Assert.That(tables.Fields.GetFlags(fieldRow) & 4u,
+            Is.EqualTo(4u));
+        Assert.That(tables.Fields.GetFlags(fieldRow) & 8u, Is.Zero);
+        Assert.That(tables.TypeSpecs.AreEquivalentTypeSpecRefs(
+                tables.Fields.GetTypeSpecRef(fieldRow),
+                tables.Parameters.GetTypeSpec(parameterStart)),
+            Is.True);
+    }
+
+    [Test]
     public void BindsImportedClassMethodDefaultFromSelectedView()
     {
         var tree = SyntaxTree.Parse("""
