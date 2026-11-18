@@ -3037,6 +3037,19 @@ public static partial class TrRmExecutableCompiler
             importedGenericMethodTargetTokens.Add(source,
                 0x1C00_0000u | checked((uint)importRow));
 
+            var importedTypeProgram
+                = emissions[0].Definition.ProofProgram;
+            var importedSpanTypes
+                = ImmutableArray.CreateRange(expected.SpanTypes);
+            var targetDefinition = new BoundGenericMethodDefinition(
+                -1, signature.Name, signature.IsPublic,
+                signature.RequiresUnsafeCaller, -1, -1, default,
+                expected.Formals, importedTypeProgram) {
+                FormalTypeOwnerOrdinal = expected.FormalTypeOwnerOrdinal,
+                IsStatic = signature.IsStatic,
+                FormalOrder = signature.FormalOrder,
+                RuntimeParameterCount = proofFunction.ParameterCount,
+            };
             var genericFirst = checked(genericParameterRows.Count + 1);
             var formalTypeSpecRows
                 = new Dictionary<PrimitiveType, uint>(
@@ -3069,8 +3082,12 @@ public static partial class TrRmExecutableCompiler
                     return formalTypeSpecRef;
                 }
 
-                return GetBuiltInTypeSpecRef(type,
-                    builtInTypeSpecRows, typeSpecRows);
+                return GenericMethodTypeSpecRef(type,
+                    formalTypeSpecRows, builtInTypeSpecRows, typeSpecRows,
+                    importedSpanTypes,
+                    importedTypeProgram.CheckedReferenceTypes, -1,
+                    targetDefinition, allowSpanType: true,
+                    nominalTypes: null);
             }
 
             uint GetExpectedTypeDefaultRef(
@@ -3142,15 +3159,6 @@ public static partial class TrRmExecutableCompiler
                     "Imported generic MethodDef interface constraints require the exact G1L1 schema.");
             }
 
-            var targetDefinition = new BoundGenericMethodDefinition(
-                -1, signature.Name, signature.IsPublic,
-                signature.RequiresUnsafeCaller, -1, -1, default,
-                expected.Formals, emissions[0].Definition.ProofProgram) {
-                FormalTypeOwnerOrdinal = expected.FormalTypeOwnerOrdinal,
-                IsStatic = signature.IsStatic,
-                FormalOrder = signature.FormalOrder,
-                RuntimeParameterCount = proofFunction.ParameterCount,
-            };
             var interfaceConstraintVisits
                 = SemanticVerifier.MaximumAnalysisVisits;
             for (var formalOrdinal = 0;
@@ -6838,14 +6846,27 @@ public static partial class TrRmExecutableCompiler
             }
 
             var spanType = spanTypes[BoundSpanTypeTypes.Index(type)];
-            if (spanType.ElementFormalDefinitionOrdinal
-                    != definitionOrdinal
-                && spanType.ElementFormalDefinitionOrdinal >= 0)
+            var isImportedFormalOwner
+                = definition.FormalTypeOwnerOrdinal >= 0
+                    && spanType.ElementFormalDefinitionOrdinal
+                        == BoundSpanTypeContract
+                            .ImportedFormalDefinitionOrdinal
+                            - definition.FormalTypeOwnerOrdinal;
+            if ((spanType.ElementFormalDefinitionOrdinal >= 0
+                    && spanType.ElementFormalDefinitionOrdinal
+                        != definitionOrdinal)
+                || (spanType.ElementFormalDefinitionOrdinal < -1
+                    && !isImportedFormalOwner))
             {
                 throw Unsupported(
                     "A G1 Span element formal belongs to a different Generic MethodDef.");
             }
-            if (spanType.ElementFormalDefinitionOrdinal >= 0
+            var hasFormalElementOwner
+                = (definitionOrdinal >= 0
+                    && spanType.ElementFormalDefinitionOrdinal
+                        == definitionOrdinal)
+                    || isImportedFormalOwner;
+            if (hasFormalElementOwner
                 && !formalTypeSpecRows.ContainsKey(spanType.ElementType))
             {
                 throw Unsupported(
@@ -6853,7 +6874,7 @@ public static partial class TrRmExecutableCompiler
             }
 
             BoundGenericMethodTypeTerm elementTerm;
-            if (spanType.ElementFormalDefinitionOrdinal >= 0)
+            if (hasFormalElementOwner)
             {
                 if ((uint)spanType.ElementFormalOrdinal
                     >= (uint)formalTypeSpecRows.Count)
@@ -7208,8 +7229,16 @@ public static partial class TrRmExecutableCompiler
                 return false;
             }
 
-            if (targetSpan.ElementFormalDefinitionOrdinal
-                == targetDefinition.DefinitionOrdinal)
+            var targetHasFormalElement
+                = (targetDefinition.DefinitionOrdinal >= 0
+                    && targetSpan.ElementFormalDefinitionOrdinal
+                        == targetDefinition.DefinitionOrdinal)
+                || (targetDefinition.FormalTypeOwnerOrdinal >= 0
+                    && targetSpan.ElementFormalDefinitionOrdinal
+                        == BoundSpanTypeContract
+                            .ImportedFormalDefinitionOrdinal
+                            - targetDefinition.FormalTypeOwnerOrdinal);
+            if (targetHasFormalElement)
             {
                 var targetFormalOrdinal
                     = targetSpan.ElementFormalOrdinal;

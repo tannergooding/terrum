@@ -4327,6 +4327,130 @@ internal sealed class TrRmGenericMethodSourceWriterTests
     }
 
     [Test]
+    public void ReemitsImportedGenericReferenceAndSpanSignatures()
+    {
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                public Span<T> SpanIdentity<T>(Span<T> value) {
+                    return value;
+                }
+                public void Inspect<T>(ref<T> source) { }
+                """));
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerProgram = providerCompilation.Program!;
+        var providerExports = providerProgram.GenericMethodDefinitions
+            .Select(definition => new TrRmSourceGenericMethodExport(
+                providerProgram, definition.SourceInputOrdinal,
+                definition.Span, definition.Name))
+            .ToArray();
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, "span-import.provider",
+            GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), providerExports);
+        var providerReference = TrRmExecutableCompiler
+            .CreateGenericMethodCallsDraftReference(providerArtifact,
+                "span-import.provider");
+        var forwarderCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                public Span<T> Forward<T>(Span<T> value) {
+                    return SpanIdentity<T>(value);
+                }
+                public void ForwardReference<T>(ref<T> source) {
+                    Inspect<T>(source);
+                    return;
+                }
+                """), providerReference);
+        Assert.That(forwarderCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                forwarderCompilation.Diagnostics));
+        var forwarderProgram = forwarderCompilation.Program!;
+        var forwarderExports = forwarderProgram.GenericMethodDefinitions
+            .Select(definition => new TrRmSourceGenericMethodExport(
+                forwarderProgram, definition.SourceInputOrdinal,
+                definition.Span, definition.Name))
+            .ToArray();
+        var forwarderArtifact = TrRmExecutableCompiler.EmitStandard(
+            forwarderProgram, "span-import.forwarder",
+            GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), forwarderExports);
+        var forwarderReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(
+                GenericMethodCallsSchemaIdentity, forwarderArtifact),
+            "span-import.forwarder", [
+                new TrRmStandardArtifactInput(
+                    GenericMethodCallsSchemaIdentity, providerArtifact),
+            ]);
+        var spanForward = forwarderReference.GenericMethodImports.Single(
+            static imported => imported.Origin.ExportKey == "Forward");
+        var spanCall = (BoundCall)((BoundReturn)
+            spanForward.ProofFunction.Body.Statements.Single()).Value!;
+        var spanTarget = spanCall.ImportedGenericMethodCall!.Binding!.Expected;
+        var spanParameterType = spanTarget.ProofFunction.Variables[0].Type;
+        Assert.That(BoundSpanTypeTypes.IsValidType(spanParameterType,
+            spanTarget.SpanTypes), Is.True);
+        Assert.That(spanTarget.ProofFunction.ReturnType,
+            Is.EqualTo(spanParameterType));
+        var spanType = spanTarget.SpanTypes[
+            BoundSpanTypeTypes.Index(spanParameterType)];
+        Assert.That(spanType.ElementFormalDefinitionOrdinal,
+            Is.EqualTo(BoundSpanTypeContract
+                .ImportedFormalDefinitionOrdinal
+                - spanTarget.FormalTypeOwnerOrdinal));
+        var providerSpanTarget
+            = spanCall.ImportedGenericMethodCall.Binding!.Provider;
+        var providerSpanParameterType
+            = providerSpanTarget.ProofFunction.Variables[0].Type;
+        Assert.That(BoundSpanTypeTypes.IsValidType(
+            providerSpanParameterType, providerSpanTarget.SpanTypes),
+            Is.True);
+        Assert.That(providerSpanTarget.ProofFunction.ReturnType,
+            Is.EqualTo(providerSpanParameterType));
+        var providerSpanType = providerSpanTarget.SpanTypes[
+            BoundSpanTypeTypes.Index(providerSpanParameterType)];
+        Assert.That(providerSpanType.ElementFormalDefinitionOrdinal,
+            Is.EqualTo(BoundSpanTypeContract
+                .ImportedFormalDefinitionOrdinal
+                - providerSpanTarget.FormalTypeOwnerOrdinal));
+
+        var referenceForward
+            = forwarderReference.GenericMethodImports.Single(
+                static imported =>
+                    imported.Origin.ExportKey == "ForwardReference");
+        var referenceCall = (BoundCall)((BoundExpressionStatement)
+            referenceForward.ProofFunction.Body.Statements[0]).Expression;
+        var referenceTarget
+            = referenceCall.ImportedGenericMethodCall!.Binding!.Expected;
+        var referenceParameterType
+            = referenceTarget.ProofFunction.Variables[0].Type;
+        Assert.That(CheckedReferenceTypeContract.IsValidType(
+            referenceParameterType, forwarderReference.CheckedReferenceTypes),
+            Is.True);
+        Assert.That(referenceTarget.ProofFunction.ReturnType,
+            Is.EqualTo(PrimitiveType.Void));
+        var expectedReference = forwarderReference.CheckedReferenceTypes[
+            CheckedReferenceTypes.Index(referenceParameterType)];
+        Assert.That(expectedReference.ReferentType,
+            Is.EqualTo(referenceTarget.Formals[0].PlaceholderType));
+        Assert.That(expectedReference.IsReferentWritable, Is.False);
+        var providerReferenceTarget
+            = referenceCall.ImportedGenericMethodCall.Binding!.Provider;
+        var providerReferenceType
+            = providerReferenceTarget.ProofFunction.Variables[0].Type;
+        Assert.That(CheckedReferenceTypeContract.IsValidType(
+            providerReferenceType, forwarderReference.CheckedReferenceTypes),
+            Is.True);
+        var providerReferenceDescriptor
+            = forwarderReference.CheckedReferenceTypes[
+            CheckedReferenceTypes.Index(providerReferenceType)];
+        Assert.That(providerReferenceDescriptor.ReferentType,
+            Is.EqualTo(providerReferenceTarget.Formals[0].PlaceholderType));
+        Assert.That(providerReferenceDescriptor.IsReferentWritable,
+            Is.False);
+    }
+
+    [Test]
     public void BindsAndExecutesSourceFreeImportedGenericForwardingChain()
     {
         var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
