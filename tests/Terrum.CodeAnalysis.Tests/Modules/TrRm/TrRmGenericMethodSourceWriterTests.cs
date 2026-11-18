@@ -4327,6 +4327,92 @@ internal sealed class TrRmGenericMethodSourceWriterTests
     }
 
     [Test]
+    public void ReemitsImportedGenericSpanTypeDefault()
+    {
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                alias NestedSpan<T> = Span<Span<T>>;
+                public int32 Identity<T>(int32 value) {
+                    return value;
+                }
+                public int32 Use<T, U = NestedSpan<T>>(int32 value) {
+                    return Identity<U>(value);
+                }
+                """));
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerProgram = providerCompilation.Program!;
+        var providerExports = providerProgram.GenericMethodDefinitions
+            .Select(definition => new TrRmSourceGenericMethodExport(
+                providerProgram, definition.SourceInputOrdinal,
+                definition.Span, definition.Name))
+            .ToArray();
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, "span-default-import.provider",
+            GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), providerExports);
+        var providerReference = TrRmExecutableCompiler
+            .CreateGenericMethodCallsDraftReference(providerArtifact,
+                "span-default-import.provider");
+        var forwarderCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                public int32 Forward<T>(int32 value) {
+                    return Use<T>(value);
+                }
+                """), providerReference);
+        Assert.That(forwarderCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                forwarderCompilation.Diagnostics));
+        var forwarderProgram = forwarderCompilation.Program!;
+        var forward = forwarderProgram.GenericMethodDefinitions.Single();
+        var forwarderArtifact = TrRmExecutableCompiler.EmitStandard(
+            forwarderProgram, "span-default-import.forwarder",
+            GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), [
+                new(forwarderProgram, forward.SourceInputOrdinal,
+                    forward.Span, "Forward"),
+            ]);
+        var forwarderReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(
+                GenericMethodCallsSchemaIdentity, forwarderArtifact),
+            "span-default-import.forwarder", [
+                new TrRmStandardArtifactInput(
+                    GenericMethodCallsSchemaIdentity, providerArtifact),
+            ]);
+        var importedForward = forwarderReference.GenericMethodImports.Single(
+            static imported => imported.Origin.ExportKey == "Forward");
+        var forwardedCall = (BoundCall)((BoundReturn)
+            importedForward.ProofFunction.Body.Statements.Single()).Value!;
+        var useImport = forwardedCall.ImportedGenericMethodCall!;
+        var expectedDefault = useImport.Binding!.Expected.Formals[1]
+            .TypeDefault!;
+        Assert.That(expectedDefault.Term.Kind,
+            Is.EqualTo(BoundGenericMethodTypeTermKind.Span));
+        Assert.That(expectedDefault.Term.TypeArguments.Single().Kind,
+            Is.EqualTo(BoundGenericMethodTypeTermKind.Span));
+        Assert.That(expectedDefault.Term.TypeArguments.Single()
+                .TypeArguments.Single().FormalOrdinal,
+            Is.Zero);
+        Assert.That(expectedDefault.FormalDependencies,
+            Is.EqualTo(new[] { 0 }));
+        Assert.That(forwardedCall.ImportedGenericMethodTypeArguments,
+            Has.Length.EqualTo(2));
+        Assert.That(BoundSpanTypeTypes.IsValidType(
+            forwardedCall.ImportedGenericMethodTypeArguments[1],
+            forwarderReference.SpanTypes), Is.True);
+
+        var entryCompilation = Compilation.Create(SyntaxTree.Parse(
+            "int32 Main() { return Forward<int32>(value: 42); }"),
+            forwarderReference);
+        Assert.That(entryCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                entryCompilation.Diagnostics));
+        Assert.That(NativeJit.Execute(entryCompilation.Program!,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(42));
+    }
+
+    [Test]
     public void ReemitsImportedGenericReferenceAndSpanSignatures()
     {
         var providerCompilation = Compilation.CreateLibrary(

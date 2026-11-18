@@ -3089,63 +3089,10 @@ public static partial class TrRmExecutableCompiler
             uint GetExpectedTypeDefaultRef(
                 BoundGenericMethodTypeDefault? typeDefault,
                 int formalOrdinal)
-            {
-                if (typeDefault is null)
-                {
-                    return 0;
-                }
-
-                var term = typeDefault.Term;
-                var redundantWritableFormal
-                    = term.Kind == BoundGenericMethodTypeTermKind.Formal
-                        && (uint)term.FormalOrdinal
-                            < (uint)expected.Formals.Length
-                        && expected.Formals[term.FormalOrdinal]
-                            .RequiresWritable;
-                if (!typeDefault.ConstantFormalDependencies.IsEmpty
-                    || !term.TypeArguments.IsDefaultOrEmpty
-                    || !term.ConstantArguments.IsEmpty
-                    || (term.IsWritable && !redundantWritableFormal)
-                    || term.IsGarbageCollected
-                    || term.IsInitialization
-                    || term.IsOptional
-                    || term.ElementCount != 0
-                    || term.CallingConvention
-                        != NativeCallingConvention.Native
-                    || term.ParameterCount != 0
-                    || term.AllowsVoid
-                    || term.IsElementWritable
-                    || term.NominalTypeIdentity is not null)
-                {
-                    throw Unsupported(
-                        $"Imported generic MethodDef '{proofFunction.Name}' has a type default outside the direct-type subset.");
-                }
-
-                if (term.Kind == BoundGenericMethodTypeTermKind.Formal)
-                {
-                    var dependency = term.FormalOrdinal;
-                    if (dependency < 0 || dependency >= formalOrdinal
-                        || !typeDefault.FormalDependencies.SequenceEqual(
-                            [dependency]))
-                    {
-                        throw Unsupported(
-                            $"Imported generic MethodDef '{proofFunction.Name}' has a type default outside the earlier-formal subset.");
-                    }
-
-                    return formalTypeSpecRows[
-                        expected.Formals[dependency].PlaceholderType];
-                }
-
-                if (term.Kind == BoundGenericMethodTypeTermKind.Concrete
-                    && typeDefault.FormalDependencies.IsEmpty)
-                {
-                    return GetBuiltInTypeSpecRef(term.ConcreteType,
-                        builtInTypeSpecRows, typeSpecRows);
-                }
-
-                throw Unsupported(
-                    $"Imported generic MethodDef '{proofFunction.Name}' has a type default outside the direct-type subset.");
-            }
+                => typeDefault is null ? 0
+                    : GenericMethodTypeDefaultRef(typeDefault,
+                        formalOrdinal, targetDefinition, formalTypeSpecRows,
+                        builtInTypeSpecRows, typeSpecRows, nominalTypes: null);
 
             if (!schema.UsesMethodParameterLabels()
                 && expected.Formals.Any(static formal =>
@@ -6125,7 +6072,7 @@ public static partial class TrRmExecutableCompiler
         Dictionary<PrimitiveType, uint> formalTypeSpecRows,
         Dictionary<PrimitiveType, uint> builtInTypeSpecRows,
         List<ReadOnlyMemory<byte>> typeSpecRows,
-        GenericMethodNominalTypeWriter nominalTypes)
+        GenericMethodNominalTypeWriter? nominalTypes)
     {
         if (BoundGenericMethodTypeTerms.ContainsKind(typeDefault.Term,
                 BoundGenericMethodTypeTermKind.ImportedGeneric))
@@ -6140,8 +6087,11 @@ public static partial class TrRmExecutableCompiler
                 throw Unsupported(
                     "A G1 nominal type default has inconsistent earlier-formal dependencies.");
             }
-            return nominalTypes.TypeTermRef(typeDefault.Term, definition,
-                formalTypeSpecRows, builtInTypeSpecRows, 0);
+            return nominalTypes is null
+                ? throw Unsupported(
+                    "This G1 type-default position does not select nominal TypeDef emission.")
+                : nominalTypes.TypeTermRef(typeDefault.Term, definition,
+                    formalTypeSpecRows, builtInTypeSpecRows, 0);
         }
         if (typeDefault.Term.Kind
             == BoundGenericMethodTypeTermKind.Span)
