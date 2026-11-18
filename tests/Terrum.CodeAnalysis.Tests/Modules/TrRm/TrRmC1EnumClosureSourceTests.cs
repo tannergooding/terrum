@@ -712,7 +712,7 @@ internal sealed class TrRmC1EnumClosureSourceTests
     }
 
     [Test]
-    public void ReemitsTransitiveImportedStructClosureAcrossProviders()
+    public void ReemitsTransitiveImportedStructDiamondAcrossProviders()
     {
         var schemaIdentity = s_schemaIdentities[0];
         var leafTree = SyntaxTree.Parse("""
@@ -741,6 +741,7 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var middleTree = SyntaxTree.Parse("""
             namespace Demo {
                 public struct Wrapper { public Leaf Child; }
+                public struct WrapperTwin { public Leaf Child; }
             }
             """);
         var middleCompilation = Compilation.CreateLibrary(middleTree,
@@ -756,9 +757,16 @@ internal sealed class TrRmC1EnumClosureSourceTests
                     "field.wrapper.child"),
             ],
         };
+        var wrapperTwinExport = new TrRmSourceTypeExport("Demo",
+            "WrapperTwin", "type.wrapper.twin") {
+            FieldExports = [
+                new TrRmSourceFieldExport("Child",
+                    "field.wrapper.twin.child"),
+            ],
+        };
         var middleArtifact = TrRmExecutableCompiler.EmitStandard(
             middleProgram, "StructMiddleProvider", schemaIdentity, 1,
-            [wrapperExport], [], [], []);
+            [wrapperExport, wrapperTwinExport], [], [], []);
         var middleTables
             = TrRmStructuralMetadataValidator
                 .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
@@ -776,8 +784,10 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var middleInput = new TrRmStandardArtifactInput(schemaIdentity,
             middleArtifact);
         var middleReference = TrRmExecutableCompiler.CreateStandardReference(
-            middleInput, "StructMiddleProvider", [leafInput],
-            ["type.wrapper"]);
+            middleInput, "StructMiddleProvider", [leafInput], [
+                "type.wrapper",
+                "type.wrapper.twin",
+            ]);
         var importedLeaf = middleReference.Structures.Single(
             static structure => structure.Name == "Demo.Leaf");
         Assert.That(importedLeaf.StandardTypeOrigin, Is.Not.Null);
@@ -787,7 +797,10 @@ internal sealed class TrRmC1EnumClosureSourceTests
 
         var consumerTree = SyntaxTree.Parse("""
             namespace Demo {
-                public struct Packet { public Wrapper Value; }
+                public struct Packet {
+                    public Wrapper Value;
+                    public WrapperTwin Twin;
+                }
             }
             """);
         var consumerCompilation = Compilation.CreateLibrary(consumerTree,
@@ -799,7 +812,10 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var packetExport = new TrRmSourceTypeExport("Demo", "Packet",
             "type.packet") {
             FieldExports = [
-                new TrRmSourceFieldExport("Value", "field.packet.value"),
+                new TrRmSourceFieldExport("Value",
+                    "field.packet.value"),
+                new TrRmSourceFieldExport("Twin",
+                    "field.packet.twin"),
             ],
         };
         var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
@@ -810,12 +826,15 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var providers = new[] { middleInput, leafInput };
         var reference = TrRmExecutableCompiler.CreateStandardReference(
             consumerInput, "StructConsumer", providers, ["type.packet"]);
-        Assert.That(reference.Structures, Has.Length.EqualTo(3));
+        Assert.That(reference.Structures, Has.Length.EqualTo(4));
         Assert.That(reference.Structures.Any(
             static structure => structure.Name == "Demo.Leaf"
                 && structure.StandardTypeOrigin is not null), Is.True);
         Assert.That(reference.Structures.Any(
             static structure => structure.Name == "Demo.Wrapper"
+                && structure.StandardTypeOrigin is not null), Is.True);
+        Assert.That(reference.Structures.Any(
+            static structure => structure.Name == "Demo.WrapperTwin"
                 && structure.StandardTypeOrigin is not null), Is.True);
 
         var sourceFreeCompilation = Compilation.CreateLibrary(
@@ -841,7 +860,7 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var reloadedReference = TrRmExecutableCompiler.CreateStandardReference(
             new TrRmStandardArtifactInput(schemaIdentity, reemitted),
             "StructConsumer", providers, ["type.packet"]);
-        Assert.That(reloadedReference.Structures, Has.Length.EqualTo(3));
+        Assert.That(reloadedReference.Structures, Has.Length.EqualTo(4));
         var reloadedCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(string.Empty), reloadedReference);
         Assert.That(reloadedCompilation.HasErrors, Is.False,
