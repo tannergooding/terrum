@@ -700,6 +700,9 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 public int32 Xor(int32 left, int32 right) {
                     return left ^ right;
                 }
+                public int32 XorAfterCall(int32 left, int32 right) {
+                    return Xor(left, right) ^ right;
+                }
             }
             """);
         var compilation = Compilation.CreateLibrary(tree);
@@ -717,6 +720,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name == "Xor"));
+        var xorAfterCall = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "XorAfterCall"));
         var artifact = TrRmExecutableCompiler.EmitStandard(program,
             "ClassInstanceXor", C1M1Construction2SchemaIdentity,
             TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
@@ -731,6 +738,8 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                         },
                         new TrRmSourceClassMemberExport(0, xor.Span,
                             "Box.Xor"),
+                        new TrRmSourceClassMemberExport(0,
+                            xorAfterCall.Span, "Box.XorAfterCall"),
                     ]),
             ]);
         var tables = TrRmStructuralMetadataValidator
@@ -757,6 +766,27 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             0xC1, 0x03, 0xF0, 0x10,
             0x17, 0,
         }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.XorAfterCall", out var xorAfterCallDefinition), Is.True);
+        var xorAfterCallMethodRow
+            = checked((int)(xorAfterCallDefinition & 0x00FF_FFFF));
+        var callBodyRow
+            = tables.Methods.GetBodyRow(xorAfterCallMethodRow);
+        Assert.That(callBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(callBodyRow,
+            tables.Contracts.Count);
+        var callBody = tables.Bodies.GetRegisterBody(callBodyRow,
+            tables.Contracts.Count);
+        Assert.That(callBody.MethodCount, Is.EqualTo(1));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                callBody.MethodMap),
+            Is.EqualTo(xorDefinition));
+        Assert.That(callBody.GetBlockCode(0).ToArray(), Is.EqualTo(new byte[] {
+            0xE0, 0, 1, 0,
+            0xD5, 1, 2, 0,
+            0xC1, 0x03, 0xF0, 0x10,
+            0x17, 0,
+        }));
 
         var reference = TrRmExecutableCompiler.CreateStandardReference(
             new TrRmStandardArtifactInput(C1M1Construction2SchemaIdentity,
@@ -764,6 +794,9 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             "ClassInstanceXor", [], ["BoxKey"]);
         var consumer = Compilation.CreateLibrary(SyntaxTree.Parse("""
             int32 Use(Box value) { return value.Xor(2, 3); }
+            int32 UseAfterCall(Box value) {
+                return value.XorAfterCall(2, 3);
+            }
             """), reference);
         Assert.That(consumer.HasErrors, Is.False,
             string.Join(Environment.NewLine, consumer.Diagnostics));

@@ -148,9 +148,10 @@ with real Bodies, exact same-class static and readonly-instance identity
 forwarders through assigned Body kind `05`, empty unit-returning instance
 methods, and readonly instance methods returning an explicit scalar parameter
 through ReturnHome with receiver/formal Homes in declaration order, plus a
-readonly instance `int32` XOR Body over two explicit value formals. The
-Unit-before-value, identity-forwarder and XOR regressions remain unverified
-under the hold.
+readonly instance `int32` XOR Body over two explicit value formals and a
+readonly same-class call followed by XOR through a general CallSite Body. The
+Unit-before-value, identity-forwarder, XOR and call-forwarding regressions
+remain unverified under the hold.
 Source binding now admits ordinary by-value Unit parameters and `()` defaults; the CM1
 producer/reader preserves their logical signature
 positions and zero-width SF1 values, while Windows x64 lowering omits only

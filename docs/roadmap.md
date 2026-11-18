@@ -124,9 +124,10 @@ prerequisite has already been met.
    scalar instance FieldRead and mutable-receiver scalar FieldWrite
    descriptors, and exact same-class static and readonly-instance identity
    forwarders through Body kind `05`, plus a readonly instance `int32` XOR
-   Body over two value formals. The Unit-before-value, field-read, field-write,
-   XOR, static-forwarder and receiver-forwarder regressions remain unverified
-   under the active hold. Ordinary
+   Body over two value formals, and a readonly same-class call followed by XOR
+   through a general CallSite Body. The Unit-before-value, field-read,
+   field-write, XOR, call-forwarding, static-forwarder and receiver-forwarder
+   regressions remain unverified under the active hold. Ordinary
    by-value Unit parameters and `()`
    defaults now retain logical positions through source binding, CM1 metadata
    and Windows x64 payload elision; focused source/metadata/JIT regressions
