@@ -68,4 +68,39 @@ internal sealed partial class CliTests
                 .ConfigureAwait(false);
         }
     }
+
+    [Test]
+    public async Task CompileModuleRejectsLegacyInitializationReferencePlacementAsync()
+    {
+        var directory = TestArtifactPaths.CreateDirectory(
+            "terrum-init-reference-module-invalid-");
+        var source = Path.Combine(directory, "invalid.terrum");
+        var output = Path.Combine(directory, "preserve.trm");
+        var sentinel = new byte[] { 0x13, 0x37, 0x42 };
+        try
+        {
+            await File.WriteAllTextAsync(source,
+                "public void Invalid(init ref<int32> value) { return; }")
+                .ConfigureAwait(false);
+            await File.WriteAllBytesAsync(output, sentinel)
+                .ConfigureAwait(false);
+
+            var (exit, result, error) = await RunAsync([], [
+                "compile-module", "producer", source, "Invalid", "-o",
+                output, "--runtime", "fail-fast", "--json",
+            ]).ConfigureAwait(false);
+
+            Assert.That(exit, Is.EqualTo(1), result + error);
+            Assert.That(error, Is.Empty);
+            Assert.That(result,
+                Does.Contain("Parameter-only init ref<T> is not admitted"));
+            Assert.That(await File.ReadAllBytesAsync(output)
+                .ConfigureAwait(false), Is.EqualTo(sentinel));
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(false);
+        }
+    }
 }
