@@ -3909,7 +3909,7 @@ internal sealed class TrRmC1EnumClosureSourceTests
             reemittedTables.Fields.GetTypeSpecRef(
                 reemittedShelfFieldRow));
         Assert.That(shelfType.Form, Is.EqualTo((byte)0x03));
-        Assert.That(shelfType.Qualifiers, Is.EqualTo((byte)0x02));
+        Assert.That(shelfType.Qualifiers, Is.Zero);
         Assert.That(shelfType.Row, Is.EqualTo(1));
 
         var reloadedReference = TrRmExecutableCompiler.CreateStandardReference(

@@ -237,7 +237,8 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         var classType = tables.TypeSpecs.GetTypeSpecBytes(
             classTypeSpecReference);
         Assert.That(classType[0], Is.EqualTo(0x02));
-        Assert.That(classType[1], Is.EqualTo(0x03));
+        Assert.That(classType[1], Is.EqualTo(0x01));
+        Assert.That(optionalType[1], Is.Zero);
         Assert.That(tables.TypeDefs.GetKind(
             checked((int)System.Buffers.Binary.BinaryPrimitives
                 .ReadUInt32LittleEndian(classType[2..]))), Is.EqualTo(2));

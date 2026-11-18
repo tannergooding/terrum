@@ -119,8 +119,11 @@ Generic TypeDef dependencies and interface/witness edges remain unsupported.
 Source class capture now retains exact compiler-owned declaration anchors and
 validates explicit class/member keys. The bounded C1M1 source emitter publishes
 captured local class TypeDefs, fields, and explicitly mapped public FieldDef
-ExportKeys with scalar, local class-handle and plain auto-layout local-struct
-closure. It rejects mapped constructor, method, and property keys rather than
+ExportKeys with scalar, local normal class-handle and plain auto-layout
+local-struct closure. Class field TypeSpecs preserve source write/optional
+qualifications without synthesizing GC backing; focused C1M1 and EN1
+regressions remain unverified under the active hold. It rejects mapped
+constructor, method, and property keys rather than
 silently dropping them; class MethodDefs, Bodies and construction records
 remain unsupported in this type-only route.
 The exact C1M1 construction successor has a

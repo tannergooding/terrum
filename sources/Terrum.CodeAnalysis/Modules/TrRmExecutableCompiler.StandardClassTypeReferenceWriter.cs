@@ -228,8 +228,7 @@ public static partial class TrRmExecutableCompiler
                 {
                     var classTypeSpecRow
                         = checked((uint)typeSpecRows.Count + 1);
-                    var qualifiers = (byte)(0x02
-                        | (isWritable ? 0x01 : 0));
+                    var qualifiers = isWritable ? (byte)0x01 : (byte)0;
                     typeSpecRows.Add(TrRmTypeSpecTableWriter.Reference(
                         0x02, checked((uint)typeDefRow), qualifiers));
                     reference = classTypeSpecRow;
