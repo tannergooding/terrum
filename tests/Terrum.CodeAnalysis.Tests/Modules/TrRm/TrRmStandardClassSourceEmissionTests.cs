@@ -754,6 +754,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 public static int32 Complement(int32 value) {
                     return ~value;
                 }
+                public static int32 CopyStatic(int32 value) {
+                    int32 copy = value;
+                    return copy;
+                }
                 public int32 XorAfterCall(int32 left, int32 right) {
                     return Xor(left, right) ^ right;
                 }
@@ -826,6 +830,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name == "Complement"));
+        var copyStatic = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "CopyStatic"));
         var xorAfterCall = members.Single(static node =>
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
@@ -874,6 +882,8 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                             "Box.Negate"),
                         new TrRmSourceClassMemberExport(0, complement.Span,
                             "Box.Complement"),
+                        new TrRmSourceClassMemberExport(0, copyStatic.Span,
+                            "Box.CopyStatic"),
                         new TrRmSourceClassMemberExport(0,
                             xorAfterCall.Span, "Box.XorAfterCall"),
                         new TrRmSourceClassMemberExport(0,
@@ -1173,6 +1183,26 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 0x17, 0,
             }));
         Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.CopyStatic", out var copyStaticDefinition), Is.True);
+        var copyStaticMethodRow
+            = checked((int)(copyStaticDefinition & 0x00FF_FFFF));
+        var copyStaticBodyRow
+            = tables.Methods.GetBodyRow(copyStaticMethodRow);
+        Assert.That(copyStaticBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(copyStaticBodyRow,
+            tables.Contracts.Count);
+        var copyStaticBody = tables.Bodies.GetRegisterBody(
+            copyStaticBodyRow, tables.Contracts.Count);
+        Assert.That(copyStaticBody.HomeCount, Is.EqualTo(2));
+        Assert.That(copyStaticBody.HomeMap[0], Is.EqualTo(2));
+        Assert.That(copyStaticBody.HomeMap[8], Is.EqualTo(3));
+        Assert.That(copyStaticBody.GetBlockCode(0).ToArray(), Is.EqualTo(
+            new byte[] {
+                0xD5, 0, 0, 0,
+                0xD6, 0x10, 1, 0,
+                0xEB, 0, 1, 0,
+            }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
             "Box.XorAfterCall", out var xorAfterCallDefinition), Is.True);
         var xorAfterCallMethodRow
             = checked((int)(xorAfterCallDefinition & 0x00FF_FFFF));
@@ -1259,6 +1289,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             int32 UseDouble() { return Box.Double(4); }
             int32 UseNegate() { return Box.Negate(4); }
             int32 UseComplement() { return Box.Complement(4); }
+            int32 UseCopyStatic() { return Box.CopyStatic(42); }
             int32 UseAfterCall(Box value) {
                 return value.XorAfterCall(2, 3);
             }

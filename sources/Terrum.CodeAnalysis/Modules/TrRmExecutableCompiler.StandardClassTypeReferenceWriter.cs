@@ -2644,29 +2644,38 @@ public static partial class TrRmExecutableCompiler
         Func<PrimitiveType, uint> typeSpecReferenceFor, int contractCount,
         TrRmArtifactSchema schema)
     {
-        if (function.IsStatic || function.ReturnType != PrimitiveType.Int32
-            || function.ParameterCount != 2
-            || function.Variables.Length != 3
-            || function.Variables[0].IsMutable
-            || function.Variables[1].Type != PrimitiveType.Int32
-            || function.Variables[1].IsMutable
-            || function.Variables[1].IsOut || function.Variables[1].IsInit
-            || function.Variables[1].IsImplicitRef
-            || function.Variables[1].IsInitializationLocal
-            || function.Variables[2].Type != PrimitiveType.Int32
-            || function.Variables[2].IsMutable
-            || function.Variables[2].IsOut || function.Variables[2].IsInit
-            || function.Variables[2].IsImplicitRef
-            || function.Variables[2].IsInitializationLocal
+        var receiverCount = function.IsStatic ? 0 : 1;
+        var localVariable = receiverCount + 1;
+        if (function.ReturnType != PrimitiveType.Int32
+            || function.ParameterCount != receiverCount + 1
+            || function.Variables.Length != receiverCount + 2
+            || (!function.IsStatic && function.Variables[0].IsMutable)
+            || function.Variables[receiverCount].Type
+                != PrimitiveType.Int32
+            || function.Variables[receiverCount].IsMutable
+            || function.Variables[receiverCount].IsOut
+            || function.Variables[receiverCount].IsInit
+            || function.Variables[receiverCount].IsImplicitRef
+            || function.Variables[receiverCount].IsInitializationLocal
+            || function.Variables[localVariable].Type
+                != PrimitiveType.Int32
+            || function.Variables[localVariable].IsMutable
+            || function.Variables[localVariable].IsOut
+            || function.Variables[localVariable].IsInit
+            || function.Variables[localVariable].IsImplicitRef
+            || function.Variables[localVariable].IsInitializationLocal
             || function.Body.RetiredManagedLocals.Length != 0
-            || function.Body.Statements.Length != 2
-            || function.Body.Statements[0] is not BoundLocal {
-                Variable: 2,
-                Initializer: BoundRead { Variable: 1, Type: PrimitiveType.Int32 },
-            }
-            || function.Body.Statements[1] is not BoundReturn {
-                Value: BoundRead { Variable: 2, Type: PrimitiveType.Int32 },
-            })
+            || function.Body.Statements is not [
+                BoundLocal local,
+                BoundReturn { Value: BoundRead returnedRead },
+            ]
+            || local.Variable != localVariable
+            || local.Initializer is not BoundRead {
+                Type: PrimitiveType.Int32,
+            } initialRead
+            || initialRead.Variable != receiverCount
+            || returnedRead.Type != PrimitiveType.Int32
+            || returnedRead.Variable != localVariable)
         {
             throw Unsupported(
                 "A Construction-2 local-copy Body requires one initialized int32 local copied from an int32 value formal and returned directly.");
@@ -2687,7 +2696,7 @@ public static partial class TrRmExecutableCompiler
             variable++)
         {
             var offset = variable * 8;
-            var role = variable == 0 ? (byte)1
+            var role = !function.IsStatic && variable == 0 ? (byte)1
                 : variable < function.ParameterCount ? (byte)2 : (byte)3;
             homeMap[offset] = role;
             BinaryPrimitives.WriteUInt16LittleEndian(
@@ -2695,14 +2704,16 @@ public static partial class TrRmExecutableCompiler
                 maps.GetTypeMapIndex(typeTokens[variable]));
             BinaryPrimitives.WriteUInt16LittleEndian(
                 homeMap.AsSpan(offset + 4, 2),
-                role == 2 ? checked((ushort)(variable - 1)) : (ushort)0);
+                role == 2
+                    ? checked((ushort)(variable - receiverCount))
+                    : (ushort)0);
         }
 
-        byte[] code = [
-            0xD5, 0, 1, 0,
-            0xD6, 0x10, 2, 0,
-            0xEB, 0, 2, 0,
-        ];
+        var code = new byte[] {
+            0xD5, 0, checked((byte)receiverCount), 0,
+            0xD6, 0x10, checked((byte)localVariable), 0,
+            0xEB, 0, checked((byte)localVariable), 0,
+        };
         ReadOnlyMemory<byte>[] records = [
             new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 },
         ];
@@ -3531,39 +3542,38 @@ public static partial class TrRmExecutableCompiler
     private static bool TryGetC1M1Construction2LocalCopyReturn(
         BoundFunction function)
     {
-        return !function.IsStatic
-            && function.ReturnType == PrimitiveType.Int32
-            && function.ParameterCount == 2
-            && function.Variables.Length == 3
-            && !function.Variables[0].IsMutable
-            && function.Variables[1].Type == PrimitiveType.Int32
-            && !function.Variables[1].IsMutable
-            && !function.Variables[1].IsOut
-            && !function.Variables[1].IsInit
-            && !function.Variables[1].IsImplicitRef
-            && !function.Variables[1].IsInitializationLocal
-            && function.Variables[2].Type == PrimitiveType.Int32
-            && !function.Variables[2].IsMutable
-            && !function.Variables[2].IsOut
-            && !function.Variables[2].IsInit
-            && !function.Variables[2].IsImplicitRef
-            && !function.Variables[2].IsInitializationLocal
+        var receiverCount = function.IsStatic ? 0 : 1;
+        var formalVariable = receiverCount;
+        var localVariable = receiverCount + 1;
+        return function.ReturnType == PrimitiveType.Int32
+            && function.ParameterCount == receiverCount + 1
+            && function.Variables.Length == receiverCount + 2
+            && (function.IsStatic || !function.Variables[0].IsMutable)
+            && function.Variables[formalVariable].Type
+                == PrimitiveType.Int32
+            && !function.Variables[formalVariable].IsMutable
+            && !function.Variables[formalVariable].IsOut
+            && !function.Variables[formalVariable].IsInit
+            && !function.Variables[formalVariable].IsImplicitRef
+            && !function.Variables[formalVariable].IsInitializationLocal
+            && function.Variables[localVariable].Type
+                == PrimitiveType.Int32
+            && !function.Variables[localVariable].IsMutable
+            && !function.Variables[localVariable].IsOut
+            && !function.Variables[localVariable].IsInit
+            && !function.Variables[localVariable].IsImplicitRef
+            && !function.Variables[localVariable].IsInitializationLocal
             && function.Body.RetiredManagedLocals.IsEmpty
             && function.Body.Statements is [
-                BoundLocal {
-                    Variable: 2,
-                    Initializer: BoundRead {
-                        Variable: 1,
-                        Type: PrimitiveType.Int32,
-                    },
-                },
-                BoundReturn {
-                    Value: BoundRead {
-                        Variable: 2,
-                        Type: PrimitiveType.Int32,
-                    },
-                },
-            ];
+                BoundLocal local,
+                BoundReturn { Value: BoundRead returnedRead },
+            ]
+            && local.Variable == localVariable
+            && local.Initializer is BoundRead initialRead
+            && initialRead.Type == PrimitiveType.Int32
+            && initialRead.Variable == formalVariable
+            && returnedRead.Type == PrimitiveType.Int32
+            && returnedRead.Variable == localVariable;
     }
 
     private static bool TryGetC1M1Construction2LocalXorReturn(
