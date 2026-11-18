@@ -4254,11 +4254,19 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                 TrRmArtifactIndex
                     .ForGenericMethodCallsParameterLabelsDraft(artifact));
         Assert.That(tables.Fields.Count, Is.GreaterThan(0));
-        var fieldTypeSpecReference = Enumerable.Range(1,
-                tables.Fields.Count)
-            .Select(tables.Fields.GetTypeSpecRef)
-            .Single(typeSpecReference => tables.TypeSpecs
-                .GetTypeSpecRef(typeSpecReference).Form == 0x0C);
+        uint fieldTypeSpecReference = 0;
+        for (var fieldRow = 1; fieldRow <= tables.Fields.Count; fieldRow++)
+        {
+            var candidate = tables.Fields.GetTypeSpecRef(fieldRow);
+            if (tables.TypeSpecs.GetTypeSpecRef(candidate).Form != 0x0C)
+            {
+                continue;
+            }
+
+            Assert.That(fieldTypeSpecReference, Is.Zero);
+            fieldTypeSpecReference = candidate;
+        }
+        Assert.That(fieldTypeSpecReference, Is.GreaterThan(0u));
         var fieldTypeSpec = tables.TypeSpecs.GetTypeSpecRef(
             fieldTypeSpecReference);
         var fieldPointerRow = tables.TypeSpecs.GetRow(fieldTypeSpec.Row);
