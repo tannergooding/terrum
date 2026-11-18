@@ -157,8 +157,9 @@ readonly-instance scalar/unit
 identity forwarders through assigned Body kind `05`, empty unit-returning instance
 methods, and readonly instance methods returning an explicit scalar parameter
 through ReturnHome with receiver/formal Homes in declaration order, plus a
-readonly instance `int32` XOR Body over two explicit value formals and a
-readonly same-class call followed by XOR through a general CallSite Body.
+readonly instance `int32` XOR Body over two explicit value formals and
+readonly same-class int32 calls followed by binary or comparison operations
+through general CallSite Bodies.
 Static and readonly instance methods can also copy one scalar formal to one
 local and return it, or use that local as the left operand of a following
 int32 binary Body, including comparison; readonly instance methods also retain

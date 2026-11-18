@@ -29,7 +29,7 @@ public static partial class TrRmExecutableCompiler
         int DirectReturnHome = -1,
         int IdentityForwarderTargetFunctionIndex = -1,
         byte[]? EncodedBody = null,
-        BoundBinary? CallXorExpression = null);
+        BoundBinary? CallBinaryExpression = null);
 
     private readonly record struct C1M1ParameterSurfaceRow(
         int MethodDefRow, int Ordinal, string Name,
@@ -922,8 +922,8 @@ public static partial class TrRmExecutableCompiler
                     var directInt32Unary
                         = TryGetC1M1Construction2DirectInt32Unary(
                             methodFunction);
-                    var callXor
-                        = TryGetC1M1Construction2DirectCallXor(
+                    var callInt32Binary
+                        = TryGetC1M1Construction2DirectCallInt32Binary(
                             methodFunction, program.Functions);
                     var localCopyReturn
                         = TryGetC1M1Construction2LocalCopyReturn(
@@ -940,7 +940,7 @@ public static partial class TrRmExecutableCompiler
                             && !isSupportedUnitIdentityForwarder
                             && directInt32Binary is null
                             && directInt32Unary is null
-                            && callXor is null
+                            && callInt32Binary is null
                             && !localCopyReturn
                             && !localInt32BinaryReturn)
                         || methodFunction.IsClassConstructor
@@ -995,7 +995,7 @@ public static partial class TrRmExecutableCompiler
                             && methodFunction.IsInternal))
                     {
                         throw Unsupported(
-                            "The bounded Construction-2 class method producer supports effect-free scalar static methods, exact identity forwarders, readonly instance int32 unary/binary/comparison and same-class call-XOR methods, one scalar local-copy return, empty unit instance methods, readonly instance methods returning one scalar value parameter and direct scalar field reads/writes.");
+                            "The bounded Construction-2 class method producer supports effect-free scalar static methods, exact identity forwarders, readonly instance int32 unary/binary/comparison and same-class call-binary methods, scalar local-copy/binary returns, empty unit instance methods, readonly instance methods returning one scalar value parameter and direct scalar field reads/writes.");
                     }
 
                     if (methodFunction.ReturnType != PrimitiveType.Void)
@@ -1009,12 +1009,12 @@ public static partial class TrRmExecutableCompiler
                                 && !isSupportedUnitIdentityForwarder
                                 && directInt32Binary is null
                                 && directInt32Unary is null
-                                && callXor is null
+                                && callInt32Binary is null
                                 && !localCopyReturn
                                 && !localInt32BinaryReturn)
                             {
                                 throw Unsupported(
-                                    "The bounded Construction-2 instance method producer supports only unit, direct scalar-parameter, direct int32 unary/binary/comparison, same-class call-XOR, scalar local-copy/binary returns or direct scalar-field results and direct scalar-field writes.");
+                                    "The bounded Construction-2 instance method producer supports only unit, direct scalar-parameter, direct int32 unary/binary/comparison, same-class call-binary, scalar local-copy/binary returns or direct scalar-field results and direct scalar-field writes.");
                             }
                         }
 
@@ -1246,7 +1246,7 @@ public static partial class TrRmExecutableCompiler
                             isSupportedIdentityForwarder
                                 || isSupportedUnitIdentityForwarder
                                 ? identityForwarderTargetFunctionIndex : -1,
-                            encodedBody, callXor));
+                            encodedBody, callInt32Binary));
                 }
             }
 
@@ -1293,11 +1293,11 @@ public static partial class TrRmExecutableCompiler
                         targetMethodDefRow);
                 }
 
-                if (body is null && method.CallXorExpression is not null)
+                if (body is null && method.CallBinaryExpression is not null)
                 {
-                    if (method.CallXorExpression
-                            is BoundBinary callXorExpression
-                        && callXorExpression.Left is BoundCall targetCall)
+                    if (method.CallBinaryExpression
+                            is BoundBinary callBinaryExpression
+                        && callBinaryExpression.Left is BoundCall targetCall)
                     {
                         if (!methodDefRowByFunctionIndex.TryGetValue(
                                 targetCall.Function,
@@ -1307,8 +1307,8 @@ public static partial class TrRmExecutableCompiler
                                 "A class call Body targets a MethodDef outside its retained class closure.");
                         }
 
-                        body = EncodeC1M1Construction2CallXorBody(
-                            method.Function, callXorExpression,
+                        body = EncodeC1M1Construction2CallInt32BinaryBody(
+                            method.Function, callBinaryExpression,
                             targetMethodDefRow,
                             Construction2ValueTypeSpecReference,
                             contractRows.Count, schema);
@@ -2638,13 +2638,13 @@ public static partial class TrRmExecutableCompiler
                 : schema.UsesGeneralPredicateGraphs());
     }
 
-    private static byte[] EncodeC1M1Construction2CallXorBody(
+    private static byte[] EncodeC1M1Construction2CallInt32BinaryBody(
         BoundFunction function, BoundBinary binary, int targetMethodDefRow,
         Func<PrimitiveType, uint> typeSpecReferenceFor, int contractCount,
         TrRmArtifactSchema schema)
     {
         if (targetMethodDefRow <= 0 || targetMethodDefRow > 0xFF_FFFF
-            || function.IsStatic || function.ReturnType != PrimitiveType.Int32
+            || function.IsStatic
             || function.ParameterCount != 3
             || function.Variables.Length != function.ParameterCount
             || function.Variables[0].IsMutable
@@ -2653,8 +2653,6 @@ public static partial class TrRmExecutableCompiler
                 || variable.IsOut || variable.IsInit
                 || variable.IsImplicitRef
                 || variable.IsInitializationLocal)
-            || binary.Type != PrimitiveType.Int32
-            || binary.Operator != TokenKind.Caret
             || binary.Left is not BoundCall call
             || binary.Right is not BoundRead right
             || right.Type != PrimitiveType.Int32
@@ -2667,7 +2665,24 @@ public static partial class TrRmExecutableCompiler
             || call.ImportedGenericMethodCall is not null)
         {
             throw Unsupported(
-                "A Construction-2 instance call-XOR Body requires a direct readonly instance int32 call followed by one direct int32 parameter read.");
+                "A Construction-2 instance call-binary Body requires a direct readonly instance int32 call and one direct int32 parameter read.");
+        }
+
+        var isComparison
+            = function.ReturnType == PrimitiveType.Bool
+                && binary.Type == PrimitiveType.Bool
+                && IsC1M1Construction2Int32ComparisonOperator(
+                    binary.Operator);
+        var isInt32ValueOperation
+            = function.ReturnType == PrimitiveType.Int32
+                && binary.Type == PrimitiveType.Int32
+                && (binary.Operator is TokenKind.Ampersand
+                    or TokenKind.Pipe or TokenKind.Caret or TokenKind.Plus
+                    or TokenKind.Minus or TokenKind.Star);
+        if (!isComparison && !isInt32ValueOperation)
+        {
+            throw Unsupported(
+                "A Construction-2 instance call-binary Body requires an assigned int32 operation or Boolean comparison.");
         }
 
         var typeTokens = new uint[function.ParameterCount];
@@ -2711,7 +2726,7 @@ public static partial class TrRmExecutableCompiler
             new(callSite),
         ];
         var callSiteRecordIndex = checked((ushort)(records.Length - 1));
-        var code = new List<byte>(14);
+        var code = new List<byte>(isComparison ? 18 : 14);
         code.Add(0xE0);
         code.Add(0);
         code.Add(unchecked((byte)callSiteRecordIndex));
@@ -2722,10 +2737,31 @@ public static partial class TrRmExecutableCompiler
         const byte rightRegister = 1;
         var payload = (ushort)(destinationRegister | (0x0F << 4)
             | (leftRegister << 8) | (rightRegister << 12));
-        code.Add(0xC1);
-        code.Add(0x03);
-        code.Add((byte)payload);
-        code.Add((byte)(payload >> 8));
+        if (isComparison)
+        {
+            code.Add(0xC2);
+            code.Add(0);
+            code.Add((byte)payload);
+            code.Add((byte)(payload >> 8));
+            var predicatePayload = (ushort)(destinationRegister
+                | (destinationRegister << 4) | (0x0F << 8)
+                | (0x0F << 12));
+            code.Add(0xC3);
+            code.Add(GetC1M1Construction2Int32ComparisonPredicate(
+                binary.Operator));
+            code.Add((byte)predicatePayload);
+            code.Add((byte)(predicatePayload >> 8));
+        }
+        else
+        {
+            var (opcode, control)
+                = GetC1M1Construction2Int32BinaryEncoding(
+                    binary.Operator, binary.OverflowBehavior);
+            code.Add(opcode);
+            code.Add(control);
+            code.Add((byte)payload);
+            code.Add((byte)(payload >> 8));
+        }
         code.Add(0x17);
         code.Add(0);
         return TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
@@ -3577,11 +3613,11 @@ public static partial class TrRmExecutableCompiler
         }
     }
 
-    private static BoundBinary? TryGetC1M1Construction2DirectCallXor(
+    private static BoundBinary?
+        TryGetC1M1Construction2DirectCallInt32Binary(
         BoundFunction function, ImmutableArray<BoundFunction> functions)
     {
-        if (function.IsStatic || function.ReturnType != PrimitiveType.Int32
-            || function.ParameterCount != 3
+        if (function.IsStatic || function.ParameterCount != 3
             || function.ParameterCount != function.Variables.Length
             || function.Variables[0].IsMutable
             || function.Variables.Skip(1).Any(static variable =>
@@ -3597,8 +3633,6 @@ public static partial class TrRmExecutableCompiler
         var isSupported = true;
         Visit(function.Body);
         if (!isSupported || returnedBinary is null
-            || returnedBinary.Type != PrimitiveType.Int32
-            || returnedBinary.Operator != TokenKind.Caret
             || returnedBinary.Left is not BoundCall call
             || returnedBinary.Right is not BoundRead right
             || right.Type != PrimitiveType.Int32
@@ -3610,6 +3644,22 @@ public static partial class TrRmExecutableCompiler
             || call.GenericMethodCall is not null
             || call.ImportedGenericMethodCall is not null
             || (uint)call.Function >= (uint)functions.Length)
+        {
+            return null;
+        }
+
+        var isComparison
+            = function.ReturnType == PrimitiveType.Bool
+                && returnedBinary.Type == PrimitiveType.Bool
+                && IsC1M1Construction2Int32ComparisonOperator(
+                    returnedBinary.Operator);
+        var isInt32ValueOperation
+            = function.ReturnType == PrimitiveType.Int32
+                && returnedBinary.Type == PrimitiveType.Int32
+                && (returnedBinary.Operator is TokenKind.Ampersand
+                    or TokenKind.Pipe or TokenKind.Caret
+                    or TokenKind.Plus or TokenKind.Minus or TokenKind.Star);
+        if (!isComparison && !isInt32ValueOperation)
         {
             return null;
         }

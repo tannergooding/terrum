@@ -776,6 +776,12 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 public bool NotEqual(int32 left, int32 right) {
                     return left != right;
                 }
+                public int32 SumAfterCall(int32 left, int32 right) {
+                    return Sum(left, right) + right;
+                }
+                public bool LessThanAfterCall(int32 left, int32 right) {
+                    return Sum(left, right) < right;
+                }
                 public static int32 StaticXorThroughLocal(
                     int32 left, int32 right) {
                     int32 copy = left;
@@ -907,6 +913,14 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name == "XorAfterCall"));
+        var sumAfterCall = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "SumAfterCall"));
+        var lessThanAfterCall = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "LessThanAfterCall"));
         var copyThroughLocal = members.Single(static node =>
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
@@ -974,6 +988,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                             lessThroughLocal.Span, "Box.LessThroughLocal"),
                         new TrRmSourceClassMemberExport(0,
                             xorAfterCall.Span, "Box.XorAfterCall"),
+                        new TrRmSourceClassMemberExport(0,
+                            sumAfterCall.Span, "Box.SumAfterCall"),
+                        new TrRmSourceClassMemberExport(0,
+                            lessThanAfterCall.Span, "Box.LessThanAfterCall"),
                         new TrRmSourceClassMemberExport(0,
                             copyThroughLocal.Span, "Box.CopyThroughLocal"),
                         new TrRmSourceClassMemberExport(0,
@@ -1430,6 +1448,56 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             0x17, 0,
         }));
         Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.SumAfterCall", out var sumAfterCallDefinition), Is.True);
+        var sumAfterCallMethodRow
+            = checked((int)(sumAfterCallDefinition & 0x00FF_FFFF));
+        var sumAfterCallBodyRow
+            = tables.Methods.GetBodyRow(sumAfterCallMethodRow);
+        Assert.That(sumAfterCallBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(sumAfterCallBodyRow,
+            tables.Contracts.Count);
+        var sumAfterCallBody = tables.Bodies.GetRegisterBody(
+            sumAfterCallBodyRow, tables.Contracts.Count);
+        Assert.That(sumAfterCallBody.MethodCount, Is.EqualTo(1));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                sumAfterCallBody.MethodMap),
+            Is.EqualTo(sumDefinition));
+        var sumAfterCallFunction = program.Functions.Single(
+            static function => function.Name == "SumAfterCall");
+        var sumAfterCallBinary = (BoundBinary)((BoundReturn)
+            sumAfterCallFunction.Body.Statements.Single()).Value!;
+        Assert.That(sumAfterCallBody.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xE0, 0, 1, 0,
+                0xD5, 1, 2, 0,
+                0xC0, GetArithmeticControl(sumAfterCallBinary), 0xF0, 0x10,
+                0x17, 0,
+            }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.LessThanAfterCall", out var lessThanAfterCallDefinition),
+            Is.True);
+        var lessThanAfterCallMethodRow = checked((int)(
+            lessThanAfterCallDefinition & 0x00FF_FFFF));
+        var lessThanAfterCallBodyRow
+            = tables.Methods.GetBodyRow(lessThanAfterCallMethodRow);
+        Assert.That(lessThanAfterCallBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(
+            lessThanAfterCallBodyRow, tables.Contracts.Count);
+        var lessThanAfterCallBody = tables.Bodies.GetRegisterBody(
+            lessThanAfterCallBodyRow, tables.Contracts.Count);
+        Assert.That(lessThanAfterCallBody.MethodCount, Is.EqualTo(1));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                lessThanAfterCallBody.MethodMap),
+            Is.EqualTo(sumDefinition));
+        Assert.That(lessThanAfterCallBody.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xE0, 0, 1, 0,
+                0xD5, 1, 2, 0,
+                0xC2, 0, 0xF0, 0x10,
+                0xC3, 1, 0, 0xFF,
+                0x17, 0,
+            }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
             "Box.CopyThroughLocal", out var copyDefinition), Is.True);
         var copyMethodRow
             = checked((int)(copyDefinition & 0x00FF_FFFF));
@@ -1517,6 +1585,12 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             }
             int32 UseAfterCall(Box value) {
                 return value.XorAfterCall(2, 3);
+            }
+            int32 UseSumAfterCall(Box value) {
+                return value.SumAfterCall(2, 3);
+            }
+            bool UseLessThanAfterCall(Box value) {
+                return value.LessThanAfterCall(2, 3);
             }
             int32 UseLocal(Box value) {
                 return value.CopyThroughLocal(4);

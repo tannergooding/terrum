@@ -116,23 +116,16 @@ prerequisite has already been met.
    typed API. The separate [class-source CLI proposal](proposals/standard-trrm-c1-class-source-cli-transport.md)
    is unapproved and unimplemented; transport depends on complete
    class/member/Body closure and targets Construction-1/2 L1R1 and PI1 successors.
-   Construction-2 source production now emits a bounded real initializer I /
-   projection P pair for direct scalar parameter-to-field initialization,
-   static direct-formal/unary/binary/comparison and fixed-SF1-constant
-   register Bodies, readonly instance direct int32 unary/binary/comparison
-   Bodies, static/instance scalar local-copy and local-fed binary Bodies,
-   empty unit instance methods, and a
-   readonly instance method returning one explicit scalar parameter through
-   ReturnHome with receiver/formal Homes in declaration order, plus direct
-   scalar instance FieldRead and mutable-receiver scalar FieldWrite
-   descriptors, and exact same-class static and readonly-instance scalar/unit
-   identity forwarders through Body kind `05`, plus a readonly instance `int32` XOR
-   Body over two value formals, and a readonly same-class call followed by XOR
-   through a general CallSite Body, plus a scalar formal-to-local copy
-   followed by ReturnHome and a local used by a subsequent XOR. The
-   Unit-before-value, field-read, field-write, XOR, call-forwarding, local-copy,
-   local-XOR, static/instance scalar-forwarder and unit-forwarder regressions
-   remain unverified under the active hold. Ordinary
+   Construction-2 source production emits a bounded I/P initializer for
+   direct scalar parameter-to-field initialization; assigned static and
+   readonly-instance register Bodies cover direct scalar returns, int32
+   unary/binary/comparison operations, fixed constants, one-local copies and
+   local-fed binary operations. It also emits empty unit instance methods,
+   direct scalar FieldRead/FieldWrite descriptors, exact same-class identity
+   forwarders and a same-class readonly CallSite followed by an int32
+   binary/comparison. Unit-before-value, field, operation, call-forwarding,
+   local and identity-forwarder regressions remain unverified under the active
+   hold. Ordinary
    by-value Unit parameters and `()`
    defaults now retain logical positions through source binding, CM1 metadata
    and Windows x64 payload elision; focused source/metadata/JIT regressions
