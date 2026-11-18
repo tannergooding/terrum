@@ -829,6 +829,16 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     int32 copy = left;
                     return copy < right;
                 }
+                public static int32 AddThroughLocalConstant(
+                    int32 value) {
+                    int32 copy = value;
+                    return copy + 7;
+                }
+                public static bool LessThroughLocalConstant(
+                    int32 value) {
+                    int32 copy = value;
+                    return copy < 7;
+                }
                 public int32 XorAfterCall(int32 left, int32 right) {
                     return Xor(left, right) ^ right;
                 }
@@ -978,6 +988,16 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name == "LessThroughLocal"));
+        var addThroughLocalConstant = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name
+                    == "AddThroughLocalConstant"));
+        var lessThroughLocalConstant = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name
+                    == "LessThroughLocalConstant"));
         var xorAfterCall = members.Single(static node =>
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
@@ -1079,6 +1099,12 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                             "Box.SumThroughTwoLocals"),
                         new TrRmSourceClassMemberExport(0,
                             lessThroughLocal.Span, "Box.LessThroughLocal"),
+                        new TrRmSourceClassMemberExport(0,
+                            addThroughLocalConstant.Span,
+                            "Box.AddThroughLocalConstant"),
+                        new TrRmSourceClassMemberExport(0,
+                            lessThroughLocalConstant.Span,
+                            "Box.LessThroughLocalConstant"),
                         new TrRmSourceClassMemberExport(0,
                             xorAfterCall.Span, "Box.XorAfterCall"),
                         new TrRmSourceClassMemberExport(0,
@@ -1697,6 +1723,60 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 0x17, 0,
             }));
         Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.AddThroughLocalConstant",
+            out var addThroughLocalConstantDefinition), Is.True);
+        var addThroughLocalConstantMethodRow = checked((int)(
+            addThroughLocalConstantDefinition & 0x00FF_FFFF));
+        var addThroughLocalConstantBodyRow
+            = tables.Methods.GetBodyRow(addThroughLocalConstantMethodRow);
+        Assert.That(addThroughLocalConstantBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(
+            addThroughLocalConstantBodyRow, tables.Contracts.Count);
+        var addThroughLocalConstantBody = tables.Bodies.GetRegisterBody(
+            addThroughLocalConstantBodyRow, tables.Contracts.Count);
+        Assert.That(addThroughLocalConstantBody.HomeCount, Is.EqualTo(2));
+        Assert.That(addThroughLocalConstantBody.ConstantCount, Is.EqualTo(1));
+        var addThroughLocalConstantFunction = program.Functions.Single(
+            static function => function.Name == "AddThroughLocalConstant");
+        var addThroughLocalConstantBinary = (BoundBinary)((BoundReturn)
+            addThroughLocalConstantFunction.Body.Statements.Single(
+                static statement => statement is BoundReturn)).Value!;
+        Assert.That(addThroughLocalConstantBody.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD5, 0, 0, 0,
+                0xD6, 0x10, 1, 0,
+                0xD5, 0, 1, 0,
+                0xD4, 1, 0, 0,
+                0xC0, GetArithmeticControl(addThroughLocalConstantBinary),
+                0xF0, 0x10,
+                0x17, 0,
+            }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.LessThroughLocalConstant",
+            out var lessThroughLocalConstantDefinition), Is.True);
+        var lessThroughLocalConstantMethodRow = checked((int)(
+            lessThroughLocalConstantDefinition & 0x00FF_FFFF));
+        var lessThroughLocalConstantBodyRow
+            = tables.Methods.GetBodyRow(lessThroughLocalConstantMethodRow);
+        Assert.That(lessThroughLocalConstantBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(
+            lessThroughLocalConstantBodyRow, tables.Contracts.Count);
+        var lessThroughLocalConstantBody = tables.Bodies.GetRegisterBody(
+            lessThroughLocalConstantBodyRow, tables.Contracts.Count);
+        Assert.That(lessThroughLocalConstantBody.HomeCount, Is.EqualTo(2));
+        Assert.That(lessThroughLocalConstantBody.ConstantCount,
+            Is.EqualTo(1));
+        Assert.That(lessThroughLocalConstantBody.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD5, 0, 0, 0,
+                0xD6, 0x10, 1, 0,
+                0xD5, 0, 1, 0,
+                0xD4, 1, 0, 0,
+                0xC2, 0, 0xF0, 0x10,
+                0xC3, 1, 0, 0xFF,
+                0x17, 0,
+            }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
             "Box.XorAfterCall", out var xorAfterCallDefinition), Is.True);
         var xorAfterCallMethodRow
             = checked((int)(xorAfterCallDefinition & 0x00FF_FFFF));
@@ -1934,6 +2014,12 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             }
             bool UseLessThroughLocal() {
                 return Box.LessThroughLocal(1, 2);
+            }
+            int32 UseAddThroughLocalConstant() {
+                return Box.AddThroughLocalConstant(5);
+            }
+            bool UseLessThroughLocalConstant() {
+                return Box.LessThroughLocalConstant(5);
             }
             int32 UseAfterCall(Box value) {
                 return value.XorAfterCall(2, 3);
