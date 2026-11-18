@@ -765,6 +765,12 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 public int32 Remainder(int32 left, int32 right) {
                     return left % right;
                 }
+                public int32 SubtractFromSeven(int32 value) {
+                    return 7 - value;
+                }
+                public bool GreaterThanSeven(int32 value) {
+                    return value > 7;
+                }
                 public static int32 Double(int32 value) {
                     return value + value;
                 }
@@ -908,6 +914,14 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name == "Remainder"));
+        var subtractFromSeven = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "SubtractFromSeven"));
+        var greaterThanSeven = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "GreaterThanSeven"));
         var doubleValue = members.Single(static node =>
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
@@ -1029,6 +1043,12 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                             "Box.SubtractFromConstant"),
                         new TrRmSourceClassMemberExport(0, remainder.Span,
                             "Box.Remainder"),
+                        new TrRmSourceClassMemberExport(0,
+                            subtractFromSeven.Span,
+                            "Box.SubtractFromSeven"),
+                        new TrRmSourceClassMemberExport(0,
+                            greaterThanSeven.Span,
+                            "Box.GreaterThanSeven"),
                         new TrRmSourceClassMemberExport(0, doubleValue.Span,
                             "Box.Double"),
                         new TrRmSourceClassMemberExport(0, negate.Span,
@@ -1154,6 +1174,54 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 0xD5, 0, 1, 0,
                 0xD5, 1, 2, 0,
                 0xC0, 0x0D, 0xF0, 0x10,
+                0x17, 0,
+            }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.SubtractFromSeven", out var subtractFromSevenDefinition),
+            Is.True);
+        var subtractFromSevenMethodRow = checked((int)(
+            subtractFromSevenDefinition & 0x00FF_FFFF));
+        var subtractFromSevenBodyRow
+            = tables.Methods.GetBodyRow(subtractFromSevenMethodRow);
+        Assert.That(subtractFromSevenBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(
+            subtractFromSevenBodyRow, tables.Contracts.Count);
+        var subtractFromSevenBody = tables.Bodies.GetRegisterBody(
+            subtractFromSevenBodyRow, tables.Contracts.Count);
+        Assert.That(subtractFromSevenBody.HomeCount, Is.EqualTo(2));
+        Assert.That(subtractFromSevenBody.ConstantCount, Is.EqualTo(1));
+        var subtractFromSevenFunction = program.Functions.Single(
+            static function => function.Name == "SubtractFromSeven");
+        var subtractFromSevenBinary = (BoundBinary)((BoundReturn)
+            subtractFromSevenFunction.Body.Statements.Single()).Value!;
+        Assert.That(subtractFromSevenBody.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD4, 0, 0, 0,
+                0xD5, 1, 1, 0,
+                0xC0, GetArithmeticControl(subtractFromSevenBinary),
+                0xF0, 0x10,
+                0x17, 0,
+            }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.GreaterThanSeven", out var greaterThanSevenDefinition),
+            Is.True);
+        var greaterThanSevenMethodRow = checked((int)(
+            greaterThanSevenDefinition & 0x00FF_FFFF));
+        var greaterThanSevenBodyRow
+            = tables.Methods.GetBodyRow(greaterThanSevenMethodRow);
+        Assert.That(greaterThanSevenBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(
+            greaterThanSevenBodyRow, tables.Contracts.Count);
+        var greaterThanSevenBody = tables.Bodies.GetRegisterBody(
+            greaterThanSevenBodyRow, tables.Contracts.Count);
+        Assert.That(greaterThanSevenBody.HomeCount, Is.EqualTo(2));
+        Assert.That(greaterThanSevenBody.ConstantCount, Is.EqualTo(1));
+        Assert.That(greaterThanSevenBody.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD5, 0, 1, 0,
+                0xD4, 1, 0, 0,
+                0xC2, 0, 0xF0, 0x10,
+                0xC3, 4, 0, 0xFF,
                 0x17, 0,
             }));
         Assert.That(tables.Exports.TryGetDefinitionForKey(1,
@@ -1834,6 +1902,12 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             }
             int32 UseRemainder(Box value) {
                 return value.Remainder(12, 5);
+            }
+            int32 UseSubtractFromSeven(Box value) {
+                return value.SubtractFromSeven(2);
+            }
+            bool UseGreaterThanSeven(Box value) {
+                return value.GreaterThanSeven(8);
             }
             int32 UseDouble() { return Box.Double(4); }
             int32 UseNegate() { return Box.Negate(4); }

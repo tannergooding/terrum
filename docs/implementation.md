@@ -149,7 +149,9 @@ wrapping int32 negation and add/subtract/multiply, checked divide/remainder,
 constant operands in int32 binary Bodies, and fixed-SF1-constant returns;
 fixed scalar constants use the provisional `11/1` path and Blob section
 `0003`. Static int32 comparisons produce Boolean results through
-assigned C2/C3 relation predicates. Readonly instance methods with two direct
+assigned C2/C3 relation predicates. Static and readonly-instance binary
+Bodies can load scalar operands through ConstantMap. Readonly instance methods
+with two direct
 int32 formal reads
 emit Body kind `01` for bitwise operations and checked/wrapping
 add/subtract/multiply and int32-to-Boolean comparisons; one-formal methods
