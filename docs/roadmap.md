@@ -120,9 +120,9 @@ prerequisite has already been met.
    projection P pair for direct scalar parameter-to-field initialization,
    parameterized static scalar methods, empty unit instance methods, and a
    readonly instance method returning one explicit scalar parameter through
-   ReturnHome with receiver/formal Homes in declaration order. The
-   Unit-before-value instance regression remains unverified under the active
-   hold. Ordinary by-value Unit parameters and `()`
+   ReturnHome with receiver/formal Homes in declaration order, plus direct
+   scalar instance FieldRead descriptors. The Unit-before-value and field-read
+   regressions remain unverified under the active hold. Ordinary by-value Unit parameters and `()`
    defaults now retain logical positions through source binding, CM1 metadata
    and Windows x64 payload elision; focused source/metadata/JIT regressions
    remain unverified under the active hold. The provisional

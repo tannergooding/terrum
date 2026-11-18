@@ -26,7 +26,7 @@ public static partial class TrRmExecutableCompiler
 
     private sealed record C1M1Construction2SourceMethod(
         BoundFunction Function, int MethodDefRow,
-        int DirectReturnHome = -1);
+        int DirectReturnHome = -1, byte[]? CompactBody = null);
 
     private readonly record struct C1M1ParameterSurfaceRow(
         int MethodDefRow, int Ordinal, string Name,
@@ -887,9 +887,17 @@ public static partial class TrRmExecutableCompiler
                                 == methodFunction.Variables.Length
                             && TryGetC1M1Construction2DirectParameterReturn(
                                 methodFunction, out directReturnHome);
+                    var directFieldIndex = -1;
+                    var isSupportedDirectFieldReadInstanceMethod
+                        = !methodFunction.IsStatic
+                            && methodFunction.ReturnType
+                                != PrimitiveType.Void
+                            && TryGetC1M1Construction2DirectFieldRead(
+                                methodFunction, out directFieldIndex);
                     if ((!methodFunction.IsStatic
                             && !isSupportedNoOpInstanceMethod
-                            && !isSupportedDirectReturnInstanceMethod)
+                            && !isSupportedDirectReturnInstanceMethod
+                            && !isSupportedDirectFieldReadInstanceMethod)
                         || methodFunction.IsClassConstructor
                         || methodFunction.IsConstructor
                         || methodFunction.IsExternal
@@ -942,17 +950,18 @@ public static partial class TrRmExecutableCompiler
                             && methodFunction.IsInternal))
                     {
                         throw Unsupported(
-                            "The bounded Construction-2 class method producer supports effect-free scalar static methods, empty unit instance methods and readonly instance methods returning one scalar value parameter.");
+                            "The bounded Construction-2 class method producer supports effect-free scalar static methods, empty unit instance methods, readonly instance methods returning one scalar value parameter and direct scalar field reads.");
                     }
 
                     if (methodFunction.ReturnType != PrimitiveType.Void)
                     {
                         if (!methodFunction.IsStatic)
                         {
-                            if (!isSupportedDirectReturnInstanceMethod)
+                            if (!isSupportedDirectReturnInstanceMethod
+                                && !isSupportedDirectFieldReadInstanceMethod)
                             {
                                 throw Unsupported(
-                                    "The bounded Construction-2 instance method producer supports only unit or direct scalar-parameter results.");
+                                    "The bounded Construction-2 instance method producer supports only unit, direct scalar-parameter or direct scalar-field results.");
                             }
                         }
 
@@ -1046,6 +1055,22 @@ public static partial class TrRmExecutableCompiler
                         .Select(static member => member.ExportKey)
                         .ToArray();
                     var methodRow = methodRows.Count + 1;
+                    byte[]? compactBody = null;
+                    if (isSupportedDirectFieldReadInstanceMethod)
+                    {
+                        if (!fieldDefRowByClassAndIndex.TryGetValue((
+                                classIndex, directFieldIndex),
+                                out var fieldDefRow))
+                        {
+                            throw new InvalidDataException(
+                                "A class instance method reads a FieldDef outside its retained owner.");
+                        }
+
+                        compactBody
+                            = EncodeC1M1Construction2FieldReadBody(
+                                fieldDefRow);
+                    }
+
                     var methodSignatureRow
                         = methodSignatureRows.Count + 1;
                     var methodParamFirst
@@ -1100,7 +1125,8 @@ public static partial class TrRmExecutableCompiler
                         new C1M1Construction2SourceMethod(
                             methodFunction, methodRow,
                             isSupportedDirectReturnInstanceMethod
-                                ? directReturnHome : -1));
+                                ? directReturnHome : -1,
+                            compactBody));
                 }
             }
 
@@ -1135,17 +1161,24 @@ public static partial class TrRmExecutableCompiler
 
             foreach (var method in construction2SourceMethods)
             {
-                bodyRows.Add(method.Function.IsStatic
-                    ? EncodeC1M1Construction2StaticMethodBody(
-                        method.Function)
-                    : method.DirectReturnHome >= 0
-                    ? EncodeC1M1Construction2InstanceMethodBody(
-                        method.Function, method.DirectReturnHome,
-                        Construction2ValueTypeSpecReference,
-                        contractRows.Count, schema)
-                    : EncodeC1M1Construction2NoOpInstanceMethodBody(
-                        method.Function, Construction2ValueTypeSpecReference,
-                        contractRows.Count, schema));
+                var body = method.CompactBody;
+                if (body is null)
+                {
+                    body = method.Function.IsStatic
+                        ? EncodeC1M1Construction2StaticMethodBody(
+                            method.Function)
+                        : method.DirectReturnHome >= 0
+                        ? EncodeC1M1Construction2InstanceMethodBody(
+                            method.Function, method.DirectReturnHome,
+                            Construction2ValueTypeSpecReference,
+                            contractRows.Count, schema)
+                        : EncodeC1M1Construction2NoOpInstanceMethodBody(
+                            method.Function,
+                            Construction2ValueTypeSpecReference,
+                            contractRows.Count, schema);
+                }
+
+                bodyRows.Add(body);
                 methodRows[method.MethodDefRow - 1]
                     = methodRows[method.MethodDefRow - 1]
                         with { BodyRow = bodyRows.Count };
@@ -1789,6 +1822,22 @@ public static partial class TrRmExecutableCompiler
             new Dictionary<PrimitiveType, int>());
     }
 
+    private static byte[] EncodeC1M1Construction2FieldReadBody(
+        int fieldDefRow)
+    {
+        if (fieldDefRow <= 0 || fieldDefRow > 0xFF_FFFF)
+        {
+            throw new InvalidDataException(
+                "A class field-read Body has an invalid FieldDef row.");
+        }
+
+        var body = new byte[8];
+        body[0] = 0x02;
+        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(4),
+            0x1400_0000u | checked((uint)fieldDefRow));
+        return body;
+    }
+
     private static byte[] EncodeC1M1Construction2InstanceMethodBody(
         BoundFunction function, int returnHomeIndex,
         Func<PrimitiveType, uint> typeSpecReferenceFor, int contractCount,
@@ -1912,6 +1961,66 @@ public static partial class TrRmExecutableCompiler
             schema: schema,
             generalPredicateGraphsInitializationReferenceBodies
                 : schema.UsesGeneralPredicateGraphs());
+    }
+
+    private static bool TryGetC1M1Construction2DirectFieldRead(
+        BoundFunction function, out int fieldIndex)
+    {
+        fieldIndex = -1;
+        if (function.IsStatic || function.ParameterCount != 1
+            || function.Variables.Length != 1
+            || function.Variables[0].IsMutable
+            || function.ReturnType == PrimitiveType.Void)
+        {
+            return false;
+        }
+
+        BoundFieldRead? returnedField = null;
+        var isSupported = true;
+        Visit(function.Body);
+        if (!isSupported || returnedField is null
+            || returnedField.Receiver is not BoundRead { Variable: 0 }
+            || returnedField.Type != function.ReturnType)
+        {
+            return false;
+        }
+
+        fieldIndex = returnedField.Field;
+        return fieldIndex >= 0;
+
+        void Visit(BoundBlock block)
+        {
+            if (!block.RetiredManagedLocals.IsEmpty)
+            {
+                isSupported = false;
+                return;
+            }
+
+            foreach (var statement in block.Statements)
+            {
+                if (!isSupported || returnedField is not null)
+                {
+                    isSupported = false;
+                    return;
+                }
+
+                if (statement is BoundBlock nested)
+                {
+                    Visit(nested);
+                }
+                else if (statement is BoundReturn {
+                    Value: BoundFieldRead fieldRead
+                })
+                {
+                    returnedField = fieldRead;
+                }
+                else
+                {
+                    isSupported = false;
+                    return;
+                }
+            }
+        }
     }
 
     private static bool TryGetC1M1Construction2DirectParameterReturn(

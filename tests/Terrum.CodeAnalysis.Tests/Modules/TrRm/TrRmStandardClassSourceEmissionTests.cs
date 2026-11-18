@@ -513,6 +513,90 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
+    public void EmitsFieldReadDescriptorForReadonlyInstanceMethod()
+    {
+        var tree = SyntaxTree.Parse("""
+            public class Box {
+                public int32 Value;
+                public Box(int32 value) { Value = value; }
+                public int32 ReadValue() { return this.Value; }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node => node.Kind == SyntaxKind.ClassDeclaration);
+        var members = classDeclaration.Children.OfType<SyntaxNode>();
+        var field = members.Single(static node =>
+            node.Kind == SyntaxKind.FieldDeclaration);
+        var constructor = members.Single(static node =>
+            node.Kind == SyntaxKind.ConstructorDeclaration);
+        var read = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "ReadValue"));
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "FieldReadInstanceMethod",
+            C1M1Construction2ClassParameterDefaultsSchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, 0,
+                    classDeclaration.Span, "BoxKey", [
+                        new TrRmSourceClassMemberExport(0, field.Span,
+                            "Box.Value"),
+                        new TrRmSourceClassMemberExport(0,
+                            constructor.Span, "Box.Initialize") {
+                            ConstructionProjectionExportKey = "Box.Create",
+                        },
+                        new TrRmSourceClassMemberExport(0, read.Span,
+                            "Box.ReadValue"),
+                    ]),
+            ]);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                        artifact));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.ReadValue", out var readDefinition), Is.True);
+        var readMethodRow = checked((int)(readDefinition & 0x00FF_FFFF));
+        var readBodyRow = tables.Methods.GetBodyRow(readMethodRow);
+        Assert.That(readBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(readBodyRow,
+            tables.Contracts.Count);
+        var readBody = tables.Bodies.GetRow(readBodyRow);
+        Assert.That(readBody[0], Is.EqualTo(0x02));
+        var fieldDefinition = BinaryPrimitives.ReadUInt32LittleEndian(
+            readBody[4..]);
+        Assert.That(fieldDefinition >> 24, Is.EqualTo(0x14u));
+        var fieldRow = checked((int)(fieldDefinition & 0x00FF_FFFF));
+        Assert.That(tables.Fields.GetOwnerTypeDef(fieldRow),
+            Is.EqualTo(tables.Methods.GetOwnerType(readMethodRow)));
+        var signature = tables.Methods.GetSignature(readMethodRow);
+        Assert.That(tables.Signatures.GetReceiverTypeSpec(signature),
+            Is.Not.Zero);
+        Assert.That(tables.Signatures.GetParamRange(signature).Count,
+            Is.Zero);
+        Assert.That(tables.TypeSpecs.AreEquivalentTypeSpecRefs(
+                tables.Fields.GetTypeSpecRef(fieldRow),
+                tables.Signatures.GetResultTypeSpec(signature)),
+            Is.True);
+
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(
+                C1M1Construction2ClassParameterDefaultsSchemaIdentity,
+                artifact),
+            "FieldReadInstanceMethod", [], ["BoxKey"]);
+        var consumer = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            int32 Use(Box value) { return value.ReadValue(); }
+            """), reference);
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
+    }
+
+    [Test]
     public void BindsImportedClassMethodDefaultFromSelectedView()
     {
         var tree = SyntaxTree.Parse("""

@@ -165,8 +165,8 @@ effects, modes and construction roles after TypeSpec remapping while retaining
 separate expected/provider defaults and Import aliases. Provider-source-free
 caller and compatible/incompatible provider regressions are added but remain
 unverified under the active hold. Other instance method Bodies beyond the
-empty-unit and direct scalar-parameter ReturnHome subsets, field access/calls,
-properties, multiple/partial constructors,
+empty-unit, direct scalar-parameter ReturnHome and direct scalar FieldRead
+subsets, nested field paths/writes and calls, properties, multiple/partial constructors,
 class-backed field initialization, source-free class method re-emission and
 its replacement/remapping paths, class FieldDef Imports, CLI transport,
 independent carrier TypeSpec verification, generic TypeDef dependencies,
