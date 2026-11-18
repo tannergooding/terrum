@@ -3932,12 +3932,15 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             T Identity<T>(T identityArgument) where T : [Blittable] {
                 return identityArgument;
             }
-            T Forward<T>(T forwardArgument) where T : [Blittable] {
-                return Identity<T>(forwardArgument);
+            T Forward<T>(T forwardFirst, T forwardSecond)
+                where T : [Blittable] {
+                return Identity<T>(forwardFirst);
             }
-            public T Twice<T>(T callerArgument) where T : [Blittable] {
-                T first = Identity<T>(callerArgument);
-                T second = Forward<T>(first);
+            public T Twice<T>(T callerFirst, T callerSecond)
+                where T : [Blittable] {
+                T first = Identity<T>(callerFirst);
+                T second = Forward<T>(forwardSecond: callerSecond,
+                    forwardFirst: first);
                 return second;
             }
             """), new CompilationOptions {
@@ -3962,7 +3965,7 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             .CreateGenericMethodCallsDraftReference(providerArtifact,
                 "forward-twice.provider", "Twice");
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse(
-            "int32 Main() { return Twice<int32>(callerArgument: 42); }"),
+            "int32 Main() { return Twice<int32>(42, 43); }"),
             reference,
             new CompilationOptions {
                 LayoutCoreRegistration =
