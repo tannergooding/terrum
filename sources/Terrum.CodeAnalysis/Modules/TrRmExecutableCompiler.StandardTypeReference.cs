@@ -573,6 +573,36 @@ public static partial class TrRmExecutableCompiler
             {
                 return;
             }
+            if (type.Form is 0x01 or 0x0C
+                && type.TypeCode == 0x8C
+                && (type.Qualifiers & ~0x01) == 0
+                && rootTables.TypeSpecs.TryGetNativePointerPointeeTypeSpecRef(
+                    typeSpecReference, out var pointeeTypeSpecReference))
+            {
+                var pointee = rootTables.TypeSpecs.GetTypeSpecRef(
+                    pointeeTypeSpecReference);
+                if (pointee.Form == 0xF2 && pointee.Qualifiers == 0
+                    && TrRmConstantSourceValueValidator
+                        .TryGetBoundScalarType(pointee.TypeCode,
+                            out var pointeeScalarType))
+                {
+                    if (pointeeScalarType is (PrimitiveType.NativeInt
+                            or PrimitiveType.NativeUInt)
+                        && rootTables.Modules.GetRequirements(rootModuleRow)
+                            .TargetRequirement
+                            != TrRmModuleTableReader
+                                .WindowsX64NativeTargetRequirement)
+                    {
+                        throw Unsupported(
+                            "A native-width pointer pointee requires the Windows x64 target.");
+                    }
+
+                    return;
+                }
+
+                throw Unsupported(
+                    "The C1 class TypeSpec closure supports only scalar-pointee native data pointers.");
+            }
             if (!type.IsRow)
             {
                 throw Unsupported(
@@ -1794,6 +1824,10 @@ public static partial class TrRmExecutableCompiler
                 .ToBuilder()
                 ?? ImmutableArray.CreateBuilder<
                     BoundGenericNominalTypeInstance>();
+        var nativePointerTypes
+            = ImmutableArray.CreateBuilder<NativePointerTypeDefinition>();
+        var nativePointerTypeIndexes
+            = new Dictionary<NativePointerTypeDefinition, int>();
         var classTypeInstanceIndexes = new Dictionary<(
             BoundGenericNominalTypeIdentity Identity,
             string TypeSpecProviderIdentity, uint TypeSpecReference), int>();
@@ -2016,6 +2050,49 @@ public static partial class TrRmExecutableCompiler
                 return true;
             }
 
+            if (typeSpecForm == type.Form
+                && type.Form is 0x01 or 0x0C
+                && type.TypeCode == 0x8C
+                && (type.Qualifiers & ~0x01) == 0
+                && rootTables.TypeSpecs.TryGetNativePointerPointeeTypeSpecRef(
+                    typeSpecReference, out var pointeeTypeSpecReference))
+            {
+                var pointee = rootTables.TypeSpecs.GetTypeSpecRef(
+                    pointeeTypeSpecReference);
+                if (pointee.Form != 0xF2 || pointee.Qualifiers != 0
+                    || !TrRmConstantSourceValueValidator
+                        .TryGetBoundScalarType(pointee.TypeCode,
+                            out var pointeeType))
+                {
+                    throw Unsupported(
+                        "The bounded EN1 class layout TypeSpec closure supports only scalar-pointee native data pointers.");
+                }
+
+                if (pointeeType is (PrimitiveType.NativeInt
+                        or PrimitiveType.NativeUInt)
+                    && rootTables.Modules.GetRequirements(rootModuleRow)
+                        .TargetRequirement
+                        != TrRmModuleTableReader
+                            .WindowsX64NativeTargetRequirement)
+                {
+                    throw Unsupported(
+                        "A native-width pointer pointee requires the Windows x64 target.");
+                }
+
+                var pointer = new NativePointerTypeDefinition(pointeeType,
+                    (type.Qualifiers & 1) != 0);
+                if (!nativePointerTypeIndexes.TryGetValue(pointer,
+                        out var pointerIndex))
+                {
+                    pointerIndex = nativePointerTypes.Count;
+                    nativePointerTypes.Add(pointer);
+                    nativePointerTypeIndexes.Add(pointer, pointerIndex);
+                }
+
+                fieldType = NativePointerTypes.Type(pointerIndex);
+                return true;
+            }
+
             var typeRow = checked((int)type.Row);
             var classTypeIdentity
                 = default(BoundGenericNominalTypeIdentity);
@@ -2159,13 +2236,14 @@ public static partial class TrRmExecutableCompiler
                 .GetRequirements(rootModuleRow).RuntimePolicy,
             Structures = structures,
             EnumDefinitions = enumDefinitions,
+            NativePointerTypes = nativePointerTypes.ToImmutable(),
             GenericNominalTypeDefinitions =
                 genericNominalTypeDefinitions,
             GenericNominalTypeInstances =
                 genericNominalTypeInstances.ToImmutable(),
             StandardClassDeclarations = standardClassDeclarations,
         };
-        if (!structures.IsEmpty)
+        if (!structures.IsEmpty || !nativePointerTypes.IsEmpty)
         {
             SemanticVerifier.VerifyLibraryReferences(program);
         }
@@ -2188,6 +2266,7 @@ public static partial class TrRmExecutableCompiler
             standardQuerySourceAssociation:
                 standardQuerySourceAssociation,
             enumDefinitions: enumDefinitions,
+            nativePointerTypes: nativePointerTypes.ToImmutable(),
             genericNominalTypeDefinitions:
                 genericNominalTypeDefinitions,
             genericNominalTypeInstances:

@@ -1311,6 +1311,67 @@ public static partial class TrRmExecutableCompiler
         BoundProgram providerProgram,
         CompilationReference consumerReference)
     {
+        var pointerTypes = providerProgram.NativePointerTypes.IsDefault
+            ? ImmutableArray.CreateBuilder<NativePointerTypeDefinition>()
+            : providerProgram.NativePointerTypes.ToBuilder();
+        var pointerTypeIndexes = pointerTypes
+            .Select((pointer, index) => (pointer, index))
+            .ToDictionary(static item => item.pointer, static item => item.index);
+        var consumerPointerIndexes = new int[
+            consumerReference.NativePointerTypes.Length];
+        for (var index = 0;
+            index < consumerReference.NativePointerTypes.Length; index++)
+        {
+            var pointer = consumerReference.NativePointerTypes[index];
+            if (!pointerTypeIndexes.TryGetValue(pointer,
+                    out var pointerIndex))
+            {
+                pointerIndex = pointerTypes.Count;
+                pointerTypes.Add(pointer);
+                pointerTypeIndexes.Add(pointer, pointerIndex);
+            }
+
+            consumerPointerIndexes[index] = pointerIndex;
+        }
+
+        PrimitiveType RemapConsumerPointerType(PrimitiveType type)
+        {
+            if (!NativePointerTypes.IsType(type))
+            {
+                return type;
+            }
+
+            var pointerIndex = NativePointerTypes.Index(type);
+            if ((uint)pointerIndex >= (uint)consumerPointerIndexes.Length)
+            {
+                throw new InvalidDataException(
+                    "The EN1 consumer class closure has an invalid pointer type identity.");
+            }
+
+            return NativePointerTypes.Type(
+                consumerPointerIndexes[pointerIndex]);
+        }
+
+        BoundStandardClassTypeView RemapConsumerClassView(
+            BoundStandardClassTypeView view)
+            => view with {
+                Fields = [.. view.Fields.Select(field => field with {
+                    Type = RemapConsumerPointerType(field.Type),
+                })],
+            };
+
+        BoundStandardClassDeclaration RemapConsumerClassDeclaration(
+            BoundStandardClassDeclaration declaration)
+            => declaration with {
+                Declaration = RemapConsumerClassView(
+                    declaration.Declaration),
+                Expectations = [.. declaration.Expectations.Select(
+                    expectation => expectation with {
+                        ExpectedDeclaration = RemapConsumerClassView(
+                            expectation.ExpectedDeclaration),
+                    })],
+            };
+
         var definitions = providerProgram.GenericNominalTypeDefinitions
             .ToBuilder();
         var definitionIndexes = definitions.Select((definition, index) =>
@@ -1342,14 +1403,16 @@ public static partial class TrRmExecutableCompiler
         foreach (var consumerDeclaration in consumerReference
             .StandardClassDeclarations)
         {
+            var remappedConsumerDeclaration
+                = RemapConsumerClassDeclaration(consumerDeclaration);
             if (!declarationIndexes.TryGetValue(
-                    consumerDeclaration.Declaration.Identity,
+                    remappedConsumerDeclaration.Declaration.Identity,
                     out var declarationIndex))
             {
                 declarationIndexes.Add(
-                    consumerDeclaration.Declaration.Identity,
+                    remappedConsumerDeclaration.Declaration.Identity,
                     declarations.Count);
-                declarations.Add(consumerDeclaration);
+                declarations.Add(remappedConsumerDeclaration);
                 continue;
             }
 
@@ -1361,7 +1424,8 @@ public static partial class TrRmExecutableCompiler
             {
                 var providerField = providerFields[fieldIndex];
                 var consumerField
-                    = consumerDeclaration.Declaration.Fields.SingleOrDefault(
+                    = remappedConsumerDeclaration.Declaration.Fields
+                        .SingleOrDefault(
                         field => field.DefinitionId
                             == providerField.DefinitionId);
                 if (consumerField is null
@@ -1378,7 +1442,7 @@ public static partial class TrRmExecutableCompiler
 
             var expectations = providerDeclaration.Expectations.ToBuilder();
             foreach (var consumerExpectation
-                in consumerDeclaration.Expectations)
+                in remappedConsumerDeclaration.Expectations)
             {
                 if (!expectations.Any(existing =>
                         existing.Binding.ImportRow
@@ -1398,13 +1462,14 @@ public static partial class TrRmExecutableCompiler
                 },
                 Expectations = expectations.ToImmutable(),
                 SelectedExportKeys
-                    = consumerDeclaration.SelectedExportKeys.IsEmpty
+                    = remappedConsumerDeclaration.SelectedExportKeys.IsEmpty
                         ? providerDeclaration.SelectedExportKeys
-                        : consumerDeclaration.SelectedExportKeys,
+                        : remappedConsumerDeclaration.SelectedExportKeys,
             };
         }
 
         return providerProgram with {
+            NativePointerTypes = pointerTypes.ToImmutable(),
             GenericNominalTypeDefinitions = definitions.ToImmutable(),
             StandardClassDeclarations = declarations.ToImmutable(),
         };

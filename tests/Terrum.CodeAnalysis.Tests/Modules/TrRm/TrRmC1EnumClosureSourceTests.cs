@@ -2094,6 +2094,135 @@ internal sealed class TrRmC1EnumClosureSourceTests
 
         Assert.That(NativeJit.Execute(executable,
             NativeRuntimePolicy.FailFast), Is.EqualTo(8));
+
+        var reemittedConsumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            loaded, "ClassLayoutConsumerReemitted", schemaIdentity, 1);
+        var reloaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                reemittedConsumerArtifact), "ClassLayoutConsumerReemitted",
+            [providerInput]);
+        var reloadedReturn = (BoundReturn)reloaded.Functions.Single().Body
+            .Statements.Single();
+        var reloadedQuery = (BoundLayoutQuery)((BoundUnsafeExpression)
+            reloadedReturn.Value!).Expression;
+        var reloadedPointerType = reloadedQuery.Subject.FieldPath!.Steps
+            .Single().FieldType;
+        Assert.That(reloaded.NativePointerTypes[
+            NativePointerTypes.Index(reloadedPointerType)],
+            Is.EqualTo(new NativePointerTypeDefinition(
+                PrimitiveType.UInt8, false)));
+        var reloadedMain = reloaded.Functions.Single() with {
+            Name = "Main",
+            ReturnType = PrimitiveType.Int32,
+            Body = new BoundBlock([
+                new BoundReturn(new BoundCast(reloadedReturn.Value!,
+                    PrimitiveType.Int32, default), default),
+            ], default),
+        };
+        var reloadedExecutable = reloaded with {
+            Functions = [reloadedMain],
+            EntryPoint = 0,
+        };
+        Assert.That(NativeJit.Execute(reloadedExecutable,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(8));
+
+        Assert.That(NativeModuleCompiler.EmitStandardLibrary(
+            new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
+            "ClassLayoutConsumer", [providerInput], ["Offset"],
+            NativeRuntimePolicy.FailFast), Is.Not.Empty);
+    }
+
+    [Test]
+    public void LowersEN1TypedDataPointerClassFieldStorage()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
+        var schemaIdentity
+            = $"{s_schemaIdentities[0]}-class-instance-layout-1";
+        var providerTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public class Box {
+                    public uint8 Prefix;
+                    public ptr<uint8> Value;
+                }
+            }
+            """);
+        var providerCompilation = Compilation.CreateLibrary(providerTree);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var providerProgram = (BoundProgram)providerCompilation.Program!;
+        var classDeclaration = providerTree.Root.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var fields = classDeclaration.Children.OfType<SyntaxNode>()
+            .Where(static node => node.Kind == SyntaxKind.FieldDeclaration)
+            .ToArray();
+        var classIndex = providerProgram.SourceClassProgramAssociation!
+            .Declarations.Single(declaration =>
+                declaration.Span == classDeclaration.Span).ClassIndex;
+        var classExport = new TrRmSourceClassExport(providerProgram,
+            classIndex, classDeclaration.Span, "type.box", [
+                new TrRmSourceClassMemberExport(0, fields[0].Span,
+                    "field.box.prefix"),
+                new TrRmSourceClassMemberExport(0, fields[1].Span,
+                    "field.box.value"),
+            ]);
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, "ClassLayoutProvider", schemaIdentity, 1, [],
+            [], [classExport], []);
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, "ClassLayoutProvider", [], ["type.box"], [
+                "field.box.prefix",
+                "field.box.value",
+            ]);
+        var queryCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Demo;
+                nint Offset() {
+                    return unsafe(offsetof(Box, Value));
+                }
+                """), reference, new CompilationOptions {
+                LayoutCoreRegistration
+                    = LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(queryCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, queryCompilation.Diagnostics));
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            queryCompilation.Program!, "ClassLayoutConsumer",
+            schemaIdentity, 1);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                consumerArtifact), "ClassLayoutConsumer", [providerInput]);
+        var returned = (BoundReturn)loaded.Functions.Single().Body
+            .Statements.Single();
+        var boundQuery = (BoundLayoutQuery)((BoundUnsafeExpression)
+            returned.Value!).Expression;
+        var pointerType = boundQuery.Subject.FieldPath!.Steps.Single()
+            .FieldType;
+        Assert.That(NativePointerTypes.IsType(pointerType), Is.True);
+        Assert.That(loaded.NativePointerTypes[
+            NativePointerTypes.Index(pointerType)],
+            Is.EqualTo(new NativePointerTypeDefinition(
+                PrimitiveType.UInt8, false)));
+        var main = loaded.Functions.Single() with {
+            Name = "Main",
+            ReturnType = PrimitiveType.Int32,
+            Body = new BoundBlock([
+                new BoundReturn(new BoundCast(returned.Value!,
+                    PrimitiveType.Int32, default), default),
+            ], default),
+        };
+        var executable = loaded with {
+            Functions = [main],
+            EntryPoint = 0,
+        };
+
+        Assert.That(NativeJit.Execute(executable,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(8));
         Assert.That(NativeModuleCompiler.EmitStandardLibrary(
             new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
             "ClassLayoutConsumer", [providerInput], ["Offset"],
