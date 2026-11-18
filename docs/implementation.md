@@ -1557,7 +1557,9 @@ class-root OffsetOfType operations, with one ordered FieldPath/0045 dependency
 per query occurrence. Source-free load/re-emission preserves the selected
 class provider and expected FieldDef imports while preserving co-located
 direct FieldDef references, and native lowering derives supported
-Auto/Sequential field offsets from complete class/inline-struct layouts.
+Auto/Sequential field offsets from complete class/inline-struct layouts,
+selecting the exact target-profile variant when present and refusing an
+unsupported exact variant instead of falling back to the default.
 Direct/nested load/JIT, multiple-query, exact-successor re-emission/reload and
 native executable-image emission through both the direct emitter and Standard
 native binding plan are added but unverified under the active hold; no image

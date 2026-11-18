@@ -1294,8 +1294,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var providerArtifact = TrRmExecutableCompiler.EmitStandard(
             providerProgram, "ClassLayoutProvider", schemaIdentity, 1,
             [], [], [classExport], []);
-        providerArtifact = AsSequentialClassLayout(providerArtifact,
-            SchemaFor(schemaIdentity));
+        providerArtifact = AddExactClassLayoutVariant(providerArtifact,
+            SchemaFor(schemaIdentity), 1, 1);
         var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
             providerArtifact);
         var reference = TrRmExecutableCompiler.CreateStandardReference(
@@ -1457,8 +1457,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
                         relocatedProviderTree, "Box", "type.box",
                         "field.box.prefix", "field.box.value"),
                 ], []);
-        relocatedProviderArtifact = AsSequentialClassLayout(
-            relocatedProviderArtifact, SchemaFor(schemaIdentity));
+        relocatedProviderArtifact = AddExactClassLayoutVariant(
+            relocatedProviderArtifact, SchemaFor(schemaIdentity), 1, 1);
         var relocatedProviderInput = new TrRmStandardArtifactInput(
             schemaIdentity, relocatedProviderArtifact);
         var originalProviderTables
@@ -1544,6 +1544,44 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 coLocatedReemittedArtifact), "ClassLayoutProvider", []);
         Assert.That(NativeEmitter.EmitLibrary(coLocatedReemitted, ["Offset"],
             NativeRuntimePolicy.FailFast), Is.Not.Empty);
+
+        var unsupportedProviderArtifact
+            = TrRmExecutableCompiler.EmitStandard(providerProgram,
+                "ClassLayoutProvider", schemaIdentity, 1, [], [],
+                [classExport], []);
+        unsupportedProviderArtifact = AddExactClassLayoutVariant(
+            unsupportedProviderArtifact, SchemaFor(schemaIdentity), 2, 1);
+        var unsupportedProviderInput = new TrRmStandardArtifactInput(
+            schemaIdentity, unsupportedProviderArtifact);
+        var unsupportedReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                unsupportedProviderInput, "ClassLayoutProvider", [],
+                ["type.box"], ["field.box.value", "field.box.prefix"]);
+        var unsupportedQueryCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Demo;
+                nint Offset() {
+                    return unsafe(offsetof(Box, Value))
+                        + unsafe(offsetof(Box, Prefix))
+                        + unsafe(offsetof(Box, Value));
+                }
+                """), unsupportedReference, new CompilationOptions {
+                LayoutCoreRegistration
+                    = LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(unsupportedQueryCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                unsupportedQueryCompilation.Diagnostics));
+        var unsupportedConsumer = TrRmExecutableCompiler.EmitStandard(
+            unsupportedQueryCompilation.Program!, "ClassLayoutConsumer",
+            schemaIdentity, 1);
+        var unsupportedLoaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                unsupportedConsumer), "ClassLayoutConsumer",
+            [unsupportedProviderInput]);
+        Assert.Throws<NotSupportedException>(() =>
+            NativeEmitter.EmitLibrary(unsupportedLoaded, ["Offset"],
+                NativeRuntimePolicy.FailFast));
     }
 
     [Test]
@@ -2868,8 +2906,9 @@ internal sealed class TrRmC1EnumClosureSourceTests
         return result;
     }
 
-    private static byte[] AsSequentialClassLayout(byte[] artifact,
-        TrRmArtifactSchema schema, string typeName = "Box")
+    private static byte[] AddExactClassLayoutVariant(byte[] artifact,
+        TrRmArtifactSchema schema, byte layoutKind, uint pack,
+        string typeName = "Box")
     {
         var index = new TrRmArtifactIndex(artifact, schema);
         var tables = TrRmStructuralMetadataValidator
@@ -2878,35 +2917,124 @@ internal sealed class TrRmC1EnumClosureSourceTests
             .Single(row => tables.TypeDefs.GetName(row) == typeName);
         var (layoutFirst, layoutCount)
             = tables.TypeDefs.GetLayoutRange(typeDefRow);
-        if (layoutCount != 1 || tables.LayoutFields.Count == 0)
+        var (fieldStart, fieldEnd)
+            = tables.TypeDefs.GetFieldRange(typeDefRow);
+        if (layoutKind is not (1 or 2) || pack is not (1 or 2 or 4 or 8 or 16)
+            || layoutCount != 1
+            || layoutFirst + layoutCount != tables.Layouts.Count + 1
+            || tables.LayoutFields.Count == 0)
         {
             throw new InvalidDataException(
-                "The sequential class fixture requires one complete Layout variant.");
+                "The class layout variant fixture requires one supported pack and the final TypeDef's complete default Layout.");
         }
 
-        var layoutOffset = checked((layoutFirst - 1) * 28);
+        var targetProfileBytes = TrRmTargetProfileTableWriter.Encode([
+            new TrRmTargetProfileRow(1, 1),
+        ]);
+        var targetProfileRow = 1;
+        var layoutRow = checked(tables.Layouts.Count + 1);
+        var layoutFieldFirst = checked(tables.LayoutFields.Count + 1);
+        var instanceFields = Enumerable.Range(fieldStart,
+                fieldEnd - fieldStart)
+            .Where(fieldRow =>
+                (tables.Fields.GetFlags(fieldRow) & 8) == 0)
+            .ToArray();
+        if (instanceFields.Length == 0)
+        {
+            throw new InvalidDataException(
+                "The sequential class fixture requires instance fields.");
+        }
+
+        var additionalLayout = new byte[28];
+        System.Buffers.Binary.BinaryPrimitives
+            .WriteUInt32LittleEndian(additionalLayout,
+                checked((uint)typeDefRow));
+        System.Buffers.Binary.BinaryPrimitives
+            .WriteUInt32LittleEndian(additionalLayout.AsSpan(4),
+                checked((uint)targetProfileRow));
+        additionalLayout[8] = layoutKind;
+        System.Buffers.Binary.BinaryPrimitives
+            .WriteUInt32LittleEndian(additionalLayout.AsSpan(16), pack);
+        System.Buffers.Binary.BinaryPrimitives
+            .WriteUInt32LittleEndian(additionalLayout.AsSpan(20),
+                checked((uint)layoutFieldFirst));
+        System.Buffers.Binary.BinaryPrimitives
+            .WriteUInt32LittleEndian(additionalLayout.AsSpan(24),
+                checked((uint)instanceFields.Length));
+
+        var additionalLayoutFields
+            = new byte[checked(instanceFields.Length * 12)];
+        for (var ordinal = 0; ordinal < instanceFields.Length; ordinal++)
+        {
+            var offset = ordinal * 12;
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteUInt32LittleEndian(
+                    additionalLayoutFields.AsSpan(offset),
+                    checked((uint)layoutRow));
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteUInt32LittleEndian(
+                    additionalLayoutFields.AsSpan(offset + 4),
+                    checked((uint)ordinal));
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteUInt32LittleEndian(
+                    additionalLayoutFields.AsSpan(offset + 8),
+                    checked((uint)instanceFields[ordinal]));
+        }
+
         var sections = new List<TrRmSection>(index.SectionCount);
+        var hasTargetProfiles = false;
         for (var entry = 0; entry < index.SectionCount; entry++)
         {
             index.GetSection(entry, out var kind, out var flags,
                 out var section, out var recordCount);
-            if (kind == 0x0015)
+            if (kind == 0x0013)
             {
-                var layoutBytes = section.ToArray();
-                if (layoutBytes.Length != recordCount * 28
-                    || layoutOffset < 0
-                    || layoutOffset > layoutBytes.Length - 28)
+                var typeDefBytes = section.ToArray();
+                if (typeDefBytes.Length != recordCount * 44)
                 {
                     throw new InvalidDataException(
-                        "The sequential class fixture has an invalid Layout row.");
+                        "The sequential class fixture has an invalid TypeDef table.");
                 }
 
-                layoutBytes[layoutOffset + 8] = 1;
+                var layoutCountOffset = checked((typeDefRow - 1) * 44 + 32);
                 System.Buffers.Binary.BinaryPrimitives
                     .WriteUInt32LittleEndian(
-                        layoutBytes.AsSpan(layoutOffset + 16), 1);
+                        typeDefBytes.AsSpan(layoutCountOffset),
+                        checked((uint)(layoutCount + 1)));
                 sections.Add(new TrRmSection(kind, flags, recordCount,
-                    layoutBytes));
+                    typeDefBytes));
+            }
+            else if (kind == 0x0015)
+            {
+                var layoutBytes = new byte[checked(section.Length + 28)];
+                section.CopyTo(layoutBytes);
+                additionalLayout.AsSpan().CopyTo(
+                    layoutBytes.AsSpan(section.Length));
+                sections.Add(new TrRmSection(kind, flags,
+                    checked(recordCount + 1), layoutBytes));
+            }
+            else if (kind == 0x0023)
+            {
+                var layoutFieldBytes = new byte[checked(
+                    section.Length + additionalLayoutFields.Length)];
+                section.CopyTo(layoutFieldBytes);
+                additionalLayoutFields.AsSpan().CopyTo(
+                    layoutFieldBytes.AsSpan(section.Length));
+                sections.Add(new TrRmSection(kind, flags,
+                    checked(recordCount + (uint)instanceFields.Length),
+                    layoutFieldBytes));
+            }
+            else if (kind == 0x0048)
+            {
+                if (recordCount != 0)
+                {
+                    throw new InvalidDataException(
+                        "The sequential class fixture expects no existing target-profile rows.");
+                }
+
+                hasTargetProfiles = true;
+                sections.Add(new TrRmSection(kind, flags, 1,
+                    targetProfileBytes));
             }
             else
             {
@@ -2914,6 +3042,13 @@ internal sealed class TrRmC1EnumClosureSourceTests
                     section.ToArray()));
             }
         }
+        if (!hasTargetProfiles)
+        {
+            sections.Add(new TrRmSection(0x0048, 0, 1,
+                targetProfileBytes));
+        }
+        sections.Sort(static (left, right)
+            => left.Kind.CompareTo(right.Kind));
 
         var result = TrRmArtifactWriter.Encode(sections, schema);
         _ = TrRmStructuralMetadataValidator
