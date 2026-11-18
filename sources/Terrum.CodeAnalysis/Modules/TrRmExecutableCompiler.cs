@@ -1007,7 +1007,7 @@ public static partial class TrRmExecutableCompiler
             }
 
             return EmitC1M1SourceClassDeclarations(program, moduleIdentity,
-                moduleTargetRequirement, sourceClassExports);
+                moduleTargetRequirement, sourceClassExports, out _);
         }
 
         if (StringComparer.Ordinal.Equals(schemaIdentity,
@@ -1336,16 +1336,43 @@ public static partial class TrRmExecutableCompiler
     {
         if (sourceClassExports is not null)
         {
-            if (!ReferenceEquals(sourceClassExports.Program, program)
-                || sourceTypeExports is { Count: > 0 }
+            if (!ReferenceEquals(sourceClassExports.Program, program))
+            {
+                throw Unsupported(
+                    "The construction-2 source class route requires its captured local declarations.");
+            }
+
+            if (schema.UsesClassParameterDefaults()
+                && !program.Interfaces.IsEmpty
+                && sourceTypeExports is not { Count: > 0 })
+            {
+                throw Unsupported(
+                    "CM1 interface requirements require explicit source TypeDef and InterfaceMethod mappings.");
+            }
+
+            var classArtifact = EmitC1M1SourceClassDeclarations(program,
+                moduleIdentity, moduleTargetRequirement, sourceClassExports,
+                out var frozenScalarValueBuilder, schema);
+            if (schema.UsesClassParameterDefaults())
+            {
+                return EmitGenericMethodCallsDraftSource(program,
+                    moduleIdentity, moduleTargetRequirement,
+                    sourceGenericMethodExports, sourceTypeExports, schema,
+                    baseSchema: schema,
+                    standardInitializationReferenceBodies: true,
+                    baseArtifact: classArtifact,
+                    frozenScalarValueBuilder:
+                        frozenScalarValueBuilder);
+            }
+
+            if (sourceTypeExports is { Count: > 0 }
                 || sourceGenericMethodExports is { Exports.IsEmpty: false })
             {
                 throw Unsupported(
-                    "The construction-2 source class route requires its captured local declarations without separate source type or generic-method maps.");
+                    "The Construction-2 class route does not yet compose D1 generic or interface metadata outside CM1.");
             }
 
-            return EmitC1M1SourceClassDeclarations(program, moduleIdentity,
-                moduleTargetRequirement, sourceClassExports, schema);
+            return classArtifact;
         }
 
         var supportsL1 = schema.UsesMethodParameterLabels();

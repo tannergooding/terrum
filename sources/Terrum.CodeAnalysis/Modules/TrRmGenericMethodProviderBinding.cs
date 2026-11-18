@@ -853,7 +853,8 @@ public static partial class TrRmExecutableCompiler
             isMethodDefTarget: true, decodeBody: false);
         var target = new BoundGenericMethodImport(expected.Origin,
             expected.Signature, expected.Formals, expected.ProofFunction,
-            expected.FormalTypeOwnerOrdinal, expected.SpanTypes);
+            expected.FormalTypeOwnerOrdinal, expected.SpanTypes,
+            expected.OrdinaryParameterDefaults);
         context.ImportTargets.Add((artifactIndex, importRow), target);
         var moduleRefRow = tables.Imports.GetModuleRefForImportRow(
             importRow);

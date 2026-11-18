@@ -374,6 +374,67 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
+    public void ComposesClassGenericAndInterfaceParameterDefaultSurfaces()
+    {
+        var tree = SyntaxTree.Parse("""
+            public class Box {
+                        public int32 Value;
+                        public Box(int32 value = 42) { Value = value; }
+            }
+            public interface IValue {
+                        int32 Read(int32 value = 7);
+            }
+            public int32 Echo<T>(int32 value = 9) { return value; }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var interfaceDefinition = program.Interfaces.Single();
+        var interfaceMember = interfaceDefinition.Members.Single();
+        var genericDefinition = program.GenericMethodDefinitions.Single();
+        var interfaceExport = new TrRmSourceTypeExport("", "IValue",
+            "IValue") {
+            InterfaceMethodExports = [
+                        new TrRmSourceInterfaceMethodExport(
+                            interfaceMember.SourceInputOrdinal,
+                            interfaceMember.SourceDeclarationSpan, "IValue.Read"),
+            ],
+        };
+        var genericExport = new TrRmSourceGenericMethodExport(program,
+            genericDefinition.SourceInputOrdinal, genericDefinition.Span,
+            "Echo");
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "Construction2D1ParameterDefaults",
+            C1M1Construction2ClassParameterDefaultsSchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [interfaceExport], [genericExport],
+            CreateClassExports(program, tree));
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                        TrRmArtifactIndex
+                            .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                                artifact));
+
+        Assert.That(tables.Methods.Count, Is.EqualTo(4));
+        Assert.That(tables.MethodParameterLabels.Count, Is.EqualTo(4));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1, "IValue.Read",
+            out var interfaceMethod), Is.True);
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1, "Echo",
+            out var genericMethod), Is.True);
+        foreach (var methodDefRow in new[] {
+            1, 2, checked((int)(interfaceMethod & 0x00FF_FFFF)),
+            checked((int)(genericMethod & 0x00FF_FFFF)),
+        })
+        {
+            Assert.That(tables.MethodParameterLabels
+                        .TryGetDefaultConstantSourceRow(methodDefRow, 0,
+                            out var defaultValue), Is.True);
+            Assert.That(defaultValue, Is.GreaterThan(0));
+        }
+    }
+
+    [Test]
     public void RetainsUnselectedSourceClassesWithoutPublishingThem()
     {
         var tree = SyntaxTree.Parse("""

@@ -31561,7 +31561,59 @@ public static partial class SemanticVerifier
                 <= import.ProofFunction.Variables.Length
             && IsValidGenericMethodImportSpanTypes(import)
             && IsValidGenericMethodImportSupportFunctions(import)
+            && IsValidGenericMethodImportParameterDefaults(import)
             && IsValidGenericMethodImportBinding(import);
+    }
+
+    private static bool IsValidGenericMethodImportParameterDefaults(
+        BoundGenericMethodImport import)
+    {
+        var defaults = import.OrdinaryParameterDefaults;
+        if (defaults.IsDefault)
+        {
+            return false;
+        }
+
+        var parameterCount = import.ProofFunction.ParameterCount;
+        if (!StringComparer.Ordinal.Equals(import.Origin.SchemaIdentity,
+                StandardGenericMethodSchema
+                    .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaults))
+        {
+            return defaults.IsEmpty
+                || defaults.Length == parameterCount
+                    && defaults.All(static value => value is null);
+        }
+
+        if (defaults.Length != parameterCount)
+        {
+            return false;
+        }
+
+        for (var ordinal = 0; ordinal < defaults.Length; ordinal++)
+        {
+            var parameterDefault = defaults[ordinal];
+            if (parameterDefault is null)
+            {
+                continue;
+            }
+
+            var parameter = import.ProofFunction.Variables[ordinal];
+            if (parameterDefault.ParameterIndex != ordinal
+                || !StringComparer.Ordinal.Equals(
+                    parameterDefault.ParameterName, parameter.Name)
+                || parameterDefault.ParameterType != parameter.Type
+                || parameterDefault.Value is not BoundConstant value
+                || value.Type != parameter.Type
+                || !parameterDefault.FormalDependencies.IsEmpty
+                || !value.Bits.IsCanonicalFor(parameter.Type)
+                || (parameter.Type is PrimitiveType.NativeInt
+                    or PrimitiveType.NativeUInt))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static bool IsValidGenericMethodImportSpanTypes(

@@ -54,7 +54,9 @@ public static partial class TrRmExecutableCompiler
         TrRmArtifactSchema baseSchema = TrRmArtifactSchema.Standard,
         bool standardInitializationReferenceBodies = false,
         IReadOnlyList<BoundGenericMethodDefinition>?
-            retainedMethodDefinitions = null)
+            retainedMethodDefinitions = null,
+        byte[]? baseArtifact = null,
+        TrRmFrozenScalarValueBuilder? frozenScalarValueBuilder = null)
     {
         if (program.GenericMethodDefinitions.IsDefault)
         {
@@ -70,6 +72,22 @@ public static partial class TrRmExecutableCompiler
                 "Source generic method mappings belong to a different checked program.",
                 nameof(sourceMethodExports));
         }
+
+        if (baseArtifact is not null
+            && (!schema.UsesClassParameterDefaults()
+                || baseSchema != schema
+                || frozenScalarValueBuilder is null))
+        {
+            throw new ArgumentException(
+                "A composed CM1 class artifact requires its shared frozen-value builder and exact schema.",
+                nameof(baseArtifact));
+        }
+
+        var methodParameterSurfaceValues
+            = schema.UsesClassParameterDefaults()
+                ? frozenScalarValueBuilder
+                    ?? new TrRmFrozenScalarValueBuilder()
+                : null;
 
         if (sourceTypeExports is { Count: > 0 }
             && !schema.UsesMethodParameterLabels()
@@ -109,7 +127,8 @@ public static partial class TrRmExecutableCompiler
             }
         }
         var sourceProgram = program;
-        var addedSeed = program.Functions.IsEmpty
+        var addedSeed = baseArtifact is null
+            && program.Functions.IsEmpty
             && emissionRows.Count != 0;
         if (addedSeed)
         {
@@ -127,11 +146,12 @@ public static partial class TrRmExecutableCompiler
             };
         }
 
-        var artifact = EmitDevelopment(sourceProgram, moduleIdentity,
-            baseSchema, moduleTargetRequirement,
-            standardInitializationReferenceBodies:
-                standardInitializationReferenceBodies,
-            allowGenericMethodNominalTypeTables: true);
+        var artifact = baseArtifact
+            ?? EmitDevelopment(sourceProgram, moduleIdentity,
+                baseSchema, moduleTargetRequirement,
+                standardInitializationReferenceBodies:
+                    standardInitializationReferenceBodies,
+                allowGenericMethodNominalTypeTables: true);
         if (addedSeed)
         {
             artifact = RemoveGenericMethodEmitterSeed(artifact, baseSchema);
@@ -160,15 +180,17 @@ public static partial class TrRmExecutableCompiler
             }
             artifact = AddGenericMethodInterfaceMetadata(artifact, program,
                 sourceTypeExports, sourceMethodExports, schema,
+                methodParameterSurfaceValues,
                 out exportedInterfaceTypeSpecRows,
                 out exportedInterfaceMethodDefRows);
         }
         if (emissionRows.Count != 0)
         {
             artifact = AddImportedGenericInterfaceMetadata(artifact, program,
-                schema);
+                schema, methodParameterSurfaceValues);
             artifact = AddImportedGenericMethodMetadata(artifact,
                 program, emissionRows, exportedInterfaceTypeSpecRows, schema,
+                methodParameterSurfaceValues,
                 out importedGenericMethodTargetTokens,
                 out importedNominalTypeReferences,
                 out importedNominalTypeSnapshots);
@@ -199,13 +221,43 @@ public static partial class TrRmExecutableCompiler
                 exportedInterfaceMethodDefRows,
                 importedGenericMethodTargetTokens,
                 importedNominalTypeReferences,
-                importedNominalTypeSnapshots, schema);
+                importedNominalTypeSnapshots, schema,
+                methodParameterSurfaceValues);
         }
         else if (hasGenericCallTargets
-            || ArtifactHasGenericWriteConstraints(artifact))
+            || ArtifactHasGenericWriteConstraints(artifact, schema))
         {
             artifact = AddGenericMethodFeatures(artifact, schema,
                 hasGenericCallTargets);
+        }
+
+        if (methodParameterSurfaceValues is not null
+            && (baseArtifact is not null
+                || methodParameterSurfaceValues.ConstantSourceCount != 0))
+        {
+            if (baseArtifact is null)
+            {
+                var existingIndex = new TrRmArtifactIndex(artifact,
+                    schema);
+                var hasExistingValues
+                    = existingIndex.TryGetSection(0x0030, out _,
+                        out var existingSources)
+                        && existingSources != 0
+                    || existingIndex.TryGetSection(0x003F, out _,
+                        out var existingNodes)
+                        && existingNodes != 0
+                    || existingIndex.TryGetSection(0x0032, out _,
+                        out var existingBlobs)
+                        && existingBlobs != 0;
+                if (hasExistingValues)
+                {
+                    throw Unsupported(
+                        "CM1 parameter defaults cannot replace unrelated frozen-value rows.");
+                }
+            }
+
+            artifact = ReplaceFrozenScalarValueSections(artifact, schema,
+                methodParameterSurfaceValues);
         }
 
         var index = new TrRmArtifactIndex(artifact, schema);
@@ -222,6 +274,47 @@ public static partial class TrRmExecutableCompiler
         }
 
         return artifact;
+    }
+
+    private static byte[] ReplaceFrozenScalarValueSections(byte[] artifact,
+        TrRmArtifactSchema schema,
+        TrRmFrozenScalarValueBuilder frozenScalarValueBuilder)
+    {
+        var index = new TrRmArtifactIndex(artifact, schema);
+        var values = frozenScalarValueBuilder.Encode(default);
+        var sections = new List<TrRmSection>(index.SectionCount + 3);
+        for (var sectionIndex = 0; sectionIndex < index.SectionCount;
+            sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var count);
+            if (kind is 0x0030 or 0x0032 or 0x003F)
+            {
+                continue;
+            }
+
+            sections.Add(new TrRmSection(kind, flags,
+                checked((uint)count), bytes.ToArray()));
+        }
+
+        if (values.BlobCount != 0)
+        {
+            sections.Add(new TrRmSection(0x0032, 0,
+                checked((uint)values.BlobCount), values.BlobSection));
+        }
+        if (values.ConstantSourceCount != 0)
+        {
+            sections.Add(new TrRmSection(0x0030, 0,
+                checked((uint)values.ConstantSourceCount),
+                values.ConstantSourceSection));
+            sections.Add(new TrRmSection(0x003F, 0,
+                checked((uint)values.FrozenValueNodeCount),
+                values.FrozenValueNodeSection));
+        }
+
+        sections.Sort(static (left, right) =>
+            left.Kind.CompareTo(right.Kind));
+        return TrRmArtifactWriter.Encode(sections, schema);
     }
 
     private static BoundFunction CreateGenericMethodEmitterSeed()
@@ -353,7 +446,7 @@ public static partial class TrRmExecutableCompiler
     private static bool ArtifactHasGenericCallTargets(byte[] artifact,
         TrRmArtifactSchema schema)
     {
-        var index = new TrRmArtifactIndex(artifact);
+        var index = new TrRmArtifactIndex(artifact, schema);
         if (!index.TryGetSection(0x0020, out var bodyBytes,
                 out var bodyCount)
             || bodyCount == 0)
@@ -388,9 +481,10 @@ public static partial class TrRmExecutableCompiler
                 .HasGenericCallTargets;
     }
 
-    private static bool ArtifactHasGenericWriteConstraints(byte[] artifact)
+    private static bool ArtifactHasGenericWriteConstraints(byte[] artifact,
+        TrRmArtifactSchema schema)
     {
-        var index = new TrRmArtifactIndex(artifact);
+        var index = new TrRmArtifactIndex(artifact, schema);
         if (!index.TryGetSection(0x001A, out var constraints,
                 out var count))
         {
@@ -418,7 +512,7 @@ public static partial class TrRmExecutableCompiler
     private static byte[] AddGenericMethodFeatures(byte[] artifact,
         TrRmArtifactSchema schema, bool includeGenericMethodCalls)
     {
-        var index = new TrRmArtifactIndex(artifact);
+        var index = new TrRmArtifactIndex(artifact, schema);
         var sections = new List<TrRmSection>(index.SectionCount);
         for (var sectionIndex = 0; sectionIndex < index.SectionCount;
             sectionIndex++)
@@ -3053,6 +3147,7 @@ public static partial class TrRmExecutableCompiler
         IReadOnlyDictionary<(string QualifiedName, int Arity), uint>
             exportedInterfaceTypeSpecRows,
         TrRmArtifactSchema schema,
+        TrRmFrozenScalarValueBuilder? methodParameterSurfaceValues,
         out Dictionary<BoundGenericMethodImport, uint>
             importedGenericMethodTargetTokens,
         out Dictionary<BoundGenericNominalTypeIdentity, uint>
@@ -3217,7 +3312,6 @@ public static partial class TrRmExecutableCompiler
         var bodyCount = GetCount(sections, 0x0020);
         var nativeFunctionPointerSignatureCount
             = GetCount(sections, 0x0052);
-        var constantSourceCount = GetCount(sections, 0x0030);
         var methodBytes = TryGetSection(sections, 0x0016,
                 out var methodSection)
             ? methodSection.Bytes.ToArray().ToList() : [];
@@ -3239,7 +3333,8 @@ public static partial class TrRmExecutableCompiler
             ? methodParameterLabelSection.Bytes.ToArray().ToList() : [];
         var methodParameterLabelCount = GetCount(sections, 0x0066);
         if (methodParameterLabelBytes.Count
-            != checked(methodParameterLabelCount * 12))
+            != checked(methodParameterLabelCount
+                * GetMethodParameterSurfaceRowSize(schema)))
         {
             throw Invalid(
                 "The G1L1 MethodParameterLabel table has an invalid extent.");
@@ -3550,6 +3645,45 @@ public static partial class TrRmExecutableCompiler
 
                 var parameterTypeSpecRef
                     = GetExpectedTypeSpecRef(parameter.Type);
+                var defaultConstantSourceRow = 0u;
+                if (schema.UsesClassParameterDefaults())
+                {
+                    var defaults
+                        = imported.Expected.OrdinaryParameterDefaults;
+                    if (defaults.IsDefault
+                        || defaults.Length != proofFunction.ParameterCount)
+                    {
+                        throw Unsupported(
+                            $"CM1 imported MethodDef '{proofFunction.Name}' has no complete default vector.");
+                    }
+
+                    var parameterDefault = defaults[parameterOrdinal];
+                    if (parameterDefault is not null)
+                    {
+                        if (parameterDefault.ParameterIndex
+                                != parameterOrdinal
+                            || parameterDefault.ParameterType
+                                != parameter.Type
+                            || !StringComparer.Ordinal.Equals(
+                                parameterDefault.ParameterName,
+                                parameter.Name)
+                            || !parameterDefault.FormalDependencies
+                                .IsEmpty
+                            || parameterDefault.Value
+                                is not BoundConstant constant)
+                        {
+                            throw Unsupported(
+                                $"CM1 imported MethodDef '{proofFunction.Name}' has an open or unsupported parameter default.");
+                        }
+
+                        defaultConstantSourceRow
+                            = AddC1M1ParameterDefault(
+                                methodParameterSurfaceValues, constant,
+                                parameter.Type, parameterTypeSpecRef)
+                                .ConstantSourceRow;
+                    }
+                }
+
                 AppendUInt32(parameterBytes,
                     checked((uint)(signatureCount + importedOrdinal + 1)));
                 AppendUInt32(parameterBytes,
@@ -3562,22 +3696,15 @@ public static partial class TrRmExecutableCompiler
 
                 if (schema.UsesMethodParameterLabels())
                 {
-                    if (methodParameterLabelCount == 0xFF_FFFF)
-                    {
-                        throw Unsupported(
-                            "The G1L1 MethodParameterLabel table exceeds its row limit.");
-                    }
-
                     var parameterNameStringRow = names.Count + 1;
                     names.Add((parameter.Name, 1));
-                    AppendUInt32(methodParameterLabelBytes,
-                        checked((uint)methodRow));
-                    AppendUInt32(methodParameterLabelBytes,
-                        checked((uint)parameterOrdinal));
-                    AppendUInt32(methodParameterLabelBytes,
-                        checked((uint)parameterNameStringRow));
-                    methodParameterLabelCount
-                        = checked(methodParameterLabelCount + 1);
+                    AppendMethodParameterSurfaceRow(
+                        methodParameterLabelBytes,
+                        ref methodParameterLabelCount, schema,
+                        checked((uint)methodRow),
+                        checked((uint)parameterOrdinal),
+                        checked((uint)parameterNameStringRow),
+                        defaultConstantSourceRow);
                 }
             }
             parameterCount = checked(parameterCount
@@ -3708,7 +3835,8 @@ public static partial class TrRmExecutableCompiler
             importedNominalTypeReferences,
         IReadOnlyList<BoundSourceTypeProviderSnapshot>
             importedNominalTypeSnapshots,
-        TrRmArtifactSchema schema)
+        TrRmArtifactSchema schema,
+        TrRmFrozenScalarValueBuilder? methodParameterSurfaceValues)
     {
         var index = new TrRmArtifactIndex(artifact, schema);
         var sections = new List<TrRmSection>(index.SectionCount + 2);
@@ -3765,6 +3893,16 @@ public static partial class TrRmExecutableCompiler
             ? labelSection.Bytes.ToArray().ToList() : [];
         var methodParameterLabelCount = hasLabelSection
             ? checked((int)labelSection.RecordCount) : 0;
+        if (methodParameterLabelBytes.Count
+            != checked(methodParameterLabelCount
+                * GetMethodParameterSurfaceRowSize(schema)))
+        {
+            throw Invalid(
+                "The MethodParameterSurface table has an invalid extent.");
+        }
+
+        var parameterSurfaceDefaultOffsets
+            = new Dictionary<(int MethodRow, int Ordinal), int>();
         if (labelBearing)
         {
             foreach (var emission in emissions)
@@ -3785,22 +3923,23 @@ public static partial class TrRmExecutableCompiler
                 for (var ordinal = 0; ordinal < function.ParameterCount;
                     ordinal++)
                 {
-                    if (methodParameterLabelCount == 0xFF_FFFF)
-                    {
-                        throw Unsupported(
-                            "The G1L1 MethodParameterLabel table exceeds its row limit.");
-                    }
-
                     var nameRow = names.Count + 1;
                     names.Add((function.Variables[ordinal].Name, 1));
-                    AppendUInt32(methodParameterLabelBytes,
-                        checked((uint)emission.MethodRow));
-                    AppendUInt32(methodParameterLabelBytes,
-                        checked((uint)ordinal));
-                    AppendUInt32(methodParameterLabelBytes,
+                    var defaultOffset = schema.UsesClassParameterDefaults()
+                        ? checked((methodParameterLabelCount
+                            * GetMethodParameterSurfaceRowSize(schema)) + 12)
+                        : -1;
+                    AppendMethodParameterSurfaceRow(
+                        methodParameterLabelBytes,
+                        ref methodParameterLabelCount, schema,
+                        checked((uint)emission.MethodRow),
+                        checked((uint)ordinal),
                         checked((uint)nameRow));
-                    methodParameterLabelCount
-                        = checked(methodParameterLabelCount + 1);
+                    if (defaultOffset >= 0)
+                    {
+                        parameterSurfaceDefaultOffsets.Add(
+                            (emission.MethodRow, ordinal), defaultOffset);
+                    }
                 }
             }
         }
@@ -4037,6 +4176,50 @@ public static partial class TrRmExecutableCompiler
                     definition.ProofProgram.CheckedReferenceTypes,
                     definition.DefinitionOrdinal, definition,
                     allowSpanType: true, nominalTypes: nominalTypes);
+                if (schema.UsesClassParameterDefaults()
+                    && exportedDefinitionOrdinals.Contains(
+                        definition.DefinitionOrdinal))
+                {
+                    var defaults = definition.OrdinaryParameterDefaults;
+                    if (defaults.IsDefault
+                        || defaults.Length != parameterCount)
+                    {
+                        throw Unsupported(
+                            $"CM1 generic MethodDef '{definition.Name}' has no complete checked default vector.");
+                    }
+
+                    var parameterDefault = defaults[parameter];
+                    if (parameterDefault is not null)
+                    {
+                        if (parameterDefault.ParameterIndex != parameter
+                            || parameterDefault.ParameterType
+                                != function.Variables[parameter].Type
+                            || !StringComparer.Ordinal.Equals(
+                                parameterDefault.ParameterName,
+                                function.Variables[parameter].Name)
+                            || !parameterDefault.FormalDependencies
+                                .IsEmpty
+                            || parameterDefault.Value
+                                is not BoundConstant constant
+                            || !parameterSurfaceDefaultOffsets.TryGetValue(
+                                (methodRow, parameter),
+                                out var defaultOffset))
+                        {
+                            throw Unsupported(
+                                $"CM1 generic MethodDef '{definition.Name}' has an open or unsupported parameter default.");
+                        }
+
+                        var frozenValue
+                            = AddC1M1ParameterDefault(
+                                methodParameterSurfaceValues, constant,
+                                function.Variables[parameter].Type,
+                                typeSpecRef);
+                        WriteUInt32(methodParameterLabelBytes,
+                            defaultOffset,
+                            frozenValue.ConstantSourceRow);
+                    }
+                }
+
                 AppendUInt32(parameterBytes, checked((uint)signatureRow));
                 AppendUInt32(parameterBytes, checked((uint)parameter));
                 AppendUInt32(parameterBytes, typeSpecRef);
@@ -4180,10 +4363,17 @@ public static partial class TrRmExecutableCompiler
         if (featureRows.Any(static feature =>
                 feature.FeatureId is
                     TrRmFeatureTableReader.GenericMethodCallsFeatureId
-                    or TrRmFeatureTableReader.MethodParameterLabelsFeatureId
                     or TrRmFeatureTableReader.GenericWriteRequirementsFeatureId))
         {
             throw Unsupported("The source emitter cannot replace pre-existing G1 Features.");
+        }
+        if (!schema.UsesClassParameterDefaults()
+            && featureRows.Any(static feature =>
+                feature.FeatureId
+                    == TrRmFeatureTableReader.MethodParameterLabelsFeatureId))
+        {
+            throw Unsupported(
+                "The source emitter cannot replace pre-existing G1 label Features.");
         }
         if (hasWriteConstraint && !schema.UsesGenericWriteRequirements())
         {
@@ -4202,9 +4392,15 @@ public static partial class TrRmExecutableCompiler
                 TrRmFeatureRow.GenericWriteRequirementsCandidate);
         }
         if (labelBearing && (exportedDefinitionOrdinals.Count != 0
-                || GetCount(sections, 0x0024) != 0))
+                || GetCount(sections, 0x0024) != 0
+                || importedGenericMethodTargetTokens.Count != 0))
         {
             featureRows.Add(TrRmFeatureRow.MethodParameterLabelsCandidate);
+        }
+        if (methodParameterSurfaceValues is not null
+            && methodParameterSurfaceValues.ConstantSourceCount > 0)
+        {
+            featureRows.Add(TrRmFeatureRow.TypedFrozenValues);
         }
         if (hasBlittableConstraint
             && !featureRows.Any(static feature =>
@@ -4299,6 +4495,7 @@ public static partial class TrRmExecutableCompiler
         BoundProgram program, IReadOnlyList<TrRmSourceTypeExport> typeExports,
         SourceGenericMethodExports sourceMethodExports,
         TrRmArtifactSchema schema,
+        TrRmFrozenScalarValueBuilder? methodParameterSurfaceValues,
         out Dictionary<(string QualifiedName, int Arity), uint>
             exportedInterfaceTypeSpecRows,
         out Dictionary<(
@@ -4307,7 +4504,7 @@ public static partial class TrRmExecutableCompiler
     {
         exportedInterfaceTypeSpecRows = [];
         exportedInterfaceMethodDefRows = [];
-        var artifactIndex = new TrRmArtifactIndex(artifact);
+        var artifactIndex = new TrRmArtifactIndex(artifact, schema);
         var sections = new List<TrRmSection>(artifactIndex.SectionCount);
         for (var sectionIndex = 0;
             sectionIndex < artifactIndex.SectionCount;
@@ -4427,8 +4624,18 @@ public static partial class TrRmExecutableCompiler
         var interfaceDefRows = new List<TrRmInterfaceDefRow>(
             emissions.Count);
         var interfaceMethodRows = new List<TrRmInterfaceMethodRow>();
-        var methodParameterLabelBytes = new List<byte>();
-        var methodParameterLabelCount = 0;
+        var methodParameterLabelCount = GetCount(sections, 0x0066);
+        var methodParameterLabelBytes
+            = TryGetSection(sections, 0x0066, out var labelSection)
+                ? labelSection.Bytes.ToArray().ToList() : [];
+        if (methodParameterLabelBytes.Count
+            != checked(methodParameterLabelCount
+                * GetMethodParameterSurfaceRowSize(schema)))
+        {
+            throw Invalid(
+                "The MethodParameterSurface table has an invalid extent.");
+        }
+
         var interfaceTypeExportNameRows = new List<int>(
             emissions.Count);
         var interfaceMethodExportNameRows = new List<int>();
@@ -4579,29 +4786,58 @@ public static partial class TrRmExecutableCompiler
                     parameterOrdinal++)
                 {
                     var parameter = member.Parameters[parameterOrdinal];
-                    if (schema.UsesMethodParameterLabels())
-                    {
-                        if (methodParameterLabelCount == 0xFF_FFFF)
-                        {
-                            throw Unsupported(
-                                "The G1L1 MethodParameterLabel table exceeds its row limit.");
-                        }
-
-                        var parameterNameStringRow = names.Count + 1;
-                        names.Add((parameter.Name, 1));
-                        AppendUInt32(methodParameterLabelBytes,
-                            checked((uint)methodRow));
-                        AppendUInt32(methodParameterLabelBytes,
-                            checked((uint)parameterOrdinal));
-                        AppendUInt32(methodParameterLabelBytes,
-                            checked((uint)parameterNameStringRow));
-                        methodParameterLabelCount
-                            = checked(methodParameterLabelCount + 1);
-                    }
                     var parameterTypeSpecRef
                         = GenericInterfaceTypeSpecRef(parameter.Type,
                             formalTypeSpecRows, builtInTypeSpecRows,
                             typeSpecRows);
+                    var defaultConstantSourceRow = 0u;
+                    if (schema.UsesClassParameterDefaults())
+                    {
+                        if (parameter.DefaultValue is BoundConstant value)
+                        {
+                            if (parameter.DefaultExpression is not null
+                                || parameter.HasPendingDefault
+                                || parameter.Mode
+                                    != BoundInterfaceParameterMode.Value
+                                || parameter.Type.Kind
+                                    != BoundInterfaceTypeKind.Primitive
+                                || parameter.Type.IsWritable
+                                || parameter.Type.IsOptional
+                                || parameter.Type.IsGarbageCollected
+                                || parameter.Type.IsInitialization)
+                            {
+                                throw Unsupported(
+                                    "CM1 interface parameter defaults require a checked closed scalar value.");
+                            }
+
+                            var frozenValue
+                                = AddC1M1ParameterDefault(
+                                    methodParameterSurfaceValues, value,
+                                    parameter.Type.PrimitiveType,
+                                    parameterTypeSpecRef);
+                            defaultConstantSourceRow
+                                = frozenValue.ConstantSourceRow;
+                        }
+                        else if (parameter.DefaultExpression is not null
+                            || parameter.HasPendingDefault)
+                        {
+                            throw Unsupported(
+                                "CM1 does not serialize open or unformed interface parameter defaults.");
+                        }
+                    }
+
+                    if (schema.UsesMethodParameterLabels())
+                    {
+                        var parameterNameStringRow = names.Count + 1;
+                        names.Add((parameter.Name, 1));
+                        AppendMethodParameterSurfaceRow(
+                            methodParameterLabelBytes,
+                            ref methodParameterLabelCount, schema,
+                            checked((uint)methodRow),
+                            checked((uint)parameterOrdinal),
+                            checked((uint)parameterNameStringRow),
+                            defaultConstantSourceRow);
+                    }
                     AppendUInt32(parameterBytes,
                         checked((uint)signatureRow));
                     AppendUInt32(parameterBytes,
@@ -4801,7 +5037,8 @@ public static partial class TrRmExecutableCompiler
     }
 
     private static byte[] AddImportedGenericInterfaceMetadata(
-        byte[] artifact, BoundProgram program, TrRmArtifactSchema schema)
+        byte[] artifact, BoundProgram program, TrRmArtifactSchema schema,
+        TrRmFrozenScalarValueBuilder? methodParameterSurfaceValues)
     {
         var emissions = CaptureImportedGenericInterfaceEmissions(program,
             schema);
@@ -4978,7 +5215,8 @@ public static partial class TrRmExecutableCompiler
             out var methodParameterLabelSection)
             ? methodParameterLabelSection.Bytes.ToArray().ToList() : [];
         if (methodParameterLabelBytes.Count
-            != checked(methodParameterLabelCount * 12))
+            != checked(methodParameterLabelCount
+                * GetMethodParameterSurfaceRowSize(schema)))
         {
             throw Invalid(
                 "The G1L1 MethodParameterLabel table has an invalid fixed-width extent.");
@@ -5128,27 +5366,56 @@ public static partial class TrRmExecutableCompiler
                     parameterOrdinal < member.Parameters.Length;
                     parameterOrdinal++)
                 {
-                    if (methodParameterLabelCount == 0xFF_FFFF)
-                    {
-                        throw Unsupported(
-                            "The G1L1 MethodParameterLabel table exceeds its row limit.");
-                    }
-
                     var parameter = member.Parameters[parameterOrdinal];
-                    var parameterNameStringRow = names.Count + 1;
-                    names.Add((parameter.Name, 1));
-                    AppendUInt32(methodParameterLabelBytes,
-                        checked((uint)methodRow));
-                    AppendUInt32(methodParameterLabelBytes,
-                        checked((uint)parameterOrdinal));
-                    AppendUInt32(methodParameterLabelBytes,
-                        checked((uint)parameterNameStringRow));
-                    methodParameterLabelCount
-                        = checked(methodParameterLabelCount + 1);
                     var parameterTypeSpecRef
                         = GenericInterfaceTypeSpecRef(parameter.Type,
                             formalTypeSpecRows, builtInTypeSpecRows,
                             typeSpecRows);
+                    var defaultConstantSourceRow = 0u;
+                    if (schema.UsesClassParameterDefaults())
+                    {
+                        if (parameter.DefaultValue is BoundConstant value)
+                        {
+                            if (parameter.DefaultExpression is not null
+                                || parameter.HasPendingDefault
+                                || parameter.Mode
+                                    != BoundInterfaceParameterMode.Value
+                                || parameter.Type.Kind
+                                    != BoundInterfaceTypeKind.Primitive
+                                || parameter.Type.IsWritable
+                                || parameter.Type.IsOptional
+                                || parameter.Type.IsGarbageCollected
+                                || parameter.Type.IsInitialization)
+                            {
+                                throw Unsupported(
+                                    "CM1 imported interface defaults require a checked closed scalar value.");
+                            }
+
+                            var frozenValue
+                                = AddC1M1ParameterDefault(
+                                    methodParameterSurfaceValues, value,
+                                    parameter.Type.PrimitiveType,
+                                    parameterTypeSpecRef);
+                            defaultConstantSourceRow
+                                = frozenValue.ConstantSourceRow;
+                        }
+                        else if (parameter.DefaultExpression is not null
+                            || parameter.HasPendingDefault)
+                        {
+                            throw Unsupported(
+                                "CM1 imported interface defaults cannot be open or unformed.");
+                        }
+                    }
+
+                    var parameterNameStringRow = names.Count + 1;
+                    names.Add((parameter.Name, 1));
+                    AppendMethodParameterSurfaceRow(
+                        methodParameterLabelBytes,
+                        ref methodParameterLabelCount, schema,
+                        checked((uint)methodRow),
+                        checked((uint)parameterOrdinal),
+                        checked((uint)parameterNameStringRow),
+                        defaultConstantSourceRow);
                     AppendUInt32(parameterBytes,
                         checked((uint)signatureRow));
                     AppendUInt32(parameterBytes,
@@ -7669,6 +7936,61 @@ public static partial class TrRmExecutableCompiler
         bytes.Add((byte)(value >> 16));
         bytes.Add((byte)(value >> 24));
     }
+
+    private static void AppendMethodParameterSurfaceRow(
+        List<byte> bytes, ref int count, TrRmArtifactSchema schema,
+        uint methodDefRow, uint ordinal, uint nameStringRow,
+        uint defaultConstantSourceRow = 0)
+    {
+        if (count >= 0xFF_FFFF
+            || (!schema.UsesClassParameterDefaults()
+                && defaultConstantSourceRow != 0))
+        {
+            throw Unsupported(
+                "The MethodParameterSurface exceeds its selected row contract.");
+        }
+
+        AppendUInt32(bytes, methodDefRow);
+        AppendUInt32(bytes, ordinal);
+        AppendUInt32(bytes, nameStringRow);
+        if (schema.UsesClassParameterDefaults())
+        {
+            AppendUInt32(bytes, defaultConstantSourceRow);
+        }
+
+        count = checked(count + 1);
+    }
+
+    private static TrRmFrozenScalarValueReference
+        AddC1M1ParameterDefault(
+            TrRmFrozenScalarValueBuilder? frozenValues,
+            BoundConstant value, PrimitiveType parameterType,
+            uint parameterTypeSpecRef)
+    {
+        if (frozenValues is null
+            || value.Type != parameterType
+            || value.RepresentationType != parameterType
+            || (parameterType is PrimitiveType.NativeInt
+                or PrimitiveType.NativeUInt)
+            || !value.Bits.IsCanonicalFor(parameterType))
+        {
+            throw Unsupported(
+                "CM1 parameter defaults require exact fixed-width SF1 scalar values.");
+        }
+
+        var frozenValue = frozenValues.Add(value);
+        if (frozenValue.TypeSpecRef != parameterTypeSpecRef)
+        {
+            throw Unsupported(
+                "CM1 parameter defaults must match the complete parameter TypeSpec.");
+        }
+
+        return frozenValue;
+    }
+
+    private static int GetMethodParameterSurfaceRowSize(
+        TrRmArtifactSchema schema)
+        => schema.UsesClassParameterDefaults() ? 16 : 12;
 
     private static void WriteUInt32(List<byte> bytes, int offset,
         uint value)

@@ -1041,6 +1041,8 @@ internal static class StandardGenericMethodSchema
         = "trrm/1-draft-generic-method-calls-parameter-labels-1";
     internal const string GenericMethodCallsParameterLabelsReceiverAccess
         = "trrm/1-draft-generic-method-calls-parameter-labels-1-receiver-access-1";
+    internal const string C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaults
+        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-class-parameter-defaults-1";
 
     internal static bool IsGenericMethodCalls(string? schemaIdentity)
         => StringComparer.Ordinal.Equals(schemaIdentity,
@@ -1048,7 +1050,9 @@ internal static class StandardGenericMethodSchema
             || StringComparer.Ordinal.Equals(schemaIdentity,
                 GenericMethodCallsParameterLabels)
             || StringComparer.Ordinal.Equals(schemaIdentity,
-                GenericMethodCallsParameterLabelsReceiverAccess);
+                GenericMethodCallsParameterLabelsReceiverAccess)
+            || StringComparer.Ordinal.Equals(schemaIdentity,
+                C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaults);
 }
 
 internal sealed record BoundGenericMethodImportOrigin(
@@ -1068,6 +1072,8 @@ internal sealed class BoundGenericMethodImport
     internal BoundGenericMethodImportOrigin Origin { get; }
     internal BoundGenericMethodSignature Signature { get; }
     internal ImmutableArray<BoundGenericMethodFormal> Formals { get; }
+    internal ImmutableArray<BoundGenericMethodParameterDefault?>
+        OrdinaryParameterDefaults { get; }
     internal IReadOnlyList<BoundSpanTypeDefinition> SpanTypes { get; }
     internal BoundFunction ProofFunction { get; private set; }
     internal ImmutableArray<BoundFunction> ProofSupportFunctions
@@ -1080,11 +1086,15 @@ internal sealed class BoundGenericMethodImport
         BoundGenericMethodSignature signature,
         ImmutableArray<BoundGenericMethodFormal> formals,
         BoundFunction proofFunction, int formalTypeOwnerOrdinal = -1,
-        IReadOnlyList<BoundSpanTypeDefinition>? spanTypes = null)
+        IReadOnlyList<BoundSpanTypeDefinition>? spanTypes = null,
+        ImmutableArray<BoundGenericMethodParameterDefault?>
+            ordinaryParameterDefaults = default)
     {
         Origin = origin;
         Signature = signature;
         Formals = formals;
+        OrdinaryParameterDefaults = ordinaryParameterDefaults.IsDefault
+            ? [] : ordinaryParameterDefaults;
         ProofFunction = proofFunction;
         FormalTypeOwnerOrdinal = formalTypeOwnerOrdinal;
         SpanTypes = spanTypes ?? Array.Empty<BoundSpanTypeDefinition>();

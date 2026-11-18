@@ -34,6 +34,7 @@ public static partial class TrRmExecutableCompiler
     private static byte[] EmitC1M1SourceClassDeclarations(
         BoundProgram program, string moduleIdentity,
         uint moduleTargetRequirement, SourceClassExports sourceClassExports,
+        out TrRmFrozenScalarValueBuilder frozenScalarValueBuilder,
         TrRmArtifactSchema schema = TrRmArtifactSchema.C1M1Draft)
     {
         var emitsConstruction2 = schema.UsesObjectConstruction();
@@ -46,13 +47,14 @@ public static partial class TrRmExecutableCompiler
         if (!ReferenceEquals(sourceClassExports.Program, program)
             || program.EntryPoint != -1
             || !program.StandardClassDeclarations.IsEmpty
+            || !program.InterfaceWitnesses.IsEmpty
+            || !program.GenericMethodSignatures.IsEmpty
+            || !program.GenericMethodOperatorProtocols.IsEmpty
             || !program.GenericNominalTypeDefinitions.IsEmpty
             || !program.GenericNominalTypeInstances.IsEmpty
-            || !program.Interfaces.IsEmpty
-            || !program.InterfaceWitnesses.IsEmpty
-            || !program.GenericMethodDefinitions.IsEmpty
-            || !program.GenericMethodSignatures.IsEmpty
-            || !program.GenericMethodOperatorProtocols.IsEmpty)
+            || (!schema.UsesClassParameterDefaults()
+                && (!program.Interfaces.IsEmpty
+                    || !program.GenericMethodDefinitions.IsEmpty))
         {
             throw Unsupported(
                 "C1M1 source declaration emission requires captured local non-generic classes without imported class, generic or interface closure.");
@@ -253,8 +255,7 @@ public static partial class TrRmExecutableCompiler
         var contractRows = new List<TrRmContractRow>();
         var bodyRows = new List<ReadOnlyMemory<byte>>();
         var featureRows = new List<TrRmFeatureRow>();
-        var frozenScalarValueBuilder
-            = new TrRmFrozenScalarValueBuilder();
+        frozenScalarValueBuilder = new TrRmFrozenScalarValueBuilder();
         var constructionInitializers
             = new List<C1M1Construction2SourceInitializer>();
         var construction2SourceMethods
@@ -1343,9 +1344,13 @@ public static partial class TrRmExecutableCompiler
             left.Kind.CompareTo(right.Kind));
         var artifact = TrRmArtifactWriter.Encode(sections,
             schema);
-        _ = TrRmStructuralMetadataValidator
-            .ValidateC1AndGetExecutionTables(
-                new TrRmArtifactIndex(artifact, schema));
+        if (!schema.UsesClassParameterDefaults())
+        {
+            _ = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(
+                    new TrRmArtifactIndex(artifact, schema));
+        }
+
         return artifact;
     }
 

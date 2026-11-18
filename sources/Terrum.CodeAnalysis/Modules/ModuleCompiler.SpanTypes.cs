@@ -728,7 +728,8 @@ public static partial class ModuleCompiler
         }
         var clone = new BoundGenericMethodImport(import.Origin,
             signature, formals, import.ProofFunction,
-            formalOwnerOrdinal, merge.Types);
+            formalOwnerOrdinal, merge.Types,
+            import.OrdinaryParameterDefaults);
         cache.Add(key, clone);
 
         BoundGenericMethodImport? expected = null;

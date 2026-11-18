@@ -1681,6 +1681,7 @@ public readonly ref struct TrRmContractTableReader
             var left = leftFirst + index;
             var right = rightFirst + index;
             if (_parameters.GetMode(left) != _parameters.GetMode(right)
+                || _parameters.GetFlags(left) != _parameters.GetFlags(right)
                 || !_typeSpecs.AreEquivalentTypeSpecRefs(
                     _parameters.GetTypeSpec(left),
                     _parameters.GetTypeSpec(right)))

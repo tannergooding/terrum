@@ -11231,6 +11231,18 @@ internal sealed partial class Binder
                 parameter < proofFunction.ParameterCount; parameter++)
             {
                 var variable = proofFunction.Variables[parameter];
+                var defaults = imported.OrdinaryParameterDefaults;
+                var parameterDefault
+                    = defaults.Length == proofFunction.ParameterCount
+                        ? defaults[parameter] : null;
+                if (!defaults.IsDefaultOrEmpty
+                    && defaults.Length != proofFunction.ParameterCount)
+                {
+                    Report("TRM3005",
+                        "The imported generic method has an incomplete ordinary default vector.",
+                        proofFunction.Span);
+                }
+
                 var formalOrdinal = -1;
                 for (var ordinal = 0;
                     ordinal < imported.Formals.Length; ordinal++)
@@ -11247,7 +11259,12 @@ internal sealed partial class Binder
                 {
                     parameters.Add(new GenericParameter(variable.Name,
                         null, formalOrdinal, variable.IsOut,
-                        variable.IsInit));
+                        variable.IsInit) {
+                        DefaultValue =
+                            parameterDefault?.Value as BoundConstant,
+                        DefaultFormalDependencies =
+                            parameterDefault?.FormalDependencies ?? [],
+                    });
                 }
                 else if (TryCreateImportedGenericMethodTypeTerm(
                         variable.Type, imported.Formals,
@@ -11262,13 +11279,22 @@ internal sealed partial class Binder
                     parameters.Add(new GenericParameter(variable.Name,
                         null, -1, variable.IsOut, variable.IsInit) {
                         TypeTerm = typeTerm,
+                        DefaultValue =
+                            parameterDefault?.Value as BoundConstant,
+                        DefaultFormalDependencies =
+                            parameterDefault?.FormalDependencies ?? [],
                     });
                 }
                 else
                 {
                     parameters.Add(new GenericParameter(variable.Name,
                         variable.Type, -1, variable.IsOut,
-                        variable.IsInit));
+                        variable.IsInit) {
+                        DefaultValue =
+                            parameterDefault?.Value as BoundConstant,
+                        DefaultFormalDependencies =
+                            parameterDefault?.FormalDependencies ?? [],
+                    });
                 }
             }
 
@@ -11355,12 +11381,23 @@ internal sealed partial class Binder
         }
 
         var proofFunction = imported.ProofFunction;
+        var importedDefaults = imported.OrdinaryParameterDefaults;
+        if (!importedDefaults.IsDefaultOrEmpty
+            && importedDefaults.Length != proofFunction.ParameterCount)
+        {
+            throw new InvalidOperationException(
+                "The imported generic method default vector has an invalid extent.");
+        }
+
         var parameters = ImmutableArray.CreateBuilder<GenericParameter>(
             proofFunction.ParameterCount);
         for (var parameter = 0;
             parameter < proofFunction.ParameterCount; parameter++)
         {
             var variable = proofFunction.Variables[parameter];
+            var parameterDefault = importedDefaults.Length
+                == proofFunction.ParameterCount
+                    ? importedDefaults[parameter] : null;
             var formalOrdinal = -1;
             for (var ordinal = 0;
                 ordinal < imported.Formals.Length; ordinal++)
@@ -11376,7 +11413,12 @@ internal sealed partial class Binder
             if (formalOrdinal >= 0)
             {
                 parameters.Add(new GenericParameter(variable.Name, null,
-                    formalOrdinal, variable.IsOut, variable.IsInit));
+                    formalOrdinal, variable.IsOut, variable.IsInit) {
+                    DefaultValue =
+                        parameterDefault?.Value as BoundConstant,
+                    DefaultFormalDependencies =
+                        parameterDefault?.FormalDependencies ?? [],
+                });
             }
             else if (TryCreateImportedGenericMethodTypeTerm(
                     variable.Type, imported.Formals, spanTypes,
@@ -11389,12 +11431,21 @@ internal sealed partial class Binder
                 parameters.Add(new GenericParameter(variable.Name, null,
                     -1, variable.IsOut, variable.IsInit) {
                     TypeTerm = typeTerm,
+                    DefaultValue =
+                        parameterDefault?.Value as BoundConstant,
+                    DefaultFormalDependencies =
+                        parameterDefault?.FormalDependencies ?? [],
                 });
             }
             else
             {
                 parameters.Add(new GenericParameter(variable.Name,
-                    variable.Type, -1, variable.IsOut, variable.IsInit));
+                    variable.Type, -1, variable.IsOut, variable.IsInit) {
+                    DefaultValue =
+                        parameterDefault?.Value as BoundConstant,
+                    DefaultFormalDependencies =
+                        parameterDefault?.FormalDependencies ?? [],
+                });
             }
         }
 

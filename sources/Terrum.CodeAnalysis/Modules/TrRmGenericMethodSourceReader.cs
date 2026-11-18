@@ -941,9 +941,52 @@ public static partial class TrRmExecutableCompiler
                     typeDef, formalCount,
                     tables.Parameters.GetTypeSpec(parameterRow),
                     isReturn: false);
+                BoundConstant? defaultValue = null;
+                if (context.Schema.UsesClassParameterDefaults())
+                {
+                    if (!tables.MethodParameterLabels
+                        .TryGetDefaultConstantSourceRow(methodRow,
+                            checked((uint)parameterOrdinal),
+                            out var constantSourceRow))
+                    {
+                        throw Invalid(
+                            "A validated CM1 InterfaceMethod has no default surface.");
+                    }
+
+                    if (constantSourceRow != 0)
+                    {
+                        var ownerModule
+                            = tables.Methods.GetOwnerModule(methodRow);
+                        var (targetRequirement, _)
+                            = tables.Modules.GetRequirements(ownerModule);
+                        defaultValue
+                            = TrRmConstantSourceValueValidator
+                                .MaterializeFrozenScalar(
+                                    checked((int)constantSourceRow),
+                                    tables.Parameters.GetTypeSpec(
+                                        parameterRow),
+                                    ownerModule, targetRequirement,
+                                    tables.ConstantSources,
+                                    tables.FrozenValueNodes, tables.Blobs,
+                                    tables.TypeSpecs, tables.Features,
+                                    tables.Modules,
+                                    tables.A3LayoutResourceLedger);
+                        if (parameterType.Kind
+                                != BoundInterfaceTypeKind.Primitive
+                            || defaultValue.Type
+                                != parameterType.PrimitiveType)
+                        {
+                            throw Invalid(
+                                "A CM1 interface default does not match its checked parameter type.");
+                        }
+                    }
+                }
+
                 parameters.Add(new BoundInterfaceParameter(
                     tables.Strings.DecodeName(labelStringRow), parameterType,
-                    BoundInterfaceParameterMode.Value, [], []));
+                    BoundInterfaceParameterMode.Value, [], []) {
+                    DefaultValue = defaultValue,
+                });
             }
 
             var resultType = DecodeG1InterfaceTypeSpec(tables, typeDef,
@@ -1749,6 +1792,8 @@ public static partial class TrRmExecutableCompiler
         }
         var variables = ImmutableArray.CreateBuilder<BoundVariable>(
             parameterCount);
+        var ordinaryParameterDefaults = ImmutableArray.CreateBuilder<
+            BoundGenericMethodParameterDefault?>(parameterCount);
         for (var ordinal = 0; ordinal < parameterCount; ordinal++)
         {
             var paramRow = parameterFirst + ordinal;
@@ -1786,6 +1831,50 @@ public static partial class TrRmExecutableCompiler
 
             variables.Add(new BoundVariable(parameterName, parameterType,
                 false, default));
+            BoundGenericMethodParameterDefault? parameterDefault = null;
+            if (context.Schema.UsesClassParameterDefaults()
+                && retainsLabel)
+            {
+                if (!tables.MethodParameterLabels
+                    .TryGetDefaultConstantSourceRow(methodRow,
+                        checked((uint)ordinal),
+                        out var constantSourceRow))
+                {
+                    throw Invalid(
+                        "A validated CM1 MethodDef has no complete default vector.");
+                }
+
+                if (constantSourceRow != 0)
+                {
+                    var ownerModule
+                        = tables.Methods.GetOwnerModule(methodRow);
+                    var (targetRequirement, _)
+                        = tables.Modules.GetRequirements(ownerModule);
+                    var value
+                        = TrRmConstantSourceValueValidator
+                            .MaterializeFrozenScalar(
+                                checked((int)constantSourceRow),
+                                tables.Parameters.GetTypeSpec(paramRow),
+                                ownerModule, targetRequirement,
+                                tables.ConstantSources,
+                                tables.FrozenValueNodes, tables.Blobs,
+                                tables.TypeSpecs, tables.Features,
+                                tables.Modules,
+                                tables.A3LayoutResourceLedger);
+                    if (value.Type != parameterType)
+                    {
+                        throw Invalid(
+                            "A CM1 generic default does not match its checked parameter type.");
+                    }
+
+                    parameterDefault
+                        = new BoundGenericMethodParameterDefault(
+                            ordinal, parameterName, parameterType, value,
+                            []);
+                }
+            }
+
+            ordinaryParameterDefaults.Add(parameterDefault);
         }
 
         var returnType = ResolveGenericMethodTypeSpec(context,
@@ -1877,7 +1966,8 @@ public static partial class TrRmExecutableCompiler
             isMethodDefTarget);
         var import = new BoundGenericMethodImport(origin, signature,
             formals.MoveToImmutable(), proofFunction,
-            formalTypeOwnerOrdinal, context.SpanTypes);
+            formalTypeOwnerOrdinal, context.SpanTypes,
+            ordinaryParameterDefaults.MoveToImmutable());
         import.CompleteProofFunction(proofFunction,
             proofSupportFunctions);
         return import;
