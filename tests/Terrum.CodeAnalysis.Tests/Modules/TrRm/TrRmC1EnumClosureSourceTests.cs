@@ -1390,6 +1390,10 @@ internal sealed class TrRmC1EnumClosureSourceTests
             NativeRuntimePolicy.FailFast), Is.Not.Empty);
         Assert.That(NativeEmitter.EmitLibrary(loaded, ["Offset"],
             NativeRuntimePolicy.FailFast), Is.Not.Empty);
+        Assert.That(NativeModuleCompiler.EmitStandardLibrary(
+            new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
+            "ClassLayoutConsumer", [providerInput], ["Offset"],
+            NativeRuntimePolicy.FailFast), Is.Not.Empty);
         Assert.That(query!.Subject.RequiresUnsafe, Is.True);
 
         var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(loaded,
