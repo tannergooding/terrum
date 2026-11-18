@@ -3932,9 +3932,12 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             T Identity<T>(T identityArgument) where T : [Blittable] {
                 return identityArgument;
             }
+            T Forward<T>(T forwardArgument) where T : [Blittable] {
+                return Identity<T>(forwardArgument);
+            }
             public T Twice<T>(T callerArgument) where T : [Blittable] {
                 T first = Identity<T>(callerArgument);
-                T second = Identity<T>(first);
+                T second = Forward<T>(first);
                 return second;
             }
             """), new CompilationOptions {
@@ -3975,15 +3978,23 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                 Origin.ExportKey: "Twice",
             }).ImportedGenericMethod!;
         var genericCallCount = 0;
+        var targetMethodIds = new List<uint>();
         Assert.That(BoundTreeTraversal.VisitExpressions(
             importedTwice.ProofFunction.Body, expression =>
             {
-                if (expression is BoundCall)
+                if (expression is BoundCall {
+                        ImportedGenericMethodCall: {
+                            Origin.IsMethodDefTarget: true,
+                        } target,
+                    })
                 {
                     genericCallCount++;
+                    targetMethodIds.Add(target.Origin.MethodDefId);
                 }
             }), Is.True);
         Assert.That(genericCallCount, Is.EqualTo(2));
+        Assert.That(targetMethodIds.Distinct().Count(),
+            Is.EqualTo(2));
         Assert.That(NativeJit.Execute(consumerProgram,
             NativeRuntimePolicy.FailFast), Is.EqualTo(42));
     }
