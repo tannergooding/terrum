@@ -748,6 +748,12 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 public static uint128 Xor128(uint128 left, uint128 right) {
                     return left ^ right;
                 }
+                public static int64 Sum64ThroughTwoLocals(
+                    int64 left, int64 right) {
+                    int64 first = left;
+                    int64 second = first;
+                    return second + right;
+                }
                 public static bool Greater64(int64 left, int64 right) {
                     return left > right;
                 }
@@ -917,6 +923,11 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name == "Xor128"));
+        var sum64ThroughTwoLocals = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name
+                    == "Sum64ThroughTwoLocals"));
         var greater64 = members.Single(static node =>
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
@@ -1092,6 +1103,9 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                             "Box.Add64"),
                         new TrRmSourceClassMemberExport(0, xor128.Span,
                             "Box.Xor128"),
+                        new TrRmSourceClassMemberExport(0,
+                            sum64ThroughTwoLocals.Span,
+                            "Box.Sum64ThroughTwoLocals"),
                         new TrRmSourceClassMemberExport(0, greater64.Span,
                             "Box.Greater64"),
                         new TrRmSourceClassMemberExport(0,
@@ -1514,6 +1528,36 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 0xD5, 0, 0, 0,
                 0xD5, 1, 1, 0,
                 0xC0, GetArithmeticControl(add64Binary), 0xF0, 0x10,
+                0x17, 0,
+            }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.Sum64ThroughTwoLocals",
+            out var sum64ThroughTwoLocalsDefinition), Is.True);
+        var sum64ThroughTwoLocalsMethodRow = checked((int)(
+            sum64ThroughTwoLocalsDefinition & 0x00FF_FFFF));
+        var sum64ThroughTwoLocalsBodyRow
+            = tables.Methods.GetBodyRow(sum64ThroughTwoLocalsMethodRow);
+        Assert.That(sum64ThroughTwoLocalsBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(
+            sum64ThroughTwoLocalsBodyRow, tables.Contracts.Count);
+        var sum64ThroughTwoLocalsBody = tables.Bodies.GetRegisterBody(
+            sum64ThroughTwoLocalsBodyRow, tables.Contracts.Count);
+        Assert.That(sum64ThroughTwoLocalsBody.HomeCount, Is.EqualTo(4));
+        var sum64ThroughTwoLocalsFunction = program.Functions.Single(
+            static function => function.Name == "Sum64ThroughTwoLocals");
+        var sum64ThroughTwoLocalsBinary = (BoundBinary)((BoundReturn)
+            sum64ThroughTwoLocalsFunction.Body.Statements.Single(
+                static statement => statement is BoundReturn)).Value!;
+        Assert.That(sum64ThroughTwoLocalsBody.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD5, 0, 0, 0,
+                0xD6, 0x10, 2, 0,
+                0xD5, 0, 2, 0,
+                0xD6, 0x10, 3, 0,
+                0xD5, 0, 3, 0,
+                0xD5, 1, 1, 0,
+                0xC0, GetArithmeticControl(sum64ThroughTwoLocalsBinary),
+                0xF0, 0x10,
                 0x17, 0,
             }));
         Assert.That(tables.Exports.TryGetDefinitionForKey(1,
@@ -2128,6 +2172,9 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             }
             uint128 UseXor128(uint128 left, uint128 right) {
                 return Box.Xor128(left, right);
+            }
+            int64 UseSum64ThroughTwoLocals(int64 left, int64 right) {
+                return Box.Sum64ThroughTwoLocals(left, right);
             }
             int64 UseNegate64(Box value, int64 input) {
                 return value.Negate64(input);

@@ -157,8 +157,8 @@ through ConstantMap; fixed scalar returns use the provisional Feature `11/1`
 path and Blob section `0003`. Same-class static or readonly-instance int32
 calls can feed a following binary/comparison through a general CallSite.
 Static and instance bodies support one-formal local copies and ordered copy
-chains feeding int32 binary/comparison operations. Readonly instance bodies
-also return an explicit scalar parameter through ReturnHome, emit direct
+chains feeding fixed-integer binary/comparison operations. Readonly instance
+bodies also return an explicit scalar parameter through ReturnHome, emit direct
 scalar FieldRead/FieldWrite descriptors, and use receiver/formal Homes in
 declaration order. Exact same-class static and readonly-instance scalar/unit
 identity forwarders use assigned Body kind `05`; empty unit instance bodies
