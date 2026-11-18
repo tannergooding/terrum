@@ -721,6 +721,12 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 public int32 Xor(int32 left, int32 right) {
                     return left ^ right;
                 }
+                public int32 Sum(int32 left, int32 right) {
+                    return left + right;
+                }
+                public int32 Difference(int32 left, int32 right) {
+                    return right - left;
+                }
                 public static int32 StaticXor(int32 left, int32 right) {
                     return left ^ right;
                 }
@@ -770,6 +776,14 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name == "Xor"));
+        var sum = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Sum"));
+        var difference = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Difference"));
         var staticXor = members.Single(static node =>
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
@@ -824,6 +838,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                         },
                         new TrRmSourceClassMemberExport(0, xor.Span,
                             "Box.Xor"),
+                        new TrRmSourceClassMemberExport(0, sum.Span,
+                            "Box.Sum"),
+                        new TrRmSourceClassMemberExport(0, difference.Span,
+                            "Box.Difference"),
                         new TrRmSourceClassMemberExport(0, staticXor.Span,
                             "Box.StaticXor"),
                         new TrRmSourceClassMemberExport(0, add.Span,
@@ -870,6 +888,49 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             0xC1, 0x03, 0xF0, 0x10,
             0x17, 0,
         }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.Sum", out var sumDefinition), Is.True);
+        var sumMethodRow = checked((int)(sumDefinition & 0x00FF_FFFF));
+        var sumBodyRow = tables.Methods.GetBodyRow(sumMethodRow);
+        Assert.That(sumBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(sumBodyRow,
+            tables.Contracts.Count);
+        var sumBody = tables.Bodies.GetRegisterBody(sumBodyRow,
+            tables.Contracts.Count);
+        Assert.That(sumBody.HomeCount, Is.EqualTo(3));
+        var sumFunction = program.Functions.Single(
+            static function => function.Name == "Sum");
+        var sumBinary = (BoundBinary)((BoundReturn)
+            sumFunction.Body.Statements.Single()).Value!;
+        Assert.That(sumBody.GetBlockCode(0).ToArray(), Is.EqualTo(
+            new byte[] {
+                0xD5, 0, 1, 0,
+                0xD5, 1, 2, 0,
+                0xC0, GetArithmeticControl(sumBinary), 0xF0, 0x10,
+                0x17, 0,
+            }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.Difference", out var differenceDefinition), Is.True);
+        var differenceMethodRow
+            = checked((int)(differenceDefinition & 0x00FF_FFFF));
+        var differenceBodyRow
+            = tables.Methods.GetBodyRow(differenceMethodRow);
+        Assert.That(differenceBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(differenceBodyRow,
+            tables.Contracts.Count);
+        var differenceBody = tables.Bodies.GetRegisterBody(
+            differenceBodyRow, tables.Contracts.Count);
+        var differenceFunction = program.Functions.Single(
+            static function => function.Name == "Difference");
+        var differenceBinary = (BoundBinary)((BoundReturn)
+            differenceFunction.Body.Statements.Single()).Value!;
+        Assert.That(differenceBody.GetBlockCode(0).ToArray(), Is.EqualTo(
+            new byte[] {
+                0xD5, 0, 2, 0,
+                0xD5, 1, 1, 0,
+                0xC0, GetArithmeticControl(differenceBinary), 0xF0, 0x10,
+                0x17, 0,
+            }));
         Assert.That(tables.Exports.TryGetDefinitionForKey(1,
             "Box.StaticXor", out var staticXorDefinition), Is.True);
         var staticXorMethodRow
@@ -1119,6 +1180,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             "ClassInstanceXor", [], ["BoxKey"]);
         var consumer = Compilation.CreateLibrary(SyntaxTree.Parse("""
             int32 Use(Box value) { return value.Xor(2, 3); }
+            int32 UseSum(Box value) { return value.Sum(4, 5); }
+            int32 UseDifference(Box value) {
+                return value.Difference(7, 3);
+            }
             int32 UseStaticXor() { return Box.StaticXor(4, 5); }
             int32 UseAdd() { return Box.Add(4, 5); }
             int32 UseSubtract() { return Box.Subtract(7, 3); }

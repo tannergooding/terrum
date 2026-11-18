@@ -916,8 +916,9 @@ public static partial class TrRmExecutableCompiler
                             && TryGetC1M1Construction2UnitIdentityForwarder(
                                 methodFunction, program.Functions,
                                 out identityForwarderTargetFunctionIndex);
-                    var directXor = TryGetC1M1Construction2DirectXor(
-                        methodFunction);
+                    var directInt32Binary
+                        = TryGetC1M1Construction2DirectInt32Binary(
+                            methodFunction);
                     var callXor
                         = TryGetC1M1Construction2DirectCallXor(
                             methodFunction, program.Functions);
@@ -934,7 +935,7 @@ public static partial class TrRmExecutableCompiler
                             && !isSupportedDirectFieldWriteInstanceMethod
                             && !isSupportedIdentityForwarder
                             && !isSupportedUnitIdentityForwarder
-                            && directXor is null
+                            && directInt32Binary is null
                             && callXor is null
                             && !localCopyReturn
                             && !localXorReturn)
@@ -1002,13 +1003,13 @@ public static partial class TrRmExecutableCompiler
                                 && !isSupportedDirectFieldWriteInstanceMethod
                                 && !isSupportedIdentityForwarder
                                 && !isSupportedUnitIdentityForwarder
-                                && directXor is null
+                                && directInt32Binary is null
                                 && callXor is null
                                 && !localCopyReturn
                                 && !localXorReturn)
                             {
                                 throw Unsupported(
-                                    "The bounded Construction-2 instance method producer supports only unit, direct scalar-parameter, direct int32 XOR, same-class call-XOR, one scalar local-copy return or direct scalar-field results and direct scalar-field writes.");
+                                    "The bounded Construction-2 instance method producer supports only unit, direct scalar-parameter, direct int32 binary, same-class call-XOR, one scalar local-copy return or direct scalar-field results and direct scalar-field writes.");
                             }
                         }
 
@@ -1149,11 +1150,11 @@ public static partial class TrRmExecutableCompiler
                             = EncodeC1M1Construction2FieldWriteBody(
                                 fieldDefRow, 0, sourceUse: 1);
                     }
-                    else if (directXor is not null)
+                    else if (directInt32Binary is not null)
                     {
                         encodedBody
-                            = EncodeC1M1Construction2DirectXorBody(
-                                methodFunction, directXor,
+                            = EncodeC1M1Construction2DirectInt32BinaryBody(
+                                methodFunction, directInt32Binary,
                                 Construction2ValueTypeSpecReference,
                                 contractRows.Count, schema);
                     }
@@ -2318,7 +2319,7 @@ public static partial class TrRmExecutableCompiler
         return body;
     }
 
-    private static byte[] EncodeC1M1Construction2DirectXorBody(
+    private static byte[] EncodeC1M1Construction2DirectInt32BinaryBody(
         BoundFunction function, BoundBinary binary,
         Func<PrimitiveType, uint> typeSpecReferenceFor, int contractCount,
         TrRmArtifactSchema schema)
@@ -2335,7 +2336,9 @@ public static partial class TrRmExecutableCompiler
                 variable.IsOut || variable.IsInit || variable.IsImplicitRef
                 || variable.IsInitializationLocal)
             || binary.Type != PrimitiveType.Int32
-            || binary.Operator != TokenKind.Caret
+            || binary.Operator is not (TokenKind.Ampersand
+                or TokenKind.Pipe or TokenKind.Caret or TokenKind.Plus
+                or TokenKind.Minus or TokenKind.Star)
             || binary.Left is not BoundRead left
             || binary.Right is not BoundRead right
             || left.Type != PrimitiveType.Int32
@@ -2344,7 +2347,7 @@ public static partial class TrRmExecutableCompiler
             || right.Variable is not (1 or 2))
         {
             throw Unsupported(
-                "A Construction-2 instance XOR Body requires two direct int32 parameter reads and a readonly receiver.");
+                "A Construction-2 instance int32 binary Body requires direct parameter reads and a readonly receiver.");
         }
 
         var typeTokens = new uint[function.ParameterCount];
@@ -2380,8 +2383,35 @@ public static partial class TrRmExecutableCompiler
         const byte rightRegister = 1;
         var payload = (ushort)(destinationRegister | (0x0F << 4)
             | (leftRegister << 8) | (rightRegister << 12));
-        code.Add(0xC1);
-        code.Add(0x03);
+        var (opcode, operation) = (binary.Operator,
+            binary.OverflowBehavior) switch
+        {
+            (TokenKind.Ampersand, _) => ((byte)0xC1, (byte)0x01),
+            (TokenKind.Pipe, _) => ((byte)0xC1, (byte)0x02),
+            (TokenKind.Caret, _) => ((byte)0xC1, (byte)0x03),
+            (TokenKind.Plus,
+                BoundIntegerOverflowBehavior.Checked)
+                => ((byte)0xC0, (byte)0x01),
+            (TokenKind.Minus,
+                BoundIntegerOverflowBehavior.Checked)
+                => ((byte)0xC0, (byte)0x02),
+            (TokenKind.Star,
+                BoundIntegerOverflowBehavior.Checked)
+                => ((byte)0xC0, (byte)0x03),
+            (TokenKind.Plus,
+                BoundIntegerOverflowBehavior.Wrapping)
+                => ((byte)0xC0, (byte)0x05),
+            (TokenKind.Minus,
+                BoundIntegerOverflowBehavior.Wrapping)
+                => ((byte)0xC0, (byte)0x06),
+            (TokenKind.Star,
+                BoundIntegerOverflowBehavior.Wrapping)
+                => ((byte)0xC0, (byte)0x07),
+            _ => throw Unsupported(
+                "The selected instance register Body does not encode this integer operation."),
+        };
+        code.Add(opcode);
+        code.Add(operation);
         code.Add((byte)payload);
         code.Add((byte)(payload >> 8));
         code.Add(0x17);
@@ -3154,7 +3184,7 @@ public static partial class TrRmExecutableCompiler
         return true;
     }
 
-    private static BoundBinary? TryGetC1M1Construction2DirectXor(
+    private static BoundBinary? TryGetC1M1Construction2DirectInt32Binary(
         BoundFunction function)
     {
         if (function.IsStatic || function.ReturnType != PrimitiveType.Int32
@@ -3177,7 +3207,9 @@ public static partial class TrRmExecutableCompiler
         Visit(function.Body);
         if (!isSupported || returnedBinary is null
             || returnedBinary.Type != PrimitiveType.Int32
-            || returnedBinary.Operator != TokenKind.Caret
+            || returnedBinary.Operator is not (TokenKind.Ampersand
+                or TokenKind.Pipe or TokenKind.Caret or TokenKind.Plus
+                or TokenKind.Minus or TokenKind.Star)
             || returnedBinary.Left is not BoundRead left
             || returnedBinary.Right is not BoundRead right
             || left.Type != PrimitiveType.Int32

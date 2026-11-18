@@ -147,7 +147,9 @@ Ordinary static class methods now emit assigned register Body kind `01` for
 direct-formal returns, int32 bitwise operations and complement, checked or
 wrapping int32 negation and add/subtract/multiply, and fixed-SF1-constant
 returns; fixed scalar constants use the provisional `11/1` path and Blob
-section `0003`. Exact same-class static and readonly-instance scalar/unit
+section `0003`. Readonly instance methods with two direct int32 formal reads
+emit Body kind `01` for bitwise operations and checked/wrapping
+add/subtract/multiply. Exact same-class static and readonly-instance scalar/unit
 identity forwarders through assigned Body kind `05`, empty unit-returning instance
 methods, and readonly instance methods returning an explicit scalar parameter
 through ReturnHome with receiver/formal Homes in declaration order, plus a
@@ -157,7 +159,7 @@ Readonly instance methods can also copy one scalar formal to one local and
 return that local, or use one initialized local as an operand of a following
 XOR. The Unit-before-value, identity-forwarder, XOR, call-forwarding and local
 regressions remain unverified under the hold.
-Other static operations, locals and control flow remain open.
+Other static and instance operations, locals and control flow remain open.
 Source binding now admits ordinary by-value Unit parameters and `()` defaults; the CM1
 producer/reader preserves their logical signature
 positions and zero-width SF1 values, while Windows x64 lowering omits only
