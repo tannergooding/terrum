@@ -130,8 +130,7 @@ public static partial class TrRmExecutableCompiler
                 program.NativeFunctionPointerSignatures,
                 type => DirectNativeImportContract.IsInputPointee(type,
                     program.Structures))
-            || !NativePointerTypeContract.IsValidTable(program.NativePointerTypes,
-                program.Structures, program.NativeFunctionPointerSignatures))
+            || !NativePointerTypeContract.IsValidTable(program))
         {
             throw Unsupported(
                 "Foreign-invocation NativeAddress emission requires two fail-fast functions and one pointer signature.");

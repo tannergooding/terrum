@@ -1334,6 +1334,9 @@ public static partial class TrRmExecutableCompiler
         var consumerEnumIndexes = new int[
             consumerReference.EnumDefinitions.Length];
         Array.Fill(consumerEnumIndexes, -1);
+        var consumerNominalClassTypeIndexes = new int[
+            consumerReference.GenericNominalTypeInstances.Length];
+        Array.Fill(consumerNominalClassTypeIndexes, -1);
         var pointerTypeStates = new byte[
             consumerReference.NativePointerTypes.Length];
         var providerStructureIndexes = new Dictionary<(
@@ -1397,6 +1400,54 @@ public static partial class TrRmExecutableCompiler
             }
 
             providerEnumIndexes.Add(key, index);
+        }
+        var providerClassViews = new Dictionary<
+            BoundGenericNominalTypeIdentity, BoundStandardClassTypeView>();
+        foreach (var declaration in providerProgram.StandardClassDeclarations)
+        {
+            var identity = declaration.Declaration.Identity;
+            if (providerClassViews.TryGetValue(identity,
+                    out var existingView))
+            {
+                if (!SameA2SourceTypeProviderSnapshot(
+                        existingView.Provider,
+                        declaration.Declaration.Provider))
+                {
+                    throw new InvalidDataException(
+                        "One EN1 provider class identity has conflicting snapshots.");
+                }
+
+                continue;
+            }
+
+            providerClassViews.Add(identity, declaration.Declaration);
+        }
+
+        var providerNominalClassTypeIndexes = new Dictionary<(
+            BoundGenericNominalTypeIdentity Identity, byte Qualifiers,
+            byte TypeSpecForm), int>();
+        for (var index = 0;
+            index < providerProgram.GenericNominalTypeInstances.Length;
+            index++)
+        {
+            var type = BoundGenericNominalTypeTypes.Type(index);
+            if (!BoundGenericNominalTypeContract.IsNominalClassType(type,
+                    providerProgram.GenericNominalTypeInstances,
+                    providerProgram.GenericNominalTypeDefinitions))
+            {
+                continue;
+            }
+
+            var instance = providerProgram.GenericNominalTypeInstances[index];
+            if (!instance.Arguments.IsEmpty
+                || !providerClassViews.ContainsKey(instance.Definition))
+            {
+                continue;
+            }
+
+            _ = providerNominalClassTypeIndexes.TryAdd(
+                (instance.Definition, instance.Qualifiers,
+                    instance.TypeSpecForm), index);
         }
 
         int MapConsumerStructureIndex(int structureIndex)
@@ -1563,6 +1614,62 @@ public static partial class TrRmExecutableCompiler
             return providerEnumIndex;
         }
 
+        int MapConsumerNominalClassTypeIndex(int typeInstanceIndex)
+        {
+            if ((uint)typeInstanceIndex
+                >= (uint)consumerNominalClassTypeIndexes.Length)
+            {
+                throw new InvalidDataException(
+                    "The EN1 consumer class closure has an invalid nominal class type identity.");
+            }
+
+            if (consumerNominalClassTypeIndexes[typeInstanceIndex] >= 0)
+            {
+                return consumerNominalClassTypeIndexes[typeInstanceIndex];
+            }
+
+            var type = BoundGenericNominalTypeTypes.Type(typeInstanceIndex);
+            if (!BoundGenericNominalTypeContract.IsNominalClassType(type,
+                    consumerReference.GenericNominalTypeInstances,
+                    consumerReference.GenericNominalTypeDefinitions))
+            {
+                throw new InvalidDataException(
+                    "An EN1 native pointer pointee has no nominal class identity.");
+            }
+
+            var instance = consumerReference.GenericNominalTypeInstances[
+                typeInstanceIndex];
+            if (!instance.Arguments.IsEmpty)
+            {
+                throw Unsupported(
+                    "EN1 class pointer pointees currently require a nongeneric class TypeDef.");
+            }
+
+            var consumerClassDeclaration
+                = consumerReference.StandardClassDeclarations
+                    .SingleOrDefault(declaration =>
+                        declaration.Declaration.Identity
+                            == instance.Definition);
+            if (consumerClassDeclaration is null
+                || !providerClassViews.TryGetValue(instance.Definition,
+                    out var providerClassView)
+                || !SameA2SourceTypeProviderSnapshot(
+                    consumerClassDeclaration.Declaration.Provider,
+                    providerClassView.Provider)
+                || !providerNominalClassTypeIndexes.TryGetValue(
+                    (instance.Definition, instance.Qualifiers,
+                        instance.TypeSpecForm),
+                    out var providerTypeInstanceIndex))
+            {
+                throw new InvalidDataException(
+                    "An EN1 consumer class pointee has no matching selected provider type.");
+            }
+
+            consumerNominalClassTypeIndexes[typeInstanceIndex]
+                = providerTypeInstanceIndex;
+            return providerTypeInstanceIndex;
+        }
+
         PrimitiveType RemapConsumerType(PrimitiveType type, int depth = 0)
         {
             if (depth > SemanticVerifier.MaximumDepth)
@@ -1586,6 +1693,12 @@ public static partial class TrRmExecutableCompiler
             {
                 return BoundEnumTypes.Type(MapConsumerEnumIndex(
                     BoundEnumTypes.Index(type)));
+            }
+            if (BoundGenericNominalTypeTypes.IsType(type))
+            {
+                return BoundGenericNominalTypeTypes.Type(
+                    MapConsumerNominalClassTypeIndex(
+                        BoundGenericNominalTypeTypes.Index(type)));
             }
             if (IsC1EnumClosureStructType(type))
             {

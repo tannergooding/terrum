@@ -453,7 +453,9 @@ public static partial class ModuleCompiler
             || !NativePointerTypeContract.IsValidTable(nativePointerTypes,
                 allTypes, nativeFunctionPointerSignatures,
                 nativeFixedArrayTypes, allCheckedReferenceTypes,
-                allEnumDefinitions))
+                allEnumDefinitions, allClasses,
+                spanRemappedGenericNominalInstances.ToImmutable(),
+                allGenericNominalDefinitions))
         {
             throw new ModuleContractException(
                 "Combined private array and pointer metadata is invalid.");

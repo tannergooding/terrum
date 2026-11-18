@@ -764,7 +764,9 @@ internal sealed partial class Binder
                 _enumDefinitions)
             || !NativePointerTypeContract.IsValidTable([.. sourcePointers], [.. _structs],
                 [.. sourceFunctionPointers], [.. sourceFixedArrays],
-                [.. sourceReferenceTypes], _enumDefinitions)
+                [.. sourceReferenceTypes], _enumDefinitions, [.. _classes],
+                [.. _genericNominalTypeInstances],
+                [.. _genericNominalTypeDefinitions])
             || !CheckedReferenceTypeContract.IsValidTable(
                 [.. sourceReferenceTypes], sourcePointers))
         {
@@ -1160,7 +1162,9 @@ internal sealed partial class Binder
                 [.. normalizedStructures], [.. normalizedFunctionPointers],
                 [.. rewrittenFixedArrays],
                 [.. normalizedReferenceTypeDefinitions],
-                _enumDefinitions)
+                _enumDefinitions, [.. normalizedClasses],
+                [.. _genericNominalTypeInstances],
+                [.. _genericNominalTypeDefinitions])
             || !CheckedReferenceTypeContract.IsValidTable(
                 [.. normalizedReferenceTypeDefinitions],
                 normalizedPointerDefinitions))

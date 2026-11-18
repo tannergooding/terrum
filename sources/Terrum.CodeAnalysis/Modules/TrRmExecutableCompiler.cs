@@ -1579,11 +1579,7 @@ public static partial class TrRmExecutableCompiler
         {
             throw Unsupported("Standard TRRM has no assigned nominal enum TypeSpec or TypeDef encoding.");
         }
-        if (!NativePointerTypeContract.IsValidTable(
-                program.NativePointerTypes, program.Structures,
-                program.NativeFunctionPointerSignatures,
-                program.NativeFixedArrayTypes,
-                program.CheckedReferenceTypes, program.EnumDefinitions))
+        if (!NativePointerTypeContract.IsValidTable(program))
         {
             throw Unsupported("The native pointer or function-pointer type table is invalid.");
         }

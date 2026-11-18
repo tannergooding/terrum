@@ -520,7 +520,9 @@ public static partial class ModuleCompiler
             || !NativePointerTypeContract.IsValidTable(nativePointerTypes,
                 combined, nativeFunctionPointerSignatures,
                 nativeFixedArrayTypes, checkedReferenceTypes,
-                enumDefinitions))
+                enumDefinitions, combinedClasses,
+                spanRemappedGenericNominalInstances.ToImmutable(),
+                allGenericNominalDefinitions))
         {
             throw new ModuleContractException(
                 "Combined graph array and pointer metadata is invalid.");
@@ -1470,7 +1472,8 @@ public static partial class ModuleCompiler
                 nativeFixedArrayTypes, enumDefinitions, reading: true);
             if (!NativePointerTypeContract.IsValidTable(nativePointerTypes,
                     structures, nativeFunctionPointerSignatures,
-                    nativeFixedArrayTypes, checkedReferenceTypes)
+                    nativeFixedArrayTypes, checkedReferenceTypes,
+                    classes: classes)
                 || (reader is ModuleReader { FormatVersion: NativePointerVersion }
                     && nativePointerTypes.IsEmpty))
             {

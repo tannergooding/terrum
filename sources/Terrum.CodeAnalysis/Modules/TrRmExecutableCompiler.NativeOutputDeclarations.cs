@@ -61,9 +61,7 @@ public static partial class TrRmExecutableCompiler
                 program.Structures, program.NativePointerTypes,
                 program.NativeFunctionPointerSignatures,
                 program.EnumDefinitions)
-            || !NativePointerTypeContract.IsValidTable(
-                program.NativePointerTypes, program.Structures,
-                program.NativeFunctionPointerSignatures))
+            || !NativePointerTypeContract.IsValidTable(program))
         {
             throw Unsupported(
                 "A standalone NativeOutput provider must be a public, bodyless, NativeParameter-free declaration.");

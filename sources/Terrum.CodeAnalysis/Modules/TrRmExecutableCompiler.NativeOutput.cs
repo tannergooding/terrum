@@ -468,9 +468,7 @@ public static partial class TrRmExecutableCompiler
                 "The direct NativeOutput Body exceeds the selected record index range.");
         }
 
-        if (!NativePointerTypeContract.IsValidTable(program.NativePointerTypes,
-                program.Structures, program.NativeFunctionPointerSignatures,
-                program.NativeFixedArrayTypes))
+        if (!NativePointerTypeContract.IsValidTable(program))
         {
             throw Invalid("The direct NativeOutput program has invalid pointer types.");
         }

@@ -2988,6 +2988,251 @@ internal sealed class TrRmC1EnumClosureSourceTests
     }
 
     [Test]
+    public void LowersEN1PointerToClassFieldStorageAndRemapsPointees()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
+        var schemaIdentity
+            = $"{s_schemaIdentities[0]}-class-instance-layout-1";
+        var providerTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public class Target { public int32 Value; }
+                public class Box {
+                    public uint8 Prefix;
+                    public ptr<Target> Address;
+                }
+            }
+            """);
+        var providerCompilation = Compilation.CreateLibrary(providerTree);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var providerProgram = (BoundProgram)providerCompilation.Program!;
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, "ClassPointerProvider", schemaIdentity, 1, [], [],
+            [
+                CreateSourceClassExport(providerProgram, providerTree,
+                    "Target", "type.target"),
+                CreateSourceClassExport(providerProgram, providerTree,
+                    "Box", "type.box", (0, "field.box.prefix"),
+                    (1, "field.box.address")),
+            ], []);
+        var providerTables
+            = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                    providerArtifact, SchemaFor(schemaIdentity)));
+        var targetDefinition
+            = providerTables.Exports.GetExportsForModule(1)
+                .Single(static export =>
+                    export.ExportKey == "type.target").Definition;
+        var boxDefinition = providerTables.Exports.GetExportsForModule(1)
+            .Single(static export =>
+                export.ExportKey == "type.box").Definition;
+        var boxTypeDefRow = checked((int)(boxDefinition & 0x00FF_FFFF));
+        var (boxFieldStart, boxFieldEnd) = providerTables.TypeDefs
+            .GetFieldRange(boxTypeDefRow);
+        var addressFieldRow = Enumerable.Range(boxFieldStart,
+                boxFieldEnd - boxFieldStart)
+            .Single(row =>
+                providerTables.Fields.GetName(row) == "Address");
+        var addressTypeSpec = providerTables.TypeSpecs.GetTypeSpecRef(
+            providerTables.Fields.GetTypeSpecRef(addressFieldRow));
+        Assert.That(addressTypeSpec.Form, Is.EqualTo((byte)0x0C));
+        Assert.That(providerTables.TypeSpecs
+            .TryGetNativePointerPointeeTypeSpecRef(
+                providerTables.Fields.GetTypeSpecRef(addressFieldRow),
+                out var addressPointeeTypeSpec), Is.True);
+        var targetTypeSpec
+            = providerTables.TypeSpecs.GetTypeSpecRef(
+                addressPointeeTypeSpec);
+        Assert.That(targetTypeSpec.Form, Is.EqualTo((byte)0x02));
+        Assert.That(targetTypeSpec.Row,
+            Is.EqualTo(targetDefinition & 0x00FF_FFFF));
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, "ClassPointerProvider", [], ["type.box"], [
+                "field.box.prefix",
+                "field.box.address",
+            ]);
+        var targetReference = reference.StandardClassDeclarations.Single(
+            static declaration =>
+                declaration.Declaration.Name == "Target");
+        Assert.That(targetReference.SelectedExportKeys, Is.Empty);
+
+        var pointerTraversalCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Demo;
+                nint Offset() {
+                    return unsafe(offsetof(Box, Address.Value));
+                }
+                """), reference, new CompilationOptions {
+                LayoutCoreRegistration
+                    = LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(pointerTraversalCompilation.HasErrors, Is.True);
+
+        var queryCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Demo;
+                nint Offset() {
+                    return unsafe(offsetof(Box, Address));
+                }
+                """), reference, new CompilationOptions {
+                LayoutCoreRegistration
+                    = LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(queryCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                queryCompilation.Diagnostics));
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            queryCompilation.Program!, "ClassPointerConsumer",
+            schemaIdentity, 1);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
+            "ClassPointerConsumer", [providerInput]);
+        var loadedReturn = (BoundReturn)loaded.Functions.Single().Body
+            .Statements.Single();
+        var loadedQuery = (BoundLayoutQuery)((BoundUnsafeExpression)
+            loadedReturn.Value!).Expression;
+        var loadedPointerType = loadedQuery.Subject.FieldPath!
+            .Steps.Single().FieldType;
+        Assert.That(NativePointerTypes.IsType(loadedPointerType), Is.True);
+        var loadedPointeeType = loaded.NativePointerTypes[
+            NativePointerTypes.Index(loadedPointerType)].PointeeType;
+        Assert.That(BoundGenericNominalTypeTypes.IsType(loadedPointeeType),
+            Is.True);
+        var targetIdentity = loaded.GenericNominalTypeInstances[
+            BoundGenericNominalTypeTypes.Index(loadedPointeeType)]
+            .Definition;
+        Assert.That(targetIdentity.DefinitionId,
+            Is.EqualTo(targetDefinition));
+
+        var main = loaded.Functions.Single() with {
+            Name = "Main",
+            ReturnType = PrimitiveType.Int32,
+            Body = new BoundBlock([
+                new BoundReturn(new BoundCast(loadedReturn.Value!,
+                    PrimitiveType.Int32, default), default),
+            ], default),
+        };
+        var executable = loaded with {
+            Functions = [main],
+            EntryPoint = 0,
+        };
+        Assert.That(NativeJit.Execute(executable,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(8));
+        Assert.That(NativeEmitter.EmitLibrary(loaded, ["Offset"],
+            NativeRuntimePolicy.FailFast), Is.Not.Empty);
+
+        var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
+            "ClassPointerConsumerReemitted", schemaIdentity, 1);
+        var reloaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+            "ClassPointerConsumerReemitted", [providerInput]);
+        var reloadedReturn = (BoundReturn)reloaded.Functions.Single().Body
+            .Statements.Single();
+        var reloadedQuery = (BoundLayoutQuery)((BoundUnsafeExpression)
+            reloadedReturn.Value!).Expression;
+        var reloadedPointerType = reloadedQuery.Subject.FieldPath!
+            .Steps.Single().FieldType;
+        var reloadedPointeeType = reloaded.NativePointerTypes[
+            NativePointerTypes.Index(reloadedPointerType)].PointeeType;
+        Assert.That(BoundGenericNominalTypeTypes.IsType(reloadedPointeeType),
+            Is.True);
+        Assert.That(reloaded.GenericNominalTypeInstances[
+                BoundGenericNominalTypeTypes.Index(reloadedPointeeType)]
+            .Definition, Is.EqualTo(targetIdentity));
+
+        var relocatedProviderTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public class Padding { public int32 Value; }
+                public class Target { public int32 Value; }
+                public class Box {
+                    public uint8 Prefix;
+                    public ptr<Target> Address;
+                }
+            }
+            """);
+        var relocatedProviderCompilation
+            = Compilation.CreateLibrary(relocatedProviderTree);
+        Assert.That(relocatedProviderCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                relocatedProviderCompilation.Diagnostics));
+        var relocatedProviderProgram
+            = (BoundProgram)relocatedProviderCompilation.Program!;
+        var relocatedProviderArtifact = TrRmExecutableCompiler.EmitStandard(
+            relocatedProviderProgram, "ClassPointerProvider",
+            schemaIdentity, 1, [], [], [
+                CreateSourceClassExport(relocatedProviderProgram,
+                    relocatedProviderTree, "Padding", "type.padding"),
+                CreateSourceClassExport(relocatedProviderProgram,
+                    relocatedProviderTree, "Target", "type.target"),
+                CreateSourceClassExport(relocatedProviderProgram,
+                    relocatedProviderTree, "Box", "type.box",
+                    (0, "field.box.prefix"),
+                    (1, "field.box.address")),
+            ], []);
+        var relocatedProviderInput = new TrRmStandardArtifactInput(
+            schemaIdentity, relocatedProviderArtifact);
+        var relocatedTargetDefinition
+            = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(
+                    new TrRmArtifactIndex(relocatedProviderArtifact,
+                        SchemaFor(schemaIdentity)))
+                .Exports.GetExportsForModule(1)
+                .Single(static export =>
+                    export.ExportKey == "type.target").Definition;
+        Assert.That(relocatedTargetDefinition,
+            Is.Not.EqualTo(targetDefinition));
+
+        var relocatedLoaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
+            "ClassPointerConsumer", [relocatedProviderInput]);
+        var relocatedReturn = (BoundReturn)relocatedLoaded.Functions
+            .Single().Body.Statements.Single();
+        var relocatedMain = relocatedLoaded.Functions.Single() with {
+            Name = "Main",
+            ReturnType = PrimitiveType.Int32,
+            Body = new BoundBlock([
+                new BoundReturn(new BoundCast(relocatedReturn.Value!,
+                    PrimitiveType.Int32, default), default),
+            ], default),
+        };
+        Assert.That(NativeJit.Execute(relocatedLoaded with {
+                Functions = [relocatedMain],
+                EntryPoint = 0,
+            }, NativeRuntimePolicy.FailFast), Is.EqualTo(8));
+        var relocatedQuery = (BoundLayoutQuery)((BoundUnsafeExpression)
+            relocatedReturn.Value!).Expression;
+        var relocatedPointerType = relocatedQuery.Subject.FieldPath!
+            .Steps.Single().FieldType;
+        Assert.That(NativePointerTypes.IsType(relocatedPointerType), Is.True);
+        var relocatedPointeeType = relocatedLoaded.NativePointerTypes[
+            NativePointerTypes.Index(relocatedPointerType)].PointeeType;
+        var relocatedTargetIdentity
+            = relocatedLoaded.GenericNominalTypeInstances[
+                BoundGenericNominalTypeTypes.Index(relocatedPointeeType)]
+                .Definition;
+        Assert.That(relocatedTargetIdentity.DefinitionId,
+            Is.EqualTo(relocatedTargetDefinition));
+
+        var relocatedReemitted = TrRmExecutableCompiler.EmitStandard(
+            relocatedLoaded, "ClassPointerConsumerReemitted",
+            schemaIdentity, 1);
+        var relocatedReloaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                relocatedReemitted), "ClassPointerConsumerReemitted",
+            [relocatedProviderInput]);
+        Assert.That(NativeEmitter.EmitLibrary(relocatedReloaded, ["Offset"],
+            NativeRuntimePolicy.FailFast), Is.Not.Empty);
+        Assert.That(NativeModuleCompiler.EmitStandardLibrary(
+            new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
+            "ClassPointerConsumer", [relocatedProviderInput], ["Offset"],
+            NativeRuntimePolicy.FailFast), Is.Not.Empty);
+    }
+
+    [Test]
     public void ReemitsEN1ClassTypeDefAndFieldImportsAndTypeSpecs()
     {
         var schemaIdentity = s_schemaIdentities[0];
@@ -3832,6 +4077,36 @@ internal sealed class TrRmC1EnumClosureSourceTests
             .ToImmutableArray();
         return new TrRmSourceEnumDeclarationExport(program,
             sourceInputOrdinal, declaration.Span, exportKeys, memberKeys);
+    }
+
+    private static TrRmSourceClassExport CreateSourceClassExport(
+        BoundProgram program, SyntaxTree tree, string name, string exportKey,
+        params (int FieldOrdinal, string ExportKey)[] fieldExports)
+    {
+        var declaration = tree.Root.DescendantNodes().Single(node =>
+            node.Kind == SyntaxKind.ClassDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(token =>
+                token.Token.Kind == TokenKind.Identifier
+                && token.Token.Name == name));
+        var classIndex = program.SourceClassProgramAssociation!
+            .Declarations.Single(item => item.Span == declaration.Span)
+            .ClassIndex;
+        var fields = declaration.Children.OfType<SyntaxNode>()
+            .Where(static node => node.Kind == SyntaxKind.FieldDeclaration)
+            .ToArray();
+        var memberExports = fieldExports.Select(fieldExport => {
+            if ((uint)fieldExport.FieldOrdinal >= (uint)fields.Length)
+            {
+                throw new InvalidDataException(
+                    "A class-export fixture field ordinal is invalid.");
+            }
+
+            return new TrRmSourceClassMemberExport(0,
+                fields[fieldExport.FieldOrdinal].Span,
+                fieldExport.ExportKey);
+        }).ToImmutableArray();
+        return new TrRmSourceClassExport(program, classIndex,
+            declaration.Span, exportKey, memberExports);
     }
 
     private static BigInteger ReadEnumValue(

@@ -66,10 +66,7 @@ public static partial class TrRmExecutableCompiler
         }
 
         ValidateA2SourceTypeDeclarationMap(program);
-        if (!NativePointerTypeContract.IsValidTable(
-                program.NativePointerTypes, program.Structures,
-                program.NativeFunctionPointerSignatures,
-                program.NativeFixedArrayTypes))
+        if (!NativePointerTypeContract.IsValidTable(program))
         {
             throw Unsupported(
                 "Standard source-type declaration emission received an invalid native pointer type table.");

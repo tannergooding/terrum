@@ -181,12 +181,17 @@ public static partial class TrRmExecutableCompiler
         => GetEN1ClassLayoutQueries(function)[0].Subject.FieldPath!;
 
     private static bool IsSupportedEN1FieldPointer(
-        NativePointerTypeDefinition pointer)
+        NativePointerTypeDefinition pointer, BoundProgram program)
         => pointer.PointeeType == PrimitiveType.Void
             ? pointer.IsWritable
             : PrimitiveTypeFacts.IsBuiltInScalar(pointer.PointeeType)
                 || IsC1EnumClosurePointerPointeeType(
-                    pointer.PointeeType);
+                    pointer.PointeeType, program.Classes,
+                    allowClassHandlePointee: true,
+                    nominalTypeInstances:
+                        program.GenericNominalTypeInstances,
+                    nominalTypeDefinitions:
+                        program.GenericNominalTypeDefinitions);
 
     private static int GetEN1ClassQueryRootTypeDefRow(
         BoundGenericNominalTypeInstance instance,
@@ -275,11 +280,7 @@ public static partial class TrRmExecutableCompiler
             SemanticVerifier.Verify(program);
         }
         if (!program.NativePointerTypes.IsEmpty
-            && !NativePointerTypeContract.IsValidTable(
-                program.NativePointerTypes, program.Structures,
-                program.NativeFunctionPointerSignatures,
-                program.NativeFixedArrayTypes,
-                program.CheckedReferenceTypes, program.EnumDefinitions))
+            && !NativePointerTypeContract.IsValidTable(program))
         {
             throw new InvalidDataException(
                 "The EN1 native pointer type table is invalid.");
@@ -408,7 +409,7 @@ public static partial class TrRmExecutableCompiler
             || program.NativeFunctionPointerSignatures.Any(signature =>
                 !IsSupportedEN1FieldFunctionPointer(signature))
             || program.NativePointerTypes.Any(pointer =>
-                !IsSupportedEN1FieldPointer(pointer))
+                !IsSupportedEN1FieldPointer(pointer, program))
             || !program.NativeFixedArrayTypes.IsEmpty
             || !program.CheckedReferenceTypes.IsEmpty
             || !program.PrivateNominalTypeOrigins.IsEmpty
@@ -1974,6 +1975,30 @@ public static partial class TrRmExecutableCompiler
             sourceClassExportsByIndex.Keys);
         var pendingStructureIndexes = new Queue<int>(
             sourceStructExportsByIndex.Keys);
+        void RetainLocalClassPointerPointee(PrimitiveType pointeeType)
+        {
+            if (!TryGetC1M1SourceClassFieldType(pointeeType,
+                    out var dependencyClassIndex, out _, out _))
+            {
+                return;
+            }
+
+            if ((uint)dependencyClassIndex >= (uint)program.Classes.Length
+                || !localClassIndexes.Contains(dependencyClassIndex))
+            {
+                throw Unsupported(
+                    "EN1 native pointers require retained local class pointees.");
+            }
+
+            if (!sourceClassExportsByIndex.ContainsKey(
+                    dependencyClassIndex))
+            {
+                sourceClassExportsByIndex.Add(dependencyClassIndex, []);
+            }
+
+            pendingClassIndexes.Enqueue(dependencyClassIndex);
+        }
+
         while (pendingClassIndexes.Count != 0
             || pendingStructureIndexes.Count != 0)
         {
@@ -2062,10 +2087,11 @@ public static partial class TrRmExecutableCompiler
                         if ((uint)pointerIndex
                                 >= (uint)program.NativePointerTypes.Length
                             || !IsSupportedEN1FieldPointer(
-                                program.NativePointerTypes[pointerIndex]))
+                                program.NativePointerTypes[pointerIndex],
+                                program))
                         {
                             throw Unsupported(
-                                "EN1 class fields require a covered native data pointer with a scalar, enum or non-generic struct pointee.");
+                                "EN1 class fields require a covered native data pointer with a scalar, enum, non-generic struct or class-handle pointee.");
                         }
 
                         if (moduleTargetRequirement
@@ -2076,6 +2102,9 @@ public static partial class TrRmExecutableCompiler
                                 "EN1 native data pointer fields require the selected Windows x64 target.");
                         }
 
+                        RetainLocalClassPointerPointee(
+                            program.NativePointerTypes[pointerIndex]
+                                .PointeeType);
                         if (TryGetEN1SourceStructFieldType(
                                 program.NativePointerTypes[pointerIndex]
                                     .PointeeType,
@@ -2212,10 +2241,11 @@ public static partial class TrRmExecutableCompiler
                         if ((uint)pointerIndex
                                 >= (uint)program.NativePointerTypes.Length
                             || !IsSupportedEN1FieldPointer(
-                                program.NativePointerTypes[pointerIndex]))
+                                program.NativePointerTypes[pointerIndex],
+                                program))
                         {
                             throw Unsupported(
-                                "EN1 struct fields require a covered native data pointer with a scalar, enum or non-generic struct pointee.");
+                                "EN1 struct fields require a covered native data pointer with a scalar, enum, non-generic struct or class-handle pointee.");
                         }
 
                         if (moduleTargetRequirement
@@ -2226,6 +2256,9 @@ public static partial class TrRmExecutableCompiler
                                 "EN1 native data pointer fields require the selected Windows x64 target.");
                         }
 
+                        RetainLocalClassPointerPointee(
+                            program.NativePointerTypes[pointerIndex]
+                                .PointeeType);
                         if (TryGetEN1SourceStructFieldType(
                                 program.NativePointerTypes[pointerIndex]
                                     .PointeeType,
@@ -2883,10 +2916,10 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 var pointer = program.NativePointerTypes[pointerIndex];
-                if (!IsSupportedEN1FieldPointer(pointer))
+                if (!IsSupportedEN1FieldPointer(pointer, program))
                 {
                     throw Unsupported(
-                        "EN1 class fields require a covered native data pointer with a scalar, enum or non-generic struct pointee.");
+                        "EN1 class fields require a covered native data pointer with a scalar, enum, non-generic struct or class-handle pointee.");
                 }
 
                 var qualifiers

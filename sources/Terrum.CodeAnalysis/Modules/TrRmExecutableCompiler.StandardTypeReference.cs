@@ -594,8 +594,26 @@ public static partial class TrRmExecutableCompiler
                 && rootTables.TypeSpecs.TryGetNativePointerPointeeTypeSpecRef(
                     typeSpecReference, out var pointeeTypeSpecReference))
             {
+                var pointeeTypeSpec = pointeeTypeSpecReference;
                 var pointee = rootTables.TypeSpecs.GetTypeSpecRef(
-                    pointeeTypeSpecReference);
+                    pointeeTypeSpec);
+                var pointeeDepth = 0;
+                while (pointee.Form == 0x06 && pointee.Qualifiers == 0)
+                {
+                    if (++pointeeDepth > SemanticVerifier.MaximumDepth
+                        || --remainingClassTypeVisits < 0)
+                    {
+                        throw Unsupported(
+                            "An EN1 native pointer pointee exceeds the TypeSpec traversal limit.");
+                    }
+
+                    var optionalRow = rootTables.TypeSpecs.GetRow(
+                        pointee.Row);
+                    pointeeTypeSpec = BinaryPrimitives
+                        .ReadUInt32LittleEndian(optionalRow[2..]);
+                    pointee = rootTables.TypeSpecs.GetTypeSpecRef(
+                        pointeeTypeSpec);
+                }
                 if (rootTables.Modules.GetRequirements(rootModuleRow)
                     .TargetRequirement
                     != TrRmModuleTableReader
@@ -612,23 +630,25 @@ public static partial class TrRmExecutableCompiler
                     return;
                 }
 
-                if (pointee.Qualifiers == 0
-                    && pointee.Form is 0x02 or 0x03)
+                if (pointee.Form is 0x02 or 0x03)
                 {
                     var pointeeTypeDefRow = rootTables.TypeSpecs
-                        .GetNominalTypeDefRow(pointeeTypeSpecReference,
+                        .GetNominalTypeDefRow(pointeeTypeSpec,
                             rootTables.TypeDefs, rootTables.Imports);
-                    if (rootTables.TypeDefs.GetKind(pointeeTypeDefRow)
-                            is 1 or 4
-                        && rootTables.TypeDefs
-                            .GetGenericRange(pointeeTypeDefRow).Count == 0)
+                    var pointeeKind
+                        = rootTables.TypeDefs.GetKind(pointeeTypeDefRow);
+                    if ((pointee.Qualifiers == 0
+                            && (pointeeKind is 1 or 4)
+                            || isEN1 && pointeeKind == 2)
+                        && rootTables.TypeDefs.GetGenericRange(
+                            pointeeTypeDefRow).Count == 0)
                     {
                         return;
                     }
                 }
 
                 throw Unsupported(
-                    "The C1 class TypeSpec closure supports scalar, enum or non-generic struct pointer pointees.");
+                    "The C1 class TypeSpec closure supports scalar, enum, non-generic struct or class-handle pointer pointees.");
             }
             if (!type.IsRow)
             {
@@ -2148,20 +2168,23 @@ public static partial class TrRmExecutableCompiler
                 {
                     pointeeType = scalarPointeeType;
                 }
-                else if (pointee.Qualifiers == 0
-                    && pointee.Form is 0x02 or 0x03
-                    && TryDecodeSelectedClassFieldType(
-                        pointeeTypeSpecReference, out var structPointeeType,
+                else if (TryDecodeSelectedClassFieldType(
+                        pointeeTypeSpecReference, out var nominalPointeeType,
                         recursionDepth + 1)
                     && IsC1EnumClosurePointerPointeeType(
-                        structPointeeType))
+                        nominalPointeeType,
+                        allowClassHandlePointee: isEN1,
+                        nominalTypeInstances:
+                            genericNominalTypeInstances,
+                        nominalTypeDefinitions:
+                            genericNominalTypeDefinitions))
                 {
-                    pointeeType = structPointeeType;
+                    pointeeType = nominalPointeeType;
                 }
                 else
                 {
                     throw Unsupported(
-                        "The bounded EN1 class layout TypeSpec closure supports scalar, enum or non-generic struct pointer pointees.");
+                        "The bounded EN1 class layout TypeSpec closure supports scalar, enum, non-generic struct or class-handle pointer pointees.");
                 }
 
                 if (rootTables.Modules.GetRequirements(rootModuleRow)
@@ -2379,8 +2402,39 @@ public static partial class TrRmExecutableCompiler
             && (int)type < ManagedClassTypes.First;
 
     private static bool IsC1EnumClosurePointerPointeeType(
-        PrimitiveType type)
-        => IsC1EnumClosureStructType(type) || BoundEnumTypes.IsType(type);
+        PrimitiveType type, ImmutableArray<BoundClass> classes = default,
+        bool allowClassHandlePointee = false,
+        IReadOnlyList<BoundGenericNominalTypeInstance>?
+            nominalTypeInstances = null,
+        IReadOnlyList<BoundGenericNominalTypeDefinition>?
+            nominalTypeDefinitions = null)
+    {
+        if (IsC1EnumClosureStructType(type) || BoundEnumTypes.IsType(type))
+        {
+            return true;
+        }
+
+        var typeCode = (int)type;
+        if (typeCode >= ManagedClassTypes.First
+            && typeCode < ManagedClassTypes.OptionalWriteFirst + 256)
+        {
+            var classIndex = ManagedClassTypes.ClassIndex(type);
+            return allowClassHandlePointee && !classes.IsDefault
+                && (uint)classIndex < (uint)classes.Length;
+        }
+
+        if (!allowClassHandlePointee
+            || nominalTypeInstances is null
+            || nominalTypeDefinitions is null
+            || !BoundGenericNominalTypeContract.IsNominalClassType(type,
+                nominalTypeInstances, nominalTypeDefinitions))
+        {
+            return false;
+        }
+
+        return nominalTypeInstances[
+            BoundGenericNominalTypeTypes.Index(type)].Arguments.IsEmpty;
+    }
 
     private static bool IsSupportedEN1FieldFunctionPointer(
         NativeFunctionPointerSignatureDefinition signature)
@@ -2809,21 +2863,25 @@ public static partial class TrRmExecutableCompiler
                 {
                     pointeeType = scalarPointeeType;
                 }
-                else if (pointee.Qualifiers == 0
-                    && pointee.Form is 0x02 or 0x03)
+                else if (pointee.Form is 0x02 or 0x03
+                    || pointee.Form == 0x06 && pointee.Qualifiers == 0)
                 {
                     pointeeType = DecodeFieldType(
                         pointeeTypeSpecReference, depth + 1);
-                    if (!IsC1EnumClosurePointerPointeeType(pointeeType))
+                    if (!IsC1EnumClosurePointerPointeeType(pointeeType,
+                            allowClassHandlePointee: true,
+                            nominalTypeInstances: classTypeInstances,
+                            nominalTypeDefinitions:
+                                classTypeDefinitions))
                     {
                         throw Unsupported(
-                            "The bounded EN1 struct reference supports scalar, enum or non-generic struct pointer pointees.");
+                            "The bounded EN1 struct reference supports scalar, enum, non-generic struct or class-handle pointer pointees.");
                     }
                 }
                 else
                 {
                     throw Unsupported(
-                        "The bounded EN1 struct reference supports scalar, enum or non-generic struct pointer pointees.");
+                        "The bounded EN1 struct reference supports scalar, enum, non-generic struct or class-handle pointer pointees.");
                 }
 
                 if (tables.Modules.GetRequirements(moduleRow)

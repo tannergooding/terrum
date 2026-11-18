@@ -512,11 +512,7 @@ public static partial class SemanticVerifier
         {
             throw Invalid();
         }
-        if (!NativePointerTypeContract.IsValidTable(program.NativePointerTypes, program.Structures,
-                program.NativeFunctionPointerSignatures,
-                program.NativeFixedArrayTypes,
-        program.CheckedReferenceTypes,
-        program.EnumDefinitions)
+        if (!NativePointerTypeContract.IsValidTable(program)
             || program.NativePointerTypes.Any(pointer =>
                 BoundEnumTypes.IsType(pointer.PointeeType)
                 && !BoundEnumTypes.IsValidType(pointer.PointeeType,
