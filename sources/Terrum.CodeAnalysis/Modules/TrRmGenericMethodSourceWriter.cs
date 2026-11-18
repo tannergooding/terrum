@@ -641,6 +641,32 @@ public static partial class TrRmExecutableCompiler
         return true;
     }
 
+    private static bool TryGetDirectGenericUnitCall(
+        BoundFunction function, out BoundCall? call)
+    {
+        call = null;
+        var body = function.Body;
+        if (function.ReturnType != PrimitiveType.Void
+            || function.ParameterCount > 8
+            || function.Variables.Length != function.ParameterCount
+            || !body.RetiredManagedLocals.IsEmpty
+            || body.Statements.Length is < 1 or > 2
+            || body.Statements[0] is not BoundExpressionStatement {
+                Expression: BoundCall directCall,
+            }
+            || directCall.Type != PrimitiveType.Void
+            || (body.Statements.Length == 2
+                && body.Statements[1] is not BoundReturn {
+                    Value: null,
+                }))
+        {
+            return false;
+        }
+
+        call = directCall;
+        return true;
+    }
+
     private static bool TryGetGenericMethodForwardingChain(
         BoundFunction function,
         out ImmutableArray<GenericMethodForwardingCall> calls)
@@ -797,13 +823,24 @@ public static partial class TrRmExecutableCompiler
                 spanTypes, schema, nominalTypes);
         }
 
-        if (!TryGetDirectGenericCallReturn(function,
-                out var genericCall, out var resultVariable)
-            || genericCall is null
+        var isUnitCall = TryGetDirectGenericUnitCall(function,
+            out var genericCall);
+        var resultVariable = -1;
+        if (!isUnitCall && !TryGetDirectGenericCallReturn(function,
+                out genericCall, out resultVariable))
+        {
+            throw Unsupported(
+                $"Generic MethodDef '{definition.Name}' has a GenericCall Body outside the direct-return or unit-forwarding subset.");
+        }
+
+        if (genericCall is null
             || genericCall.GenericMethodCall
                 is not BoundGenericMethodInstantiation call
-            || genericCall.Type == PrimitiveType.Void
-            || genericCall.Type != function.ReturnType
+            || (isUnitCall
+                ? genericCall.Type != PrimitiveType.Void
+                    || function.ReturnType != PrimitiveType.Void
+                : genericCall.Type == PrimitiveType.Void
+                    || genericCall.Type != function.ReturnType)
             || (resultVariable < 0
                 ? function.Variables.Length != function.ParameterCount
                 : resultVariable < function.ParameterCount
@@ -812,7 +849,7 @@ public static partial class TrRmExecutableCompiler
             || function.ParameterCount > 8)
         {
             throw Unsupported(
-                $"Generic MethodDef '{definition.Name}' has a GenericCall Body outside the direct-return forwarding subset.");
+                $"Generic MethodDef '{definition.Name}' has a GenericCall Body outside the direct-return or unit-forwarding subset.");
         }
 
         var proofProgram = definition.ProofProgram;
@@ -836,7 +873,7 @@ public static partial class TrRmExecutableCompiler
             || target.ParameterCount != genericCall.Arguments.Length
             || target.ParameterCount != target.Variables.Length
             || target.ParameterCount > 8
-            || target.ReturnType == PrimitiveType.Void
+            || (target.ReturnType == PrimitiveType.Void) != isUnitCall
             || call.TypeArguments.Length
                 != targetEmissions[0].Definition.Formals.Length
             || (!genericCall.ArgumentParameterIndices.IsDefault
@@ -1020,7 +1057,7 @@ public static partial class TrRmExecutableCompiler
         }
 
         var homeCount = function.ParameterCount
-            + (targetDoesNotReturn ? 0 : 1);
+            + (targetDoesNotReturn || isUnitCall ? 0 : 1);
         var homeMap = new byte[checked(homeCount * 8)];
         for (var parameter = 0; parameter < function.ParameterCount;
             parameter++)
@@ -1036,7 +1073,7 @@ public static partial class TrRmExecutableCompiler
         }
 
         ushort resultHome = 0;
-        if (!targetDoesNotReturn)
+        if (!targetDoesNotReturn && !isUnitCall)
         {
             resultHome = checked((ushort)function.ParameterCount);
             var resultOffset = resultHome * 8;
@@ -1116,10 +1153,10 @@ public static partial class TrRmExecutableCompiler
             schema));
         var callSiteIndex = checked((ushort)records.Count);
         records.Add(TrRmRegisterBodyRecordWriter.EncodeCallSite(
-            4, targetDoesNotReturn ? (byte)0 : (byte)2, 1,
+            4, targetDoesNotReturn || isUnitCall ? (byte)0 : (byte)2, 1,
             resultHome, inputs, [], schema: schema));
 
-        var code = targetDoesNotReturn
+        var code = targetDoesNotReturn || isUnitCall
             ? new byte[] { 0x90, checked((byte)callSiteIndex) }
             : [
                 0x90,

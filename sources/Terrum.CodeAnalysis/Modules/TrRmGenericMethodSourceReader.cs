@@ -1980,7 +1980,7 @@ public static partial class TrRmExecutableCompiler
             + (hasReturnHome ? 2 : 0))
         {
             throw Unsupported(
-                "The G1 consumer supports only a terminal GenericCall or one followed by ReturnHome.");
+                "The G1 consumer supports only a no-return GenericCall, a normal unit GenericCall, or a non-unit GenericCall followed by ReturnHome.");
         }
 
         var callSite = body.GetRecord(callSiteRecordIndex);
@@ -2230,12 +2230,16 @@ public static partial class TrRmExecutableCompiler
             callSitePayload.Slice(6, 2));
         var targetDoesNotReturn
             = targetImport.ProofFunction.DoesNotReturn;
+        var returnsUnit = !targetDoesNotReturn
+            && resultType == PrimitiveType.Void;
         if (resultType != callerReturnType
             || (targetDoesNotReturn
                 ? callSite[5] != 0 || resultHome != 0 || hasReturnHome
-                : callSite[5] != 2 || !hasReturnHome
-                    || resultHome
-                        != code[callSiteInstructionLength + 1]))
+                : returnsUnit
+                    ? callSite[5] != 0 || resultHome != 0 || hasReturnHome
+                    : callSite[5] != 2 || !hasReturnHome
+                        || resultHome
+                            != code[callSiteInstructionLength + 1])
         {
             throw Invalid(
                 "The GenericCall result differs from the open MethodSig return type.");
@@ -2250,7 +2254,12 @@ public static partial class TrRmExecutableCompiler
         // Authorization is a published Body fact, not an unsafe declaration scope.
         BoundExpression value = targetImport.Signature.RequiresUnsafeCaller
             ? new BoundUnsafeExpression(call, default) : call;
-        return [new BoundReturn(value, default)];
+        return returnsUnit
+            ? [
+                new BoundExpressionStatement(value, default),
+                new BoundReturn(null, default),
+            ]
+            : [new BoundReturn(value, default)];
     }
 
     private static ImmutableArray<BoundStatement>
