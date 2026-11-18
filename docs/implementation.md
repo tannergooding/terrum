@@ -924,10 +924,14 @@ pointee backing, retention or failure cleanup. Selected private revision-106
 semantic/native routes keep these NativeOutput contracts separate from checked
 init-output publication: each ModuleFunction owns its selector/output-state
 vectors, and phase-2 Captures must correlate with a complete normal outcome.
-Standard F/F+S
-register Bodies have bounded scalar/raw-pointer output and provider-binding
-support; general aggregate output Bodies and native-interface/vtable outputs
-remain incomplete. [CG-004](implementation/conformance-gaps.md#cg-004) owns
+Standard F/F+S register Bodies have bounded scalar/raw-pointer output and
+provider-binding support, including pretest `while` loops whose Boolean Home
+condition branches to the body or exit and whose fallthrough emits an explicit
+backedge. Direct NativeOutput reservations inside a loop remain unsupported so
+one reservation cannot be repeated; the loop round-trip and rejection
+regressions remain unverified under the active hold. General aggregate output
+Bodies and native-interface/vtable outputs remain incomplete.
+[CG-004](implementation/conformance-gaps.md#cg-004) owns
 the detailed composition and qualification gates. Earlier TRRM NativeOutput
 clauses and ScalarInitOutput encoding are prototype artifacts, not a fallback
 or the selected general representation.

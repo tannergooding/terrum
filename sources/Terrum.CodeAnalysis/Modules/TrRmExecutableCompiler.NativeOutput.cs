@@ -204,11 +204,16 @@ public static partial class TrRmExecutableCompiler
             }
         }
         var conditionalCount = 0;
+        var loopCount = 0;
         if (!BoundTreeTraversal.VisitStatements(caller.Body, statement =>
             {
                 if (statement is BoundIf)
                 {
                     conditionalCount++;
+                }
+                else if (statement is BoundWhile)
+                {
+                    loopCount++;
                 }
             }))
         {
@@ -219,8 +224,10 @@ public static partial class TrRmExecutableCompiler
         var minimumHomeCount = caller.ParameterCount + outputHomeCount
             + nativeParameterHomeCount;
         var expectedRecordCount = 1L + outputCalls.Count
-            + outputHomeCount + nativeParameterHomeCount + conditionalCount;
-        var expectedBlockCount = 1L + (3L * conditionalCount);
+            + outputHomeCount + nativeParameterHomeCount
+            + conditionalCount + loopCount;
+        var expectedBlockCount = 1L
+            + (3L * (conditionalCount + loopCount));
         if (minimumHomeCount > 65_536 || expectedRecordCount > 65_536
             || expectedBlockCount > 65_536)
         {
@@ -1827,6 +1834,24 @@ public static partial class TrRmExecutableCompiler
                     return false;
                 }
 
+                case BoundWhile loop:
+                {
+                    var conditionBlock = CreateBlock();
+                    var bodyBlock = CreateBlock();
+                    var afterBlock = CreateBlock();
+                    AppendBranch(conditionBlock);
+                    SelectBlock(conditionBlock);
+                    AppendConditionalFlow(loop.Condition, bodyBlock,
+                        afterBlock);
+                    SelectBlock(bodyBlock);
+                    if (!EmitStatement(loop.Body))
+                    {
+                        AppendBranch(conditionBlock);
+                    }
+                    SelectBlock(afterBlock);
+                    return false;
+                }
+
                 case BoundExpressionStatement {
                     Expression: BoundCall call,
                 }:
@@ -2065,6 +2090,7 @@ public static partial class TrRmExecutableCompiler
         }
 
         var calls = new List<BoundCall>();
+        var loopDepth = 0;
         void VisitExpression(BoundExpression expression)
         {
             if (expression is BoundCall call)
@@ -2102,6 +2128,13 @@ public static partial class TrRmExecutableCompiler
                     }
                     return;
 
+                case BoundWhile loop:
+                    loopDepth++;
+                    VisitExpression(loop.Condition);
+                    VisitStatement(loop.Body);
+                    loopDepth--;
+                    return;
+
                 case BoundExpressionStatement {
                     Expression: BoundCall expressionCall,
                 }:
@@ -2119,6 +2152,11 @@ public static partial class TrRmExecutableCompiler
             if (call.Arguments.Any(static argument =>
                         argument is BoundNativeOutputReservation))
             {
+                if (loopDepth != 0)
+                {
+                    throw Unsupported(
+                        "A direct NativeOutput call cannot repeat inside a loop.");
+                }
                 calls.Add(call);
             }
         }
