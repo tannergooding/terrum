@@ -62,11 +62,11 @@ value/None inputs and value or unit results. Separate source-free provider/JIT
 regressions for unit and Copy-value targets are unverified. The same imported
 target subset now works in linear GenericCall chains with value-result Homes
 and an imported terminal unit call; a source-free provider/consumer JIT
-regression is added but remains unverified. Expected imported declarations now
-retain concrete built-in and earlier-formal type defaults; source-free
-round-trip and incompatible-default replacement coverage is added but
-unverified. Constructed nominal defaults, other constructed nominal import cases,
-optional/GC signatures,
+regression is added but remains unverified. Expected imported declarations now retain concrete built-in,
+earlier-formal, and constructed nominal type defaults through checked
+TypeDef/Import closure; source-free provider-chain, relocation and incompatible
+replacement coverage is added but remains unverified. Other constructed nominal
+import cases, optional/GC signatures,
 other dependency destinations and cleanup, and owners remain open. G1L1 imported
 MethodDef expectations now retain interface-instance constraints, and direct
 imported calls require matching caller-formal constraints; the source-free
@@ -85,8 +85,7 @@ relationships 1/2/3; source-free ref-result forwarding coverage is added but
 remains unverified. Expected imported declarations also retain concrete
 built-in, earlier-formal, non-optional/non-GC CheckedReference and Span type
 defaults; source-free wrapper-default/JIT coverage remains unverified.
-Constructed nominal defaults, optional/GC forms, other dependency
-destinations and cleanup remain open.
+Optional/GC defaults, other dependency destinations and cleanup remain open.
 The writer also copies local declaration
 graphs or exact imported expectations, including formal order, fields, declared
 layouts and frozen scalar constant actuals/defaults; nested constructions and

@@ -1501,6 +1501,9 @@ result types through checked TypeDef/Import closure.
 Provider-to-method-importer-to-source-free-consumer coverage includes TypeDef
 relocation and incompatible replacement, but remains unverified under the
 active hold.
+Expected imported MethodDefs also retain constructed nominal type defaults
+through checked TypeDef/Import closure; provider-chain, relocation and
+incompatible replacement coverage remains unverified under the active hold.
 The writer now copies all retained TypeDef Import expectation views; a
 reference-set emission regression is added but remains unverified. Fresh
 generic TypeDef source declarations, source-free generic MethodDef re-emission,
