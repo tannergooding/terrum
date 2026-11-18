@@ -1,7 +1,9 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.IO;
 using System.Linq;
 using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
@@ -20,6 +22,8 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1";
     private const string C1M1Construction2SchemaIdentity
         = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2";
+    private const string C1M1Construction2ClassParameterDefaultsSchemaIdentity
+        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-class-parameter-defaults-1";
 
     [Test]
     public void EmitsCapturedC1M1ClassDeclarationsAndRemapsWithoutSource()
@@ -293,6 +297,80 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         privateProjectionTables.ValidateRegisterBodyMapsForMethod(4);
         privateProjectionTables.ValidateRegisterBodyMapsForMethod(1);
         privateProjectionTables.ValidateRegisterBodyMapsForMethod(2);
+    }
+
+    [Test]
+    public void EmitsClassConstructorDefaultForInitializerAndProjection()
+    {
+        var tree = SyntaxTree.Parse("""
+            public class Box {
+                public int32 Value;
+                public Box(int32 value = 42) { Value = value; }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "Construction2ClassParameterDefaults",
+            C1M1Construction2ClassParameterDefaultsSchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], CreateClassExports(program, tree));
+        var index = TrRmArtifactIndex
+            .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                artifact);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(index);
+
+        Assert.That(tables.Methods.Count, Is.EqualTo(2));
+        Assert.That(tables.MethodParameterLabels.Count, Is.EqualTo(2));
+        Assert.That(tables.MethodParameterLabels.TryGetNameStringRow(1, 0,
+            out var initializerNameRow), Is.True);
+        Assert.That(tables.Strings.DecodeName(initializerNameRow),
+            Is.EqualTo("value"));
+        Assert.That(tables.MethodParameterLabels.TryGetNameStringRow(2, 0,
+            out var projectionNameRow), Is.True);
+        Assert.That(tables.Strings.DecodeName(projectionNameRow),
+            Is.EqualTo("value"));
+        Assert.That(tables.MethodParameterLabels
+            .TryGetDefaultConstantSourceRow(1, 0, out var initializerDefault),
+            Is.True);
+        Assert.That(tables.MethodParameterLabels
+            .TryGetDefaultConstantSourceRow(2, 0, out var projectionDefault),
+            Is.True);
+        Assert.That(initializerDefault, Is.GreaterThan(0));
+        Assert.That(projectionDefault, Is.EqualTo(initializerDefault));
+        Assert.That(tables.ConstantSources.GetKind(
+            checked((int)initializerDefault)), Is.EqualTo(1));
+
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var sectionIndex = 0; sectionIndex < index.SectionCount;
+            sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var count);
+            var sectionBytes = bytes.ToArray();
+            if (kind == 0x0066)
+            {
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteUInt32LittleEndian(
+                        sectionBytes.AsSpan(28, sizeof(uint)), 0);
+            }
+
+            sections.Add(new TrRmSection(kind, flags,
+                checked((uint)count), sectionBytes));
+        }
+
+        var mismatchedProjection = TrRmArtifactWriter.Encode(sections,
+            TrRmArtifactSchema
+                .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(
+                    TrRmArtifactIndex
+                        .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                            mismatchedProjection)));
     }
 
     [Test]

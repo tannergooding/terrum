@@ -617,6 +617,10 @@ internal static class BoundTreeTraversal
         function with {
             Body = (BoundBlock)RewriteCalls(function.Body, rewrite),
             IndexedBody = function.IndexedBody?.RewriteCalls(rewrite),
+            OrdinaryParameterDefaults =
+                RewriteOrdinaryParameterDefaults(
+                    function.OrdinaryParameterDefaults,
+                    expression => RewriteCalls(expression, rewrite)),
             DeclarationContractClauses = RewriteDeclarationContractClauses(
                 function.DeclarationContractClauses,
                 predicate => RewriteCalls(predicate, rewrite)),
@@ -631,6 +635,10 @@ internal static class BoundTreeTraversal
         function with {
             Body = (BoundBlock)RewriteExpressions(function.Body, rewrite),
             IndexedBody = function.IndexedBody?.RewriteExpressions(rewrite),
+            OrdinaryParameterDefaults =
+                RewriteOrdinaryParameterDefaults(
+                    function.OrdinaryParameterDefaults,
+                    expression => RewriteExpressions(expression, rewrite)),
             DeclarationContractClauses = RewriteDeclarationContractClauses(
                 function.DeclarationContractClauses,
                 predicate => RewriteExpressions(predicate, rewrite)),
@@ -650,6 +658,11 @@ internal static class BoundTreeTraversal
                 rewriteVariable),
             IndexedBody = function.IndexedBody?.RewriteVariables(variables,
                 rewriteVariable),
+            OrdinaryParameterDefaults =
+                RewriteOrdinaryParameterDefaults(
+                    function.OrdinaryParameterDefaults,
+                    expression => RewriteVariables(expression,
+                        rewriteVariable)),
             DeclarationContractClauses = RewriteDeclarationContractClauses(
                 function.DeclarationContractClauses,
                 predicate => RewriteVariables(predicate,
@@ -668,6 +681,93 @@ internal static class BoundTreeTraversal
     private static int RewriteVariable(int variable,
         Func<int, int> rewriteVariable)
         => variable < 0 ? variable : rewriteVariable(variable);
+
+    internal static bool VisitOrdinaryParameterDefaultExpressions(
+        BoundFunction function, Action<BoundExpression> visitor)
+    {
+        ArgumentNullException.ThrowIfNull(function);
+        ArgumentNullException.ThrowIfNull(visitor);
+        if (function.OrdinaryParameterDefaults.IsDefault)
+        {
+            return false;
+        }
+
+        var pending = new Stack<(BoundExpression Expression, int Depth)>();
+        var remaining = SemanticVerifier.MaximumAnalysisVisits;
+        foreach (var parameterDefault
+            in function.OrdinaryParameterDefaults)
+        {
+            if (parameterDefault is null || parameterDefault.IsPending
+                || (parameterDefault.Value is null)
+                    == (parameterDefault.Expression is null)
+                || --remaining < 0)
+            {
+                return false;
+            }
+
+            pending.Push((
+                parameterDefault.Value
+                    ?? parameterDefault.Expression!,
+                0));
+        }
+
+        while (pending.TryPop(out var item))
+        {
+            if (item.Depth > SemanticVerifier.MaximumDepth
+                || --remaining < 0
+                || !item.Expression.HasValidNestedExpressions)
+            {
+                return false;
+            }
+
+            visitor(item.Expression);
+            foreach (var child in item.Expression.NestedExpressions)
+            {
+                pending.Push((child, item.Depth + 1));
+            }
+        }
+
+        return true;
+    }
+
+    private static ImmutableArray<BoundOrdinaryParameterDefault>
+        RewriteOrdinaryParameterDefaults(
+            ImmutableArray<BoundOrdinaryParameterDefault> defaults,
+            Func<BoundExpression, BoundExpression> rewrite)
+    {
+        ArgumentNullException.ThrowIfNull(rewrite);
+        if (defaults.IsDefault)
+        {
+            return default;
+        }
+
+        var rewritten
+            = ImmutableArray.CreateBuilder<BoundOrdinaryParameterDefault>(
+                defaults.Length);
+        foreach (var parameterDefault in defaults)
+        {
+            if (parameterDefault is null)
+            {
+                throw new InvalidOperationException(
+                    "An ordinary parameter default entry is null.");
+            }
+
+            var value = parameterDefault.Value is BoundConstant constant
+                ? rewrite(constant) as BoundConstant
+                    ?? throw new InvalidOperationException(
+                        "A rewritten ordinary parameter constant is not constant.")
+                : null;
+            var expression
+                = parameterDefault.Expression is BoundExpression defaultExpression
+                    ? rewrite(defaultExpression) : null;
+            rewritten.Add(parameterDefault with {
+                Value = value,
+                Expression = expression,
+            });
+        }
+
+        return rewritten.MoveToImmutable();
+    }
 
     internal static BoundStatement RewriteVariables(BoundStatement statement,
         Func<int, int> rewriteVariable)

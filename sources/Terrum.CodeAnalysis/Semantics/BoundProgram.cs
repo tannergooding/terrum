@@ -1551,6 +1551,10 @@ public sealed record BoundFunction(string Name, PrimitiveType ReturnType, Immuta
     internal int SourceDeclarationInputOrdinal { get; init; } = -1;
     internal TextSpan SourceDeclarationSpan { get; init; }
     internal bool IsPartialConstructor { get; init; }
+    // Sparse explicit-parameter facts; receiver slots are never included.
+    internal ImmutableArray<BoundOrdinaryParameterDefault>
+        OrdinaryParameterDefaults { get; init; } = [];
+    internal bool HasOrdinaryParameterDefaultSurface { get; init; }
     internal ImmutableArray<BoundFriendTarget> FriendTargets
     {
         get; init;
@@ -1830,6 +1834,10 @@ public sealed record BoundVariable(string Name, PrimitiveType Type, bool IsMutab
     /// <summary>Whether a vacant local may initialize its storage without replacing a live value.</summary>
     public bool IsInitializationLocal { get; init; }
 }
+
+internal sealed record BoundOrdinaryParameterDefault(
+    int ParameterOrdinal, BoundConstant? Value, BoundExpression? Expression,
+    int SourceInputOrdinal, TextSpan Span, bool IsPending);
 
 /// <summary>A structured statement, retaining its source range.</summary>
 /// <param name="Span">The source range.</param>

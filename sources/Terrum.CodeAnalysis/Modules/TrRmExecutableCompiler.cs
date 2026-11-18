@@ -129,6 +129,8 @@ public static partial class TrRmExecutableCompiler
         = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-1-parameter-labels-1-receiver-access-1";
     private const string StandardC1M1Construction2L1R1SchemaIdentity
         = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1";
+    private const string StandardC1M1Construction2L1R1ClassParameterDefaultsSchemaIdentity
+        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-class-parameter-defaults-1";
     private const string StandardC1M1ConstructionL1R1PropertyInitializedStateSchemaIdentity
         = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-1-parameter-labels-1-receiver-access-1-property-initialized-state-1";
     private const string StandardC1M1Construction2L1R1PropertyInitializedStateSchemaIdentity
@@ -167,6 +169,8 @@ public static partial class TrRmExecutableCompiler
                 StandardC1M1ConstructionL1R1SchemaIdentity)
             || StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardC1M1Construction2L1R1SchemaIdentity)
+            || StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardC1M1Construction2L1R1ClassParameterDefaultsSchemaIdentity)
             || StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardC1M1ConstructionL1R1PropertyInitializedStateSchemaIdentity)
             || StringComparer.Ordinal.Equals(schemaIdentity,
@@ -573,10 +577,12 @@ public static partial class TrRmExecutableCompiler
             && !StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardC1M1ConstructionSchemaIdentity)
             && !StringComparer.Ordinal.Equals(schemaIdentity,
-                StandardC1M1Construction2SchemaIdentity))
+                StandardC1M1Construction2SchemaIdentity)
+            && !StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardC1M1Construction2L1R1ClassParameterDefaultsSchemaIdentity))
         {
             throw new ArgumentException(
-                "The seven-argument source class route requires an exact C1M1, Construction-1 or Construction-2 identity.",
+                "The seven-argument source class route requires an exact C1M1, Construction-1, Construction-2 or CM1 identity.",
                 nameof(schemaIdentity));
         }
 
@@ -1114,6 +1120,13 @@ public static partial class TrRmExecutableCompiler
                     sourceGenericMethodExports,
                     TrRmArtifactSchema
                         .C1M1Construction2ParameterLabelsReceiverAccessDraft),
+            StandardC1M1Construction2L1R1ClassParameterDefaultsSchemaIdentity
+                => EmitC1M1Construction2(program, moduleIdentity,
+                    moduleTargetRequirement, sourceTypeExports,
+                    sourceGenericMethodExports,
+                    TrRmArtifactSchema
+                        .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft,
+                    sourceClassExports),
             StandardNominalEnumsSchemaIdentity
                 => EmitNominalEnumsDraftSource(program, moduleIdentity,
                     moduleTargetRequirement, sourceTypeExports),
@@ -1464,6 +1477,7 @@ public static partial class TrRmExecutableCompiler
                 or TrRmArtifactSchema.C1M1ConstructionParameterLabelsReceiverAccessDraft
                 or TrRmArtifactSchema.C1M1Construction2Draft
                 or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessDraft
+                or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft
                 or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft
                 or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateDraft
                 or TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft

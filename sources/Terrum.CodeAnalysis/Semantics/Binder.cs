@@ -3579,16 +3579,38 @@ internal sealed partial class Binder
         BoundBlock body;
         ImmutableArray<BoundDeclarationContractClause>
             declarationContractClauses;
+        var hasOrdinaryParameterDefaultSurface = false;
+        var ordinaryParameterDefaults
+            = ImmutableArray<BoundOrdinaryParameterDefault>.Empty;
         try
         {
             declarationContractClauses
                 = BindDeclarationContractClauses(
                     signature.DeclarationContractClauses);
+            hasOrdinaryParameterDefaultSurface
+                = signature.Generic is null
+                    && signature.GenericOwnerTypeArguments is null
+                    && signature.GenericOwnerContext is null
+                    && !_templates.ContainsKey(signature.Name)
+                    && signature.SourceDeclarationInputOrdinal >= 0
+                    && signature.Declaration is SyntaxNode;
+            ordinaryParameterDefaults
+                = hasOrdinaryParameterDefaultSurface
+                    ? CaptureOrdinaryParameterDefaults(signature)
+                    : [];
             if (signature.External is BoundFunction externalFunction)
             {
                 return externalFunction with {
                     DeclarationContractClauses =
                         declarationContractClauses,
+                    SourceDeclarationInputOrdinal =
+                        signature.SourceDeclarationInputOrdinal,
+                    SourceDeclarationSpan =
+                        signature.SourceDeclarationSpan,
+                    OrdinaryParameterDefaults =
+                        ordinaryParameterDefaults,
+                    HasOrdinaryParameterDefaultSurface =
+                        hasOrdinaryParameterDefaultSurface,
                 };
             }
             body = staticPropertyBackingFieldIndex >= 0
@@ -3700,6 +3722,9 @@ internal sealed partial class Binder
                 signature.SourceDeclarationInputOrdinal,
             SourceDeclarationSpan = signature.SourceDeclarationSpan,
             IsPartialConstructor = signature.IsPartialConstructor,
+            OrdinaryParameterDefaults = ordinaryParameterDefaults,
+            HasOrdinaryParameterDefaultSurface =
+                hasOrdinaryParameterDefaultSurface,
             GenericMethodInstantiation = signature.Generic is
                 GenericInstantiation methodInstantiation
                     && methodInstantiation.Template.ImportedMethod is null
@@ -3767,6 +3792,41 @@ internal sealed partial class Binder
         };
         return CheckedOutputStateProjection.Apply(boundFunction,
             _checkedReferenceTypes);
+    }
+
+    private static ImmutableArray<BoundOrdinaryParameterDefault>
+        CaptureOrdinaryParameterDefaults(Signature signature)
+    {
+        if (signature.Parameters.IsDefault)
+        {
+            return default;
+        }
+
+        var defaults
+            = ImmutableArray.CreateBuilder<BoundOrdinaryParameterDefault>();
+        for (var parameterOrdinal = 0;
+            parameterOrdinal < signature.Parameters.Length;
+            parameterOrdinal++)
+        {
+            var parameter = signature.Parameters[parameterOrdinal];
+            if (parameter.DefaultSyntax is null
+                && parameter.DefaultExpression is null
+                && parameter.DefaultValue is null)
+            {
+                continue;
+            }
+
+            var span = parameter.DefaultSyntax?.Span
+                ?? parameter.DefaultExpression?.Span
+                ?? parameter.DefaultValue?.Span ?? parameter.Span;
+            defaults.Add(new BoundOrdinaryParameterDefault(
+                parameterOrdinal, parameter.DefaultValue,
+                parameter.DefaultExpression,
+                signature.SourceDeclarationInputOrdinal, span,
+                parameter.DefaultSyntax is not null));
+        }
+
+        return defaults.ToImmutable();
     }
 
     private ImmutableArray<BoundDeclarationContractClause>

@@ -27,6 +27,10 @@ public static partial class TrRmExecutableCompiler
     private sealed record C1M1Construction2SourceMethod(
         BoundFunction Function, int MethodDefRow);
 
+    private readonly record struct C1M1ParameterSurfaceRow(
+        int MethodDefRow, int Ordinal, string Name,
+        uint DefaultConstantSourceRow);
+
     private static byte[] EmitC1M1SourceClassDeclarations(
         BoundProgram program, string moduleIdentity,
         uint moduleTargetRequirement, SourceClassExports sourceClassExports,
@@ -244,9 +248,13 @@ public static partial class TrRmExecutableCompiler
         var methodNames = new List<string>();
         var methodSignatureRows = new List<TrRmMethodSigRow>();
         var parameterRows = new List<TrRmParamRow>();
+        var parameterSurfaceRows
+            = new List<C1M1ParameterSurfaceRow>();
         var contractRows = new List<TrRmContractRow>();
         var bodyRows = new List<ReadOnlyMemory<byte>>();
         var featureRows = new List<TrRmFeatureRow>();
+        var frozenScalarValueBuilder
+            = new TrRmFrozenScalarValueBuilder();
         var constructionInitializers
             = new List<C1M1Construction2SourceInitializer>();
         var construction2SourceMethods
@@ -352,17 +360,109 @@ public static partial class TrRmExecutableCompiler
                 var variable = function.Variables[firstVariable + ordinal];
                 if (variable.IsMutable || variable.IsOut || variable.IsInit
                     || variable.IsImplicitRef
-                    || variable.Type == PrimitiveType.Void)
+                    || (variable.Type == PrimitiveType.Void
+                        && !schema.UsesClassParameterDefaults()))
                 {
                     throw Unsupported(
                         "The bounded Construction-2 constructor projection supports only immutable by-value parameters.");
                 }
 
                 parameterRows.Add(new TrRmParamRow(signatureRow, ordinal,
-                    FieldTypeSpecReference(variable.Type), 0));
+                    ParameterTypeSpecReference(variable.Type), 0));
             }
 
             return firstParam;
+        }
+
+        uint ParameterTypeSpecReference(PrimitiveType type)
+            => type == PrimitiveType.Void
+                ? 0xF200_0000u : FieldTypeSpecReference(type);
+
+        void AppendC1M1Construction2ParameterSurface(
+            int methodDefRow, BoundFunction function, int firstVariable)
+        {
+            if (!schema.UsesClassParameterDefaults())
+            {
+                return;
+            }
+
+            var parameterCount = function.ParameterCount - firstVariable;
+            var defaultsByOrdinal
+                = new Dictionary<int, BoundOrdinaryParameterDefault>();
+            var previousOrdinal = -1;
+            if (!function.HasOrdinaryParameterDefaultSurface
+                || function.SourceDeclarationInputOrdinal < 0
+                || function.OrdinaryParameterDefaults.IsDefault)
+            {
+                throw Unsupported(
+                    "CM1 source publication requires the checked primary parameter surface for every retained class method.");
+            }
+
+            foreach (var parameterDefault
+                in function.OrdinaryParameterDefaults)
+            {
+                if (parameterDefault is null
+                    || parameterDefault.ParameterOrdinal <= previousOrdinal
+                    || parameterDefault.ParameterOrdinal >= parameterCount
+                    || parameterDefault.SourceInputOrdinal
+                        != function.SourceDeclarationInputOrdinal
+                    || parameterDefault.IsPending
+                    || parameterDefault.Value is not BoundConstant
+                        || parameterDefault.Expression is not null
+                    || !defaultsByOrdinal.TryAdd(
+                        parameterDefault.ParameterOrdinal,
+                        parameterDefault))
+                {
+                    throw Unsupported(
+                        "CM1 source defaults require one checked, closed scalar value per authored parameter default.");
+                }
+
+                previousOrdinal = parameterDefault.ParameterOrdinal;
+            }
+
+            for (var ordinal = 0; ordinal < parameterCount; ordinal++)
+            {
+                var variable = function.Variables[
+                    firstVariable + ordinal];
+                var defaultConstantSourceRow = 0u;
+                if (defaultsByOrdinal.TryGetValue(ordinal,
+                        out var parameterDefault))
+                {
+                    var value = (BoundConstant)parameterDefault.Value!;
+                    if (value.Type != variable.Type
+                        || value.RepresentationType != variable.Type
+                        || (value.Type is PrimitiveType.NativeInt
+                            or PrimitiveType.NativeUInt)
+                        || !value.Bits.IsCanonicalFor(variable.Type))
+                    {
+                        throw Unsupported(
+                            "CM1 parameter defaults require exact fixed-width SF1 scalar values.");
+                    }
+
+                    var expectedTypeSpecRef
+                        = ParameterTypeSpecReference(variable.Type);
+                    var frozenValue
+                        = frozenScalarValueBuilder.Add(value);
+                    if (frozenValue.TypeSpecRef != expectedTypeSpecRef)
+                    {
+                        throw Unsupported(
+                            "CM1 parameter default values must retain the exact parameter TypeSpec.");
+                    }
+
+                    defaultConstantSourceRow
+                        = frozenValue.ConstantSourceRow;
+                }
+
+                if (parameterSurfaceRows.Count >= 0xFF_FFFF)
+                {
+                    throw Unsupported(
+                        "The CM1 MethodParameterSurface table exceeds its row limit.");
+                }
+
+                parameterSurfaceRows.Add(new C1M1ParameterSurfaceRow(
+                    methodDefRow, ordinal, variable.Name,
+                    defaultConstantSourceRow));
+            }
         }
 
         foreach (var (isClass, sourceIndex) in typeDefOrder)
@@ -564,7 +664,8 @@ public static partial class TrRmExecutableCompiler
 
                         if (member.Kind == SyntaxKind.FunctionDeclaration)
                         {
-                            if (HasC1M1Construction2ParameterDefaults(
+                            if (!schema.UsesClassParameterDefaults()
+                                && HasC1M1Construction2ParameterDefaults(
                                     member))
                             {
                                 throw Unsupported(
@@ -581,7 +682,8 @@ public static partial class TrRmExecutableCompiler
                                 "The bounded Construction-2 class source emitter does not yet retain properties or other class member declarations.");
                         }
 
-                        if (HasC1M1Construction2ParameterDefaults(member))
+                        if (!schema.UsesClassParameterDefaults()
+                            && HasC1M1Construction2ParameterDefaults(member))
                         {
                             throw Unsupported(
                                 "The bounded Construction-2 source emitter does not yet retain ordinary member parameter defaults.");
@@ -723,6 +825,10 @@ public static partial class TrRmExecutableCompiler
                     projectionExportKeys.IsEmpty ? 0u : 2u,
                     projectionContractFirst, 1, 0));
                 methodNames.Add(function.Name);
+                AppendC1M1Construction2ParameterSurface(
+                    initializerMethodDefRow, function, 1);
+                AppendC1M1Construction2ParameterSurface(
+                    projectionMethodDefRow, function, 1);
 
                 foreach (var exportKey in initializerExportKeys)
                 {
@@ -913,6 +1019,9 @@ public static partial class TrRmExecutableCompiler
                         typeDefRowByClass[classIndex], 0,
                         methodSignatureRow, methodVisibility, 0, 0, 0));
                     methodNames.Add(methodFunction.Name);
+                    AppendC1M1Construction2ParameterSurface(methodRow,
+                        methodFunction,
+                        methodFunction.IsStatic ? 0 : 1);
                     foreach (var exportKey in methodExportKeys)
                     {
                         exportRows.Add((
@@ -928,6 +1037,16 @@ public static partial class TrRmExecutableCompiler
 
             featureRows.Add(
                 TrRmFeatureRow.ClassConstructionBodiesCandidate);
+            if (schema.UsesClassParameterDefaults())
+            {
+                featureRows.Add(
+                    TrRmFeatureRow.MethodParameterLabelsCandidate);
+                if (frozenScalarValueBuilder.ConstantSourceCount != 0)
+                {
+                    featureRows.Add(TrRmFeatureRow.TypedFrozenValues);
+                }
+            }
+
             foreach (var initializer in constructionInitializers)
             {
                 bodyRows.Add(EncodeC1M1Construction2InitializerBody(
@@ -962,7 +1081,11 @@ public static partial class TrRmExecutableCompiler
             + layoutRows.Count + layoutFieldRows.Count
             + typeSpecRows.Count + exportRows.Count + methodRows.Count
             + methodSignatureRows.Count + parameterRows.Count
-            + contractRows.Count + bodyRows.Count + featureRows.Count;
+            + parameterSurfaceRows.Count + contractRows.Count
+            + bodyRows.Count + featureRows.Count
+            + frozenScalarValueBuilder.BlobCount
+            + frozenScalarValueBuilder.FrozenValueNodeCount
+            + frozenScalarValueBuilder.ConstantSourceCount;
         if (typeDefRows.Count > 0xFF_FFFF
             || fieldRows.Count > 0xFF_FFFF
             || layoutRows.Count > 0xFF_FFFF
@@ -972,9 +1095,13 @@ public static partial class TrRmExecutableCompiler
             || methodRows.Count > 0xFF_FFFF
             || methodSignatureRows.Count > 0xFF_FFFF
             || parameterRows.Count > 0xFF_FFFF
+            || parameterSurfaceRows.Count > 0xFF_FFFF
             || contractRows.Count > 0xFF_FFFF
             || bodyRows.Count > 0xFF_FFFF
             || featureRows.Count > 0xFF_FFFF
+            || frozenScalarValueBuilder.BlobCount > 0xFF_FFFF
+            || frozenScalarValueBuilder.FrozenValueNodeCount > 0xFF_FFFF
+            || frozenScalarValueBuilder.ConstantSourceCount > 0xFF_FFFF
             || totalRows > SemanticVerifier.MaximumAnalysisVisits)
         {
             throw Unsupported(
@@ -1010,6 +1137,11 @@ public static partial class TrRmExecutableCompiler
         foreach (var methodName in methodNames)
         {
             _ = AddString(methodName);
+        }
+
+        foreach (var parameterSurface in parameterSurfaceRows)
+        {
+            _ = AddString(parameterSurface.Name);
         }
 
         foreach (var (_, exportKey) in exportRows)
@@ -1074,6 +1206,27 @@ public static partial class TrRmExecutableCompiler
                 ? new byte[sizeof(uint)] : typeSpecBytes,
             typeSpecRows.Count, typeDefRows.Count, 0, 0, 0,
             schema, methodDefCount: methodRows.Count);
+        var frozenScalarValueTables
+            = frozenScalarValueBuilder.Encode(typeSpecs);
+        var parameterSurfaceBytes
+            = new byte[checked(parameterSurfaceRows.Count * 16)];
+        for (var index = 0; index < parameterSurfaceRows.Count; index++)
+        {
+            var parameterSurface = parameterSurfaceRows[index];
+            var offset = index * 16;
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                parameterSurfaceBytes.AsSpan(offset, 4),
+                checked((uint)parameterSurface.MethodDefRow));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                parameterSurfaceBytes.AsSpan(offset + 4, 4),
+                checked((uint)parameterSurface.Ordinal));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                parameterSurfaceBytes.AsSpan(offset + 8, 4),
+                checked((uint)stringRows[parameterSurface.Name]));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                parameterSurfaceBytes.AsSpan(offset + 12, 4),
+                parameterSurface.DefaultConstantSourceRow);
+        }
         var fieldBytes = TrRmFieldDefTableWriter.Encode(fieldRows, strings,
             typeDefs, typeSpecs, schema);
         var fields = new TrRmFieldDefTableReader(fieldBytes,
@@ -1163,6 +1316,27 @@ public static partial class TrRmExecutableCompiler
             sections.Add(new TrRmSection(0x0020, 0,
                 checked((uint)bodyRows.Count),
                 TrRmVariableTableWriter.EncodeBodies(bodyRows)));
+        }
+        if (frozenScalarValueTables.BlobCount != 0)
+        {
+            sections.Add(new TrRmSection(0x0032, 0,
+                checked((uint)frozenScalarValueTables.BlobCount),
+                frozenScalarValueTables.BlobSection));
+        }
+        if (frozenScalarValueTables.ConstantSourceCount != 0)
+        {
+            sections.Add(new TrRmSection(0x0030, 0,
+                checked((uint)frozenScalarValueTables.ConstantSourceCount),
+                frozenScalarValueTables.ConstantSourceSection));
+            sections.Add(new TrRmSection(0x003F, 0,
+                checked((uint)frozenScalarValueTables.FrozenValueNodeCount),
+                frozenScalarValueTables.FrozenValueNodeSection));
+        }
+        if (parameterSurfaceRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x0066, 0,
+                checked((uint)parameterSurfaceRows.Count),
+                parameterSurfaceBytes));
         }
 
         sections.Sort(static (left, right) =>

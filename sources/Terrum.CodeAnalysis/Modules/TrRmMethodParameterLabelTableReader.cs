@@ -13,7 +13,9 @@ internal readonly ref struct TrRmMethodParameterLabelTableReader
 {
     private const int RowSize = 12;
     private readonly Dictionary<ulong, uint>? _nameRows;
+    private readonly Dictionary<ulong, uint>? _defaultConstantSourceRows;
     private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
+    private readonly bool _usesClassParameterDefaults;
 
     internal TrRmMethodParameterLabelTableReader(ReadOnlySpan<byte> section,
         int recordCount, TrRmStringTableReader strings,
@@ -22,6 +24,7 @@ internal readonly ref struct TrRmMethodParameterLabelTableReader
         TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
         if (!schema.UsesMethodParameterLabels()
+            || schema.UsesClassParameterDefaults()
             || recordCount is < 1 or > 0xFF_FFFF
             || (long)recordCount * RowSize != section.Length)
         {
@@ -67,6 +70,137 @@ internal readonly ref struct TrRmMethodParameterLabelTableReader
 
         Count = recordCount;
         _nameRows = nameRows;
+        _defaultConstantSourceRows = null;
+        _usesClassParameterDefaults = false;
+    }
+
+    internal TrRmMethodParameterLabelTableReader(ReadOnlySpan<byte> section,
+        int recordCount, TrRmStringTableReader strings,
+        TrRmMethodDefTableReader methods,
+        TrRmMethodSigTableReader signatures,
+        TrRmParamTableReader parameters,
+        TrRmTypeSpecTableReader typeSpecs,
+        TrRmConstantSourceTableReader constantSources,
+        TrRmFrozenValueNodeTableReader frozenValueNodes,
+        TrRmBlobTableReader blobs, TrRmFeatureTableReader features,
+        TrRmModuleTableReader modules, TrRmArtifactSchema schema,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
+    {
+        const int surfaceRowSize = 16;
+        if (!schema.UsesClassParameterDefaults()
+            || recordCount is < 1 or > 0xFF_FFFF
+            || (long)recordCount * surfaceRowSize != section.Length)
+        {
+            throw InvalidTable();
+        }
+
+        _resourceLedger = resourceLedger;
+        var nameRows = new Dictionary<ulong, uint>(recordCount);
+        var defaultRows = new Dictionary<ulong, uint>(recordCount);
+        var namesByOwner = new HashSet<(uint Owner, string Name)>();
+        for (var row = 0; row < recordCount; row++)
+        {
+            resourceLedger?.ConsumeWork();
+            var data = section.Slice(row * surfaceRowSize,
+                surfaceRowSize);
+            var owner = Read(data, 0);
+            var ordinal = Read(data, 4);
+            var nameRow = Read(data, 8);
+            var defaultValueRow = Read(data, 12);
+            if (owner is 0 or > 0x00FF_FFFF
+                || owner > (uint)methods.Count
+                || nameRow is 0 or > 0x00FF_FFFF
+                || nameRow > (uint)strings.Count
+                || defaultValueRow > 0x00FF_FFFF
+                || defaultValueRow > (uint)constantSources.Count)
+            {
+                throw InvalidTable();
+            }
+
+            var ownerModule = methods.GetOwnerModule(
+                checked((int)owner));
+            if (!TrRmFeatureManifestValidator.Requires(features, modules,
+                    ownerModule,
+                    TrRmFeatureTableReader.MethodParameterLabelsFeatureId,
+                    schema))
+            {
+                throw InvalidTable();
+            }
+
+            var signature = methods.GetSignature(checked((int)owner));
+            var (parameterFirst, parameterCount)
+                = signatures.GetParamRange(signature);
+            if (ordinal >= (uint)parameterCount)
+            {
+                throw InvalidTable();
+            }
+
+            var name = strings.DecodeName(checked((int)nameRow));
+            if (!IsIdentifier(name)
+                || !namesByOwner.Add((owner, name)))
+            {
+                throw InvalidTable();
+            }
+
+            var key = ((ulong)owner << 32) | ordinal;
+            if (!nameRows.TryAdd(key, nameRow)
+                || !defaultRows.TryAdd(key, defaultValueRow))
+            {
+                throw InvalidTable();
+            }
+
+            if (defaultValueRow == 0)
+            {
+                continue;
+            }
+
+            if (!TrRmFeatureManifestValidator.Requires(features, modules,
+                    ownerModule,
+                    TrRmFeatureTableReader.TypedFrozenValuesFeatureId,
+                    schema))
+            {
+                throw InvalidTable();
+            }
+
+            var parameterRow = checked(parameterFirst
+                + (int)ordinal);
+            var parameterTypeSpecRef
+                = parameters.GetTypeSpec(parameterRow);
+            var parameterType
+                = typeSpecs.GetTypeSpecRef(parameterTypeSpecRef);
+            if (parameters.GetMode(parameterRow) != 0
+                || parameters.GetFlags(parameterRow) != 0
+                || parameterType.Form != 0x01
+                || parameterType.Row != 0
+                || parameterType.Qualifiers != 0
+                || parameterType.TypeCode is 0x10 or 0x11)
+            {
+                throw InvalidTable();
+            }
+
+            var constantSourceRow = checked((int)defaultValueRow);
+            if (constantSources.GetKind(constantSourceRow) != 1)
+            {
+                throw InvalidTable();
+            }
+
+            var frozenValueNodeRow = checked((int)
+                constantSources.GetPayloadReference(constantSourceRow));
+            if (frozenValueNodes.GetKind(frozenValueNodeRow) != 1
+                || frozenValueNodes.GetTypeSpecRef(frozenValueNodeRow)
+                    != parameterTypeSpecRef)
+            {
+                throw InvalidTable();
+            }
+
+            _ = frozenValueNodes.GetScalarPayload(frozenValueNodeRow,
+                blobs);
+        }
+
+        Count = recordCount;
+        _nameRows = nameRows;
+        _defaultConstantSourceRows = defaultRows;
+        _usesClassParameterDefaults = true;
     }
 
     internal int Count { get; }
@@ -86,6 +220,24 @@ internal readonly ref struct TrRmMethodParameterLabelTableReader
         }
 
         nameStringRow = checked((int)row);
+        return true;
+    }
+
+    internal bool TryGetDefaultConstantSourceRow(int methodDefRow,
+        uint ordinal, out uint constantSourceRow)
+    {
+        _resourceLedger?.ConsumeWork();
+        if (!_usesClassParameterDefaults
+            || methodDefRow <= 0 || (uint)methodDefRow > 0x00FF_FFFF
+            || _defaultConstantSourceRows is null
+            || !_defaultConstantSourceRows.TryGetValue(
+                ((ulong)(uint)methodDefRow << 32) | ordinal,
+                out constantSourceRow))
+        {
+            constantSourceRow = 0;
+            return false;
+        }
+
         return true;
     }
 

@@ -79,6 +79,7 @@ internal readonly ref struct TrRmRegisterBodyReader
                 or TrRmArtifactSchema.C1M1ConstructionParameterLabelsReceiverAccessDraft
                 or TrRmArtifactSchema.C1M1Construction2Draft
                 or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessDraft
+                or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft
                 or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft
                 or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateDraft
                 or TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft

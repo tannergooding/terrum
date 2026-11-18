@@ -3717,6 +3717,7 @@ public static partial class TrRmExecutableCompiler
             or StandardC1M1L1R1SchemaIdentity
             or StandardC1M1ConstructionL1R1SchemaIdentity
             or StandardC1M1Construction2L1R1SchemaIdentity
+            or StandardC1M1Construction2L1R1ClassParameterDefaultsSchemaIdentity
             or StandardC1M1ConstructionL1R1PropertyInitializedStateSchemaIdentity
             or StandardC1M1Construction2L1R1PropertyInitializedStateSchemaIdentity
             or StandardC1M1ConstructionL1R1EnumClosureSchemaIdentity
@@ -3810,6 +3811,7 @@ public static partial class TrRmExecutableCompiler
             or StandardC1M1L1R1SchemaIdentity
             or StandardC1M1ConstructionL1R1SchemaIdentity
             or StandardC1M1Construction2L1R1SchemaIdentity
+            or StandardC1M1Construction2L1R1ClassParameterDefaultsSchemaIdentity
             or StandardC1M1ConstructionL1R1PropertyInitializedStateSchemaIdentity
             or StandardC1M1Construction2L1R1PropertyInitializedStateSchemaIdentity
             or StandardC1M1ConstructionL1R1EnumClosureSchemaIdentity
@@ -3889,6 +3891,9 @@ public static partial class TrRmExecutableCompiler
                 => TrRmArtifactSchema.C1M1ConstructionParameterLabelsReceiverAccessDraft,
             StandardC1M1Construction2L1R1SchemaIdentity
                 => TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessDraft,
+            StandardC1M1Construction2L1R1ClassParameterDefaultsSchemaIdentity
+                => TrRmArtifactSchema
+                    .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft,
             StandardC1M1ConstructionL1R1PropertyInitializedStateSchemaIdentity
                 => TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft,
             StandardC1M1Construction2L1R1PropertyInitializedStateSchemaIdentity
@@ -4103,6 +4108,7 @@ public static partial class TrRmExecutableCompiler
                     or TrRmArtifactSchema.C1M1ConstructionParameterLabelsReceiverAccessDraft
                     or TrRmArtifactSchema.C1M1Construction2Draft
                     or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessDraft
+                    or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft
                     or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft
                     or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateDraft
                     or TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft
@@ -4576,6 +4582,7 @@ public static partial class TrRmExecutableCompiler
         string schemaIdentity)
         => schemaIdentity is StandardC1M1Construction2SchemaIdentity
             or StandardC1M1Construction2L1R1SchemaIdentity
+            or StandardC1M1Construction2L1R1ClassParameterDefaultsSchemaIdentity
             or StandardC1M1Construction2L1R1PropertyInitializedStateSchemaIdentity
             or StandardC1M1Construction2L1R1EnumClosureSchemaIdentity
             or StandardC1M1Construction2L1R1PropertyInitializedStateEnumClosureSchemaIdentity;

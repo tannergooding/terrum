@@ -183,6 +183,7 @@ internal readonly ref struct TrRmPredicateNodeTableReader
                 or TrRmArtifactSchema.C1M1ConstructionParameterLabelsReceiverAccessDraft
                 or TrRmArtifactSchema.C1M1Construction2Draft
                 or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessDraft
+                or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft
                 or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft
                 or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateDraft
                 or TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft
@@ -346,6 +347,7 @@ internal readonly ref struct TrRmPredicateNodeOperandTableReader
                 or TrRmArtifactSchema.C1M1ConstructionParameterLabelsReceiverAccessDraft
                 or TrRmArtifactSchema.C1M1Construction2Draft
                 or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessDraft
+                or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft
                 or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft
                 or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateDraft
                 or TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft
@@ -501,6 +503,7 @@ internal readonly ref struct TrRmPredicateReadRootTableReader
                 or TrRmArtifactSchema.C1M1ConstructionParameterLabelsReceiverAccessDraft
                 or TrRmArtifactSchema.C1M1Construction2Draft
                 or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessDraft
+                or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft
                 or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft
                 or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateDraft
                 or TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft

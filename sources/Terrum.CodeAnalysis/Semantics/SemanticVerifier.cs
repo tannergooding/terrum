@@ -1311,6 +1311,10 @@ public static partial class SemanticVerifier
             {
                 throw Limit();
             }
+            if (!IsValidOrdinaryParameterDefaults(function, program))
+            {
+                throw Invalid();
+            }
             if (function.Intrinsic is BoundIntrinsic.None or BoundIntrinsic.ClassTryCreate)
             {
                 for (var variableIndex = 0; variableIndex < function.Variables.Length; variableIndex++)
@@ -24654,6 +24658,83 @@ public static partial class SemanticVerifier
             && isUnsafeAuthorized == isUnsafe
             && (!program.StaticFields[fieldIndex].RequiresUnsafeCaller
                 || isUnsafe);
+
+    private static bool IsValidOrdinaryParameterDefaults(
+        BoundFunction function, BoundProgram program)
+    {
+        var defaults = function.OrdinaryParameterDefaults;
+        if (defaults.IsDefault)
+        {
+            return false;
+        }
+        if (!function.HasOrdinaryParameterDefaultSurface)
+        {
+            return defaults.IsEmpty;
+        }
+
+        if (function.SourceDeclarationInputOrdinal < 0
+            || function.SourceDeclarationInputOrdinal
+                >= program.SourceInputCount
+            || function.GenericMethodProofDefinitionOrdinal >= 0
+            || function.GenericMethodInstantiation is not null
+            || function.ImportedGenericMethod is not null
+            || function.Intrinsic != BoundIntrinsic.None)
+        {
+            return false;
+        }
+
+        var receiverCount = function.IsClassConstructor
+            || (function.DeclaringStruct is not null
+                && !function.IsStatic && !function.IsConstructor) ? 1 : 0;
+        var parameterCount = function.ParameterCount - receiverCount;
+        if (parameterCount < 0
+            || parameterCount
+                > function.Variables.Length - receiverCount
+            || defaults.Length > parameterCount)
+        {
+            return false;
+        }
+
+        var previousOrdinal = -1;
+        foreach (var parameterDefault in defaults)
+        {
+            if (parameterDefault is null
+                || parameterDefault.ParameterOrdinal <= previousOrdinal
+                || parameterDefault.ParameterOrdinal >= parameterCount
+                || parameterDefault.SourceInputOrdinal < 0
+                || parameterDefault.SourceInputOrdinal
+                    >= program.SourceInputCount
+                || parameterDefault.Span.Start < 0
+                || parameterDefault.IsPending
+                || (parameterDefault.Value is null)
+                    == (parameterDefault.Expression is null))
+            {
+                return false;
+            }
+
+            var variable = function.Variables[
+                receiverCount + parameterDefault.ParameterOrdinal];
+            if (variable.IsOut || variable.IsInit
+                || variable.IsImplicitRef
+                || !ValidType(variable.Type, allowVoid: false, program)
+                || (parameterDefault.Value is BoundConstant value
+                    && (value.Type != variable.Type
+                        || !ValidType(value.Type, allowVoid: false,
+                            program)))
+                || (parameterDefault.Expression is BoundExpression expression
+                    && (expression.Type != variable.Type
+                        || !ValidType(expression.Type, allowVoid: false,
+                            program))))
+            {
+                return false;
+            }
+
+            previousOrdinal = parameterDefault.ParameterOrdinal;
+        }
+
+        return BoundTreeTraversal.VisitOrdinaryParameterDefaultExpressions(
+            function, static _ => { });
+    }
 
     private static bool IsValidStaticFriendTargets(
         ImmutableArray<BoundFriendTarget> targets,
