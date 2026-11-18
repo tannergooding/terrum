@@ -144,10 +144,10 @@ are initialized directly from scalar parameters. It preserves explicit I/P
 ExportKeys and does not substitute `ClassTryCreate`; keyed and private-P
 producer regressions are added but unverified under the hold.
 Ordinary method emission also supports parameterized static scalar methods
-with real Bodies, exact same-class static identity forwarders through assigned
-Body kind `05`, empty unit-returning instance methods, and readonly
-instance methods returning an explicit scalar parameter through ReturnHome
-with receiver/formal Homes in declaration order. The Unit-before-value
+with real Bodies, exact same-class static and readonly-instance identity
+forwarders through assigned Body kind `05`, empty unit-returning instance
+methods, and readonly instance methods returning an explicit scalar parameter
+through ReturnHome with receiver/formal Homes in declaration order. The Unit-before-value
 instance and identity-forwarder regressions remain unverified under the hold.
 Source binding now admits ordinary by-value Unit parameters and `()` defaults; the CM1
 producer/reader preserves their logical signature
@@ -165,13 +165,13 @@ owner TypeDef Import to the same selected provider, comparing signatures,
 effects, modes and construction roles after TypeSpec remapping while retaining
 separate expected/provider defaults and Import aliases. Provider-source-free
 caller and compatible/incompatible provider regressions are added but remain
-unverified under the active hold. The remaining member Body work includes
-instance calls/forwarders, nested field paths, locals and control flow,
-properties, multiple/partial constructors,
-class-backed field initialization, source-free class method re-emission and
-its replacement/remapping paths, class FieldDef Imports, CLI transport,
-independent carrier TypeSpec verification, generic TypeDef dependencies,
-interfaces/witnesses outside D1, and runtime execution remain open. The user-authorized provisional
+unverified under the active hold. Remaining gaps include non-identity
+instance calls, nested field paths, locals and control flow, properties,
+multiple/partial constructors, class-backed field initialization, source-free
+class method re-emission and its replacement/remapping paths, class FieldDef
+Imports, CLI transport, independent carrier TypeSpec verification, generic
+TypeDef dependencies, interfaces/witnesses outside D1, and runtime execution.
+The user-authorized provisional
 [CM1 class parameter-default proposal](proposals/standard-trrm-c1-class-parameter-defaults.md)
 defines the exact candidate owner/schema and remains pending later review.
 The checked development and Standard TRRM type-reference

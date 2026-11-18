@@ -691,7 +691,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
-    public void EmitsExactIdentityForwarderDescriptorForStaticClassMethod()
+    public void EmitsExactIdentityForwardersForStaticAndInstanceClassMethods()
     {
         var tree = SyntaxTree.Parse("""
             public class Box {
@@ -702,6 +702,12 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 }
                 public static int32 Forward(int32 value) {
                     return Identity(value);
+                }
+                public int32 IdentityInstance(int32 value) {
+                    return value;
+                }
+                public int32 ForwardInstance(int32 value) {
+                    return IdentityInstance(value);
                 }
             }
             """);
@@ -724,6 +730,14 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name == "Forward"));
+        var identityInstance = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "IdentityInstance"));
+        var forwardInstance = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "ForwardInstance"));
         var artifact = TrRmExecutableCompiler.EmitStandard(program,
             "ClassIdentityForwarder", C1M1Construction2SchemaIdentity,
             TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
@@ -740,75 +754,92 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                             "Box.Identity"),
                         new TrRmSourceClassMemberExport(0, forward.Span,
                             "Box.Forward"),
+                        new TrRmSourceClassMemberExport(0,
+                            identityInstance.Span, "Box.IdentityInstance"),
+                        new TrRmSourceClassMemberExport(0,
+                            forwardInstance.Span, "Box.ForwardInstance"),
                     ]),
             ]);
         var tables = TrRmStructuralMetadataValidator
             .ValidateC1AndGetExecutionTables(
                 TrRmArtifactIndex.ForC1M1Construction2Draft(artifact));
-        Assert.That(tables.Exports.TryGetDefinitionForKey(1, "Box.Identity",
-            out var identityDefinition), Is.True);
-        Assert.That(tables.Exports.TryGetDefinitionForKey(1, "Box.Forward",
-            out var forwardDefinition), Is.True);
-        var identityMethodRow
-            = checked((int)(identityDefinition & 0x00FF_FFFF));
-        var forwardMethodRow
-            = checked((int)(forwardDefinition & 0x00FF_FFFF));
-        Assert.That(tables.Methods.GetOwnerType(forwardMethodRow),
-            Is.EqualTo(tables.Methods.GetOwnerType(identityMethodRow)));
-        var forwardBodyRow
-            = tables.Methods.GetBodyRow(forwardMethodRow);
-        Assert.That(forwardBodyRow, Is.GreaterThan(0));
-        tables.Bodies.ValidateSelectedImplementation(forwardBodyRow,
-            tables.Contracts.Count);
-        var body = tables.Bodies.GetRow(forwardBodyRow);
-        Assert.That(body.Length, Is.EqualTo(8));
-        Assert.That(body[0], Is.EqualTo(0x05));
-        Assert.That(body[1], Is.Zero);
-        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(body[2..]),
-            Is.Zero);
-        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(body[4..]),
-            Is.EqualTo(identityDefinition));
-
-        var identitySignature
-            = tables.Methods.GetSignature(identityMethodRow);
-        var forwardSignature
-            = tables.Methods.GetSignature(forwardMethodRow);
-        Assert.That(tables.Signatures.GetReceiverTypeSpec(forwardSignature),
-            Is.Zero);
-        Assert.That(tables.Signatures.GetReceiverTypeSpec(identitySignature),
-            Is.Zero);
-        Assert.That(tables.TypeSpecs.AreEquivalentTypeSpecRefs(
-                tables.Signatures.GetResultTypeSpec(forwardSignature),
-                tables.Signatures.GetResultTypeSpec(identitySignature)),
-            Is.True);
-        var (identityParamFirst, identityParamCount)
-            = tables.Signatures.GetParamRange(identitySignature);
-        var (forwardParamFirst, forwardParamCount)
-            = tables.Signatures.GetParamRange(forwardSignature);
-        Assert.That(forwardParamCount, Is.EqualTo(identityParamCount));
-        for (var parameter = 0; parameter < forwardParamCount; parameter++)
-        {
-            Assert.That(tables.TypeSpecs.AreEquivalentTypeSpecRefs(
-                    tables.Parameters.GetTypeSpec(forwardParamFirst
-                        + parameter),
-                    tables.Parameters.GetTypeSpec(identityParamFirst
-                        + parameter)),
-                Is.True);
-            Assert.That(tables.Parameters.GetMode(forwardParamFirst
-                    + parameter),
-                Is.EqualTo(tables.Parameters.GetMode(identityParamFirst
-                    + parameter)));
-        }
+        AssertIdentityForwarder("Box.Forward", "Box.Identity", false);
+        AssertIdentityForwarder("Box.ForwardInstance",
+            "Box.IdentityInstance", true);
 
         var reference = TrRmExecutableCompiler.CreateStandardReference(
             new TrRmStandardArtifactInput(C1M1Construction2SchemaIdentity,
                 artifact),
             "ClassIdentityForwarder", [], ["BoxKey"]);
         var consumer = Compilation.CreateLibrary(SyntaxTree.Parse("""
-            int32 Use() { return Box.Forward(7); }
+            int32 UseStatic() { return Box.Forward(7); }
+            int32 UseInstance(Box value) {
+                return value.ForwardInstance(7);
+            }
             """), reference);
         Assert.That(consumer.HasErrors, Is.False,
             string.Join(Environment.NewLine, consumer.Diagnostics));
+
+        void AssertIdentityForwarder(string forwardKey, string identityKey,
+            bool hasReceiver)
+        {
+            Assert.That(tables.Exports.TryGetDefinitionForKey(1, identityKey,
+                out var identityDefinition), Is.True);
+            Assert.That(tables.Exports.TryGetDefinitionForKey(1, forwardKey,
+                out var forwardDefinition), Is.True);
+            var identityMethodRow
+                = checked((int)(identityDefinition & 0x00FF_FFFF));
+            var forwardMethodRow
+                = checked((int)(forwardDefinition & 0x00FF_FFFF));
+            Assert.That(tables.Methods.GetOwnerType(forwardMethodRow),
+                Is.EqualTo(tables.Methods.GetOwnerType(identityMethodRow)));
+            var forwardBodyRow
+                = tables.Methods.GetBodyRow(forwardMethodRow);
+            Assert.That(forwardBodyRow, Is.GreaterThan(0));
+            tables.Bodies.ValidateSelectedImplementation(forwardBodyRow,
+                tables.Contracts.Count);
+            var body = tables.Bodies.GetRow(forwardBodyRow);
+            Assert.That(body.Length, Is.EqualTo(8));
+            Assert.That(body[0], Is.EqualTo(0x05));
+            Assert.That(body[1], Is.Zero);
+            Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(body[2..]),
+                Is.Zero);
+            Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(body[4..]),
+                Is.EqualTo(identityDefinition));
+
+            var identitySignature
+                = tables.Methods.GetSignature(identityMethodRow);
+            var forwardSignature
+                = tables.Methods.GetSignature(forwardMethodRow);
+            var identityReceiver
+                = tables.Signatures.GetReceiverTypeSpec(identitySignature);
+            var forwardReceiver
+                = tables.Signatures.GetReceiverTypeSpec(forwardSignature);
+            Assert.That(forwardReceiver, Is.EqualTo(identityReceiver));
+            Assert.That(forwardReceiver != 0, Is.EqualTo(hasReceiver));
+            Assert.That(tables.TypeSpecs.AreEquivalentTypeSpecRefs(
+                    tables.Signatures.GetResultTypeSpec(forwardSignature),
+                    tables.Signatures.GetResultTypeSpec(identitySignature)),
+                Is.True);
+            var (identityParamFirst, identityParamCount)
+                = tables.Signatures.GetParamRange(identitySignature);
+            var (forwardParamFirst, forwardParamCount)
+                = tables.Signatures.GetParamRange(forwardSignature);
+            Assert.That(forwardParamCount, Is.EqualTo(identityParamCount));
+            for (var parameter = 0; parameter < forwardParamCount; parameter++)
+            {
+                Assert.That(tables.TypeSpecs.AreEquivalentTypeSpecRefs(
+                        tables.Parameters.GetTypeSpec(forwardParamFirst
+                            + parameter),
+                        tables.Parameters.GetTypeSpec(identityParamFirst
+                            + parameter)),
+                    Is.True);
+                Assert.That(tables.Parameters.GetMode(forwardParamFirst
+                        + parameter),
+                    Is.EqualTo(tables.Parameters.GetMode(identityParamFirst
+                        + parameter)));
+            }
+        }
     }
 
     [Test]

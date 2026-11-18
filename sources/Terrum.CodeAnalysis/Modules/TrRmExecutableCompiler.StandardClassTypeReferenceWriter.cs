@@ -907,15 +907,15 @@ public static partial class TrRmExecutableCompiler
                                 out directFieldWriteIndex);
                     var identityForwarderTargetFunctionIndex = -1;
                     var isSupportedIdentityForwarder
-                        = methodFunction.IsStatic
-                            && TryGetC1M1Construction2IdentityForwarder(
-                                methodFunction, program.Functions,
-                                out identityForwarderTargetFunctionIndex);
+                        = TryGetC1M1Construction2IdentityForwarder(
+                            methodFunction, program.Functions,
+                            out identityForwarderTargetFunctionIndex);
                     if ((!methodFunction.IsStatic
                             && !isSupportedNoOpInstanceMethod
                             && !isSupportedDirectReturnInstanceMethod
                             && !isSupportedDirectFieldReadInstanceMethod
-                            && !isSupportedDirectFieldWriteInstanceMethod)
+                            && !isSupportedDirectFieldWriteInstanceMethod
+                            && !isSupportedIdentityForwarder)
                         || methodFunction.IsClassConstructor
                         || methodFunction.IsConstructor
                         || methodFunction.IsExternal
@@ -977,7 +977,8 @@ public static partial class TrRmExecutableCompiler
                         {
                             if (!isSupportedDirectReturnInstanceMethod
                                 && !isSupportedDirectFieldReadInstanceMethod
-                                && !isSupportedDirectFieldWriteInstanceMethod)
+                                && !isSupportedDirectFieldWriteInstanceMethod
+                                && !isSupportedIdentityForwarder)
                             {
                                 throw Unsupported(
                                     "The bounded Construction-2 instance method producer supports only unit, direct scalar-parameter or direct scalar-field results and direct scalar-field writes.");
@@ -2201,8 +2202,10 @@ public static partial class TrRmExecutableCompiler
         out int targetFunctionIndex)
     {
         targetFunctionIndex = -1;
-        if (!function.IsStatic || function.ReturnType == PrimitiveType.Void
-            || function.ParameterCount != function.Variables.Length)
+        if (function.ReturnType == PrimitiveType.Void
+            || function.ParameterCount != function.Variables.Length
+            || (!function.IsStatic && (function.ParameterCount == 0
+                || function.Variables[0].IsMutable)))
         {
             return false;
         }
@@ -2223,7 +2226,7 @@ public static partial class TrRmExecutableCompiler
         }
 
         var target = functions[returnedCall.Function];
-        if (!target.IsStatic || target.IsExternal
+        if (target.IsStatic != function.IsStatic || target.IsExternal
             || target.IsClassConstructor || target.IsConstructor
             || target.IsCleanup || target.IsOperator
             || target.ModuleImport is not null
