@@ -911,10 +911,10 @@ public static partial class TrRmExecutableCompiler
             [entryState], code, schema: schema);
     }
 
-    private static byte[] EncodeImportedGenericMethodUnitCallBody(
+    private static byte[] EncodeImportedGenericMethodForwardingBody(
         BoundFunction function, BoundGenericMethodDefinition definition,
-        BoundProgram proofProgram, BoundCall genericCall,
-        BoundGenericMethodImport importedTarget,
+        BoundProgram proofProgram, BoundCall genericCall, int resultVariable,
+        bool isUnitCall, BoundGenericMethodImport importedTarget,
         IReadOnlyDictionary<BoundGenericMethodImport, uint>
             importedGenericMethodTargetTokens,
         Dictionary<PrimitiveType, uint> formalTypeSpecRows,
@@ -928,20 +928,22 @@ public static partial class TrRmExecutableCompiler
             ?? importedTarget;
         var typeArguments
             = genericCall.ImportedGenericMethodTypeArguments;
-        if (function.ReturnType != PrimitiveType.Void
-            || function.ParameterCount != 0
-            || !function.Variables.IsEmpty
-            || genericCall.Type != PrimitiveType.Void
-            || genericCall.GenericMethodCall is not null
-            || !genericCall.Arguments.IsEmpty
+        if (genericCall.GenericMethodCall is not null
+            || function.ParameterCount > 8
+            || (resultVariable < 0
+                ? function.Variables.Length != function.ParameterCount
+                : resultVariable < function.ParameterCount
+                    || resultVariable
+                        != function.Variables.Length - 1)
+            || function.Body.Statements.Any(
+                static statement => statement is BoundTryFinally)
             || importedTarget.Signature.Owner is not null
             || !importedTarget.Signature.IsStatic
             || importedTarget.Signature.IsMutable
             || !importedTarget.Signature.ConstantFormals.IsDefaultOrEmpty
-            || expectedTarget.ProofFunction.ParameterCount != 0
-            || !expectedTarget.ProofFunction.Variables.IsEmpty
-            || expectedTarget.ProofFunction.ReturnType
-                != PrimitiveType.Void
+            || expectedTarget.ProofFunction.ParameterCount > 8
+            || expectedTarget.ProofFunction.Variables.Length
+                < expectedTarget.ProofFunction.ParameterCount
             || expectedTarget.ProofFunction.DoesNotReturn
             || expectedTarget.ProofFunction.RequiresUnsafeCaller
                 != expectedTarget.Signature.RequiresUnsafeCaller
@@ -958,7 +960,7 @@ public static partial class TrRmExecutableCompiler
                 importedTarget, out var targetToken))
         {
             throw Unsupported(
-                $"Generic MethodDef '{definition.Name}' has an imported GenericCall outside the zero-parameter unit-returning subset.");
+                $"Generic MethodDef '{definition.Name}' has an imported GenericCall outside the direct forwarding subset.");
         }
 
         var target = proofProgram.Functions[genericCall.Function];
@@ -967,25 +969,59 @@ public static partial class TrRmExecutableCompiler
             || !target.ImportedGenericMethodTypeArguments
                 .SequenceEqual(typeArguments)
             || !target.IsStatic || target.DeclaringStruct is not null
-            || target.ParameterCount != 0
-            || target.ReturnType != PrimitiveType.Void
-            || target.DoesNotReturn)
+            || target.ParameterCount != genericCall.Arguments.Length
+            || target.ParameterCount
+                != expectedTarget.ProofFunction.ParameterCount
+            || target.Variables.Length < target.ParameterCount
+            || target.ParameterCount > 8
+            || target.DoesNotReturn
+            || genericCall.Type != target.ReturnType
+            || function.ReturnType != target.ReturnType
+            || ((target.ReturnType == PrimitiveType.Void) != isUnitCall)
+            || (resultVariable < 0
+                ? function.Variables.Length != function.ParameterCount
+                : resultVariable < function.ParameterCount
+                    || resultVariable
+                        != function.Variables.Length - 1))
         {
             throw Unsupported(
                 $"Generic MethodDef '{definition.Name}' does not retain the imported target specialization.");
         }
 
+        var targetDefinition = new BoundGenericMethodDefinition(
+            -1, expectedTarget.Signature.Name,
+            expectedTarget.Signature.IsPublic,
+            expectedTarget.Signature.RequiresUnsafeCaller,
+            genericCall.Function, -1, default, expectedTarget.Formals,
+            proofProgram) {
+            FormalTypeOwnerOrdinal
+                = expectedTarget.FormalTypeOwnerOrdinal,
+            IsStatic = expectedTarget.Signature.IsStatic,
+            FormalOrder = expectedTarget.Signature.FormalOrder,
+            RuntimeParameterCount
+                = expectedTarget.ProofFunction.ParameterCount,
+        };
         var typeArgumentsInBody
             = new TrRmRegisterBodyGenericCallArgument[typeArguments.Length];
         for (var ordinal = 0; ordinal < typeArguments.Length; ordinal++)
         {
             var actual = typeArguments[ordinal];
             var formal = expectedTarget.Formals[ordinal];
-            if (formal.Ordinal != ordinal || formal.TypeDefault is not null
+            var formalSignature
+                = expectedTarget.Signature.Formals[ordinal];
+            if (formal.Ordinal != ordinal
+                || formalSignature.Ordinal != ordinal
+                || formal.TypeDefault is not null
+                || formalSignature.HasTypeDefault
+                || !formalSignature
+                    .DefaultTypeParameterDependencies.IsEmpty
                 || !formal.Requirements.IsDefaultOrEmpty
+                || !formalSignature.Requirements.IsDefaultOrEmpty
                 || formal.InterfaceConstraints.IsDefault
                 || !formal.InterfaceConstraints.IsEmpty
-                || formal.OwnershipDomain is < 1 or > 3
+                || formalSignature.InterfaceConstraints.IsDefault
+                || !formalSignature.InterfaceConstraints.IsEmpty
+                || formal.OwnershipDomain != 1
                 || formal.NullabilityDomain is < 1 or > 2)
             {
                 throw Unsupported(
@@ -1025,7 +1061,8 @@ public static partial class TrRmExecutableCompiler
                 }
             }
             else if (formal.OwnershipDomain == 2
-                || formal.RequiresWritable)
+                || formal.RequiresWritable
+                || !formal.InterfaceConstraints.IsEmpty)
             {
                 throw Unsupported(
                     "An imported G1 GenericCall has a TypeActual outside its supported domain.");
@@ -1040,6 +1077,170 @@ public static partial class TrRmExecutableCompiler
                         allowSpanType: true, nominalTypes: nominalTypes));
         }
 
+        var typeMap = new TrRmRegisterBodyTokenMapBuilder();
+        uint GetBodyTypeToken(PrimitiveType type)
+        {
+            if (type == PrimitiveType.Void)
+            {
+                throw Unsupported(
+                    "G1 imported GenericCall forwarding has a unit value Home.");
+            }
+
+            return CreateStandardBodyTypeMapToken(
+                GenericMethodTypeSpecRef(type, formalTypeSpecRows,
+                    builtInTypeSpecRows, typeSpecRows, spanTypes,
+                    proofProgram.CheckedReferenceTypes,
+                    definition.DefinitionOrdinal, definition,
+                    allowSpanType: true, nominalTypes: nominalTypes));
+        }
+
+        var parameterHomeIndexes = new int[function.Variables.Length];
+        Array.Fill(parameterHomeIndexes, -1);
+        var homeRows = new List<byte[]>(function.ParameterCount + 1);
+        for (var parameter = 0; parameter < function.ParameterCount;
+            parameter++)
+        {
+            var parameterType = function.Variables[parameter].Type;
+            if (parameterType == PrimitiveType.Void)
+            {
+                continue;
+            }
+
+            var home = new byte[8];
+            home[0] = 2;
+            BinaryPrimitives.WriteUInt16LittleEndian(home.AsSpan(2),
+                typeMap.GetIndex(GetBodyTypeToken(parameterType)));
+            BinaryPrimitives.WriteUInt16LittleEndian(home.AsSpan(4),
+                checked((ushort)parameter));
+            parameterHomeIndexes[parameter] = homeRows.Count;
+            homeRows.Add(home);
+        }
+
+        var inputs = new TrRmRegisterBodyCallInput[
+            target.ParameterCount];
+        var assignedParameters = new bool[inputs.Length];
+        for (var argumentIndex = 0;
+            argumentIndex < genericCall.Arguments.Length; argumentIndex++)
+        {
+            var argument = genericCall.Arguments[argumentIndex];
+            var formalIndex
+                = genericCall.ArgumentParameterIndices.IsDefault
+                    ? argumentIndex
+                    : genericCall.ArgumentParameterIndices[argumentIndex];
+            if ((uint)formalIndex >= (uint)inputs.Length
+                || assignedParameters[formalIndex])
+            {
+                throw Unsupported(
+                    $"Generic MethodDef '{definition.Name}' has a duplicate or invalid imported call input.");
+            }
+
+            var targetParameterType
+                = expectedTarget.ProofFunction.Variables[formalIndex].Type;
+            if (argument.Type == PrimitiveType.Void)
+            {
+                if (!GenericMethodTypeMatchesAfterSubstitution(
+                        targetParameterType, argument.Type,
+                        targetDefinition, definition, typeArguments, 0)
+                    || target.Variables[formalIndex].Type
+                        != PrimitiveType.Void
+                    || !IsSupportedGenericUnitArgument(argument, function)
+                    || target.Variables[formalIndex].IsMutable
+                    || target.Variables[formalIndex].IsOut
+                    || target.Variables[formalIndex].IsInit
+                    || target.Variables[formalIndex].IsImplicitRef)
+                {
+                    throw Unsupported(
+                        $"Generic MethodDef '{definition.Name}' has an imported unit input outside the exact None-selector subset.");
+                }
+
+                assignedParameters[formalIndex] = true;
+                inputs[formalIndex] = new TrRmRegisterBodyCallInput(
+                    0, 0, 0);
+                continue;
+            }
+
+            if (argument is not BoundRead read
+                || (uint)read.Variable >= (uint)function.ParameterCount
+                || function.Variables[read.Variable].Type != argument.Type
+                || !GenericMethodTypeMatchesAfterSubstitution(
+                    targetParameterType, argument.Type,
+                    targetDefinition, definition, typeArguments, 0)
+                || target.Variables[formalIndex].Type != argument.Type
+                || target.Variables[formalIndex].IsMutable
+                || target.Variables[formalIndex].IsOut
+                || target.Variables[formalIndex].IsInit
+                || target.Variables[formalIndex].IsImplicitRef
+                || function.Variables[read.Variable].IsMutable
+                || function.Variables[read.Variable].IsOut
+                || function.Variables[read.Variable].IsInit
+                || function.Variables[read.Variable].IsImplicitRef
+                || parameterHomeIndexes[read.Variable] < 0)
+            {
+                throw Unsupported(
+                    $"Generic MethodDef '{definition.Name}' has an imported call input outside the Copy parameter-Home subset.");
+            }
+
+            var callerFormalOrdinal = -1;
+            for (var callerOrdinal = 0;
+                callerOrdinal < definition.Formals.Length;
+                callerOrdinal++)
+            {
+                if (definition.Formals[callerOrdinal].PlaceholderType
+                    == argument.Type)
+                {
+                    callerFormalOrdinal = callerOrdinal;
+                    break;
+                }
+            }
+            if (callerFormalOrdinal >= 0
+                && definition.Formals[callerFormalOrdinal]
+                    .OwnershipDomain != 1)
+            {
+                throw Unsupported(
+                    $"Generic MethodDef '{definition.Name}' reads a non-Copy caller formal in an imported call.");
+            }
+
+            assignedParameters[formalIndex] = true;
+            inputs[formalIndex] = new TrRmRegisterBodyCallInput(
+                2, 1, checked((ushort)parameterHomeIndexes[read.Variable]));
+        }
+        if (assignedParameters.Any(static assigned => !assigned))
+        {
+            throw Unsupported(
+                $"Generic MethodDef '{definition.Name}' has an incomplete imported call input list.");
+        }
+        if (!GenericMethodTypeMatchesAfterSubstitution(
+                expectedTarget.ProofFunction.ReturnType,
+                function.ReturnType, targetDefinition, definition,
+                typeArguments, 0))
+        {
+            throw Unsupported(
+                $"Generic MethodDef '{definition.Name}' has an imported result outside the checked direct-forwarding subset.");
+        }
+
+        ushort resultHome = 0;
+        if (!isUnitCall)
+        {
+            if (homeRows.Count >= ushort.MaxValue)
+            {
+                throw Unsupported(
+                    "A G1 imported GenericCall result exceeds its bounded Home map.");
+            }
+
+            resultHome = checked((ushort)homeRows.Count);
+            var result = new byte[8];
+            result[0] = 3;
+            result[1] = 1;
+            BinaryPrimitives.WriteUInt16LittleEndian(result.AsSpan(2),
+                typeMap.GetIndex(GetBodyTypeToken(function.ReturnType)));
+            homeRows.Add(result);
+        }
+
+        var homeMap = new byte[checked(homeRows.Count * 8)];
+        for (var homeIndex = 0; homeIndex < homeRows.Count; homeIndex++)
+        {
+            homeRows[homeIndex].CopyTo(homeMap, homeIndex * 8);
+        }
         var methodMap = new TrRmRegisterBodyTokenMapBuilder();
         var methodMapIndex = methodMap.GetIndex(targetToken);
         var records = new List<ReadOnlyMemory<byte>>(3);
@@ -1050,13 +1251,18 @@ public static partial class TrRmExecutableCompiler
             1, 0, methodMapIndex, 0, 0, typeArgumentsInBody, schema));
         var callSiteIndex = checked((ushort)records.Count);
         records.Add(TrRmRegisterBodyRecordWriter.EncodeCallSite(
-            4, 0, 1, 0, [], [], schema: schema));
-        var code = new byte[] {
-            0x90,
-            checked((byte)callSiteIndex),
-        };
-        return TrRmRegisterBodyWriter.Encode(default,
-            default, methodMap.Encode(), default, default,
+            4, isUnitCall ? (byte)0 : (byte)2, 1, resultHome,
+            inputs, [], schema: schema));
+        var code = isUnitCall
+            ? new byte[] { 0x90, checked((byte)callSiteIndex) }
+            : [
+                0x90,
+                checked((byte)callSiteIndex),
+                0xB8,
+                checked((byte)resultHome),
+            ];
+        return TrRmRegisterBodyWriter.Encode(homeMap, typeMap.Encode(),
+            methodMap.Encode(), default, default,
             [new TrRmRegisterBodyBlock(0, checked((uint)code.Length), 0)],
             records, code, schema: schema);
     }
@@ -1106,11 +1312,12 @@ public static partial class TrRmExecutableCompiler
                     $"Generic MethodDef '{definition.Name}' has an imported GenericCall outside the unit-returning subset.");
             }
 
-            return EncodeImportedGenericMethodUnitCallBody(function,
+            return EncodeImportedGenericMethodForwardingBody(function,
                 definition, definition.ProofProgram, genericCall,
-                importedGenericMethod, importedGenericMethodTargetTokens,
-                formalTypeSpecRows, builtInTypeSpecRows, typeSpecRows,
-                spanTypes, schema, nominalTypes);
+                resultVariable, isUnitCall, importedGenericMethod,
+                importedGenericMethodTargetTokens, formalTypeSpecRows,
+                builtInTypeSpecRows, typeSpecRows, spanTypes, schema,
+                nominalTypes);
         }
 
         if (genericCall.GenericMethodCall
@@ -1581,7 +1788,7 @@ public static partial class TrRmExecutableCompiler
                 if (!formal.Requirements.IsEmpty
                     || formal.InterfaceConstraints.IsDefault
                     || !formal.InterfaceConstraints.IsEmpty
-                    || formal.OwnershipDomain is < 1 or > 3
+                    || formal.OwnershipDomain != 1
                     || formal.NullabilityDomain is < 1 or > 2)
                 {
                     throw Unsupported(
@@ -2587,12 +2794,15 @@ public static partial class TrRmExecutableCompiler
             if (!signature.IsPublic || !signature.IsStatic
                 || signature.IsMutable || signature.Owner is not null
                 || !signature.ConstantFormals.IsDefaultOrEmpty
+                || signature.FormalOrder.IsDefault
+                || signature.FormalOrder.Length
+                    != expected.Formals.Length
                 || !proofFunction.IsStatic
                 || proofFunction.DeclaringStruct is not null
                 || string.IsNullOrEmpty(proofFunction.Name)
-                || proofFunction.ParameterCount != 0
-                || !proofFunction.Variables.IsEmpty
-                || proofFunction.ReturnType != PrimitiveType.Void
+                || proofFunction.ParameterCount > 8
+                || proofFunction.Variables.Length
+                    < proofFunction.ParameterCount
                 || proofFunction.DoesNotReturn
                 || proofFunction.RequiresUnsafeCaller
                     != signature.RequiresUnsafeCaller
@@ -2603,7 +2813,7 @@ public static partial class TrRmExecutableCompiler
                 || expected.Formals.Length > 8)
             {
                 throw Unsupported(
-                    $"Imported generic MethodDef '{proofFunction.Name}' is outside the zero-parameter type-formal subset.");
+                    $"Imported generic MethodDef '{proofFunction.Name}' is outside the bounded type-only Copy-value subset.");
             }
 
             var moduleRefRow = GetModuleRefRow(imported.Import);
@@ -2627,14 +2837,23 @@ public static partial class TrRmExecutableCompiler
                 0x1C00_0000u | checked((uint)importRow));
 
             var genericFirst = checked(genericParameterRows.Count + 1);
+            var formalGenericParamRows
+                = new Dictionary<PrimitiveType, int>(
+                    expected.Formals.Length);
             for (var formalOrdinal = 0;
                 formalOrdinal < expected.Formals.Length; formalOrdinal++)
             {
                 var formal = expected.Formals[formalOrdinal];
                 var formalSignature
                     = signature.Formals[formalOrdinal];
+                var formalSlot = signature.FormalOrder[formalOrdinal];
                 if (formal.Ordinal != formalOrdinal
                     || formalSignature.Ordinal != formalOrdinal
+                    || formalSlot.Ordinal != formalOrdinal
+                    || formalSlot.Kind
+                        != BoundGenericMethodFormalKind.Type
+                    || formalSlot.TypeFormalOrdinal != formalOrdinal
+                    || formalSlot.ConstantFormalOrdinal != -1
                     || !StringComparer.Ordinal.Equals(formal.Name,
                         formalSignature.Name)
                     || formal.OwnershipDomain
@@ -2647,6 +2866,8 @@ public static partial class TrRmExecutableCompiler
                         != formalSignature.RequiresBlittable
                     || formal.TypeDefault is not null
                     || formalSignature.HasTypeDefault
+                    || !formalSignature
+                        .DefaultTypeParameterDependencies.IsEmpty
                     || !formal.Requirements.IsDefaultOrEmpty
                     || !formalSignature.Requirements.IsDefaultOrEmpty
                     || formal.InterfaceConstraints.IsDefault
@@ -2687,14 +2908,97 @@ public static partial class TrRmExecutableCompiler
                     constraintFirst, constraintCount, 1,
                     formal.OwnershipDomain, formal.NullabilityDomain,
                     0, 0));
+                if (!formalGenericParamRows.TryAdd(
+                        formal.PlaceholderType, genericParamRow))
+                {
+                    throw Unsupported(
+                        $"Imported generic MethodDef '{proofFunction.Name}' has duplicate formal type identities.");
+                }
             }
 
-            var resultTypeSpecRef = GetBuiltInTypeSpecRef(
-                PrimitiveType.Void, builtInTypeSpecRows, typeSpecRows);
+            var formalTypeSpecRows
+                = new Dictionary<PrimitiveType, uint>(
+                    expected.Formals.Length);
+            uint GetExpectedTypeSpecRef(PrimitiveType type)
+            {
+                if (formalTypeSpecRows.TryGetValue(type,
+                        out var formalTypeSpecRef))
+                {
+                    return formalTypeSpecRef;
+                }
+
+                if (!formalGenericParamRows.TryGetValue(type,
+                        out var genericParamRow))
+                {
+                    return GetBuiltInTypeSpecRef(type,
+                        builtInTypeSpecRows, typeSpecRows);
+                }
+
+                formalTypeSpecRef = checked(
+                    (uint)typeSpecRows.Count + 1);
+                typeSpecRows.Add(TrRmTypeSpecTableWriter.Reference(0x04,
+                    checked((uint)genericParamRow)));
+                formalTypeSpecRows.Add(type, formalTypeSpecRef);
+                return formalTypeSpecRef;
+            }
+
+            var firstParameter = proofFunction.ParameterCount == 0 ? 0
+                : checked(parameterCount + 1);
+            for (var parameterOrdinal = 0;
+                parameterOrdinal < proofFunction.ParameterCount;
+                parameterOrdinal++)
+            {
+                var parameter
+                    = proofFunction.Variables[parameterOrdinal];
+                if (parameter.IsMutable || parameter.IsOut || parameter.IsInit
+                    || parameter.IsImplicitRef)
+                {
+                    throw Unsupported(
+                        $"Imported generic MethodDef '{proofFunction.Name}' has a non-value parameter mode.");
+                }
+
+                var parameterTypeSpecRef
+                    = GetExpectedTypeSpecRef(parameter.Type);
+                AppendUInt32(parameterBytes,
+                    checked((uint)(signatureCount + importedOrdinal + 1)));
+                AppendUInt32(parameterBytes,
+                    checked((uint)parameterOrdinal));
+                AppendUInt32(parameterBytes, parameterTypeSpecRef);
+                parameterBytes.Add(0);
+                parameterBytes.Add(0);
+                parameterBytes.Add(0);
+                parameterBytes.Add(0);
+
+                if (schema.UsesMethodParameterLabels())
+                {
+                    if (methodParameterLabelCount == 0xFF_FFFF)
+                    {
+                        throw Unsupported(
+                            "The G1L1 MethodParameterLabel table exceeds its row limit.");
+                    }
+
+                    var parameterNameStringRow = names.Count + 1;
+                    names.Add((parameter.Name, 1));
+                    AppendUInt32(methodParameterLabelBytes,
+                        checked((uint)methodRow));
+                    AppendUInt32(methodParameterLabelBytes,
+                        checked((uint)parameterOrdinal));
+                    AppendUInt32(methodParameterLabelBytes,
+                        checked((uint)parameterNameStringRow));
+                    methodParameterLabelCount
+                        = checked(methodParameterLabelCount + 1);
+                }
+            }
+            parameterCount = checked(parameterCount
+                + proofFunction.ParameterCount);
+
+            var resultTypeSpecRef
+                = GetExpectedTypeSpecRef(proofFunction.ReturnType);
             AppendUInt32(signatureBytes, resultTypeSpecRef);
             AppendUInt32(signatureBytes, 0);
-            AppendUInt32(signatureBytes, 0);
-            AppendUInt32(signatureBytes, 0);
+            AppendUInt32(signatureBytes, checked((uint)firstParameter));
+            AppendUInt32(signatureBytes,
+                checked((uint)proofFunction.ParameterCount));
             AppendUInt32(signatureBytes, checked((uint)genericFirst));
             AppendUInt32(signatureBytes,
                 checked((uint)expected.Formals.Length));
@@ -2785,6 +3089,10 @@ public static partial class TrRmExecutableCompiler
                 : TrRmVariableTableWriter.EncodeBlobs(contractRows));
         SetSection(sections, 0x001C, checked((uint)finalImportCount),
             importBytes);
+        SetSection(sections, 0x0066,
+            checked((uint)methodParameterLabelCount),
+            methodParameterLabelBytes.Count == 0 ? []
+                : [.. methodParameterLabelBytes]);
 
         sections.Sort(static (left, right) =>
             left.Kind.CompareTo(right.Kind));
