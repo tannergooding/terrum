@@ -922,6 +922,9 @@ public static partial class TrRmExecutableCompiler
                     var directInt32Unary
                         = TryGetC1M1Construction2DirectInt32Unary(
                             methodFunction);
+                    var directBooleanComparison
+                        = TryGetC1M1Construction2DirectBooleanComparison(
+                            methodFunction);
                     var callInt32Binary
                         = TryGetC1M1Construction2DirectCallInt32Binary(
                             methodFunction, program.Functions);
@@ -940,6 +943,7 @@ public static partial class TrRmExecutableCompiler
                             && !isSupportedUnitIdentityForwarder
                             && directInt32Binary is null
                             && directInt32Unary is null
+                            && directBooleanComparison is null
                             && callInt32Binary is null
                             && !localCopyReturn
                             && !localInt32BinaryReturn)
@@ -995,7 +999,7 @@ public static partial class TrRmExecutableCompiler
                             && methodFunction.IsInternal))
                     {
                         throw Unsupported(
-                            "The bounded Construction-2 class method producer supports effect-free scalar static methods, exact identity forwarders, readonly instance int32 unary/binary/comparison and same-class call-binary methods, scalar local-copy/binary returns, empty unit instance methods, readonly instance methods returning one scalar value parameter and direct scalar field reads/writes.");
+                            "The bounded Construction-2 class method producer supports effect-free scalar static methods, exact identity forwarders, readonly instance int32/Boolean operations and same-class call-binary methods, scalar local-copy/binary returns, empty unit instance methods, readonly instance methods returning one scalar value parameter and direct scalar field reads/writes.");
                     }
 
                     if (methodFunction.ReturnType != PrimitiveType.Void)
@@ -1009,12 +1013,13 @@ public static partial class TrRmExecutableCompiler
                                 && !isSupportedUnitIdentityForwarder
                                 && directInt32Binary is null
                                 && directInt32Unary is null
+                                && directBooleanComparison is null
                                 && callInt32Binary is null
                                 && !localCopyReturn
                                 && !localInt32BinaryReturn)
                             {
                                 throw Unsupported(
-                                    "The bounded Construction-2 instance method producer supports only unit, direct scalar-parameter, direct int32 unary/binary/comparison, same-class call-binary, scalar local-copy/binary returns or direct scalar-field results and direct scalar-field writes.");
+                                    "The bounded Construction-2 instance method producer supports only unit, direct scalar-parameter, direct int32/Boolean operations, same-class call-binary, scalar local-copy/binary returns or direct scalar-field results and direct scalar-field writes.");
                             }
                         }
 
@@ -1161,6 +1166,14 @@ public static partial class TrRmExecutableCompiler
                             = EncodeC1M1Construction2DirectInt32BinaryBody(
                                 methodFunction, directInt32Binary,
                                 frozenScalarValueBuilder,
+                                Construction2ValueTypeSpecReference,
+                                contractRows.Count, schema);
+                    }
+                    else if (directBooleanComparison is not null)
+                    {
+                        encodedBody
+                            = EncodeC1M1Construction2DirectBooleanComparisonBody(
+                                methodFunction, directBooleanComparison,
                                 Construction2ValueTypeSpecReference,
                                 contractRows.Count, schema);
                     }
@@ -2025,11 +2038,11 @@ public static partial class TrRmExecutableCompiler
         byte[] homeMap = [];
         byte[] constantMap = [];
         byte[] code;
-        (int LeftHome, int RightHome) SetInt32BinaryHomes(
-            int leftVariable, int rightVariable)
+        (int LeftHome, int RightHome) SetScalarBinaryHomes(
+            PrimitiveType type, int leftVariable, int rightVariable)
         {
             var typeToken = CreateStandardBodyTypeMapToken(
-                typeSpecReferenceFor(PrimitiveType.Int32));
+                typeSpecReferenceFor(type));
             var homeCount = leftVariable == rightVariable ? 1 : 2;
             typeTokens = new uint[homeCount];
             homeMap = new byte[homeCount * 8];
@@ -2142,7 +2155,8 @@ public static partial class TrRmExecutableCompiler
                 or TokenKind.Caret)
         {
             var (leftHome, rightHome)
-                = SetInt32BinaryHomes(left.Variable, right.Variable);
+                = SetScalarBinaryHomes(PrimitiveType.Int32,
+                    left.Variable, right.Variable);
             var operation = binary.Operator switch
             {
                 TokenKind.Ampersand => (byte)0x01,
@@ -2191,8 +2205,9 @@ public static partial class TrRmExecutableCompiler
             && arithmetic.Operator is TokenKind.Plus or TokenKind.Minus
                 or TokenKind.Star or TokenKind.Slash or TokenKind.Percent)
         {
-            var (leftHome, rightHome) = SetInt32BinaryHomes(
-                arithmeticLeft.Variable, arithmeticRight.Variable);
+            var (leftHome, rightHome) = SetScalarBinaryHomes(
+                PrimitiveType.Int32, arithmeticLeft.Variable,
+                arithmeticRight.Variable);
             var operation = (arithmetic.Operator,
                 arithmetic.OverflowBehavior) switch
             {
@@ -2255,10 +2270,35 @@ public static partial class TrRmExecutableCompiler
             && IsC1M1Construction2Int32ComparisonOperator(
                 comparison.Operator))
         {
-            var (leftHome, rightHome) = SetInt32BinaryHomes(
-                comparisonLeft.Variable, comparisonRight.Variable);
+            var (leftHome, rightHome) = SetScalarBinaryHomes(
+                PrimitiveType.Int32, comparisonLeft.Variable,
+                comparisonRight.Variable);
             code = EncodeC1M1Construction2Int32ComparisonCode(
                 leftHome, rightHome, comparison.Operator);
+        }
+        else if (returnValue is BoundBinary booleanComparison
+            && function.ReturnType == PrimitiveType.Bool
+            && booleanComparison.Type == PrimitiveType.Bool
+            && booleanComparison.Left is BoundRead booleanLeft
+            && booleanComparison.Right is BoundRead booleanRight
+            && booleanLeft.Type == PrimitiveType.Bool
+            && booleanRight.Type == PrimitiveType.Bool
+            && (uint)booleanLeft.Variable
+                < (uint)function.ParameterCount
+            && (uint)booleanRight.Variable
+                < (uint)function.ParameterCount
+            && function.Variables[booleanLeft.Variable].Type
+                == PrimitiveType.Bool
+            && function.Variables[booleanRight.Variable].Type
+                == PrimitiveType.Bool
+            && booleanComparison.Operator is (TokenKind.EqualsEquals
+                or TokenKind.BangEquals))
+        {
+            var (leftHome, rightHome) = SetScalarBinaryHomes(
+                PrimitiveType.Bool, booleanLeft.Variable,
+                booleanRight.Variable);
+            code = EncodeC1M1Construction2BooleanEqualityCode(
+                leftHome, rightHome, booleanComparison.Operator);
         }
         else if (returnValue is BoundBinary constantBinary
             && function.ReturnType == PrimitiveType.Int32
@@ -2380,7 +2420,7 @@ public static partial class TrRmExecutableCompiler
         else
         {
             throw Unsupported(
-                "The bounded Construction-2 static register Body supports direct value-formal, int32 unary/binary/comparison, or fixed-scalar returns.");
+                "The bounded Construction-2 static register Body supports direct value-formal, int32 unary/binary/comparison, Boolean equality/inequality, or fixed-scalar returns.");
         }
 
         var maps = TrRmRegisterBodyMapBuilder.Create(typeTokens, []);
@@ -2489,6 +2529,44 @@ public static partial class TrRmExecutableCompiler
         code.Add(GetC1M1Construction2Int32ComparisonPredicate(operation));
         code.Add((byte)predicatePayload);
         code.Add((byte)(predicatePayload >> 8));
+        code.Add(0x17);
+        code.Add(0);
+        return code.ToArray();
+
+        void AppendHomeLoad(byte destination, int homeIndex)
+        {
+            code.Add(0xD5);
+            code.Add(destination);
+            code.Add(checked((byte)homeIndex));
+            code.Add(checked((byte)(homeIndex >> 8)));
+        }
+    }
+
+    private static byte[] EncodeC1M1Construction2BooleanEqualityCode(
+        int leftHome, int rightHome, TokenKind operation)
+    {
+        if (leftHome < 0 || leftHome > ushort.MaxValue
+            || rightHome < 0 || rightHome > ushort.MaxValue
+            || operation is not (TokenKind.EqualsEquals
+                or TokenKind.BangEquals))
+        {
+            throw new InvalidDataException(
+                "A Boolean comparison Body has an invalid Home or operator.");
+        }
+
+        var code = new List<byte>(14);
+        AppendHomeLoad(0, leftHome);
+        AppendHomeLoad(1, rightHome);
+        const byte destinationRegister = 0;
+        const byte leftRegister = 0;
+        const byte rightRegister = 1;
+        var payload = (ushort)(destinationRegister | (0x0F << 4)
+            | (leftRegister << 8) | (rightRegister << 12));
+        code.Add(0xC2);
+        code.Add(operation == TokenKind.EqualsEquals
+            ? (byte)0x01 : (byte)0x02);
+        code.Add((byte)payload);
+        code.Add((byte)(payload >> 8));
         code.Add(0x17);
         code.Add(0);
         return code.ToArray();
@@ -2726,6 +2804,74 @@ public static partial class TrRmExecutableCompiler
             instructions.Add(checked((byte)homeIndex));
             instructions.Add(checked((byte)(homeIndex >> 8)));
         }
+    }
+
+    private static byte[] EncodeC1M1Construction2DirectBooleanComparisonBody(
+        BoundFunction function, BoundBinary binary,
+        Func<PrimitiveType, uint> typeSpecReferenceFor, int contractCount,
+        TrRmArtifactSchema schema)
+    {
+        if (function.IsStatic || function.ReturnType != PrimitiveType.Bool
+            || function.ParameterCount != 3
+            || function.Variables.Length != function.ParameterCount
+            || function.Variables[0].IsMutable
+            || function.Variables[1].Type != PrimitiveType.Bool
+            || function.Variables[2].Type != PrimitiveType.Bool
+            || function.Variables.Skip(1).Any(static variable =>
+                variable.IsMutable || variable.IsOut || variable.IsInit
+                || variable.IsImplicitRef
+                || variable.IsInitializationLocal)
+            || binary.Type != PrimitiveType.Bool
+            || binary.Operator is not (TokenKind.EqualsEquals
+                or TokenKind.BangEquals)
+            || binary.Left is not BoundRead left
+            || binary.Right is not BoundRead right
+            || left.Type != PrimitiveType.Bool
+            || right.Type != PrimitiveType.Bool
+            || left.Variable is not (1 or 2)
+            || right.Variable is not (1 or 2))
+        {
+            throw Unsupported(
+                "A Construction-2 instance Boolean comparison Body requires two direct Boolean value formals and a readonly receiver.");
+        }
+
+        var typeTokens = new uint[function.ParameterCount];
+        var homeMap = new byte[checked(function.ParameterCount * 8)];
+        for (var parameter = 0;
+            parameter < function.ParameterCount; parameter++)
+        {
+            typeTokens[parameter] = CreateStandardBodyTypeMapToken(
+                typeSpecReferenceFor(function.Variables[parameter].Type));
+        }
+
+        var maps = TrRmRegisterBodyMapBuilder.Create(typeTokens, []);
+        for (var parameter = 0;
+            parameter < function.ParameterCount; parameter++)
+        {
+            var offset = parameter * 8;
+            homeMap[offset] = parameter == 0 ? (byte)1 : (byte)2;
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                homeMap.AsSpan(offset + 2, 2),
+                maps.GetTypeMapIndex(typeTokens[parameter]));
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                homeMap.AsSpan(offset + 4, 2),
+                parameter == 0 ? (ushort)0
+                    : checked((ushort)(parameter - 1)));
+        }
+
+        var code = EncodeC1M1Construction2BooleanEqualityCode(
+            left.Variable, right.Variable, binary.Operator);
+        ReadOnlyMemory<byte>[] records = [
+            new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 },
+        ];
+        return TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
+            default, default, default,
+            [new TrRmRegisterBodyBlock(0,
+                checked((uint)code.Length), 0)],
+            records, code, contractCount: contractCount,
+            schema: schema,
+            generalPredicateGraphsInitializationReferenceBodies
+                : schema.UsesGeneralPredicateGraphs());
     }
 
     private static byte[] EncodeC1M1Construction2DirectInt32UnaryBody(
@@ -3799,6 +3945,78 @@ public static partial class TrRmExecutableCompiler
 
         targetFunctionIndex = call.Function;
         return true;
+    }
+
+    private static BoundBinary?
+        TryGetC1M1Construction2DirectBooleanComparison(
+        BoundFunction function)
+    {
+        if (function.IsStatic || function.ReturnType != PrimitiveType.Bool
+            || function.ParameterCount != 3
+            || function.ParameterCount != function.Variables.Length
+            || function.Variables[0].IsMutable
+            || function.Variables[1].Type != PrimitiveType.Bool
+            || function.Variables[2].Type != PrimitiveType.Bool
+            || function.Variables.Skip(1).Any(static variable =>
+                variable.IsMutable || variable.IsOut || variable.IsInit
+                || variable.IsImplicitRef
+                || variable.IsInitializationLocal))
+        {
+            return null;
+        }
+
+        BoundBinary? returnedBinary = null;
+        var isSupported = true;
+        Visit(function.Body);
+        if (!isSupported || returnedBinary is null
+            || returnedBinary.Type != PrimitiveType.Bool
+            || returnedBinary.Operator is not (TokenKind.EqualsEquals
+                or TokenKind.BangEquals)
+            || returnedBinary.Left is not BoundRead left
+            || returnedBinary.Right is not BoundRead right
+            || left.Type != PrimitiveType.Bool
+            || right.Type != PrimitiveType.Bool
+            || left.Variable is not (1 or 2)
+            || right.Variable is not (1 or 2))
+        {
+            return null;
+        }
+
+        return returnedBinary;
+
+        void Visit(BoundBlock block)
+        {
+            if (!block.RetiredManagedLocals.IsEmpty)
+            {
+                isSupported = false;
+                return;
+            }
+
+            foreach (var statement in block.Statements)
+            {
+                if (!isSupported || returnedBinary is not null)
+                {
+                    isSupported = false;
+                    return;
+                }
+
+                if (statement is BoundBlock nested)
+                {
+                    Visit(nested);
+                }
+                else if (statement is BoundReturn {
+                    Value: BoundBinary binary
+                })
+                {
+                    returnedBinary = binary;
+                }
+                else
+                {
+                    isSupported = false;
+                    return;
+                }
+            }
+        }
     }
 
     private static BoundBinary? TryGetC1M1Construction2DirectInt32Binary(

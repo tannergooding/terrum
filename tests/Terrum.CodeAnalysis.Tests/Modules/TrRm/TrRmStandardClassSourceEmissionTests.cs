@@ -802,6 +802,12 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 public bool NotEqual(int32 left, int32 right) {
                     return left != right;
                 }
+                public static bool Same(bool left, bool right) {
+                    return left == right;
+                }
+                public bool Different(bool left, bool right) {
+                    return left != right;
+                }
                 public int32 SumAfterCall(int32 left, int32 right) {
                     return Sum(left, right) + right;
                 }
@@ -972,6 +978,14 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name == "NotEqual"));
+        var same = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Same"));
+        var different = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Different"));
         var staticXorThroughLocal = members.Single(static node =>
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
@@ -1089,6 +1103,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                             greaterOrEqual.Span, "Box.GreaterOrEqual"),
                         new TrRmSourceClassMemberExport(0, notEqual.Span,
                             "Box.NotEqual"),
+                        new TrRmSourceClassMemberExport(0, same.Span,
+                            "Box.Same"),
+                        new TrRmSourceClassMemberExport(0, different.Span,
+                            "Box.Different"),
                         new TrRmSourceClassMemberExport(0,
                             staticXorThroughLocal.Span,
                             "Box.StaticXorThroughLocal"),
@@ -1615,6 +1633,42 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             2, 1, 0);
         AssertComparisonBody("Box.NotEqual", "NotEqual", 13, 3, 0, 1);
         Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.Same", out var sameDefinition), Is.True);
+        var sameMethodRow
+            = checked((int)(sameDefinition & 0x00FF_FFFF));
+        var sameBodyRow = tables.Methods.GetBodyRow(sameMethodRow);
+        Assert.That(sameBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(sameBodyRow,
+            tables.Contracts.Count);
+        var sameBody = tables.Bodies.GetRegisterBody(sameBodyRow,
+            tables.Contracts.Count);
+        Assert.That(sameBody.HomeCount, Is.EqualTo(2));
+        Assert.That(sameBody.GetBlockCode(0).ToArray(), Is.EqualTo(
+            new byte[] {
+                0xD5, 0, 0, 0,
+                0xD5, 1, 1, 0,
+                0xC2, 0x01, 0xF0, 0x10,
+                0x17, 0,
+            }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.Different", out var differentDefinition), Is.True);
+        var differentMethodRow
+            = checked((int)(differentDefinition & 0x00FF_FFFF));
+        var differentBodyRow = tables.Methods.GetBodyRow(differentMethodRow);
+        Assert.That(differentBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(differentBodyRow,
+            tables.Contracts.Count);
+        var differentBody = tables.Bodies.GetRegisterBody(differentBodyRow,
+            tables.Contracts.Count);
+        Assert.That(differentBody.HomeCount, Is.EqualTo(3));
+        Assert.That(differentBody.GetBlockCode(0).ToArray(), Is.EqualTo(
+            new byte[] {
+                0xD5, 0, 1, 0,
+                0xD5, 1, 2, 0,
+                0xC2, 0x02, 0xF0, 0x10,
+                0x17, 0,
+            }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
             "Box.StaticXorThroughLocal",
             out var staticXorThroughLocalDefinition), Is.True);
         var staticXorThroughLocalMethodRow = checked((int)(
@@ -2002,6 +2056,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             bool UseGreaterOrEqual() { return Box.GreaterOrEqual(1, 2); }
             bool UseNotEqual(Box value) {
                 return value.NotEqual(1, 2);
+            }
+            bool UseSame() { return Box.Same(true, false); }
+            bool UseDifferent(Box value) {
+                return value.Different(true, false);
             }
             int32 UseStaticXorThroughLocal() {
                 return Box.StaticXorThroughLocal(1, 2);
