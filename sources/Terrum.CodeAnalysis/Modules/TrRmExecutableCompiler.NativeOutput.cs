@@ -203,17 +203,53 @@ public static partial class TrRmExecutableCompiler
                 }
             }
         }
+
         var conditionalCount = 0;
         var loopCount = 0;
+        var logicalConditionCount = 0L;
+        var logicalConditionVisits = 0L;
+        void CountShortCircuitConditions(BoundExpression condition)
+        {
+            var pendingExpressions = new Stack<BoundExpression>();
+            pendingExpressions.Push(condition);
+            while (pendingExpressions.TryPop(out var expression))
+            {
+                if (++logicalConditionVisits
+                    > SemanticVerifier.MaximumAnalysisVisits)
+                {
+                    throw Unsupported(
+                        "A direct NativeOutput Body exceeds the supported conditional-expression analysis limit.");
+                }
+
+                while (expression is BoundUnsafeExpression unsafeExpression)
+                {
+                    expression = unsafeExpression.Expression;
+                }
+
+                if (expression is BoundBinary {
+                        Type: PrimitiveType.Bool,
+                        Operator: TokenKind.AmpersandAmpersand
+                            or TokenKind.PipePipe,
+                    } logical)
+                {
+                    logicalConditionCount++;
+                    pendingExpressions.Push(logical.Right);
+                    pendingExpressions.Push(logical.Left);
+                }
+            }
+        }
+
         if (!BoundTreeTraversal.VisitStatements(caller.Body, statement =>
             {
-                if (statement is BoundIf)
+                if (statement is BoundIf branch)
                 {
                     conditionalCount++;
+                    CountShortCircuitConditions(branch.Condition);
                 }
-                else if (statement is BoundWhile)
+                else if (statement is BoundWhile loop)
                 {
                     loopCount++;
+                    CountShortCircuitConditions(loop.Condition);
                 }
             }))
         {
@@ -225,9 +261,10 @@ public static partial class TrRmExecutableCompiler
             + nativeParameterHomeCount;
         var expectedRecordCount = 1L + outputCalls.Count
             + outputHomeCount + nativeParameterHomeCount
-            + conditionalCount + loopCount;
+            + conditionalCount + loopCount + logicalConditionCount;
         var expectedBlockCount = 1L
-            + (3L * (conditionalCount + loopCount));
+            + (3L * (conditionalCount + loopCount))
+            + logicalConditionCount;
         if (minimumHomeCount > 65_536 || expectedRecordCount > 65_536
             || expectedBlockCount > 65_536)
         {
@@ -1585,6 +1622,37 @@ public static partial class TrRmExecutableCompiler
             while (condition is BoundUnsafeExpression unsafeExpression)
             {
                 condition = unsafeExpression.Expression;
+            }
+
+            if (condition is BoundBinary {
+                    Type: PrimitiveType.Bool,
+                    Operator: TokenKind.AmpersandAmpersand
+                        or TokenKind.PipePipe,
+                } logical)
+            {
+                if (logical.Left.Type != PrimitiveType.Bool
+                    || logical.Right.Type != PrimitiveType.Bool)
+                {
+                    throw Unsupported(
+                        "A direct NativeOutput short-circuit condition requires Boolean operands.");
+                }
+
+                var rightBlock = CreateBlock();
+                if (logical.Operator == TokenKind.AmpersandAmpersand)
+                {
+                    AppendConditionalFlow(logical.Left, rightBlock,
+                        falseBlock);
+                }
+                else
+                {
+                    AppendConditionalFlow(logical.Left, trueBlock,
+                        rightBlock);
+                }
+
+                SelectBlock(rightBlock);
+                AppendConditionalFlow(logical.Right, trueBlock,
+                    falseBlock);
+                return;
             }
 
             if (TryGetDirectNativeOutputBooleanHomeCondition(condition,
