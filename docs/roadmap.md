@@ -122,7 +122,7 @@ prerequisite has already been met.
    unary/binary/comparison operations, fixed constants, one-local copies and
    local-fed binary operations. It also emits empty unit instance methods,
    direct scalar FieldRead/FieldWrite descriptors, exact same-class identity
-   forwarders and a same-class readonly CallSite followed by an int32
+   forwarders and same-class static/readonly CallSites followed by an int32
    binary/comparison. Unit-before-value, field, operation, call-forwarding,
    local and identity-forwarder regressions remain unverified under the active
    hold. Ordinary

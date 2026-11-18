@@ -739,6 +739,14 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 public static int32 Add(int32 left, int32 right) {
                     return left + right;
                 }
+                public static int32 StaticAddAfterCall(
+                    int32 left, int32 right) {
+                    return Add(left, right) + right;
+                }
+                public int32 InstanceStaticAddAfterCall(
+                    int32 left, int32 right) {
+                    return Add(left, right) + right;
+                }
                 public static int32 Subtract(int32 left, int32 right) {
                     return right - left;
                 }
@@ -849,6 +857,15 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name == "Add"));
+        var staticAddAfterCall = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "StaticAddAfterCall"));
+        var instanceStaticAddAfterCall = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name
+                    == "InstanceStaticAddAfterCall"));
         var subtract = members.Single(static node =>
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
@@ -955,6 +972,12 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                             "Box.StaticXor"),
                         new TrRmSourceClassMemberExport(0, add.Span,
                             "Box.Add"),
+                        new TrRmSourceClassMemberExport(0,
+                            staticAddAfterCall.Span,
+                            "Box.StaticAddAfterCall"),
+                        new TrRmSourceClassMemberExport(0,
+                            instanceStaticAddAfterCall.Span,
+                            "Box.InstanceStaticAddAfterCall"),
                         new TrRmSourceClassMemberExport(0, subtract.Span,
                             "Box.Subtract"),
                         new TrRmSourceClassMemberExport(0, multiply.Span,
@@ -1498,6 +1521,65 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 0x17, 0,
             }));
         Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.StaticAddAfterCall", out var staticAddAfterCallDefinition),
+            Is.True);
+        var staticAddAfterCallMethodRow = checked((int)(
+            staticAddAfterCallDefinition & 0x00FF_FFFF));
+        var staticAddAfterCallBodyRow
+            = tables.Methods.GetBodyRow(staticAddAfterCallMethodRow);
+        Assert.That(staticAddAfterCallBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(
+            staticAddAfterCallBodyRow, tables.Contracts.Count);
+        var staticAddAfterCallBody = tables.Bodies.GetRegisterBody(
+            staticAddAfterCallBodyRow, tables.Contracts.Count);
+        Assert.That(staticAddAfterCallBody.HomeCount, Is.EqualTo(2));
+        Assert.That(staticAddAfterCallBody.MethodCount, Is.EqualTo(1));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                staticAddAfterCallBody.MethodMap),
+            Is.EqualTo(addDefinition));
+        var staticAddAfterCallFunction = program.Functions.Single(
+            static function => function.Name == "StaticAddAfterCall");
+        var staticAddAfterCallBinary = (BoundBinary)((BoundReturn)
+            staticAddAfterCallFunction.Body.Statements.Single()).Value!;
+        Assert.That(staticAddAfterCallBody.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xE0, 0, 1, 0,
+                0xD5, 1, 1, 0,
+                0xC0, GetArithmeticControl(staticAddAfterCallBinary),
+                0xF0, 0x10,
+                0x17, 0,
+            }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.InstanceStaticAddAfterCall",
+            out var instanceStaticAddAfterCallDefinition), Is.True);
+        var instanceStaticAddAfterCallMethodRow = checked((int)(
+            instanceStaticAddAfterCallDefinition & 0x00FF_FFFF));
+        var instanceStaticAddAfterCallBodyRow
+            = tables.Methods.GetBodyRow(instanceStaticAddAfterCallMethodRow);
+        Assert.That(instanceStaticAddAfterCallBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(
+            instanceStaticAddAfterCallBodyRow, tables.Contracts.Count);
+        var instanceStaticAddAfterCallBody = tables.Bodies.GetRegisterBody(
+            instanceStaticAddAfterCallBodyRow, tables.Contracts.Count);
+        Assert.That(instanceStaticAddAfterCallBody.HomeCount, Is.EqualTo(3));
+        Assert.That(instanceStaticAddAfterCallBody.MethodCount,
+            Is.EqualTo(1));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                instanceStaticAddAfterCallBody.MethodMap),
+            Is.EqualTo(addDefinition));
+        var instanceStaticAddAfterCallFunction = program.Functions.Single(
+            static function => function.Name == "InstanceStaticAddAfterCall");
+        var instanceStaticAddAfterCallBinary = (BoundBinary)((BoundReturn)
+            instanceStaticAddAfterCallFunction.Body.Statements.Single()).Value!;
+        Assert.That(instanceStaticAddAfterCallBody.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xE0, 0, 1, 0,
+                0xD5, 1, 2, 0,
+                0xC0, GetArithmeticControl(instanceStaticAddAfterCallBinary),
+                0xF0, 0x10,
+                0x17, 0,
+            }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
             "Box.CopyThroughLocal", out var copyDefinition), Is.True);
         var copyMethodRow
             = checked((int)(copyDefinition & 0x00FF_FFFF));
@@ -1558,6 +1640,12 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             }
             int32 UseStaticXor() { return Box.StaticXor(4, 5); }
             int32 UseAdd() { return Box.Add(4, 5); }
+            int32 UseStaticAddAfterCall() {
+                return Box.StaticAddAfterCall(2, 3);
+            }
+            int32 UseInstanceStaticAddAfterCall(Box value) {
+                return value.InstanceStaticAddAfterCall(2, 3);
+            }
             int32 UseSubtract() { return Box.Subtract(7, 3); }
             int32 UseMultiply() { return Box.Multiply(4, 5); }
             int32 UseDouble() { return Box.Double(4); }

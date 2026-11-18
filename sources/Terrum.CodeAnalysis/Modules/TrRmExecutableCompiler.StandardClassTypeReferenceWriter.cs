@@ -1310,6 +1310,7 @@ public static partial class TrRmExecutableCompiler
                         body = EncodeC1M1Construction2CallInt32BinaryBody(
                             method.Function, callBinaryExpression,
                             targetMethodDefRow,
+                            program.Functions[targetCall.Function],
                             Construction2ValueTypeSpecReference,
                             contractRows.Count, schema);
                     }
@@ -2640,15 +2641,18 @@ public static partial class TrRmExecutableCompiler
 
     private static byte[] EncodeC1M1Construction2CallInt32BinaryBody(
         BoundFunction function, BoundBinary binary, int targetMethodDefRow,
+        BoundFunction targetFunction,
         Func<PrimitiveType, uint> typeSpecReferenceFor, int contractCount,
         TrRmArtifactSchema schema)
     {
+        var callerReceiverCount = function.IsStatic ? 0 : 1;
+        var targetReceiverCount = targetFunction.IsStatic ? 0 : 1;
         if (targetMethodDefRow <= 0 || targetMethodDefRow > 0xFF_FFFF
-            || function.IsStatic
-            || function.ParameterCount != 3
+            || function.ParameterCount != callerReceiverCount + 2
             || function.Variables.Length != function.ParameterCount
-            || function.Variables[0].IsMutable
-            || function.Variables.Skip(1).Any(static variable =>
+            || (!function.IsStatic && function.Variables[0].IsMutable)
+            || function.Variables.Skip(callerReceiverCount).Any(
+                static variable =>
                 variable.Type != PrimitiveType.Int32 || variable.IsMutable
                 || variable.IsOut || variable.IsInit
                 || variable.IsImplicitRef
@@ -2656,16 +2660,63 @@ public static partial class TrRmExecutableCompiler
             || binary.Left is not BoundCall call
             || binary.Right is not BoundRead right
             || right.Type != PrimitiveType.Int32
-            || right.Variable is not (1 or 2)
+            || right.Variable < callerReceiverCount
+            || right.Variable >= function.ParameterCount
             || call.Type != PrimitiveType.Int32
-            || call.Arguments.Length != function.ParameterCount
+            || call.Arguments.Length != targetFunction.ParameterCount
             || !call.DefaultedArguments.IsDefaultOrEmpty
             || call.InterfaceCallIdentity is not null
             || call.GenericMethodCall is not null
-            || call.ImportedGenericMethodCall is not null)
+            || call.ImportedGenericMethodCall is not null
+            || targetFunction.IsExternal || targetFunction.IsClassConstructor
+            || targetFunction.IsConstructor || targetFunction.IsCleanup
+            || targetFunction.IsOperator
+            || targetFunction.ModuleImport is not null
+            || targetFunction.GenericMethodInstantiation is not null
+            || !StringComparer.Ordinal.Equals(function.DeclaringStruct,
+                targetFunction.DeclaringStruct)
+            || targetFunction.ReturnType != PrimitiveType.Int32
+            || targetFunction.ParameterCount != targetReceiverCount + 2
+            || targetFunction.Variables.Length
+                < targetFunction.ParameterCount
+            || (!targetFunction.IsStatic
+                && targetFunction.Variables[0].IsMutable)
+            || targetFunction.Variables.Skip(targetReceiverCount)
+                .Take(2).Any(static variable =>
+                    variable.Type != PrimitiveType.Int32
+                    || variable.IsMutable || variable.IsOut
+                    || variable.IsInit || variable.IsImplicitRef
+                    || variable.IsInitializationLocal))
         {
             throw Unsupported(
-                "A Construction-2 instance call-binary Body requires a direct readonly instance int32 call and one direct int32 parameter read.");
+                "A Construction-2 call-binary Body requires a same-class direct int32 call and one direct int32 parameter read.");
+        }
+
+        for (var parameter = 0;
+            parameter < targetFunction.ParameterCount; parameter++)
+        {
+            var sourceVariable = targetFunction.IsStatic
+                ? callerReceiverCount + parameter
+                : parameter == 0 ? 0
+                    : callerReceiverCount + parameter - 1;
+            var source = function.Variables[sourceVariable];
+            var targetParameter = targetFunction.Variables[parameter];
+            if (call.ParameterIndex(parameter) != parameter
+                || call.ImplicitReferenceTemporary(parameter) != -1
+                || call.Arguments[parameter] is not BoundRead argument
+                || argument.Variable != sourceVariable
+                || argument.Type != source.Type
+                || source.Type != targetParameter.Type
+                || source.IsMutable != targetParameter.IsMutable
+                || source.IsOut != targetParameter.IsOut
+                || source.IsInit != targetParameter.IsInit
+                || source.IsImplicitRef != targetParameter.IsImplicitRef
+                || source.IsInitializationLocal
+                    != targetParameter.IsInitializationLocal)
+            {
+                throw Unsupported(
+                    "A Construction-2 call-binary Body requires direct argument Homes matching the selected MethodSig.");
+            }
         }
 
         var isComparison
@@ -2703,21 +2754,33 @@ public static partial class TrRmExecutableCompiler
             parameter < function.ParameterCount; parameter++)
         {
             var offset = parameter * 8;
-            homeMap[offset] = parameter == 0 ? (byte)1 : (byte)2;
+            var role = !function.IsStatic && parameter == 0
+                ? (byte)1 : (byte)2;
+            homeMap[offset] = role;
             BinaryPrimitives.WriteUInt16LittleEndian(
                 homeMap.AsSpan(offset + 2, 2),
                 maps.GetTypeMapIndex(typeTokens[parameter]));
             BinaryPrimitives.WriteUInt16LittleEndian(
                 homeMap.AsSpan(offset + 4, 2),
-                parameter == 0 ? (ushort)0
-                    : checked((ushort)(parameter - 1)));
+                role == 2
+                    ? checked((ushort)(parameter - callerReceiverCount))
+                    : (ushort)0);
         }
 
-        var callInputs = new TrRmRegisterBodyCallInput[] {
-            new(2, 3, 0),
-            new(2, 1, 1),
-            new(2, 1, 2),
-        };
+        var callInputs = new TrRmRegisterBodyCallInput[
+            targetFunction.ParameterCount];
+        for (var parameter = 0;
+            parameter < callInputs.Length; parameter++)
+        {
+            var sourceHome = targetFunction.IsStatic
+                ? callerReceiverCount + parameter
+                : parameter == 0 ? 0
+                    : callerReceiverCount + parameter - 1;
+            var sourceUse = !targetFunction.IsStatic && parameter == 0
+                ? (byte)3 : (byte)1;
+            callInputs[parameter] = new(2, sourceUse,
+                checked((ushort)sourceHome));
+        }
         var callSite = TrRmRegisterBodyRecordWriter.EncodeCallSite(1, 1,
             maps.GetMethodMapIndex(targetMethodToken), 0, callInputs, [],
             schema: schema);
@@ -3617,10 +3680,12 @@ public static partial class TrRmExecutableCompiler
         TryGetC1M1Construction2DirectCallInt32Binary(
         BoundFunction function, ImmutableArray<BoundFunction> functions)
     {
-        if (function.IsStatic || function.ParameterCount != 3
+        var callerReceiverCount = function.IsStatic ? 0 : 1;
+        if (function.ParameterCount != callerReceiverCount + 2
             || function.ParameterCount != function.Variables.Length
-            || function.Variables[0].IsMutable
-            || function.Variables.Skip(1).Any(static variable =>
+            || (!function.IsStatic && function.Variables[0].IsMutable)
+            || function.Variables.Skip(callerReceiverCount).Any(
+                static variable =>
                 variable.Type != PrimitiveType.Int32 || variable.IsMutable
                 || variable.IsOut || variable.IsInit
                 || variable.IsImplicitRef
@@ -3636,9 +3701,9 @@ public static partial class TrRmExecutableCompiler
             || returnedBinary.Left is not BoundCall call
             || returnedBinary.Right is not BoundRead right
             || right.Type != PrimitiveType.Int32
-            || right.Variable is not (1 or 2)
+            || right.Variable < callerReceiverCount
+            || right.Variable >= function.ParameterCount
             || call.Type != PrimitiveType.Int32
-            || call.Arguments.Length != function.ParameterCount
             || !call.DefaultedArguments.IsDefaultOrEmpty
             || call.InterfaceCallIdentity is not null
             || call.GenericMethodCall is not null
@@ -3665,7 +3730,8 @@ public static partial class TrRmExecutableCompiler
         }
 
         var target = functions[call.Function];
-        if (target.IsStatic || target.IsExternal
+        var targetReceiverCount = target.IsStatic ? 0 : 1;
+        if (target.IsExternal
             || target.IsClassConstructor || target.IsConstructor
             || target.IsCleanup || target.IsOperator
             || target.ModuleImport is not null
@@ -3673,21 +3739,26 @@ public static partial class TrRmExecutableCompiler
             || !StringComparer.Ordinal.Equals(target.DeclaringStruct,
                 function.DeclaringStruct)
             || target.ReturnType != PrimitiveType.Int32
-            || target.ParameterCount != function.ParameterCount
+            || target.ParameterCount != targetReceiverCount + 2
+            || call.Arguments.Length != target.ParameterCount
             || target.Variables.Length < target.ParameterCount)
         {
             return null;
         }
 
         for (var parameter = 0;
-            parameter < function.ParameterCount; parameter++)
+            parameter < target.ParameterCount; parameter++)
         {
-            var source = function.Variables[parameter];
+            var sourceVariable = target.IsStatic
+                ? callerReceiverCount + parameter
+                : parameter == 0 ? 0
+                    : callerReceiverCount + parameter - 1;
+            var source = function.Variables[sourceVariable];
             var targetParameter = target.Variables[parameter];
             if (call.ParameterIndex(parameter) != parameter
                 || call.ImplicitReferenceTemporary(parameter) != -1
                 || call.Arguments[parameter] is not BoundRead argument
-                || argument.Variable != parameter
+                || argument.Variable != sourceVariable
                 || argument.Type != source.Type
                 || source.Type != targetParameter.Type
                 || source.IsMutable != targetParameter.IsMutable
