@@ -1692,11 +1692,33 @@ public static partial class TrRmExecutableCompiler
                     or TokenKind.LessEquals
                     or TokenKind.Greater
                     or TokenKind.GreaterEquals
-                && binary.Right is BoundConstant zero
-                && zero.Type == binary.Left.Type
-                && zero.Bits.Low == 0 && zero.Bits.High == 0
                 && PrimitiveTypeFacts.IsInteger(binary.Left.Type))
             {
+                var right = binary.Right;
+                while (right is BoundUnsafeExpression rightUnsafe)
+                {
+                    right = rightUnsafe.Expression;
+                }
+
+                var rightIsZero = right is BoundConstant zero
+                    && zero.Type == binary.Left.Type
+                    && zero.Bits.Low == 0 && zero.Bits.High == 0;
+                var rightRegister = 14;
+                var rightHome = -1;
+                if (right is BoundRead rightRead
+                    && rightRead.Type == binary.Left.Type
+                    && homeByVariable.TryGetValue(rightRead.Variable,
+                        out var resolvedRightHome))
+                {
+                    rightHome = resolvedRightHome;
+                    rightRegister = 1;
+                }
+                else if (!rightIsZero)
+                {
+                    throw Unsupported(
+                        "A direct NativeOutput comparison requires a zero constant or a matching Home on the right.");
+                }
+
                 var left = binary.Left;
                 while (left is BoundUnsafeExpression leftUnsafe)
                 {
@@ -1719,10 +1741,15 @@ public static partial class TrRmExecutableCompiler
                         "A direct NativeOutput comparison has no call-result or Home input.");
                 }
 
+                if (rightHome >= 0)
+                {
+                    AppendLoadHome(1, rightHome);
+                }
+
                 currentCode.Add(0xC2);
                 currentCode.Add(0);
-                const ushort comparePayload
-                    = (ushort)((15 << 4) | (14 << 12));
+                var comparePayload
+                    = (ushort)((15 << 4) | (rightRegister << 12));
                 currentCode.Add(unchecked((byte)comparePayload));
                 currentCode.Add((byte)(comparePayload >> 8));
                 currentCode.Add(0xC3);

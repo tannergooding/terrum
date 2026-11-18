@@ -2647,6 +2647,10 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
     [TestCase("trrm/1-draft-foreign-invocation-contracts-1", false,
         "repeat || enterLoop", 2, 4, 2, 3)]
     [TestCase("trrm/1-draft-foreign-invocation-contracts-1", false,
+        "repeat && value < limit", 4, 3, 2, 3)]
+    [TestCase("trrm/1-draft-foreign-invocation-contracts-1", false,
+        "repeat || value < limit", 2, 4, 2, 3)]
+    [TestCase("trrm/1-draft-foreign-invocation-contracts-1", false,
         "!(repeat && enterLoop)", 4, 2, 3, 2)]
     [TestCase("trrm/1-draft-foreign-invocation-contracts-1", false,
         "!(repeat || enterLoop)", 3, 4, 3, 2)]
@@ -2654,6 +2658,10 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
         "repeat && enterLoop", 4, 3, 2, 3)]
     [TestCase("trrm/1-draft-foreign-invocation-storage-addresses-1", true,
         "repeat || enterLoop", 2, 4, 2, 3)]
+    [TestCase("trrm/1-draft-foreign-invocation-storage-addresses-1", true,
+        "repeat && value < limit", 4, 3, 2, 3)]
+    [TestCase("trrm/1-draft-foreign-invocation-storage-addresses-1", true,
+        "repeat || value < limit", 2, 4, 2, 3)]
     [TestCase("trrm/1-draft-foreign-invocation-storage-addresses-1", true,
         "!(repeat && enterLoop)", 4, 2, 3, 2)]
     [TestCase("trrm/1-draft-foreign-invocation-storage-addresses-1", true,
@@ -2672,7 +2680,8 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                     When: Terrum.Interop.NativeOutputCondition.NonZero)]
                 write ptr<int64> ticks);
 
-            public int32 Probe(bool repeat, bool enterLoop) {
+            public int32 Probe(
+                bool repeat, bool enterLoop, int32 value, int32 limit) {
                 while (OP) {
                     break;
                 }
@@ -2727,6 +2736,19 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
         Assert.That(body.GetBlockCode(2).ToArray(),
             Is.EqualTo(new byte[] { 0xE3, 0, 3, 0 }));
         Assert.That(body.GetBlockCode(3).Length, Is.GreaterThan(0));
+        if (loopCondition.Contains("value < limit",
+                StringComparison.Ordinal))
+        {
+            var comparisonCode = body.GetBlockCode(4);
+            Assert.That(comparisonCode.Length, Is.EqualTo(20));
+            Assert.That(comparisonCode[0], Is.EqualTo(0xD5));
+            Assert.That(comparisonCode[1], Is.Zero);
+            Assert.That(comparisonCode[4], Is.EqualTo(0xD5));
+            Assert.That(comparisonCode[5], Is.EqualTo(1));
+            Assert.That(comparisonCode[8], Is.EqualTo(0xC2));
+            Assert.That(comparisonCode[12], Is.EqualTo(0xC3));
+            Assert.That(comparisonCode[16], Is.EqualTo(0xE4));
+        }
 
         var loaded = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(schemaIdentity, artifact),
