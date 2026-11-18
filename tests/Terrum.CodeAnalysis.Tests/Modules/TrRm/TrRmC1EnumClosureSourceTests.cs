@@ -1219,6 +1219,14 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
             queryCompilation.Program!, "ClassLayoutConsumer",
             schemaIdentity, 1);
+        var wrongFieldProvider = RewriteFieldImportExportKey(
+            consumerArtifact, schemaIdentity, "field.box.value",
+            "field.box.prefix");
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    wrongFieldProvider), "ClassLayoutConsumer",
+                [providerInput]));
         var consumerTables = TrRmStructuralMetadataValidator
             .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
                 consumerArtifact, SchemaFor(schemaIdentity), null,
@@ -3235,6 +3243,90 @@ internal sealed class TrRmC1EnumClosureSourceTests
         _ = TrRmStructuralMetadataValidator
             .ValidateC1AndGetExecutionTables(
                 new TrRmArtifactIndex(result, schema));
+        return result;
+
+        static int GetTextEncoding(string text)
+            => text.Any(static character => character > 0x7F) ? 1 : 0;
+    }
+
+    private static byte[] RewriteFieldImportExportKey(byte[] artifact,
+        string schemaIdentity, string currentKey, string replacementKey)
+    {
+        var schema = SchemaFor(schemaIdentity);
+        var index = new TrRmArtifactIndex(artifact, schema);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                artifact, schema, null, usesNativePointerLoads: false,
+                standardSchemaIdentity: schemaIdentity));
+        var importRow = Enumerable.Range(1, tables.Imports.Count)
+            .Single(row =>
+                (tables.Imports.GetExpectedDefinitionForImportRow(row) >> 24)
+                    == 0x14
+                && StringComparer.Ordinal.Equals(
+                    tables.Imports.GetBindingForImportRow(row).ExportKey,
+                    currentKey));
+        if (!index.TryGetSection(0x0002, out var originalStringBytes,
+                out var originalStringCount)
+            || !index.TryGetSection(0x001C, out var originalImportBytes,
+                out var originalImportCount))
+        {
+            throw new InvalidDataException(
+                "The FieldDef Import fixture requires String and Import tables.");
+        }
+
+        var originalStrings = new TrRmStringTableReader(
+            originalStringBytes, originalStringCount);
+        var stringRows = new List<(string Text, int Encoding)>(
+            originalStrings.Count + 1);
+        var stringRowsByText = new Dictionary<string, int>(
+            StringComparer.Ordinal);
+        for (var row = 1; row <= originalStrings.Count; row++)
+        {
+            var text = originalStrings.DecodeNamespace(row);
+            stringRows.Add((text, GetTextEncoding(text)));
+            _ = stringRowsByText.TryAdd(text, row);
+        }
+
+        if (!stringRowsByText.TryGetValue(replacementKey,
+                out var replacementStringRow))
+        {
+            replacementStringRow = stringRows.Count + 1;
+            stringRows.Add((replacementKey, GetTextEncoding(replacementKey)));
+        }
+
+        var stringBytes = TrRmStringTableWriter.EncodeTextRows(stringRows);
+        var importBytes = originalImportBytes.ToArray();
+        System.Buffers.Binary.BinaryPrimitives
+            .WriteUInt32LittleEndian(importBytes.AsSpan(
+                checked((importRow - 1) * 12 + 4)),
+                checked((uint)replacementStringRow));
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var entry = 0; entry < index.SectionCount; entry++)
+        {
+            index.GetSection(entry, out var kind, out var flags,
+                out var section, out var recordCount);
+            if (kind == 0x0002)
+            {
+                sections.Add(new TrRmSection(kind, flags,
+                    checked((uint)stringRows.Count), stringBytes));
+            }
+            else if (kind == 0x001C)
+            {
+                sections.Add(new TrRmSection(kind, flags,
+                    checked((uint)originalImportCount), importBytes));
+            }
+            else
+            {
+                sections.Add(new TrRmSection(kind, flags,
+                    checked((uint)recordCount), section.ToArray()));
+            }
+        }
+
+        var result = TrRmArtifactWriter.Encode(sections, schema);
+        _ = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                result, schema, null, usesNativePointerLoads: false,
+                standardSchemaIdentity: schemaIdentity));
         return result;
 
         static int GetTextEncoding(string text)
