@@ -717,7 +717,11 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var schemaIdentity = s_schemaIdentities[0];
         var leafTree = SyntaxTree.Parse("""
             namespace Demo {
-                public struct Leaf { public int32 Id; }
+                public enum Shade : int8 { Dark = -1 }
+                public struct Leaf {
+                    public int32 Id;
+                    public Shade Kind;
+                }
             }
             """);
         var leafCompilation = Compilation.CreateLibrary(leafTree);
@@ -728,15 +732,23 @@ internal sealed class TrRmC1EnumClosureSourceTests
             "type.leaf") {
             FieldExports = [
                 new TrRmSourceFieldExport("Id", "field.leaf.id"),
+                new TrRmSourceFieldExport("Kind", "field.leaf.kind"),
             ],
         };
         var leafArtifact = TrRmExecutableCompiler.EmitStandard(
             leafProgram, "StructLeafProvider", schemaIdentity, 1,
-            [leafExport], [], [], []);
+            [leafExport], [], [], [
+                CreateExport(leafProgram, leafTree, 0, "Shade",
+                    ["type.shade"], "shade"),
+            ]);
         var leafInput = new TrRmStandardArtifactInput(schemaIdentity,
             leafArtifact);
         var leafReference = TrRmExecutableCompiler.CreateStandardReference(
-            leafInput, "StructLeafProvider", [], ["type.leaf"]);
+            leafInput, "StructLeafProvider", [],
+            ["type.leaf", "type.shade"], [
+                "field.leaf.id",
+                "field.leaf.kind",
+            ]);
 
         var middleTree = SyntaxTree.Parse("""
             namespace Demo {
@@ -791,9 +803,12 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var importedLeaf = middleReference.Structures.Single(
             static structure => structure.Name == "Demo.Leaf");
         Assert.That(importedLeaf.StandardTypeOrigin, Is.Not.Null);
+        Assert.That(BoundEnumTypes.IsType(importedLeaf.Fields.Single(
+            static field => field.Name == "Kind").Type), Is.True);
         Assert.That(importedLeaf.Fields.Single(
             static field => field.Name == "Id").StandardFieldOrigin,
             Is.Not.Null);
+        Assert.That(middleReference.EnumDefinitions, Has.Length.EqualTo(1));
 
         var consumerTree = SyntaxTree.Parse("""
             namespace Demo {
@@ -836,6 +851,16 @@ internal sealed class TrRmC1EnumClosureSourceTests
         Assert.That(reference.Structures.Any(
             static structure => structure.Name == "Demo.WrapperTwin"
                 && structure.StandardTypeOrigin is not null), Is.True);
+        var importedPacketLeaf = reference.Structures.Single(
+            static structure => structure.Name == "Demo.Leaf");
+        var importedShadeType = importedPacketLeaf.Fields.Single(
+            static field => field.Name == "Kind").Type;
+        Assert.That(BoundEnumTypes.IsType(importedShadeType), Is.True);
+        var importedShade = ((BoundEnumDeclarationIdentity.Standard)
+            reference.EnumDefinitions[
+                BoundEnumTypes.Index(importedShadeType)].Identity).Value;
+        Assert.That(importedShade.Declaration.Site.Snapshot.ModuleIdentity,
+            Is.EqualTo("StructLeafProvider"));
 
         var sourceFreeCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(string.Empty), reference);
@@ -866,11 +891,26 @@ internal sealed class TrRmC1EnumClosureSourceTests
         Assert.That(reloadedCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine,
                 reloadedCompilation.Diagnostics));
+        var reloadedLeaf = reloadedReference.Structures.Single(
+            static structure => structure.Name == "Demo.Leaf");
+        var reloadedShadeType = reloadedLeaf.Fields.Single(
+            static field => field.Name == "Kind").Type;
+        Assert.That(BoundEnumTypes.IsType(reloadedShadeType), Is.True);
+        Assert.That(((BoundEnumDeclarationIdentity.Standard)
+            reloadedReference.EnumDefinitions[
+                BoundEnumTypes.Index(reloadedShadeType)].Identity).Value
+            .Declaration.Site.DefinitionId,
+            Is.EqualTo(importedShade.Declaration.Site.DefinitionId));
 
         var relocatedLeafTree = SyntaxTree.Parse("""
             namespace Demo {
+                public enum Before : int8 { Zero = 0 }
+                public enum Shade : int8 { Dark = -1 }
                 public struct Padding { public int32 Value; }
-                public struct Leaf { public int32 Id; }
+                public struct Leaf {
+                    public int32 Id;
+                    public Shade Kind;
+                }
             }
             """);
         var relocatedLeafCompilation
@@ -884,7 +924,12 @@ internal sealed class TrRmC1EnumClosureSourceTests
             relocatedLeafProgram, "StructLeafProvider", schemaIdentity, 1, [
                 new TrRmSourceTypeExport("Demo", "Padding", "type.padding"),
                 leafExport,
-            ], [], [], []);
+            ], [], [], [
+                CreateExport(relocatedLeafProgram, relocatedLeafTree, 0,
+                    "Before", ["type.before"], "before"),
+                CreateExport(relocatedLeafProgram, relocatedLeafTree, 1,
+                    "Shade", ["type.shade"], "shade"),
+            ]);
         var relocatedLeafTables
             = TrRmStructuralMetadataValidator
                 .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
@@ -913,6 +958,16 @@ internal sealed class TrRmC1EnumClosureSourceTests
             Is.Not.EqualTo(originalLeafTypeDefinition));
         Assert.That(relocatedLeafFieldDefinition,
             Is.Not.EqualTo(originalLeafFieldDefinition));
+        var originalShadeDefinition
+            = originalLeafTables.Exports.GetExportsForModule(1)
+                .Single(static export =>
+                    export.ExportKey == "type.shade").Definition;
+        var relocatedShadeDefinition
+            = relocatedLeafTables.Exports.GetExportsForModule(1)
+                .Single(static export =>
+                    export.ExportKey == "type.shade").Definition;
+        Assert.That(relocatedShadeDefinition,
+            Is.Not.EqualTo(originalShadeDefinition));
 
         var relocatedLeafInput = new TrRmStandardArtifactInput(
             schemaIdentity, relocatedLeafArtifact);
@@ -928,6 +983,13 @@ internal sealed class TrRmC1EnumClosureSourceTests
             static field => field.Name == "Id")
             .StandardFieldOrigin!.DefinitionId,
             Is.EqualTo(relocatedLeafFieldDefinition));
+        var remappedShadeType = remappedLeaf.Fields.Single(
+            static field => field.Name == "Kind").Type;
+        Assert.That(((BoundEnumDeclarationIdentity.Standard)
+            relocatedReference.EnumDefinitions[
+                BoundEnumTypes.Index(remappedShadeType)].Identity).Value
+            .Declaration.Site.DefinitionId,
+            Is.EqualTo(relocatedShadeDefinition));
         var relocatedSourceFreeCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(string.Empty), relocatedReference);
         Assert.That(relocatedSourceFreeCompilation.HasErrors, Is.False,
@@ -950,10 +1012,22 @@ internal sealed class TrRmC1EnumClosureSourceTests
             static field => field.Name == "Id")
             .StandardFieldOrigin!.DefinitionId,
             Is.EqualTo(relocatedLeafFieldDefinition));
+        var reloadedRelocatedShadeType
+            = reloadedRelocatedLeaf.Fields.Single(
+                static field => field.Name == "Kind").Type;
+        Assert.That(((BoundEnumDeclarationIdentity.Standard)
+            relocatedReloadedReference.EnumDefinitions[
+                BoundEnumTypes.Index(reloadedRelocatedShadeType)]
+                .Identity).Value.Declaration.Site.DefinitionId,
+            Is.EqualTo(relocatedShadeDefinition));
 
         var incompatibleLeafTree = SyntaxTree.Parse("""
             namespace Demo {
-                public struct Leaf { public int64 Id; }
+                public enum Shade : int8 { Dark = -1 }
+                public struct Leaf {
+                    public int64 Id;
+                    public Shade Kind;
+                }
             }
             """);
         var incompatibleLeafCompilation
@@ -961,18 +1035,26 @@ internal sealed class TrRmC1EnumClosureSourceTests
         Assert.That(incompatibleLeafCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine,
                 incompatibleLeafCompilation.Diagnostics));
+        var incompatibleLeafProgram
+            = (BoundProgram)incompatibleLeafCompilation.Program!;
         var incompatibleLeafArtifact
             = TrRmExecutableCompiler.EmitStandard(
-                (BoundProgram)incompatibleLeafCompilation.Program!,
-                "StructLeafProvider", schemaIdentity, 1, [
+                incompatibleLeafProgram, "StructLeafProvider",
+                schemaIdentity, 1, [
                     new TrRmSourceTypeExport("Demo", "Leaf",
                         "type.leaf") {
                         FieldExports = [
                             new TrRmSourceFieldExport("Id",
                                 "field.leaf.id"),
+                            new TrRmSourceFieldExport("Kind",
+                                "field.leaf.kind"),
                         ],
                     },
-                ], [], [], []);
+                ], [], [], [
+                    CreateExport(incompatibleLeafProgram,
+                        incompatibleLeafTree, 0, "Shade",
+                        ["type.shade"], "shade"),
+                ]);
         Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.CreateStandardReference(
                 consumerInput, "StructConsumer", [
