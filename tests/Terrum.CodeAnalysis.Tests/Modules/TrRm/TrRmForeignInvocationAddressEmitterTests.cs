@@ -2951,13 +2951,18 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                 write ptr<int64> ticks);
 
             public int32 Probe(bool repeat, bool enterMiddle,
-                bool enterInner, bool leaveOuter, bool leaveMiddle) {
+                bool enterSecond, bool enterThird, bool enterInner,
+                bool leaveOuter, bool leaveMiddle) {
                 outer: while (repeat) {
                     middle: while (enterMiddle) {
-                        while (enterInner) {
-                            if (leaveOuter) { break outer; }
-                            if (leaveMiddle) { break middle; }
-                            continue outer;
+                        while (enterSecond) {
+                            while (enterThird) {
+                                while (enterInner) {
+                                    if (leaveOuter) { break outer; }
+                                    if (leaveMiddle) { break middle; }
+                                    continue outer;
+                                }
+                            }
                         }
                     }
                 }
@@ -2988,9 +2993,9 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                     continueDepths.Add(continuation.TargetDepth);
                 }
             }), Is.True);
-        Assert.That(breakDepths, Does.Contain(2));
-        Assert.That(breakDepths, Does.Contain(3));
-        Assert.That(continueDepths, Does.Contain(3));
+        Assert.That(breakDepths, Does.Contain(4));
+        Assert.That(breakDepths, Does.Contain(5));
+        Assert.That(continueDepths, Does.Contain(5));
 
         var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
             moduleIdentity, schemaIdentity, 1);
