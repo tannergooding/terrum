@@ -4007,6 +4007,48 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             firstReference, secondReference,
         ]);
         AssertCanonicalMerge(graphMergedReference);
+        Assert.That(mergedReference.GenericNominalTypeDefinitions.Single()
+            .ProviderExpectations, Has.Length.EqualTo(2));
+
+        var sourceCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Example;
+                public Box<Span<T>> Preserve<T>(Box<Span<T>> value) {
+                    return move value;
+                }
+                """), mergedReference);
+        Assert.That(sourceCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceCompilation.Diagnostics));
+        var sourceProgram = sourceCompilation.Program!;
+        var sourceDefinition = sourceProgram.GenericMethodDefinitions.Single();
+        var sourceArtifact = TrRmExecutableCompiler.EmitStandard(sourceProgram,
+            "constructed-generic.span-source-emitter",
+            GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), [
+                new TrRmSourceGenericMethodExport(sourceProgram,
+                    sourceDefinition.SourceInputOrdinal,
+                    sourceDefinition.Span, "preserve.api/v1"),
+            ]);
+        var sourceTables
+            = TrRmStructuralMetadataValidator
+                .ValidateGenericMethodCallsDraftAndGetExecutionTables(
+                    TrRmArtifactIndex
+                        .ForGenericMethodCallsParameterLabelsDraft(
+                            sourceArtifact));
+        Assert.That(Enumerable.Range(1, sourceTables.Imports.Count)
+                .Count(row =>
+                    (sourceTables.Imports
+                        .GetExpectedDefinitionForImportRow(row) >> 24)
+                    == 0x13),
+            Is.EqualTo(2));
+        var sourceReference
+            = TrRmExecutableCompiler.CreateGenericMethodCallsDraftReference(
+                sourceArtifact, "constructed-generic.span-source-emitter", [
+                    providerInput,
+                ]);
+        Assert.That(sourceReference.GenericNominalTypeDefinitions.Single()
+            .ProviderExpectations, Has.Length.EqualTo(2));
 
         static void AssertCanonicalMerge(
             CompilationReference mergedReference)

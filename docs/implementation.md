@@ -1494,7 +1494,9 @@ declarations or exact imported expectations, ordered scalar constant actuals
 and admitted nested reference/Span actuals. Added source emission,
 source re-emission, compatible TypeDef-row relocation and incompatible
 replacement regressions are unverified under the active validation hold.
-Fresh generic TypeDef source declarations, multiple retained expectation views,
+The writer now copies all retained TypeDef Import expectation views; a
+reference-set emission regression is added but remains unverified. Fresh
+generic TypeDef source declarations, source-free generic MethodDef re-emission,
 broader declaration copying, associated-relation and non-frozen constant-default
 comparison, and qualification remain open; see the
 [module implementation boundary](implementation/modules.md#definitions-and-scope).
