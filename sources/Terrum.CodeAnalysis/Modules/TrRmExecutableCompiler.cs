@@ -551,7 +551,7 @@ public static partial class TrRmExecutableCompiler
     }
 
     /// <summary>Emits C1M1 class declarations or construction-successor class/member exports from checked source mappings.</summary>
-    /// <remarks>The C1M1 route emits TypeDef, FieldDef, Layout and class/field Export rows only. Construction successors use their exact member contracts; the bounded Construction-2 route emits real initializer/projection MethodDefs and Bodies for supported direct scalar field initialization, not ordinary method or property Bodies.</remarks>
+    /// <remarks>The C1M1 route emits TypeDef, FieldDef, Layout and class/field Export rows only. Construction successors use their exact member contracts; the bounded Construction-2 route emits real initializer/projection MethodDefs and Bodies for supported direct scalar field initialization, zero-parameter static scalar methods, and empty unit-returning instance methods. Broader method Bodies and properties remain unsupported.</remarks>
     public static byte[] EmitStandard(BoundProgram program, string moduleIdentity,
         string schemaIdentity, uint moduleTargetRequirement,
         IReadOnlyList<TrRmSourceTypeExport> typeExports,

@@ -117,8 +117,10 @@ prerequisite has already been met.
    is unapproved and unimplemented; transport depends on complete
    class/member/Body closure and targets Construction-1/2 L1R1 and PI1 successors.
    Construction-2 source production now emits a bounded real initializer I /
-   projection P pair for direct scalar parameter-to-field initialization;
-   ordinary member Bodies and the unapproved, provisionally actionable
+   projection P pair for direct scalar parameter-to-field initialization,
+   zero-parameter static scalar methods, and empty unit-returning instance
+   methods with receiver Homes; parameterized methods, instance field access
+   and the unapproved, provisionally actionable
    [CM1 class parameter-default proposal](proposals/standard-trrm-c1-class-parameter-defaults.md)
    remain prerequisites to complete class binding and transport.
    A separate [C1 enum-closure proposal](proposals/standard-trrm-c1-enum-closure-composition.md)

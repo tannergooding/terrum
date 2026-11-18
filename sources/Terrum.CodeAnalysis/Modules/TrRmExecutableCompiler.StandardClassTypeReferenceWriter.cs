@@ -24,6 +24,9 @@ public static partial class TrRmExecutableCompiler
         ImmutableArray<BoundFieldAssignment> FieldAssignments,
         int InitializerMethodDefRow, int ProjectionMethodDefRow);
 
+    private sealed record C1M1Construction2SourceMethod(
+        BoundFunction Function, int MethodDefRow);
+
     private static byte[] EmitC1M1SourceClassDeclarations(
         BoundProgram program, string moduleIdentity,
         uint moduleTargetRequirement, SourceClassExports sourceClassExports,
@@ -61,11 +64,10 @@ public static partial class TrRmExecutableCompiler
         if (emitsConstruction2
             && sourceClassExports.Exports.Any(static export =>
                 export.MemberExports.Any(static member =>
-                    member.Kind is SourceClassMemberKind.Method
-                        or SourceClassMemberKind.Property)))
+                    member.Kind == SourceClassMemberKind.Property)))
         {
             throw Unsupported(
-                "The bounded Construction-2 class source emitter does not yet retain ordinary method or property Bodies.");
+                "The bounded Construction-2 class source emitter does not yet retain property Bodies.");
         }
         if (program.Classes.Any(static @class =>
                 @class.HasCleanup is not false))
@@ -247,6 +249,8 @@ public static partial class TrRmExecutableCompiler
         var featureRows = new List<TrRmFeatureRow>();
         var constructionInitializers
             = new List<C1M1Construction2SourceInitializer>();
+        var construction2SourceMethods
+            = new List<C1M1Construction2SourceMethod>();
         var sourceNames = new HashSet<(string Namespace, string Name)>();
         var typeDefRowByClass = exportKeysByClass.Keys
             .Select(static (classIndex, ordinal) =>
@@ -500,6 +504,20 @@ public static partial class TrRmExecutableCompiler
                         candidate.function.SourceDeclarationSpan))
                     .ToDictionary(static group => group.Key,
                         static group => group.ToArray());
+            var classMethodsBySourceDeclaration = program.Functions
+                .Select(static (function, functionIndex) =>
+                    (function, functionIndex))
+                .Where(static candidate =>
+                    candidate.function.DeclaringStruct is not null
+                    && !candidate.function.IsClassConstructor
+                    && candidate.function.PropertyName is null
+                    && candidate.function.SourceDeclarationInputOrdinal
+                        >= 0)
+                .GroupBy(static candidate => (
+                    candidate.function.SourceDeclarationInputOrdinal,
+                    candidate.function.SourceDeclarationSpan))
+                .ToDictionary(static group => group.Key,
+                    static group => group.ToArray());
             var memberExportsByClassAndFunction
                 = sourceClassExports.Exports
                     .SelectMany(static export =>
@@ -523,6 +541,8 @@ public static partial class TrRmExecutableCompiler
 
                 var constructorDeclarations = new List<(
                     BoundSourceClassPart Part, SyntaxNode Declaration)>();
+                var methodDeclarations = new List<(
+                    BoundSourceClassPart Part, SyntaxNode Declaration)>();
                 foreach (var part in declaration.Parts)
                 {
                     foreach (var member in part.Declaration.Children
@@ -542,16 +562,29 @@ public static partial class TrRmExecutableCompiler
                             continue;
                         }
 
+                        if (member.Kind == SyntaxKind.FunctionDeclaration)
+                        {
+                            if (HasC1M1Construction2ParameterDefaults(
+                                    member))
+                            {
+                                throw Unsupported(
+                                    "The bounded Construction-2 source emitter does not yet retain ordinary member parameter defaults.");
+                            }
+
+                            methodDeclarations.Add((part, member));
+                            continue;
+                        }
+
                         if (member.Kind != SyntaxKind.ConstructorDeclaration)
                         {
                             throw Unsupported(
-                                "The bounded Construction-2 class source emitter does not yet retain ordinary methods, properties, or partial constructors.");
+                                "The bounded Construction-2 class source emitter does not yet retain properties or other class member declarations.");
                         }
 
                         if (HasC1M1Construction2ParameterDefaults(member))
                         {
                             throw Unsupported(
-                                "The bounded Construction-2 class source emitter does not yet retain constructor parameter defaults.");
+                                "The bounded Construction-2 source emitter does not yet retain ordinary member parameter defaults.");
                         }
 
                         constructorDeclarations.Add((part, member));
@@ -712,6 +745,185 @@ public static partial class TrRmExecutableCompiler
                         classIndex, function, classTypeSpecReference,
                         fieldAssignments, initializerMethodDefRow,
                         projectionMethodDefRow));
+
+                foreach (var (methodPart, methodDeclaration)
+                    in methodDeclarations)
+                {
+                    if (!classMethodsBySourceDeclaration.TryGetValue((
+                            methodPart.SourceInputOrdinal,
+                            methodDeclaration.Span),
+                            out var methodFunctions)
+                        || methodFunctions.Length != 1)
+                    {
+                        throw new InvalidDataException(
+                            "A retained source class method has no unique checked MethodDef.");
+                    }
+
+                    var (methodFunction, methodFunctionIndex)
+                        = methodFunctions[0];
+                    var isSupportedNoOpInstanceMethod
+                        = !methodFunction.IsStatic
+                            && methodFunction.ParameterCount == 1
+                            && methodFunction.Variables.Length == 1
+                            && methodFunction.ReturnType
+                                == PrimitiveType.Void;
+                    if ((!methodFunction.IsStatic
+                            && !isSupportedNoOpInstanceMethod)
+                        || methodFunction.IsClassConstructor
+                        || methodFunction.IsConstructor
+                        || methodFunction.IsExternal
+                        || methodFunction.IsCleanup
+                        || methodFunction.IsOperator
+                        || methodFunction.Intrinsic != BoundIntrinsic.None
+                        || methodFunction.ClassConstructor != -1
+                        || methodFunction.DeclaringStruct
+                            != classDeclaration.Name
+                        || (methodFunction.IsStatic
+                            && methodFunction.ParameterCount != 0)
+                        || methodFunction.RequiresUnsafeCaller
+                        || methodFunction.DeclaredRequiresUnsafeCaller
+                        || methodFunction.DoesNotReturn
+                        || methodFunction.NoFailureProof
+                        || methodFunction.HasPureEvaluationForm
+                        || methodFunction.DirectNativeImport is not null
+                        || methodFunction.NativeVTableMethod is not null
+                        || methodFunction.NativeFunctionPointerType
+                            is not null
+                        || methodFunction.NativeCallableConvention
+                            is not null
+                        || methodFunction.NativeCallableEntryName
+                            is not null
+                        || methodFunction.HasNativeExport
+                        || methodFunction.NativeExportEntryName
+                            is not null
+                        || methodFunction.StaticConstructorIdentity
+                            is not null
+                        || methodFunction.StaticFieldInitializerIndex
+                            >= 0
+                        || methodFunction.ModuleImport is not null
+                        || methodFunction.GenericMethodInstantiation
+                            is not null
+                        || methodFunction.PropertyName is not null
+                        || methodFunction.IndexedBody is not null
+                        || !methodFunction.CapturedParameters.IsEmpty
+                        || !methodFunction.ResultDependencyParameters
+                            .IsEmpty
+                        || methodFunction.ResultDependencyIncludesReceiver
+                        || methodFunction.ReturnsForwardedBacking
+                        || methodFunction.NativeOutputRole is not null
+                        || !methodFunction.NativeOutputContracts.IsEmpty
+                        || !methodFunction.DependencyContracts.IsEmpty
+                        || methodFunction.CopyOriginSummary is not null
+                        || methodFunction.HasRawUnionReturnCoverage
+                        || !methodFunction.RawUnionReturnCoverage.IsEmpty
+                        || !methodFunction.FriendTargets.IsEmpty
+                        || !methodFunction.DeclarationContractClauses
+                            .IsEmpty
+                        || (methodFunction.IsPrivate
+                            && methodFunction.IsInternal))
+                    {
+                        throw Unsupported(
+                            "The bounded Construction-2 class method producer supports only effect-free scalar static methods without parameters or empty unit instance methods.");
+                    }
+
+                    if (methodFunction.ReturnType != PrimitiveType.Void)
+                    {
+                        if (!methodFunction.IsStatic)
+                        {
+                            throw Unsupported(
+                                "The bounded Construction-2 instance method producer supports only unit-returning methods.");
+                        }
+
+                        _ = GetC1M1SourceScalarTypeSpecReference(
+                            methodFunction.ReturnType);
+                    }
+
+                    if (methodFunction.IsStatic)
+                    {
+                        foreach (var variable in methodFunction.Variables)
+                        {
+                            if (variable.Type == PrimitiveType.Void
+                                || variable.IsOut || variable.IsInit
+                                || variable.IsImplicitRef
+                                || variable.IsInitializationLocal)
+                            {
+                                throw Unsupported(
+                                    "The bounded Construction-2 static method producer supports only scalar local storage.");
+                            }
+
+                            _ = GetC1M1SourceScalarTypeSpecReference(
+                                variable.Type);
+                        }
+                    }
+                    else
+                    {
+                        var receiverType = methodFunction.Variables[0].Type;
+                        if (ManagedClassTypes.IsOptional(receiverType)
+                            || !ManagedClassTypes.IsClass(receiverType)
+                            || ManagedClassTypes.ClassIndex(receiverType)
+                                != classIndex)
+                        {
+                            throw Unsupported(
+                                "The bounded Construction-2 instance method producer requires its exact nominal class receiver.");
+                        }
+                    }
+
+                    var methodExports
+                        = memberExportsByClassAndFunction.TryGetValue((
+                            classIndex, methodFunctionIndex),
+                            out var mappedMethodExports)
+                            ? mappedMethodExports
+                            : Array.Empty<SourceClassMemberExport>();
+                    if (methodExports.Any(static member =>
+                            member.Kind != SourceClassMemberKind.Method))
+                    {
+                        throw new InvalidDataException(
+                            "A class method mapping contains a non-method member.");
+                    }
+
+                    var methodExportKeys = methodExports
+                        .Select(static member => member.ExportKey)
+                        .ToArray();
+                    var methodRow = methodRows.Count + 1;
+                    var methodSignatureRow
+                        = methodSignatureRows.Count + 1;
+                    var methodParamFirst
+                        = AppendC1M1Construction2Parameters(
+                            methodSignatureRow, methodFunction,
+                            methodFunction.IsStatic ? 0 : 1);
+                    var methodResultTypeSpecReference
+                        = methodFunction.ReturnType == PrimitiveType.Void
+                            ? 0xF200_0000u
+                            : FieldTypeSpecReference(
+                                methodFunction.ReturnType);
+                    var methodReceiverTypeSpecReference
+                        = methodFunction.IsStatic ? 0u
+                            : FieldTypeSpecReference(
+                                methodFunction.Variables[0].Type);
+                    methodSignatureRows.Add(new TrRmMethodSigRow(
+                        methodResultTypeSpecReference,
+                        methodReceiverTypeSpecReference,
+                        methodParamFirst,
+                        methodFunction.ParameterCount
+                            - (methodFunction.IsStatic ? 0 : 1),
+                        0, 0));
+                    var methodVisibility = methodFunction.IsPrivate ? 0u
+                        : methodFunction.IsInternal ? 1u : 2u;
+                    methodRows.Add(new TrRmMethodDefRow(
+                        typeDefRowByClass[classIndex], 0,
+                        methodSignatureRow, methodVisibility, 0, 0, 0));
+                    methodNames.Add(methodFunction.Name);
+                    foreach (var exportKey in methodExportKeys)
+                    {
+                        exportRows.Add((
+                            0x1600_0000u | checked((uint)methodRow),
+                            exportKey));
+                    }
+
+                    construction2SourceMethods.Add(
+                        new C1M1Construction2SourceMethod(
+                            methodFunction, methodRow));
+                }
             }
 
             featureRows.Add(
@@ -729,6 +941,19 @@ public static partial class TrRmExecutableCompiler
                     contractRows.Count, schema));
                 methodRows[initializer.ProjectionMethodDefRow - 1]
                     = methodRows[initializer.ProjectionMethodDefRow - 1]
+                        with { BodyRow = bodyRows.Count };
+            }
+
+            foreach (var method in construction2SourceMethods)
+            {
+                bodyRows.Add(method.Function.IsStatic
+                    ? EncodeC1M1Construction2StaticMethodBody(
+                        method.Function)
+                    : EncodeC1M1Construction2NoOpInstanceMethodBody(
+                        method.Function, FieldTypeSpecReference,
+                        contractRows.Count, schema));
+                methodRows[method.MethodDefRow - 1]
+                    = methodRows[method.MethodDefRow - 1]
                         with { BodyRow = bodyRows.Count };
             }
         }
@@ -1283,6 +1508,91 @@ public static partial class TrRmExecutableCompiler
             schema: schema,
             generalPredicateGraphsInitializationReferenceBodies
                 : schema.UsesGeneralPredicateGraphs());
+    }
+
+    private static byte[] EncodeC1M1Construction2StaticMethodBody(
+        BoundFunction function)
+    {
+        var hasFloatingTypes = IsFloat(function.ReturnType)
+            || function.Variables.Any(static variable =>
+                IsFloat(variable.Type));
+        if (!BoundTreeTraversal.VisitExpressions(function.Body,
+                expression => hasFloatingTypes
+                    |= IsFloat(expression.Type)))
+        {
+            throw Unsupported(
+                "The bounded Construction-2 static method producer cannot inspect the checked Body.");
+        }
+
+        return EncodeBody(function, hasFloatingTypes, -1,
+            new Dictionary<PrimitiveType, int>(),
+            new Dictionary<PrimitiveType, int>());
+    }
+
+    private static byte[] EncodeC1M1Construction2NoOpInstanceMethodBody(
+        BoundFunction function,
+        Func<PrimitiveType, uint> typeSpecReferenceFor,
+        int contractCount, TrRmArtifactSchema schema)
+    {
+        RequireC1M1Construction2NoOpUnitBody(function.Body);
+        var typeToken = CreateStandardBodyTypeMapToken(
+            typeSpecReferenceFor(function.Variables[0].Type));
+        var maps = TrRmRegisterBodyMapBuilder.Create([typeToken], []);
+        var homeMap = new byte[8];
+        homeMap[0] = 1;
+        BinaryPrimitives.WriteUInt16LittleEndian(homeMap.AsSpan(2),
+            maps.GetTypeMapIndex(typeToken));
+        var records = new ReadOnlyMemory<byte>[] {
+            new(new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 }),
+        };
+        var code = new byte[] { 0x18, 0 };
+        return TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
+            default, default, default,
+            [new TrRmRegisterBodyBlock(0,
+                checked((uint)code.Length), 0)],
+            records, code, contractCount: contractCount,
+            schema: schema,
+            generalPredicateGraphsInitializationReferenceBodies
+                : schema.UsesGeneralPredicateGraphs());
+    }
+
+    private static void RequireC1M1Construction2NoOpUnitBody(
+        BoundBlock body)
+    {
+        var returned = false;
+        Visit(body);
+
+        void Visit(BoundBlock block)
+        {
+            if (!block.RetiredManagedLocals.IsEmpty)
+            {
+                throw Unsupported(
+                    "The bounded Construction-2 instance method producer cannot discard retired-local cleanup.");
+            }
+
+            foreach (var statement in block.Statements)
+            {
+                if (returned)
+                {
+                    throw Unsupported(
+                        "A Construction-2 no-op method cannot continue after its unit return.");
+                }
+
+                if (statement is BoundBlock nested)
+                {
+                    Visit(nested);
+                }
+                else if (statement is BoundReturn { Value: null })
+                {
+                    returned = true;
+                }
+                else
+                {
+                    throw Unsupported(
+                        "The bounded Construction-2 instance method producer supports only an empty unit body.");
+                }
+            }
+        }
     }
 
     private static bool TryGetC1M1SourceClassFieldType(

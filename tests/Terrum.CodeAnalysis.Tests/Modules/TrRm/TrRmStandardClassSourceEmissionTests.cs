@@ -172,6 +172,8 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             public class Box {
                 public int32 Value;
                 public Box(int32 value) { Value = value; }
+                public static int32 Answer() { return 42; }
+                public void Touch() {}
             }
             """);
         var compilation = Compilation.CreateLibrary(tree);
@@ -186,6 +188,16 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             node.Kind == SyntaxKind.FieldDeclaration);
         var constructorDeclaration = memberNodes.Single(static node =>
             node.Kind == SyntaxKind.ConstructorDeclaration);
+        var methodDeclaration = memberNodes.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Answer"));
+        var instanceMethodDeclaration = memberNodes.Skip(1)
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.FunctionDeclaration
+                && node.Children.OfType<SyntaxTokenElement>().Any(
+                    static token => token.Token.Name == "Touch"));
 
         var artifact = TrRmExecutableCompiler.EmitStandard(program,
             "Construction2Box", C1M1Construction2SchemaIdentity,
@@ -199,6 +211,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                             constructorDeclaration.Span, "Box.Initialize") {
                             ConstructionProjectionExportKey = "Box.Create",
                         },
+                        new TrRmSourceClassMemberExport(0,
+                            methodDeclaration.Span, "Box.Answer"),
+                        new TrRmSourceClassMemberExport(0,
+                            instanceMethodDeclaration.Span, "Box.Touch"),
                     ]),
             ]);
         var index = TrRmArtifactIndex.ForC1M1Construction2Draft(
@@ -206,23 +222,36 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         var tables = TrRmStructuralMetadataValidator
             .ValidateC1AndGetExecutionTables(index);
 
-        Assert.That(tables.Methods.Count, Is.EqualTo(2));
-        Assert.That(tables.Signatures.Count, Is.EqualTo(2));
+        Assert.That(tables.Methods.Count, Is.EqualTo(4));
+        Assert.That(tables.Signatures.Count, Is.EqualTo(4));
         Assert.That(tables.Parameters.Count, Is.EqualTo(2));
         Assert.That(tables.Contracts.Count, Is.EqualTo(2));
-        Assert.That(tables.Bodies.Count, Is.EqualTo(2));
+        Assert.That(tables.Bodies.Count, Is.EqualTo(4));
         Assert.That(tables.Exports.TryGetDefinitionForKey(1,
             "Box.Initialize", out var initializer), Is.True);
         Assert.That(initializer >> 24, Is.EqualTo(0x16u));
         Assert.That(tables.Exports.TryGetDefinitionForKey(1,
             "Box.Create", out var projection), Is.True);
         Assert.That(projection >> 24, Is.EqualTo(0x16u));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.Answer", out var answer), Is.True);
+        Assert.That(answer >> 24, Is.EqualTo(0x16u));
+        var answerBodyRow = tables.Methods.GetBodyRow(
+            checked((int)(answer & 0x00FF_FFFF)));
+        Assert.That(answerBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(answerBodyRow,
+            tables.Contracts.Count);
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.Touch", out var touch), Is.True);
+        Assert.That(touch >> 24, Is.EqualTo(0x16u));
+        var touchMethodRow
+            = checked((int)(touch & 0x00FF_FFFF));
+        var touchBodyRow = tables.Methods.GetBodyRow(touchMethodRow);
+        Assert.That(touchBodyRow, Is.GreaterThan(0));
+        tables.ValidateRegisterBodyMapsForMethod(touchMethodRow);
 
-        for (var methodRow = 1; methodRow <= tables.Methods.Count;
-            methodRow++)
-        {
-            tables.ValidateRegisterBodyMapsForMethod(methodRow);
-        }
+        tables.ValidateRegisterBodyMapsForMethod(1);
+        tables.ValidateRegisterBodyMapsForMethod(2);
 
         var privateProjectionArtifact
             = TrRmExecutableCompiler.EmitStandard(program,
@@ -236,6 +265,11 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                             new TrRmSourceClassMemberExport(0,
                                 constructorDeclaration.Span,
                                 "Box.Initialize"),
+                                new TrRmSourceClassMemberExport(0,
+                                    methodDeclaration.Span, "Box.Answer"),
+                                new TrRmSourceClassMemberExport(0,
+                                    instanceMethodDeclaration.Span,
+                                    "Box.Touch"),
                         ]),
                 ]);
         var privateProjectionTables
@@ -247,13 +281,18 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             Is.Zero);
         Assert.That(privateProjectionTables.Exports
             .TryGetDefinitionForKey(1, "Box.Create", out _), Is.False);
-        for (var methodRow = 1;
-            methodRow <= privateProjectionTables.Methods.Count;
-            methodRow++)
-        {
-            privateProjectionTables.ValidateRegisterBodyMapsForMethod(
-                methodRow);
-        }
+        var privateAnswerBodyRow
+            = privateProjectionTables.Methods.GetBodyRow(3);
+        Assert.That(privateAnswerBodyRow, Is.GreaterThan(0));
+        privateProjectionTables.Bodies.ValidateSelectedImplementation(
+            privateAnswerBodyRow,
+            privateProjectionTables.Contracts.Count);
+        var privateTouchBodyRow
+            = privateProjectionTables.Methods.GetBodyRow(4);
+        Assert.That(privateTouchBodyRow, Is.GreaterThan(0));
+        privateProjectionTables.ValidateRegisterBodyMapsForMethod(4);
+        privateProjectionTables.ValidateRegisterBodyMapsForMethod(1);
+        privateProjectionTables.ValidateRegisterBodyMapsForMethod(2);
     }
 
     [Test]

@@ -143,11 +143,15 @@ Feature 25 and Bodies for one non-partial constructor per class whose fields
 are initialized directly from scalar parameters. It preserves explicit I/P
 ExportKeys and does not substitute `ClassTryCreate`; keyed and private-P
 producer regressions are added but unverified under the hold. Ordinary method
-and property Bodies, multiple/partial constructors, class-backed field
-initialization, parameter defaults, expected/provider class binding and
-re-emission, class FieldDef Imports, CLI transport, independent carrier
-TypeSpec verification, generic TypeDef dependencies, interfaces/witnesses and
-runtime execution remain open. The user-authorized provisional
+emission now also supports zero-parameter static scalar methods with real
+Bodies and empty unit-returning instance methods with receiver Homes and
+explicit method keys; those regressions are added but remain unverified.
+Parameterized methods, instance field access/calls, properties, multiple/partial
+constructors, class-backed field initialization, parameter defaults,
+expected/provider class binding and re-emission, class FieldDef Imports, CLI
+transport, independent carrier TypeSpec verification, generic TypeDef
+dependencies, interfaces/witnesses and runtime execution remain open. The
+user-authorized provisional
 [CM1 class parameter-default proposal](proposals/standard-trrm-c1-class-parameter-defaults.md)
 defines a candidate exact owner/schema; no producer or consumer currently
 emits or consumes those defaults.
