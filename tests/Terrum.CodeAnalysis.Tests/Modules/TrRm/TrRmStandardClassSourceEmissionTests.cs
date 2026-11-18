@@ -306,6 +306,9 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             public class Box {
                 public int32 Value;
                 public Box(int32 value = 42) { Value = value; }
+                public static int32 Identity(int32 value = 11) {
+                    return value;
+                }
             }
             """);
         var compilation = Compilation.CreateLibrary(tree);
@@ -416,14 +419,16 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                             .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
                                 artifact));
 
-        Assert.That(tables.Methods.Count, Is.EqualTo(4));
-        Assert.That(tables.MethodParameterLabels.Count, Is.EqualTo(4));
+        Assert.That(tables.Methods.Count, Is.EqualTo(5));
+        Assert.That(tables.MethodParameterLabels.Count, Is.EqualTo(5));
         Assert.That(tables.Exports.TryGetDefinitionForKey(1, "IValue.Read",
             out var interfaceMethod), Is.True);
         Assert.That(tables.Exports.TryGetDefinitionForKey(1, "Echo",
             out var genericMethod), Is.True);
+        tables.ValidateRegisterBodyMapsForMethod(3);
         foreach (var methodDefRow in new[] {
-            1, 2, checked((int)(interfaceMethod & 0x00FF_FFFF)),
+            1, 2, 3,
+            checked((int)(interfaceMethod & 0x00FF_FFFF)),
             checked((int)(genericMethod & 0x00FF_FFFF)),
         })
         {

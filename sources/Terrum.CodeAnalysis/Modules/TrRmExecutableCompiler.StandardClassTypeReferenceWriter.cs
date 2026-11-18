@@ -885,8 +885,6 @@ public static partial class TrRmExecutableCompiler
                         || methodFunction.ClassConstructor != -1
                         || methodFunction.DeclaringStruct
                             != classDeclaration.Name
-                        || (methodFunction.IsStatic
-                            && methodFunction.ParameterCount != 0)
                         || methodFunction.RequiresUnsafeCaller
                         || methodFunction.DeclaredRequiresUnsafeCaller
                         || methodFunction.DoesNotReturn
@@ -930,7 +928,7 @@ public static partial class TrRmExecutableCompiler
                             && methodFunction.IsInternal))
                     {
                         throw Unsupported(
-                            "The bounded Construction-2 class method producer supports only effect-free scalar static methods without parameters or empty unit instance methods.");
+                            "The bounded Construction-2 class method producer supports only effect-free scalar static methods or empty unit instance methods.");
                     }
 
                     if (methodFunction.ReturnType != PrimitiveType.Void)
