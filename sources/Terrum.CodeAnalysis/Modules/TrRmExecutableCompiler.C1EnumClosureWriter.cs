@@ -185,7 +185,8 @@ public static partial class TrRmExecutableCompiler
         => pointer.PointeeType == PrimitiveType.Void
             ? pointer.IsWritable
             : PrimitiveTypeFacts.IsBuiltInScalar(pointer.PointeeType)
-                || IsC1EnumClosureStructType(pointer.PointeeType);
+                || IsC1EnumClosurePointerPointeeType(
+                    pointer.PointeeType);
 
     private static int GetEN1ClassQueryRootTypeDefRow(
         BoundGenericNominalTypeInstance instance,
@@ -2064,7 +2065,7 @@ public static partial class TrRmExecutableCompiler
                                 program.NativePointerTypes[pointerIndex]))
                         {
                             throw Unsupported(
-                                "EN1 class fields require a covered native data pointer with a scalar or non-generic struct pointee.");
+                                "EN1 class fields require a covered native data pointer with a scalar, enum or non-generic struct pointee.");
                         }
 
                         if (moduleTargetRequirement
@@ -2214,7 +2215,7 @@ public static partial class TrRmExecutableCompiler
                                 program.NativePointerTypes[pointerIndex]))
                         {
                             throw Unsupported(
-                                "EN1 struct fields require a covered native data pointer with a scalar or non-generic struct pointee.");
+                                "EN1 struct fields require a covered native data pointer with a scalar, enum or non-generic struct pointee.");
                         }
 
                         if (moduleTargetRequirement
@@ -2885,7 +2886,7 @@ public static partial class TrRmExecutableCompiler
                 if (!IsSupportedEN1FieldPointer(pointer))
                 {
                     throw Unsupported(
-                        "EN1 class fields require a covered native data pointer with a scalar or non-generic struct pointee.");
+                        "EN1 class fields require a covered native data pointer with a scalar, enum or non-generic struct pointee.");
                 }
 
                 var qualifiers
@@ -4003,10 +4004,11 @@ public static partial class TrRmExecutableCompiler
             layoutFieldRows.Count);
         var typeSpecBytes = typeSpecRows.Count == 0 ? []
             : TrRmTypeSpecTableWriter.Encode(typeSpecRows,
-                typeDefRows.Count, importRows.Count, 0, 0, schema);
+                typeDefRows.Count, importRows.Count, 0, 0, schema,
+                methodDefCount: methodRows.Count);
         var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes,
             typeSpecRows.Count, typeDefRows.Count, importRows.Count, 0, 0,
-            schema);
+            schema, methodDefCount: methodRows.Count);
         var methodSignatureBytes = methodSignatureRows.Count == 0 ? []
             : TrRmMethodSigTableWriter.Encode(methodSignatureRows,
                 typeSpecs, parameterRows.Count, 0);

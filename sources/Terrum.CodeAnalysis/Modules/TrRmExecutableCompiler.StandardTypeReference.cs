@@ -2152,7 +2152,8 @@ public static partial class TrRmExecutableCompiler
                     && TryDecodeSelectedClassFieldType(
                         pointeeTypeSpecReference, out var structPointeeType,
                         recursionDepth + 1)
-                    && IsC1EnumClosureStructType(structPointeeType))
+                    && IsC1EnumClosurePointerPointeeType(
+                        structPointeeType))
                 {
                     pointeeType = structPointeeType;
                 }
@@ -2375,6 +2376,10 @@ public static partial class TrRmExecutableCompiler
         => !BoundEnumTypes.IsType(type)
             && (int)type >= 100
             && (int)type < ManagedClassTypes.First;
+
+    private static bool IsC1EnumClosurePointerPointeeType(
+        PrimitiveType type)
+        => IsC1EnumClosureStructType(type) || BoundEnumTypes.IsType(type);
 
     private static bool IsSupportedEN1FieldFunctionPointer(
         NativeFunctionPointerSignatureDefinition signature)
@@ -2808,7 +2813,7 @@ public static partial class TrRmExecutableCompiler
                 {
                     pointeeType = DecodeFieldType(
                         pointeeTypeSpecReference, depth + 1);
-                    if (!IsC1EnumClosureStructType(pointeeType))
+                    if (!IsC1EnumClosurePointerPointeeType(pointeeType))
                     {
                         throw Unsupported(
                             "The bounded EN1 struct reference supports scalar or non-generic struct pointer pointees.");
