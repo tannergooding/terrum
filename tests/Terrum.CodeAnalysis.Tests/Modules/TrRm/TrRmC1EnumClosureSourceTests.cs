@@ -1062,6 +1062,38 @@ internal sealed class TrRmC1EnumClosureSourceTests
                     new TrRmStandardArtifactInput(schemaIdentity,
                         incompatibleLeafArtifact),
                 ], ["type.packet"]));
+
+        var incompatibleShadeTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public enum Shade : int32 { Dark = -1 }
+                public struct Leaf {
+                    public int32 Id;
+                    public Shade Kind;
+                }
+            }
+            """);
+        var incompatibleShadeCompilation
+            = Compilation.CreateLibrary(incompatibleShadeTree);
+        Assert.That(incompatibleShadeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                incompatibleShadeCompilation.Diagnostics));
+        var incompatibleShadeProgram
+            = (BoundProgram)incompatibleShadeCompilation.Program!;
+        var incompatibleShadeArtifact
+            = TrRmExecutableCompiler.EmitStandard(
+                incompatibleShadeProgram, "StructLeafProvider",
+                schemaIdentity, 1, [leafExport], [], [], [
+                    CreateExport(incompatibleShadeProgram,
+                        incompatibleShadeTree, 0, "Shade",
+                        ["type.shade"], "shade"),
+                ]);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                consumerInput, "StructConsumer", [
+                    middleInput,
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        incompatibleShadeArtifact),
+                ], ["type.packet"]));
     }
 
     [Test]
