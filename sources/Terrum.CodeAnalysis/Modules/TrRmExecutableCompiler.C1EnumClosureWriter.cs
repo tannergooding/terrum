@@ -283,6 +283,13 @@ public static partial class TrRmExecutableCompiler
             throw new InvalidDataException(
                 "The EN1 native pointer type table is invalid.");
         }
+        if (!program.NativeFunctionPointerSignatures.IsEmpty
+            && !NativeFunctionPointerContract.IsValidTable(
+                program.NativeFunctionPointerSignatures))
+        {
+            throw new InvalidDataException(
+                "The EN1 native function-pointer signature table is invalid.");
+        }
 
         var classQueryFunction = GetEN1ClassLayoutQueryFunction(program,
             schemaIdentity);
@@ -397,7 +404,8 @@ public static partial class TrRmExecutableCompiler
             || !program.Interfaces.IsEmpty
             || !program.InterfaceWitnesses.IsEmpty
             || !program.Buffers.IsEmpty
-            || !program.NativeFunctionPointerSignatures.IsEmpty
+            || program.NativeFunctionPointerSignatures.Any(signature =>
+                !IsSupportedEN1FieldFunctionPointer(signature))
             || program.NativePointerTypes.Any(pointer =>
                 !IsSupportedEN1FieldPointer(pointer))
             || !program.NativeFixedArrayTypes.IsEmpty
@@ -2089,6 +2097,31 @@ public static partial class TrRmExecutableCompiler
                         continue;
                     }
 
+                    if (NativeFunctionPointerTypes.IsType(field.Type))
+                    {
+                        var signatureIndex
+                            = NativeFunctionPointerTypes.Index(field.Type);
+                        if ((uint)signatureIndex
+                                >= (uint)program.NativeFunctionPointerSignatures.Length
+                            || !IsSupportedEN1FieldFunctionPointer(
+                                program.NativeFunctionPointerSignatures[
+                                    signatureIndex]))
+                        {
+                            throw Unsupported(
+                                "EN1 class fields require a covered scalar-signature native function pointer.");
+                        }
+
+                        if (moduleTargetRequirement
+                            != TrRmModuleTableReader
+                                .WindowsX64NativeTargetRequirement)
+                        {
+                            throw Unsupported(
+                                "EN1 native function-pointer fields require the selected Windows x64 target.");
+                        }
+
+                        continue;
+                    }
+
                     if (field.Type == PrimitiveType.NativeRawPointer)
                     {
                         if (moduleTargetRequirement
@@ -2214,6 +2247,31 @@ public static partial class TrRmExecutableCompiler
                         continue;
                     }
 
+                    if (NativeFunctionPointerTypes.IsType(field.Type))
+                    {
+                        var signatureIndex
+                            = NativeFunctionPointerTypes.Index(field.Type);
+                        if ((uint)signatureIndex
+                                >= (uint)program.NativeFunctionPointerSignatures.Length
+                            || !IsSupportedEN1FieldFunctionPointer(
+                                program.NativeFunctionPointerSignatures[
+                                    signatureIndex]))
+                        {
+                            throw Unsupported(
+                                "EN1 struct fields require a covered scalar-signature native function pointer.");
+                        }
+
+                        if (moduleTargetRequirement
+                            != TrRmModuleTableReader
+                                .WindowsX64NativeTargetRequirement)
+                        {
+                            throw Unsupported(
+                                "EN1 native function-pointer fields require the selected Windows x64 target.");
+                        }
+
+                        continue;
+                    }
+
                     if ((field.Type is PrimitiveType.NativeInt
                             or PrimitiveType.NativeUInt)
                         && moduleTargetRequirement
@@ -2282,6 +2340,56 @@ public static partial class TrRmExecutableCompiler
                 + retainedStructureIndexes.Count);
         var methodSignatureRows = new List<TrRmMethodSigRow>();
         var methodRows = new List<TrRmMethodDefRow>();
+        var nativeFunctionPointerAnchorMethodRows = new int[
+            program.NativeFunctionPointerSignatures.Length];
+        var usedFunctionPointerSignatureIndexes = new SortedSet<int>();
+        void AddFunctionPointerSignature(PrimitiveType type)
+        {
+            if (!NativeFunctionPointerTypes.IsType(type))
+            {
+                return;
+            }
+
+            var signatureIndex = NativeFunctionPointerTypes.Index(type);
+            if ((uint)signatureIndex
+                    >= (uint)nativeFunctionPointerAnchorMethodRows.Length)
+            {
+                throw new InvalidDataException(
+                    "An EN1 field references an invalid native function-pointer signature.");
+            }
+
+            _ = usedFunctionPointerSignatureIndexes.Add(signatureIndex);
+        }
+        foreach (var classIndex in retainedClassIndexes)
+        {
+            foreach (var field in program.Classes[classIndex].Fields)
+            {
+                AddFunctionPointerSignature(field.Type);
+            }
+        }
+        foreach (var structureIndex in retainedStructureIndexes)
+        {
+            foreach (var field in program.Structures[structureIndex].Fields)
+            {
+                AddFunctionPointerSignature(field.Type);
+            }
+        }
+        foreach (var emission in standardClassEmissions)
+        {
+            foreach (var field in emission.View.Fields)
+            {
+                AddFunctionPointerSignature(field.Type);
+            }
+        }
+
+        var nextFunctionPointerAnchorRow = 1;
+        foreach (var signatureIndex in usedFunctionPointerSignatureIndexes)
+        {
+            nativeFunctionPointerAnchorMethodRows[signatureIndex]
+                = nextFunctionPointerAnchorRow++;
+        }
+
+        var parameterRows = new List<TrRmParamRow>();
         var bodyRows = new List<ReadOnlyMemory<byte>>();
         var typeDefNames = new List<(string Namespace, string Name)>(
             emittedEnums.Count + retainedClassIndexes.Count
@@ -2431,8 +2539,10 @@ public static partial class TrRmExecutableCompiler
         var activeStandardClassTypeSpecs = new HashSet<uint>();
         uint StandardClassFieldTypeSpecReference(
             BoundStandardClassFieldDeclaration field)
-            => RemapStandardClassTypeSpecReference(
-                field.TypeSpecReference, 0);
+            => NativeFunctionPointerTypes.IsType(field.Type)
+                ? FieldTypeSpecReference(field.Type)
+                : RemapStandardClassTypeSpecReference(
+                    field.TypeSpecReference, 0);
 
         uint RemapStandardClassTypeSpecReference(uint sourceTypeSpec,
             int depth)
@@ -2727,6 +2837,38 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 return typeSpecRow;
+            }
+
+            if (NativeFunctionPointerTypes.IsType(type))
+            {
+                var signatureIndex
+                    = NativeFunctionPointerTypes.Index(type);
+                if ((uint)signatureIndex
+                        >= (uint)program.NativeFunctionPointerSignatures.Length
+                    || !IsSupportedEN1FieldFunctionPointer(
+                        program.NativeFunctionPointerSignatures[
+                            signatureIndex]))
+                {
+                    throw Unsupported(
+                        "EN1 FieldDefs require a covered scalar-signature native function pointer.");
+                }
+
+                var anchorMethodRow
+                    = nativeFunctionPointerAnchorMethodRows[signatureIndex];
+                if (anchorMethodRow == 0)
+                {
+                    throw new InvalidDataException(
+                        "An EN1 native function-pointer FieldDef has no retained MethodDef anchor.");
+                }
+
+                var functionPointerTypeSpecRow
+                    = checked((uint)typeSpecRows.Count + 1);
+                typeSpecRows.Add(
+                    TrRmTypeSpecTableWriter.NativeFunctionPointer(
+                        (byte)program.NativeFunctionPointerSignatures[
+                            signatureIndex].CallingConvention,
+                        checked((uint)anchorMethodRow)));
+                return functionPointerTypeSpecRow;
             }
 
             if (NativePointerTypes.IsType(type))
@@ -3473,6 +3615,62 @@ public static partial class TrRmExecutableCompiler
         }
         exportRows.AddRange(fieldExportRows);
 
+        if (usedFunctionPointerSignatureIndexes.Count != 0)
+        {
+            var anchorNames = program.Functions.Select(
+                    static function => function.Name)
+                .ToHashSet(StringComparer.Ordinal);
+            var anchorNameOrdinal = 1;
+            foreach (var signatureIndex
+                in usedFunctionPointerSignatureIndexes)
+            {
+                var methodRow = checked(methodRows.Count + 1);
+                if (methodRow
+                    != nativeFunctionPointerAnchorMethodRows[
+                        signatureIndex])
+                {
+                    throw new InvalidDataException(
+                        "The EN1 native function-pointer anchor order changed during emission.");
+                }
+
+                var signature
+                    = program.NativeFunctionPointerSignatures[
+                        signatureIndex];
+                var methodSignatureRow
+                    = checked(methodSignatureRows.Count + 1);
+                var parameterFirst = signature.ParameterTypes.IsEmpty
+                    ? 0 : checked(parameterRows.Count + 1);
+                for (var parameterIndex = 0;
+                    parameterIndex < signature.ParameterTypes.Length;
+                    parameterIndex++)
+                {
+                    parameterRows.Add(new TrRmParamRow(
+                        methodSignatureRow, parameterIndex,
+                        FieldTypeSpecReference(
+                            signature.ParameterTypes[parameterIndex]), 0));
+                }
+
+                var returnTypeSpecReference
+                    = signature.ReturnType == PrimitiveType.Void
+                    ? 0xF200_0000u
+                    : FieldTypeSpecReference(signature.ReturnType);
+                methodSignatureRows.Add(new TrRmMethodSigRow(
+                    returnTypeSpecReference, 0, parameterFirst,
+                    signature.ParameterTypes.Length, 0, 0));
+
+                string anchorName;
+                do
+                {
+                    anchorName
+                        = $"__trrm_fnptr_anchor_{anchorNameOrdinal++}";
+                }
+                while (!anchorNames.Add(anchorName));
+
+                methodRows.Add(new TrRmMethodDefRow(0,
+                    AddString(anchorName), methodSignatureRow, 0, 0, 0, 0));
+            }
+        }
+
         if (classQueryFunction is not null)
         {
             var classFieldPaths
@@ -3711,9 +3909,14 @@ public static partial class TrRmExecutableCompiler
         {
             featureRows.Add(TrRmFeatureRow.LayoutQueries);
         }
-        if (hasBlittableEnum)
+        if (hasBlittableEnum
+            || usedFunctionPointerSignatureIndexes.Count != 0)
         {
             featureRows.Add(TrRmFeatureRow.NativeBoundaryContracts);
+        }
+        if (usedFunctionPointerSignatureIndexes.Count != 0)
+        {
+            featureRows.Add(TrRmFeatureRow.RootlessNativeValues);
         }
         featureRows.Sort(static (left, right)
             => left.FeatureId.CompareTo(right.FeatureId));
@@ -3721,7 +3924,7 @@ public static partial class TrRmExecutableCompiler
         var totalRows = 1L + stringRows.Count + typeDefRows.Count
             + moduleRefRows.Count + importRows.Count + fieldRows.Count
             + layoutRows.Count + layoutFieldRows.Count + methodRows.Count
-            + methodSignatureRows.Count + bodyRows.Count
+            + methodSignatureRows.Count + parameterRows.Count + bodyRows.Count
             + fieldPathRows.Count + targetLayoutDependencyRows.Count
             + targetLayoutDependencyFieldReferences.Count + enumRows.Count
             + enumMemberRows.Count + typeSpecRows.Count + exportRows.Count
@@ -3737,6 +3940,7 @@ public static partial class TrRmExecutableCompiler
             || layoutFieldRows.Count > 0xFF_FFFF
             || methodRows.Count > 0xFF_FFFF
             || methodSignatureRows.Count > 0xFF_FFFF
+            || parameterRows.Count > 0xFF_FFFF
             || bodyRows.Count > 0xFF_FFFF
             || fieldPathRows.Count > 0xFF_FFFF
             || targetLayoutDependencyRows.Count > 0xFF_FFFF
@@ -3805,10 +4009,14 @@ public static partial class TrRmExecutableCompiler
             schema);
         var methodSignatureBytes = methodSignatureRows.Count == 0 ? []
             : TrRmMethodSigTableWriter.Encode(methodSignatureRows,
-                typeSpecs, 0, 0);
+                typeSpecs, parameterRows.Count, 0);
         var methodSignatures = methodSignatureRows.Count == 0 ? default
             : new TrRmMethodSigTableReader(methodSignatureBytes,
-                methodSignatureRows.Count, typeSpecs, 0, 0);
+                methodSignatureRows.Count, typeSpecs, parameterRows.Count,
+                0);
+        var parameterBytes = parameterRows.Count == 0 ? []
+            : TrRmParamTableWriter.Encode(parameterRows, methodSignatures,
+                typeSpecs, schema);
         var fieldBytes = fieldRows.Count == 0 ? []
             : TrRmFieldDefTableWriter.Encode(fieldRows, strings, typeDefs,
                 typeSpecs, schema);
@@ -3921,6 +4129,11 @@ public static partial class TrRmExecutableCompiler
             sections.Add(new TrRmSection(0x0017, 0,
                 checked((uint)methodSignatureRows.Count),
                 methodSignatureBytes));
+        }
+        if (parameterRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x0018, 0,
+                checked((uint)parameterRows.Count), parameterBytes));
         }
         if (bodyRows.Count != 0)
         {

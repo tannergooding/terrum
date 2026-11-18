@@ -568,6 +568,12 @@ public static partial class TrRmExecutableCompiler
             {
                 return;
             }
+            if (type.Form == 0x0D && type.IsRow)
+            {
+                _ = DecodeEN1FieldFunctionPointer(rootTables, type.Row,
+                    rootModuleRow);
+                return;
+            }
             if (type.Form == 0x01 && type.TypeCode == 0x8C
                 && type.ArgumentCode == 0 && type.Qualifiers == 0)
             {
@@ -1848,6 +1854,33 @@ public static partial class TrRmExecutableCompiler
             = ImmutableArray.CreateBuilder<NativePointerTypeDefinition>();
         var nativePointerTypeIndexes
             = new Dictionary<NativePointerTypeDefinition, int>();
+        var nativeFunctionPointerSignatures
+            = ImmutableArray.CreateBuilder<
+                NativeFunctionPointerSignatureDefinition>();
+        int GetOrAddNativeFunctionPointerSignature(
+            NativeFunctionPointerSignatureDefinition signature)
+        {
+            for (var index = 0;
+                index < nativeFunctionPointerSignatures.Count; index++)
+            {
+                if (NativeFunctionPointerContract.AreEquivalent(
+                        nativeFunctionPointerSignatures[index], signature))
+                {
+                    return index;
+                }
+            }
+
+            if (nativeFunctionPointerSignatures.Count
+                >= SemanticVerifier.MaximumAnalysisVisits)
+            {
+                throw Unsupported(
+                    "The EN1 native function-pointer signature limit was exceeded.");
+            }
+
+            nativeFunctionPointerSignatures.Add(signature);
+            return nativeFunctionPointerSignatures.Count - 1;
+        }
+
         var classTypeInstanceIndexes = new Dictionary<(
             BoundGenericNominalTypeIdentity Identity,
             string TypeSpecProviderIdentity, uint TypeSpecReference), int>();
@@ -1873,6 +1906,7 @@ public static partial class TrRmExecutableCompiler
                 selectedByTypeDef, enumIndexByTypeDefRow,
                 enumIndexByImportRow, structureIndexByImportRow,
                 enumDefinitions, nativePointerTypes,
+                nativeFunctionPointerSignatures,
                 nativePointerTypeIndexes, typeProviderBindings,
                 fieldProviderValidation.FieldBindings, GetTables,
                 GetSnapshot, GetExportKeys,
@@ -1932,6 +1966,16 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 pendingStructures.Push(structureIndex);
+                return true;
+            }
+
+            if (typeSpecForm == 0x0D && type.Form == 0x0D
+                && type.IsRow)
+            {
+                var signature = DecodeEN1FieldFunctionPointer(rootTables,
+                    type.Row, rootModuleRow);
+                fieldType = NativeFunctionPointerTypes.Type(
+                    GetOrAddNativeFunctionPointerSignature(signature));
                 return true;
             }
 
@@ -2285,13 +2329,16 @@ public static partial class TrRmExecutableCompiler
             Structures = structures,
             EnumDefinitions = enumDefinitions,
             NativePointerTypes = nativePointerTypes.ToImmutable(),
+            NativeFunctionPointerSignatures
+                = nativeFunctionPointerSignatures.ToImmutable(),
             GenericNominalTypeDefinitions =
                 genericNominalTypeDefinitions,
             GenericNominalTypeInstances =
                 genericNominalTypeInstances.ToImmutable(),
             StandardClassDeclarations = standardClassDeclarations,
         };
-        if (!structures.IsEmpty || !nativePointerTypes.IsEmpty)
+        if (!structures.IsEmpty || !nativePointerTypes.IsEmpty
+            || !nativeFunctionPointerSignatures.IsEmpty)
         {
             SemanticVerifier.VerifyLibraryReferences(program);
         }
@@ -2314,6 +2361,8 @@ public static partial class TrRmExecutableCompiler
             standardQuerySourceAssociation:
                 standardQuerySourceAssociation,
             enumDefinitions: enumDefinitions,
+            nativeFunctionPointerSignatures:
+                nativeFunctionPointerSignatures.ToImmutable(),
             nativePointerTypes: nativePointerTypes.ToImmutable(),
             genericNominalTypeDefinitions:
                 genericNominalTypeDefinitions,
@@ -2327,6 +2376,95 @@ public static partial class TrRmExecutableCompiler
             && (int)type >= 100
             && (int)type < ManagedClassTypes.First;
 
+    private static bool IsSupportedEN1FieldFunctionPointer(
+        NativeFunctionPointerSignatureDefinition signature)
+        => NativeFunctionPointerContract.IsValidSignature(signature,
+                ImmutableArray.Create(signature))
+            && signature.CallingConvention
+                != NativeCallingConvention.Native
+            && NativeFunctionPointerContract
+                .IsSupportedWindowsX64Convention(
+                    signature.CallingConvention)
+            && signature.EffectsMask == 0
+            && signature.Selectors.IsEmpty
+            && signature.OutputStates.IsEmpty
+            && signature.Dependencies.IsEmpty
+            && signature.NativeParameters.IsDefaultOrEmpty
+            && (signature.ReturnType == PrimitiveType.Void
+                || PrimitiveTypeFacts.IsBuiltInScalar(signature.ReturnType))
+            && signature.ParameterTypes.All(
+                PrimitiveTypeFacts.IsBuiltInScalar);
+
+    private static NativeFunctionPointerSignatureDefinition
+        DecodeEN1FieldFunctionPointer(
+            TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+            int typeSpecRow, int moduleRow)
+    {
+        var anchorMethodRow = tables.NativeFunctionPointerAnchors
+            .GetAnchorMethodDefRow(typeSpecRow);
+        if (tables.Methods.GetContractRange(anchorMethodRow).Count != 0)
+        {
+            throw Unsupported(
+                "The bounded EN1 function-pointer field route supports scalar signatures without extra method contracts.");
+        }
+
+        var signatureRow = tables.Methods.GetSignature(anchorMethodRow);
+        var returnTypeSpecRef = tables.Signatures
+            .GetResultTypeSpec(signatureRow);
+        var returnType = DecodeScalar(returnTypeSpecRef,
+            allowVoid: true);
+        var (parameterFirst, parameterCount)
+            = tables.Signatures.GetParamRange(signatureRow);
+        var parameterTypes
+            = ImmutableArray.CreateBuilder<PrimitiveType>(parameterCount);
+        for (var parameter = 0; parameter < parameterCount; parameter++)
+        {
+            parameterTypes.Add(DecodeScalar(
+                tables.Parameters.GetTypeSpec(parameterFirst + parameter),
+                allowVoid: false));
+        }
+
+        var signature = new NativeFunctionPointerSignatureDefinition(
+            (NativeCallingConvention)tables.NativeFunctionPointerAnchors
+                .GetCallingConvention(typeSpecRow),
+            returnType, parameterTypes.MoveToImmutable());
+        if (tables.Modules.GetRequirements(moduleRow).TargetRequirement
+            != TrRmModuleTableReader.WindowsX64NativeTargetRequirement
+            || !IsSupportedEN1FieldFunctionPointer(signature))
+        {
+            throw Unsupported(
+                "The bounded EN1 function-pointer field route requires the selected Windows x64 target and a covered scalar signature.");
+        }
+
+        return signature;
+
+        PrimitiveType DecodeScalar(uint typeSpecRef, bool allowVoid)
+        {
+            var type = tables.TypeSpecs.GetTypeSpecRef(typeSpecRef);
+            if (type.Form != 0xF2 || type.Qualifiers != 0
+                || !TrRmConstantSourceValueValidator
+                    .TryGetBoundScalarType(type.TypeCode, out var scalarType)
+                || (scalarType == PrimitiveType.Void && !allowVoid))
+            {
+                throw Unsupported(
+                    "The bounded EN1 function-pointer field route supports only scalar signature TypeSpecs.");
+            }
+
+            if (scalarType is (PrimitiveType.NativeInt
+                    or PrimitiveType.NativeUInt)
+                && tables.Modules.GetRequirements(moduleRow)
+                    .TargetRequirement
+                    != TrRmModuleTableReader
+                        .WindowsX64NativeTargetRequirement)
+            {
+                throw Unsupported(
+                    "A native-width function-pointer signature requires the Windows x64 target.");
+            }
+
+            return scalarType;
+        }
+    }
+
     private static ImmutableArray<BoundStruct>
         CreateC1EnumClosureStructSourceTypes(
         TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
@@ -2338,6 +2476,8 @@ public static partial class TrRmExecutableCompiler
         ImmutableArray<BoundEnumDefinition> enumDefinitions,
         ImmutableArray<NativePointerTypeDefinition>.Builder
             nativePointerTypes,
+        ImmutableArray<NativeFunctionPointerSignatureDefinition>.Builder
+            nativeFunctionPointerSignatures,
         Dictionary<NativePointerTypeDefinition, int>
             nativePointerTypeIndexes,
         ImmutableArray<TrRmStandardTypeProviderBinding> typeProviderBindings,
@@ -2572,6 +2712,30 @@ public static partial class TrRmExecutableCompiler
             return true;
         }
 
+        int GetOrAddNativeFunctionPointerSignature(
+            NativeFunctionPointerSignatureDefinition signature)
+        {
+            for (var index = 0;
+                index < nativeFunctionPointerSignatures.Count; index++)
+            {
+                if (NativeFunctionPointerContract.AreEquivalent(
+                        nativeFunctionPointerSignatures[index], signature))
+                {
+                    return index;
+                }
+            }
+
+            if (nativeFunctionPointerSignatures.Count
+                >= SemanticVerifier.MaximumAnalysisVisits)
+            {
+                throw Unsupported(
+                    "The EN1 native function-pointer signature limit was exceeded.");
+            }
+
+            nativeFunctionPointerSignatures.Add(signature);
+            return nativeFunctionPointerSignatures.Count - 1;
+        }
+
         PrimitiveType DecodeFieldType(uint typeSpecReference,
             int depth = 0)
         {
@@ -2613,6 +2777,14 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 return PrimitiveType.NativeRawPointer;
+            }
+
+            if (type.Form == 0x0D && type.IsRow)
+            {
+                var signature = DecodeEN1FieldFunctionPointer(tables,
+                    type.Row, moduleRow);
+                return NativeFunctionPointerTypes.Type(
+                    GetOrAddNativeFunctionPointerSignature(signature));
             }
 
             if (type.Form is 0x01 or 0x0C

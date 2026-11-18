@@ -1317,6 +1317,14 @@ public static partial class TrRmExecutableCompiler
         var pointerTypeIndexes = pointerTypes
             .Select((pointer, index) => (pointer, index))
             .ToDictionary(static item => item.pointer, static item => item.index);
+        var functionPointerSignatures
+            = providerProgram.NativeFunctionPointerSignatures.IsDefault
+                ? ImmutableArray.CreateBuilder<
+                    NativeFunctionPointerSignatureDefinition>()
+                : providerProgram.NativeFunctionPointerSignatures.ToBuilder();
+        var consumerFunctionPointerIndexes = new int[
+            consumerReference.NativeFunctionPointerSignatures.Length];
+        Array.Fill(consumerFunctionPointerIndexes, -1);
         var consumerPointerIndexes = new int[
             consumerReference.NativePointerTypes.Length];
         Array.Fill(consumerPointerIndexes, -1);
@@ -1438,6 +1446,44 @@ public static partial class TrRmExecutableCompiler
             return mappedPointerIndex;
         }
 
+        int MapConsumerFunctionPointerType(int signatureIndex)
+        {
+            if ((uint)signatureIndex
+                    >= (uint)consumerFunctionPointerIndexes.Length)
+            {
+                throw new InvalidDataException(
+                    "The EN1 consumer class closure has an invalid function-pointer type identity.");
+            }
+
+            if (consumerFunctionPointerIndexes[signatureIndex] >= 0)
+            {
+                return consumerFunctionPointerIndexes[signatureIndex];
+            }
+
+            var signature = consumerReference
+                .NativeFunctionPointerSignatures[signatureIndex];
+            var mappedIndex = -1;
+            for (var index = 0; index < functionPointerSignatures.Count;
+                index++)
+            {
+                if (NativeFunctionPointerContract.AreEquivalent(
+                        functionPointerSignatures[index], signature))
+                {
+                    mappedIndex = index;
+                    break;
+                }
+            }
+
+            if (mappedIndex < 0)
+            {
+                mappedIndex = functionPointerSignatures.Count;
+                functionPointerSignatures.Add(signature);
+            }
+
+            consumerFunctionPointerIndexes[signatureIndex] = mappedIndex;
+            return mappedIndex;
+        }
+
         PrimitiveType RemapConsumerType(PrimitiveType type, int depth = 0)
         {
             if (depth > SemanticVerifier.MaximumDepth)
@@ -1450,6 +1496,12 @@ public static partial class TrRmExecutableCompiler
             {
                 return NativePointerTypes.Type(MapConsumerPointerType(
                     NativePointerTypes.Index(type), depth));
+            }
+            if (NativeFunctionPointerTypes.IsType(type))
+            {
+                return NativeFunctionPointerTypes.Type(
+                    MapConsumerFunctionPointerType(
+                        NativeFunctionPointerTypes.Index(type)));
             }
             if (IsC1EnumClosureStructType(type))
             {
@@ -1577,6 +1629,8 @@ public static partial class TrRmExecutableCompiler
         }
 
         return providerProgram with {
+            NativeFunctionPointerSignatures
+                = functionPointerSignatures.ToImmutable(),
             NativePointerTypes = pointerTypes.ToImmutable(),
             GenericNominalTypeDefinitions = definitions.ToImmutable(),
             StandardClassDeclarations = declarations.ToImmutable(),
