@@ -8160,7 +8160,7 @@ internal static class TrRmRegisterBodyMapValidator
         var type = typeSpecs.GetTypeSpecRef(typeSpecRef);
         return type.Form == 0x01 && type.Qualifiers == 0
             && (isFloating
-                ? type.TypeCode is 0x14 or 0x15
+                ? type.TypeCode is >= 0x12 and <= 0x19
                 : type.TypeCode is >= 0x06 and <= 0x0F);
     }
 

@@ -916,11 +916,11 @@ public static partial class TrRmExecutableCompiler
                             && TryGetC1M1Construction2UnitIdentityForwarder(
                                 methodFunction, program.Functions,
                                 out identityForwarderTargetFunctionIndex);
-                    var directIntegerBinary
-                        = TryGetC1M1Construction2DirectIntegerBinary(
+                    var directNumericBinary
+                        = TryGetC1M1Construction2DirectNumericBinary(
                             methodFunction);
-                    var directIntegerUnary
-                        = TryGetC1M1Construction2DirectIntegerUnary(
+                    var directNumericUnary
+                        = TryGetC1M1Construction2DirectNumericUnary(
                             methodFunction);
                     var directBooleanComparison
                         = TryGetC1M1Construction2DirectBooleanComparison(
@@ -941,8 +941,8 @@ public static partial class TrRmExecutableCompiler
                             && !isSupportedDirectFieldWriteInstanceMethod
                             && !isSupportedIdentityForwarder
                             && !isSupportedUnitIdentityForwarder
-                            && directIntegerBinary is null
-                            && directIntegerUnary is null
+                            && directNumericBinary is null
+                            && directNumericUnary is null
                             && directBooleanComparison is null
                             && callIntegerBinary is null
                             && !localCopyReturn
@@ -1011,15 +1011,15 @@ public static partial class TrRmExecutableCompiler
                                 && !isSupportedDirectFieldWriteInstanceMethod
                                 && !isSupportedIdentityForwarder
                                 && !isSupportedUnitIdentityForwarder
-                                && directIntegerBinary is null
-                                && directIntegerUnary is null
+                                && directNumericBinary is null
+                                && directNumericUnary is null
                                 && directBooleanComparison is null
                                 && callIntegerBinary is null
                                 && !localCopyReturn
                                 && !localIntegerBinaryReturn)
                             {
                                 throw Unsupported(
-                                    "The bounded Construction-2 instance method producer supports only unit, direct scalar-parameter, direct int32/Boolean operations, same-class call-binary, scalar local-copy/binary returns or direct scalar-field results and direct scalar-field writes.");
+                                    "The bounded Construction-2 instance method producer supports only unit, direct scalar-parameter, direct numeric/Boolean operations, same-class fixed-integer call-binary, local-copy/binary returns or direct scalar-field results and direct scalar-field writes.");
                             }
                         }
 
@@ -1160,11 +1160,11 @@ public static partial class TrRmExecutableCompiler
                             = EncodeC1M1Construction2FieldWriteBody(
                                 fieldDefRow, 0, sourceUse: 1);
                     }
-                    else if (directIntegerBinary is not null)
+                    else if (directNumericBinary is not null)
                     {
                         encodedBody
-                            = EncodeC1M1Construction2DirectIntegerBinaryBody(
-                                methodFunction, directIntegerBinary,
+                            = EncodeC1M1Construction2DirectNumericBinaryBody(
+                                methodFunction, directNumericBinary,
                                 frozenScalarValueBuilder,
                                 Construction2ValueTypeSpecReference,
                                 contractRows.Count, schema);
@@ -1177,11 +1177,11 @@ public static partial class TrRmExecutableCompiler
                                 Construction2ValueTypeSpecReference,
                                 contractRows.Count, schema);
                     }
-                    else if (directIntegerUnary is not null)
+                    else if (directNumericUnary is not null)
                     {
                         encodedBody
-                            = EncodeC1M1Construction2DirectIntegerUnaryBody(
-                                methodFunction, directIntegerUnary,
+                            = EncodeC1M1Construction2DirectNumericUnaryBody(
+                                methodFunction, directNumericUnary,
                                 Construction2ValueTypeSpecReference,
                                 contractRows.Count, schema);
                     }
@@ -2139,6 +2139,25 @@ public static partial class TrRmExecutableCompiler
                 0x17, 0,
             ];
         }
+        else if (returnValue is BoundUnary floatingUnary
+            && function.ReturnType == floatingUnary.Type
+            && PrimitiveTypeFacts.IsFloating(floatingUnary.Type)
+            && floatingUnary.Operator == TokenKind.Minus
+            && floatingUnary.Operand is BoundRead floatingOperand
+            && floatingOperand.Type == floatingUnary.Type
+            && (uint)floatingOperand.Variable
+                < (uint)function.ParameterCount
+            && function.Variables[floatingOperand.Variable].Type
+                == floatingUnary.Type)
+        {
+            SetIntegerFormalHome(floatingOperand.Variable,
+                floatingUnary.Type);
+            code = [
+                0xD5, 0, 0, 0,
+                0xC0, 0x25, 0xF0, 0xF0,
+                0x17, 0,
+            ];
+        }
         else if (returnValue is BoundBinary binary
             && function.ReturnType == binary.Type
             && IsC1M1Construction2BodyIntegerType(binary.Type)
@@ -2190,7 +2209,7 @@ public static partial class TrRmExecutableCompiler
         }
         else if (returnValue is BoundBinary arithmetic
             && function.ReturnType == arithmetic.Type
-            && IsC1M1Construction2BodyIntegerType(arithmetic.Type)
+            && IsC1M1Construction2BodyNumericType(arithmetic.Type)
             && arithmetic.Left is BoundRead arithmeticLeft
             && arithmetic.Right is BoundRead arithmeticRight
             && arithmeticLeft.Type == arithmetic.Type
@@ -2209,28 +2228,30 @@ public static partial class TrRmExecutableCompiler
             var (leftHome, rightHome) = SetScalarBinaryHomes(
                 arithmetic.Type, arithmeticLeft.Variable,
                 arithmeticRight.Variable);
-            var operation = (arithmetic.Operator,
-                arithmetic.OverflowBehavior) switch
-            {
-                (TokenKind.Plus,
-                    BoundIntegerOverflowBehavior.Checked) => (byte)0x01,
-                (TokenKind.Minus,
-                    BoundIntegerOverflowBehavior.Checked) => (byte)0x02,
-                (TokenKind.Star,
-                    BoundIntegerOverflowBehavior.Checked) => (byte)0x03,
-                (TokenKind.Slash,
-                    BoundIntegerOverflowBehavior.Checked) => (byte)0x0C,
-                (TokenKind.Percent,
-                    BoundIntegerOverflowBehavior.Checked) => (byte)0x0D,
-                (TokenKind.Plus,
-                    BoundIntegerOverflowBehavior.Wrapping) => (byte)0x05,
-                (TokenKind.Minus,
-                    BoundIntegerOverflowBehavior.Wrapping) => (byte)0x06,
-                (TokenKind.Star,
-                    BoundIntegerOverflowBehavior.Wrapping) => (byte)0x07,
-                _ => throw Unsupported(
-                    "The selected static register Body does not encode this integer overflow policy."),
-            };
+            var operation = PrimitiveTypeFacts.IsFloating(arithmetic.Type)
+                ? GetC1M1Construction2FloatingBinaryControl(
+                    arithmetic.Operator)
+                : (arithmetic.Operator, arithmetic.OverflowBehavior) switch
+                {
+                    (TokenKind.Plus,
+                        BoundIntegerOverflowBehavior.Checked) => (byte)0x01,
+                    (TokenKind.Minus,
+                        BoundIntegerOverflowBehavior.Checked) => (byte)0x02,
+                    (TokenKind.Star,
+                        BoundIntegerOverflowBehavior.Checked) => (byte)0x03,
+                    (TokenKind.Slash,
+                        BoundIntegerOverflowBehavior.Checked) => (byte)0x0C,
+                    (TokenKind.Percent,
+                        BoundIntegerOverflowBehavior.Checked) => (byte)0x0D,
+                    (TokenKind.Plus,
+                        BoundIntegerOverflowBehavior.Wrapping) => (byte)0x05,
+                    (TokenKind.Minus,
+                        BoundIntegerOverflowBehavior.Wrapping) => (byte)0x06,
+                    (TokenKind.Star,
+                        BoundIntegerOverflowBehavior.Wrapping) => (byte)0x07,
+                    _ => throw Unsupported(
+                        "The selected static register Body does not encode this integer overflow policy."),
+                };
             var instructions = new List<byte>(14);
             instructions.Add(0xD5);
             instructions.Add(0);
@@ -2258,7 +2279,7 @@ public static partial class TrRmExecutableCompiler
             && comparison.Type == PrimitiveType.Bool
             && comparison.Left is BoundRead comparisonLeft
             && comparison.Right is BoundRead comparisonRight
-            && IsC1M1Construction2BodyIntegerType(
+            && IsC1M1Construction2BodyNumericType(
                 comparisonLeft.Type)
             && comparisonRight.Type == comparisonLeft.Type
             && (uint)comparisonLeft.Variable
@@ -2304,11 +2325,15 @@ public static partial class TrRmExecutableCompiler
         }
         else if (returnValue is BoundBinary constantBinary
             && function.ReturnType == constantBinary.Type
-            && IsC1M1Construction2BodyIntegerType(constantBinary.Type)
-            && (constantBinary.Operator is TokenKind.Ampersand
-                or TokenKind.Pipe or TokenKind.Caret or TokenKind.Plus
-                or TokenKind.Minus or TokenKind.Star or TokenKind.Slash
-                or TokenKind.Percent))
+            && IsC1M1Construction2BodyNumericType(constantBinary.Type)
+            && (PrimitiveTypeFacts.IsFloating(constantBinary.Type)
+                ? constantBinary.Operator is TokenKind.Plus
+                    or TokenKind.Minus or TokenKind.Star or TokenKind.Slash
+                    or TokenKind.Percent
+                : constantBinary.Operator is TokenKind.Ampersand
+                    or TokenKind.Pipe or TokenKind.Caret or TokenKind.Plus
+                    or TokenKind.Minus or TokenKind.Star or TokenKind.Slash
+                    or TokenKind.Percent))
         {
             var (formalRead, constant, constantOnLeft)
                 = (constantBinary.Left, constantBinary.Right) switch
@@ -2318,7 +2343,7 @@ public static partial class TrRmExecutableCompiler
                     (BoundConstant value, BoundRead read)
                         => (read, value, true),
                     _ => throw Unsupported(
-                        "A Construction-2 static constant binary Body requires one direct fixed-integer formal and one scalar constant."),
+                        "A Construction-2 static constant binary Body requires one direct numeric formal and one scalar constant."),
                 };
 
             if (formalRead.Type != constantBinary.Type
@@ -2331,7 +2356,7 @@ public static partial class TrRmExecutableCompiler
                 || !constant.Bits.IsCanonicalFor(constantBinary.Type))
             {
                 throw Unsupported(
-                    "A Construction-2 static constant binary Body requires exact canonical fixed-integer operands.");
+                    "A Construction-2 static constant binary Body requires exact canonical same-typed operands.");
             }
 
             SetIntegerFormalHome(formalRead.Variable, formalRead.Type);
@@ -2374,9 +2399,13 @@ public static partial class TrRmExecutableCompiler
             }
 
             var (opcode, operation)
-                = GetC1M1Construction2IntegerBinaryEncoding(
-                    constantBinary.Operator,
-                    constantBinary.OverflowBehavior);
+                = PrimitiveTypeFacts.IsFloating(constantBinary.Type)
+                    ? ((byte)0xC0,
+                        GetC1M1Construction2FloatingBinaryControl(
+                            constantBinary.Operator))
+                    : GetC1M1Construction2IntegerBinaryEncoding(
+                        constantBinary.Operator,
+                        constantBinary.OverflowBehavior);
             const byte destinationRegister = 0;
             const byte leftRegister = 0;
             const byte rightRegister = 1;
@@ -2422,7 +2451,7 @@ public static partial class TrRmExecutableCompiler
         else
         {
             throw Unsupported(
-                "The bounded Construction-2 static register Body supports direct value-formal, fixed-integer unary/binary/comparison, Boolean equality/inequality, or fixed-scalar returns.");
+                "The bounded Construction-2 static register Body supports direct scalar return, numeric unary/binary/comparison, Boolean equality/inequality, or fixed-scalar returns.");
         }
 
         var maps = TrRmRegisterBodyMapBuilder.Create(typeTokens, []);
@@ -2460,6 +2489,11 @@ public static partial class TrRmExecutableCompiler
         => PrimitiveTypeFacts.IsIntegerOrWide(type)
             && type is not (PrimitiveType.NativeInt
                 or PrimitiveType.NativeUInt);
+
+    private static bool IsC1M1Construction2BodyNumericType(
+        PrimitiveType type)
+        => IsC1M1Construction2BodyIntegerType(type)
+            || PrimitiveTypeFacts.IsFloating(type);
 
     private static bool IsC1M1Construction2IntegerComparisonOperator(
         TokenKind operation)
@@ -2507,6 +2541,19 @@ public static partial class TrRmExecutableCompiler
                 => (0xC0, 0x07),
             _ => throw Unsupported(
                 "The selected integer binary Body has no registered operation."),
+        };
+
+    private static byte GetC1M1Construction2FloatingBinaryControl(
+        TokenKind operation)
+        => operation switch
+        {
+            TokenKind.Plus => 0x20,
+            TokenKind.Minus => 0x21,
+            TokenKind.Star => 0x22,
+            TokenKind.Slash => 0x23,
+            TokenKind.Percent => 0x24,
+            _ => throw Unsupported(
+                "The selected floating binary Body has no registered operation."),
         };
 
     private static byte[] EncodeC1M1Construction2IntegerComparisonCode(
@@ -2625,7 +2672,7 @@ public static partial class TrRmExecutableCompiler
         return body;
     }
 
-    private static byte[] EncodeC1M1Construction2DirectIntegerBinaryBody(
+    private static byte[] EncodeC1M1Construction2DirectNumericBinaryBody(
         BoundFunction function, BoundBinary binary,
         TrRmFrozenScalarValueBuilder frozenScalarValueBuilder,
         Func<PrimitiveType, uint> typeSpecReferenceFor, int contractCount,
@@ -2643,7 +2690,7 @@ public static partial class TrRmExecutableCompiler
                     || variable.IsInitializationLocal))
         {
             throw Unsupported(
-                "A Construction-2 instance integer binary Body requires readonly value formals and a readonly receiver.");
+                "A Construction-2 instance numeric binary Body requires readonly value formals and a readonly receiver.");
         }
 
         var leftRead = binary.Left as BoundRead;
@@ -2656,22 +2703,23 @@ public static partial class TrRmExecutableCompiler
         var rightConstantIsValid = IsValidConstant(rightConstant);
         var leftType = leftRead?.Type ?? leftConstant?.Type;
         var rightType = rightRead?.Type ?? rightConstant?.Type;
-        var hasSameIntegerType
+        var hasSameNumericType
             = leftType.HasValue && rightType == leftType
-                && IsC1M1Construction2BodyIntegerType(leftType.Value);
+                && IsC1M1Construction2BodyNumericType(leftType.Value);
         var isComparison
             = function.ReturnType == PrimitiveType.Bool
                 && binary.Type == PrimitiveType.Bool
                 && IsC1M1Construction2IntegerComparisonOperator(
                     binary.Operator)
-                && hasSameIntegerType
+                && hasSameNumericType
                 && (leftReadIsValid || leftConstantIsValid)
                 && (rightReadIsValid || rightConstantIsValid)
                 && (leftReadIsValid || rightReadIsValid);
         var isIntegerValueOperation
             = function.ReturnType == binary.Type
                 && leftType.HasValue && binary.Type == leftType.Value
-                && hasSameIntegerType
+                && hasSameNumericType
+                && IsC1M1Construction2BodyIntegerType(leftType.Value)
                 && (binary.Operator is TokenKind.Ampersand
                     or TokenKind.Pipe or TokenKind.Caret or TokenKind.Plus
                     or TokenKind.Minus or TokenKind.Star
@@ -2679,12 +2727,23 @@ public static partial class TrRmExecutableCompiler
                 && (leftReadIsValid && rightReadIsValid
                     || leftReadIsValid && rightConstantIsValid
                     || leftConstantIsValid && rightReadIsValid);
+        var isFloatingValueOperation
+            = function.ReturnType == binary.Type
+                && leftType.HasValue && binary.Type == leftType.Value
+                && hasSameNumericType
+                && PrimitiveTypeFacts.IsFloating(leftType.Value)
+                && (binary.Operator is TokenKind.Plus or TokenKind.Minus
+                    or TokenKind.Star or TokenKind.Slash or TokenKind.Percent)
+                && (leftReadIsValid && rightReadIsValid
+                    || leftReadIsValid && rightConstantIsValid
+                    || leftConstantIsValid && rightReadIsValid);
         if ((!leftReadIsValid && !leftConstantIsValid)
             || (!rightReadIsValid && !rightConstantIsValid)
-            || (!isComparison && !isIntegerValueOperation))
+            || (!isComparison && !isIntegerValueOperation
+                && !isFloatingValueOperation))
         {
             throw Unsupported(
-                "A Construction-2 instance integer Body requires direct fixed-integer formal reads or one canonical constant.");
+                "A Construction-2 instance numeric Body requires direct same-typed formal reads or one canonical constant.");
         }
 
         byte[] constantMap = [];
@@ -2756,6 +2815,14 @@ public static partial class TrRmExecutableCompiler
             code.Add((byte)predicatePayload);
             code.Add((byte)(predicatePayload >> 8));
         }
+        else if (isFloatingValueOperation)
+        {
+            code.Add(0xC0);
+            code.Add(GetC1M1Construction2FloatingBinaryControl(
+                binary.Operator));
+            code.Add((byte)payload);
+            code.Add((byte)(payload >> 8));
+        }
         else
         {
             var (opcode, operation)
@@ -2783,7 +2850,7 @@ public static partial class TrRmExecutableCompiler
 
         bool IsValidFormalRead(BoundRead? read)
             => read is not null
-                && IsC1M1Construction2BodyIntegerType(read.Type)
+                && IsC1M1Construction2BodyNumericType(read.Type)
                 && read.Variable >= receiverCount
                 && read.Variable < function.ParameterCount
                 && function.Variables[read.Variable].Type
@@ -2791,7 +2858,7 @@ public static partial class TrRmExecutableCompiler
 
         static bool IsValidConstant(BoundConstant? constant)
             => constant is not null
-                && IsC1M1Construction2BodyIntegerType(constant.Type)
+                && IsC1M1Construction2BodyNumericType(constant.Type)
                 && constant.RepresentationType == constant.Type
                 && constant.Bits.IsCanonicalFor(constant.Type);
 
@@ -2889,7 +2956,7 @@ public static partial class TrRmExecutableCompiler
                 : schema.UsesGeneralPredicateGraphs());
     }
 
-    private static byte[] EncodeC1M1Construction2DirectIntegerUnaryBody(
+    private static byte[] EncodeC1M1Construction2DirectNumericUnaryBody(
         BoundFunction function, BoundUnary unary,
         Func<PrimitiveType, uint> typeSpecReferenceFor, int contractCount,
         TrRmArtifactSchema schema)
@@ -2904,14 +2971,16 @@ public static partial class TrRmExecutableCompiler
             || function.Variables[1].IsImplicitRef
             || function.Variables[1].IsInitializationLocal
             || function.ReturnType != unary.Type
-            || !IsC1M1Construction2BodyIntegerType(unary.Type)
+            || !IsC1M1Construction2BodyNumericType(unary.Type)
             || unary.Operand is not BoundRead operand
             || operand.Type != unary.Type
             || operand.Variable != 1
-            || unary.Operator is not (TokenKind.Minus or TokenKind.Tilde))
+            || (PrimitiveTypeFacts.IsFloating(unary.Type)
+                ? unary.Operator != TokenKind.Minus
+                : unary.Operator is not (TokenKind.Minus or TokenKind.Tilde)))
         {
             throw Unsupported(
-                "A Construction-2 instance integer unary Body requires one direct integer parameter read and a readonly receiver.");
+                "A Construction-2 instance numeric unary Body requires one direct parameter read and a readonly receiver.");
         }
 
         var typeTokens = new uint[function.ParameterCount];
@@ -2939,19 +3008,20 @@ public static partial class TrRmExecutableCompiler
                     : checked((ushort)(parameter - 1)));
         }
 
-        var (opcode, operation) = (unary.Operator,
-            unary.OverflowBehavior) switch
-        {
-            (TokenKind.Tilde, _) => ((byte)0xC1, (byte)0x04),
-            (TokenKind.Minus,
-                BoundIntegerOverflowBehavior.Checked)
-                => ((byte)0xC0, (byte)0x04),
-            (TokenKind.Minus,
-                BoundIntegerOverflowBehavior.Wrapping)
-                => ((byte)0xC0, (byte)0x08),
-            _ => throw Unsupported(
-                "The selected instance register Body does not encode this integer unary operation."),
-        };
+        var (opcode, operation) = PrimitiveTypeFacts.IsFloating(unary.Type)
+            ? ((byte)0xC0, (byte)0x25)
+            : (unary.Operator, unary.OverflowBehavior) switch
+            {
+                (TokenKind.Tilde, _) => ((byte)0xC1, (byte)0x04),
+                (TokenKind.Minus,
+                    BoundIntegerOverflowBehavior.Checked)
+                    => ((byte)0xC0, (byte)0x04),
+                (TokenKind.Minus,
+                    BoundIntegerOverflowBehavior.Wrapping)
+                    => ((byte)0xC0, (byte)0x08),
+                _ => throw Unsupported(
+                    "The selected instance register Body does not encode this integer unary operation."),
+            };
         var code = new byte[] {
             0xD5, 0, 1, 0,
             opcode, operation, 0xF0, 0xF0,
@@ -4097,7 +4167,7 @@ public static partial class TrRmExecutableCompiler
         }
     }
 
-    private static BoundBinary? TryGetC1M1Construction2DirectIntegerBinary(
+    private static BoundBinary? TryGetC1M1Construction2DirectNumericBinary(
         BoundFunction function)
     {
         if (function.IsStatic || function.ParameterCount < 2
@@ -4130,22 +4200,23 @@ public static partial class TrRmExecutableCompiler
         var rightConstantIsValid = IsValidConstant(rightConstant);
         var leftType = leftRead?.Type ?? leftConstant?.Type;
         var rightType = rightRead?.Type ?? rightConstant?.Type;
-        var hasSameIntegerType
+        var hasSameNumericType
             = leftType.HasValue && rightType == leftType
-                && IsC1M1Construction2BodyIntegerType(leftType.Value);
+                && IsC1M1Construction2BodyNumericType(leftType.Value);
         var isComparison
             = function.ReturnType == PrimitiveType.Bool
                 && returnedBinary.Type == PrimitiveType.Bool
                 && IsC1M1Construction2IntegerComparisonOperator(
                     returnedBinary.Operator)
-                && hasSameIntegerType
+                && hasSameNumericType
                 && (leftReadIsValid || leftConstantIsValid)
                 && (rightReadIsValid || rightConstantIsValid)
                 && (leftReadIsValid || rightReadIsValid);
         var isIntegerValueOperation
             = function.ReturnType == returnedBinary.Type
                 && leftType.HasValue && returnedBinary.Type == leftType.Value
-                && hasSameIntegerType
+                && hasSameNumericType
+                && IsC1M1Construction2BodyIntegerType(leftType.Value)
                 && (returnedBinary.Operator is TokenKind.Ampersand
                     or TokenKind.Pipe or TokenKind.Caret or TokenKind.Plus
                     or TokenKind.Minus or TokenKind.Star
@@ -4153,12 +4224,24 @@ public static partial class TrRmExecutableCompiler
                 && (leftReadIsValid && rightReadIsValid
                     || leftReadIsValid && rightConstantIsValid
                     || leftConstantIsValid && rightReadIsValid);
+        var isFloatingValueOperation
+            = function.ReturnType == returnedBinary.Type
+                && leftType.HasValue && returnedBinary.Type == leftType.Value
+                && hasSameNumericType
+                && PrimitiveTypeFacts.IsFloating(leftType.Value)
+                && (returnedBinary.Operator is TokenKind.Plus
+                    or TokenKind.Minus or TokenKind.Star or TokenKind.Slash
+                    or TokenKind.Percent)
+                && (leftReadIsValid && rightReadIsValid
+                    || leftReadIsValid && rightConstantIsValid
+                    || leftConstantIsValid && rightReadIsValid);
         return isComparison || isIntegerValueOperation
+                || isFloatingValueOperation
             ? returnedBinary : null;
 
         bool IsValidFormalRead(BoundRead? read)
             => read is not null
-                && IsC1M1Construction2BodyIntegerType(read.Type)
+                && IsC1M1Construction2BodyNumericType(read.Type)
                 && read.Variable > 0
                 && read.Variable < function.ParameterCount
                 && function.Variables[read.Variable].Type
@@ -4166,7 +4249,7 @@ public static partial class TrRmExecutableCompiler
 
         static bool IsValidConstant(BoundConstant? constant)
             => constant is not null
-                && IsC1M1Construction2BodyIntegerType(constant.Type)
+                && IsC1M1Construction2BodyNumericType(constant.Type)
                 && constant.RepresentationType == constant.Type
                 && constant.Bits.IsCanonicalFor(constant.Type);
 
@@ -4205,13 +4288,13 @@ public static partial class TrRmExecutableCompiler
         }
     }
 
-    private static BoundUnary? TryGetC1M1Construction2DirectIntegerUnary(
+    private static BoundUnary? TryGetC1M1Construction2DirectNumericUnary(
         BoundFunction function)
     {
         if (function.IsStatic || function.ParameterCount != 2
             || function.ParameterCount != function.Variables.Length
             || function.Variables[0].IsMutable
-            || !IsC1M1Construction2BodyIntegerType(
+            || !IsC1M1Construction2BodyNumericType(
                 function.Variables[1].Type)
             || function.Variables[1].IsMutable
             || function.Variables[1].IsOut || function.Variables[1].IsInit
@@ -4226,9 +4309,11 @@ public static partial class TrRmExecutableCompiler
         Visit(function.Body);
         if (!isSupported || returnedUnary is null
             || returnedUnary.Type != function.ReturnType
-            || !IsC1M1Construction2BodyIntegerType(returnedUnary.Type)
-            || returnedUnary.Operator is not (TokenKind.Minus
-                or TokenKind.Tilde)
+            || !IsC1M1Construction2BodyNumericType(returnedUnary.Type)
+            || (PrimitiveTypeFacts.IsFloating(returnedUnary.Type)
+                ? returnedUnary.Operator != TokenKind.Minus
+                : returnedUnary.Operator is not (TokenKind.Minus
+                    or TokenKind.Tilde))
             || returnedUnary.Operand is not BoundRead operand
             || operand.Type != returnedUnary.Type
             || operand.Variable != 1)

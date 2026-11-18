@@ -144,25 +144,24 @@ are initialized directly from scalar parameters. It preserves explicit I/P
 ExportKeys and does not substitute `ClassTryCreate`; keyed and private-P
 producer regressions are added but unverified under the hold.
 Construction-2 class methods emit assigned register Body kind `01` for
-direct-formal returns and fixed-width integer unary/binary operations:
-bitwise, checked/wrapping negation and add/subtract/multiply, checked
-divide/remainder, and numeric comparisons. Readonly instance methods support
-the same direct integer operations; static and readonly-instance Boolean
-equality/inequality use C2 controls, while numeric comparisons use C2/C3.
-Target-native integer Body arithmetic remains outside the register validator's
-current type matrix.
+direct-formal returns, fixed-width integer unary/binary operations (bitwise,
+checked/wrapping negation and add/subtract/multiply, checked divide/remainder),
+and strict floating/decimal negation and add/subtract/multiply/divide/remainder
+for float16, bfloat16, float32, float64, float128, decimal32, decimal64 and
+decimal128. Static and readonly-instance numeric comparisons use C2/C3;
+Boolean equality/inequality uses C2 controls. Target-native integer Body
+arithmetic remains outside the register validator's current type matrix.
 
-Static and readonly-instance fixed-integer binaries can load SF1 scalar operands
-through ConstantMap; fixed scalar returns use the provisional Feature `11/1`
-path and Blob section `0003`. Same-class static or readonly-instance
+Static and readonly-instance numeric arithmetic Bodies can load SF1 scalar
+operands through ConstantMap; fixed scalar returns use the provisional Feature
+`11/1` path and Blob section `0003`. Same-class static or readonly-instance
 fixed-integer calls can feed a following fixed-integer binary/comparison
 through a general CallSite, with a direct formal or SF1 ConstantMap operand.
 Static and instance bodies support one-formal fixed-integer local-copy returns
 and ordered copy chains feeding fixed-integer binary/comparison operations.
 Readonly instance bodies also return an explicit scalar parameter through
-ReturnHome, emit direct
-scalar FieldRead/FieldWrite descriptors, and use receiver/formal Homes in
-declaration order. Exact same-class static and readonly-instance scalar/unit
+ReturnHome, emit direct scalar FieldRead/FieldWrite descriptors, and use
+receiver/formal Homes in declaration order. Exact same-class static and readonly-instance scalar/unit
 identity forwarders use assigned Body kind `05`; empty unit instance bodies
 are emitted. These producer and imported-caller regressions remain unverified
 under the hold.

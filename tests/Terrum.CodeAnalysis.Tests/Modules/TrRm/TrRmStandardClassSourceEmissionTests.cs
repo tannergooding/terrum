@@ -455,6 +455,42 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
             .Single(static node => node.Kind == SyntaxKind.ClassDeclaration);
         var members = classDeclaration.Children.OfType<SyntaxNode>();
+        var floatingTypeCases = new (string Name, byte TypeCode)[] {
+            ("AddFloat16", 0x12),
+            ("AddBFloat16", 0x13),
+            ("AddFloat32", 0x14),
+            ("AddFloat64", 0x15),
+            ("AddFloat128", 0x16),
+            ("AddDecimal32", 0x17),
+            ("AddDecimal64", 0x18),
+            ("AddDecimal128", 0x19),
+        };
+        var floatingControlCases = new (string Name, byte Control)[] {
+            ("SubtractFloat64", 0x21),
+            ("MultiplyFloat64", 0x22),
+            ("DivideFloat64", 0x23),
+            ("RemainderFloat64", 0x24),
+        };
+        var floatingAddExports = floatingTypeCases.Select(item =>
+        {
+            var member = members.Single(node =>
+                node.Kind == SyntaxKind.FunctionDeclaration
+                && node.Children.OfType<SyntaxTokenElement>().Any(token =>
+                    StringComparer.Ordinal.Equals(
+                        token.Token.Name, item.Name)));
+            return new TrRmSourceClassMemberExport(0, member.Span,
+                "Box." + item.Name);
+        }).ToArray();
+        var floatingControlExports = floatingControlCases.Select(item =>
+        {
+            var member = members.Single(node =>
+                node.Kind == SyntaxKind.FunctionDeclaration
+                && node.Children.OfType<SyntaxTokenElement>().Any(token =>
+                    StringComparer.Ordinal.Equals(
+                        token.Token.Name, item.Name)));
+            return new TrRmSourceClassMemberExport(0, member.Span,
+                "Box." + item.Name);
+        }).ToArray();
         var field = members.Single(static node =>
             node.Kind == SyntaxKind.FieldDeclaration);
         var constructor = members.Single(static node =>
@@ -733,6 +769,9 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 public int64 Negate64(int64 value) {
                     return -value;
                 }
+                public float32 NegateFloat32(float32 value) {
+                    return -value;
+                }
                 public int32 Complemented(int32 value) {
                     return ~value;
                 }
@@ -744,6 +783,70 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 }
                 public static int64 Add64(int64 left, int64 right) {
                     return left + right;
+                }
+                public static float16 AddFloat16(
+                    float16 left, float16 right) {
+                    return left + right;
+                }
+                public static bfloat16 AddBFloat16(
+                    bfloat16 left, bfloat16 right) {
+                    return left + right;
+                }
+                public static float32 AddFloat32(
+                    float32 left, float32 right) {
+                    return left + right;
+                }
+                public static float64 AddFloat64(
+                    float64 left, float64 right) {
+                    return left + right;
+                }
+                public static float64 SubtractFloat64(
+                    float64 left, float64 right) {
+                    return left - right;
+                }
+                public static float64 MultiplyFloat64(
+                    float64 left, float64 right) {
+                    return left * right;
+                }
+                public static float64 DivideFloat64(
+                    float64 left, float64 right) {
+                    return left / right;
+                }
+                public static float64 RemainderFloat64(
+                    float64 left, float64 right) {
+                    return left % right;
+                }
+                public float64 AddFloat64Instance(
+                    float64 left, float64 right) {
+                    return left + right;
+                }
+                public static float64 AddFloat64Constant(
+                    float64 left, float64 right) {
+                    return left + 0.5;
+                }
+                public static float128 AddFloat128(
+                    float128 left, float128 right) {
+                    return left + right;
+                }
+                public static decimal32 AddDecimal32(
+                    decimal32 left, decimal32 right) {
+                    return left + right;
+                }
+                public static decimal64 AddDecimal64(
+                    decimal64 left, decimal64 right) {
+                    return left + right;
+                }
+                public static decimal128 AddDecimal128(
+                    decimal128 left, decimal128 right) {
+                    return left + right;
+                }
+                public static bool LessFloat64(
+                    float64 left, float64 right) {
+                    return left < right;
+                }
+                public bool LessFloat64Instance(
+                    float64 left, float64 right) {
+                    return left < right;
                 }
                 public int64 Sum64(int64 left, int64 right) {
                     return left + right;
@@ -944,6 +1047,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name == "Negate64"));
+        var negateFloat32 = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "NegateFloat32"));
         var complemented = members.Single(static node =>
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
@@ -956,6 +1063,23 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name == "Add64"));
+        var addFloat64Constant = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name
+                    == "AddFloat64Constant"));
+        var lessFloat64 = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "LessFloat64"));
+        var addFloat64Instance = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "AddFloat64Instance"));
+        var lessFloat64Instance = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "LessFloat64Instance"));
         var sum64 = members.Single(static node =>
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
@@ -1171,6 +1295,8 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                         new TrRmSourceClassMemberExport(0, negate64.Span,
                             "Box.Negate64"),
                         new TrRmSourceClassMemberExport(0,
+                            negateFloat32.Span, "Box.NegateFloat32"),
+                        new TrRmSourceClassMemberExport(0,
                             complemented.Span, "Box.Complemented"),
                         new TrRmSourceClassMemberExport(0, staticXor.Span,
                             "Box.StaticXor"),
@@ -1178,6 +1304,19 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                             "Box.Add"),
                         new TrRmSourceClassMemberExport(0, add64.Span,
                             "Box.Add64"),
+                        ..floatingAddExports,
+                        ..floatingControlExports,
+                        new TrRmSourceClassMemberExport(0,
+                            addFloat64Constant.Span,
+                            "Box.AddFloat64Constant"),
+                        new TrRmSourceClassMemberExport(0,
+                            lessFloat64.Span, "Box.LessFloat64"),
+                        new TrRmSourceClassMemberExport(0,
+                            addFloat64Instance.Span,
+                            "Box.AddFloat64Instance"),
+                        new TrRmSourceClassMemberExport(0,
+                            lessFloat64Instance.Span,
+                            "Box.LessFloat64Instance"),
                         new TrRmSourceClassMemberExport(0, sum64.Span,
                             "Box.Sum64"),
                         new TrRmSourceClassMemberExport(0, xor128.Span,
@@ -1630,6 +1769,176 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 0xD5, 0, 0, 0,
                 0xD5, 1, 1, 0,
                 0xC0, GetArithmeticControl(add64Binary), 0xF0, 0x10,
+                0x17, 0,
+            }));
+        foreach (var floatingType in floatingTypeCases)
+        {
+            Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+                "Box." + floatingType.Name, out var floatingDefinition),
+                Is.True);
+            var floatingMethodRow = checked((int)(
+                floatingDefinition & 0x00FF_FFFF));
+            var floatingBodyRow
+                = tables.Methods.GetBodyRow(floatingMethodRow);
+            Assert.That(floatingBodyRow, Is.GreaterThan(0));
+            tables.Bodies.ValidateSelectedImplementation(floatingBodyRow,
+                tables.Contracts.Count);
+            tables.ValidateRegisterBodyMapsForMethod(floatingMethodRow);
+            var floatingBody = tables.Bodies.GetRegisterBody(floatingBodyRow,
+                tables.Contracts.Count);
+            Assert.That(floatingBody.HomeCount, Is.EqualTo(2));
+            var floatingSignature = tables.Methods.GetSignature(
+                floatingMethodRow);
+            var floatingResultTypeSpecRef
+                = tables.Signatures.GetResultTypeSpec(floatingSignature);
+            Assert.That(tables.TypeSpecs
+                    .GetTypeSpecRef(floatingResultTypeSpecRef).TypeCode,
+                Is.EqualTo(floatingType.TypeCode));
+            Assert.That(floatingBody.GetBlockCode(0).ToArray(),
+                Is.EqualTo(new byte[] {
+                    0xD5, 0, 0, 0,
+                    0xD5, 1, 1, 0,
+                    0xC0, 0x20, 0xF0, 0x10,
+                    0x17, 0,
+                }));
+        }
+        foreach (var floatingOperation in floatingControlCases)
+        {
+            Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+                "Box." + floatingOperation.Name,
+                out var floatingDefinition), Is.True);
+            var floatingMethodRow = checked((int)(
+                floatingDefinition & 0x00FF_FFFF));
+            var floatingBodyRow
+                = tables.Methods.GetBodyRow(floatingMethodRow);
+            Assert.That(floatingBodyRow, Is.GreaterThan(0));
+            tables.Bodies.ValidateSelectedImplementation(floatingBodyRow,
+                tables.Contracts.Count);
+            tables.ValidateRegisterBodyMapsForMethod(floatingMethodRow);
+            var floatingBody = tables.Bodies.GetRegisterBody(floatingBodyRow,
+                tables.Contracts.Count);
+            Assert.That(floatingBody.GetBlockCode(0).ToArray(),
+                Is.EqualTo(new byte[] {
+                    0xD5, 0, 0, 0,
+                    0xD5, 1, 1, 0,
+                    0xC0, floatingOperation.Control, 0xF0, 0x10,
+                    0x17, 0,
+                }));
+        }
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.NegateFloat32", out var negateFloat32Definition), Is.True);
+        var negateFloat32MethodRow = checked((int)(
+            negateFloat32Definition & 0x00FF_FFFF));
+        var negateFloat32BodyRow
+            = tables.Methods.GetBodyRow(negateFloat32MethodRow);
+        Assert.That(negateFloat32BodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(negateFloat32BodyRow,
+            tables.Contracts.Count);
+        tables.ValidateRegisterBodyMapsForMethod(negateFloat32MethodRow);
+        var negateFloat32Body = tables.Bodies.GetRegisterBody(
+            negateFloat32BodyRow, tables.Contracts.Count);
+        Assert.That(negateFloat32Body.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD5, 0, 1, 0,
+                0xC0, 0x25, 0xF0, 0xF0,
+                0x17, 0,
+            }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.LessFloat64", out var lessFloat64Definition), Is.True);
+        var lessFloat64MethodRow = checked((int)(
+            lessFloat64Definition & 0x00FF_FFFF));
+        var lessFloat64BodyRow = tables.Methods.GetBodyRow(
+            lessFloat64MethodRow);
+        Assert.That(lessFloat64BodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(lessFloat64BodyRow,
+            tables.Contracts.Count);
+        tables.ValidateRegisterBodyMapsForMethod(lessFloat64MethodRow);
+        var lessFloat64Body = tables.Bodies.GetRegisterBody(
+            lessFloat64BodyRow, tables.Contracts.Count);
+        Assert.That(lessFloat64Body.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD5, 0, 0, 0,
+                0xD5, 1, 1, 0,
+                0xC2, 0, 0xF0, 0x10,
+                0xC3, 1, 0, 0xFF,
+                0x17, 0,
+            }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.AddFloat64Constant",
+            out var addFloat64ConstantDefinition), Is.True);
+        var addFloat64ConstantMethodRow = checked((int)(
+            addFloat64ConstantDefinition & 0x00FF_FFFF));
+        var addFloat64ConstantBodyRow
+            = tables.Methods.GetBodyRow(addFloat64ConstantMethodRow);
+        Assert.That(addFloat64ConstantBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(
+            addFloat64ConstantBodyRow, tables.Contracts.Count);
+        tables.ValidateRegisterBodyMapsForMethod(
+            addFloat64ConstantMethodRow);
+        var addFloat64ConstantBody = tables.Bodies.GetRegisterBody(
+            addFloat64ConstantBodyRow, tables.Contracts.Count);
+        Assert.That(addFloat64ConstantBody.ConstantCount, Is.EqualTo(1));
+        Assert.That(addFloat64ConstantBody.ConstantMap.Length,
+            Is.EqualTo(8));
+        Assert.That(tables.TypeSpecs.AreEquivalentTypeSpecRefs(
+                BinaryPrimitives.ReadUInt32LittleEndian(
+                    addFloat64ConstantBody.ConstantMap),
+                tables.Signatures.GetResultTypeSpec(
+                    tables.Methods.GetSignature(
+                        addFloat64ConstantMethodRow))),
+            Is.True);
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                addFloat64ConstantBody.ConstantMap.Slice(4)),
+            Is.GreaterThan(0u));
+        Assert.That(tables.Features.TryGetFeature(11, out _), Is.True);
+        Assert.That(addFloat64ConstantBody.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD5, 0, 0, 0,
+                0xD4, 1, 0, 0,
+                0xC0, 0x20, 0xF0, 0x10,
+                0x17, 0,
+            }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.AddFloat64Instance",
+            out var addFloat64InstanceDefinition), Is.True);
+        var addFloat64InstanceMethodRow = checked((int)(
+            addFloat64InstanceDefinition & 0x00FF_FFFF));
+        var addFloat64InstanceBodyRow
+            = tables.Methods.GetBodyRow(addFloat64InstanceMethodRow);
+        Assert.That(addFloat64InstanceBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(
+            addFloat64InstanceBodyRow, tables.Contracts.Count);
+        tables.ValidateRegisterBodyMapsForMethod(
+            addFloat64InstanceMethodRow);
+        var addFloat64InstanceBody = tables.Bodies.GetRegisterBody(
+            addFloat64InstanceBodyRow, tables.Contracts.Count);
+        Assert.That(addFloat64InstanceBody.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD5, 0, 1, 0,
+                0xD5, 1, 2, 0,
+                0xC0, 0x20, 0xF0, 0x10,
+                0x17, 0,
+            }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.LessFloat64Instance",
+            out var lessFloat64InstanceDefinition), Is.True);
+        var lessFloat64InstanceMethodRow = checked((int)(
+            lessFloat64InstanceDefinition & 0x00FF_FFFF));
+        var lessFloat64InstanceBodyRow
+            = tables.Methods.GetBodyRow(lessFloat64InstanceMethodRow);
+        Assert.That(lessFloat64InstanceBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(
+            lessFloat64InstanceBodyRow, tables.Contracts.Count);
+        tables.ValidateRegisterBodyMapsForMethod(
+            lessFloat64InstanceMethodRow);
+        var lessFloat64InstanceBody = tables.Bodies.GetRegisterBody(
+            lessFloat64InstanceBodyRow, tables.Contracts.Count);
+        Assert.That(lessFloat64InstanceBody.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD5, 0, 1, 0,
+                0xD5, 1, 2, 0,
+                0xC2, 0, 0xF0, 0x10,
+                0xC3, 1, 0, 0xFF,
                 0x17, 0,
             }));
         Assert.That(tables.Exports.TryGetDefinitionForKey(1,
@@ -2527,6 +2836,23 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             int32 UseAdd() { return Box.Add(4, 5); }
             int64 UseAdd64(int64 left, int64 right) {
                 return Box.Add64(left, right);
+            }
+            float32 UseNegateFloat32(Box value, float32 input) {
+                return value.NegateFloat32(input);
+            }
+            float64 UseAddFloat64Constant(float64 left, float64 right) {
+                return Box.AddFloat64Constant(left, right);
+            }
+            float64 UseAddFloat64Instance(
+                Box value, float64 left, float64 right) {
+                return value.AddFloat64Instance(left, right);
+            }
+            bool UseLessFloat64(float64 left, float64 right) {
+                return Box.LessFloat64(left, right);
+            }
+            bool UseLessFloat64Instance(
+                Box value, float64 left, float64 right) {
+                return value.LessFloat64Instance(left, right);
             }
             int64 UseSum64(Box value, int64 left, int64 right) {
                 return value.Sum64(left, right);
