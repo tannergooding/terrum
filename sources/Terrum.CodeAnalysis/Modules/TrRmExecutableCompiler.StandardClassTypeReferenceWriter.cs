@@ -995,7 +995,7 @@ public static partial class TrRmExecutableCompiler
                             && methodFunction.IsInternal))
                     {
                         throw Unsupported(
-                            "The bounded Construction-2 class method producer supports effect-free scalar static methods, exact identity forwarders, readonly instance int32 unary/binary and same-class call-XOR methods, one scalar local-copy return, empty unit instance methods, readonly instance methods returning one scalar value parameter and direct scalar field reads/writes.");
+                            "The bounded Construction-2 class method producer supports effect-free scalar static methods, exact identity forwarders, readonly instance int32 unary/binary/comparison and same-class call-XOR methods, one scalar local-copy return, empty unit instance methods, readonly instance methods returning one scalar value parameter and direct scalar field reads/writes.");
                     }
 
                     if (methodFunction.ReturnType != PrimitiveType.Void)
@@ -2230,6 +2230,29 @@ public static partial class TrRmExecutableCompiler
             instructions.Add(0);
             code = instructions.ToArray();
         }
+        else if (returnValue is BoundBinary comparison
+            && function.ReturnType == PrimitiveType.Bool
+            && comparison.Type == PrimitiveType.Bool
+            && comparison.Left is BoundRead comparisonLeft
+            && comparison.Right is BoundRead comparisonRight
+            && comparisonLeft.Type == PrimitiveType.Int32
+            && comparisonRight.Type == PrimitiveType.Int32
+            && (uint)comparisonLeft.Variable
+                < (uint)function.ParameterCount
+            && (uint)comparisonRight.Variable
+                < (uint)function.ParameterCount
+            && function.Variables[comparisonLeft.Variable].Type
+                == PrimitiveType.Int32
+            && function.Variables[comparisonRight.Variable].Type
+                == PrimitiveType.Int32
+            && IsC1M1Construction2Int32ComparisonOperator(
+                comparison.Operator))
+        {
+            var (leftHome, rightHome) = SetInt32BinaryHomes(
+                comparisonLeft.Variable, comparisonRight.Variable);
+            code = EncodeC1M1Construction2Int32ComparisonCode(
+                leftHome, rightHome, comparison.Operator);
+        }
         else if (returnValue is BoundConstant constant)
         {
             if (constant.Type != function.ReturnType
@@ -2262,7 +2285,7 @@ public static partial class TrRmExecutableCompiler
         else
         {
             throw Unsupported(
-                "The bounded Construction-2 static register Body supports direct value-formal, int32 unary/binary, or fixed-scalar returns.");
+                "The bounded Construction-2 static register Body supports direct value-formal, int32 unary/binary/comparison, or fixed-scalar returns.");
         }
 
         var maps = TrRmRegisterBodyMapBuilder.Create(typeTokens, []);
@@ -2293,6 +2316,67 @@ public static partial class TrRmExecutableCompiler
             schema: schema,
             generalPredicateGraphsInitializationReferenceBodies
                 : schema.UsesGeneralPredicateGraphs());
+    }
+
+    private static bool IsC1M1Construction2Int32ComparisonOperator(
+        TokenKind operation)
+        => operation is TokenKind.EqualsEquals or TokenKind.BangEquals
+            or TokenKind.Less or TokenKind.LessEquals or TokenKind.Greater
+            or TokenKind.GreaterEquals;
+
+    private static byte GetC1M1Construction2Int32ComparisonPredicate(
+        TokenKind operation)
+        => operation switch
+        {
+            TokenKind.EqualsEquals => 2,
+            TokenKind.BangEquals => 13,
+            TokenKind.Less => 1,
+            TokenKind.LessEquals => 3,
+            TokenKind.Greater => 4,
+            TokenKind.GreaterEquals => 6,
+            _ => throw Unsupported(
+                "The selected int32 comparison has no registered predicate."),
+        };
+
+    private static byte[] EncodeC1M1Construction2Int32ComparisonCode(
+        int leftHome, int rightHome, TokenKind operation)
+    {
+        if (leftHome < 0 || leftHome > ushort.MaxValue
+            || rightHome < 0 || rightHome > ushort.MaxValue)
+        {
+            throw new InvalidDataException(
+                "An int32 comparison Body has an invalid Home index.");
+        }
+
+        var code = new List<byte>(18);
+        AppendHomeLoad(0, leftHome);
+        AppendHomeLoad(1, rightHome);
+        const byte destinationRegister = 0;
+        const byte leftRegister = 0;
+        const byte rightRegister = 1;
+        var payload = (ushort)(destinationRegister | (0x0F << 4)
+            | (leftRegister << 8) | (rightRegister << 12));
+        code.Add(0xC2);
+        code.Add(0);
+        code.Add((byte)payload);
+        code.Add((byte)(payload >> 8));
+        var predicatePayload = (ushort)(destinationRegister
+            | (destinationRegister << 4) | (0x0F << 8) | (0x0F << 12));
+        code.Add(0xC3);
+        code.Add(GetC1M1Construction2Int32ComparisonPredicate(operation));
+        code.Add((byte)predicatePayload);
+        code.Add((byte)(predicatePayload >> 8));
+        code.Add(0x17);
+        code.Add(0);
+        return code.ToArray();
+
+        void AppendHomeLoad(byte destination, int homeIndex)
+        {
+            code.Add(0xD5);
+            code.Add(destination);
+            code.Add(checked((byte)homeIndex));
+            code.Add(checked((byte)(homeIndex >> 8)));
+        }
     }
 
     private static byte[] EncodeC1M1Construction2FieldReadBody(
@@ -2337,8 +2421,7 @@ public static partial class TrRmExecutableCompiler
         Func<PrimitiveType, uint> typeSpecReferenceFor, int contractCount,
         TrRmArtifactSchema schema)
     {
-        if (function.IsStatic || function.ReturnType != PrimitiveType.Int32
-            || function.ParameterCount != 3
+        if (function.IsStatic || function.ParameterCount != 3
             || function.Variables.Length != function.ParameterCount
             || function.Variables[0].IsMutable
             || function.Variables[1].Type != PrimitiveType.Int32
@@ -2348,10 +2431,6 @@ public static partial class TrRmExecutableCompiler
             || function.Variables.Skip(1).Any(static variable =>
                 variable.IsOut || variable.IsInit || variable.IsImplicitRef
                 || variable.IsInitializationLocal)
-            || binary.Type != PrimitiveType.Int32
-            || binary.Operator is not (TokenKind.Ampersand
-                or TokenKind.Pipe or TokenKind.Caret or TokenKind.Plus
-                or TokenKind.Minus or TokenKind.Star)
             || binary.Left is not BoundRead left
             || binary.Right is not BoundRead right
             || left.Type != PrimitiveType.Int32
@@ -2361,6 +2440,23 @@ public static partial class TrRmExecutableCompiler
         {
             throw Unsupported(
                 "A Construction-2 instance int32 binary Body requires direct parameter reads and a readonly receiver.");
+        }
+
+        var isComparison
+            = function.ReturnType == PrimitiveType.Bool
+                && binary.Type == PrimitiveType.Bool
+                && IsC1M1Construction2Int32ComparisonOperator(
+                    binary.Operator);
+        var isInt32ValueOperation
+            = function.ReturnType == PrimitiveType.Int32
+                && binary.Type == PrimitiveType.Int32
+                && (binary.Operator is TokenKind.Ampersand
+                    or TokenKind.Pipe or TokenKind.Caret or TokenKind.Plus
+                    or TokenKind.Minus or TokenKind.Star);
+        if (!isComparison && !isInt32ValueOperation)
+        {
+            throw Unsupported(
+                "A Construction-2 instance int32 binary Body requires a supported int32 operation or Boolean comparison.");
         }
 
         var typeTokens = new uint[function.ParameterCount];
@@ -2388,47 +2484,57 @@ public static partial class TrRmExecutableCompiler
                     : checked((ushort)(parameter - 1)));
         }
 
-        var code = new List<byte>(14);
-        AppendHomeLoad(0, left.Variable);
-        AppendHomeLoad(1, right.Variable);
-        const byte destinationRegister = 0;
-        const byte leftRegister = 0;
-        const byte rightRegister = 1;
-        var payload = (ushort)(destinationRegister | (0x0F << 4)
-            | (leftRegister << 8) | (rightRegister << 12));
-        var (opcode, operation) = (binary.Operator,
-            binary.OverflowBehavior) switch
+        byte[] code;
+        if (isComparison)
         {
-            (TokenKind.Ampersand, _) => ((byte)0xC1, (byte)0x01),
-            (TokenKind.Pipe, _) => ((byte)0xC1, (byte)0x02),
-            (TokenKind.Caret, _) => ((byte)0xC1, (byte)0x03),
-            (TokenKind.Plus,
-                BoundIntegerOverflowBehavior.Checked)
-                => ((byte)0xC0, (byte)0x01),
-            (TokenKind.Minus,
-                BoundIntegerOverflowBehavior.Checked)
-                => ((byte)0xC0, (byte)0x02),
-            (TokenKind.Star,
-                BoundIntegerOverflowBehavior.Checked)
-                => ((byte)0xC0, (byte)0x03),
-            (TokenKind.Plus,
-                BoundIntegerOverflowBehavior.Wrapping)
-                => ((byte)0xC0, (byte)0x05),
-            (TokenKind.Minus,
-                BoundIntegerOverflowBehavior.Wrapping)
-                => ((byte)0xC0, (byte)0x06),
-            (TokenKind.Star,
-                BoundIntegerOverflowBehavior.Wrapping)
-                => ((byte)0xC0, (byte)0x07),
-            _ => throw Unsupported(
-                "The selected instance register Body does not encode this integer operation."),
-        };
-        code.Add(opcode);
-        code.Add(operation);
-        code.Add((byte)payload);
-        code.Add((byte)(payload >> 8));
-        code.Add(0x17);
-        code.Add(0);
+            code = EncodeC1M1Construction2Int32ComparisonCode(
+                left.Variable, right.Variable, binary.Operator);
+        }
+        else
+        {
+            var instructions = new List<byte>(14);
+            AppendHomeLoad(instructions, 0, left.Variable);
+            AppendHomeLoad(instructions, 1, right.Variable);
+            const byte destinationRegister = 0;
+            const byte leftRegister = 0;
+            const byte rightRegister = 1;
+            var payload = (ushort)(destinationRegister | (0x0F << 4)
+                | (leftRegister << 8) | (rightRegister << 12));
+            var (opcode, operation) = (binary.Operator,
+                binary.OverflowBehavior) switch
+            {
+                (TokenKind.Ampersand, _) => ((byte)0xC1, (byte)0x01),
+                (TokenKind.Pipe, _) => ((byte)0xC1, (byte)0x02),
+                (TokenKind.Caret, _) => ((byte)0xC1, (byte)0x03),
+                (TokenKind.Plus,
+                    BoundIntegerOverflowBehavior.Checked)
+                    => ((byte)0xC0, (byte)0x01),
+                (TokenKind.Minus,
+                    BoundIntegerOverflowBehavior.Checked)
+                    => ((byte)0xC0, (byte)0x02),
+                (TokenKind.Star,
+                    BoundIntegerOverflowBehavior.Checked)
+                    => ((byte)0xC0, (byte)0x03),
+                (TokenKind.Plus,
+                    BoundIntegerOverflowBehavior.Wrapping)
+                    => ((byte)0xC0, (byte)0x05),
+                (TokenKind.Minus,
+                    BoundIntegerOverflowBehavior.Wrapping)
+                    => ((byte)0xC0, (byte)0x06),
+                (TokenKind.Star,
+                    BoundIntegerOverflowBehavior.Wrapping)
+                    => ((byte)0xC0, (byte)0x07),
+                _ => throw Unsupported(
+                    "The selected instance register Body does not encode this integer operation."),
+            };
+            instructions.Add(opcode);
+            instructions.Add(operation);
+            instructions.Add((byte)payload);
+            instructions.Add((byte)(payload >> 8));
+            instructions.Add(0x17);
+            instructions.Add(0);
+            code = instructions.ToArray();
+        }
 
         var records = new ReadOnlyMemory<byte>[] {
             new(new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 }),
@@ -2436,18 +2542,19 @@ public static partial class TrRmExecutableCompiler
         return TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
             default, default, default,
             [new TrRmRegisterBodyBlock(0,
-                checked((uint)code.Count), 0)],
-            records, code.ToArray(), contractCount: contractCount,
+                checked((uint)code.Length), 0)],
+            records, code, contractCount: contractCount,
             schema: schema,
             generalPredicateGraphsInitializationReferenceBodies
                 : schema.UsesGeneralPredicateGraphs());
 
-        void AppendHomeLoad(byte destination, int homeIndex)
+        static void AppendHomeLoad(List<byte> instructions,
+            byte destination, int homeIndex)
         {
-            code.Add(0xD5);
-            code.Add(destination);
-            code.Add(checked((byte)homeIndex));
-            code.Add(checked((byte)(homeIndex >> 8)));
+            instructions.Add(0xD5);
+            instructions.Add(destination);
+            instructions.Add(checked((byte)homeIndex));
+            instructions.Add(checked((byte)(homeIndex >> 8)));
         }
     }
 
@@ -2732,8 +2839,7 @@ public static partial class TrRmExecutableCompiler
         Func<PrimitiveType, uint> typeSpecReferenceFor, int contractCount,
         TrRmArtifactSchema schema)
     {
-        if (function.IsStatic || function.ReturnType != PrimitiveType.Int32
-            || function.ParameterCount != 3
+        if (function.IsStatic || function.ParameterCount != 3
             || function.Variables.Length != 4
             || function.Variables[0].IsMutable
             || function.Variables.Skip(1).Any(static variable =>
@@ -3291,8 +3397,7 @@ public static partial class TrRmExecutableCompiler
     private static BoundBinary? TryGetC1M1Construction2DirectInt32Binary(
         BoundFunction function)
     {
-        if (function.IsStatic || function.ReturnType != PrimitiveType.Int32
-            || function.ParameterCount != 3
+        if (function.IsStatic || function.ParameterCount != 3
             || function.ParameterCount != function.Variables.Length
             || function.Variables[0].IsMutable
             || function.Variables[1].Type != PrimitiveType.Int32
@@ -3310,10 +3415,6 @@ public static partial class TrRmExecutableCompiler
         var isSupported = true;
         Visit(function.Body);
         if (!isSupported || returnedBinary is null
-            || returnedBinary.Type != PrimitiveType.Int32
-            || returnedBinary.Operator is not (TokenKind.Ampersand
-                or TokenKind.Pipe or TokenKind.Caret or TokenKind.Plus
-                or TokenKind.Minus or TokenKind.Star)
             || returnedBinary.Left is not BoundRead left
             || returnedBinary.Right is not BoundRead right
             || left.Type != PrimitiveType.Int32
@@ -3324,7 +3425,19 @@ public static partial class TrRmExecutableCompiler
             return null;
         }
 
-        return returnedBinary;
+        var isComparison
+            = function.ReturnType == PrimitiveType.Bool
+                && returnedBinary.Type == PrimitiveType.Bool
+                && IsC1M1Construction2Int32ComparisonOperator(
+                    returnedBinary.Operator);
+        var isInt32ValueOperation
+            = function.ReturnType == PrimitiveType.Int32
+                && returnedBinary.Type == PrimitiveType.Int32
+                && (returnedBinary.Operator is TokenKind.Ampersand
+                    or TokenKind.Pipe or TokenKind.Caret or TokenKind.Plus
+                    or TokenKind.Minus or TokenKind.Star);
+        return isComparison || isInt32ValueOperation
+            ? returnedBinary : null;
 
         void Visit(BoundBlock block)
         {

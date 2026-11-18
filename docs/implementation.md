@@ -147,10 +147,13 @@ Ordinary static class methods now emit assigned register Body kind `01` for
 direct-formal returns, int32 bitwise operations and complement, checked or
 wrapping int32 negation and add/subtract/multiply, and fixed-SF1-constant
 returns; fixed scalar constants use the provisional `11/1` path and Blob
-section `0003`. Readonly instance methods with two direct int32 formal reads
+section `0003`. Static int32 comparisons produce Boolean results through
+assigned C2/C3 relation predicates. Readonly instance methods with two direct
+int32 formal reads
 emit Body kind `01` for bitwise operations and checked/wrapping
-add/subtract/multiply; one-formal methods support checked/wrapping negation
-and complement. Exact same-class static and readonly-instance scalar/unit
+add/subtract/multiply and int32-to-Boolean comparisons; one-formal methods
+support checked/wrapping negation and complement. Exact same-class static and
+readonly-instance scalar/unit
 identity forwarders through assigned Body kind `05`, empty unit-returning instance
 methods, and readonly instance methods returning an explicit scalar parameter
 through ReturnHome with receiver/formal Homes in declaration order, plus a

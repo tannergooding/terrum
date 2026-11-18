@@ -118,8 +118,9 @@ prerequisite has already been met.
    class/member/Body closure and targets Construction-1/2 L1R1 and PI1 successors.
    Construction-2 source production now emits a bounded real initializer I /
    projection P pair for direct scalar parameter-to-field initialization,
-   static direct-formal/unary/binary and fixed-SF1-constant register Bodies,
-   readonly instance direct int32 unary/binary Bodies, static/instance scalar
+   static direct-formal/unary/binary/comparison and fixed-SF1-constant
+   register Bodies, readonly instance direct int32 unary/binary/comparison
+   Bodies, static/instance scalar
    local-copy Bodies, empty unit instance methods, and a
    readonly instance method returning one explicit scalar parameter through
    ReturnHome with receiver/formal Homes in declaration order, plus direct

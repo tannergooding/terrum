@@ -758,6 +758,24 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     int32 copy = value;
                     return copy;
                 }
+                public static bool LessThan(int32 left, int32 right) {
+                    return left < right;
+                }
+                public static bool EqualTo(int32 left, int32 right) {
+                    return left == right;
+                }
+                public static bool LessOrEqual(int32 left, int32 right) {
+                    return left <= right;
+                }
+                public bool GreaterThan(int32 left, int32 right) {
+                    return left > right;
+                }
+                public static bool GreaterOrEqual(int32 left, int32 right) {
+                    return right >= left;
+                }
+                public bool NotEqual(int32 left, int32 right) {
+                    return left != right;
+                }
                 public int32 XorAfterCall(int32 left, int32 right) {
                     return Xor(left, right) ^ right;
                 }
@@ -834,6 +852,30 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name == "CopyStatic"));
+        var lessThan = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "LessThan"));
+        var equalTo = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "EqualTo"));
+        var lessOrEqual = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "LessOrEqual"));
+        var greaterThan = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "GreaterThan"));
+        var greaterOrEqual = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "GreaterOrEqual"));
+        var notEqual = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "NotEqual"));
         var xorAfterCall = members.Single(static node =>
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
@@ -884,6 +926,18 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                             "Box.Complement"),
                         new TrRmSourceClassMemberExport(0, copyStatic.Span,
                             "Box.CopyStatic"),
+                        new TrRmSourceClassMemberExport(0, lessThan.Span,
+                            "Box.LessThan"),
+                        new TrRmSourceClassMemberExport(0, equalTo.Span,
+                            "Box.EqualTo"),
+                        new TrRmSourceClassMemberExport(0, lessOrEqual.Span,
+                            "Box.LessOrEqual"),
+                        new TrRmSourceClassMemberExport(0,
+                            greaterThan.Span, "Box.GreaterThan"),
+                        new TrRmSourceClassMemberExport(0,
+                            greaterOrEqual.Span, "Box.GreaterOrEqual"),
+                        new TrRmSourceClassMemberExport(0, notEqual.Span,
+                            "Box.NotEqual"),
                         new TrRmSourceClassMemberExport(0,
                             xorAfterCall.Span, "Box.XorAfterCall"),
                         new TrRmSourceClassMemberExport(0,
@@ -1041,22 +1095,59 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             addFunction.Body.Statements.Single()).Value!;
         static byte GetArithmeticControl(BoundBinary binary)
             => (binary.Operator, binary.OverflowBehavior) switch
+            {
+                (TokenKind.Plus, BoundIntegerOverflowBehavior.Checked)
+                    => 0x01,
+                (TokenKind.Minus, BoundIntegerOverflowBehavior.Checked)
+                    => 0x02,
+                (TokenKind.Star, BoundIntegerOverflowBehavior.Checked)
+                    => 0x03,
+                (TokenKind.Plus, BoundIntegerOverflowBehavior.Wrapping)
+                    => 0x05,
+                (TokenKind.Minus, BoundIntegerOverflowBehavior.Wrapping)
+                    => 0x06,
+                (TokenKind.Star, BoundIntegerOverflowBehavior.Wrapping)
+                    => 0x07,
+                _ => throw new InvalidOperationException(
+                    "The arithmetic fixture must use a supported operation and overflow policy."),
+            };
+        void AssertComparisonBody(string exportKey, string functionName,
+            byte predicate, int expectedHomeCount,
+            ushort leftFormalOrdinal, ushort rightFormalOrdinal)
         {
-            (TokenKind.Plus, BoundIntegerOverflowBehavior.Checked)
-                => 0x01,
-            (TokenKind.Minus, BoundIntegerOverflowBehavior.Checked)
-                => 0x02,
-            (TokenKind.Star, BoundIntegerOverflowBehavior.Checked)
-                => 0x03,
-            (TokenKind.Plus, BoundIntegerOverflowBehavior.Wrapping)
-                => 0x05,
-            (TokenKind.Minus, BoundIntegerOverflowBehavior.Wrapping)
-                => 0x06,
-            (TokenKind.Star, BoundIntegerOverflowBehavior.Wrapping)
-                => 0x07,
-            _ => throw new InvalidOperationException(
-                "The arithmetic fixture must use a supported operation and overflow policy."),
-        };
+            Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+                exportKey, out var definition), Is.True);
+            var methodRow = checked((int)(definition & 0x00FF_FFFF));
+            var bodyRow = tables.Methods.GetBodyRow(methodRow);
+            Assert.That(bodyRow, Is.GreaterThan(0));
+            tables.Bodies.ValidateSelectedImplementation(bodyRow,
+                tables.Contracts.Count);
+            var body = tables.Bodies.GetRegisterBody(bodyRow,
+                tables.Contracts.Count);
+            Assert.That(body.HomeCount, Is.EqualTo(expectedHomeCount));
+            var formalHomeOffset = expectedHomeCount == 3 ? 8 : 0;
+            Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+                    body.HomeMap.AsSpan(formalHomeOffset + 4, 2)),
+                Is.EqualTo(leftFormalOrdinal));
+            Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+                    body.HomeMap.AsSpan(formalHomeOffset + 12, 2)),
+                Is.EqualTo(rightFormalOrdinal));
+            var function = program.Functions.Single(
+                candidate => candidate.Name == functionName);
+            Assert.That(function.ReturnType, Is.EqualTo(PrimitiveType.Bool));
+            var binary = (BoundBinary)((BoundReturn)
+                function.Body.Statements.Single()).Value!;
+            Assert.That(binary.Type, Is.EqualTo(PrimitiveType.Bool));
+            var homeBase = expectedHomeCount == 3 ? 1 : 0;
+            Assert.That(body.GetBlockCode(0).ToArray(), Is.EqualTo(
+                new byte[] {
+                    0xD5, 0, (byte)homeBase, 0,
+                    0xD5, 1, (byte)(homeBase + 1), 0,
+                    0xC2, 0, 0xF0, 0x10,
+                    0xC3, predicate, 0, 0xFF,
+                    0x17, 0,
+                }));
+        }
         var addControl = GetArithmeticControl(addBinary);
         Assert.That(addBody.GetBlockCode(0).ToArray(), Is.EqualTo(
             new byte[] {
@@ -1202,6 +1293,13 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 0xD6, 0x10, 1, 0,
                 0xEB, 0, 1, 0,
             }));
+        AssertComparisonBody("Box.LessThan", "LessThan", 1, 2, 0, 1);
+        AssertComparisonBody("Box.EqualTo", "EqualTo", 2, 2, 0, 1);
+        AssertComparisonBody("Box.LessOrEqual", "LessOrEqual", 3, 2, 0, 1);
+        AssertComparisonBody("Box.GreaterThan", "GreaterThan", 4, 3, 0, 1);
+        AssertComparisonBody("Box.GreaterOrEqual", "GreaterOrEqual", 6,
+            2, 1, 0);
+        AssertComparisonBody("Box.NotEqual", "NotEqual", 13, 3, 0, 1);
         Assert.That(tables.Exports.TryGetDefinitionForKey(1,
             "Box.XorAfterCall", out var xorAfterCallDefinition), Is.True);
         var xorAfterCallMethodRow
@@ -1290,6 +1388,16 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             int32 UseNegate() { return Box.Negate(4); }
             int32 UseComplement() { return Box.Complement(4); }
             int32 UseCopyStatic() { return Box.CopyStatic(42); }
+            bool UseLessThan() { return Box.LessThan(1, 2); }
+            bool UseEqualTo() { return Box.EqualTo(1, 2); }
+            bool UseLessOrEqual() { return Box.LessOrEqual(1, 2); }
+            bool UseGreaterThan(Box value) {
+                return value.GreaterThan(2, 1);
+            }
+            bool UseGreaterOrEqual() { return Box.GreaterOrEqual(1, 2); }
+            bool UseNotEqual(Box value) {
+                return value.NotEqual(1, 2);
+            }
             int32 UseAfterCall(Box value) {
                 return value.XorAfterCall(2, 3);
             }
