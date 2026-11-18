@@ -2327,11 +2327,14 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
             providerArtifact);
         var reference = TrRmExecutableCompiler.CreateStandardReference(
-            providerInput, "ClassLayoutProvider", [],
-            ["type.box", "type.payload"], [
+            providerInput, "ClassLayoutProvider", [], ["type.box"], [
                 "field.box.prefix",
                 "field.box.address",
             ]);
+        var payloadReference = reference.Structures.Single(
+            static structure => structure.Name == "Demo.Payload");
+        Assert.That(payloadReference.StandardTypeOrigin!
+            .SelectedExportKeys, Is.Empty);
         var queryCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
                 using Demo;
@@ -2399,6 +2402,101 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 reloaded.Structures[index].Name == "Demo.Payload");
         Assert.That(reloadedPointeeType, Is.EqualTo(
             (PrimitiveType)(100 + reloadedPayloadIndex)));
+
+        var relocatedProviderTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public struct Extra { public int32 Value; }
+                public struct Payload { public int32 Value; }
+                public class Box {
+                    public uint8 Prefix;
+                    public ptr<Payload> Address;
+                }
+            }
+            """);
+        var relocatedProviderCompilation
+            = Compilation.CreateLibrary(relocatedProviderTree);
+        Assert.That(relocatedProviderCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                relocatedProviderCompilation.Diagnostics));
+        var relocatedProviderProgram
+            = (BoundProgram)relocatedProviderCompilation.Program!;
+        var relocatedClassDeclaration
+            = relocatedProviderTree.Root.Children
+                .OfType<SyntaxNode>()
+                .Single(static node =>
+                    node.Kind == SyntaxKind.ClassDeclaration);
+        var relocatedClassFields = relocatedClassDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Where(static node => node.Kind == SyntaxKind.FieldDeclaration)
+            .ToArray();
+        var relocatedClassIndex
+            = relocatedProviderProgram.SourceClassProgramAssociation!
+                .Declarations.Single(declaration =>
+                    declaration.Span == relocatedClassDeclaration.Span)
+                .ClassIndex;
+        var relocatedClassExport = new TrRmSourceClassExport(
+            relocatedProviderProgram, relocatedClassIndex,
+            relocatedClassDeclaration.Span, "type.box", [
+                new TrRmSourceClassMemberExport(0,
+                    relocatedClassFields[0].Span, "field.box.prefix"),
+                new TrRmSourceClassMemberExport(0,
+                    relocatedClassFields[1].Span, "field.box.address"),
+            ]);
+        var relocatedProviderArtifact
+            = TrRmExecutableCompiler.EmitStandard(
+                relocatedProviderProgram, "ClassLayoutProvider",
+                schemaIdentity, 1, [
+                    new TrRmSourceTypeExport("Demo", "Extra",
+                        "type.extra"),
+                    new TrRmSourceTypeExport("Demo", "Payload",
+                        "type.payload"),
+                ], [], [relocatedClassExport], []);
+        var relocatedProviderInput
+            = new TrRmStandardArtifactInput(schemaIdentity,
+                relocatedProviderArtifact);
+        var relocatedLoaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
+            "ClassLayoutConsumer", [relocatedProviderInput]);
+        Assert.That(relocatedLoaded.NativePointerTypes,
+            Has.Length.EqualTo(1));
+        var relocatedReturn = (BoundReturn)relocatedLoaded.Functions
+            .Single().Body.Statements.Single();
+        var relocatedQuery = (BoundLayoutQuery)((BoundUnsafeExpression)
+            relocatedReturn.Value!).Expression;
+        var relocatedPointerType
+            = relocatedQuery.Subject.FieldPath!.Steps.Single().FieldType;
+        var relocatedPointeeType = relocatedLoaded.NativePointerTypes[
+            NativePointerTypes.Index(relocatedPointerType)].PointeeType;
+        var relocatedPayloadIndex = Enumerable.Range(0,
+                relocatedLoaded.Structures.Length)
+            .Single(index =>
+                relocatedLoaded.Structures[index].Name == "Demo.Payload");
+        Assert.That(relocatedPointeeType, Is.EqualTo(
+            (PrimitiveType)(100 + relocatedPayloadIndex)));
+        var relocatedMain = relocatedLoaded.Functions.Single() with {
+            Name = "Main",
+            ReturnType = PrimitiveType.Int32,
+            Body = new BoundBlock([
+                new BoundReturn(new BoundCast(relocatedReturn.Value!,
+                    PrimitiveType.Int32, default), default),
+            ], default),
+        };
+        var relocatedExecutable = relocatedLoaded with {
+            Functions = [relocatedMain],
+            EntryPoint = 0,
+        };
+        Assert.That(NativeJit.Execute(relocatedExecutable,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(8));
+
+        var relocatedReemittedArtifact
+            = TrRmExecutableCompiler.EmitStandard(relocatedLoaded,
+                "ClassLayoutConsumerReemitted", schemaIdentity, 1);
+        var relocatedReloaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                relocatedReemittedArtifact),
+            "ClassLayoutConsumerReemitted", [relocatedProviderInput]);
+        Assert.That(relocatedReloaded.NativePointerTypes,
+            Has.Length.EqualTo(1));
     }
 
     [Test]

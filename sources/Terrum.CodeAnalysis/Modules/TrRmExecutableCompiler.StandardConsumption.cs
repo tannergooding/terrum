@@ -1319,44 +1319,152 @@ public static partial class TrRmExecutableCompiler
             .ToDictionary(static item => item.pointer, static item => item.index);
         var consumerPointerIndexes = new int[
             consumerReference.NativePointerTypes.Length];
-        for (var index = 0;
-            index < consumerReference.NativePointerTypes.Length; index++)
+        Array.Fill(consumerPointerIndexes, -1);
+        var consumerStructureIndexes = new int[
+            consumerReference.Structures.Length];
+        Array.Fill(consumerStructureIndexes, -1);
+        var pointerTypeStates = new byte[
+            consumerReference.NativePointerTypes.Length];
+        var providerStructureIndexes = new Dictionary<(
+            string ModuleIdentity, uint DefinitionId), int>();
+        for (var index = 0; index < providerProgram.Structures.Length;
+            index++)
         {
-            var pointer = consumerReference.NativePointerTypes[index];
-            if (!pointerTypeIndexes.TryGetValue(pointer,
-                    out var pointerIndex))
+            var origin
+                = providerProgram.Structures[index].StandardTypeOrigin;
+            if (origin is null)
             {
-                pointerIndex = pointerTypes.Count;
-                pointerTypes.Add(pointer);
-                pointerTypeIndexes.Add(pointer, pointerIndex);
+                continue;
             }
 
-            consumerPointerIndexes[index] = pointerIndex;
+            var key = (origin.Provider.ModuleIdentity,
+                origin.DefinitionId);
+            if (providerStructureIndexes.TryGetValue(key,
+                    out var existingIndex))
+            {
+                var existingOrigin = providerProgram.Structures[
+                    existingIndex].StandardTypeOrigin!;
+                if (!SameA2SourceTypeProviderSnapshot(
+                        existingOrigin.Provider, origin.Provider))
+                {
+                    throw new InvalidDataException(
+                        "One EN1 provider struct identity has conflicting snapshots.");
+                }
+
+                continue;
+            }
+
+            providerStructureIndexes.Add(key, index);
         }
 
-        PrimitiveType RemapConsumerPointerType(PrimitiveType type)
+        int MapConsumerStructureIndex(int structureIndex)
         {
-            if (!NativePointerTypes.IsType(type))
-            {
-                return type;
-            }
-
-            var pointerIndex = NativePointerTypes.Index(type);
-            if ((uint)pointerIndex >= (uint)consumerPointerIndexes.Length)
+            if ((uint)structureIndex
+                    >= (uint)consumerStructureIndexes.Length)
             {
                 throw new InvalidDataException(
-                    "The EN1 consumer class closure has an invalid pointer type identity.");
+                    "The EN1 consumer class closure has an invalid struct type identity.");
             }
 
-            return NativePointerTypes.Type(
-                consumerPointerIndexes[pointerIndex]);
+            if (consumerStructureIndexes[structureIndex] >= 0)
+            {
+                return consumerStructureIndexes[structureIndex];
+            }
+
+            var consumerOrigin = consumerReference.Structures[structureIndex]
+                .StandardTypeOrigin;
+            if (consumerOrigin is null)
+            {
+                throw new InvalidDataException(
+                    "An EN1 consumer pointer-to-struct type has no Standard provider identity.");
+            }
+
+            var key = (consumerOrigin.Provider.ModuleIdentity,
+                consumerOrigin.DefinitionId);
+            if (!providerStructureIndexes.TryGetValue(key,
+                    out var providerStructureIndex))
+            {
+                throw new InvalidDataException(
+                    "An EN1 consumer pointer-to-struct identity has no matching selected provider type.");
+            }
+            var providerOrigin = providerProgram.Structures[
+                providerStructureIndex].StandardTypeOrigin!;
+            if (!SameA2SourceTypeProviderSnapshot(providerOrigin.Provider,
+                    consumerOrigin.Provider))
+            {
+                throw new InvalidDataException(
+                    "An EN1 consumer pointer-to-struct identity has a conflicting provider snapshot.");
+            }
+
+            consumerStructureIndexes[structureIndex]
+                = providerStructureIndex;
+            return providerStructureIndex;
+        }
+
+        int MapConsumerPointerType(int pointerIndex, int depth)
+        {
+            if ((uint)pointerIndex
+                    >= (uint)consumerPointerIndexes.Length
+                || depth > SemanticVerifier.MaximumDepth
+                || pointerTypeStates[pointerIndex] == 1)
+            {
+                throw new InvalidDataException(
+                    "The EN1 consumer class closure has an invalid or cyclic pointer type identity.");
+            }
+
+            if (consumerPointerIndexes[pointerIndex] >= 0)
+            {
+                return consumerPointerIndexes[pointerIndex];
+            }
+
+            pointerTypeStates[pointerIndex] = 1;
+            var consumerPointer = consumerReference.NativePointerTypes[
+                pointerIndex];
+            var mappedPointee = RemapConsumerType(
+                consumerPointer.PointeeType, depth + 1);
+            var pointer = consumerPointer with {
+                PointeeType = mappedPointee,
+            };
+            if (!pointerTypeIndexes.TryGetValue(pointer,
+                    out var mappedPointerIndex))
+            {
+                mappedPointerIndex = pointerTypes.Count;
+                pointerTypes.Add(pointer);
+                pointerTypeIndexes.Add(pointer, mappedPointerIndex);
+            }
+
+            consumerPointerIndexes[pointerIndex] = mappedPointerIndex;
+            pointerTypeStates[pointerIndex] = 2;
+            return mappedPointerIndex;
+        }
+
+        PrimitiveType RemapConsumerType(PrimitiveType type, int depth = 0)
+        {
+            if (depth > SemanticVerifier.MaximumDepth)
+            {
+                throw new InvalidDataException(
+                    "The EN1 consumer class type closure exceeds its nesting limit.");
+            }
+
+            if (NativePointerTypes.IsType(type))
+            {
+                return NativePointerTypes.Type(MapConsumerPointerType(
+                    NativePointerTypes.Index(type), depth));
+            }
+            if (IsC1EnumClosureStructType(type))
+            {
+                return (PrimitiveType)(100 + MapConsumerStructureIndex(
+                    (int)type - 100));
+            }
+
+            return type;
         }
 
         BoundStandardClassTypeView RemapConsumerClassView(
             BoundStandardClassTypeView view)
             => view with {
                 Fields = [.. view.Fields.Select(field => field with {
-                    Type = RemapConsumerPointerType(field.Type),
+                    Type = RemapConsumerType(field.Type),
                 })],
             };
 
