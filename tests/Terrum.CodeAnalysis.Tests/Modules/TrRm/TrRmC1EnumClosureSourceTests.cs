@@ -900,6 +900,34 @@ internal sealed class TrRmC1EnumClosureSourceTests
         Assert.That(queryCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine,
                 queryCompilation.Diagnostics));
+        var unscopedQueryCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Demo;
+                nint Offset() {
+                    return offsetof(Box, Value);
+                }
+                """), selectedReference, new CompilationOptions {
+                LayoutCoreRegistration
+                    = LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(unscopedQueryCompilation.Diagnostics.Any(
+            static diagnostic => diagnostic.Message.Contains(
+                "requires an explicit unsafe context",
+                StringComparison.Ordinal)), Is.True);
+        var unsafeDeclarationCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Demo;
+                unsafe nint Offset() {
+                    return offsetof(Box, Value);
+                }
+                """), selectedReference, new CompilationOptions {
+                LayoutCoreRegistration
+                    = LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(unsafeDeclarationCompilation.Diagnostics.Any(
+            static diagnostic => diagnostic.Message.Contains(
+                "requires an explicit unsafe context",
+                StringComparison.Ordinal)), Is.True);
         var query = (BoundLayoutQuery?)null;
         var function = queryCompilation.Program!.Functions.Single();
         Assert.That(BoundTreeTraversal.VisitExpressions(function.Body,
