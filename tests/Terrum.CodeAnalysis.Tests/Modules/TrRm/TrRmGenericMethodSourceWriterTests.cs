@@ -1730,6 +1730,7 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
             alias NestedSpan<T> = Span<Span<T>>;
             alias ReferenceSpan<T> = Span<ref<T>>;
+            alias NestedReferenceSpan<T> = Span<ref<Span<T>>>;
             alias ElementWritableSpan<T> = Span<write T>;
             alias NestedElementWritableSpan<T>
                 = ElementWritableSpan<T>;
@@ -1740,6 +1741,10 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             }
             public int32 UseReferenceSpan<T,
                 U = ReferenceSpan<T>>(int32 value) {
+                return Identity<U>(value);
+            }
+            public int32 UseNestedReferenceSpan<T,
+                U = NestedReferenceSpan<T>>(int32 value) {
                 return Identity<U>(value);
             }
             public int32 UseInitialized<T,
@@ -1799,6 +1804,24 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             Is.EqualTo(BoundGenericMethodTypeTermKind.Formal));
         Assert.That(referenceSpanDefault.FormalDependencies,
             Is.EqualTo(new[] { 0 }));
+        var nestedReferenceSpanImport
+            = reference.GenericMethodImports.Single(candidate =>
+                candidate.Origin.ExportKey
+                    == "span.default.UseNestedReferenceSpan/v1");
+        var nestedReferenceSpanDefault
+            = nestedReferenceSpanImport.Formals[1].TypeDefault!;
+        var nestedReferenceElement
+            = nestedReferenceSpanDefault.Term.TypeArguments.Single();
+        Assert.That(nestedReferenceSpanDefault.Term.Kind,
+            Is.EqualTo(BoundGenericMethodTypeTermKind.Span));
+        Assert.That(nestedReferenceElement.Kind,
+            Is.EqualTo(
+                BoundGenericMethodTypeTermKind.CheckedReference));
+        Assert.That(nestedReferenceElement.TypeArguments.Single().Kind,
+            Is.EqualTo(BoundGenericMethodTypeTermKind.Span));
+        Assert.That(nestedReferenceElement.TypeArguments.Single()
+                .TypeArguments.Single().FormalOrdinal,
+            Is.Zero);
 
         var initializedImport = reference.GenericMethodImports.Single(
             candidate => candidate.Origin.ExportKey
@@ -1842,6 +1865,9 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                 }
                 public int32 ForwardReferenceSpan<T>(int32 value) {
                     return UseReferenceSpan<T, default>(value);
+                }
+                public int32 ForwardNestedReferenceSpan<T>(int32 value) {
+                    return UseNestedReferenceSpan<T, default>(value);
                 }
                 """), reference);
         Assert.That(consumerCompilation.HasErrors, Is.False,
@@ -1944,6 +1970,44 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             Is.EqualTo(forwardReferenceSpan.Formals[0].PlaceholderType));
         Assert.That(forwardedReference.IsGarbageCollected, Is.False);
         Assert.That(forwardedReference.IsOptional, Is.False);
+
+        var forwardNestedReferenceSpan
+            = consumerProgram.GenericMethodDefinitions.Single(
+                static definition =>
+                    definition.Name == "ForwardNestedReferenceSpan");
+        var nestedReferenceSpanBody
+            = forwardNestedReferenceSpan.ProofProgram.Functions[
+                forwardNestedReferenceSpan.FunctionIndex];
+        BoundCall? nestedReferenceSpanCall = null;
+        Assert.That(BoundTreeTraversal.VisitExpressions(
+            nestedReferenceSpanBody.Body, expression =>
+            {
+                if (expression is BoundCall {
+                        ImportedGenericMethodCall: not null,
+                    } call)
+                {
+                    nestedReferenceSpanCall = call;
+                }
+            }), Is.True);
+        Assert.That(nestedReferenceSpanCall, Is.Not.Null);
+        var forwardedNestedReferenceSpan
+            = nestedReferenceSpanCall!
+                .ImportedGenericMethodTypeArguments[1];
+        Assert.That(BoundSpanTypeTypes.IsValidType(
+            forwardedNestedReferenceSpan,
+            forwardNestedReferenceSpan.ProofProgram.SpanTypes), Is.True);
+        var outerSpan = forwardNestedReferenceSpan.ProofProgram.SpanTypes[
+            BoundSpanTypeTypes.Index(forwardedNestedReferenceSpan)];
+        Assert.That(CheckedReferenceTypeContract.IsValidType(
+            outerSpan.ElementType,
+            forwardNestedReferenceSpan.ProofProgram.CheckedReferenceTypes),
+            Is.True);
+        var outerReference = forwardNestedReferenceSpan.ProofProgram
+            .CheckedReferenceTypes[CheckedReferenceTypes.Index(
+                outerSpan.ElementType)];
+        Assert.That(BoundSpanTypeTypes.IsValidType(
+            outerReference.ReferentType,
+            forwardNestedReferenceSpan.ProofProgram.SpanTypes), Is.True);
     }
 
     [Test]
