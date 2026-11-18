@@ -26,7 +26,9 @@ public static partial class TrRmExecutableCompiler
 
     private sealed record C1M1Construction2SourceMethod(
         BoundFunction Function, int MethodDefRow,
-        int DirectReturnHome = -1, byte[]? CompactBody = null);
+        int DirectReturnHome = -1,
+        int IdentityForwarderTargetFunctionIndex = -1,
+        byte[]? CompactBody = null);
 
     private readonly record struct C1M1ParameterSurfaceRow(
         int MethodDefRow, int Ordinal, string Name,
@@ -261,6 +263,7 @@ public static partial class TrRmExecutableCompiler
             = new List<C1M1Construction2SourceInitializer>();
         var construction2SourceMethods
             = new List<C1M1Construction2SourceMethod>();
+        var methodDefRowByFunctionIndex = new Dictionary<int, int>();
         var sourceNames = new HashSet<(string Namespace, string Name)>();
         var typeDefRowByClass = exportKeysByClass.Keys
             .Select(static (classIndex, ordinal) =>
@@ -902,6 +905,12 @@ public static partial class TrRmExecutableCompiler
                             && TryGetC1M1Construction2DirectFieldWrite(
                                 methodFunction,
                                 out directFieldWriteIndex);
+                    var identityForwarderTargetFunctionIndex = -1;
+                    var isSupportedIdentityForwarder
+                        = methodFunction.IsStatic
+                            && TryGetC1M1Construction2IdentityForwarder(
+                                methodFunction, program.Functions,
+                                out identityForwarderTargetFunctionIndex);
                     if ((!methodFunction.IsStatic
                             && !isSupportedNoOpInstanceMethod
                             && !isSupportedDirectReturnInstanceMethod
@@ -959,7 +968,7 @@ public static partial class TrRmExecutableCompiler
                             && methodFunction.IsInternal))
                     {
                         throw Unsupported(
-                            "The bounded Construction-2 class method producer supports effect-free scalar static methods, empty unit instance methods, readonly instance methods returning one scalar value parameter and direct scalar field reads/writes.");
+                            "The bounded Construction-2 class method producer supports effect-free scalar static methods, exact identity forwarders, empty unit instance methods, readonly instance methods returning one scalar value parameter and direct scalar field reads/writes.");
                     }
 
                     if (methodFunction.ReturnType != PrimitiveType.Void)
@@ -1065,6 +1074,13 @@ public static partial class TrRmExecutableCompiler
                         .Select(static member => member.ExportKey)
                         .ToArray();
                     var methodRow = methodRows.Count + 1;
+                    if (!methodDefRowByFunctionIndex.TryAdd(
+                            methodFunctionIndex, methodRow))
+                    {
+                        throw new InvalidDataException(
+                            "A checked class method was assigned more than one MethodDef row.");
+                    }
+
                     byte[]? compactBody = null;
                     if (isSupportedDirectFieldReadInstanceMethod)
                     {
@@ -1161,6 +1177,8 @@ public static partial class TrRmExecutableCompiler
                             methodFunction, methodRow,
                             isSupportedDirectReturnInstanceMethod
                                 ? directReturnHome : -1,
+                            isSupportedIdentityForwarder
+                                ? identityForwarderTargetFunctionIndex : -1,
                             compactBody));
                 }
             }
@@ -1197,6 +1215,21 @@ public static partial class TrRmExecutableCompiler
             foreach (var method in construction2SourceMethods)
             {
                 var body = method.CompactBody;
+                if (body is null
+                    && method.IdentityForwarderTargetFunctionIndex >= 0)
+                {
+                    if (!methodDefRowByFunctionIndex.TryGetValue(
+                            method.IdentityForwarderTargetFunctionIndex,
+                            out var targetMethodDefRow))
+                    {
+                        throw new InvalidDataException(
+                            "A class identity forwarder targets a MethodDef outside its retained class closure.");
+                    }
+
+                    body = EncodeC1M1Construction2IdentityForwarderBody(
+                        targetMethodDefRow);
+                }
+
                 if (body is null)
                 {
                     body = method.Function.IsStatic
@@ -1894,6 +1927,22 @@ public static partial class TrRmExecutableCompiler
         return body;
     }
 
+    private static byte[] EncodeC1M1Construction2IdentityForwarderBody(
+        int targetMethodDefRow)
+    {
+        if (targetMethodDefRow <= 0 || targetMethodDefRow > 0xFF_FFFF)
+        {
+            throw new InvalidDataException(
+                "A class identity-forwarder Body has an invalid MethodDef row.");
+        }
+
+        var body = new byte[8];
+        body[0] = 0x05;
+        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(4),
+            0x1600_0000u | checked((uint)targetMethodDefRow));
+        return body;
+    }
+
     private static byte[] EncodeC1M1Construction2InstanceMethodBody(
         BoundFunction function, int returnHomeIndex,
         Func<PrimitiveType, uint> typeSpecReferenceFor, int contractCount,
@@ -2137,6 +2186,112 @@ public static partial class TrRmExecutableCompiler
                     && assignment is not null)
                 {
                     returned = true;
+                }
+                else
+                {
+                    isSupported = false;
+                    return;
+                }
+            }
+        }
+    }
+
+    private static bool TryGetC1M1Construction2IdentityForwarder(
+        BoundFunction function, ImmutableArray<BoundFunction> functions,
+        out int targetFunctionIndex)
+    {
+        targetFunctionIndex = -1;
+        if (!function.IsStatic || function.ReturnType == PrimitiveType.Void
+            || function.ParameterCount != function.Variables.Length)
+        {
+            return false;
+        }
+
+        BoundCall? returnedCall = null;
+        var isSupported = true;
+        Visit(function.Body);
+        if (!isSupported || returnedCall is null
+            || returnedCall.Type != function.ReturnType
+            || returnedCall.Arguments.Length != function.ParameterCount
+            || !returnedCall.DefaultedArguments.IsDefaultOrEmpty
+            || returnedCall.InterfaceCallIdentity is not null
+            || returnedCall.GenericMethodCall is not null
+            || returnedCall.ImportedGenericMethodCall is not null
+            || (uint)returnedCall.Function >= (uint)functions.Length)
+        {
+            return false;
+        }
+
+        var target = functions[returnedCall.Function];
+        if (!target.IsStatic || target.IsExternal
+            || target.IsClassConstructor || target.IsConstructor
+            || target.IsCleanup || target.IsOperator
+            || target.ModuleImport is not null
+            || target.GenericMethodInstantiation is not null
+            || !StringComparer.Ordinal.Equals(target.DeclaringStruct,
+                function.DeclaringStruct)
+            || target.ReturnType != function.ReturnType
+            || target.ParameterCount != function.ParameterCount
+            || target.Variables.Length < target.ParameterCount)
+        {
+            return false;
+        }
+
+        for (var parameter = 0;
+            parameter < function.ParameterCount; parameter++)
+        {
+            var source = function.Variables[parameter];
+            var targetParameter = target.Variables[parameter];
+            if (returnedCall.ParameterIndex(parameter) != parameter
+                || returnedCall.ImplicitReferenceTemporary(parameter) != -1
+                || returnedCall.Arguments[parameter]
+                    is not BoundRead read)
+            {
+                return false;
+            }
+
+            if (read.Variable != parameter
+                || read.Type != source.Type
+                || source.Type != targetParameter.Type
+                || source.IsMutable != targetParameter.IsMutable
+                || source.IsOut != targetParameter.IsOut
+                || source.IsInit != targetParameter.IsInit
+                || source.IsImplicitRef != targetParameter.IsImplicitRef
+                || source.IsInitializationLocal
+                    != targetParameter.IsInitializationLocal)
+            {
+                return false;
+            }
+        }
+
+        targetFunctionIndex = returnedCall.Function;
+        return true;
+
+        void Visit(BoundBlock block)
+        {
+            if (!block.RetiredManagedLocals.IsEmpty)
+            {
+                isSupported = false;
+                return;
+            }
+
+            foreach (var statement in block.Statements)
+            {
+                if (!isSupported || returnedCall is not null)
+                {
+                    isSupported = false;
+                    return;
+                }
+
+                if (statement is BoundBlock nested)
+                {
+                    Visit(nested);
+                }
+                else if (statement is BoundReturn {
+                    Value: BoundCall call
+                })
+                {
+                    returnedCall = call;
                 }
                 else
                 {

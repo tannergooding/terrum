@@ -122,8 +122,10 @@ prerequisite has already been met.
    readonly instance method returning one explicit scalar parameter through
    ReturnHome with receiver/formal Homes in declaration order, plus direct
    scalar instance FieldRead and mutable-receiver scalar FieldWrite
-   descriptors. The Unit-before-value, field-read and field-write regressions
-   remain unverified under the active hold. Ordinary by-value Unit parameters and `()`
+   descriptors, and exact same-class static identity forwarders through Body
+   kind `05`. The Unit-before-value, field-read, field-write and identity-
+   forwarder regressions remain unverified under the active hold. Ordinary
+   by-value Unit parameters and `()`
    defaults now retain logical positions through source binding, CM1 metadata
    and Windows x64 payload elision; focused source/metadata/JIT regressions
    remain unverified under the active hold. The provisional

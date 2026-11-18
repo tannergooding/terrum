@@ -144,11 +144,12 @@ are initialized directly from scalar parameters. It preserves explicit I/P
 ExportKeys and does not substitute `ClassTryCreate`; keyed and private-P
 producer regressions are added but unverified under the hold.
 Ordinary method emission also supports parameterized static scalar methods
-with real Bodies, empty unit-returning instance methods, and readonly
+with real Bodies, exact same-class static identity forwarders through assigned
+Body kind `05`, empty unit-returning instance methods, and readonly
 instance methods returning an explicit scalar parameter through ReturnHome
 with receiver/formal Homes in declaration order. The Unit-before-value
-instance regression remains unverified under the hold. Source binding now
-admits ordinary by-value Unit parameters and `()` defaults; the CM1
+instance and identity-forwarder regressions remain unverified under the hold.
+Source binding now admits ordinary by-value Unit parameters and `()` defaults; the CM1
 producer/reader preserves their logical signature
 positions and zero-width SF1 values, while Windows x64 lowering omits only
 their payload positions. Focused source, metadata and JIT regressions are
@@ -164,9 +165,9 @@ owner TypeDef Import to the same selected provider, comparing signatures,
 effects, modes and construction roles after TypeSpec remapping while retaining
 separate expected/provider defaults and Import aliases. Provider-source-free
 caller and compatible/incompatible provider regressions are added but remain
-unverified under the active hold. Other instance method Bodies beyond the
-empty-unit, direct scalar-parameter ReturnHome, direct scalar FieldRead and
-mutable scalar FieldWrite subsets, nested field paths and calls, properties, multiple/partial constructors,
+unverified under the active hold. The remaining member Body work includes
+instance calls/forwarders, nested field paths, locals and control flow,
+properties, multiple/partial constructors,
 class-backed field initialization, source-free class method re-emission and
 its replacement/remapping paths, class FieldDef Imports, CLI transport,
 independent carrier TypeSpec verification, generic TypeDef dependencies,

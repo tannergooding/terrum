@@ -691,6 +691,127 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
+    public void EmitsExactIdentityForwarderDescriptorForStaticClassMethod()
+    {
+        var tree = SyntaxTree.Parse("""
+            public class Box {
+                public int32 Value;
+                public Box(int32 value) { Value = value; }
+                public static int32 Identity(int32 value) {
+                    return value;
+                }
+                public static int32 Forward(int32 value) {
+                    return Identity(value);
+                }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node => node.Kind == SyntaxKind.ClassDeclaration);
+        var members = classDeclaration.Children.OfType<SyntaxNode>();
+        var field = members.Single(static node =>
+            node.Kind == SyntaxKind.FieldDeclaration);
+        var constructor = members.Single(static node =>
+            node.Kind == SyntaxKind.ConstructorDeclaration);
+        var identity = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Identity"));
+        var forward = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Forward"));
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "ClassIdentityForwarder", C1M1Construction2SchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, 0,
+                    classDeclaration.Span, "BoxKey", [
+                        new TrRmSourceClassMemberExport(0, field.Span,
+                            "Box.Value"),
+                        new TrRmSourceClassMemberExport(0,
+                            constructor.Span, "Box.Initialize") {
+                            ConstructionProjectionExportKey = "Box.Create",
+                        },
+                        new TrRmSourceClassMemberExport(0, identity.Span,
+                            "Box.Identity"),
+                        new TrRmSourceClassMemberExport(0, forward.Span,
+                            "Box.Forward"),
+                    ]),
+            ]);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex.ForC1M1Construction2Draft(artifact));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1, "Box.Identity",
+            out var identityDefinition), Is.True);
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1, "Box.Forward",
+            out var forwardDefinition), Is.True);
+        var identityMethodRow
+            = checked((int)(identityDefinition & 0x00FF_FFFF));
+        var forwardMethodRow
+            = checked((int)(forwardDefinition & 0x00FF_FFFF));
+        Assert.That(tables.Methods.GetOwnerType(forwardMethodRow),
+            Is.EqualTo(tables.Methods.GetOwnerType(identityMethodRow)));
+        var forwardBodyRow
+            = tables.Methods.GetBodyRow(forwardMethodRow);
+        Assert.That(forwardBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(forwardBodyRow,
+            tables.Contracts.Count);
+        var body = tables.Bodies.GetRow(forwardBodyRow);
+        Assert.That(body.Length, Is.EqualTo(8));
+        Assert.That(body[0], Is.EqualTo(0x05));
+        Assert.That(body[1], Is.Zero);
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(body[2..]),
+            Is.Zero);
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(body[4..]),
+            Is.EqualTo(identityDefinition));
+
+        var identitySignature
+            = tables.Methods.GetSignature(identityMethodRow);
+        var forwardSignature
+            = tables.Methods.GetSignature(forwardMethodRow);
+        Assert.That(tables.Signatures.GetReceiverTypeSpec(forwardSignature),
+            Is.Zero);
+        Assert.That(tables.Signatures.GetReceiverTypeSpec(identitySignature),
+            Is.Zero);
+        Assert.That(tables.TypeSpecs.AreEquivalentTypeSpecRefs(
+                tables.Signatures.GetResultTypeSpec(forwardSignature),
+                tables.Signatures.GetResultTypeSpec(identitySignature)),
+            Is.True);
+        var (identityParamFirst, identityParamCount)
+            = tables.Signatures.GetParamRange(identitySignature);
+        var (forwardParamFirst, forwardParamCount)
+            = tables.Signatures.GetParamRange(forwardSignature);
+        Assert.That(forwardParamCount, Is.EqualTo(identityParamCount));
+        for (var parameter = 0; parameter < forwardParamCount; parameter++)
+        {
+            Assert.That(tables.TypeSpecs.AreEquivalentTypeSpecRefs(
+                    tables.Parameters.GetTypeSpec(forwardParamFirst
+                        + parameter),
+                    tables.Parameters.GetTypeSpec(identityParamFirst
+                        + parameter)),
+                Is.True);
+            Assert.That(tables.Parameters.GetMode(forwardParamFirst
+                    + parameter),
+                Is.EqualTo(tables.Parameters.GetMode(identityParamFirst
+                    + parameter)));
+        }
+
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(C1M1Construction2SchemaIdentity,
+                artifact),
+            "ClassIdentityForwarder", [], ["BoxKey"]);
+        var consumer = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            int32 Use() { return Box.Forward(7); }
+            """), reference);
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
+    }
+
+    [Test]
     public void BindsImportedClassMethodDefaultFromSelectedView()
     {
         var tree = SyntaxTree.Parse("""
