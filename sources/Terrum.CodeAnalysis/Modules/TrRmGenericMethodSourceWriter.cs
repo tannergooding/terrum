@@ -949,7 +949,6 @@ public static partial class TrRmExecutableCompiler
             || expectedTarget.ProofFunction.DoesNotReturn
             || expectedTarget.ProofFunction.RequiresUnsafeCaller
                 != expectedTarget.Signature.RequiresUnsafeCaller
-            || !expectedTarget.ProofFunction.DependencyContracts.IsEmpty
             || expectedTarget.Formals.IsDefaultOrEmpty
             || expectedTarget.Formals.Length
                 != expectedTarget.Signature.Formals.Length
@@ -1804,8 +1803,6 @@ public static partial class TrRmExecutableCompiler
                     || expectedTarget.ProofFunction.DoesNotReturn
                     || expectedTarget.ProofFunction.RequiresUnsafeCaller
                         != expectedTarget.Signature.RequiresUnsafeCaller
-                    || !expectedTarget.ProofFunction.DependencyContracts
-                        .IsEmpty
                     || expectedTarget.Formals.IsDefaultOrEmpty
                     || expectedTarget.Formals.Length
                         != expectedTarget.Signature.Formals.Length
@@ -3007,7 +3004,6 @@ public static partial class TrRmExecutableCompiler
                 || proofFunction.DoesNotReturn
                 || proofFunction.RequiresUnsafeCaller
                     != signature.RequiresUnsafeCaller
-                || !proofFunction.DependencyContracts.IsEmpty
                 || expected.Formals.IsDefaultOrEmpty
                 || expected.Formals.Length
                     != signature.Formals.Length
@@ -3320,6 +3316,17 @@ public static partial class TrRmExecutableCompiler
                 contractFirst = contractRows.Count + 1;
                 contractRows.Add(EncodeGenericMethodEffectContract(
                     methodRow, s_effectPayloads[4]));
+                contractCount++;
+            }
+            foreach (var dependencyContract
+                in EncodeGenericMethodDependencyContracts(proofFunction,
+                    methodRow))
+            {
+                if (contractFirst == 0)
+                {
+                    contractFirst = contractRows.Count + 1;
+                }
+                contractRows.Add(dependencyContract);
                 contractCount++;
             }
 

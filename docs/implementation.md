@@ -1479,9 +1479,11 @@ reborrows. The bounded routes reject base-schema and mixed-provider-schema
 substitution. G1 result
 Dependency rows preserve storage-only relationship 1 separately from
 backing-only 2 and union 3 through source-free decoding and per-source provider
-comparison. The row encoder can represent the refinement when present in
-bound facts, but source-authored syntax and generic-import re-emission do not
-provide it yet. Binding rejects invalid broad-to-storage narrowing, mixed-source
+comparison. Expected imported MethodDefs now retain those ordinary-result
+Dependency rows when re-emitted; source-free ref-result forwarding coverage is
+added but remains unverified. Source-authored syntax still does not declare
+relationship 1, and independent GenericMethodImport/reference-set re-emission
+remains open. Binding rejects invalid broad-to-storage narrowing, mixed-source
 exclusion and provider-only source widening. Constructed nominal TypeSpecs for local or exactly imported public
 TypeDefs now decode in generic MethodSig/GenericCall signatures. Imported
 TypeDefs bind through exact ModuleRef/Import provider selections and compare

@@ -4331,10 +4331,15 @@ internal sealed class TrRmGenericMethodSourceWriterTests
     {
         var providerCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
+                using Terrum.CodeAnalysis;
                 public Span<T> SpanIdentity<T>(Span<T> value) {
                     return value;
                 }
                 public void Inspect<T>(ref<T> source) { }
+                [return: DependsOn(nameof(source))]
+                public ref<T> Borrow<T>(ref<T> source) {
+                    return move source;
+                }
                 """));
         Assert.That(providerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine,
@@ -4354,12 +4359,17 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                 "span-import.provider");
         var forwarderCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
+                using Terrum.CodeAnalysis;
                 public Span<T> Forward<T>(Span<T> value) {
                     return SpanIdentity<T>(value);
                 }
                 public void ForwardReference<T>(ref<T> source) {
                     Inspect<T>(source);
                     return;
+                }
+                [return: DependsOn(nameof(source))]
+                public ref<T> ForwardBorrow<T>(ref<T> source) {
+                    return Borrow<T>(source);
                 }
                 """), providerReference);
         Assert.That(forwarderCompilation.HasErrors, Is.False,
@@ -4448,6 +4458,23 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             Is.EqualTo(providerReferenceTarget.Formals[0].PlaceholderType));
         Assert.That(providerReferenceDescriptor.IsReferentWritable,
             Is.False);
+
+        var borrowForward
+            = forwarderReference.GenericMethodImports.Single(
+                static imported =>
+                    imported.Origin.ExportKey == "ForwardBorrow");
+        var borrowCall = (BoundCall)((BoundReturn)
+            borrowForward.ProofFunction.Body.Statements.Single()).Value!;
+        var borrowImport = borrowCall.ImportedGenericMethodCall!;
+        var borrowDependency = borrowImport.Binding!.Expected.ProofFunction
+            .DependencyContracts.Single();
+        Assert.That(borrowDependency.Relation,
+            Is.EqualTo(BoundDependencyRelation.DependsOn));
+        Assert.That(borrowDependency.Destination,
+            Is.EqualTo(BoundDependencyDestination.Result));
+        Assert.That(borrowDependency.Sources.Single(),
+            Is.EqualTo(new BoundDependencySource(
+                BoundDependencySourceKind.Formal, 0)));
     }
 
     [Test]
