@@ -12,6 +12,9 @@ namespace Terrum.CodeAnalysis.Modules;
 
 public static partial class TrRmExecutableCompiler
 {
+    private readonly record struct GenericMethodCallSiteResult(
+        int ResultHome, PrimitiveType ResultType, BoundExpression Value);
+
     /// <summary>Creates a source-free reference to a G1L1 Module's exported generic MethodDefs and exported interfaces.</summary>
     /// <param name="providerArtifact">The exact G1L1 provider artifact.</param>
     /// <param name="moduleIdentity">The exact identity of the provider Module.</param>
@@ -1947,6 +1950,14 @@ public static partial class TrRmExecutableCompiler
             return [new BoundReturn(returned, default)];
         }
 
+        if (body.BlockCount == 1 && body.RecordCount > 3)
+        {
+            return DecodeGenericMethodCallChainBody(tables, context,
+                artifactIndex, moduleRow, callerMethodRow, callerFormals,
+                callerFormalRecords, callerReturnType, callerVariables,
+                body, code);
+        }
+
         if (body.BlockCount != 1 || body.RecordCount != 3)
         {
             throw Unsupported(
@@ -2240,6 +2251,411 @@ public static partial class TrRmExecutableCompiler
         BoundExpression value = targetImport.Signature.RequiresUnsafeCaller
             ? new BoundUnsafeExpression(call, default) : call;
         return [new BoundReturn(value, default)];
+    }
+
+    private static ImmutableArray<BoundStatement>
+        DecodeGenericMethodCallChainBody(
+            TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+            GenericMethodReadContext context, int artifactIndex, int moduleRow,
+            int callerMethodRow, ImmutableArray<PrimitiveType> callerFormals,
+            TrRmGenericMethodFormalImport[] callerFormalRecords,
+            PrimitiveType callerReturnType,
+            ImmutableArray<BoundVariable>.Builder callerVariables,
+            TrRmRegisterBodyReader body, ReadOnlySpan<byte> code)
+    {
+        if (code.Length < 6
+            || body.RecordCount < 4
+            || body.GetRecord(0)[0] != 1)
+        {
+            throw Unsupported(
+                "The G1 consumer requires a nonempty linear GenericCall chain.");
+        }
+
+        var callerParameterCount = callerVariables.Count;
+        var callerSignature = tables.Methods.GetSignature(callerMethodRow);
+        if (tables.Methods.GetOwnerType(callerMethodRow) != 0
+            || tables.Signatures.GetReceiverTypeSpec(callerSignature) != 0
+            || tables.Signatures.GetParamRange(callerSignature).Count
+                != callerParameterCount)
+        {
+            throw Unsupported(
+                "The G1 consumer requires a module-level ownerless GenericCall chain.");
+        }
+
+        var callSiteIndexes = new List<int>();
+        var returnHome = -1;
+        var position = 0;
+        while (position < code.Length)
+        {
+            var opcode = code[position];
+            var instructionLength
+                = TrRmRegisterBodyReader.InstructionLength(opcode,
+                    body.Schema);
+            if (instructionLength <= 0
+                || position + instructionLength > code.Length)
+            {
+                throw Invalid(
+                    "The G1 GenericCall chain has an invalid instruction extent.");
+            }
+            if ((opcode is 0x90 or 0xE0)
+                && callerVariables.Count + callSiteIndexes.Count
+                    >= SemanticVerifier.MaximumVariables)
+            {
+                throw Unsupported(
+                    "The G1 GenericCall chain exceeds the supported local-result count.");
+            }
+
+            if (opcode == 0x90 && instructionLength == 2)
+            {
+                if (callerVariables.Count + callSiteIndexes.Count
+                    >= SemanticVerifier.MaximumVariables)
+                {
+                    throw Unsupported(
+                        "The G1 GenericCall chain exceeds the supported local-result count.");
+                }
+                callSiteIndexes.Add(code[position + 1]);
+            }
+            else if (opcode == 0xE0 && instructionLength == 4
+                && code[position + 1] == 0)
+            {
+                if (callerVariables.Count + callSiteIndexes.Count
+                    >= SemanticVerifier.MaximumVariables)
+                {
+                    throw Unsupported(
+                        "The G1 GenericCall chain exceeds the supported local-result count.");
+                }
+                callSiteIndexes.Add(BinaryPrimitives
+                    .ReadUInt16LittleEndian(code.Slice(position + 2, 2)));
+            }
+            else if (opcode == 0xB8 && instructionLength == 2
+                && position + instructionLength == code.Length)
+            {
+                returnHome = code[position + 1];
+                position += instructionLength;
+                break;
+            }
+            else
+            {
+                throw Unsupported(
+                    "The G1 consumer supports only sequential GenericCall instructions followed by ReturnHome.");
+            }
+
+            position += instructionLength;
+        }
+
+        if (position != code.Length || returnHome < 0
+            || callSiteIndexes.Count < 2
+            || body.RecordCount < callSiteIndexes.Count + 2)
+        {
+            throw Unsupported(
+                "The G1 consumer requires at least two GenericCalls followed by ReturnHome.");
+        }
+
+        var statements = ImmutableArray.CreateBuilder<BoundStatement>(
+            callSiteIndexes.Count + 1);
+        var resultVariablesByHome = new Dictionary<int, int>();
+        var referencedRecords = new HashSet<int> { 0 };
+        for (var callOrdinal = 0;
+            callOrdinal < callSiteIndexes.Count; callOrdinal++)
+        {
+            var callSiteIndex = callSiteIndexes[callOrdinal];
+            if ((uint)callSiteIndex >= (uint)body.RecordCount
+                || !referencedRecords.Add(callSiteIndex))
+            {
+                throw Invalid(
+                    "The G1 GenericCall chain reuses or misses a CallSite record.");
+            }
+
+            var callSite = body.GetRecord(callSiteIndex);
+            if (callSite[0] != 0x02 || callSite[4] != 4
+                || callSite[5] != 2)
+            {
+                throw Unsupported(
+                    "The G1 consumer requires value-returning direct GenericCall CallSites.");
+            }
+
+            var callSitePayload = callSite[4..];
+            var targetRecordIndex = BinaryPrimitives
+                .ReadUInt16LittleEndian(callSitePayload.Slice(4, 2));
+            if ((uint)targetRecordIndex >= (uint)body.RecordCount)
+            {
+                throw Invalid(
+                    "A G1 GenericCall chain CallSite has an invalid target record.");
+            }
+            _ = referencedRecords.Add(targetRecordIndex);
+
+            var decoded = DecodeDirectGenericCallForChain(tables, context,
+                artifactIndex, moduleRow, callerMethodRow, callerFormals,
+                callerFormalRecords, callerParameterCount, callerVariables,
+                body, callSitePayload, resultVariablesByHome);
+            if ((uint)decoded.ResultHome >= (uint)body.HomeCount
+                || resultVariablesByHome.ContainsKey(decoded.ResultHome))
+            {
+                throw Invalid(
+                    "A G1 GenericCall chain reuses an invalid result Home.");
+            }
+
+            var resultHome = body.HomeMap.Slice(
+                decoded.ResultHome * 8, 8);
+            if (resultHome[0] != 3 || resultHome[1] != 1)
+            {
+                throw Invalid(
+                    "A G1 GenericCall chain result does not select an initialized-value Home.");
+            }
+
+            var localVariable = callerVariables.Count;
+            callerVariables.Add(new BoundVariable(
+                "<trrm-generic-call-result-" + callOrdinal.ToString(
+                    System.Globalization.CultureInfo.InvariantCulture) + ">",
+                decoded.ResultType, false, default));
+            resultVariablesByHome.Add(decoded.ResultHome, localVariable);
+            statements.Add(new BoundLocal(localVariable, decoded.Value,
+                default));
+        }
+
+        for (var recordIndex = 1; recordIndex < body.RecordCount;
+            recordIndex++)
+        {
+            if (!referencedRecords.Contains(recordIndex))
+            {
+                throw Unsupported(
+                    "The G1 consumer does not retain an unreferenced GenericCall Body record.");
+            }
+        }
+
+        if (!resultVariablesByHome.TryGetValue(returnHome,
+                out var returnedVariable)
+            || callerVariables[returnedVariable].Type != callerReturnType)
+        {
+            throw Invalid(
+                "The G1 GenericCall chain ReturnHome does not match the open MethodSig result.");
+        }
+
+        statements.Add(new BoundReturn(new BoundRead(returnedVariable,
+            callerReturnType, default), default));
+        return statements.MoveToImmutable();
+    }
+
+    private static GenericMethodCallSiteResult
+        DecodeDirectGenericCallForChain(
+            TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+            GenericMethodReadContext context, int artifactIndex, int moduleRow,
+            int callerMethodRow, ImmutableArray<PrimitiveType> callerFormals,
+            TrRmGenericMethodFormalImport[] callerFormalRecords,
+            int callerParameterCount,
+            ImmutableArray<BoundVariable>.Builder callerVariables,
+            TrRmRegisterBodyReader body, ReadOnlySpan<byte> callSitePayload,
+            IReadOnlyDictionary<int, int> resultVariablesByHome)
+    {
+        var targetRecordIndex = BinaryPrimitives
+            .ReadUInt16LittleEndian(callSitePayload.Slice(4, 2));
+        var targetRecord = body.GetRecord(targetRecordIndex);
+        if (targetRecord[0] != 0x10 || targetRecord[4] != 1
+            || targetRecord[5] != 0
+            || BinaryPrimitives.ReadUInt32LittleEndian(
+                targetRecord.Slice(8, 4)) != 0
+            || BinaryPrimitives.ReadUInt32LittleEndian(
+                targetRecord.Slice(12, 4)) != 0)
+        {
+            throw Unsupported(
+                "The G1 consumer currently supports direct module-level GenericCall targets without dispatch evidence.");
+        }
+
+        var targetPayload = targetRecord[4..];
+        var methodMapIndex = BinaryPrimitives.ReadUInt16LittleEndian(
+            targetPayload.Slice(2, 2));
+        if ((uint)methodMapIndex >= (uint)body.MethodCount)
+        {
+            throw Invalid(
+                "The selected GenericCall target has an invalid MethodMap index.");
+        }
+
+        var methodToken = BinaryPrimitives.ReadUInt32LittleEndian(
+            body.MethodMap.Slice(methodMapIndex * sizeof(uint),
+                sizeof(uint)));
+        var importRow = (methodToken >> 24) == 0x1C
+            ? checked((int)(methodToken & 0x00FF_FFFF)) : 0;
+        var targetDefinition = (methodToken >> 24) switch
+        {
+            0x16 => methodToken,
+            0x1C => tables.Imports.GetExpectedDefinitionForImportRow(
+                importRow),
+            _ => throw Invalid(
+                "The selected GenericCall target is not a MethodDef or MethodDef Import."),
+        };
+        if ((targetDefinition >> 24) != 0x16)
+        {
+            throw Invalid(
+                "The selected GenericCall Import does not expect a MethodDef.");
+        }
+
+        var targetMethodRow = checked((int)(targetDefinition
+            & 0x00FF_FFFF));
+        var targetImport = importRow != 0
+            ? CreateExpectedGenericMethodImport(tables, context,
+                artifactIndex, moduleRow, importRow)
+            : CreateGenericMethodImport(tables, context, artifactIndex,
+                moduleRow, targetDefinition, "", isMethodDefTarget: true);
+        var targetSignature = tables.Methods.GetSignature(targetMethodRow);
+        if (tables.Methods.GetOwnerType(targetMethodRow) != 0
+            || tables.Signatures.GetReceiverTypeSpec(targetSignature) != 0)
+        {
+            throw Unsupported(
+                "The G1 multi-call consumer requires module-level GenericCall targets.");
+        }
+        var (_, targetFormalCount)
+            = tables.Signatures.GetGenericRange(targetSignature);
+        var targetArgumentCount = BinaryPrimitives.ReadUInt32LittleEndian(
+            targetPayload.Slice(12, sizeof(uint)));
+        if (targetArgumentCount != (uint)targetFormalCount
+            || targetImport.Formals.Length != targetFormalCount)
+        {
+            throw Invalid(
+                "The GenericCall actual and target formal counts differ.");
+        }
+
+        var typeArguments = ImmutableArray.CreateBuilder<PrimitiveType>(
+            targetFormalCount);
+        var typeArgumentMetadata = ImmutableArray.CreateBuilder<
+            BoundGenericNominalTypeArgument>(targetFormalCount);
+        for (var ordinal = 0; ordinal < targetFormalCount; ordinal++)
+        {
+            var argumentOffset = checked(16 + (ordinal * 8));
+            if (targetPayload[argumentOffset] != 1)
+            {
+                throw Unsupported(
+                    "The G1 consumer currently supports TypeActual GenericCall arguments only.");
+            }
+
+            var typeSpecRef = BinaryPrimitives.ReadUInt32LittleEndian(
+                targetPayload.Slice(argumentOffset + 4, sizeof(uint)));
+            var actual = ResolveGenericMethodTypeSpec(context, artifactIndex,
+                tables, moduleRow, tables.TypeSpecs, tables.GenericParams,
+                callerFormalRecords, callerMethodRow,
+                context.GetFormalTypeOwnerOrdinal(artifactIndex,
+                    callerMethodRow), typeSpecRef, callerFormals,
+                allowFormalForwarding: false,
+                ordinal: callerFormals.Length, out _);
+            typeArguments.Add(actual);
+            typeArgumentMetadata.Add(context.ReadGenericNominalTypeArgument(
+                tables, artifactIndex, moduleRow, typeSpecRef,
+                callerMethodRow, callerFormals, callerFormalRecords,
+                actual));
+        }
+
+        var actualTypes = typeArguments.MoveToImmutable();
+        var actualTypeMetadata = typeArgumentMetadata.MoveToImmutable();
+        var targetFormalTypes = targetImport.Formals.Select(
+            static formal => formal.PlaceholderType).ToImmutableArray();
+        var callerFormalTypeOwnerOrdinal
+            = context.GetFormalTypeOwnerOrdinal(artifactIndex,
+                callerMethodRow);
+        var (_, parameterCount)
+            = tables.Signatures.GetParamRange(targetSignature);
+        var inputCount = checked((int)BinaryPrimitives
+            .ReadUInt32LittleEndian(callSitePayload.Slice(8, 4)));
+        if (parameterCount != inputCount
+            || targetImport.ProofFunction.ParameterCount != parameterCount
+            || tables.Signatures.GetReceiverTypeSpec(targetSignature) != 0)
+        {
+            throw Invalid(
+                "The GenericCall input count differs from its selected MethodSig.");
+        }
+
+        var arguments = ImmutableArray.CreateBuilder<BoundExpression>(
+            parameterCount);
+        for (var ordinal = 0; ordinal < parameterCount; ordinal++)
+        {
+            var inputOffset = 16 + (ordinal * 4);
+            var selectorKind = callSitePayload[inputOffset];
+            var sourceUse = callSitePayload[inputOffset + 1];
+            if (selectorKind != 2 || sourceUse != 1)
+            {
+                throw Unsupported(
+                    "The G1 multi-call consumer supports Copy parameter-Home inputs only.");
+            }
+
+            var homeIndex = BinaryPrimitives.ReadUInt16LittleEndian(
+                callSitePayload.Slice(inputOffset + 2, 2));
+            if ((uint)homeIndex >= (uint)body.HomeCount)
+            {
+                throw Invalid(
+                    "A GenericCall input references an invalid Home.");
+            }
+
+            var home = body.HomeMap.Slice(homeIndex * 8, 8);
+            var variable = home[0] switch {
+                2 => checked((int)BinaryPrimitives
+                    .ReadUInt16LittleEndian(home.Slice(4, 2))),
+                3 when resultVariablesByHome.TryGetValue(homeIndex,
+                    out var resultVariable) => resultVariable,
+                _ => -1,
+            };
+            if (variable < 0 || variable >= callerVariables.Count
+                || (home[0] == 2 && variable >= callerParameterCount))
+            {
+                throw Invalid(
+                    "A GenericCall input Home is not initialized before this call.");
+            }
+
+            var argumentType = callerVariables[variable].Type;
+            var targetParameterType = targetImport.ProofFunction
+                .Variables[ordinal].Type;
+            if (!TrySubstituteGenericMethodType(targetParameterType,
+                    targetFormalTypes, actualTypes, actualTypeMetadata,
+                    targetImport, context, artifactIndex, callerMethodRow,
+                    callerFormals, callerFormalTypeOwnerOrdinal, 0,
+                    out targetParameterType))
+            {
+                throw Unsupported(
+                    "The G1 GenericCall parameter type uses an unsupported substitution term.");
+            }
+            if (argumentType != targetParameterType)
+            {
+                throw Invalid(
+                    "A GenericCall input type differs from its substituted target formal.");
+            }
+
+            arguments.Add(new BoundRead(variable, argumentType, default));
+        }
+
+        var resultType = targetImport.ProofFunction.ReturnType;
+        if (!TrySubstituteGenericMethodType(resultType, targetFormalTypes,
+                actualTypes, actualTypeMetadata, targetImport, context,
+                artifactIndex, callerMethodRow, callerFormals,
+                callerFormalTypeOwnerOrdinal, 0, out resultType)
+            || targetImport.ProofFunction.DoesNotReturn
+            || resultType == PrimitiveType.Void)
+        {
+            throw Unsupported(
+                "The G1 GenericCall result type or termination contract is outside the multi-call subset.");
+        }
+
+        var resultHome = BinaryPrimitives.ReadUInt16LittleEndian(
+            callSitePayload.Slice(6, 2));
+        if ((uint)resultHome >= (uint)body.HomeCount)
+        {
+            throw Invalid(
+                "A GenericCall chain references an invalid result Home.");
+        }
+        var resultHomeEntry = body.HomeMap.Slice(resultHome * 8, 8);
+        if (callSitePayload[1] != 2 || resultHomeEntry[0] != 3
+            || resultHomeEntry[1] != 1)
+        {
+            throw Invalid(
+                "The GenericCall result does not select a value Home.");
+        }
+
+        var call = new BoundCall(0, arguments.MoveToImmutable(),
+            resultType, default) {
+            ImportedGenericMethodCall = targetImport,
+            ImportedGenericMethodTypeArguments = actualTypes,
+            IsUnsafeAuthorized = targetImport.Signature.RequiresUnsafeCaller,
+        };
+        BoundExpression value = targetImport.Signature.RequiresUnsafeCaller
+            ? new BoundUnsafeExpression(call, default) : call;
+        return new GenericMethodCallSiteResult(resultHome, resultType,
+            value);
     }
 
     private static bool TrySubstituteGenericMethodType(

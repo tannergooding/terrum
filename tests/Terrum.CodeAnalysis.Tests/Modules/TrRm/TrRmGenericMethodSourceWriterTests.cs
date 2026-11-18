@@ -3925,6 +3925,70 @@ internal sealed class TrRmGenericMethodSourceWriterTests
     }
 
     [Test]
+    public void BindsAndExecutesSourceFreeGenericForwardingThroughTwoCalls()
+    {
+        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            """
+            T Identity<T>(T identityArgument) where T : [Blittable] {
+                return identityArgument;
+            }
+            public T Twice<T>(T callerArgument) where T : [Blittable] {
+                T first = Identity<T>(callerArgument);
+                T second = Identity<T>(first);
+                return second;
+            }
+            """), new CompilationOptions {
+            LayoutCoreRegistration =
+                Terrum.CodeAnalysis.Tests.Semantics
+                    .LayoutCoreRegistrationTestData.Create(),
+        });
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerProgram = providerCompilation.Program!;
+        var twice = providerProgram.GenericMethodDefinitions.Single(
+            static definition => definition.Name == "Twice");
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, "forward-twice.provider",
+            GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), [
+                new(providerProgram, twice.SourceInputOrdinal,
+                    twice.Span, "Twice"),
+            ]);
+        var reference = TrRmExecutableCompiler
+            .CreateGenericMethodCallsDraftReference(providerArtifact,
+                "forward-twice.provider", "Twice");
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse(
+            "int32 Main() { return Twice<int32>(callerArgument: 42); }"),
+            reference,
+            new CompilationOptions {
+                LayoutCoreRegistration =
+                    Terrum.CodeAnalysis.Tests.Semantics
+                        .LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerProgram = consumerCompilation.Program!;
+        var importedTwice = consumerProgram.Functions.Single(
+            static function => function.ImportedGenericMethod is {
+                Origin.ExportKey: "Twice",
+            }).ImportedGenericMethod!;
+        var genericCallCount = 0;
+        Assert.That(BoundTreeTraversal.VisitExpressions(
+            importedTwice.ProofFunction.Body, expression =>
+            {
+                if (expression is BoundCall)
+                {
+                    genericCallCount++;
+                }
+            }), Is.True);
+        Assert.That(genericCallCount, Is.EqualTo(2));
+        Assert.That(NativeJit.Execute(consumerProgram,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(42));
+    }
+
+    [Test]
     public void RejectsGenericForwardingAliasNotDerivedFromCallResult()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(

@@ -18,6 +18,14 @@ public static partial class TrRmExecutableCompiler
         BoundFunction ProofFunction,
         int MethodRow);
 
+    private readonly record struct GenericMethodForwardingCall(
+        BoundCall Call, int ResultVariable);
+
+    private readonly record struct GenericMethodForwardingTarget(
+        BoundCall Call, BoundFunction Function,
+        BoundGenericMethodDefinition Definition, int MethodRow,
+        int ResultVariable);
+
     private readonly record struct GenericInterfaceEmission(
         BoundInterfaceDefinition Definition, TrRmSourceTypeExport Export);
 
@@ -633,6 +641,82 @@ public static partial class TrRmExecutableCompiler
         return true;
     }
 
+    private static bool TryGetGenericMethodForwardingChain(
+        BoundFunction function,
+        out ImmutableArray<GenericMethodForwardingCall> calls)
+    {
+        calls = [];
+        var body = function.Body;
+        var localCount = body.Statements.Length - 1;
+        if (!body.RetiredManagedLocals.IsEmpty
+            || localCount < 2
+            || localCount > SemanticVerifier.MaximumVariables
+            || function.Variables.Length
+                != function.ParameterCount + localCount
+            || body.Statements[^1] is not BoundReturn {
+                Value: BoundRead returnedRead,
+            }
+            || returnedRead.Variable
+                != function.ParameterCount + localCount - 1
+            || returnedRead.Type != function.ReturnType
+            || function.Variables[returnedRead.Variable].Type
+                != function.ReturnType)
+        {
+            return false;
+        }
+
+        var builder
+            = ImmutableArray.CreateBuilder<GenericMethodForwardingCall>(
+                localCount);
+        for (var ordinal = 0; ordinal < localCount; ordinal++)
+        {
+            var resultVariable = function.ParameterCount + ordinal;
+            if (body.Statements[ordinal] is not BoundLocal local
+                || local.Variable != resultVariable
+                || local.Initializer is not BoundCall call
+                || call.Type == PrimitiveType.Void
+                || function.Variables[resultVariable].Type != call.Type)
+            {
+                return false;
+            }
+
+            var variable = function.Variables[resultVariable];
+            if (variable.IsMutable || variable.IsOut || variable.IsInit
+                || variable.IsImplicitRef
+                || variable.IsImplicitReferenceTemporary
+                || variable.IsInitializationLocal)
+            {
+                return false;
+            }
+
+            if (ordinal != 0)
+            {
+                var consumesEarlierCallResult = false;
+                foreach (var argument in call.Arguments)
+                {
+                    if (argument is BoundRead read
+                        && read.Variable >= function.ParameterCount
+                        && read.Variable < resultVariable)
+                    {
+                        consumesEarlierCallResult = true;
+                        break;
+                    }
+                }
+
+                if (!consumesEarlierCallResult)
+                {
+                    return false;
+                }
+            }
+
+            builder.Add(new GenericMethodForwardingCall(call,
+                resultVariable));
+        }
+
+        calls = builder.MoveToImmutable();
+        return true;
+    }
+
     private static byte[] EncodeGenericMethodMoveReturnBody(
         BoundFunction function, BoundGenericMethodDefinition definition,
         Dictionary<PrimitiveType, uint> formalTypeSpecRows,
@@ -705,6 +789,14 @@ public static partial class TrRmExecutableCompiler
         TrRmArtifactSchema schema,
         GenericMethodNominalTypeWriter nominalTypes)
     {
+        if (TryGetGenericMethodForwardingChain(function, out var callChain))
+        {
+            return EncodeGenericMethodForwardingChainBody(function,
+                definition, emissions, callChain,
+                formalTypeSpecRows, builtInTypeSpecRows, typeSpecRows,
+                spanTypes, schema, nominalTypes);
+        }
+
         if (!TryGetDirectGenericCallReturn(function,
                 out var genericCall, out var resultVariable)
             || genericCall is null
@@ -1039,6 +1131,354 @@ public static partial class TrRmExecutableCompiler
             targetMethodMap.Encode(), default, default,
             [new TrRmRegisterBodyBlock(0, checked((uint)code.Length), 0)],
             records, code, schema: schema);
+    }
+
+    private static byte[] EncodeGenericMethodForwardingChainBody(
+        BoundFunction function, BoundGenericMethodDefinition definition,
+        IReadOnlyList<GenericMethodEmission> emissions,
+        ImmutableArray<GenericMethodForwardingCall> callChain,
+        Dictionary<PrimitiveType, uint> formalTypeSpecRows,
+        Dictionary<PrimitiveType, uint> builtInTypeSpecRows,
+        List<ReadOnlyMemory<byte>> typeSpecRows,
+        ImmutableArray<BoundSpanTypeDefinition> spanTypes,
+        TrRmArtifactSchema schema,
+        GenericMethodNominalTypeWriter nominalTypes)
+    {
+        if (function.ParameterCount > 8 || function.ReturnType
+            == PrimitiveType.Void
+            || callChain.Length < 2
+            || callChain.Length > SemanticVerifier.MaximumVariables
+            || function.ParameterCount + callChain.Length - 1
+                > byte.MaxValue
+            || callChain.Length > ushort.MaxValue / 2)
+        {
+            throw Unsupported(
+                $"Generic MethodDef '{definition.Name}' has a call chain outside the bounded forwarding subset.");
+        }
+
+        var proofProgram = definition.ProofProgram;
+        GenericMethodForwardingTarget PrepareTarget(
+            GenericMethodForwardingCall forwardingCall)
+        {
+            var genericCall = forwardingCall.Call;
+            if (genericCall.GenericMethodCall
+                    is not BoundGenericMethodInstantiation call
+                || genericCall.ImportedGenericMethodCall is not null
+                || (uint)genericCall.Function
+                    >= (uint)proofProgram.Functions.Length)
+            {
+                throw Unsupported(
+                    $"Generic MethodDef '{definition.Name}' has a call-chain target outside the local type-only subset.");
+            }
+
+            var target = proofProgram.Functions[genericCall.Function];
+            var targetCall = target.GenericMethodProofCall;
+            var targetEmissions = emissions.Where(candidate =>
+                candidate.Definition.DefinitionOrdinal
+                    == call.DefinitionOrdinal).ToArray();
+            if (targetCall is null || targetEmissions.Length != 1
+                || targetCall.DefinitionOrdinal != call.DefinitionOrdinal
+                || !targetCall.TypeArguments.SequenceEqual(
+                    call.TypeArguments)
+                || !targetCall.ConstantArguments.IsEmpty
+                || target.DeclaringStruct is not null || !target.IsStatic
+                || targetEmissions[0].Definition.Owner is not null
+                || !targetEmissions[0].Definition.IsStatic
+                || target.DoesNotReturn
+                || target.ParameterCount != genericCall.Arguments.Length
+                || target.ParameterCount != target.Variables.Length
+                || target.ParameterCount > 8
+                || target.ReturnType == PrimitiveType.Void
+                || HasConstantFormals(targetEmissions[0].Definition)
+                || call.TypeArguments.Length
+                    != targetEmissions[0].Definition.Formals.Length
+                || (!genericCall.ArgumentParameterIndices.IsDefault
+                    && genericCall.ArgumentParameterIndices.Length
+                        != genericCall.Arguments.Length))
+            {
+                throw Unsupported(
+                    $"Generic MethodDef '{definition.Name}' targets an unsupported local GenericMethod.");
+            }
+
+            var targetDefinition = targetEmissions[0].Definition;
+            for (var ordinal = 0;
+                ordinal < targetDefinition.Formals.Length; ordinal++)
+            {
+                var formal = targetDefinition.Formals[ordinal];
+                if (!formal.Requirements.IsEmpty
+                    || formal.InterfaceConstraints.IsDefault
+                    || !formal.InterfaceConstraints.IsEmpty
+                    || formal.OwnershipDomain is < 1 or > 3
+                    || formal.NullabilityDomain is < 1 or > 2)
+                {
+                    throw Unsupported(
+                        $"Generic MethodDef '{definition.Name}' targets a method with unsupported formal obligations.");
+                }
+            }
+
+            return new GenericMethodForwardingTarget(genericCall, target,
+                targetDefinition, targetEmissions[0].MethodRow,
+                forwardingCall.ResultVariable);
+        }
+
+        static bool HasConstantFormals(
+            BoundGenericMethodDefinition target)
+            => !target.ConstantFormals.IsDefaultOrEmpty;
+
+        var targets = new GenericMethodForwardingTarget[callChain.Length];
+        for (var index = 0; index < targets.Length; index++)
+        {
+            targets[index] = PrepareTarget(callChain[index]);
+        }
+        var typeMap = new TrRmRegisterBodyTokenMapBuilder();
+        uint GetBodyTypeToken(PrimitiveType type)
+        {
+            if (type == PrimitiveType.Void)
+            {
+                throw Unsupported(
+                    "G1 GenericCall forwarding requires non-unit values.");
+            }
+
+            return CreateStandardBodyTypeMapToken(
+                GenericMethodTypeSpecRef(type, formalTypeSpecRows,
+                    builtInTypeSpecRows, typeSpecRows, spanTypes,
+                    proofProgram.CheckedReferenceTypes,
+                    definition.DefinitionOrdinal, definition,
+                    allowSpanType: true, nominalTypes: nominalTypes));
+        }
+
+        var homeRows = new List<byte[]>(
+            function.ParameterCount + callChain.Length);
+        var homeIndicesByVariable = new int[function.Variables.Length];
+        Array.Fill(homeIndicesByVariable, -1);
+        for (var parameter = 0; parameter < function.ParameterCount;
+            parameter++)
+        {
+            var home = new byte[8];
+            home[0] = 2;
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                home.AsSpan(2), typeMap.GetIndex(GetBodyTypeToken(
+                    function.Variables[parameter].Type)));
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                home.AsSpan(4), checked((ushort)parameter));
+            homeIndicesByVariable[parameter] = homeRows.Count;
+            homeRows.Add(home);
+        }
+
+        foreach (var target in targets)
+        {
+            var resultVariable = target.ResultVariable;
+            if ((uint)resultVariable >= (uint)function.Variables.Length
+                || homeIndicesByVariable[resultVariable] != -1
+                || homeRows.Count >= ushort.MaxValue)
+            {
+                throw Unsupported(
+                    "A G1 GenericCall result exceeds its bounded Home map.");
+            }
+
+            var home = new byte[8];
+            home[0] = 3;
+            home[1] = 1;
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                home.AsSpan(2), typeMap.GetIndex(GetBodyTypeToken(
+                    function.Variables[resultVariable].Type)));
+            homeIndicesByVariable[resultVariable] = homeRows.Count;
+            homeRows.Add(home);
+        }
+
+        var homeMap = new byte[checked(homeRows.Count * 8)];
+        for (var homeIndex = 0; homeIndex < homeRows.Count; homeIndex++)
+        {
+            homeRows[homeIndex].CopyTo(homeMap, homeIndex * 8);
+        }
+
+        var methodMap = new TrRmRegisterBodyTokenMapBuilder();
+        var records = new List<ReadOnlyMemory<byte>>(
+            checked(1 + (callChain.Length * 2)));
+        var entryState = new byte[8];
+        entryState[0] = 1;
+        records.Add(entryState);
+        var code = new List<byte>(checked((callChain.Length * 4) + 2));
+        foreach (var target in targets)
+        {
+            var genericCall = target.Call;
+            var call = genericCall.GenericMethodCall!;
+            var targetDefinition = target.Definition;
+            var inputs = new TrRmRegisterBodyCallInput[
+                target.Function.ParameterCount];
+            var assignedParameters = new bool[inputs.Length];
+            for (var argumentIndex = 0;
+                argumentIndex < genericCall.Arguments.Length;
+                argumentIndex++)
+            {
+                var argument = genericCall.Arguments[argumentIndex];
+                var formalIndex
+                    = genericCall.ArgumentParameterIndices.IsDefault
+                        ? argumentIndex
+                        : genericCall.ArgumentParameterIndices[
+                            argumentIndex];
+                if (argument is not BoundRead read
+                    || (uint)formalIndex >= (uint)inputs.Length
+                    || assignedParameters[formalIndex]
+                    || (uint)read.Variable
+                        >= (uint)target.ResultVariable
+                    || (uint)read.Variable
+                        >= (uint)function.Variables.Length
+                    || function.Variables[read.Variable].Type
+                        != argument.Type
+                    || !GenericMethodTypeMatchesAfterSubstitution(
+                        target.Function.Variables[formalIndex].Type,
+                        argument.Type, targetDefinition, definition,
+                        call.TypeArguments, 0)
+                    || target.Function.Variables[formalIndex].IsMutable
+                    || target.Function.Variables[formalIndex].IsOut
+                    || target.Function.Variables[formalIndex].IsInit
+                    || target.Function.Variables[formalIndex]
+                        .IsImplicitRef
+                    || function.Variables[read.Variable].IsMutable
+                    || function.Variables[read.Variable].IsOut
+                    || function.Variables[read.Variable].IsInit
+                    || function.Variables[read.Variable].IsImplicitRef
+                    || homeIndicesByVariable[read.Variable] < 0)
+                {
+                    throw Unsupported(
+                        $"Generic MethodDef '{definition.Name}' has a call-chain input outside the Copy Home subset.");
+                }
+
+                var callerFormalOrdinal = -1;
+                for (var ordinal = 0;
+                    ordinal < definition.Formals.Length; ordinal++)
+                {
+                    if (definition.Formals[ordinal].PlaceholderType
+                        == argument.Type)
+                    {
+                        callerFormalOrdinal = ordinal;
+                        break;
+                    }
+                }
+                if (callerFormalOrdinal >= 0
+                    && definition.Formals[callerFormalOrdinal]
+                        .OwnershipDomain != 1)
+                {
+                    throw Unsupported(
+                        $"Generic MethodDef '{definition.Name}' reads a non-Copy caller formal in a call chain.");
+                }
+
+                assignedParameters[formalIndex] = true;
+                inputs[formalIndex] = new TrRmRegisterBodyCallInput(
+                    2, 1, checked((ushort)homeIndicesByVariable[
+                        read.Variable]));
+            }
+
+            if (assignedParameters.Any(static assigned => !assigned)
+                || !GenericMethodTypeMatchesAfterSubstitution(
+                    target.Function.ReturnType,
+                    function.Variables[target.ResultVariable].Type,
+                    targetDefinition, definition, call.TypeArguments, 0))
+            {
+                throw Unsupported(
+                    $"Generic MethodDef '{definition.Name}' has a call-chain signature outside the checked subset.");
+            }
+
+            var targetArguments
+                = new TrRmRegisterBodyGenericCallArgument[
+                    call.TypeArguments.Length];
+            for (var ordinal = 0; ordinal < targetArguments.Length;
+                ordinal++)
+            {
+                var actual = call.TypeArguments[ordinal];
+                var formal = targetDefinition.Formals[ordinal];
+                var callerFormalOrdinal = -1;
+                for (var candidate = 0;
+                    candidate < definition.Formals.Length; candidate++)
+                {
+                    if (definition.Formals[candidate].PlaceholderType
+                        == actual)
+                    {
+                        callerFormalOrdinal = candidate;
+                        break;
+                    }
+                }
+
+                if (callerFormalOrdinal >= 0)
+                {
+                    var callerFormal
+                        = definition.Formals[callerFormalOrdinal];
+                    if (!SemanticVerifier
+                            .IsGenericMethodFormalContractSatisfied(
+                                formal.OwnershipDomain,
+                                formal.NullabilityDomain,
+                                formal.RequiresWritable,
+                                formal.RequiresBlittable,
+                                callerFormal.OwnershipDomain,
+                                callerFormal.NullabilityDomain,
+                                callerFormal.RequiresWritable,
+                                callerFormal.RequiresBlittable))
+                    {
+                        throw Unsupported(
+                            $"Generic MethodDef '{definition.Name}' forwards a caller formal without satisfying the target domain.");
+                    }
+                }
+                else if (actual == PrimitiveType.Void
+                    || formal.OwnershipDomain == 2
+                    || formal.RequiresWritable)
+                {
+                    throw Unsupported(
+                        "A G1 GenericCall chain has a TypeActual outside its supported domain.");
+                }
+
+                targetArguments[ordinal]
+                    = new TrRmRegisterBodyGenericCallArgument(1,
+                        GenericMethodTypeSpecRef(actual,
+                            formalTypeSpecRows, builtInTypeSpecRows,
+                            typeSpecRows, spanTypes,
+                            proofProgram.CheckedReferenceTypes,
+                            definition.DefinitionOrdinal, definition,
+                            allowSpanType: true,
+                            nominalTypes: nominalTypes));
+            }
+
+            var methodToken = 0x1600_0000u
+                | checked((uint)target.MethodRow);
+            var methodMapIndex = methodMap.GetIndex(methodToken);
+            var targetRecordIndex = checked((ushort)records.Count);
+            records.Add(
+                TrRmRegisterBodyRecordWriter.EncodeGenericCallTarget(
+                    1, 0, methodMapIndex, 0, 0, targetArguments,
+                    schema));
+            var callSiteIndex = checked((ushort)records.Count);
+            records.Add(TrRmRegisterBodyRecordWriter.EncodeCallSite(
+                4, 2, targetRecordIndex,
+                checked((ushort)homeIndicesByVariable[
+                    target.ResultVariable]), inputs, [], schema: schema));
+            if (callSiteIndex <= byte.MaxValue)
+            {
+                code.Add(0x90);
+                code.Add(checked((byte)callSiteIndex));
+            }
+            else
+            {
+                code.Add(0xE0);
+                code.Add(0);
+                code.Add((byte)callSiteIndex);
+                code.Add((byte)(callSiteIndex >> 8));
+            }
+        }
+
+        var returnHome = homeIndicesByVariable[
+            callChain[^1].ResultVariable];
+        if (returnHome > byte.MaxValue)
+        {
+            throw Unsupported(
+                "A G1 forwarding chain exceeds the compact return-Home index.");
+        }
+        code.Add(0xB8);
+        code.Add(checked((byte)returnHome));
+        return TrRmRegisterBodyWriter.Encode(homeMap,
+            typeMap.Encode(), methodMap.Encode(), default, default,
+            [new TrRmRegisterBodyBlock(0,
+                checked((uint)code.Count), 0)],
+            records, code.ToArray(), schema: schema);
     }
 
     private static bool TrySubstituteGenericMethodInterfaceConstraint(
