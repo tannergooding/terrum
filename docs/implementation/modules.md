@@ -56,6 +56,10 @@ is block-terminal, uses the None result selector, and completes with unit; the
 source-free consumer reconstructs it as an expression statement followed by
 unit return. Exact unit input positions use None selectors and reconstruct as
 canonical `()` values; unit TypeActuals retain their nonzero TypeSpecRefs.
+A direct zero-parameter, unit-result role-1 call can target an emitted,
+bodyless MethodDef Import expectation; its source-free provider/JIT regression
+is unverified. Parameterized imported targets and imported call chains remain
+open.
 The writer also copies local declaration
 graphs or exact imported expectations, including formal order, fields, declared
 layouts and frozen scalar constant actuals/defaults; nested constructions and

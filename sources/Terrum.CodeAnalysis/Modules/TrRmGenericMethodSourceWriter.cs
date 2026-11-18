@@ -32,6 +32,11 @@ public static partial class TrRmExecutableCompiler
     private readonly record struct GenericImportedInterfaceEmission(
         BoundInterfaceDefinition Definition, BoundModuleImport Import);
 
+    private readonly record struct GenericImportedMethodEmission(
+        BoundGenericMethodImport Source,
+        BoundGenericMethodImport Expected,
+        BoundModuleImport Import);
+
     private readonly record struct GenericImportedInterfaceMethodKey(
         string ProviderIdentity, string TypeExportKey,
         string QualifiedName, int Arity, int MemberOrdinal,
@@ -125,6 +130,8 @@ public static partial class TrRmExecutableCompiler
             = new Dictionary<(
                 string QualifiedName, int Arity, int MemberOrdinal,
                 string DeclarationKey), uint>();
+        var importedGenericMethodTargetTokens
+            = new Dictionary<BoundGenericMethodImport, uint>();
         if (sourceTypeExports is { Count: > 0 })
         {
             if (sourceMethodExports is null)
@@ -142,6 +149,9 @@ public static partial class TrRmExecutableCompiler
         {
             artifact = AddImportedGenericInterfaceMetadata(artifact, program,
                 schema);
+            artifact = AddImportedGenericMethodMetadata(artifact,
+                emissionRows, schema,
+                out importedGenericMethodTargetTokens);
         }
         if (emissionRows.Count != 0
             || sourceTypeExports is { Count: > 0 })
@@ -166,7 +176,8 @@ public static partial class TrRmExecutableCompiler
             artifact = AddGenericMethodMetadata(artifact, program,
                 sourceMethodExports, emissionRows,
                 exportedInterfaceTypeSpecRows,
-                exportedInterfaceMethodDefRows, schema);
+                exportedInterfaceMethodDefRows,
+                importedGenericMethodTargetTokens, schema);
         }
         else if (hasGenericCallTargets
             || ArtifactHasGenericWriteConstraints(artifact))
@@ -900,6 +911,156 @@ public static partial class TrRmExecutableCompiler
             [entryState], code, schema: schema);
     }
 
+    private static byte[] EncodeImportedGenericMethodUnitCallBody(
+        BoundFunction function, BoundGenericMethodDefinition definition,
+        BoundProgram proofProgram, BoundCall genericCall,
+        BoundGenericMethodImport importedTarget,
+        IReadOnlyDictionary<BoundGenericMethodImport, uint>
+            importedGenericMethodTargetTokens,
+        Dictionary<PrimitiveType, uint> formalTypeSpecRows,
+        Dictionary<PrimitiveType, uint> builtInTypeSpecRows,
+        List<ReadOnlyMemory<byte>> typeSpecRows,
+        ImmutableArray<BoundSpanTypeDefinition> spanTypes,
+        TrRmArtifactSchema schema,
+        GenericMethodNominalTypeWriter nominalTypes)
+    {
+        var expectedTarget = importedTarget.Binding?.Expected
+            ?? importedTarget;
+        var typeArguments
+            = genericCall.ImportedGenericMethodTypeArguments;
+        if (function.ReturnType != PrimitiveType.Void
+            || function.ParameterCount != 0
+            || !function.Variables.IsEmpty
+            || genericCall.Type != PrimitiveType.Void
+            || genericCall.GenericMethodCall is not null
+            || !genericCall.Arguments.IsEmpty
+            || importedTarget.Signature.Owner is not null
+            || !importedTarget.Signature.IsStatic
+            || importedTarget.Signature.IsMutable
+            || !importedTarget.Signature.ConstantFormals.IsDefaultOrEmpty
+            || expectedTarget.ProofFunction.ParameterCount != 0
+            || !expectedTarget.ProofFunction.Variables.IsEmpty
+            || expectedTarget.ProofFunction.ReturnType
+                != PrimitiveType.Void
+            || expectedTarget.ProofFunction.DoesNotReturn
+            || expectedTarget.ProofFunction.RequiresUnsafeCaller
+                != expectedTarget.Signature.RequiresUnsafeCaller
+            || !expectedTarget.ProofFunction.DependencyContracts.IsEmpty
+            || expectedTarget.Formals.IsDefaultOrEmpty
+            || expectedTarget.Formals.Length
+                != expectedTarget.Signature.Formals.Length
+            || expectedTarget.Formals.Length > 8
+            || typeArguments.IsDefault
+            || typeArguments.Length != expectedTarget.Formals.Length
+            || (uint)genericCall.Function
+                >= (uint)proofProgram.Functions.Length
+            || !importedGenericMethodTargetTokens.TryGetValue(
+                importedTarget, out var targetToken))
+        {
+            throw Unsupported(
+                $"Generic MethodDef '{definition.Name}' has an imported GenericCall outside the zero-parameter unit-returning subset.");
+        }
+
+        var target = proofProgram.Functions[genericCall.Function];
+        if (!ReferenceEquals(target.ImportedGenericMethod, importedTarget)
+            || target.ImportedGenericMethodTypeArguments.IsDefault
+            || !target.ImportedGenericMethodTypeArguments
+                .SequenceEqual(typeArguments)
+            || !target.IsStatic || target.DeclaringStruct is not null
+            || target.ParameterCount != 0
+            || target.ReturnType != PrimitiveType.Void
+            || target.DoesNotReturn)
+        {
+            throw Unsupported(
+                $"Generic MethodDef '{definition.Name}' does not retain the imported target specialization.");
+        }
+
+        var typeArgumentsInBody
+            = new TrRmRegisterBodyGenericCallArgument[typeArguments.Length];
+        for (var ordinal = 0; ordinal < typeArguments.Length; ordinal++)
+        {
+            var actual = typeArguments[ordinal];
+            var formal = expectedTarget.Formals[ordinal];
+            if (formal.Ordinal != ordinal || formal.TypeDefault is not null
+                || !formal.Requirements.IsDefaultOrEmpty
+                || formal.InterfaceConstraints.IsDefault
+                || !formal.InterfaceConstraints.IsEmpty
+                || formal.OwnershipDomain is < 1 or > 3
+                || formal.NullabilityDomain is < 1 or > 2)
+            {
+                throw Unsupported(
+                    $"Imported generic MethodDef '{expectedTarget.Signature.Name}' has an unsupported formal obligation.");
+            }
+
+            var callerFormalOrdinal = -1;
+            for (var callerOrdinal = 0;
+                callerOrdinal < definition.Formals.Length;
+                callerOrdinal++)
+            {
+                if (definition.Formals[callerOrdinal].PlaceholderType
+                    == actual)
+                {
+                    callerFormalOrdinal = callerOrdinal;
+                    break;
+                }
+            }
+
+            if (callerFormalOrdinal >= 0)
+            {
+                var callerFormal = definition.Formals[
+                    callerFormalOrdinal];
+                if (!SemanticVerifier
+                        .IsGenericMethodFormalContractSatisfied(
+                            formal.OwnershipDomain,
+                            formal.NullabilityDomain,
+                            formal.RequiresWritable,
+                            formal.RequiresBlittable,
+                            callerFormal.OwnershipDomain,
+                            callerFormal.NullabilityDomain,
+                            callerFormal.RequiresWritable,
+                            callerFormal.RequiresBlittable))
+                {
+                    throw Unsupported(
+                        $"Generic MethodDef '{definition.Name}' forwards a caller formal without satisfying the imported target domain.");
+                }
+            }
+            else if (formal.OwnershipDomain == 2
+                || formal.RequiresWritable)
+            {
+                throw Unsupported(
+                    "An imported G1 GenericCall has a TypeActual outside its supported domain.");
+            }
+
+            typeArgumentsInBody[ordinal]
+                = new TrRmRegisterBodyGenericCallArgument(1,
+                    GenericMethodTypeSpecRef(actual, formalTypeSpecRows,
+                        builtInTypeSpecRows, typeSpecRows, spanTypes,
+                        proofProgram.CheckedReferenceTypes,
+                        definition.DefinitionOrdinal, definition,
+                        allowSpanType: true, nominalTypes: nominalTypes));
+        }
+
+        var methodMap = new TrRmRegisterBodyTokenMapBuilder();
+        var methodMapIndex = methodMap.GetIndex(targetToken);
+        var records = new List<ReadOnlyMemory<byte>>(3);
+        var entryState = new byte[8];
+        entryState[0] = 1;
+        records.Add(entryState);
+        records.Add(TrRmRegisterBodyRecordWriter.EncodeGenericCallTarget(
+            1, 0, methodMapIndex, 0, 0, typeArgumentsInBody, schema));
+        var callSiteIndex = checked((ushort)records.Count);
+        records.Add(TrRmRegisterBodyRecordWriter.EncodeCallSite(
+            4, 0, 1, 0, [], [], schema: schema));
+        var code = new byte[] {
+            0x90,
+            checked((byte)callSiteIndex),
+        };
+        return TrRmRegisterBodyWriter.Encode(default,
+            default, methodMap.Encode(), default, default,
+            [new TrRmRegisterBodyBlock(0, checked((uint)code.Length), 0)],
+            records, code, schema: schema);
+    }
+
     private static byte[] EncodeGenericMethodForwardingBody(
         BoundFunction function, BoundGenericMethodDefinition definition,
         IReadOnlyList<GenericMethodEmission> emissions,
@@ -907,6 +1068,8 @@ public static partial class TrRmExecutableCompiler
         Dictionary<PrimitiveType, uint> builtInTypeSpecRows,
         List<ReadOnlyMemory<byte>> typeSpecRows,
         ImmutableArray<BoundSpanTypeDefinition> spanTypes,
+        IReadOnlyDictionary<BoundGenericMethodImport, uint>
+            importedGenericMethodTargetTokens,
         TrRmArtifactSchema schema,
         GenericMethodNominalTypeWriter nominalTypes)
     {
@@ -928,8 +1091,29 @@ public static partial class TrRmExecutableCompiler
                 $"Generic MethodDef '{definition.Name}' has a GenericCall Body outside the direct-return or unit-forwarding subset.");
         }
 
-        if (genericCall is null
-            || genericCall.GenericMethodCall
+        if (genericCall is null)
+        {
+            throw Unsupported(
+                $"Generic MethodDef '{definition.Name}' has a missing GenericCall Body target.");
+        }
+
+        if (genericCall.ImportedGenericMethodCall
+            is { } importedGenericMethod)
+        {
+            if (!isUnitCall)
+            {
+                throw Unsupported(
+                    $"Generic MethodDef '{definition.Name}' has an imported GenericCall outside the unit-returning subset.");
+            }
+
+            return EncodeImportedGenericMethodUnitCallBody(function,
+                definition, definition.ProofProgram, genericCall,
+                importedGenericMethod, importedGenericMethodTargetTokens,
+                formalTypeSpecRows, builtInTypeSpecRows, typeSpecRows,
+                spanTypes, schema, nominalTypes);
+        }
+
+        if (genericCall.GenericMethodCall
                 is not BoundGenericMethodInstantiation call
             || (isUnitCall
                 ? genericCall.Type != PrimitiveType.Void
@@ -2159,6 +2343,454 @@ public static partial class TrRmExecutableCompiler
             records, code, schema: schema);
     }
 
+    private static List<GenericImportedMethodEmission>
+        CaptureImportedGenericMethodEmissions(
+            IReadOnlyList<GenericMethodEmission> emissions)
+    {
+        var result = new List<GenericImportedMethodEmission>();
+        var captured = new Dictionary<BoundGenericMethodImport, byte>();
+        var remainingVisits = SemanticVerifier.MaximumAnalysisVisits;
+        foreach (var emission in emissions)
+        {
+            if (!BoundTreeTraversal.VisitExpressions(
+                    emission.ProofFunction.Body, expression =>
+                    {
+                        if (--remainingVisits < 0)
+                        {
+                            throw Unsupported(
+                                "Generic MethodDef imported targets exceed the supported analysis limit.");
+                        }
+                        if (expression is not BoundCall {
+                                InterfaceCallIdentity: null,
+                                ImportedGenericMethodCall: { } source,
+                            })
+                        {
+                            return;
+                        }
+
+                        if (source.Origin.IsMethodDefTarget)
+                        {
+                            throw Unsupported(
+                                "G1 source emission cannot yet re-emit a direct MethodDef target inherited from another artifact.");
+                        }
+
+                        var expected = source.Binding?.Expected ?? source;
+                        var origin = expected.Origin;
+                        if (origin.IsMethodDefTarget
+                            || string.IsNullOrEmpty(origin.ProviderIdentity)
+                            || string.IsNullOrEmpty(origin.ExportKey))
+                        {
+                            throw Unsupported(
+                                "An imported GenericCall target has no exact provider ExportKey.");
+                        }
+
+                        if (captured.TryAdd(source, 0))
+                        {
+                            result.Add(new GenericImportedMethodEmission(
+                                source, expected,
+                                new BoundModuleImport(
+                                    origin.ProviderIdentity,
+                                    origin.ExportKey,
+                                    origin.TargetRequirement,
+                                    origin.RuntimePolicy)));
+                        }
+                    }))
+            {
+                throw Unsupported(
+                    "The G1 source writer cannot inspect an imported GenericCall Body.");
+            }
+        }
+
+        return result;
+    }
+
+    private static byte[] AddImportedGenericMethodMetadata(
+        byte[] artifact, IReadOnlyList<GenericMethodEmission> emissions,
+        TrRmArtifactSchema schema,
+        out Dictionary<BoundGenericMethodImport, uint>
+            importedGenericMethodTargetTokens)
+    {
+        importedGenericMethodTargetTokens = [];
+        var importedMethods
+            = CaptureImportedGenericMethodEmissions(emissions);
+        if (importedMethods.Count == 0)
+        {
+            return artifact;
+        }
+
+        var artifactIndex = new TrRmArtifactIndex(artifact, schema);
+        var sections = new List<TrRmSection>(artifactIndex.SectionCount);
+        for (var sectionIndex = 0;
+            sectionIndex < artifactIndex.SectionCount; sectionIndex++)
+        {
+            artifactIndex.GetSection(sectionIndex, out var kind,
+                out var flags, out var bytes, out var count);
+            sections.Add(new TrRmSection(kind, flags,
+                checked((uint)count), bytes.ToArray()));
+        }
+
+        var stringSection = GetSection(sections, 0x0002);
+        var sourceStrings = new TrRmStringTableReader(
+            stringSection.Bytes.Span,
+            checked((int)stringSection.RecordCount));
+        var names = new List<(string Text, int Encoding)>(
+            sourceStrings.Count + (importedMethods.Count * 4));
+        for (var row = 1; row <= sourceStrings.Count; row++)
+        {
+            names.Add((sourceStrings.DecodeNamespace(row), 1));
+        }
+
+        var moduleRefCount = GetCount(sections, 0x0010);
+        var moduleRefRows = new List<TrRmModuleRefRow>(
+            moduleRefCount + importedMethods.Count);
+        var moduleRefRowsByProvider = new Dictionary<string, (
+            int Row, uint TargetRequirement, uint RuntimePolicy)>(
+                StringComparer.Ordinal);
+        if (TryGetSection(sections, 0x0010, out var moduleRefSection))
+        {
+            if (moduleRefSection.Bytes.Length
+                != checked(moduleRefCount * 12))
+            {
+                throw Invalid(
+                    "The G1 MethodDef Import ModuleRef table has an invalid extent.");
+            }
+
+            for (var row = 1; row <= moduleRefCount; row++)
+            {
+                var data = moduleRefSection.Bytes.Span.Slice(
+                    (row - 1) * 12, 12);
+                var providerIdentity = sourceStrings.DecodeName(
+                    ReadInt(data, 0));
+                var targetRequirement
+                    = BinaryPrimitives.ReadUInt32LittleEndian(data[4..]);
+                var runtimePolicy
+                    = BinaryPrimitives.ReadUInt32LittleEndian(data[8..]);
+                if (moduleRefRowsByProvider.TryGetValue(providerIdentity,
+                        out var existing)
+                    && (existing.TargetRequirement != targetRequirement
+                        || existing.RuntimePolicy != runtimePolicy))
+                {
+                    throw Invalid(
+                        "The G1 MethodDef Import ModuleRef table has conflicting provider requirements.");
+                }
+
+                _ = moduleRefRowsByProvider.TryAdd(providerIdentity,
+                    (row, targetRequirement, runtimePolicy));
+                moduleRefRows.Add(new TrRmModuleRefRow(
+                    ReadInt(data, 0), targetRequirement, runtimePolicy));
+            }
+        }
+
+        var importCount = GetCount(sections, 0x001C);
+        var importRows = new List<TrRmImportRow>(
+            importCount + importedMethods.Count);
+        var importTriples = new HashSet<(
+            int ModuleRefRow, string ExportKey, uint ExpectedDefinition)>();
+        if (TryGetSection(sections, 0x001C, out var importSection))
+        {
+            if (importSection.Bytes.Length != checked(importCount * 12))
+            {
+                throw Invalid(
+                    "The G1 MethodDef Import table has an invalid extent.");
+            }
+
+            for (var row = 1; row <= importCount; row++)
+            {
+                var data = importSection.Bytes.Span.Slice(
+                    (row - 1) * 12, 12);
+                var moduleRefRow = ReadInt(data, 0);
+                var exportKeyRow = ReadInt(data, 4);
+                var expectedDefinition
+                    = BinaryPrimitives.ReadUInt32LittleEndian(data[8..]);
+                if (!importTriples.Add((moduleRefRow,
+                        sourceStrings.DecodeName(exportKeyRow),
+                        expectedDefinition)))
+                {
+                    throw Invalid(
+                        "The G1 MethodDef Import table contains a duplicate expectation.");
+                }
+
+                importRows.Add(new TrRmImportRow(moduleRefRow,
+                    exportKeyRow, expectedDefinition));
+            }
+        }
+
+        int GetModuleRefRow(BoundModuleImport import)
+        {
+            if (moduleRefRowsByProvider.TryGetValue(
+                    import.ProducerIdentity, out var existing))
+            {
+                if (existing.TargetRequirement != import.TargetRequirement
+                    || existing.RuntimePolicy != import.RuntimePolicy)
+                {
+                    throw Unsupported(
+                        "An imported GenericCall target disagrees with an existing ModuleRef.");
+                }
+
+                return existing.Row;
+            }
+
+            var providerStringRow = names.Count + 1;
+            names.Add((import.ProducerIdentity, 1));
+            var moduleRefRow = moduleRefRows.Count + 1;
+            moduleRefRows.Add(new TrRmModuleRefRow(providerStringRow,
+                import.TargetRequirement, import.RuntimePolicy));
+            moduleRefRowsByProvider.Add(import.ProducerIdentity,
+                (moduleRefRow, import.TargetRequirement,
+                    import.RuntimePolicy));
+            return moduleRefRow;
+        }
+
+        var typeDefCount = GetCount(sections, 0x0013);
+        var methodCount = GetCount(sections, 0x0016);
+        var signatureCount = GetCount(sections, 0x0017);
+        var parameterCount = GetCount(sections, 0x0018);
+        var featureCount = GetCount(sections, 0x0004);
+        var sourceFileCount = GetCount(sections, 0x001F);
+        var bodyCount = GetCount(sections, 0x0020);
+        var nativeFunctionPointerSignatureCount
+            = GetCount(sections, 0x0052);
+        var constantSourceCount = GetCount(sections, 0x0030);
+        var methodBytes = TryGetSection(sections, 0x0016,
+                out var methodSection)
+            ? methodSection.Bytes.ToArray().ToList() : [];
+        var signatureBytes = TryGetSection(sections, 0x0017,
+                out var signatureSection)
+            ? signatureSection.Bytes.ToArray().ToList() : [];
+        var parameterBytes = TryGetSection(sections, 0x0018,
+                out var parameterSection)
+            ? parameterSection.Bytes.ToArray().ToList() : [];
+        var typeSpecRows = ReadVariableRows(sections, 0x0011, 2, 1);
+        var builtInTypeSpecRows = GetBuiltInTypeSpecRows(typeSpecRows);
+        var genericParameterRows = ReadGenericParamRows(sections);
+        var constraintRows = ReadConstraintRows(sections);
+        var contractRows = ReadVariableRows(sections, 0x001B, 8, 4);
+        var methodParameterLabelBytes = TryGetSection(sections, 0x0066,
+                out var methodParameterLabelSection)
+            ? methodParameterLabelSection.Bytes.ToArray().ToList() : [];
+        var methodParameterLabelCount = GetCount(sections, 0x0066);
+        if (methodParameterLabelBytes.Count
+            != checked(methodParameterLabelCount * 12))
+        {
+            throw Invalid(
+                "The G1L1 MethodParameterLabel table has an invalid extent.");
+        }
+
+        for (var importedOrdinal = 0;
+            importedOrdinal < importedMethods.Count; importedOrdinal++)
+        {
+            var imported = importedMethods[importedOrdinal];
+            var source = imported.Source;
+            var expected = imported.Expected;
+            var signature = expected.Signature;
+            var proofFunction = expected.ProofFunction;
+            if (!signature.IsPublic || !signature.IsStatic
+                || signature.IsMutable || signature.Owner is not null
+                || !signature.ConstantFormals.IsDefaultOrEmpty
+                || !proofFunction.IsStatic
+                || proofFunction.DeclaringStruct is not null
+                || string.IsNullOrEmpty(proofFunction.Name)
+                || proofFunction.ParameterCount != 0
+                || !proofFunction.Variables.IsEmpty
+                || proofFunction.ReturnType != PrimitiveType.Void
+                || proofFunction.DoesNotReturn
+                || proofFunction.RequiresUnsafeCaller
+                    != signature.RequiresUnsafeCaller
+                || !proofFunction.DependencyContracts.IsEmpty
+                || expected.Formals.IsDefaultOrEmpty
+                || expected.Formals.Length
+                    != signature.Formals.Length
+                || expected.Formals.Length > 8)
+            {
+                throw Unsupported(
+                    $"Imported generic MethodDef '{proofFunction.Name}' is outside the zero-parameter type-formal subset.");
+            }
+
+            var moduleRefRow = GetModuleRefRow(imported.Import);
+            var exportKeyStringRow = names.Count + 1;
+            names.Add((imported.Import.ExportKey, 1));
+            var methodNameStringRow = names.Count + 1;
+            names.Add((proofFunction.Name, 1));
+            var methodRow = checked(methodCount + importedOrdinal + 1);
+            var methodDefId = 0x1600_0000u | checked((uint)methodRow);
+            if (!importTriples.Add((moduleRefRow,
+                    imported.Import.ExportKey, methodDefId)))
+            {
+                throw Invalid(
+                    "An imported generic MethodDef duplicates an existing expectation.");
+            }
+
+            var importRow = checked(importRows.Count + 1);
+            importRows.Add(new TrRmImportRow(moduleRefRow,
+                exportKeyStringRow, methodDefId));
+            importedGenericMethodTargetTokens.Add(source,
+                0x1C00_0000u | checked((uint)importRow));
+
+            var genericFirst = checked(genericParameterRows.Count + 1);
+            for (var formalOrdinal = 0;
+                formalOrdinal < expected.Formals.Length; formalOrdinal++)
+            {
+                var formal = expected.Formals[formalOrdinal];
+                var formalSignature
+                    = signature.Formals[formalOrdinal];
+                if (formal.Ordinal != formalOrdinal
+                    || formalSignature.Ordinal != formalOrdinal
+                    || !StringComparer.Ordinal.Equals(formal.Name,
+                        formalSignature.Name)
+                    || formal.OwnershipDomain
+                        != formalSignature.OwnershipDomain
+                    || formal.NullabilityDomain
+                        != formalSignature.NullabilityDomain
+                    || formal.RequiresWritable
+                        != formalSignature.RequiresWritable
+                    || formal.RequiresBlittable
+                        != formalSignature.RequiresBlittable
+                    || formal.TypeDefault is not null
+                    || formalSignature.HasTypeDefault
+                    || !formal.Requirements.IsDefaultOrEmpty
+                    || !formalSignature.Requirements.IsDefaultOrEmpty
+                    || formal.InterfaceConstraints.IsDefault
+                    || !formal.InterfaceConstraints.IsEmpty
+                    || formalSignature.InterfaceConstraints.IsDefault
+                    || !formalSignature.InterfaceConstraints.IsEmpty
+                    || formal.OwnershipDomain is < 1 or > 3
+                    || formal.NullabilityDomain is < 1 or > 2)
+                {
+                    throw Unsupported(
+                        $"Imported generic MethodDef '{proofFunction.Name}' has a formal outside the selected G1 contract subset.");
+                }
+
+                var genericParamRow
+                    = checked(genericParameterRows.Count + 1);
+                var formalNameStringRow = names.Count + 1;
+                names.Add((formal.Name, 1));
+                var constraintFirst = checked(constraintRows.Count + 1);
+                if (formal.RequiresWritable)
+                {
+                    constraintRows.Add(new TrRmConstraintRow(
+                        genericParamRow, 2, 2));
+                }
+                if (formal.RequiresBlittable)
+                {
+                    constraintRows.Add(new TrRmConstraintRow(
+                        genericParamRow, 2, 3));
+                }
+                var constraintCount = constraintRows.Count
+                    - constraintFirst + 1;
+                if (constraintCount == 0)
+                {
+                    constraintFirst = 0;
+                }
+
+                genericParameterRows.Add(new TrRmGenericParamRow(
+                    methodDefId, formalOrdinal, formalNameStringRow,
+                    constraintFirst, constraintCount, 1,
+                    formal.OwnershipDomain, formal.NullabilityDomain,
+                    0, 0));
+            }
+
+            var resultTypeSpecRef = GetBuiltInTypeSpecRef(
+                PrimitiveType.Void, builtInTypeSpecRows, typeSpecRows);
+            AppendUInt32(signatureBytes, resultTypeSpecRef);
+            AppendUInt32(signatureBytes, 0);
+            AppendUInt32(signatureBytes, 0);
+            AppendUInt32(signatureBytes, 0);
+            AppendUInt32(signatureBytes, checked((uint)genericFirst));
+            AppendUInt32(signatureBytes,
+                checked((uint)expected.Formals.Length));
+
+            var contractFirst = 0;
+            var contractCount = 0;
+            if (signature.RequiresUnsafeCaller)
+            {
+                contractFirst = contractRows.Count + 1;
+                contractRows.Add(EncodeGenericMethodEffectContract(
+                    methodRow, s_effectPayloads[4]));
+                contractCount++;
+            }
+
+            AppendUInt32(methodBytes, 0);
+            AppendUInt32(methodBytes,
+                checked((uint)methodNameStringRow));
+            AppendUInt32(methodBytes,
+                checked((uint)(signatureCount + importedOrdinal + 1)));
+            AppendUInt32(methodBytes, 2);
+            AppendUInt32(methodBytes, checked((uint)contractFirst));
+            AppendUInt32(methodBytes, checked((uint)contractCount));
+            AppendUInt32(methodBytes, 0);
+        }
+
+        var finalMethodCount = checked(methodCount + importedMethods.Count);
+        var finalSignatureCount
+            = checked(signatureCount + importedMethods.Count);
+        var finalImportCount = importRows.Count;
+        var finalTypeSpecBytes = TrRmTypeSpecTableWriter.Encode(
+            typeSpecRows, typeDefCount, finalImportCount,
+            genericParameterRows.Count,
+            nativeFunctionPointerSignatureCount, schema,
+            finalMethodCount);
+        var rewrittenStrings = TrRmStringTableWriter.EncodeTextRows(names);
+        var stringTable = new TrRmStringTableReader(rewrittenStrings,
+            names.Count);
+        var moduleBytes = GetSection(sections, 0x0001).Bytes.ToArray();
+        var modules = new TrRmModuleTableReader(moduleBytes, 1,
+            stringTable, moduleRefRows.Count, typeDefCount,
+            finalMethodCount, sourceFileCount, featureCount);
+        var moduleRefBytes = TrRmModuleRefTableWriter.Encode(moduleRefRows,
+            stringTable, modules);
+        var (genericParameterBytes, constraintBytes)
+            = CreateGenericMetadataBytes(rewrittenStrings, names.Count,
+                moduleBytes, methodBytes.ToArray(),
+                signatureBytes.ToArray(), finalTypeSpecBytes,
+                typeSpecRows.Count, genericParameterRows, constraintRows,
+                sections, typeDefCount, finalImportCount,
+                nativeFunctionPointerSignatureCount, featureCount,
+                finalSignatureCount, parameterCount, contractRows.Count,
+                bodyCount, moduleRefRows.Count, schema);
+        var importBytes = new byte[checked(finalImportCount * 12)];
+        for (var row = 0; row < importRows.Count; row++)
+        {
+            var import = importRows[row];
+            var offset = row * 12;
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                importBytes.AsSpan(offset),
+                checked((uint)import.ModuleRefRow));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                importBytes.AsSpan(offset + 4),
+                checked((uint)import.ExportKeyStringRow));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                importBytes.AsSpan(offset + 8),
+                import.ExpectedLocalDefId);
+        }
+
+        SetSection(sections, 0x0002, checked((uint)names.Count),
+            rewrittenStrings);
+        SetSection(sections, 0x0010,
+            checked((uint)moduleRefRows.Count), moduleRefBytes);
+        SetSection(sections, 0x0011,
+            checked((uint)typeSpecRows.Count), finalTypeSpecBytes);
+        SetSection(sections, 0x0016, checked((uint)finalMethodCount),
+            methodBytes.ToArray());
+        SetSection(sections, 0x0017, checked((uint)finalSignatureCount),
+            signatureBytes.ToArray());
+        SetSection(sections, 0x0018, checked((uint)parameterCount),
+            parameterBytes.ToArray());
+        SetSection(sections, 0x0019,
+            checked((uint)genericParameterRows.Count),
+            genericParameterBytes);
+        SetSection(sections, 0x001A,
+            checked((uint)constraintRows.Count), constraintBytes);
+        SetSection(sections, 0x001B, checked((uint)contractRows.Count),
+            contractRows.Count == 0 ? []
+                : TrRmVariableTableWriter.EncodeBlobs(contractRows));
+        SetSection(sections, 0x001C, checked((uint)finalImportCount),
+            importBytes);
+
+        sections.Sort(static (left, right) =>
+            left.Kind.CompareTo(right.Kind));
+        return TrRmArtifactWriter.Encode(sections, schema);
+    }
+
     private static byte[] AddGenericMethodMetadata(byte[] artifact,
         BoundProgram program, SourceGenericMethodExports sourceMethodExports,
         IReadOnlyList<GenericMethodEmission> emissions,
@@ -2167,6 +2799,8 @@ public static partial class TrRmExecutableCompiler
         IReadOnlyDictionary<(
             string QualifiedName, int Arity, int MemberOrdinal,
             string DeclarationKey), uint> exportedInterfaceMethodDefRows,
+        IReadOnlyDictionary<BoundGenericMethodImport, uint>
+            importedGenericMethodTargetTokens,
         TrRmArtifactSchema schema)
     {
         var index = new TrRmArtifactIndex(artifact, schema);
@@ -2536,7 +3170,8 @@ public static partial class TrRmExecutableCompiler
                 ? EncodeGenericMethodForwardingBody(function,
                     definition, emissions, formalTypeSpecRows,
                     builtInTypeSpecRows, typeSpecRows,
-                    definition.ProofProgram.SpanTypes, schema,
+                    definition.ProofProgram.SpanTypes,
+                    importedGenericMethodTargetTokens, schema,
                     nominalTypes)
                 : containsInterfaceCall
                     ? EncodeGenericMethodRequirementBody(function,
