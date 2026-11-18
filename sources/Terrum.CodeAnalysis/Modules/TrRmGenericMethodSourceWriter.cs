@@ -673,9 +673,80 @@ public static partial class TrRmExecutableCompiler
     {
         calls = [];
         var body = function.Body;
+        if (!body.RetiredManagedLocals.IsEmpty)
+        {
+            return false;
+        }
+
+        var hasUnitReturn = body.Statements.Length != 0
+            && body.Statements[^1] is BoundReturn { Value: null };
+        var unitCallIndex = body.Statements.Length
+            - (hasUnitReturn ? 2 : 1);
+        if (function.ReturnType == PrimitiveType.Void
+            && unitCallIndex >= 1
+            && unitCallIndex <= SemanticVerifier.MaximumVariables
+            && function.ParameterCount + unitCallIndex
+                <= SemanticVerifier.MaximumVariables
+            && function.Variables.Length
+                == function.ParameterCount + unitCallIndex
+            && body.Statements[unitCallIndex]
+                is BoundExpressionStatement {
+                    Expression: BoundCall unitCall,
+                }
+            && unitCall.Type == PrimitiveType.Void)
+        {
+            var unitChain
+                = ImmutableArray.CreateBuilder<GenericMethodForwardingCall>(
+                    unitCallIndex + 1);
+            for (var ordinal = 0; ordinal < unitCallIndex; ordinal++)
+            {
+                var resultVariable = function.ParameterCount + ordinal;
+                if (body.Statements[ordinal] is not BoundLocal local
+                    || local.Variable != resultVariable
+                    || local.Initializer is not BoundCall call
+                    || call.Type == PrimitiveType.Void
+                    || function.Variables[resultVariable].Type != call.Type)
+                {
+                    return false;
+                }
+
+                var variable = function.Variables[resultVariable];
+                if (variable.IsMutable || variable.IsOut || variable.IsInit
+                    || variable.IsImplicitRef
+                    || variable.IsImplicitReferenceTemporary
+                    || variable.IsInitializationLocal)
+                {
+                    return false;
+                }
+
+                if (ordinal != 0
+                    && !call.Arguments.Any(argument =>
+                        argument is BoundRead read
+                        && read.Variable >= function.ParameterCount
+                        && read.Variable < resultVariable))
+                {
+                    return false;
+                }
+
+                unitChain.Add(new GenericMethodForwardingCall(call,
+                    resultVariable));
+            }
+
+            if (!unitCall.Arguments.Any(argument =>
+                    argument is BoundRead read
+                    && read.Variable >= function.ParameterCount
+                    && read.Variable < function.Variables.Length))
+            {
+                return false;
+            }
+
+            unitChain.Add(new GenericMethodForwardingCall(unitCall, -1));
+            calls = unitChain.MoveToImmutable();
+            return true;
+        }
+
         var localCount = body.Statements.Length - 1;
-        if (!body.RetiredManagedLocals.IsEmpty
-            || localCount < 2
+        if (localCount < 2
             || localCount > SemanticVerifier.MaximumVariables
             || function.Variables.Length
                 != function.ParameterCount + localCount
@@ -1181,12 +1252,21 @@ public static partial class TrRmExecutableCompiler
         TrRmArtifactSchema schema,
         GenericMethodNominalTypeWriter nominalTypes)
     {
-        if (function.ParameterCount > 8 || function.ReturnType
-            == PrimitiveType.Void
+        var hasUnitResult = callChain.Length != 0
+            && callChain[^1].ResultVariable < 0;
+        var resultCallCount = callChain.Length
+            - (hasUnitResult ? 1 : 0);
+        if (function.ParameterCount > 8
+            || ((function.ReturnType == PrimitiveType.Void)
+                != hasUnitResult)
             || callChain.Length < 2
             || callChain.Length > SemanticVerifier.MaximumVariables
-            || function.ParameterCount + callChain.Length - 1
-                > byte.MaxValue
+            || resultCallCount < 1
+            || function.ParameterCount + resultCallCount
+                > ushort.MaxValue
+            || (!hasUnitResult
+                && function.ParameterCount + resultCallCount - 1
+                    > byte.MaxValue)
             || callChain.Length > ushort.MaxValue / 2)
         {
             throw Unsupported(
@@ -1225,7 +1305,9 @@ public static partial class TrRmExecutableCompiler
                 || target.ParameterCount != genericCall.Arguments.Length
                 || target.ParameterCount != target.Variables.Length
                 || target.ParameterCount > 8
-                || target.ReturnType == PrimitiveType.Void
+                || (target.ReturnType == PrimitiveType.Void)
+                    != (forwardingCall.ResultVariable < 0)
+                || genericCall.Type != target.ReturnType
                 || HasConstantFormals(targetEmissions[0].Definition)
                 || call.TypeArguments.Length
                     != targetEmissions[0].Definition.Formals.Length
@@ -1285,7 +1367,7 @@ public static partial class TrRmExecutableCompiler
         }
 
         var homeRows = new List<byte[]>(
-            function.ParameterCount + callChain.Length);
+            function.ParameterCount + resultCallCount);
         var homeIndicesByVariable = new int[function.Variables.Length];
         Array.Fill(homeIndicesByVariable, -1);
         for (var parameter = 0; parameter < function.ParameterCount;
@@ -1305,6 +1387,11 @@ public static partial class TrRmExecutableCompiler
         foreach (var target in targets)
         {
             var resultVariable = target.ResultVariable;
+            if (resultVariable < 0)
+            {
+                continue;
+            }
+
             if ((uint)resultVariable >= (uint)function.Variables.Length
                 || homeIndicesByVariable[resultVariable] != -1
                 || homeRows.Count >= ushort.MaxValue)
@@ -1358,7 +1445,9 @@ public static partial class TrRmExecutableCompiler
                     || (uint)formalIndex >= (uint)inputs.Length
                     || assignedParameters[formalIndex]
                     || (uint)read.Variable
-                        >= (uint)target.ResultVariable
+                        >= (uint)(target.ResultVariable < 0
+                            ? function.Variables.Length
+                            : target.ResultVariable)
                     || (uint)read.Variable
                         >= (uint)function.Variables.Length
                     || function.Variables[read.Variable].Type
@@ -1407,10 +1496,14 @@ public static partial class TrRmExecutableCompiler
                         read.Variable]));
             }
 
+            var resultType = target.ResultVariable < 0
+                ? PrimitiveType.Void
+                : function.Variables[
+                    target.ResultVariable].Type;
             if (assignedParameters.Any(static assigned => !assigned)
                 || !GenericMethodTypeMatchesAfterSubstitution(
                     target.Function.ReturnType,
-                    function.Variables[target.ResultVariable].Type,
+                    resultType,
                     targetDefinition, definition, call.TypeArguments, 0))
             {
                 throw Unsupported(
@@ -1484,10 +1577,13 @@ public static partial class TrRmExecutableCompiler
                     1, 0, methodMapIndex, 0, 0, targetArguments,
                     schema));
             var callSiteIndex = checked((ushort)records.Count);
+            var hasResultHome = target.ResultVariable >= 0;
+            var resultHome = hasResultHome
+                ? checked((ushort)homeIndicesByVariable[
+                    target.ResultVariable]) : (ushort)0;
             records.Add(TrRmRegisterBodyRecordWriter.EncodeCallSite(
-                4, 2, targetRecordIndex,
-                checked((ushort)homeIndicesByVariable[
-                    target.ResultVariable]), inputs, [], schema: schema));
+                4, hasResultHome ? (byte)2 : (byte)0,
+                targetRecordIndex, resultHome, inputs, [], schema: schema));
             if (callSiteIndex <= byte.MaxValue)
             {
                 code.Add(0x90);
@@ -1502,15 +1598,18 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        var returnHome = homeIndicesByVariable[
-            callChain[^1].ResultVariable];
-        if (returnHome > byte.MaxValue)
+        if (!hasUnitResult)
         {
-            throw Unsupported(
-                "A G1 forwarding chain exceeds the compact return-Home index.");
+            var returnHome = homeIndicesByVariable[
+                callChain[^1].ResultVariable];
+            if (returnHome > byte.MaxValue)
+            {
+                throw Unsupported(
+                    "A G1 forwarding chain exceeds the compact return-Home index.");
+            }
+            code.Add(0xB8);
+            code.Add(checked((byte)returnHome));
         }
-        code.Add(0xB8);
-        code.Add(checked((byte)returnHome));
         return TrRmRegisterBodyWriter.Encode(homeMap,
             typeMap.Encode(), methodMap.Encode(), default, default,
             [new TrRmRegisterBodyBlock(0,

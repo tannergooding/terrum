@@ -3920,6 +3920,55 @@ internal sealed class TrRmGenericMethodSourceWriterTests
     }
 
     [Test]
+    public void BindsAndExecutesSourceFreeGenericUnitForwardingChain()
+    {
+        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            """
+            T Identity<T>(T value) where T : [Blittable] { return value; }
+            void Complete<T>(T value) where T : [Blittable] { return; }
+            public void Forward<T>(T callerArgument)
+                where T : [Blittable] {
+                T intermediate = Identity<T>(callerArgument);
+                Complete<T>(intermediate);
+                return;
+            }
+            """), new CompilationOptions {
+            LayoutCoreRegistration =
+                Terrum.CodeAnalysis.Tests.Semantics
+                    .LayoutCoreRegistrationTestData.Create(),
+        });
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerProgram = providerCompilation.Program!;
+        var forward = providerProgram.GenericMethodDefinitions.Single(
+            static definition => definition.Name == "Forward");
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, "forward-unit-chain.provider",
+            GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), [
+                new(providerProgram, forward.SourceInputOrdinal,
+                    forward.Span, "Forward"),
+            ]);
+        var reference = TrRmExecutableCompiler
+            .CreateGenericMethodCallsDraftReference(providerArtifact,
+                "forward-unit-chain.provider", "Forward");
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse(
+            "int32 Main() { Forward<int32>(callerArgument: 42); return 42; }"),
+            reference,
+            new CompilationOptions {
+                LayoutCoreRegistration =
+                    Terrum.CodeAnalysis.Tests.Semantics
+                        .LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        Assert.That(NativeJit.Execute(consumerCompilation.Program!,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(42));
+    }
+
+    [Test]
     public void BindsAndExecutesSourceFreeGenericForwardingThroughCopyLocals()
     {
         var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(

@@ -2272,7 +2272,7 @@ public static partial class TrRmExecutableCompiler
             ImmutableArray<BoundVariable>.Builder callerVariables,
             TrRmRegisterBodyReader body, ReadOnlySpan<byte> code)
     {
-        if (code.Length < 6
+        if (code.Length < 4
             || body.RecordCount < 4
             || body.GetRecord(0)[0] != 1)
         {
@@ -2293,6 +2293,7 @@ public static partial class TrRmExecutableCompiler
 
         var callSiteIndexes = new List<int>();
         var returnHome = -1;
+        var hasReturnHome = false;
         var position = 0;
         while (position < code.Length)
         {
@@ -2340,30 +2341,34 @@ public static partial class TrRmExecutableCompiler
                 && position + instructionLength == code.Length)
             {
                 returnHome = code[position + 1];
+                hasReturnHome = true;
                 position += instructionLength;
                 break;
             }
             else
             {
                 throw Unsupported(
-                    "The G1 consumer supports only sequential GenericCall instructions followed by ReturnHome.");
+                    "The G1 consumer supports only sequential GenericCall instructions with a value ReturnHome or terminal unit call.");
             }
 
             position += instructionLength;
         }
 
-        if (position != code.Length || returnHome < 0
+        if (position != code.Length
             || callSiteIndexes.Count < 2
-            || body.RecordCount < callSiteIndexes.Count + 2)
+            || body.RecordCount < callSiteIndexes.Count + 2
+            || (callerReturnType == PrimitiveType.Void
+                ? hasReturnHome : !hasReturnHome))
         {
             throw Unsupported(
-                "The G1 consumer requires at least two GenericCalls followed by ReturnHome.");
+                "The G1 consumer requires a multi-call sequence ending in a value ReturnHome or normal unit call.");
         }
 
         var statements = ImmutableArray.CreateBuilder<BoundStatement>(
             callSiteIndexes.Count + 1);
         var resultVariablesByHome = new Dictionary<int, int>();
         var referencedRecords = new HashSet<int> { 0 };
+        var hasUnitTerminalCall = false;
         for (var callOrdinal = 0;
             callOrdinal < callSiteIndexes.Count; callOrdinal++)
         {
@@ -2377,10 +2382,13 @@ public static partial class TrRmExecutableCompiler
 
             var callSite = body.GetRecord(callSiteIndex);
             if (callSite[0] != 0x02 || callSite[4] != 4
-                || callSite[5] != 2)
+                || (callSite[5] != 2
+                    && !(callOrdinal == callSiteIndexes.Count - 1
+                        && callerReturnType == PrimitiveType.Void
+                        && callSite[5] == 0)))
             {
                 throw Unsupported(
-                    "The G1 consumer requires value-returning direct GenericCall CallSites.");
+                    "The G1 consumer requires value results except for a terminal normal unit GenericCall.");
             }
 
             var callSitePayload = callSite[4..];
@@ -2396,7 +2404,24 @@ public static partial class TrRmExecutableCompiler
             var decoded = DecodeDirectGenericCallForChain(tables, context,
                 artifactIndex, moduleRow, callerMethodRow, callerFormals,
                 callerFormalRecords, callerParameterCount, callerVariables,
-                body, callSitePayload, resultVariablesByHome);
+                body, callSitePayload, resultVariablesByHome,
+                callOrdinal == callSiteIndexes.Count - 1
+                    && callerReturnType == PrimitiveType.Void);
+            if (decoded.ResultType == PrimitiveType.Void)
+            {
+                if (callOrdinal != callSiteIndexes.Count - 1
+                    || hasReturnHome || decoded.ResultHome != -1)
+                {
+                    throw Invalid(
+                        "A unit GenericCall must be the terminal operation of a unit-returning chain.");
+                }
+
+                hasUnitTerminalCall = true;
+                statements.Add(new BoundExpressionStatement(decoded.Value,
+                    default));
+                continue;
+            }
+
             if ((uint)decoded.ResultHome >= (uint)body.HomeCount
                 || resultVariablesByHome.ContainsKey(decoded.ResultHome))
             {
@@ -2432,16 +2457,30 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        if (!resultVariablesByHome.TryGetValue(returnHome,
-                out var returnedVariable)
-            || callerVariables[returnedVariable].Type != callerReturnType)
+        if (hasReturnHome)
+        {
+            if (!resultVariablesByHome.TryGetValue(returnHome,
+                    out var returnedVariable)
+                || callerVariables[returnedVariable].Type
+                    != callerReturnType)
+            {
+                throw Invalid(
+                    "The G1 GenericCall chain ReturnHome does not match the open MethodSig result.");
+            }
+
+            statements.Add(new BoundReturn(new BoundRead(returnedVariable,
+                callerReturnType, default), default));
+        }
+        else if (callerReturnType != PrimitiveType.Void
+            || !hasUnitTerminalCall)
         {
             throw Invalid(
-                "The G1 GenericCall chain ReturnHome does not match the open MethodSig result.");
+                "The GenericCall chain has no valid unit completion.");
         }
-
-        statements.Add(new BoundReturn(new BoundRead(returnedVariable,
-            callerReturnType, default), default));
+        else
+        {
+            statements.Add(new BoundReturn(null, default));
+        }
         return statements.MoveToImmutable();
     }
 
@@ -2454,7 +2493,8 @@ public static partial class TrRmExecutableCompiler
             int callerParameterCount,
             ImmutableArray<BoundVariable>.Builder callerVariables,
             TrRmRegisterBodyReader body, ReadOnlySpan<byte> callSitePayload,
-            IReadOnlyDictionary<int, int> resultVariablesByHome)
+            IReadOnlyDictionary<int, int> resultVariablesByHome,
+            bool allowUnitResult)
     {
         var targetRecordIndex = BinaryPrimitives
             .ReadUInt16LittleEndian(callSitePayload.Slice(4, 2));
@@ -2633,8 +2673,7 @@ public static partial class TrRmExecutableCompiler
                 actualTypes, actualTypeMetadata, targetImport, context,
                 artifactIndex, callerMethodRow, callerFormals,
                 callerFormalTypeOwnerOrdinal, 0, out resultType)
-            || targetImport.ProofFunction.DoesNotReturn
-            || resultType == PrimitiveType.Void)
+            || targetImport.ProofFunction.DoesNotReturn)
         {
             throw Unsupported(
                 "The G1 GenericCall result type or termination contract is outside the multi-call subset.");
@@ -2642,17 +2681,29 @@ public static partial class TrRmExecutableCompiler
 
         var resultHome = BinaryPrimitives.ReadUInt16LittleEndian(
             callSitePayload.Slice(6, 2));
-        if ((uint)resultHome >= (uint)body.HomeCount)
+        if (resultType == PrimitiveType.Void)
         {
-            throw Invalid(
-                "A GenericCall chain references an invalid result Home.");
+            if (!allowUnitResult || callSitePayload[1] != 0
+                || resultHome != 0)
+            {
+                throw Invalid(
+                    "A unit GenericCall must be the terminal None-result call of a unit-returning chain.");
+            }
         }
-        var resultHomeEntry = body.HomeMap.Slice(resultHome * 8, 8);
-        if (callSitePayload[1] != 2 || resultHomeEntry[0] != 3
-            || resultHomeEntry[1] != 1)
+        else
         {
-            throw Invalid(
-                "The GenericCall result does not select a value Home.");
+            if ((uint)resultHome >= (uint)body.HomeCount)
+            {
+                throw Invalid(
+                    "A GenericCall chain references an invalid result Home.");
+            }
+            var resultHomeEntry = body.HomeMap.Slice(resultHome * 8, 8);
+            if (callSitePayload[1] != 2 || resultHomeEntry[0] != 3
+                || resultHomeEntry[1] != 1)
+            {
+                throw Invalid(
+                    "The GenericCall result does not select a value Home.");
+            }
         }
 
         var call = new BoundCall(0, arguments.MoveToImmutable(),
@@ -2663,8 +2714,9 @@ public static partial class TrRmExecutableCompiler
         };
         BoundExpression value = targetImport.Signature.RequiresUnsafeCaller
             ? new BoundUnsafeExpression(call, default) : call;
-        return new GenericMethodCallSiteResult(resultHome, resultType,
-            value);
+        return new GenericMethodCallSiteResult(
+            resultType == PrimitiveType.Void ? -1 : resultHome,
+            resultType, value);
     }
 
     private static bool TrySubstituteGenericMethodType(

@@ -50,10 +50,11 @@ bounded move/forwarding Body type maps from checked public TypeDef artifact
 snapshots; a one-call forwarding Body can collapse same-typed immutable Copy
 local aliases onto the result Home, and a linear GenericCall chain carries
 results through Homes to later calls; the source-free consumer
-reconstructs the result Homes as checked locals. A direct normal unit-result
-GenericCall is block-terminal, uses the None result selector, and completes
-with unit; the source-free consumer reconstructs it as an expression statement
-followed by unit return.
+reconstructs the result Homes as checked locals. A normal unit-result
+GenericCall, including as the final call after value Homes in a linear chain,
+is block-terminal, uses the None result selector, and completes with unit; the
+source-free consumer reconstructs it as an expression statement followed by
+unit return.
 The writer also copies local declaration
 graphs or exact imported expectations, including formal order, fields, declared
 layouts and frozen scalar constant actuals/defaults; nested constructions and
@@ -65,8 +66,8 @@ compatible provider-row relocation, source re-emission and incompatible
 replacement regressions remain unverified under the active validation hold.
 The source-free JIT Copy-alias-chain regression is also unverified under the
 hold; the two-call chain regression is unverified as well.
-The normal unit-result forwarding regression is also unverified under the
-hold.
+The normal unit-result direct-call and chain-tail regressions are also
+unverified under the hold.
 This does not admit fresh generic TypeDef source declarations or source-free
 generic MethodDef re-emission. The writer copies all retained TypeDef Import
 expectation views; a reference-set emission regression is added but remains
