@@ -119,6 +119,10 @@ prerequisite has already been met.
    A separate [C1 enum-closure proposal](proposals/standard-trrm-c1-enum-closure-composition.md)
    defines enum-bearing EN1 successors and class-manifest v2; this route also
    remains unimplemented.
+   Source-free generic MethodDef re-emission has a separate, unapproved but
+   provisionally actionable [explicit selection proposal](proposals/standard-trrm-source-free-generic-method-export-selection.md);
+   only selected root definitions and aliases may be published, and complete
+   retained-graph support remains a prerequisite.
    Complete G1L1 before C1L1, C1M1L1,
    Construction-1L1 and Construction-2L1.
    The complete phase-1/2 failure route selects Construction-2L1 only as the

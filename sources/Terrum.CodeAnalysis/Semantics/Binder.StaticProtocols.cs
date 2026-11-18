@@ -11189,8 +11189,23 @@ internal sealed partial class Binder
     private void AddReferenceGenericMethodImports(
         CompilationReference reference)
     {
+        var importedDefinitions = new HashSet<(
+            string ProviderIdentity, string SchemaIdentity, string DigestHex,
+            uint MethodDefId)>();
         foreach (var imported in reference.GenericMethodImports)
         {
+            var origin = imported.Origin;
+            if (!origin.IsMethodDefTarget
+                && origin.MethodDefId != 0
+                && !importedDefinitions.Add((
+                    origin.ProviderIdentity, origin.SchemaIdentity,
+                    Convert.ToHexString(
+                        origin.ProviderArtifactDigest.AsSpan()),
+                    origin.MethodDefId)))
+            {
+                continue;
+            }
+
             var typeParameters = ImmutableArray.CreateBuilder<
                 GenericTypeParameter>(imported.Formals.Length);
             foreach (var formal in imported.Formals)

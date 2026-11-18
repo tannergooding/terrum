@@ -759,9 +759,29 @@ public static partial class TrRmExecutableCompiler
         uint moduleTargetRequirement,
         IReadOnlyList<TrRmSourceTypeExport>? sourceTypeExports,
         SourceGenericMethodExports? sourceGenericMethodExports = null,
-        SourceClassExports? sourceClassExports = null)
+        SourceClassExports? sourceClassExports = null,
+        IReadOnlyList<BoundGenericMethodDefinition>?
+            retainedGenericMethodDefinitions = null)
     {
         ArgumentNullException.ThrowIfNull(program);
+        if (retainedGenericMethodDefinitions is not null
+            && (sourceGenericMethodExports is null
+                || !ReferenceEquals(sourceGenericMethodExports.Program,
+                    program)
+                || sourceTypeExports is not null
+                || sourceClassExports is not null
+                || (!StringComparer.Ordinal.Equals(schemaIdentity,
+                        StandardGenericMethodCallsSchemaIdentity)
+                    && !StringComparer.Ordinal.Equals(schemaIdentity,
+                        StandardGenericMethodCallsParameterLabelsSchemaIdentity)
+                    && !StringComparer.Ordinal.Equals(schemaIdentity,
+                        StandardGenericMethodCallsParameterLabelsReceiverAccessSchemaIdentity))
+                || !program.GenericMethodDefinitions.IsEmpty))
+        {
+            throw new ArgumentException(
+                "Retained generic MethodDef selections require an exact G1-family source-free route.",
+                nameof(retainedGenericMethodDefinitions));
+        }
         if (program.EntryPoint == -1
             && program.Functions.Any(static function =>
                 !function.IsPrivate && !function.IsInternal
@@ -1145,17 +1165,23 @@ public static partial class TrRmExecutableCompiler
             StandardGenericMethodCallsSchemaIdentity
                 => EmitGenericMethodCallsDraftSource(program, moduleIdentity,
                     moduleTargetRequirement, sourceGenericMethodExports,
-                    sourceTypeExports),
+                    sourceTypeExports,
+                    retainedMethodDefinitions:
+                        retainedGenericMethodDefinitions),
             StandardGenericMethodCallsParameterLabelsSchemaIdentity
                 => EmitGenericMethodCallsDraftSource(program, moduleIdentity,
                     moduleTargetRequirement, sourceGenericMethodExports,
                     sourceTypeExports,
-                    TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft),
+                    TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft,
+                    retainedMethodDefinitions:
+                        retainedGenericMethodDefinitions),
             StandardGenericMethodCallsParameterLabelsReceiverAccessSchemaIdentity
                 => EmitGenericMethodCallsDraftSource(program, moduleIdentity,
                     moduleTargetRequirement, sourceGenericMethodExports,
                     sourceTypeExports,
-                    TrRmArtifactSchema.GenericMethodCallsParameterLabelsReceiverAccessDraft),
+                    TrRmArtifactSchema.GenericMethodCallsParameterLabelsReceiverAccessDraft,
+                    retainedMethodDefinitions:
+                        retainedGenericMethodDefinitions),
             _ => throw new ArgumentException(
                 "The exact Standard TRRM schema identity is not supported by this emitter.",
                 nameof(schemaIdentity)),

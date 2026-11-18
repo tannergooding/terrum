@@ -38,6 +38,8 @@ public sealed class CompilationReference
             nativeOutputCoreRegistration = null,
         ImmutableArray<BoundGenericMethodImport>
             genericMethodImports = default,
+        ImmutableArray<BoundGenericMethodImport>
+            retainedGenericMethodRoots = default,
         BoundStandardQuerySourceAssociation?
             standardQuerySourceAssociation = null,
         ImmutableArray<CoreEvaluationFormIdentitySelection>
@@ -341,6 +343,18 @@ public sealed class CompilationReference
             ? [] : privateClassReferences;
         GenericMethodImports = genericMethodImports.IsDefault
             ? [] : genericMethodImports;
+        RetainedGenericMethodRoots = retainedGenericMethodRoots.IsDefault
+            ? [] : retainedGenericMethodRoots;
+        if (RetainedGenericMethodRoots.Any(import =>
+                import is null
+                || !GenericMethodImports.Contains(import)
+                || import.Origin.IsMethodDefTarget
+                || !import.Signature.IsPublic))
+        {
+            throw new ArgumentException(
+                "The selected retained generic MethodDef roots are invalid.",
+                nameof(retainedGenericMethodRoots));
+        }
         StandardQuerySourceAssociation = standardQuerySourceAssociation;
         CoreEvaluationFormIdentitySelections
             = coreEvaluationFormIdentitySelections.IsDefault
@@ -483,6 +497,8 @@ public sealed class CompilationReference
         PrivateClassReferences { get; }
     internal ImmutableArray<BoundGenericMethodImport>
         GenericMethodImports { get; }
+    internal ImmutableArray<BoundGenericMethodImport>
+        RetainedGenericMethodRoots { get; }
 
     internal BoundStandardQuerySourceAssociation?
         StandardQuerySourceAssociation { get; }
@@ -551,6 +567,7 @@ public sealed class CompilationReference
             nativeOutputCoreRegistration:
                 NativeOutputCoreRegistration,
             genericMethodImports: GenericMethodImports,
+            retainedGenericMethodRoots: RetainedGenericMethodRoots,
             standardQuerySourceAssociation:
                 StandardQuerySourceAssociation,
             coreEvaluationFormIdentitySelections:

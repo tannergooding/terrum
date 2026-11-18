@@ -108,10 +108,12 @@ public static partial class TrRmExecutableCompiler
             context, 0, moduleRow);
         context.CompleteBindings();
         var (_, runtimePolicy) = tables.Modules.GetRequirements(moduleRow);
+        var genericMethodImports = imports.ToImmutable();
         return new CompilationReference([], [],
             (BoundRuntimePolicy)runtimePolicy,
             interfaces: interfaces,
-            genericMethodImports: imports.ToImmutable(),
+            genericMethodImports: genericMethodImports,
+            retainedGenericMethodRoots: genericMethodImports,
             spanTypes: [.. context.SpanTypes],
             checkedReferenceTypes:
                 [.. context.CheckedReferenceTypeDefinitions],

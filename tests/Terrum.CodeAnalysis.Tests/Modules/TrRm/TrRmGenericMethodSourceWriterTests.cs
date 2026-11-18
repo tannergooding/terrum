@@ -3,6 +3,7 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
 using NUnit.Framework;
@@ -177,6 +178,185 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         Assert.That(genericBody[26], Is.Zero);
         Assert.That(genericBody[27], Is.EqualTo(0x83));
         Assert.That(genericBody[28], Is.EqualTo(1));
+    }
+
+    [Test]
+    public void ReemitsOnlyExplicitlySelectedRetainedGenericMethodAliases()
+    {
+        const string providerIdentity = "retained-identity.provider";
+        const string outputIdentity = "retained-identity.reemitted";
+        const string leafIdentity = "retained-identity.leaf";
+        var leafCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(
+                "public T External<T>(T value) { return value; }"));
+        Assert.That(leafCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                leafCompilation.Diagnostics));
+        var leaf = leafCompilation.Program!;
+        var leafDefinition = leaf.GenericMethodDefinitions.Single();
+        var leafArtifact = TrRmExecutableCompiler.EmitStandard(leaf,
+            leafIdentity, GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(),
+            [new TrRmSourceGenericMethodExport(leaf,
+                leafDefinition.SourceInputOrdinal, leafDefinition.Span,
+                "External")]);
+        var leafInput = new TrRmStandardArtifactInput(
+            GenericMethodCallsSchemaIdentity, leafArtifact);
+        var leafReference = TrRmExecutableCompiler.CreateStandardReference(
+            leafInput, leafIdentity,
+            Array.Empty<TrRmStandardArtifactInput>());
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                public T Helper<T>(T value) { return value; }
+                public T Identity<T>(T value) {
+                    T intermediate = Helper<T>(value);
+                    return External<T>(intermediate);
+                }
+                """), leafReference);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+
+        var provider = providerCompilation.Program!;
+        var identityDefinition = provider.GenericMethodDefinitions.Single(
+            static candidate => candidate.Name == "Identity");
+        var sourceExports = provider.GenericMethodDefinitions.Select(
+            definition => new TrRmSourceGenericMethodExport(provider,
+                definition.SourceInputOrdinal, definition.Span,
+                definition.Name == "Identity"
+                    ? "identity.api/v1"
+                    : "helper.api/v1"))
+            .Append(new TrRmSourceGenericMethodExport(provider,
+                identityDefinition.SourceInputOrdinal,
+                identityDefinition.Span, "identity.compat/v1"))
+            .ToArray();
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(provider,
+            providerIdentity, GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), sourceExports);
+        var (providerStringCount, providerStringBytes)
+            = GetSection(providerArtifact, 0x0002);
+        var providerStrings = new TrRmStringTableReader(
+            providerStringBytes, checked((int)providerStringCount));
+        var (providerExportCount, providerExportBytes)
+            = GetSection(providerArtifact, 0x001D);
+        var methodDefId = 0u;
+        for (var index = 0;
+            index < checked((int)providerExportCount); index++)
+        {
+            var offset = checked((int)index * 8);
+            var key = providerStrings.DecodeName(checked((int)ReadUInt32(
+                providerExportBytes, offset + 4)));
+            if (key == "identity.api/v1")
+            {
+                methodDefId = ReadUInt32(providerExportBytes, offset);
+                break;
+            }
+        }
+        Assert.That(methodDefId >> 24, Is.EqualTo(0x16));
+
+        var rootReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(GenericMethodCallsSchemaIdentity,
+                providerArtifact), providerIdentity,
+            [leafInput]);
+        var sourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), rootReference);
+        Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceFreeCompilation.Diagnostics));
+        var sourceFreeProgram = sourceFreeCompilation.Program!;
+        var originDigest = ImmutableArray.CreateRange(
+            System.Security.Cryptography.SHA256.HashData(providerArtifact));
+        var firstSelection = new TrRmRetainedGenericMethodExport(
+            sourceFreeProgram, providerIdentity,
+            GenericMethodCallsSchemaIdentity, originDigest, methodDefId,
+            "identity.api/v1", "IdentityCopy");
+        var secondSelection = firstSelection with {
+            OriginExportKey = "identity.compat/v1",
+            ExportKey = "IdentityCompat",
+        };
+
+        var reemitted = TrRmExecutableCompiler
+            .EmitStandardReemittingGenericMethods(sourceFreeProgram,
+                outputIdentity, GenericMethodCallsSchemaIdentity, 0,
+                [firstSelection, secondSelection]);
+        var (methodCount, methodBytes) = GetSection(reemitted, 0x0016);
+        Assert.That(methodCount, Is.EqualTo(3));
+        var (exportCount, exportBytes) = GetSection(reemitted, 0x001D);
+        Assert.That(exportCount, Is.EqualTo(2));
+        Assert.That(ReadUInt32(exportBytes, 0),
+            Is.EqualTo(ReadUInt32(exportBytes, 8)));
+        var (reemittedStringCount, reemittedStringBytes)
+            = GetSection(reemitted, 0x0002);
+        var reemittedStrings = new TrRmStringTableReader(
+            reemittedStringBytes, checked((int)reemittedStringCount));
+        var methodNames = Enumerable.Range(0, checked((int)methodCount))
+            .Select(index => reemittedStrings.DecodeName(
+                checked((int)ReadUInt32(methodBytes, (index * 28) + 4))))
+            .ToArray();
+        Assert.That(methodNames, Does.Contain("Helper"));
+        Assert.That(methodNames, Does.Contain("Identity"));
+        Assert.That(methodNames, Does.Contain("External"));
+        var reemittedTables = TrRmStructuralMetadataValidator
+            .ValidateGenericMethodCallsDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForGenericMethodCallsParameterLabelsDraft(reemitted));
+        Assert.That(reemittedTables.Imports.Count, Is.EqualTo(1));
+        var importedProvider
+            = reemittedTables.Imports.GetBindingForImportRow(1);
+        Assert.That(importedProvider.ProducerIdentity,
+            Is.EqualTo(leafIdentity));
+        Assert.That(importedProvider.ExportKey, Is.EqualTo("External"));
+        var importedExpectedDefId
+            = reemittedTables.Imports.GetExpectedDefinitionForImportRow(1);
+        var importedExpectedMethodRow
+            = checked((int)(importedExpectedDefId & 0x00FF_FFFF));
+        Assert.That(reemittedTables.Methods.GetBodyRow(
+            importedExpectedMethodRow), Is.Zero);
+        Assert.That(reemittedStrings.DecodeName(checked((int)ReadUInt32(
+            exportBytes, 4))), Is.EqualTo("IdentityCopy"));
+        Assert.That(reemittedStrings.DecodeName(checked((int)ReadUInt32(
+            exportBytes, 12))), Is.EqualTo("IdentityCompat"));
+
+        var reemittedReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(GenericMethodCallsSchemaIdentity,
+                reemitted), outputIdentity,
+            [leafInput]);
+        Assert.That(reemittedReference.GenericMethodImports,
+            Has.Length.EqualTo(2));
+        var consumerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                public int32 Use() {
+                    return Identity<int32>(42);
+                }
+                """), reemittedReference);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+
+        var emptySelectionArtifact = TrRmExecutableCompiler
+            .EmitStandardReemittingGenericMethods(sourceFreeProgram,
+                "retained-identity.empty", GenericMethodCallsSchemaIdentity,
+                0, Array.Empty<TrRmRetainedGenericMethodExport>());
+        var emptyReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(GenericMethodCallsSchemaIdentity,
+                emptySelectionArtifact), "retained-identity.empty",
+            [leafInput]);
+        Assert.That(emptyReference.GenericMethodImports, Is.Empty);
+
+        var staleSelection = firstSelection with {
+            ProviderArtifactDigest = ImmutableArray.CreateRange(
+                new byte[32]),
+        };
+        Assert.Throws<ArgumentException>(() =>
+            TrRmExecutableCompiler.EmitStandardReemittingGenericMethods(
+                sourceFreeProgram, outputIdentity,
+                GenericMethodCallsSchemaIdentity, 0, [staleSelection]));
+        var otherProgram = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), rootReference).Program!;
+        Assert.Throws<ArgumentException>(() =>
+            TrRmExecutableCompiler.EmitStandardReemittingGenericMethods(
+                otherProgram, outputIdentity,
+                GenericMethodCallsSchemaIdentity, 0, [firstSelection]));
     }
 
     [Test]

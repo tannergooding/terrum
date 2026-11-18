@@ -665,6 +665,9 @@ public sealed record BoundProgram(ImmutableArray<BoundFunction> Functions, int E
     internal ImmutableArray<BoundGenericMethodDefinition>
         GenericMethodDefinitions { get; init; } = [];
 
+    internal ImmutableArray<BoundGenericMethodImport>
+        RetainedGenericMethodRoots { get; init; } = [];
+
     internal ImmutableArray<BoundGenericMethodSignature>
         GenericMethodSignatures { get; init; } = [];
 
@@ -1017,6 +1020,7 @@ internal sealed record BoundGenericMethodDefinition(
     BoundProgram ProofProgram)
 {
     internal int FormalTypeOwnerOrdinal { get; init; } = -1;
+    internal BoundGenericMethodImportOrigin? RetainedOrigin { get; init; }
     internal bool IsStatic { get; init; } = true;
     internal bool IsMutable { get; init; }
     internal BoundGenericMethodOwner? Owner { get; init; }

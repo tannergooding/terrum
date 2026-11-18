@@ -1246,6 +1246,8 @@ internal sealed partial class Binder
             SourceGenericTypeDefinitions = [.. _sourceGenericTypeDefinitions],
             SourceGenericTypeInstances = [.. _sourceGenericTypeInstances],
             GenericMethodDefinitions = [.. _genericMethodDefinitions],
+            RetainedGenericMethodRoots = _reference is null
+                ? [] : _reference.RetainedGenericMethodRoots,
             GenericMethodSignatures = [.. _genericMethodSignatures],
             GenericMethodOperatorProtocols =
                 [.. _genericMethodOperatorProtocols],

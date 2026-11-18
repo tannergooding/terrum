@@ -1510,9 +1510,16 @@ through checked TypeDef/Import closure; provider-chain, relocation and
 incompatible replacement coverage remains unverified under the active hold.
 The writer now copies all retained TypeDef Import expectation views; a
 reference-set emission regression is added but remains unverified. Fresh
-generic TypeDef source declarations, source-free generic MethodDef re-emission,
-broader declaration copying, associated-relation and non-frozen constant-default
-comparison, and qualification remain open; see the
+generic TypeDef source declarations, source-free generic MethodDef re-emission
+has a provisional explicit selector/emission path for the current G1 writer
+subset under the unapproved
+[selection proposal](proposals/standard-trrm-source-free-generic-method-export-selection.md);
+public alias/reload regressions are added but remain unverified under the
+active hold. The bounded path preserves direct same-root MethodDef helper
+Bodies without exporting helper keys and retains external bodyless MethodDef
+Imports; broader provider/nominal remapping, declaration copying,
+associated-relation and non-frozen constant-default comparison, and
+qualification remain open; see the
 [module implementation boundary](implementation/modules.md#definitions-and-scope).
 Optional and GC-backed TypeSpecs,
 owner-type and role-2 nested substitution,

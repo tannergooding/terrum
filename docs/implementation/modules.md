@@ -99,23 +99,28 @@ The source-free JIT Copy-alias-chain regression is also unverified under the
 hold; the two-call chain regression is unverified as well.
 The normal unit-result, unit-input and unit-TypeActual regressions are also
 unverified under the hold.
-This does not admit fresh generic TypeDef source declarations or source-free
-generic MethodDef re-emission. The writer copies all retained TypeDef Import
-expectation views; a reference-set emission regression is added but remains
-unverified under the active hold. Contracted/interface/enum declaration
-copying, TypeDefs with owned MethodDef/static-field/union-case closure, broader
-wrapper/owner cases, associated-relation and non-frozen constant-default
-comparison, and qualification remain open; unsupported declaration graphs
-refuse emission.
+This does not admit fresh generic TypeDef source declarations. Source-free
+generic MethodDef re-emission now has the provisional explicit selector and
+bounded writer path from the
+[selection proposal](../proposals/standard-trrm-source-free-generic-method-export-selection.md);
+public alias/reload regressions are added but remain unverified under the
+active hold. Direct same-root MethodDef helper Bodies are included without
+publishing helper exports, and external bodyless MethodDef Imports retain
+their exact provider keys; broader helper, provider and nominal remapping
+remain open. The writer copies all retained TypeDef Import expectation views; a
+reference-set emission regression is added but remains unverified under the
+active hold. Contracted/interface/enum declaration copying, TypeDefs with
+owned MethodDef/static-field/union-case closure, broader wrapper/owner cases,
+associated-relation and non-frozen constant-default comparison, and
+qualification remain open; unsupported declaration graphs refuse emission.
 
 G1 generic MethodDef result Dependency rows preserve relationship 1 (storage
 only), 2 (backing only) and 3 (union) separately through source-free decoding
 and provider comparison. The row encoder can represent the same distinctions
-when present in bound facts; no source annotation or generic-import
-re-emission path supplies relationship 1 yet. Provider comparison preserves
-per-source dependency distinctions and rejects incompatible narrowing,
-widening, mixed-source and provider-only cases. Generic-import re-emission,
-private persistence, full provider replacement and closed lowering remain open.
+when present in bound facts. The explicit generic-import re-emission path is
+implemented for the current writer subset, but dependency-row re-emission,
+provider replacement, private persistence and closed lowering remain
+unverified or open.
 
 A **module artifact** is a `.trm` file with the `TRRM` identifier. A **producer**
 stores selected function bodies and exported contracts; a **consumer** stores

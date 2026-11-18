@@ -52,7 +52,9 @@ public static partial class TrRmExecutableCompiler
         IReadOnlyList<TrRmSourceTypeExport>? sourceTypeExports,
         TrRmArtifactSchema schema = TrRmArtifactSchema.GenericMethodCallsDraft,
         TrRmArtifactSchema baseSchema = TrRmArtifactSchema.Standard,
-        bool standardInitializationReferenceBodies = false)
+        bool standardInitializationReferenceBodies = false,
+        IReadOnlyList<BoundGenericMethodDefinition>?
+            retainedMethodDefinitions = null)
     {
         if (program.GenericMethodDefinitions.IsDefault)
         {
@@ -89,6 +91,16 @@ public static partial class TrRmExecutableCompiler
         if (sourceMethodExports is not null)
         {
             foreach (var definition in program.GenericMethodDefinitions)
+            {
+                var proofFunction = GetSupportedOpenGenericProofFunction(
+                    definition);
+                emissionRows.Add(new GenericMethodEmission(definition,
+                    proofFunction, 0));
+            }
+        }
+        if (retainedMethodDefinitions is not null)
+        {
+            foreach (var definition in retainedMethodDefinitions)
             {
                 var proofFunction = GetSupportedOpenGenericProofFunction(
                     definition);
@@ -2754,10 +2766,18 @@ public static partial class TrRmExecutableCompiler
 
     private static List<GenericImportedMethodEmission>
         CaptureImportedGenericMethodEmissions(
-            IReadOnlyList<GenericMethodEmission> emissions)
+            IReadOnlyList<GenericMethodEmission> emissions,
+            out List<BoundGenericMethodImport> directMethodDefTargets)
     {
         var result = new List<GenericImportedMethodEmission>();
         var captured = new Dictionary<BoundGenericMethodImport, byte>();
+        directMethodDefTargets = [];
+        var retainedDefinitionOrigins = emissions
+            .Select(static emission => emission.Definition.RetainedOrigin)
+            .OfType<BoundGenericMethodImportOrigin>()
+            .Select(static origin => GetRetainedGenericMethodOriginKey(
+                origin))
+            .ToHashSet();
         var remainingVisits = SemanticVerifier.MaximumAnalysisVisits;
         foreach (var emission in emissions)
         {
@@ -2777,31 +2797,63 @@ public static partial class TrRmExecutableCompiler
                             return;
                         }
 
-                        if (source.Origin.IsMethodDefTarget)
+                        if (source.Origin.IsMethodDefTarget
+                            && source.Binding is null)
                         {
-                            throw Unsupported(
-                                "G1 source emission cannot yet re-emit a direct MethodDef target inherited from another artifact.");
+                            if (!retainedDefinitionOrigins.Contains(
+                                    GetRetainedGenericMethodOriginKey(
+                                        source.Origin)))
+                            {
+                                throw Unsupported(
+                                    "A direct MethodDef target is outside the selected retained root's re-emitted Body closure.");
+                            }
+                            if (captured.TryAdd(source, 0))
+                            {
+                                directMethodDefTargets.Add(source);
+                            }
+                            return;
                         }
 
                         var expected = source.Binding?.Expected ?? source;
-                        var origin = expected.Origin;
-                        if (origin.IsMethodDefTarget
-                            || string.IsNullOrEmpty(origin.ProviderIdentity)
-                            || string.IsNullOrEmpty(origin.ExportKey))
+                        BoundModuleImport import;
+                        if (source.Binding is { } binding)
                         {
-                            throw Unsupported(
-                                "An imported GenericCall target has no exact provider ExportKey.");
+                            if (string.IsNullOrEmpty(
+                                    binding.ProviderIdentity)
+                                || string.IsNullOrEmpty(binding.ExportKey))
+                            {
+                                throw Unsupported(
+                                    "A bound GenericCall Import has no exact provider ExportKey.");
+                            }
+
+                            import = new BoundModuleImport(
+                                binding.ProviderIdentity,
+                                binding.ExportKey,
+                                binding.TargetRequirement,
+                                binding.RuntimePolicy);
+                        }
+                        else
+                        {
+                            var origin = expected.Origin;
+                            if (origin.IsMethodDefTarget
+                                || string.IsNullOrEmpty(
+                                    origin.ProviderIdentity)
+                                || string.IsNullOrEmpty(origin.ExportKey))
+                            {
+                                throw Unsupported(
+                                    "An imported GenericCall target has no exact provider ExportKey.");
+                            }
+
+                            import = new BoundModuleImport(
+                                origin.ProviderIdentity, origin.ExportKey,
+                                origin.TargetRequirement,
+                                origin.RuntimePolicy);
                         }
 
                         if (captured.TryAdd(source, 0))
                         {
                             result.Add(new GenericImportedMethodEmission(
-                                source, expected,
-                                new BoundModuleImport(
-                                    origin.ProviderIdentity,
-                                    origin.ExportKey,
-                                    origin.TargetRequirement,
-                                    origin.RuntimePolicy)));
+                                source, expected, import));
                         }
                     }))
             {
@@ -2830,8 +2882,23 @@ public static partial class TrRmExecutableCompiler
         importedNominalTypeReferences = [];
         importedNominalTypeSnapshots = [];
         var importedMethods
-            = CaptureImportedGenericMethodEmissions(emissions);
-        if (importedMethods.Count == 0)
+            = CaptureImportedGenericMethodEmissions(emissions,
+                out var directMethodDefTargets);
+        var retainedDefinitionIndices
+            = new Dictionary<RetainedGenericMethodOriginKey, int>();
+        for (var index = 0; index < emissions.Count; index++)
+        {
+            if (emissions[index].Definition.RetainedOrigin
+                is not BoundGenericMethodImportOrigin origin)
+            {
+                continue;
+            }
+
+            _ = retainedDefinitionIndices.TryAdd(
+                GetRetainedGenericMethodOriginKey(origin), index);
+        }
+        if (importedMethods.Count == 0
+            && directMethodDefTargets.Count == 0)
         {
             return artifact;
         }
@@ -3049,6 +3116,26 @@ public static partial class TrRmExecutableCompiler
                 exportKeyStringRow, methodDefId));
             importedGenericMethodTargetTokens.Add(imported.Source,
                 0x1C00_0000u | checked((uint)importRow));
+        }
+
+        foreach (var directTarget in directMethodDefTargets)
+        {
+            var originKey = GetRetainedGenericMethodOriginKey(
+                directTarget.Origin);
+            if (!retainedDefinitionIndices.TryGetValue(originKey,
+                    out var emissionIndex)
+                || !IsSameRetainedGenericMethodOrigin(
+                    emissions[emissionIndex].Definition.RetainedOrigin,
+                    directTarget.Origin))
+            {
+                throw Unsupported(
+                    "A direct MethodDef target has no emitted retained Body.");
+            }
+
+            var methodRow = checked(methodCount + importedMethods.Count
+                + emissionIndex + 1);
+            importedGenericMethodTargetTokens.Add(directTarget,
+                0x1600_0000u | checked((uint)methodRow));
         }
 
         var preallocatedStrings = TrRmStringTableWriter.EncodeTextRows(names);
