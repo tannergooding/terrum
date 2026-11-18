@@ -89,7 +89,7 @@ public static partial class TrRmExecutableCompiler
         private readonly Dictionary<(int ArtifactIndex, int MethodRow,
             PrimitiveType ReferentType, bool IsWritable,
             bool IsGarbageCollected, bool IsInitialization,
-            bool IsReferentWritable), PrimitiveType>
+            bool IsOptional, bool IsReferentWritable), PrimitiveType>
                 _checkedReferenceTypeIndexes = [];
         internal Dictionary<(PrimitiveType ElementType,
             int ElementFormalDefinitionOrdinal, int ElementFormalOrdinal,
@@ -155,11 +155,11 @@ public static partial class TrRmExecutableCompiler
         internal PrimitiveType GetCheckedReferenceType(
             int artifactIndex, int methodRow, PrimitiveType referentType,
             bool isWritable, bool isGarbageCollected, bool isInitialization,
-            bool isReferentWritable)
+            bool isReferentWritable, bool isOptional = false)
         {
             var key = (artifactIndex, methodRow, referentType, isWritable,
                 isGarbageCollected, isInitialization,
-                isReferentWritable);
+                isOptional, isReferentWritable);
             if (_checkedReferenceTypeIndexes.TryGetValue(key,
                     out var existingType))
             {
@@ -167,6 +167,7 @@ public static partial class TrRmExecutableCompiler
             }
             if (referentType == PrimitiveType.Void
                 || (isGarbageCollected && isInitialization)
+                || (isOptional && isInitialization)
                 || CheckedReferenceTypeDefinitions.Count
                     >= SemanticVerifier.MaximumAnalysisVisits)
             {
@@ -178,7 +179,7 @@ public static partial class TrRmExecutableCompiler
             CheckedReferenceTypeDefinitions.Add(
                 new CheckedReferenceTypeDefinition(referentType,
                     isWritable, isGarbageCollected, isInitialization,
-                    IsOptional: false,
+                    IsOptional: isOptional,
                     IsReferentWritable: isReferentWritable));
             var type = CheckedReferenceTypes.Type(index);
             _checkedReferenceTypeIndexes.Add(key, type);
@@ -1338,6 +1339,10 @@ public static partial class TrRmExecutableCompiler
                     expectedDefault.Term.ConcreteType,
                     providerDefault.Term.ConcreteType, expected, provider,
                     context, allowFormal: false),
+            BoundGenericMethodTypeTermKind.CheckedReference
+                => AreEquivalentGenericMethodImportTypeTerms(
+                    expectedDefault.Term, providerDefault.Term,
+                    expected, provider, context, 0),
             BoundGenericMethodTypeTermKind.Span
                 => AreEquivalentGenericMethodImportTypeTerms(
                     expectedDefault.Term, providerDefault.Term,

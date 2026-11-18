@@ -2011,6 +2011,157 @@ internal sealed class TrRmGenericMethodSourceWriterTests
     }
 
     [Test]
+    public void PreservesGcAndOptionalCheckedReferenceSignaturesAndDefaults()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public void InspectGc<T>(gc ref<T> source) { return; }
+            public void UseGc<T, U = gc ref<T>>(int32 value) { return; }
+            public void InspectOptional<T>(ref<T>? source) { return; }
+            public void UseOptional<T, U = ref<T>?>(int32 value) {
+                return;
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var exports = program.GenericMethodDefinitions.Select(definition =>
+            new TrRmSourceGenericMethodExport(program,
+                definition.SourceInputOrdinal, definition.Span,
+                definition.Name)).ToArray();
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "checked-reference-wrapper.provider",
+            GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), exports);
+        var reference = TrRmExecutableCompiler
+            .CreateGenericMethodCallsDraftReference(artifact,
+                "checked-reference-wrapper.provider");
+
+        BoundGenericMethodImport GetImport(string name)
+            => reference.GenericMethodImports.Single(import =>
+                import.Origin.ExportKey == name);
+
+        var inspectGc = GetImport("InspectGc");
+        var gcParameterType = inspectGc.ProofFunction.Variables[0].Type;
+        Assert.That(CheckedReferenceTypeContract.IsValidType(
+            gcParameterType, reference.CheckedReferenceTypes), Is.True);
+        var gcParameter = reference.CheckedReferenceTypes[
+            CheckedReferenceTypes.Index(gcParameterType)];
+        Assert.That(gcParameter.IsGarbageCollected, Is.True);
+        Assert.That(gcParameter.IsOptional, Is.False);
+
+        var gcDefault = GetImport("UseGc").Formals[1].TypeDefault!.Term;
+        Assert.That(gcDefault.Kind,
+            Is.EqualTo(BoundGenericMethodTypeTermKind.CheckedReference));
+        Assert.That(gcDefault.IsGarbageCollected, Is.True);
+        Assert.That(gcDefault.IsOptional, Is.False);
+        Assert.That(gcDefault.TypeArguments.Single().FormalOrdinal,
+            Is.Zero);
+
+        var inspectOptional = GetImport("InspectOptional");
+        var optionalParameterType
+            = inspectOptional.ProofFunction.Variables[0].Type;
+        Assert.That(CheckedReferenceTypeContract.IsValidType(
+            optionalParameterType, reference.CheckedReferenceTypes), Is.True);
+        var optionalParameter = reference.CheckedReferenceTypes[
+            CheckedReferenceTypes.Index(optionalParameterType)];
+        Assert.That(optionalParameter.IsOptional, Is.True);
+        Assert.That(optionalParameter.IsGarbageCollected, Is.False);
+
+        var optionalDefault
+            = GetImport("UseOptional").Formals[1].TypeDefault!.Term;
+        Assert.That(optionalDefault.Kind,
+            Is.EqualTo(BoundGenericMethodTypeTermKind.CheckedReference));
+        Assert.That(optionalDefault.IsOptional, Is.True);
+        Assert.That(optionalDefault.IsGarbageCollected, Is.False);
+        Assert.That(optionalDefault.TypeArguments.Single().FormalOrdinal,
+            Is.Zero);
+
+        var forwarderCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                public void ForwardGc<T>(int32 value) {
+                    UseGc<T>(value);
+                    return;
+                }
+                public void ForwardOptional<T>(int32 value) {
+                    UseOptional<T>(value);
+                    return;
+                }
+                """), reference);
+        Assert.That(forwarderCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                forwarderCompilation.Diagnostics));
+        var forwarderProgram = forwarderCompilation.Program!;
+        var forwarderExports = forwarderProgram.GenericMethodDefinitions
+            .Select(definition => new TrRmSourceGenericMethodExport(
+                forwarderProgram, definition.SourceInputOrdinal,
+                definition.Span, definition.Name)).ToArray();
+        var forwarderArtifact = TrRmExecutableCompiler.EmitStandard(
+            forwarderProgram, "checked-reference-wrapper.forwarder",
+            GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), forwarderExports);
+        var boundForwarder = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(
+                GenericMethodCallsSchemaIdentity, forwarderArtifact),
+            "checked-reference-wrapper.forwarder", [
+                new TrRmStandardArtifactInput(
+                    GenericMethodCallsSchemaIdentity, artifact),
+            ]);
+        var forwardGc = boundForwarder.GenericMethodImports.Single(
+            static import => import.Origin.ExportKey == "ForwardGc");
+        BoundCall? gcForwardingCall = null;
+        Assert.That(BoundTreeTraversal.VisitExpressions(
+            forwardGc.ProofFunction.Body, expression =>
+            {
+                if (expression is BoundCall {
+                        ImportedGenericMethodCall: not null,
+                    } call)
+                {
+                    gcForwardingCall = call;
+                }
+            }), Is.True);
+        Assert.That(gcForwardingCall, Is.Not.Null);
+        var expectedGcDefault = gcForwardingCall!
+            .ImportedGenericMethodCall!.Binding!.Expected.Formals[1]
+            .TypeDefault!.Term;
+        Assert.That(expectedGcDefault.IsGarbageCollected, Is.True);
+
+        var replacementCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                public void InspectGc<T>(gc ref<T> source) { return; }
+                public void UseGc<T, U = ref<T>>(int32 value) {
+                    return;
+                }
+                public void InspectOptional<T>(ref<T>? source) { return; }
+                public void UseOptional<T, U = ref<T>?>(int32 value) {
+                    return;
+                }
+                """));
+        Assert.That(replacementCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                replacementCompilation.Diagnostics));
+        var replacementProgram = replacementCompilation.Program!;
+        var replacementExports
+            = replacementProgram.GenericMethodDefinitions.Select(
+                definition => new TrRmSourceGenericMethodExport(
+                    replacementProgram, definition.SourceInputOrdinal,
+                    definition.Span, definition.Name)).ToArray();
+        var replacementArtifact = TrRmExecutableCompiler.EmitStandard(
+            replacementProgram, "checked-reference-wrapper.provider",
+            GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), replacementExports);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(
+                    GenericMethodCallsSchemaIdentity, forwarderArtifact),
+                "checked-reference-wrapper.forwarder", [
+                    new TrRmStandardArtifactInput(
+                        GenericMethodCallsSchemaIdentity,
+                        replacementArtifact),
+                ]));
+    }
+
+    [Test]
     public void MergesSpanFormalOwnersAcrossG1References()
     {
         static CompilationReference CreateReference(string provider,

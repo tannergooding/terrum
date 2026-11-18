@@ -1544,8 +1544,12 @@ provider/nominal remapping, declaration copying,
 associated-relation and non-frozen constant-default comparison, and
 qualification remain open; see the
 [module implementation boundary](implementation/modules.md#definitions-and-scope).
-Optional and GC-backed TypeSpecs,
-owner-type and role-2 nested substitution,
+G1 source TypeSpecs now encode and reconstruct GC-backed `ref<T>` and
+optional `ref<T>?` signatures/defaults, without selecting their runtime
+execution; a provider replacement with weakened GC default is rejected.
+Focused producer/import/forwarding and replacement regressions remain
+unverified under the active hold. Optional class
+handles/value types, GC execution, owner-type and role-2 nested substitution,
 interface/witness or associated-relation obligations and arbitrary Body
 control flow remain open.
 Full replacement closure, generic-import re-emission, private persistence and

@@ -6464,8 +6464,10 @@ public static partial class TrRmExecutableCompiler
         {
             if (!typeDefault.ConstantFormalDependencies.IsEmpty
                 || typeDefault.Term.TypeArguments.Length != 1
-                || typeDefault.Term.IsGarbageCollected
-                || typeDefault.Term.IsOptional
+                || (typeDefault.Term.IsGarbageCollected
+                    && typeDefault.Term.IsInitialization)
+                || (typeDefault.Term.IsOptional
+                    && typeDefault.Term.IsInitialization)
                 || typeDefault.Term.AllowsVoid
                 || typeDefault.Term.IsElementWritable
                 || typeDefault.Term.ElementCount != 0
@@ -6580,7 +6582,8 @@ public static partial class TrRmExecutableCompiler
         if (term.Kind == BoundGenericMethodTypeTermKind.CheckedReference)
         {
             if (term.TypeArguments.Length != 1
-                || term.IsGarbageCollected || term.IsOptional
+                || (term.IsGarbageCollected && term.IsInitialization)
+                || (term.IsOptional && term.IsInitialization)
                 || term.AllowsVoid || term.IsElementWritable
                 || term.ElementCount != 0
                 || term.CallingConvention
@@ -6645,12 +6648,19 @@ public static partial class TrRmExecutableCompiler
             }
 
             var typeSpecRef = checked((uint)typeSpecRows.Count + 1);
+            var qualifiers = (byte)((term.IsWritable ? 0x01 : 0)
+                | (term.IsGarbageCollected ? 0x02 : 0));
             typeSpecRows.Add(term.IsInitialization
                 ? TrRmTypeSpecTableWriter.InitializationReference(
                     referentTypeSpecRef, term.IsWritable)
-                : TrRmTypeSpecTableWriter.Wrapped(0x07,
-                    referentTypeSpecRef,
-                    term.IsWritable ? (byte)0x01 : (byte)0));
+                : TrRmTypeSpecTableWriter.Wrapped(0x07, referentTypeSpecRef,
+                    qualifiers));
+            if (term.IsOptional)
+            {
+                typeSpecRef = checked((uint)typeSpecRows.Count + 1);
+                typeSpecRows.Add(TrRmTypeSpecTableWriter.Wrapped(0x06,
+                    checked(typeSpecRef - 1)));
+            }
             return typeSpecRef;
         }
 
@@ -7245,12 +7255,14 @@ public static partial class TrRmExecutableCompiler
         {
             var referenceType = checkedReferenceTypes[
                 CheckedReferenceTypes.Index(type)];
-            if (referenceType.IsGarbageCollected
-                || referenceType.IsOptional
-                || referenceType.IsOptionalValue)
+            if (referenceType.IsOptionalValue
+                || (referenceType.IsGarbageCollected
+                    && referenceType.IsInitialization)
+                || (referenceType.IsOptional
+                    && referenceType.IsInitialization))
             {
                 throw Unsupported(
-                    "The selected G1 profile supports only non-optional, non-GC checked-reference types.");
+                    "The selected G1 profile does not support this checked-reference qualifier combination.");
             }
             var referentTypeSpecRef = GenericMethodTypeSpecRef(
                 referenceType.ReferentType, formalTypeSpecRows,
@@ -7284,13 +7296,23 @@ public static partial class TrRmExecutableCompiler
             }
             var referenceTypeSpecRef = checked(
                 (uint)typeSpecRows.Count + 1);
+            var qualifiers = (byte)((referenceType.IsWritable ? 0x01 : 0)
+                | (referenceType.IsGarbageCollected ? 0x02 : 0));
             typeSpecRows.Add(referenceType.IsInitialization
                 ? TrRmTypeSpecTableWriter.InitializationReference(
                     referentTypeSpecRef, referenceType.IsWritable)
                 : TrRmTypeSpecTableWriter.Wrapped(0x07,
-                    referentTypeSpecRef,
-                    referenceType.IsWritable ? (byte)0x01 : (byte)0));
-            return referenceTypeSpecRef;
+                    referentTypeSpecRef, qualifiers));
+            if (!referenceType.IsOptional)
+            {
+                return referenceTypeSpecRef;
+            }
+
+            var optionalTypeSpecRef = checked(
+                (uint)typeSpecRows.Count + 1);
+            typeSpecRows.Add(TrRmTypeSpecTableWriter.Wrapped(0x06,
+                referenceTypeSpecRef));
+            return optionalTypeSpecRef;
         }
 
         return allowFormal

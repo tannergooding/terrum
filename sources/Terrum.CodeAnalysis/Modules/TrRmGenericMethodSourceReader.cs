@@ -3842,9 +3842,7 @@ public static partial class TrRmExecutableCompiler
         {
             var reference = checkedReferenceTypes[
                 CheckedReferenceTypes.Index(type)];
-            if (reference.IsGarbageCollected
-                || reference.IsOptional
-                || reference.IsOptionalValue)
+            if (reference.IsOptionalValue)
             {
                 return false;
             }
@@ -4062,6 +4060,56 @@ public static partial class TrRmExecutableCompiler
         }
 
         var row = typeSpecs.GetRow(reference.Row);
+        if (reference.Form == 0x06 && row.Length == 6)
+        {
+            if (reference.Qualifiers != 0)
+            {
+                throw Unsupported(
+                    "G1 optional checked-reference wrappers do not admit outer qualifiers.");
+            }
+
+            var innerTypeSpecRef = BinaryPrimitives
+                .ReadUInt32LittleEndian(row.Slice(2, sizeof(uint)));
+            if (typeSpecs.GetTypeSpecRef(innerTypeSpecRef).Form != 0x07)
+            {
+                throw Unsupported(
+                    "G1 generic MethodDef imports support optional checked-reference wrappers only.");
+            }
+
+            var inner = ResolveGenericMethodTypeSpecCore(context,
+                artifactIndex, tables, moduleRow, typeSpecs,
+                genericParams, formalRecords, methodRow,
+                formalTypeOwnerOrdinal, innerTypeSpecRef, formalTypes,
+                allowFormalForwarding, ordinal, false, false,
+                ref remaining, depth + 1);
+            if (!CheckedReferenceTypeContract.IsValidType(inner.Type,
+                    context.CheckedReferenceTypeDefinitions))
+            {
+                throw Invalid(
+                    "A G1 optional TypeSpec does not wrap a checked-reference type.");
+            }
+
+            var innerReference = context
+                .CheckedReferenceTypeDefinitions[
+                    CheckedReferenceTypes.Index(inner.Type)];
+            if (innerReference.IsInitialization
+                || innerReference.IsOptional)
+            {
+                throw Unsupported(
+                    "G1 does not support optional initialization or nested optional checked references.");
+            }
+
+            var optionalType = context.GetCheckedReferenceType(
+                artifactIndex, methodRow, innerReference.ReferentType,
+                innerReference.IsWritable,
+                innerReference.IsGarbageCollected,
+                isInitialization: false,
+                isReferentWritable: innerReference.IsReferentWritable,
+                isOptional: true);
+            return new G1GenericTypeSpecResolution(optionalType, -1,
+                false, false);
+        }
+
         if (reference.Form == 0x0C && row.Length == 7
             && reference.TypeCode == 0x8A)
         {
@@ -4147,10 +4195,11 @@ public static partial class TrRmExecutableCompiler
                 throw Invalid(
                     "A G1 checked-reference TypeSpec has an invalid qualifier.");
             }
-            if (isGarbageCollectedQualifier)
+            if (isGarbageCollectedQualifier
+                && isInitializationReference)
             {
                 throw Unsupported(
-                    "G1 generic MethodDef imports do not support GC-backed reference types.");
+                    "G1 initialization-reference TypeSpecs cannot be GC-backed.");
             }
 
             var referentTypeSpecRef = BinaryPrimitives
@@ -4170,7 +4219,7 @@ public static partial class TrRmExecutableCompiler
             var referenceType = context.GetCheckedReferenceType(
                 artifactIndex, methodRow, referent.Type,
                 isWritable: isWritableQualifier,
-                isGarbageCollected: false,
+                isGarbageCollected: isGarbageCollectedQualifier,
                 isInitialization: isInitializationReference,
                 isReferentWritable: referent.IsWritableQualifier);
             return new G1GenericTypeSpecResolution(referenceType, -1,

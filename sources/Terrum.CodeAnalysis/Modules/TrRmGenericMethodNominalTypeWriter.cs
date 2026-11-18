@@ -226,10 +226,12 @@ public static partial class TrRmExecutableCompiler
             Dictionary<PrimitiveType, uint> builtInRows, int depth)
         {
             Visit(depth);
-            if (term.IsGarbageCollected || term.IsOptional)
+            if ((term.IsGarbageCollected || term.IsOptional)
+                && term.Kind
+                    != BoundGenericMethodTypeTermKind.CheckedReference)
             {
                 throw Unsupported(
-                    "G1 nominal source terms do not select optional or GC types.");
+                    "G1 nominal source terms select optional and GC qualifiers only on checked references.");
             }
             uint result;
             switch (term.Kind)
@@ -312,11 +314,30 @@ public static partial class TrRmExecutableCompiler
                     }
                     else
                     {
+                        if ((term.IsGarbageCollected
+                                || term.IsOptional)
+                            && term.IsInitialization)
+                        {
+                            throw Unsupported(
+                                "G1 initialization references do not admit GC or optional wrappers.");
+                        }
+
+                        var qualifiers = (byte)(
+                            (term.IsWritable ? 0x01 : 0)
+                            | (term.IsGarbageCollected ? 0x02 : 0));
                         _typeSpecs.Add(term.IsInitialization
                             ? TrRmTypeSpecTableWriter.InitializationReference(
                                 result, term.IsWritable)
                             : TrRmTypeSpecTableWriter.Wrapped(0x07, result,
-                                term.IsWritable ? (byte)0x01 : (byte)0));
+                                qualifiers));
+                        if (term.IsOptional)
+                        {
+                            var referenceTypeSpecRef
+                                = checked((uint)_typeSpecs.Count);
+                            _typeSpecs.Add(
+                                TrRmTypeSpecTableWriter.Wrapped(0x06,
+                                    referenceTypeSpecRef));
+                        }
                     }
                     return checked((uint)_typeSpecs.Count);
                 default:
