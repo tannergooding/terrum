@@ -2367,6 +2367,10 @@ internal sealed class TrRmC1EnumClosureSourceTests
         Assert.That(fieldPath.Steps[2].StandardFieldOrigin!.Provider
             .ModuleIdentity, Is.EqualTo("LeafLayoutProvider"));
         Assert.That(ExecuteOffset(loaded), Is.EqualTo(12));
+        Assert.That(NativeModuleCompiler.EmitStandardLibrary(
+            new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
+            "ClassLayoutConsumer", providers, ["Offset"],
+            NativeRuntimePolicy.FailFast), Is.Not.Empty);
 
         var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(loaded,
             "ClassLayoutConsumer", schemaIdentity, 1);
