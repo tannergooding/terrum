@@ -122,8 +122,8 @@ prerequisite has already been met.
    integer unary/binary/comparison operations, strict floating/decimal
    unary/binary/comparison operations across the assigned formats, typed
    scalar constant returns and ConstantMap operands for numeric arithmetic,
-   fixed-integer local-copy returns and ordered local-copy chains feeding
-   fixed-integer binary operations. It also
+   numeric local-copy returns and ordered local-copy chains feeding numeric
+   binary operations. It also
    emits empty unit instance methods,
    direct scalar FieldRead/FieldWrite descriptors, exact same-class identity
    forwarders and same-class static/readonly fixed-integer CallSites followed

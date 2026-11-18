@@ -931,8 +931,8 @@ public static partial class TrRmExecutableCompiler
                     var localCopyReturn
                         = TryGetC1M1Construction2LocalCopyReturn(
                             methodFunction);
-                    var localIntegerBinaryReturn
-                        = TryGetC1M1Construction2LocalIntegerBinaryReturn(
+                    var localNumericBinaryReturn
+                        = TryGetC1M1Construction2LocalNumericBinaryReturn(
                             methodFunction);
                     if ((!methodFunction.IsStatic
                             && !isSupportedNoOpInstanceMethod
@@ -946,7 +946,7 @@ public static partial class TrRmExecutableCompiler
                             && directBooleanComparison is null
                             && callIntegerBinary is null
                             && !localCopyReturn
-                            && !localIntegerBinaryReturn)
+                            && !localNumericBinaryReturn)
                         || methodFunction.IsClassConstructor
                         || methodFunction.IsConstructor
                         || methodFunction.IsExternal
@@ -1016,7 +1016,7 @@ public static partial class TrRmExecutableCompiler
                                 && directBooleanComparison is null
                                 && callIntegerBinary is null
                                 && !localCopyReturn
-                                && !localIntegerBinaryReturn)
+                                && !localNumericBinaryReturn)
                             {
                                 throw Unsupported(
                                     "The bounded Construction-2 instance method producer supports only unit, direct scalar-parameter, direct numeric/Boolean operations, same-class fixed-integer call-binary, local-copy/binary returns or direct scalar-field results and direct scalar-field writes.");
@@ -1193,10 +1193,10 @@ public static partial class TrRmExecutableCompiler
                                 Construction2ValueTypeSpecReference,
                                 contractRows.Count, schema);
                     }
-                    else if (localIntegerBinaryReturn)
+                    else if (localNumericBinaryReturn)
                     {
                         encodedBody
-                            = EncodeC1M1Construction2LocalIntegerBinaryReturnBody(
+                            = EncodeC1M1Construction2LocalNumericBinaryReturnBody(
                                 methodFunction,
                                 frozenScalarValueBuilder,
                                 Construction2ValueTypeSpecReference,
@@ -3311,7 +3311,7 @@ public static partial class TrRmExecutableCompiler
         }
 
         var operationType = function.Variables[receiverCount].Type;
-        if (!IsC1M1Construction2BodyIntegerType(operationType)
+        if (!IsC1M1Construction2BodyNumericType(operationType)
             || function.ReturnType != operationType
             || (!function.IsStatic && function.Variables[0].IsMutable)
             || function.Variables[receiverCount].IsMutable
@@ -3339,7 +3339,7 @@ public static partial class TrRmExecutableCompiler
             || returnedRead.Variable != localVariable)
         {
             throw Unsupported(
-                "A Construction-2 local-copy Body requires one initialized fixed-integer local copied from a same-typed value formal and returned directly.");
+                "A Construction-2 local-copy Body requires one initialized numeric local copied from a same-typed value formal and returned directly.");
         }
 
         var typeTokens = new uint[function.Variables.Length];
@@ -3388,7 +3388,7 @@ public static partial class TrRmExecutableCompiler
                 : schema.UsesGeneralPredicateGraphs());
     }
 
-    private static byte[] EncodeC1M1Construction2LocalIntegerBinaryReturnBody(
+    private static byte[] EncodeC1M1Construction2LocalNumericBinaryReturnBody(
         BoundFunction function,
         TrRmFrozenScalarValueBuilder frozenScalarValueBuilder,
         Func<PrimitiveType, uint> typeSpecReferenceFor, int contractCount,
@@ -3407,11 +3407,11 @@ public static partial class TrRmExecutableCompiler
             })
         {
             throw Unsupported(
-                "A Construction-2 local-binary Body requires initialized scalar locals followed by one binary return.");
+                "A Construction-2 local-binary Body requires initialized numeric locals followed by one binary return.");
         }
 
         var operationType = function.Variables[receiverCount].Type;
-        if (!IsC1M1Construction2BodyIntegerType(operationType)
+        if (!IsC1M1Construction2BodyNumericType(operationType)
             || function.Variables.Skip(receiverCount).Any(variable =>
                 variable.Type != operationType || variable.IsMutable
                 || variable.IsOut || variable.IsInit
@@ -3419,7 +3419,7 @@ public static partial class TrRmExecutableCompiler
                 || variable.IsInitializationLocal))
         {
             throw Unsupported(
-                "A Construction-2 local-binary Body requires one fixed-integer value type and immutable local copies.");
+                "A Construction-2 local-binary Body requires one numeric value type and immutable local copies.");
         }
 
         var localInitializers = new BoundRead[localCount];
@@ -3437,7 +3437,7 @@ public static partial class TrRmExecutableCompiler
                     != operationType)
             {
                 throw Unsupported(
-                    "A Construction-2 local-binary Body requires source-ordered fixed-integer local copies from initialized Homes.");
+                    "A Construction-2 local-binary Body requires source-ordered numeric local copies from initialized Homes.");
             }
 
             localInitializers[localOrdinal] = initializer;
@@ -3453,7 +3453,7 @@ public static partial class TrRmExecutableCompiler
         var rightConstantIsValid = IsValidConstant(rightConstant);
         var leftType = leftRead?.Type ?? leftConstant?.Type;
         var rightType = rightRead?.Type ?? rightConstant?.Type;
-        var hasSameIntegerType
+        var hasSameNumericType
             = leftType == operationType && rightType == leftType;
 
         var isComparison
@@ -3461,14 +3461,15 @@ public static partial class TrRmExecutableCompiler
                 && binary.Type == PrimitiveType.Bool
                 && IsC1M1Construction2IntegerComparisonOperator(
                     binary.Operator)
-                && hasSameIntegerType
+                && hasSameNumericType
                 && (leftReadIsValid || leftConstantIsValid)
                 && (rightReadIsValid || rightConstantIsValid)
                 && (leftReadIsValid || rightReadIsValid);
         var isIntegerValueOperation
             = function.ReturnType == operationType
                 && binary.Type == operationType
-                && hasSameIntegerType
+                && hasSameNumericType
+                && IsC1M1Construction2BodyIntegerType(operationType)
                 && (binary.Operator is TokenKind.Ampersand
                     or TokenKind.Pipe or TokenKind.Caret or TokenKind.Plus
                     or TokenKind.Minus or TokenKind.Star
@@ -3476,12 +3477,23 @@ public static partial class TrRmExecutableCompiler
                 && (leftReadIsValid && rightReadIsValid
                     || leftReadIsValid && rightConstantIsValid
                     || leftConstantIsValid && rightReadIsValid);
+        var isFloatingValueOperation
+            = function.ReturnType == operationType
+                && binary.Type == operationType
+                && hasSameNumericType
+                && PrimitiveTypeFacts.IsFloating(operationType)
+                && (binary.Operator is TokenKind.Plus or TokenKind.Minus
+                    or TokenKind.Star or TokenKind.Slash or TokenKind.Percent)
+                && (leftReadIsValid && rightReadIsValid
+                    || leftReadIsValid && rightConstantIsValid
+                    || leftConstantIsValid && rightReadIsValid);
         if ((!leftReadIsValid && !leftConstantIsValid)
             || (!rightReadIsValid && !rightConstantIsValid)
-            || (!isComparison && !isIntegerValueOperation))
+            || (!isComparison && !isIntegerValueOperation
+                && !isFloatingValueOperation))
         {
             throw Unsupported(
-                "A Construction-2 local-binary Body requires direct fixed-integer Home reads or one canonical constant.");
+                "A Construction-2 local-binary Body requires direct same-typed Home reads or one canonical constant.");
         }
 
         byte[] constantMap = [];
@@ -3569,6 +3581,14 @@ public static partial class TrRmExecutableCompiler
             code.Add((byte)predicatePayload);
             code.Add((byte)(predicatePayload >> 8));
         }
+        else if (isFloatingValueOperation)
+        {
+            code.Add(0xC0);
+            code.Add(GetC1M1Construction2FloatingBinaryControl(
+                binary.Operator));
+            code.Add((byte)payload);
+            code.Add((byte)(payload >> 8));
+        }
         else
         {
             var (opcode, control)
@@ -3596,6 +3616,7 @@ public static partial class TrRmExecutableCompiler
 
         bool IsValidHomeRead(BoundRead? read)
             => read is not null && read.Type == operationType
+                && IsC1M1Construction2BodyNumericType(read.Type)
                 && read.Variable >= receiverCount
                 && read.Variable < function.Variables.Length
                 && function.Variables[read.Variable].Type
@@ -3603,7 +3624,7 @@ public static partial class TrRmExecutableCompiler
 
         static bool IsValidConstant(BoundConstant? constant)
             => constant is not null
-                && IsC1M1Construction2BodyIntegerType(constant.Type)
+                && IsC1M1Construction2BodyNumericType(constant.Type)
                 && constant.RepresentationType == constant.Type
                 && constant.Bits.IsCanonicalFor(constant.Type);
 
@@ -4532,7 +4553,7 @@ public static partial class TrRmExecutableCompiler
         }
 
         var operationType = function.Variables[formalVariable].Type;
-        return IsC1M1Construction2BodyIntegerType(operationType)
+        return IsC1M1Construction2BodyNumericType(operationType)
             && function.ReturnType == operationType
             && (function.IsStatic || !function.Variables[0].IsMutable)
             && !function.Variables[formalVariable].IsMutable
@@ -4555,7 +4576,7 @@ public static partial class TrRmExecutableCompiler
             && returnedRead.Variable == localVariable;
     }
 
-    private static bool TryGetC1M1Construction2LocalIntegerBinaryReturn(
+    private static bool TryGetC1M1Construction2LocalNumericBinaryReturn(
         BoundFunction function)
     {
         var receiverCount = function.IsStatic ? 0 : 1;
@@ -4571,7 +4592,7 @@ public static partial class TrRmExecutableCompiler
         }
 
         var operationType = function.Variables[receiverCount].Type;
-        if (!IsC1M1Construction2BodyIntegerType(operationType)
+        if (!IsC1M1Construction2BodyNumericType(operationType)
             || !function.Variables.Skip(receiverCount).All(
                 variable => variable.Type == operationType
                     && !variable.IsMutable && !variable.IsOut
@@ -4615,21 +4636,22 @@ public static partial class TrRmExecutableCompiler
         var rightConstantIsValid = IsValidConstant(rightConstant);
         var leftType = leftRead?.Type ?? leftConstant?.Type;
         var rightType = rightRead?.Type ?? rightConstant?.Type;
-        var hasSameIntegerType
+        var hasSameNumericType
             = leftType == operationType && rightType == leftType;
         var isComparison
             = function.ReturnType == PrimitiveType.Bool
                 && binary.Type == PrimitiveType.Bool
                 && IsC1M1Construction2IntegerComparisonOperator(
                     binary.Operator)
-                && hasSameIntegerType
+                && hasSameNumericType
                 && (leftReadIsValid || leftConstantIsValid)
                 && (rightReadIsValid || rightConstantIsValid)
                 && (leftReadIsValid || rightReadIsValid);
         var isIntegerValueOperation
             = function.ReturnType == operationType
                 && binary.Type == operationType
-                && hasSameIntegerType
+                && hasSameNumericType
+                && IsC1M1Construction2BodyIntegerType(operationType)
                 && (binary.Operator is TokenKind.Ampersand
                     or TokenKind.Pipe or TokenKind.Caret or TokenKind.Plus
                     or TokenKind.Minus or TokenKind.Star
@@ -4637,10 +4659,22 @@ public static partial class TrRmExecutableCompiler
                 && (leftReadIsValid && rightReadIsValid
                     || leftReadIsValid && rightConstantIsValid
                     || leftConstantIsValid && rightReadIsValid);
-        return isComparison || isIntegerValueOperation;
+        var isFloatingValueOperation
+            = function.ReturnType == operationType
+                && binary.Type == operationType
+                && hasSameNumericType
+                && PrimitiveTypeFacts.IsFloating(operationType)
+                && (binary.Operator is TokenKind.Plus or TokenKind.Minus
+                    or TokenKind.Star or TokenKind.Slash or TokenKind.Percent)
+                && (leftReadIsValid && rightReadIsValid
+                    || leftReadIsValid && rightConstantIsValid
+                    || leftConstantIsValid && rightReadIsValid);
+        return isComparison || isIntegerValueOperation
+            || isFloatingValueOperation;
 
         bool IsValidHomeRead(BoundRead? read)
             => read is not null && read.Type == operationType
+                && IsC1M1Construction2BodyNumericType(read.Type)
                 && read.Variable >= receiverCount
                 && read.Variable < function.Variables.Length
                 && function.Variables[read.Variable].Type
@@ -4648,7 +4682,7 @@ public static partial class TrRmExecutableCompiler
 
         static bool IsValidConstant(BoundConstant? constant)
             => constant is not null
-                && IsC1M1Construction2BodyIntegerType(constant.Type)
+                && IsC1M1Construction2BodyNumericType(constant.Type)
                 && constant.RepresentationType == constant.Type
                 && constant.Bits.IsCanonicalFor(constant.Type);
     }

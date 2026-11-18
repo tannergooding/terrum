@@ -866,6 +866,18 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     int64 second = first;
                     return second + 7;
                 }
+                public static float64 SumFloat64ThroughTwoLocals(
+                    float64 left, float64 right) {
+                    float64 first = left;
+                    float64 second = first;
+                    return second + right;
+                }
+                public static float64 SumFloat64ThroughLocalConstant(
+                    float64 left, float64 right) {
+                    float64 first = left;
+                    float64 second = first;
+                    return second + 0.5;
+                }
                 public static bool Greater64(int64 left, int64 right) {
                     return left > right;
                 }
@@ -1010,6 +1022,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     int64 copy = value;
                     return copy;
                 }
+                public float64 CopyFloat64ThroughLocal(float64 value) {
+                    float64 copy = value;
+                    return copy;
+                }
                 public int32 XorThroughLocal(int32 left, int32 right) {
                     int32 copy = left;
                     return copy ^ right;
@@ -1098,6 +1114,16 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name
                     == "Sum64ThroughLocalConstant"));
+        var sumFloat64ThroughTwoLocals = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name
+                    == "SumFloat64ThroughTwoLocals"));
+        var sumFloat64ThroughLocalConstant = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name
+                    == "SumFloat64ThroughLocalConstant"));
         var greater64 = members.Single(static node =>
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
@@ -1268,6 +1294,11 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name == "Copy64ThroughLocal"));
+        var copyFloat64ThroughLocal = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name
+                    == "CopyFloat64ThroughLocal"));
         var xorThroughLocal = members.Single(static node =>
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
@@ -1327,6 +1358,12 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                         new TrRmSourceClassMemberExport(0,
                             sum64ThroughLocalConstant.Span,
                             "Box.Sum64ThroughLocalConstant"),
+                        new TrRmSourceClassMemberExport(0,
+                            sumFloat64ThroughTwoLocals.Span,
+                            "Box.SumFloat64ThroughTwoLocals"),
+                        new TrRmSourceClassMemberExport(0,
+                            sumFloat64ThroughLocalConstant.Span,
+                            "Box.SumFloat64ThroughLocalConstant"),
                         new TrRmSourceClassMemberExport(0, greater64.Span,
                             "Box.Greater64"),
                         new TrRmSourceClassMemberExport(0,
@@ -1422,6 +1459,9 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                         new TrRmSourceClassMemberExport(0,
                             copy64ThroughLocal.Span,
                             "Box.Copy64ThroughLocal"),
+                        new TrRmSourceClassMemberExport(0,
+                            copyFloat64ThroughLocal.Span,
+                            "Box.CopyFloat64ThroughLocal"),
                         new TrRmSourceClassMemberExport(0,
                             xorThroughLocal.Span, "Box.XorThroughLocal"),
                     ]),
@@ -2017,6 +2057,77 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 0xC0, GetArithmeticControl(
                     sum64ThroughLocalConstantBinary),
                 0xF0, 0x10,
+                0x17, 0,
+            }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.SumFloat64ThroughTwoLocals",
+            out var sumFloat64ThroughTwoLocalsDefinition), Is.True);
+        var sumFloat64ThroughTwoLocalsMethodRow = checked((int)(
+            sumFloat64ThroughTwoLocalsDefinition & 0x00FF_FFFF));
+        var sumFloat64ThroughTwoLocalsBodyRow
+            = tables.Methods.GetBodyRow(
+                sumFloat64ThroughTwoLocalsMethodRow);
+        Assert.That(sumFloat64ThroughTwoLocalsBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(
+            sumFloat64ThroughTwoLocalsBodyRow, tables.Contracts.Count);
+        tables.ValidateRegisterBodyMapsForMethod(
+            sumFloat64ThroughTwoLocalsMethodRow);
+        var sumFloat64ThroughTwoLocalsBody = tables.Bodies.GetRegisterBody(
+            sumFloat64ThroughTwoLocalsBodyRow, tables.Contracts.Count);
+        Assert.That(sumFloat64ThroughTwoLocalsBody.HomeCount, Is.EqualTo(4));
+        Assert.That(sumFloat64ThroughTwoLocalsBody.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD5, 0, 0, 0,
+                0xD6, 0x10, 2, 0,
+                0xD5, 0, 2, 0,
+                0xD6, 0x10, 3, 0,
+                0xD5, 0, 3, 0,
+                0xD5, 1, 1, 0,
+                0xC0, 0x20, 0xF0, 0x10,
+                0x17, 0,
+            }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.SumFloat64ThroughLocalConstant",
+            out var sumFloat64ThroughLocalConstantDefinition), Is.True);
+        var sumFloat64ThroughLocalConstantMethodRow = checked((int)(
+            sumFloat64ThroughLocalConstantDefinition & 0x00FF_FFFF));
+        var sumFloat64ThroughLocalConstantBodyRow
+            = tables.Methods.GetBodyRow(
+                sumFloat64ThroughLocalConstantMethodRow);
+        Assert.That(sumFloat64ThroughLocalConstantBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(
+            sumFloat64ThroughLocalConstantBodyRow, tables.Contracts.Count);
+        tables.ValidateRegisterBodyMapsForMethod(
+            sumFloat64ThroughLocalConstantMethodRow);
+        var sumFloat64ThroughLocalConstantBody
+            = tables.Bodies.GetRegisterBody(
+                sumFloat64ThroughLocalConstantBodyRow,
+                tables.Contracts.Count);
+        Assert.That(sumFloat64ThroughLocalConstantBody.ConstantCount,
+            Is.EqualTo(1));
+        Assert.That(sumFloat64ThroughLocalConstantBody.ConstantMap.Length,
+            Is.EqualTo(8));
+        Assert.That(tables.TypeSpecs.AreEquivalentTypeSpecRefs(
+                BinaryPrimitives.ReadUInt32LittleEndian(
+                    sumFloat64ThroughLocalConstantBody.ConstantMap),
+                tables.Signatures.GetResultTypeSpec(
+                    tables.Methods.GetSignature(
+                        sumFloat64ThroughLocalConstantMethodRow))),
+            Is.True);
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                sumFloat64ThroughLocalConstantBody.ConstantMap.Slice(4)),
+            Is.GreaterThan(0u));
+        Assert.That(tables.Features.TryGetFeature(11, out _), Is.True);
+        Assert.That(sumFloat64ThroughLocalConstantBody.GetBlockCode(0)
+                .ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD5, 0, 0, 0,
+                0xD6, 0x10, 2, 0,
+                0xD5, 0, 2, 0,
+                0xD6, 0x10, 3, 0,
+                0xD5, 0, 3, 0,
+                0xD4, 1, 0, 0,
+                0xC0, 0x20, 0xF0, 0x10,
                 0x17, 0,
             }));
         Assert.That(tables.Exports.TryGetDefinitionForKey(1,
@@ -2794,6 +2905,26 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 0xEB, 0, 2, 0,
             }));
         Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.CopyFloat64ThroughLocal",
+            out var copyFloat64Definition), Is.True);
+        var copyFloat64MethodRow
+            = checked((int)(copyFloat64Definition & 0x00FF_FFFF));
+        var copyFloat64BodyRow
+            = tables.Methods.GetBodyRow(copyFloat64MethodRow);
+        Assert.That(copyFloat64BodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(copyFloat64BodyRow,
+            tables.Contracts.Count);
+        tables.ValidateRegisterBodyMapsForMethod(copyFloat64MethodRow);
+        var copyFloat64Body = tables.Bodies.GetRegisterBody(
+            copyFloat64BodyRow, tables.Contracts.Count);
+        Assert.That(copyFloat64Body.HomeCount, Is.EqualTo(3));
+        Assert.That(copyFloat64Body.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD5, 0, 1, 0,
+                0xD6, 0x10, 2, 0,
+                0xEB, 0, 2, 0,
+            }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
             "Box.XorThroughLocal", out var xorLocalDefinition), Is.True);
         var xorLocalMethodRow
             = checked((int)(xorLocalDefinition & 0x00FF_FFFF));
@@ -2866,6 +2997,14 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             int64 UseSum64ThroughLocalConstant(
                 int64 left, int64 right) {
                 return Box.Sum64ThroughLocalConstant(left, right);
+            }
+            float64 UseSumFloat64ThroughTwoLocals(
+                float64 left, float64 right) {
+                return Box.SumFloat64ThroughTwoLocals(left, right);
+            }
+            float64 UseSumFloat64ThroughLocalConstant(
+                float64 left, float64 right) {
+                return Box.SumFloat64ThroughLocalConstant(left, right);
             }
             int64 UseNegate64(Box value, int64 input) {
                 return value.Negate64(input);
@@ -2966,6 +3105,9 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             }
             int64 UseCopy64(Box value, int64 input) {
                 return value.Copy64ThroughLocal(input);
+            }
+            float64 UseCopyFloat64(Box value, float64 input) {
+                return value.CopyFloat64ThroughLocal(input);
             }
             int32 UseLocalXor(Box value) {
                 return value.XorThroughLocal(4, 5);
