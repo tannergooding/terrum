@@ -2939,10 +2939,10 @@ public static partial class TrRmExecutableCompiler
         TrRmArtifactSchema schema)
     {
         var receiverCount = function.IsStatic ? 0 : 1;
-        var rightVariable = receiverCount + 1;
-        var localVariable = receiverCount + 2;
+        var localCount = function.Variables.Length
+            - function.ParameterCount;
         if (function.ParameterCount != receiverCount + 2
-            || function.Variables.Length != receiverCount + 3
+            || localCount <= 0
             || (!function.IsStatic && function.Variables[0].IsMutable)
             || function.Variables.Skip(receiverCount).Any(
                 static variable =>
@@ -2950,24 +2950,52 @@ public static partial class TrRmExecutableCompiler
                 || variable.IsOut || variable.IsInit
                 || variable.IsImplicitRef
                 || variable.IsInitializationLocal)
-            || function.Body.RetiredManagedLocals.Length != 0
-            || function.Body.Statements is not [
-                BoundLocal local,
-                BoundReturn { Value: BoundBinary binary },
-            ]
-            || local.Variable != localVariable
-            || local.Initializer is not BoundRead initializer
-            || initializer.Variable != receiverCount
-            || initializer.Type != PrimitiveType.Int32
-            || binary.Left is not BoundRead left
-            || binary.Right is not BoundRead right
-            || left.Variable != localVariable
-            || right.Variable != rightVariable
-            || left.Type != PrimitiveType.Int32
-            || right.Type != PrimitiveType.Int32)
+            || !function.Body.RetiredManagedLocals.IsEmpty
+            || function.Body.Statements.Length != localCount + 1
+            || function.Body.Statements[localCount] is not BoundReturn {
+                Value: BoundBinary binary,
+            })
         {
             throw Unsupported(
-                "A Construction-2 local-binary Body requires one int32 local copied from a formal and used as the left operand with a second formal.");
+                "A Construction-2 local-binary Body requires initialized int32 locals followed by one binary return.");
+        }
+
+        var localInitializers = new BoundRead[localCount];
+        for (var localOrdinal = 0;
+            localOrdinal < localCount; localOrdinal++)
+        {
+            var localVariable = function.ParameterCount + localOrdinal;
+            if (function.Body.Statements[localOrdinal] is not BoundLocal local
+                || local.Variable != localVariable
+                || local.Initializer is not BoundRead initializer
+                || initializer.Type != PrimitiveType.Int32
+                || initializer.Variable < 0
+                || initializer.Variable >= localVariable
+                || function.Variables[initializer.Variable].Type
+                    != PrimitiveType.Int32)
+            {
+                throw Unsupported(
+                    "A Construction-2 local-binary Body requires source-ordered scalar local copies from initialized Homes.");
+            }
+
+            localInitializers[localOrdinal] = initializer;
+        }
+
+        if (binary.Left is not BoundRead left
+            || binary.Right is not BoundRead right
+            || left.Type != PrimitiveType.Int32
+            || right.Type != PrimitiveType.Int32
+            || left.Variable < receiverCount
+            || left.Variable >= function.Variables.Length
+            || right.Variable < receiverCount
+            || right.Variable >= function.Variables.Length
+            || function.Variables[left.Variable].Type
+                != PrimitiveType.Int32
+            || function.Variables[right.Variable].Type
+                != PrimitiveType.Int32)
+        {
+            throw Unsupported(
+                "A Construction-2 local-binary Body requires direct int32 Home operands.");
         }
 
         var isComparison
@@ -3014,21 +3042,30 @@ public static partial class TrRmExecutableCompiler
                     : (ushort)0);
         }
 
-        var code = new List<byte>(isComparison ? 26 : 22);
-        AppendHomeLoad(code, 0, receiverCount);
-        code.Add(0xD6);
-        code.Add(0x10);
-        code.Add(checked((byte)localVariable));
-        code.Add(0);
+        var code = new List<byte>(checked(localCount * 8
+            + (isComparison ? 18 : 14)));
+        for (var localOrdinal = 0;
+            localOrdinal < localCount; localOrdinal++)
+        {
+            var localVariable = function.ParameterCount + localOrdinal;
+            AppendHomeLoad(code, 0,
+                localInitializers[localOrdinal].Variable);
+            var homeIndex = checked((ushort)localVariable);
+            code.Add(0xD6);
+            code.Add(0x10);
+            code.Add((byte)homeIndex);
+            code.Add((byte)(homeIndex >> 8));
+        }
+
         if (isComparison)
         {
             code.AddRange(EncodeC1M1Construction2Int32ComparisonCode(
-                localVariable, rightVariable, binary.Operator));
+                left.Variable, right.Variable, binary.Operator));
         }
         else
         {
-            AppendHomeLoad(code, 0, localVariable);
-            AppendHomeLoad(code, 1, rightVariable);
+            AppendHomeLoad(code, 0, left.Variable);
+            AppendHomeLoad(code, 1, right.Variable);
             const byte destinationRegister = 0;
             const byte leftRegister = 0;
             const byte rightRegister = 1;
@@ -3850,10 +3887,10 @@ public static partial class TrRmExecutableCompiler
         BoundFunction function)
     {
         var receiverCount = function.IsStatic ? 0 : 1;
-        var rightVariable = receiverCount + 1;
-        var localVariable = receiverCount + 2;
+        var localCount = function.Variables.Length
+            - function.ParameterCount;
         if (function.ParameterCount != receiverCount + 2
-            || function.Variables.Length != receiverCount + 3
+            || localCount <= 0
             || (!function.IsStatic && function.Variables[0].IsMutable)
             || !function.Variables.Skip(receiverCount).All(
                 static variable =>
@@ -3862,20 +3899,43 @@ public static partial class TrRmExecutableCompiler
                 && !variable.IsInit && !variable.IsImplicitRef
                 && !variable.IsInitializationLocal)
             || !function.Body.RetiredManagedLocals.IsEmpty
-            || function.Body.Statements is not [
-                BoundLocal local,
-                BoundReturn { Value: BoundBinary binary },
-            ]
-            || local.Variable != localVariable
-            || local.Initializer is not BoundRead initializer
-            || initializer.Variable != receiverCount
-            || initializer.Type != PrimitiveType.Int32
+            || function.Body.Statements.Length != localCount + 1)
+        {
+            return false;
+        }
+
+        for (var localOrdinal = 0;
+            localOrdinal < localCount; localOrdinal++)
+        {
+            var localVariable = function.ParameterCount + localOrdinal;
+            if (function.Body.Statements[localOrdinal] is not BoundLocal local
+                || local.Variable != localVariable
+                || local.Initializer is not BoundRead initializer
+                || initializer.Type != PrimitiveType.Int32
+                || initializer.Variable < 0
+                || initializer.Variable >= localVariable
+                || function.Variables[initializer.Variable].Type
+                    != PrimitiveType.Int32)
+            {
+                return false;
+            }
+        }
+
+        if (function.Body.Statements[localCount] is not BoundReturn {
+                Value: BoundBinary binary,
+            }
             || binary.Left is not BoundRead left
             || binary.Right is not BoundRead right
-            || left.Variable != localVariable
-            || right.Variable != rightVariable
             || left.Type != PrimitiveType.Int32
-            || right.Type != PrimitiveType.Int32)
+            || right.Type != PrimitiveType.Int32
+            || left.Variable < receiverCount
+            || left.Variable >= function.Variables.Length
+            || right.Variable < receiverCount
+            || right.Variable >= function.Variables.Length
+            || function.Variables[left.Variable].Type
+                != PrimitiveType.Int32
+            || function.Variables[right.Variable].Type
+                != PrimitiveType.Int32)
         {
             return false;
         }

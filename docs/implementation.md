@@ -160,10 +160,10 @@ through ReturnHome with receiver/formal Homes in declaration order, plus a
 readonly instance `int32` XOR Body over two explicit value formals, plus
 same-class static or readonly instance int32 calls followed by binary or
 comparison operations through general CallSite Bodies.
-Static and readonly instance methods can also copy one scalar formal to one
-local and return it, or use that local as the left operand of a following
-int32 binary Body, including comparison; readonly instance methods also retain
-the local-fed XOR form. The Unit-before-value, identity-forwarder,
+Static and readonly instance methods can copy one scalar formal to one local
+and return it, or copy through ordered local chains before an int32 binary
+Body, including comparison; readonly instance methods also retain the
+local-fed XOR form. The Unit-before-value, identity-forwarder,
 XOR, call-forwarding and local
 regressions remain unverified under the hold.
 Other static and instance operations, locals and control flow remain open.

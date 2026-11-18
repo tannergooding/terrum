@@ -119,8 +119,9 @@ prerequisite has already been met.
    Construction-2 source production emits a bounded I/P initializer for
    direct scalar parameter-to-field initialization; assigned static and
    readonly-instance register Bodies cover direct scalar returns, int32
-   unary/binary/comparison operations, fixed constants, one-local copies and
-   local-fed binary operations. It also emits empty unit instance methods,
+   unary/binary/comparison operations, fixed constants, scalar local-copy
+   returns and ordered local-copy chains feeding binary operations. It also
+   emits empty unit instance methods,
    direct scalar FieldRead/FieldWrite descriptors, exact same-class identity
    forwarders and same-class static/readonly CallSites followed by an int32
    binary/comparison. Unit-before-value, field, operation, call-forwarding,

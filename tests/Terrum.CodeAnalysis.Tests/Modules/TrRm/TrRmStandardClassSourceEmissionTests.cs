@@ -800,6 +800,12 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     int32 copy = left;
                     return copy + right;
                 }
+                public static int32 SumThroughTwoLocals(
+                    int32 left, int32 right) {
+                    int32 first = left;
+                    int32 second = first;
+                    return second + right;
+                }
                 public static bool LessThroughLocal(
                     int32 left, int32 right) {
                     int32 copy = left;
@@ -922,6 +928,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name == "SumThroughLocal"));
+        var sumThroughTwoLocals = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "SumThroughTwoLocals"));
         var lessThroughLocal = members.Single(static node =>
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
@@ -1007,6 +1017,9 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                             "Box.StaticXorThroughLocal"),
                         new TrRmSourceClassMemberExport(0,
                             sumThroughLocal.Span, "Box.SumThroughLocal"),
+                        new TrRmSourceClassMemberExport(0,
+                            sumThroughTwoLocals.Span,
+                            "Box.SumThroughTwoLocals"),
                         new TrRmSourceClassMemberExport(0,
                             lessThroughLocal.Span, "Box.LessThroughLocal"),
                         new TrRmSourceClassMemberExport(0,
@@ -1428,6 +1441,40 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 0x17, 0,
             }));
         Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.SumThroughTwoLocals",
+            out var sumThroughTwoLocalsDefinition), Is.True);
+        var sumThroughTwoLocalsMethodRow = checked((int)(
+            sumThroughTwoLocalsDefinition & 0x00FF_FFFF));
+        var sumThroughTwoLocalsBodyRow
+            = tables.Methods.GetBodyRow(sumThroughTwoLocalsMethodRow);
+        Assert.That(sumThroughTwoLocalsBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(
+            sumThroughTwoLocalsBodyRow, tables.Contracts.Count);
+        var sumThroughTwoLocalsBody = tables.Bodies.GetRegisterBody(
+            sumThroughTwoLocalsBodyRow, tables.Contracts.Count);
+        Assert.That(sumThroughTwoLocalsBody.HomeCount, Is.EqualTo(4));
+        Assert.That(sumThroughTwoLocalsBody.HomeMap[0], Is.EqualTo(2));
+        Assert.That(sumThroughTwoLocalsBody.HomeMap[8], Is.EqualTo(2));
+        Assert.That(sumThroughTwoLocalsBody.HomeMap[16], Is.EqualTo(3));
+        Assert.That(sumThroughTwoLocalsBody.HomeMap[24], Is.EqualTo(3));
+        var sumThroughTwoLocalsFunction = program.Functions.Single(
+            static function => function.Name == "SumThroughTwoLocals");
+        var sumThroughTwoLocalsBinary = (BoundBinary)((BoundReturn)
+            sumThroughTwoLocalsFunction.Body.Statements.Single(
+                static statement => statement is BoundReturn)).Value!;
+        Assert.That(sumThroughTwoLocalsBody.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD5, 0, 0, 0,
+                0xD6, 0x10, 2, 0,
+                0xD5, 0, 2, 0,
+                0xD6, 0x10, 3, 0,
+                0xD5, 0, 3, 0,
+                0xD5, 1, 1, 0,
+                0xC0, GetArithmeticControl(sumThroughTwoLocalsBinary),
+                0xF0, 0x10,
+                0x17, 0,
+            }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
             "Box.LessThroughLocal", out var lessThroughLocalDefinition),
             Is.True);
         var lessThroughLocalMethodRow = checked((int)(
@@ -1667,6 +1714,9 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             }
             int32 UseSumThroughLocal() {
                 return Box.SumThroughLocal(3, 4);
+            }
+            int32 UseSumThroughTwoLocals() {
+                return Box.SumThroughTwoLocals(3, 4);
             }
             bool UseLessThroughLocal() {
                 return Box.LessThroughLocal(1, 2);
