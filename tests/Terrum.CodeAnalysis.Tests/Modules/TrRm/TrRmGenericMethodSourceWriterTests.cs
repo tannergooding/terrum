@@ -5026,11 +5026,11 @@ internal sealed class TrRmGenericMethodSourceWriterTests
     {
         var providerCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
-                alias NestedSpan<T> = Span<Span<T>>;
+                alias ReferenceSpan<T> = Span<ref<T>>;
                 public int32 Identity<T>(int32 value) {
                     return value;
                 }
-                public int32 Use<T, U = NestedSpan<T>>(int32 value) {
+                public int32 Use<T, U = ReferenceSpan<T>>(int32 value) {
                     return Identity<U>(value);
                 }
                 """));
@@ -5085,7 +5085,8 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         Assert.That(expectedDefault.Term.Kind,
             Is.EqualTo(BoundGenericMethodTypeTermKind.Span));
         Assert.That(expectedDefault.Term.TypeArguments.Single().Kind,
-            Is.EqualTo(BoundGenericMethodTypeTermKind.Span));
+            Is.EqualTo(
+                BoundGenericMethodTypeTermKind.CheckedReference));
         Assert.That(expectedDefault.Term.TypeArguments.Single()
                 .TypeArguments.Single().FormalOrdinal,
             Is.Zero);
@@ -5093,9 +5094,21 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             Is.EqualTo(new[] { 0 }));
         Assert.That(forwardedCall.ImportedGenericMethodTypeArguments,
             Has.Length.EqualTo(2));
-        Assert.That(BoundSpanTypeTypes.IsValidType(
-            forwardedCall.ImportedGenericMethodTypeArguments[1],
+        var forwardedSpanType
+            = forwardedCall.ImportedGenericMethodTypeArguments[1];
+        Assert.That(BoundSpanTypeTypes.IsValidType(forwardedSpanType,
             forwarderReference.SpanTypes), Is.True);
+        var forwardedSpan = forwarderReference.SpanTypes[
+            BoundSpanTypeTypes.Index(forwardedSpanType)];
+        Assert.That(CheckedReferenceTypeContract.IsValidType(
+            forwardedSpan.ElementType,
+            forwarderReference.CheckedReferenceTypes), Is.True);
+        var forwardedReference = forwarderReference.CheckedReferenceTypes[
+            CheckedReferenceTypes.Index(forwardedSpan.ElementType)];
+        Assert.That(forwardedReference.ReferentType,
+            Is.EqualTo(forward.Formals[0].PlaceholderType));
+        Assert.That(forwardedReference.IsGarbageCollected, Is.False);
+        Assert.That(forwardedReference.IsOptional, Is.False);
 
         var entryCompilation = Compilation.Create(SyntaxTree.Parse(
             "int32 Main() { return Forward<int32>(value: 42); }"),
