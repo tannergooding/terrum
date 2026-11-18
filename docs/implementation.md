@@ -1514,8 +1514,9 @@ generic TypeDef source declarations, source-free generic MethodDef re-emission
 has a provisional explicit selector/emission path for the current G1 writer
 subset under the unapproved
 [selection proposal](proposals/standard-trrm-source-free-generic-method-export-selection.md);
-public alias/reload regressions are added but remain unverified under the
-active hold. The bounded path preserves direct same-root MethodDef helper
+public alias/helper/import, constructed-nominal, replacement and reload
+regressions are added but remain unverified under the active hold. The bounded
+path preserves direct same-root MethodDef helper
 Bodies without exporting helper keys and retains external bodyless MethodDef
 Imports; broader provider/nominal remapping, declaration copying,
 associated-relation and non-frozen constant-default comparison, and

@@ -333,6 +333,29 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             string.Join(Environment.NewLine,
                 consumerCompilation.Diagnostics));
 
+        var unsafeLeafCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(
+                "public unsafe T External<T>(T value) { return value; }"));
+        Assert.That(unsafeLeafCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                unsafeLeafCompilation.Diagnostics));
+        var unsafeLeaf = unsafeLeafCompilation.Program!;
+        var unsafeLeafDefinition
+            = unsafeLeaf.GenericMethodDefinitions.Single();
+        var unsafeLeafArtifact = TrRmExecutableCompiler.EmitStandard(
+            unsafeLeaf, leafIdentity, GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(),
+            [new TrRmSourceGenericMethodExport(unsafeLeaf,
+                unsafeLeafDefinition.SourceInputOrdinal,
+                unsafeLeafDefinition.Span, "External")]);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(
+                    GenericMethodCallsSchemaIdentity, reemitted),
+                outputIdentity,
+                [new TrRmStandardArtifactInput(
+                    GenericMethodCallsSchemaIdentity, unsafeLeafArtifact)]));
+
         var emptySelectionArtifact = TrRmExecutableCompiler
             .EmitStandardReemittingGenericMethods(sourceFreeProgram,
                 "retained-identity.empty", GenericMethodCallsSchemaIdentity,
@@ -357,6 +380,97 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             TrRmExecutableCompiler.EmitStandardReemittingGenericMethods(
                 otherProgram, outputIdentity,
                 GenericMethodCallsSchemaIdentity, 0, [firstSelection]));
+    }
+
+    [Test]
+    public void ReemitsRetainedGenericMethodWithConstructedNominalSignature()
+    {
+        const string typeProviderIdentity = "constructed-source.provider";
+        const string providerIdentity = "retained-nominal.provider";
+        const string outputIdentity = "retained-nominal.reemitted";
+        var typeProviderArtifact
+            = CreateConstructedNominalSourceProvider();
+        var typeProviderInput = new TrRmStandardArtifactInput(
+            GenericMethodCallsSchemaIdentity, typeProviderArtifact);
+        var typeProviderReference
+            = TrRmExecutableCompiler.CreateGenericMethodCallsDraftReference(
+                typeProviderArtifact, typeProviderIdentity);
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Example;
+                public Box<T> Accept<T>(Box<T> value) {
+                    return move value;
+                }
+                """), typeProviderReference);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+
+        var provider = providerCompilation.Program!;
+        var accept = provider.GenericMethodDefinitions.Single();
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(provider,
+            providerIdentity, GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(),
+            [new TrRmSourceGenericMethodExport(provider,
+                accept.SourceInputOrdinal, accept.Span, "Accept")]);
+        var rootReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(GenericMethodCallsSchemaIdentity,
+                providerArtifact), providerIdentity, [typeProviderInput]);
+        var sourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), rootReference);
+        Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceFreeCompilation.Diagnostics));
+        var sourceFreeProgram = sourceFreeCompilation.Program!;
+        var (stringCount, stringBytes) = GetSection(providerArtifact, 0x0002);
+        var strings = new TrRmStringTableReader(stringBytes,
+            checked((int)stringCount));
+        var (exportCount, exportBytes) = GetSection(providerArtifact, 0x001D);
+        var methodDefId = 0u;
+        for (var index = 0; index < checked((int)exportCount); index++)
+        {
+            var offset = checked(index * 8);
+            if (strings.DecodeName(checked((int)ReadUInt32(exportBytes,
+                    offset + 4))) == "Accept")
+            {
+                methodDefId = ReadUInt32(exportBytes, offset);
+                break;
+            }
+        }
+        Assert.That(methodDefId >> 24, Is.EqualTo(0x16));
+
+        var selection = new TrRmRetainedGenericMethodExport(
+            sourceFreeProgram, providerIdentity,
+            GenericMethodCallsSchemaIdentity,
+            ImmutableArray.CreateRange(
+                System.Security.Cryptography.SHA256.HashData(providerArtifact)),
+            methodDefId, "Accept", "AcceptCopy");
+        var reemitted = TrRmExecutableCompiler
+            .EmitStandardReemittingGenericMethods(sourceFreeProgram,
+                outputIdentity, GenericMethodCallsSchemaIdentity, 0,
+                [selection]);
+        var reemittedReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(GenericMethodCallsSchemaIdentity,
+                reemitted), outputIdentity, [typeProviderInput]);
+        var reemittedAccept = reemittedReference.GenericMethodImports.Single();
+        Assert.That(reemittedAccept.Origin.ExportKey,
+            Is.EqualTo("AcceptCopy"));
+        var nominalInstance = reemittedReference.GenericNominalTypeInstances[
+            BoundGenericNominalTypeTypes.Index(
+                reemittedAccept.ProofFunction.Variables[0].Type)];
+        Assert.That(nominalInstance.Definition.ModuleIdentity,
+            Is.EqualTo(typeProviderIdentity));
+
+        var consumerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Example;
+                public Box<T> Use<T>(Box<T> value) {
+                    return Accept<T>(move value);
+                }
+                """), reemittedReference);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
     }
 
     [Test]
