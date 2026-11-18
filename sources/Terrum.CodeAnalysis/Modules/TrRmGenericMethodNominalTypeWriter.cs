@@ -32,6 +32,8 @@ public static partial class TrRmExecutableCompiler
         private readonly Dictionary<ushort, List<byte[]>> _rows = [];
         private readonly Dictionary<(BoundSourceTypeProviderSnapshot Snapshot,
             ushort Kind, int Row), uint> _remappedRows = [];
+        private readonly Dictionary<BoundSourceTypeProviderSnapshot,
+            HashSet<int>> _typeDefsWithUnsupportedMembers = [];
         private readonly HashSet<BoundSourceTypeProviderSnapshot>
             _usedSnapshots = [];
         private readonly List<ReadOnlyMemory<byte>> _blobs;
@@ -485,6 +487,13 @@ public static partial class TrRmExecutableCompiler
             }
 
             var row = SourceRow(snapshot, 0x0013, oldRow, 44);
+            if (GetTypeDefsWithUnsupportedMembers(snapshot, tables, depth)
+                .Contains(oldRow))
+            {
+                throw Unsupported(
+                    "A G1 nominal TypeDef with owned methods, static fields or union cases requires member closure.");
+            }
+
             var newRow = AddRow(0x0013, row);
             _remappedRows.Add(key, newRow);
             Write(row, 0, Name(snapshot, ReadInt(row, 0)));
@@ -627,6 +636,42 @@ public static partial class TrRmExecutableCompiler
                 }
             }
             return newRow;
+        }
+
+        private HashSet<int> GetTypeDefsWithUnsupportedMembers(
+            BoundSourceTypeProviderSnapshot snapshot,
+            TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+            int depth)
+        {
+            if (_typeDefsWithUnsupportedMembers.TryGetValue(snapshot,
+                    out var existing))
+            {
+                return existing;
+            }
+
+            var result = new HashSet<int>();
+            for (var row = 1; row <= tables.Methods.Count; row++)
+            {
+                Visit(depth + 1);
+                var owner = tables.Methods.GetOwnerType(row);
+                if (owner != 0)
+                {
+                    result.Add(owner);
+                }
+            }
+            for (var row = 1; row <= tables.StaticFields.Count; row++)
+            {
+                Visit(depth + 1);
+                result.Add(tables.StaticFields.GetOwnerTypeDefRow(row));
+            }
+            for (var row = 1; row <= tables.UnionCaseDefs.Count; row++)
+            {
+                Visit(depth + 1);
+                result.Add(tables.UnionCaseDefs.GetOwnerTypeDef(row));
+            }
+
+            _typeDefsWithUnsupportedMembers.Add(snapshot, result);
+            return result;
         }
 
         private uint CopyTypeSpec(BoundSourceTypeProviderSnapshot snapshot,

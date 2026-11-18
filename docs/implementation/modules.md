@@ -59,9 +59,10 @@ This does not admit fresh generic TypeDef source declarations or source-free
 generic MethodDef re-emission. The writer copies all retained TypeDef Import
 expectation views; a reference-set emission regression is added but remains
 unverified under the active hold. Contracted/interface/enum declaration
-copying, broader wrapper/owner cases, associated-relation and non-frozen
-constant-default comparison, and qualification remain open; unsupported
-declaration graphs refuse emission.
+copying, TypeDefs with owned MethodDef/static-field/union-case closure, broader
+wrapper/owner cases, associated-relation and non-frozen constant-default
+comparison, and qualification remain open; unsupported declaration graphs
+refuse emission.
 
 G1 generic MethodDef result Dependency rows preserve relationship 1 (storage
 only), 2 (backing only) and 3 (union) separately through source-free decoding

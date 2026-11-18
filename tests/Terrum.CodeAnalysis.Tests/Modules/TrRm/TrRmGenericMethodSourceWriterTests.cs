@@ -4295,6 +4295,37 @@ internal sealed class TrRmGenericMethodSourceWriterTests
     }
 
     [Test]
+    public void RefusesConstructedTypeWithUncopiedOwnedMethods()
+    {
+        var provider = AssignMethodOwner(
+            CreateConstructedNominalSourceProvider(
+                includeOwnedHelper: true), "Hidden");
+        var reference
+            = TrRmExecutableCompiler.CreateGenericMethodCallsDraftReference(
+                provider, "constructed-source.provider");
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            using Example;
+            public Box<T> Preserve<T>(Box<T> value) {
+                return move value;
+            }
+            """), reference);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var definition = program.GenericMethodDefinitions.Single();
+        Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.EmitStandard(program,
+                "constructed-source.member-closure",
+                GenericMethodCallsSchemaIdentity, 0,
+                Array.Empty<TrRmSourceTypeExport>(), [
+                    new TrRmSourceGenericMethodExport(program,
+                        definition.SourceInputOrdinal, definition.Span,
+                        "preserve.member-closure/v1"),
+                ]));
+    }
+
+    [Test]
     public void EmitsNominalForwardingAndEarlierFormalDefaults()
     {
         var provider = CreateConstructedNominalSourceProvider();
@@ -4395,14 +4426,25 @@ internal sealed class TrRmGenericMethodSourceWriterTests
 
     private static byte[] CreateConstructedNominalSourceProvider(
         bool mixedConstantArguments = false,
-        bool includeConstructedField = false)
+        bool includeConstructedField = false,
+        bool includeOwnedHelper = false)
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var source = includeOwnedHelper
+            ? """
+              private int32 Hidden(int32 value) { return value; }
+              public T Identity<T>(T value) { return move value; }
+              public T Forward<T>(T value) {
+                  return Identity<T>(move value);
+              }
+              """
+            : """
             public T Identity<T>(T value) { return move value; }
             public T Forward<T>(T value) {
                 return Identity<T>(move value);
             }
-            """));
+            """;
+        var compilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = compilation.Program!;
@@ -4417,6 +4459,60 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             mixedConstantArguments: mixedConstantArguments,
             includeDeclaredField: true,
             includeConstructedField: includeConstructedField);
+    }
+
+    private static byte[] AssignMethodOwner(byte[] artifact,
+        string methodName)
+    {
+        var index = TrRmArtifactIndex
+            .ForGenericMethodCallsParameterLabelsDraft(artifact);
+        var (stringCount, stringBytes) = GetSection(artifact, 0x0002);
+        var strings = new TrRmStringTableReader(stringBytes,
+            checked((int)stringCount));
+        var (methodCount, methodBytes) = GetSection(artifact, 0x0016);
+        var rewrittenMethods = methodBytes.ToArray();
+        var found = false;
+        for (var row = 1; row <= methodCount; row++)
+        {
+            var offset = checked((row - 1) * 28);
+            var nameRow = checked((int)ReadUInt32(rewrittenMethods,
+                offset + 4));
+            if (!StringComparer.Ordinal.Equals(
+                    strings.DecodeName(nameRow), methodName))
+            {
+                continue;
+            }
+
+            if (ReadUInt32(rewrittenMethods, offset) != 0)
+            {
+                throw new InvalidDataException(
+                    "The method fixture already has an owner.");
+            }
+
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                rewrittenMethods.AsSpan(offset, 4), 1);
+            found = true;
+            break;
+        }
+        if (!found)
+        {
+            throw new InvalidDataException(
+                "The method fixture has no matching MethodDef.");
+        }
+
+        var sections = new SortedDictionary<ushort, TrRmSection>();
+        for (var sectionIndex = 0; sectionIndex < index.SectionCount;
+            sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var count);
+            sections.Add(kind, kind == 0x0016
+                ? new TrRmSection(kind, flags, count, rewrittenMethods)
+                : new TrRmSection(kind, flags, count,
+                    bytes.ToArray()));
+        }
+        return TrRmArtifactWriter.Encode(sections.Values.ToArray(),
+            TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft);
     }
 
     private static byte[] RelocateConstructedNominalProviderTypeDef(
