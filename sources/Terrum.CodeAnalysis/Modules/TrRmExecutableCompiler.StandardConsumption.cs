@@ -1331,6 +1331,9 @@ public static partial class TrRmExecutableCompiler
         var consumerStructureIndexes = new int[
             consumerReference.Structures.Length];
         Array.Fill(consumerStructureIndexes, -1);
+        var consumerEnumIndexes = new int[
+            consumerReference.EnumDefinitions.Length];
+        Array.Fill(consumerEnumIndexes, -1);
         var pointerTypeStates = new byte[
             consumerReference.NativePointerTypes.Length];
         var providerStructureIndexes = new Dictionary<(
@@ -1363,6 +1366,37 @@ public static partial class TrRmExecutableCompiler
             }
 
             providerStructureIndexes.Add(key, index);
+        }
+        var providerEnumIndexes = new Dictionary<(
+            string ModuleIdentity, uint DefinitionId), int>();
+        for (var index = 0;
+            index < providerProgram.EnumDefinitions.Length; index++)
+        {
+            if (providerProgram.EnumDefinitions[index].Identity
+                is not BoundEnumDeclarationIdentity.Standard standard)
+            {
+                continue;
+            }
+
+            var site = standard.Value.Declaration.Site;
+            var key = (site.Snapshot.ModuleIdentity, site.DefinitionId);
+            if (providerEnumIndexes.TryGetValue(key,
+                    out var existingIndex))
+            {
+                var existing = (BoundEnumDeclarationIdentity.Standard)
+                    providerProgram.EnumDefinitions[existingIndex].Identity;
+                if (!SameA2SourceTypeProviderSnapshot(
+                        existing.Value.Declaration.Site.Snapshot,
+                        site.Snapshot))
+                {
+                    throw new InvalidDataException(
+                        "One EN1 provider enum identity has conflicting snapshots.");
+                }
+
+                continue;
+            }
+
+            providerEnumIndexes.Add(key, index);
         }
 
         int MapConsumerStructureIndex(int structureIndex)
@@ -1484,6 +1518,51 @@ public static partial class TrRmExecutableCompiler
             return mappedIndex;
         }
 
+        int MapConsumerEnumIndex(int enumIndex)
+        {
+            if ((uint)enumIndex >= (uint)consumerEnumIndexes.Length)
+            {
+                throw new InvalidDataException(
+                    "The EN1 consumer class closure has an invalid enum type identity.");
+            }
+
+            if (consumerEnumIndexes[enumIndex] >= 0)
+            {
+                return consumerEnumIndexes[enumIndex];
+            }
+
+            if (consumerReference.EnumDefinitions[enumIndex].Identity
+                is not BoundEnumDeclarationIdentity.Standard standard)
+            {
+                throw new InvalidDataException(
+                    "An EN1 consumer class enum type has no Standard provider identity.");
+            }
+
+            var site = standard.Value.Declaration.Site;
+            var key = (site.Snapshot.ModuleIdentity, site.DefinitionId);
+            if (!providerEnumIndexes.TryGetValue(key,
+                    out var providerEnumIndex))
+            {
+                throw new InvalidDataException(
+                    "An EN1 consumer enum identity has no matching selected provider type.");
+            }
+
+            var providerStandard
+                = (BoundEnumDeclarationIdentity.Standard)
+                    providerProgram.EnumDefinitions[providerEnumIndex]
+                        .Identity;
+            if (!SameA2SourceTypeProviderSnapshot(
+                    providerStandard.Value.Declaration.Site.Snapshot,
+                    site.Snapshot))
+            {
+                throw new InvalidDataException(
+                    "An EN1 consumer enum identity has a conflicting provider snapshot.");
+            }
+
+            consumerEnumIndexes[enumIndex] = providerEnumIndex;
+            return providerEnumIndex;
+        }
+
         PrimitiveType RemapConsumerType(PrimitiveType type, int depth = 0)
         {
             if (depth > SemanticVerifier.MaximumDepth)
@@ -1502,6 +1581,11 @@ public static partial class TrRmExecutableCompiler
                 return NativeFunctionPointerTypes.Type(
                     MapConsumerFunctionPointerType(
                         NativeFunctionPointerTypes.Index(type)));
+            }
+            if (BoundEnumTypes.IsType(type))
+            {
+                return BoundEnumTypes.Type(MapConsumerEnumIndex(
+                    BoundEnumTypes.Index(type)));
             }
             if (IsC1EnumClosureStructType(type))
             {

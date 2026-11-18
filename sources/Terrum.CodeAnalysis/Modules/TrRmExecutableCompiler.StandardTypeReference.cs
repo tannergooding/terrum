@@ -618,7 +618,8 @@ public static partial class TrRmExecutableCompiler
                     var pointeeTypeDefRow = rootTables.TypeSpecs
                         .GetNominalTypeDefRow(pointeeTypeSpecReference,
                             rootTables.TypeDefs, rootTables.Imports);
-                    if (rootTables.TypeDefs.GetKind(pointeeTypeDefRow) == 1
+                    if (rootTables.TypeDefs.GetKind(pointeeTypeDefRow)
+                            is 1 or 4
                         && rootTables.TypeDefs
                             .GetGenericRange(pointeeTypeDefRow).Count == 0)
                     {
@@ -627,7 +628,7 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 throw Unsupported(
-                    "The C1 class TypeSpec closure supports scalar or non-generic struct pointer pointees.");
+                    "The C1 class TypeSpec closure supports scalar, enum or non-generic struct pointer pointees.");
             }
             if (!type.IsRow)
             {
@@ -2160,7 +2161,7 @@ public static partial class TrRmExecutableCompiler
                 else
                 {
                     throw Unsupported(
-                        "The bounded EN1 class layout TypeSpec closure supports scalar or non-generic struct pointer pointees.");
+                        "The bounded EN1 class layout TypeSpec closure supports scalar, enum or non-generic struct pointer pointees.");
                 }
 
                 if (rootTables.Modules.GetRequirements(rootModuleRow)
@@ -2816,13 +2817,13 @@ public static partial class TrRmExecutableCompiler
                     if (!IsC1EnumClosurePointerPointeeType(pointeeType))
                     {
                         throw Unsupported(
-                            "The bounded EN1 struct reference supports scalar or non-generic struct pointer pointees.");
+                            "The bounded EN1 struct reference supports scalar, enum or non-generic struct pointer pointees.");
                     }
                 }
                 else
                 {
                     throw Unsupported(
-                        "The bounded EN1 struct reference supports scalar or non-generic struct pointer pointees.");
+                        "The bounded EN1 struct reference supports scalar, enum or non-generic struct pointer pointees.");
                 }
 
                 if (tables.Modules.GetRequirements(moduleRow)

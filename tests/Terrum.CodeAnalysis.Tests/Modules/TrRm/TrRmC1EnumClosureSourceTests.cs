@@ -2281,7 +2281,7 @@ internal sealed class TrRmC1EnumClosureSourceTests
     }
 
     [Test]
-    public void LowersEN1PointerToStructClassFieldStorage()
+    public void LowersEN1ClassFieldPointerStorageAndRemapsPointees()
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
@@ -2290,10 +2290,12 @@ internal sealed class TrRmC1EnumClosureSourceTests
             = $"{s_schemaIdentities[0]}-class-instance-layout-1";
         var providerTree = SyntaxTree.Parse("""
             namespace Demo {
+                public enum Marker : int32 { Value = 1 }
                 public struct Payload { public int32 Value; }
                 public class Box {
                     public uint8 Prefix;
                     public ptr<Payload> Address;
+                    public ptr<Marker> EnumAddress;
                 }
             }
             """);
@@ -2318,7 +2320,11 @@ internal sealed class TrRmC1EnumClosureSourceTests
                     classFields[0].Span, "field.box.prefix"),
                 new TrRmSourceClassMemberExport(0,
                     classFields[1].Span, "field.box.address"),
+                new TrRmSourceClassMemberExport(0,
+                    classFields[2].Span, "field.box.enum-address"),
             ]);
+        var markerExport = CreateExport(providerProgram, providerTree, 0,
+            "Marker", ["type.marker"], "marker");
         var providerArtifact = TrRmExecutableCompiler.EmitStandard(
             providerProgram, "ClassLayoutProvider", schemaIdentity, 1, [
                 new TrRmSourceTypeExport("Demo", "Payload",
@@ -2328,7 +2334,7 @@ internal sealed class TrRmC1EnumClosureSourceTests
                             "field.payload.value"),
                     ],
                 },
-            ], [], [classExport], []);
+            ], [], [classExport], [markerExport]);
         var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
             providerArtifact);
         var reference = TrRmExecutableCompiler.CreateStandardReference(
@@ -2355,10 +2361,10 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var traversalReference
             = TrRmExecutableCompiler.CreateStandardReference(
                 providerInput, "ClassLayoutProvider", [],
-                ["type.box", "type.payload"], [
+                ["type.box"], [
                     "field.box.prefix",
                     "field.box.address",
-                    "field.payload.value",
+                    "field.box.enum-address",
                 ]);
         var pointerTraversalCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
@@ -2429,11 +2435,14 @@ internal sealed class TrRmC1EnumClosureSourceTests
 
         var relocatedProviderTree = SyntaxTree.Parse("""
             namespace Demo {
+                public enum ExtraMarker : int32 { Value = 0 }
+                public enum Marker : int32 { Value = 1 }
                 public struct Extra { public int32 Value; }
                 public struct Payload { public int32 Value; }
                 public class Box {
                     public uint8 Prefix;
                     public ptr<Payload> Address;
+                    public ptr<Marker> EnumAddress;
                 }
             }
             """);
@@ -2465,7 +2474,15 @@ internal sealed class TrRmC1EnumClosureSourceTests
                     relocatedClassFields[0].Span, "field.box.prefix"),
                 new TrRmSourceClassMemberExport(0,
                     relocatedClassFields[1].Span, "field.box.address"),
+                new TrRmSourceClassMemberExport(0,
+                    relocatedClassFields[2].Span, "field.box.enum-address"),
             ]);
+        var relocatedExtraMarkerExport = CreateExport(
+            relocatedProviderProgram, relocatedProviderTree, 0,
+            "ExtraMarker", ["type.extra-marker"], "extra-marker");
+        var relocatedMarkerExport = CreateExport(
+            relocatedProviderProgram, relocatedProviderTree, 0,
+            "Marker", ["type.marker"], "marker");
         var relocatedProviderArtifact
             = TrRmExecutableCompiler.EmitStandard(
                 relocatedProviderProgram, "ClassLayoutProvider",
@@ -2479,7 +2496,10 @@ internal sealed class TrRmC1EnumClosureSourceTests
                                 "field.payload.value"),
                         ],
                     },
-                ], [], [relocatedClassExport], []);
+                ], [], [relocatedClassExport], [
+                        relocatedExtraMarkerExport,
+                        relocatedMarkerExport,
+                    ]);
         var relocatedProviderInput
             = new TrRmStandardArtifactInput(schemaIdentity,
                 relocatedProviderArtifact);
@@ -2487,7 +2507,24 @@ internal sealed class TrRmC1EnumClosureSourceTests
             new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
             "ClassLayoutConsumer", [relocatedProviderInput]);
         Assert.That(relocatedLoaded.NativePointerTypes,
-            Has.Length.EqualTo(1));
+            Has.Length.EqualTo(2));
+        var relocatedMarkerIndex = Enumerable.Range(0,
+                relocatedLoaded.EnumDefinitions.Length)
+            .Single(index =>
+                relocatedLoaded.EnumDefinitions[index].Name
+                    == "Demo.Marker");
+        var relocatedBox = relocatedLoaded.StandardClassDeclarations
+            .Single(declaration =>
+                declaration.Declaration.Namespace == "Demo"
+                    && declaration.Declaration.Name == "Box")
+            .Declaration;
+        var relocatedEnumPointerType = relocatedBox.Fields
+            .Single(field => field.Name == "EnumAddress").Type;
+        Assert.That(NativePointerTypes.IsType(relocatedEnumPointerType),
+            Is.True);
+        Assert.That(relocatedLoaded.NativePointerTypes[
+            NativePointerTypes.Index(relocatedEnumPointerType)].PointeeType,
+            Is.EqualTo(BoundEnumTypes.Type(relocatedMarkerIndex)));
         var relocatedReturn = (BoundReturn)relocatedLoaded.Functions
             .Single().Body.Statements.Single();
         var relocatedQuery = (BoundLayoutQuery)((BoundUnsafeExpression)
