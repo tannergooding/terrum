@@ -537,30 +537,79 @@ public static partial class TrRmExecutableCompiler
         {
             returnedCall = directCall;
         }
-        else if (body.Statements.Length == 2
-            && body.Statements[0] is BoundLocal local
-            && body.Statements[1] is BoundReturn {
+        else if (body.Statements.Length >= 2
+            && body.Statements[^1] is BoundReturn {
                 Value: BoundRead returnedRead,
-            }
-            && local.Initializer is BoundCall localCall
-            && local.Variable == returnedRead.Variable
-            && local.Variable == function.ParameterCount
-            && function.Variables.Length
-                == function.ParameterCount + 1
-            && (uint)local.Variable < (uint)function.Variables.Length
-            && function.Variables[local.Variable].Type == localCall.Type
-            && localCall.Type == function.ReturnType
-            && returnedRead.Type == function.ReturnType
-            && !function.Variables[local.Variable].IsMutable
-            && !function.Variables[local.Variable].IsOut
-            && !function.Variables[local.Variable].IsInit
-            && !function.Variables[local.Variable].IsImplicitRef
-            && !function.Variables[local.Variable]
-                .IsImplicitReferenceTemporary
-            && !function.Variables[local.Variable].IsInitializationLocal)
+            })
         {
-            returnedCall = localCall;
-            resultVariable = local.Variable;
+            // Same-typed Copy aliases require no distinct serialized Home.
+            var localCount = body.Statements.Length - 1;
+            if (localCount > SemanticVerifier.MaximumVariables
+                || function.Variables.Length
+                    != function.ParameterCount + localCount)
+            {
+                return false;
+            }
+
+            var previousAlias = -1;
+            for (var ordinal = 0; ordinal < localCount; ordinal++)
+            {
+                if (body.Statements[ordinal] is not BoundLocal local
+                    || local.Variable
+                        != function.ParameterCount + ordinal
+                    || (uint)local.Variable
+                        >= (uint)function.Variables.Length)
+                {
+                    return false;
+                }
+
+                var variable = function.Variables[local.Variable];
+                if (variable.Type != local.Initializer.Type
+                    || variable.IsMutable || variable.IsOut
+                    || variable.IsInit || variable.IsImplicitRef
+                    || variable.IsImplicitReferenceTemporary
+                    || variable.IsInitializationLocal)
+                {
+                    return false;
+                }
+
+                if (ordinal == 0)
+                {
+                    if (local.Initializer is not BoundCall localCall
+                        || localCall.Type == PrimitiveType.Void
+                        || variable.Type != function.ReturnType)
+                    {
+                        return false;
+                    }
+
+                    returnedCall = localCall;
+                }
+                else if (local.Initializer is BoundRead read
+                    && read.Variable == previousAlias
+                    && read.Type == variable.Type)
+                {
+                    if (returnedCall is null
+                        || variable.Type != returnedCall.Type)
+                    {
+                        return false;
+                    }
+                }
+                else
+                {
+                    return false;
+                }
+
+                previousAlias = local.Variable;
+            }
+
+            if (returnedCall is null
+                || returnedRead.Variable != previousAlias
+                || returnedRead.Type != function.ReturnType)
+            {
+                return false;
+            }
+
+            resultVariable = previousAlias;
         }
 
         if (returnedCall is null)
@@ -665,9 +714,9 @@ public static partial class TrRmExecutableCompiler
             || genericCall.Type != function.ReturnType
             || (resultVariable < 0
                 ? function.Variables.Length != function.ParameterCount
-                : resultVariable != function.ParameterCount
-                    || function.Variables.Length
-                        != function.ParameterCount + 1)
+                : resultVariable < function.ParameterCount
+                    || resultVariable
+                        != function.Variables.Length - 1)
             || function.ParameterCount > 8)
         {
             throw Unsupported(

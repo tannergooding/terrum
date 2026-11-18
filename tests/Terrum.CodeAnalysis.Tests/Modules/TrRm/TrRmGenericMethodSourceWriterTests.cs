@@ -3873,6 +3873,90 @@ internal sealed class TrRmGenericMethodSourceWriterTests
     }
 
     [Test]
+    public void BindsAndExecutesSourceFreeGenericForwardingThroughCopyLocals()
+    {
+        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            """
+            T Identity<T>(T identityArgument) where T : [Blittable] {
+                return identityArgument;
+            }
+            public T ForwardChain<T>(T callerArgument)
+                where T : [Blittable] {
+                T first = Identity<T>(callerArgument);
+                T second = first;
+                T third = second;
+                return third;
+            }
+            """), new CompilationOptions {
+            LayoutCoreRegistration =
+                Terrum.CodeAnalysis.Tests.Semantics
+                    .LayoutCoreRegistrationTestData.Create(),
+        });
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerProgram = providerCompilation.Program!;
+        var forward = providerProgram.GenericMethodDefinitions.Single(
+            static definition => definition.Name == "ForwardChain");
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, "forward-chain.provider",
+            GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), [
+                new(providerProgram, forward.SourceInputOrdinal,
+                    forward.Span, "ForwardChain"),
+            ]);
+        var reference = TrRmExecutableCompiler
+            .CreateGenericMethodCallsDraftReference(providerArtifact,
+                "forward-chain.provider", "ForwardChain");
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse(
+            "int32 Main() { return ForwardChain<int32>(callerArgument: 42); }"),
+            reference,
+            new CompilationOptions {
+                LayoutCoreRegistration =
+                    Terrum.CodeAnalysis.Tests.Semantics
+                        .LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerProgram = consumerCompilation.Program!;
+        Assert.That(NativeJit.Execute(consumerProgram,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(42));
+    }
+
+    [Test]
+    public void RejectsGenericForwardingAliasNotDerivedFromCallResult()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            """
+            T Identity<T>(T identityArgument) where T : [Blittable] {
+                return identityArgument;
+            }
+            public T Forward<T>(T callerArgument) where T : [Blittable] {
+                T first = Identity<T>(callerArgument);
+                T second = callerArgument;
+                return second;
+            }
+            """), new CompilationOptions {
+            LayoutCoreRegistration =
+                Terrum.CodeAnalysis.Tests.Semantics
+                    .LayoutCoreRegistrationTestData.Create(),
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        var forward = program.GenericMethodDefinitions.Single(
+            static definition => definition.Name == "Forward");
+        Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.EmitStandard(program,
+                "forward-alias.reject", GenericMethodCallsSchemaIdentity, 0,
+                Array.Empty<TrRmSourceTypeExport>(), [
+                    new(program, forward.SourceInputOrdinal, forward.Span,
+                        "Forward"),
+                ]));
+    }
+
+    [Test]
     public void RejectsProviderReplacementWithDifferentConstructedWrapperSignature()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
