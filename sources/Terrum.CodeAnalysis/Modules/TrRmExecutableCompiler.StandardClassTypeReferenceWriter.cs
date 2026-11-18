@@ -2045,6 +2045,52 @@ public static partial class TrRmExecutableCompiler
                 0x17, 0,
             ];
         }
+        else if (returnValue is BoundBinary binary
+            && function.ReturnType == PrimitiveType.Int32
+            && binary.Type == PrimitiveType.Int32
+            && binary.Left is BoundRead left
+            && binary.Right is BoundRead right
+            && left.Type == PrimitiveType.Int32
+            && right.Type == PrimitiveType.Int32
+            && (uint)left.Variable < (uint)function.ParameterCount
+            && (uint)right.Variable < (uint)function.ParameterCount
+            && function.Variables[left.Variable].Type
+                == PrimitiveType.Int32
+            && function.Variables[right.Variable].Type
+                == PrimitiveType.Int32
+            && binary.Operator is TokenKind.Ampersand or TokenKind.Pipe
+                or TokenKind.Caret)
+        {
+            var operation = binary.Operator switch
+            {
+                TokenKind.Ampersand => (byte)0x01,
+                TokenKind.Pipe => (byte)0x02,
+                TokenKind.Caret => (byte)0x03,
+                _ => throw new InvalidDataException(
+                    "A static Body bitwise operation lost its assigned control."),
+            };
+            var instructions = new List<byte>(14);
+            instructions.Add(0xD5);
+            instructions.Add(0);
+            instructions.Add(checked((byte)left.Variable));
+            instructions.Add(checked((byte)(left.Variable >> 8)));
+            instructions.Add(0xD5);
+            instructions.Add(1);
+            instructions.Add(checked((byte)right.Variable));
+            instructions.Add(checked((byte)(right.Variable >> 8)));
+            const byte destinationRegister = 0;
+            const byte leftRegister = 0;
+            const byte rightRegister = 1;
+            var payload = (ushort)(destinationRegister | (0x0F << 4)
+                | (leftRegister << 8) | (rightRegister << 12));
+            instructions.Add(0xC1);
+            instructions.Add(operation);
+            instructions.Add((byte)payload);
+            instructions.Add((byte)(payload >> 8));
+            instructions.Add(0x17);
+            instructions.Add(0);
+            code = instructions.ToArray();
+        }
         else if (returnValue is BoundConstant constant)
         {
             if (constant.Type != function.ReturnType

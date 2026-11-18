@@ -144,8 +144,9 @@ are initialized directly from scalar parameters. It preserves explicit I/P
 ExportKeys and does not substitute `ClassTryCreate`; keyed and private-P
 producer regressions are added but unverified under the hold.
 Ordinary static class methods now emit assigned register Body kind `01` for
-direct-formal and fixed-SF1-constant returns; fixed scalar constants use the
-provisional `11/1` path and Blob section `0003`. Exact same-class static and
+direct-formal returns, direct int32 bitwise operations, and fixed-SF1-constant
+returns; fixed scalar constants use the provisional `11/1` path and Blob
+section `0003`. Exact same-class static and
 readonly-instance scalar/unit
 identity forwarders through assigned Body kind `05`, empty unit-returning instance
 methods, and readonly instance methods returning an explicit scalar parameter

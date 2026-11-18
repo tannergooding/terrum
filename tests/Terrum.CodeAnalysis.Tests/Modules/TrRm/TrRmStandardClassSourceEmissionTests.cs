@@ -264,6 +264,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 answerBody.ConstantMap.Slice(4)),
             Is.GreaterThan(0u));
         Assert.That(tables.Features.TryGetFeature(11, out _), Is.True);
+        Assert.That(tables.Features.TryGetFeature(9, out _), Is.False);
         Assert.That(answerBody.GetBlockCode(0).ToArray(), Is.EqualTo(
             new byte[] { 0xD4, 0, 0, 0, 0x17, 0 }));
         Assert.That(tables.Exports.TryGetDefinitionForKey(1,
@@ -720,6 +721,9 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 public int32 Xor(int32 left, int32 right) {
                     return left ^ right;
                 }
+                public static int32 StaticXor(int32 left, int32 right) {
+                    return left ^ right;
+                }
                 public int32 XorAfterCall(int32 left, int32 right) {
                     return Xor(left, right) ^ right;
                 }
@@ -748,6 +752,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name == "Xor"));
+        var staticXor = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "StaticXor"));
         var xorAfterCall = members.Single(static node =>
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
@@ -774,6 +782,8 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                         },
                         new TrRmSourceClassMemberExport(0, xor.Span,
                             "Box.Xor"),
+                        new TrRmSourceClassMemberExport(0, staticXor.Span,
+                            "Box.StaticXor"),
                         new TrRmSourceClassMemberExport(0,
                             xorAfterCall.Span, "Box.XorAfterCall"),
                         new TrRmSourceClassMemberExport(0,
@@ -806,6 +816,25 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             0xC1, 0x03, 0xF0, 0x10,
             0x17, 0,
         }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.StaticXor", out var staticXorDefinition), Is.True);
+        var staticXorMethodRow
+            = checked((int)(staticXorDefinition & 0x00FF_FFFF));
+        var staticXorBodyRow
+            = tables.Methods.GetBodyRow(staticXorMethodRow);
+        Assert.That(staticXorBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(staticXorBodyRow,
+            tables.Contracts.Count);
+        var staticXorBody = tables.Bodies.GetRegisterBody(staticXorBodyRow,
+            tables.Contracts.Count);
+        Assert.That(staticXorBody.HomeCount, Is.EqualTo(2));
+        Assert.That(staticXorBody.GetBlockCode(0).ToArray(), Is.EqualTo(
+            new byte[] {
+                0xD5, 0, 0, 0,
+                0xD5, 1, 1, 0,
+                0xC1, 0x03, 0xF0, 0x10,
+                0x17, 0,
+            }));
         Assert.That(tables.Exports.TryGetDefinitionForKey(1,
             "Box.XorAfterCall", out var xorAfterCallDefinition), Is.True);
         var xorAfterCallMethodRow
@@ -878,6 +907,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             "ClassInstanceXor", [], ["BoxKey"]);
         var consumer = Compilation.CreateLibrary(SyntaxTree.Parse("""
             int32 Use(Box value) { return value.Xor(2, 3); }
+            int32 UseStaticXor() { return Box.StaticXor(4, 5); }
             int32 UseAfterCall(Box value) {
                 return value.XorAfterCall(2, 3);
             }
@@ -1161,6 +1191,8 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                             artifact));
         Assert.That(providerTables.Features.TryGetFeature(11, out _),
             Is.True);
+        Assert.That(providerTables.Features.TryGetFeature(9, out _),
+            Is.False);
         Assert.That(providerTables.Exports.TryGetDefinitionForKey(1,
             "Box.Unit", out var unitDefinition), Is.True);
         var unitMethodRow
