@@ -1700,10 +1700,26 @@ public static partial class TrRmExecutableCompiler
                     right = rightUnsafe.Expression;
                 }
 
+                var left = binary.Left;
+                while (left is BoundUnsafeExpression leftUnsafe)
+                {
+                    left = leftUnsafe.Expression;
+                }
+
+                var leftIsZero = left is BoundConstant leftZero
+                    && leftZero.Type == binary.Left.Type
+                    && leftZero.Bits.Low == 0 && leftZero.Bits.High == 0;
                 var rightIsZero = right is BoundConstant zero
                     && zero.Type == binary.Left.Type
                     && zero.Bits.Low == 0 && zero.Bits.High == 0;
+                if (leftIsZero && rightIsZero)
+                {
+                    throw Unsupported(
+                        "A direct NativeOutput comparison requires a Home or call result.");
+                }
+
                 var rightRegister = 14;
+                var leftRegister = 0;
                 var rightHome = -1;
                 if (right is BoundRead rightRead
                     && rightRead.Type == binary.Left.Type
@@ -1719,13 +1735,11 @@ public static partial class TrRmExecutableCompiler
                         "A direct NativeOutput comparison requires a zero constant or a matching Home on the right.");
                 }
 
-                var left = binary.Left;
-                while (left is BoundUnsafeExpression leftUnsafe)
+                if (leftIsZero)
                 {
-                    left = leftUnsafe.Expression;
+                    leftRegister = 14;
                 }
-
-                if (left is BoundCall call)
+                else if (left is BoundCall call)
                 {
                     EmitCall(call);
                 }
@@ -1748,8 +1762,8 @@ public static partial class TrRmExecutableCompiler
 
                 currentCode.Add(0xC2);
                 currentCode.Add(0);
-                var comparePayload
-                    = (ushort)((15 << 4) | (rightRegister << 12));
+                var comparePayload = (ushort)((15 << 4)
+                    | (leftRegister << 8) | (rightRegister << 12));
                 currentCode.Add(unchecked((byte)comparePayload));
                 currentCode.Add((byte)(comparePayload >> 8));
                 currentCode.Add(0xC3);
@@ -1956,8 +1970,25 @@ public static partial class TrRmExecutableCompiler
                     var afterBlock = CreateBlock();
                     AppendBranch(conditionBlock);
                     SelectBlock(conditionBlock);
-                    AppendConditionalFlow(loop.Condition, bodyBlock,
-                        afterBlock);
+                    if (loop.Condition is BoundConstant {
+                            Type: PrimitiveType.Bool,
+                        } constantCondition)
+                    {
+                        if (constantCondition.Bits.Low != 1
+                            || constantCondition.Bits.High != 0)
+                        {
+                            throw Unsupported(
+                                "A direct NativeOutput loop supports only a constant-true condition.");
+                        }
+
+                        AppendBranch(bodyBlock);
+                    }
+                    else
+                    {
+                        AppendConditionalFlow(loop.Condition, bodyBlock,
+                            afterBlock);
+                    }
+
                     SelectBlock(bodyBlock);
                     loopTargets.Add((afterBlock, conditionBlock));
                     var bodyReturned = EmitStatement(loop.Body);
@@ -1971,29 +2002,25 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 case BoundBreak exit:
-                    if (exit.TargetDepth < 1
-                        || exit.TargetDepth > loopTargets.Count)
+                    if (exit.TargetDepth != 1
+                        || loopTargets.Count == 0)
                     {
                         throw Unsupported(
-                            "A direct NativeOutput break has no emitted loop target.");
+                            "A direct NativeOutput break must target the nearest emitted while loop.");
                     }
 
-                    AppendBranch(
-                        loopTargets[loopTargets.Count - exit.TargetDepth]
-                            .BreakBlock);
+                    AppendBranch(loopTargets[^1].BreakBlock);
                     return true;
 
                 case BoundContinue continuation:
-                    if (continuation.TargetDepth < 1
-                        || continuation.TargetDepth > loopTargets.Count)
+                    if (continuation.TargetDepth != 1
+                        || loopTargets.Count == 0)
                     {
                         throw Unsupported(
-                            "A direct NativeOutput continue has no emitted loop target.");
+                            "A direct NativeOutput continue must target the nearest emitted while loop.");
                     }
 
-                    AppendBranch(
-                        loopTargets[loopTargets.Count
-                            - continuation.TargetDepth].ContinueBlock);
+                    AppendBranch(loopTargets[^1].ContinueBlock);
                     return true;
 
                 case BoundExpressionStatement {

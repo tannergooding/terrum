@@ -618,15 +618,19 @@ public static partial class TrRmExecutableCompiler
         var seenCallSiteRecords = new HashSet<int>();
         var callSiteRecordsByBlock = new List<int>[body.BlockCount];
         var conditionHomeByBlock = new int[body.BlockCount];
+        var conditionRightHomeByBlock = new int[body.BlockCount];
         var conditionCallSiteByBlock = new int[body.BlockCount];
         var conditionOperatorByBlock = new TokenKind[body.BlockCount];
         var hasComparisonByBlock = new bool[body.BlockCount];
+        var conditionLeftIsZeroByBlock = new bool[body.BlockCount];
+        var conditionRightIsZeroByBlock = new bool[body.BlockCount];
         var trueTargetByBlock = new int[body.BlockCount];
         var falseTargetByBlock = new int[body.BlockCount];
         var jumpTargetByBlock = new int[body.BlockCount];
         var returnsByBlock = new bool[body.BlockCount];
         var returnResultByBlock = new bool[body.BlockCount];
         Array.Fill(conditionHomeByBlock, -1);
+        Array.Fill(conditionRightHomeByBlock, -1);
         Array.Fill(conditionCallSiteByBlock, -1);
         Array.Fill(trueTargetByBlock, -1);
         Array.Fill(falseTargetByBlock, -1);
@@ -723,6 +727,7 @@ public static partial class TrRmExecutableCompiler
                     var destinationRegister = instruction[1] & 0x0F;
                     var sourceHome = BinaryPrimitives
                         .ReadUInt16LittleEndian(instruction[2..]);
+                    var preserveCallSite = false;
                     if (blockIndex == 0 && pendingHomeLoad < 0
                         && pendingRightHomeLoad < 0
                         && pendingBackingArithmeticControl is null
@@ -741,20 +746,23 @@ public static partial class TrRmExecutableCompiler
                     {
                         pendingHomeLoad = sourceHome;
                     }
-                    else if (blockIndex == 0 && pendingHomeLoad >= 0
-                        && pendingRightHomeLoad < 0
+                    else if (pendingRightHomeLoad < 0
                         && pendingBackingArithmeticControl is null
                         && !pendingComparison && destinationRegister == 1)
                     {
                         pendingRightHomeLoad = sourceHome;
+                        preserveCallSite = lastCallSiteRecord >= 0;
                     }
                     else
                     {
                         throw Unsupported(
-                            "A direct NativeOutput Body loads a Home into an unsupported initializer register.");
+                            "A direct NativeOutput Body loads a Home into an unsupported initializer or comparison register.");
                     }
 
-                    lastCallSiteRecord = -1;
+                    if (!preserveCallSite)
+                    {
+                        lastCallSiteRecord = -1;
+                    }
                 }
                 else if (opcode == 0xC0)
                 {
@@ -1162,31 +1170,51 @@ public static partial class TrRmExecutableCompiler
                     var secondResult = (comparison >> 4) & 0x0F;
                     var source0 = (comparison >> 8) & 0x0F;
                     var source1 = comparison >> 12;
+                    var leftIsHome = source0 == 0
+                        && pendingHomeLoad >= 0
+                        && lastCallSiteRecord < 0;
+                    var leftIsCallResult = source0 == 0
+                        && pendingHomeLoad < 0
+                        && lastCallSiteRecord >= 0;
+                    var leftIsZero = source0 == 14
+                        && pendingHomeLoad < 0
+                        && lastCallSiteRecord < 0;
+                    var rightIsHome = source1 == 1
+                        && pendingRightHomeLoad >= 0;
+                    var rightIsZero = source1 == 14
+                        && pendingRightHomeLoad < 0;
                     if (instruction[1] != 0 || pendingComparison
                         || pendingBackingArithmeticControl is not null
-                        || pendingRightHomeLoad >= 0
                         || destination != 0 || secondResult != 15
-                        || source0 != 0 || source1 != 14
-                        || (pendingHomeLoad < 0
-                            && lastCallSiteRecord < 0))
+                        || (!leftIsHome && !leftIsCallResult && !leftIsZero)
+                        || (!rightIsHome && !rightIsZero)
+                        || (leftIsZero && rightIsZero))
                     {
                         throw Unsupported(
                             "A direct NativeOutput comparison has an unsupported operand or origin.");
                     }
 
-                    if (pendingHomeLoad >= 0)
+                    if (leftIsHome)
                     {
                         conditionHomeByBlock[blockIndex]
                             = pendingHomeLoad;
                         pendingHomeLoad = -1;
                     }
-                    else
+                    else if (leftIsCallResult)
                     {
                         conditionCallSiteByBlock[blockIndex]
                             = lastCallSiteRecord;
                         lastCallSiteRecord = -1;
                     }
 
+                    conditionLeftIsZeroByBlock[blockIndex] = leftIsZero;
+                    if (rightIsHome)
+                    {
+                        conditionRightHomeByBlock[blockIndex]
+                            = pendingRightHomeLoad;
+                        pendingRightHomeLoad = -1;
+                    }
+                    conditionRightIsZeroByBlock[blockIndex] = rightIsZero;
                     pendingComparison = true;
                 }
                 else if (opcode == 0xC3)
@@ -1258,7 +1286,9 @@ public static partial class TrRmExecutableCompiler
                         conditionHomeByBlock[blockIndex] = pendingHomeLoad;
                     }
                     else if (conditionHomeByBlock[blockIndex] < 0
-                        && conditionCallSiteByBlock[blockIndex] < 0)
+                        && conditionCallSiteByBlock[blockIndex] < 0
+                        && !(conditionLeftIsZeroByBlock[blockIndex]
+                            && conditionRightHomeByBlock[blockIndex] >= 0))
                     {
                         throw Invalid(
                             "A direct NativeOutput comparison has no source value.");
@@ -1866,7 +1896,8 @@ public static partial class TrRmExecutableCompiler
             BoundExpression? condition = null;
             if (hasComparisonByBlock[blockIndex])
             {
-                BoundExpression value;
+                BoundExpression leftValue;
+                PrimitiveType comparisonType;
                 if (conditionCallSite >= 0)
                 {
                     if (!callsByRecord.TryGetValue(conditionCallSite,
@@ -1876,7 +1907,14 @@ public static partial class TrRmExecutableCompiler
                             "A direct NativeOutput result comparison has no CallSite.");
                     }
 
-                    value = new BoundUnsafeExpression(call, default);
+                    comparisonType = call.Type;
+                    if (!PrimitiveTypeFacts.IsInteger(comparisonType))
+                    {
+                        throw Invalid(
+                            "A direct NativeOutput comparison CallSite has no integral result.");
+                    }
+
+                    leftValue = new BoundUnsafeExpression(call, default);
                 }
                 else if (conditionHomeByBlock[blockIndex] >= 0)
                 {
@@ -1891,8 +1929,27 @@ public static partial class TrRmExecutableCompiler
                             "A direct NativeOutput zero comparison Home has no integral value.");
                     }
 
-                    value = new BoundRead(valueVariable,
-                        variables[valueVariable].Type, default);
+                    comparisonType = variables[valueVariable].Type;
+                    leftValue = new BoundRead(valueVariable,
+                        comparisonType, default);
+                }
+                else if (conditionLeftIsZeroByBlock[blockIndex]
+                    && conditionRightHomeByBlock[blockIndex] >= 0)
+                {
+                    var rightVariable = variableByHome[
+                        conditionRightHomeByBlock[blockIndex]];
+                    if (rightVariable < 0
+                        || rightVariable >= variables.Count
+                        || !PrimitiveTypeFacts.IsInteger(
+                            variables[rightVariable].Type))
+                    {
+                        throw Invalid(
+                            "A direct NativeOutput comparison Home has no integral value.");
+                    }
+
+                    comparisonType = variables[rightVariable].Type;
+                    leftValue = new BoundConstant(0, comparisonType,
+                        default);
                 }
                 else
                 {
@@ -1900,9 +1957,36 @@ public static partial class TrRmExecutableCompiler
                         "A direct NativeOutput comparison has no value source.");
                 }
 
+                BoundExpression rightValue;
+                if (conditionRightHomeByBlock[blockIndex] >= 0)
+                {
+                    var rightVariable = variableByHome[
+                        conditionRightHomeByBlock[blockIndex]];
+                    if (rightVariable < 0
+                        || rightVariable >= variables.Count
+                        || variables[rightVariable].Type != comparisonType)
+                    {
+                        throw Invalid(
+                            "A direct NativeOutput comparison Home has a mismatched type.");
+                    }
+
+                    rightValue = new BoundRead(rightVariable, comparisonType,
+                        default);
+                }
+                else if (conditionRightIsZeroByBlock[blockIndex])
+                {
+                    rightValue = new BoundConstant(0, comparisonType,
+                        default);
+                }
+                else
+                {
+                    throw Invalid(
+                        "A direct NativeOutput comparison has no right operand.");
+                }
+
                 condition = new BoundBinary(
-                    conditionOperatorByBlock[blockIndex], value,
-                    new BoundConstant(0, value.Type, default),
+                    conditionOperatorByBlock[blockIndex], leftValue,
+                    rightValue,
                     PrimitiveType.Bool, default);
             }
             else if (conditionHomeByBlock[blockIndex] >= 0)
@@ -1943,11 +2027,6 @@ public static partial class TrRmExecutableCompiler
         }
 
         var controlFlow = AnalyzeLocalAggregateLayoutControlFlow(body);
-        if (!controlFlow.IsAcyclic)
-        {
-            throw Unsupported(
-                "The bounded direct NativeOutput Body loader does not reconstruct loops.");
-        }
         var controlStatements = BuildLocalAggregateLayoutBody(
             decodedBlocks, controlFlow);
         var statements = ImmutableArray.CreateBuilder<BoundStatement>(
