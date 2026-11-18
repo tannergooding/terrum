@@ -768,6 +768,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     int64 left, int64 right) {
                     return Add64(left, right) + right;
                 }
+                public static int64 StaticAdd64AfterCallConstant(
+                    int64 left, int64 right) {
+                    return Add64(left, right) + 7;
+                }
                 public int32 InstanceStaticAddAfterCall(
                     int32 left, int32 right) {
                     return Add(left, right) + right;
@@ -967,6 +971,11 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name == "StaticAdd64AfterCall"));
+        var staticAdd64AfterCallConstant = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name
+                    == "StaticAdd64AfterCallConstant"));
         var instanceStaticAddAfterCall = members.Single(static node =>
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
@@ -1157,6 +1166,9 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                         new TrRmSourceClassMemberExport(0,
                             staticAdd64AfterCall.Span,
                             "Box.StaticAdd64AfterCall"),
+                        new TrRmSourceClassMemberExport(0,
+                            staticAdd64AfterCallConstant.Span,
+                            "Box.StaticAdd64AfterCallConstant"),
                         new TrRmSourceClassMemberExport(0,
                             instanceStaticAddAfterCall.Span,
                             "Box.InstanceStaticAddAfterCall"),
@@ -2191,6 +2203,54 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 0x17, 0,
             }));
         Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.StaticAdd64AfterCallConstant",
+            out var staticAdd64AfterCallConstantDefinition), Is.True);
+        var staticAdd64AfterCallConstantMethodRow = checked((int)(
+            staticAdd64AfterCallConstantDefinition & 0x00FF_FFFF));
+        var staticAdd64AfterCallConstantBodyRow
+            = tables.Methods.GetBodyRow(
+                staticAdd64AfterCallConstantMethodRow);
+        Assert.That(staticAdd64AfterCallConstantBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(
+            staticAdd64AfterCallConstantBodyRow, tables.Contracts.Count);
+        var staticAdd64AfterCallConstantBody
+            = tables.Bodies.GetRegisterBody(
+                staticAdd64AfterCallConstantBodyRow,
+                tables.Contracts.Count);
+        Assert.That(staticAdd64AfterCallConstantBody.ConstantCount,
+            Is.EqualTo(1));
+        Assert.That(staticAdd64AfterCallConstantBody.ConstantMap.Length,
+            Is.EqualTo(8));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                staticAdd64AfterCallConstantBody.ConstantMap),
+            Is.Not.Zero);
+        Assert.That(tables.TypeSpecs.AreEquivalentTypeSpecRefs(
+                BinaryPrimitives.ReadUInt32LittleEndian(
+                    staticAdd64AfterCallConstantBody.ConstantMap),
+                tables.Signatures.GetResultTypeSpec(
+                    tables.Methods.GetSignature(
+                        staticAdd64AfterCallConstantMethodRow))),
+            Is.True);
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                staticAdd64AfterCallConstantBody.ConstantMap.Slice(4)),
+            Is.GreaterThan(0u));
+        Assert.That(tables.Features.TryGetFeature(11, out _), Is.True);
+        var staticAdd64AfterCallConstantFunction = program.Functions.Single(
+            static function =>
+                function.Name == "StaticAdd64AfterCallConstant");
+        var staticAdd64AfterCallConstantBinary = (BoundBinary)(
+            (BoundReturn)staticAdd64AfterCallConstantFunction.Body.Statements
+                .Single()).Value!;
+        Assert.That(staticAdd64AfterCallConstantBody.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xE0, 0, 1, 0,
+                0xD4, 1, 0, 0,
+                0xC0, GetArithmeticControl(
+                    staticAdd64AfterCallConstantBinary),
+                0xF0, 0x10,
+                0x17, 0,
+            }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
             "Box.InstanceStaticAdd64AfterCall",
             out var instanceStaticAdd64AfterCallDefinition), Is.True);
         var instanceStaticAdd64AfterCallMethodRow = checked((int)(
@@ -2367,6 +2427,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             }
             int64 UseStaticAdd64AfterCall(int64 left, int64 right) {
                 return Box.StaticAdd64AfterCall(left, right);
+            }
+            int64 UseStaticAdd64AfterCallConstant(
+                int64 left, int64 right) {
+                return Box.StaticAdd64AfterCallConstant(left, right);
             }
             int64 UseInstanceStaticAdd64AfterCall(
                 Box value, int64 left, int64 right) {

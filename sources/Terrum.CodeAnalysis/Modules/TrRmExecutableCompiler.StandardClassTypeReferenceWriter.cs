@@ -1326,6 +1326,7 @@ public static partial class TrRmExecutableCompiler
                             method.Function, callBinaryExpression,
                             targetMethodDefRow,
                             program.Functions[targetCall.Function],
+                            frozenScalarValueBuilder,
                             Construction2ValueTypeSpecReference,
                             contractRows.Count, schema);
                     }
@@ -2972,6 +2973,7 @@ public static partial class TrRmExecutableCompiler
     private static byte[] EncodeC1M1Construction2CallIntegerBinaryBody(
         BoundFunction function, BoundBinary binary, int targetMethodDefRow,
         BoundFunction targetFunction,
+        TrRmFrozenScalarValueBuilder frozenScalarValueBuilder,
         Func<PrimitiveType, uint> typeSpecReferenceFor, int contractCount,
         TrRmArtifactSchema schema)
     {
@@ -2985,6 +2987,8 @@ public static partial class TrRmExecutableCompiler
         }
 
         var operationType = function.Variables[callerReceiverCount].Type;
+        var rightRead = binary.Right as BoundRead;
+        var rightConstant = binary.Right as BoundConstant;
         if (targetMethodDefRow <= 0 || targetMethodDefRow > 0xFF_FFFF
             || !IsC1M1Construction2BodyIntegerType(operationType)
             || (!function.IsStatic && function.Variables[0].IsMutable)
@@ -2995,10 +2999,13 @@ public static partial class TrRmExecutableCompiler
                 || variable.IsImplicitRef
                 || variable.IsInitializationLocal)
             || binary.Left is not BoundCall call
-            || binary.Right is not BoundRead right
-            || right.Type != operationType
-            || right.Variable < callerReceiverCount
-            || right.Variable >= function.ParameterCount
+            || (rightRead is null && !IsValidConstant(rightConstant))
+            || (rightRead is not null
+                && (rightRead.Type != operationType
+                    || rightRead.Variable < callerReceiverCount
+                    || rightRead.Variable >= function.ParameterCount))
+            || (rightConstant is not null
+                && rightConstant.Type != operationType)
             || call.Type != operationType
             || call.Arguments.Length != targetFunction.ParameterCount
             || !call.DefaultedArguments.IsDefaultOrEmpty
@@ -3026,7 +3033,7 @@ public static partial class TrRmExecutableCompiler
                     || variable.IsInitializationLocal))
         {
             throw Unsupported(
-                "A Construction-2 call-binary Body requires a same-class direct fixed-integer call and one direct fixed-integer parameter read.");
+                "A Construction-2 call-binary Body requires a same-class direct fixed-integer call and one direct fixed-integer read or canonical constant.");
         }
 
         for (var parameter = 0;
@@ -3072,6 +3079,26 @@ public static partial class TrRmExecutableCompiler
         {
             throw Unsupported(
                 "A Construction-2 call-binary Body requires an assigned fixed-integer operation or Boolean comparison.");
+        }
+
+        byte[] constantMap = [];
+        if (rightConstant is not null)
+        {
+            var frozenValue
+                = frozenScalarValueBuilder.Add(rightConstant);
+            var expectedTypeSpecRef
+                = typeSpecReferenceFor(operationType);
+            if (frozenValue.TypeSpecRef != expectedTypeSpecRef)
+            {
+                throw Unsupported(
+                    "A Construction-2 call constant Body requires the exact operand TypeSpecRef.");
+            }
+
+            constantMap = new byte[8];
+            BinaryPrimitives.WriteUInt32LittleEndian(constantMap,
+                frozenValue.TypeSpecRef);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                constantMap.AsSpan(4), frozenValue.ConstantSourceRow);
         }
 
         var typeTokens = new uint[function.ParameterCount];
@@ -3132,7 +3159,17 @@ public static partial class TrRmExecutableCompiler
         code.Add(0);
         code.Add(unchecked((byte)callSiteRecordIndex));
         code.Add((byte)(callSiteRecordIndex >> 8));
-        AppendHomeLoad(1, right.Variable);
+        if (rightRead is not null)
+        {
+            AppendHomeLoad(1, rightRead.Variable);
+        }
+        else
+        {
+            code.Add(0xD4);
+            code.Add(1);
+            code.Add(0);
+            code.Add(0);
+        }
         const byte destinationRegister = 0;
         const byte leftRegister = 0;
         const byte rightRegister = 1;
@@ -3166,7 +3203,7 @@ public static partial class TrRmExecutableCompiler
         code.Add(0x17);
         code.Add(0);
         return TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
-            maps.MethodMap, default, default,
+            maps.MethodMap, default, constantMap,
             [new TrRmRegisterBodyBlock(0,
                 checked((uint)code.Count), 0)],
             records, code.ToArray(), contractCount: contractCount,
@@ -3181,6 +3218,12 @@ public static partial class TrRmExecutableCompiler
             code.Add(checked((byte)homeIndex));
             code.Add(checked((byte)(homeIndex >> 8)));
         }
+
+        static bool IsValidConstant(BoundConstant? constant)
+            => constant is not null
+                && IsC1M1Construction2BodyIntegerType(constant.Type)
+                && constant.Type == constant.RepresentationType
+                && constant.Bits.IsCanonicalFor(constant.Type);
     }
 
     private static byte[] EncodeC1M1Construction2LocalCopyReturnBody(
@@ -4253,12 +4296,17 @@ public static partial class TrRmExecutableCompiler
         BoundBinary? returnedBinary = null;
         var isSupported = true;
         Visit(function.Body);
+        var rightRead = returnedBinary?.Right as BoundRead;
+        var rightConstant = returnedBinary?.Right as BoundConstant;
         if (!isSupported || returnedBinary is null
             || returnedBinary.Left is not BoundCall call
-            || returnedBinary.Right is not BoundRead right
-            || right.Type != operationType
-            || right.Variable < callerReceiverCount
-            || right.Variable >= function.ParameterCount
+            || (rightRead is null && !IsValidConstant(rightConstant))
+            || (rightRead is not null
+                && (rightRead.Type != operationType
+                    || rightRead.Variable < callerReceiverCount
+                    || rightRead.Variable >= function.ParameterCount))
+            || (rightConstant is not null
+                && rightConstant.Type != operationType)
             || call.Type != operationType
             || !call.DefaultedArguments.IsDefaultOrEmpty
             || call.InterfaceCallIdentity is not null
@@ -4335,6 +4383,12 @@ public static partial class TrRmExecutableCompiler
         }
 
         return returnedBinary;
+
+        static bool IsValidConstant(BoundConstant? constant)
+            => constant is not null
+                && constant.Type == constant.RepresentationType
+                && IsC1M1Construction2BodyIntegerType(constant.Type)
+                && constant.Bits.IsCanonicalFor(constant.Type);
 
         void Visit(BoundBlock block)
         {

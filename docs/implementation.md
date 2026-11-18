@@ -156,7 +156,7 @@ Static and readonly-instance fixed-integer binaries can load SF1 scalar operands
 through ConstantMap; fixed scalar returns use the provisional Feature `11/1`
 path and Blob section `0003`. Same-class static or readonly-instance
 fixed-integer calls can feed a following fixed-integer binary/comparison
-through a general CallSite.
+through a general CallSite, with a direct formal or SF1 ConstantMap operand.
 Static and instance bodies support one-formal local copies and ordered copy
 chains feeding fixed-integer binary/comparison operations. Readonly instance
 bodies also return an explicit scalar parameter through ReturnHome, emit direct
