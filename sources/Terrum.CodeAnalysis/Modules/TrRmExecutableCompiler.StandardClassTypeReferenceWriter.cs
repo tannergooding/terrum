@@ -2029,6 +2029,18 @@ public static partial class TrRmExecutableCompiler
             return (0, homeCount == 1 ? 0 : 1);
         }
 
+        void SetInt32FormalHome(int variable)
+        {
+            typeTokens = [
+                CreateStandardBodyTypeMapToken(
+                    typeSpecReferenceFor(PrimitiveType.Int32)),
+            ];
+            homeMap = new byte[8];
+            homeMap[0] = 2;
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                homeMap.AsSpan(4, 2), checked((ushort)variable));
+        }
+
         if (function.ReturnType == PrimitiveType.Void)
         {
             if (returnValue is not null
@@ -2063,6 +2075,36 @@ public static partial class TrRmExecutableCompiler
             code = [
                 0xD5, 0,
                 0, 0,
+                0x17, 0,
+            ];
+        }
+        else if (returnValue is BoundUnary unary
+            && function.ReturnType == PrimitiveType.Int32
+            && unary.Type == PrimitiveType.Int32
+            && unary.Operand is BoundRead operand
+            && operand.Type == PrimitiveType.Int32
+            && (uint)operand.Variable < (uint)function.ParameterCount
+            && function.Variables[operand.Variable].Type
+                == PrimitiveType.Int32
+            && unary.Operator is TokenKind.Minus or TokenKind.Tilde)
+        {
+            SetInt32FormalHome(operand.Variable);
+            var (opcode, operation) = (unary.Operator,
+                unary.OverflowBehavior) switch
+            {
+                (TokenKind.Tilde, _) => ((byte)0xC1, (byte)0x04),
+                (TokenKind.Minus,
+                    BoundIntegerOverflowBehavior.Checked)
+                    => ((byte)0xC0, (byte)0x04),
+                (TokenKind.Minus,
+                    BoundIntegerOverflowBehavior.Wrapping)
+                    => ((byte)0xC0, (byte)0x08),
+                _ => throw Unsupported(
+                    "The selected static register Body does not encode this unary integer policy."),
+            };
+            code = [
+                0xD5, 0, 0, 0,
+                opcode, operation, 0xF0, 0xF0,
                 0x17, 0,
             ];
         }
@@ -2206,7 +2248,7 @@ public static partial class TrRmExecutableCompiler
         else
         {
             throw Unsupported(
-                "The bounded Construction-2 static register Body supports direct value-formal, int32 binary, or fixed-scalar returns.");
+                "The bounded Construction-2 static register Body supports direct value-formal, int32 unary/binary, or fixed-scalar returns.");
         }
 
         var maps = TrRmRegisterBodyMapBuilder.Create(typeTokens, []);
