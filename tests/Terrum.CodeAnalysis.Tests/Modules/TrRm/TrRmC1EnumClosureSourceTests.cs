@@ -409,6 +409,130 @@ internal sealed class TrRmC1EnumClosureSourceTests
             Assert.That(reloadedCompilation.HasErrors, Is.False,
                 string.Join(Environment.NewLine,
                     reloadedCompilation.Diagnostics));
+
+            var relocatedProviderTree = SyntaxTree.Parse("""
+                namespace Demo {
+                    public enum Before : int8 { Zero = 0 }
+                    public enum Shade : int8 {
+                        Dark = -1,
+                        Light = 1
+                    }
+                }
+                """, "relocated-enum-provider.terrum");
+            var relocatedProviderCompilation
+                = Compilation.CreateLibrary(relocatedProviderTree);
+            Assert.That(relocatedProviderCompilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    relocatedProviderCompilation.Diagnostics));
+            var relocatedProviderProgram
+                = (BoundProgram)relocatedProviderCompilation.Program!;
+            var relocatedProviderArtifact
+                = TrRmExecutableCompiler.EmitStandard(
+                    relocatedProviderProgram, "EnumProvider",
+                    schemaIdentity, 1, [], [], [], [
+                        CreateExport(relocatedProviderProgram,
+                            relocatedProviderTree, 0, "Before",
+                            ["type.before"], "before"),
+                        CreateExport(relocatedProviderProgram,
+                            relocatedProviderTree, 0, "Shade",
+                            ["type.shade"], "shade"),
+                    ]);
+            var relocatedProviderInput
+                = new TrRmStandardArtifactInput(schemaIdentity,
+                    relocatedProviderArtifact);
+            var relocatedProviderTables
+                = TrRmStructuralMetadataValidator
+                    .ValidateC1AndGetExecutionTables(
+                        new TrRmArtifactIndex(relocatedProviderArtifact,
+                            SchemaFor(schemaIdentity)));
+            var originalProviderTables
+                = TrRmStructuralMetadataValidator
+                    .ValidateC1AndGetExecutionTables(
+                        new TrRmArtifactIndex(providerArtifact,
+                            SchemaFor(schemaIdentity)));
+            var originalShadeDefinition
+                = originalProviderTables.Exports.GetExportsForModule(1)
+                    .Single(static export =>
+                        export.ExportKey == "type.shade").Definition;
+            var relocatedShadeDefinition
+                = relocatedProviderTables.Exports.GetExportsForModule(1)
+                    .Single(static export =>
+                        export.ExportKey == "type.shade").Definition;
+            Assert.That(relocatedShadeDefinition,
+                Is.Not.EqualTo(originalShadeDefinition));
+            var relocatedConsumerInput
+                = new TrRmStandardArtifactInput(schemaIdentity,
+                    consumerArtifact);
+            var relocatedReference
+                = TrRmExecutableCompiler.CreateStandardReference(
+                    relocatedConsumerInput, "MixedEnumConsumer", [
+                        relocatedProviderInput,
+                    ], ["type.packet"]);
+            var relocatedPacket = relocatedReference.Structures.Single(
+                static structure => structure.Name == "Demo.Packet");
+            var relocatedShadeType = relocatedPacket.Fields.Single(
+                static field => field.Name == "Value").Type;
+            Assert.That(BoundEnumTypes.IsType(relocatedShadeType), Is.True);
+            var relocatedShadeIndex
+                = BoundEnumTypes.Index(relocatedShadeType);
+            Assert.That(relocatedReference.EnumDefinitions[
+                relocatedShadeIndex].Name, Is.EqualTo("Demo.Shade"));
+            Assert.That(((BoundEnumDeclarationIdentity.Standard)
+                relocatedReference.EnumDefinitions[relocatedShadeIndex]
+                    .Identity).Value.Declaration.Site.DefinitionId,
+                Is.EqualTo(relocatedShadeDefinition));
+
+            var relocatedSourceFreeCompilation = Compilation.CreateLibrary(
+                SyntaxTree.Parse(string.Empty), relocatedReference);
+            Assert.That(relocatedSourceFreeCompilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    relocatedSourceFreeCompilation.Diagnostics));
+            var relocatedReemitted = TrRmExecutableCompiler.EmitStandard(
+                relocatedSourceFreeCompilation.Program!,
+                "MixedEnumConsumer", schemaIdentity, 1);
+            var relocatedReemittedTables
+                = TrRmStructuralMetadataValidator
+                    .ValidateC1AndGetExecutionTables(
+                        new TrRmArtifactIndex(relocatedReemitted,
+                            SchemaFor(schemaIdentity)));
+            var relocatedShadeImport = Enumerable.Range(1,
+                    relocatedReemittedTables.Imports.Count)
+                .Single(row =>
+                    (relocatedReemittedTables.Imports
+                        .GetExpectedDefinitionForImportRow(row) >> 24)
+                    == 0x13
+                    && relocatedReemittedTables.Imports
+                        .GetBindingForImportRow(row).ExportKey
+                        == "type.shade");
+            var relocatedPacketRow = Enumerable.Range(1,
+                    relocatedReemittedTables.TypeDefs.Count)
+                .Single(row =>
+                    relocatedReemittedTables.TypeDefs.GetName(row)
+                        == "Packet");
+            var (relocatedFieldStart, _) = relocatedReemittedTables.TypeDefs
+                .GetFieldRange(relocatedPacketRow);
+            var relocatedFieldType
+                = relocatedReemittedTables.TypeSpecs.GetTypeSpecRef(
+                    relocatedReemittedTables.Fields.GetTypeSpecRef(
+                        relocatedFieldStart));
+            Assert.That(relocatedFieldType.Form, Is.EqualTo((byte)0x03));
+            Assert.That(relocatedFieldType.Row,
+                Is.EqualTo(relocatedShadeImport));
+            var relocatedReloadedReference
+                = TrRmExecutableCompiler.CreateStandardReference(
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        relocatedReemitted), "MixedEnumConsumer", [
+                        relocatedProviderInput,
+                    ], ["type.packet"]);
+            var reloadedRelocatedPacket
+                = relocatedReloadedReference.Structures.Single(
+                    static structure => structure.Name == "Demo.Packet");
+            var reloadedRelocatedShadeType
+                = reloadedRelocatedPacket.Fields.Single(
+                    static field => field.Name == "Value").Type;
+            Assert.That(relocatedReloadedReference.EnumDefinitions[
+                BoundEnumTypes.Index(reloadedRelocatedShadeType)].Name,
+                Is.EqualTo("Demo.Shade"));
         }
     }
 
