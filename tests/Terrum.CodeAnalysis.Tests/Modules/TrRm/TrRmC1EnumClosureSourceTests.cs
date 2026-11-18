@@ -2322,7 +2322,12 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var providerArtifact = TrRmExecutableCompiler.EmitStandard(
             providerProgram, "ClassLayoutProvider", schemaIdentity, 1, [
                 new TrRmSourceTypeExport("Demo", "Payload",
-                    "type.payload"),
+                    "type.payload") {
+                    FieldExports = [
+                        new TrRmSourceFieldExport("Value",
+                            "field.payload.value"),
+                    ],
+                },
             ], [], [classExport], []);
         var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
             providerArtifact);
@@ -2347,6 +2352,25 @@ internal sealed class TrRmC1EnumClosureSourceTests
             });
         Assert.That(queryCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, queryCompilation.Diagnostics));
+        var traversalReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                providerInput, "ClassLayoutProvider", [],
+                ["type.box", "type.payload"], [
+                    "field.box.prefix",
+                    "field.box.address",
+                    "field.payload.value",
+                ]);
+        var pointerTraversalCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Demo;
+                nint Offset() {
+                    return unsafe(offsetof(Box, Address.Value));
+                }
+                """), traversalReference, new CompilationOptions {
+                LayoutCoreRegistration
+                    = LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(pointerTraversalCompilation.HasErrors, Is.True);
         var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
             queryCompilation.Program!, "ClassLayoutConsumer",
             schemaIdentity, 1);
@@ -2449,7 +2473,12 @@ internal sealed class TrRmC1EnumClosureSourceTests
                     new TrRmSourceTypeExport("Demo", "Extra",
                         "type.extra"),
                     new TrRmSourceTypeExport("Demo", "Payload",
-                        "type.payload"),
+                        "type.payload") {
+                        FieldExports = [
+                            new TrRmSourceFieldExport("Value",
+                                "field.payload.value"),
+                        ],
+                    },
                 ], [], [relocatedClassExport], []);
         var relocatedProviderInput
             = new TrRmStandardArtifactInput(schemaIdentity,
