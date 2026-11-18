@@ -551,7 +551,7 @@ public static partial class TrRmExecutableCompiler
     }
 
     /// <summary>Emits C1M1 class declarations or construction-successor class/member exports from checked source mappings.</summary>
-    /// <remarks>The C1M1 route emits TypeDef, FieldDef, Layout and Export rows only. It publishes class keys and mapped public FieldDef keys, and retains reachable scalar, local non-generic class and plain auto-layout struct TypeSpecs. It does not emit class MethodDefs, Bodies or construction records.</remarks>
+    /// <remarks>The C1M1 route emits TypeDef, FieldDef, Layout and class/field Export rows only. Construction successors use their exact member contracts; the bounded Construction-2 route emits real initializer/projection MethodDefs and Bodies for supported direct scalar field initialization, not ordinary method or property Bodies.</remarks>
     public static byte[] EmitStandard(BoundProgram program, string moduleIdentity,
         string schemaIdentity, uint moduleTargetRequirement,
         IReadOnlyList<TrRmSourceTypeExport> typeExports,
@@ -571,10 +571,12 @@ public static partial class TrRmExecutableCompiler
             schemaIdentity, StandardC1M1SchemaIdentity);
         if (!emitsClassDeclarations
             && !StringComparer.Ordinal.Equals(schemaIdentity,
-                StandardC1M1ConstructionSchemaIdentity))
+                StandardC1M1ConstructionSchemaIdentity)
+            && !StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardC1M1Construction2SchemaIdentity))
         {
             throw new ArgumentException(
-                "The seven-argument source class route requires the exact C1M1 or C1M1 construction identity.",
+                "The seven-argument source class route requires an exact C1M1, Construction-1 or Construction-2 identity.",
                 nameof(schemaIdentity));
         }
 
@@ -849,8 +851,11 @@ public static partial class TrRmExecutableCompiler
                 null, null);
         }
 
-        var requiresSourceClassExports = StringComparer.Ordinal.Equals(
-            schemaIdentity, StandardC1M1ConstructionSchemaIdentity);
+        var requiresSourceClassExports
+            = StringComparer.Ordinal.Equals(schemaIdentity,
+                    StandardC1M1ConstructionSchemaIdentity)
+                || StringComparer.Ordinal.Equals(schemaIdentity,
+                    StandardC1M1Construction2SchemaIdentity);
         if ((requiresSourceClassExports && sourceClassExports is null)
             || (sourceClassExports is not null
                 && !StringComparer.Ordinal.Equals(schemaIdentity,
@@ -1101,7 +1106,8 @@ public static partial class TrRmExecutableCompiler
             StandardC1M1Construction2SchemaIdentity
                 => EmitC1M1Construction2(program, moduleIdentity,
                     moduleTargetRequirement, sourceTypeExports,
-                    sourceGenericMethodExports),
+                    sourceGenericMethodExports,
+                    sourceClassExports: sourceClassExports),
             StandardC1M1Construction2L1R1SchemaIdentity
                 => EmitC1M1Construction2(program, moduleIdentity,
                     moduleTargetRequirement, sourceTypeExports,
@@ -1312,8 +1318,23 @@ public static partial class TrRmExecutableCompiler
         IReadOnlyList<TrRmSourceTypeExport>? sourceTypeExports,
         SourceGenericMethodExports? sourceGenericMethodExports,
         TrRmArtifactSchema schema
-            = TrRmArtifactSchema.C1M1Construction2Draft)
+            = TrRmArtifactSchema.C1M1Construction2Draft,
+        SourceClassExports? sourceClassExports = null)
     {
+        if (sourceClassExports is not null)
+        {
+            if (!ReferenceEquals(sourceClassExports.Program, program)
+                || sourceTypeExports is { Count: > 0 }
+                || sourceGenericMethodExports is { Exports.IsEmpty: false })
+            {
+                throw Unsupported(
+                    "The construction-2 source class route requires its captured local declarations without separate source type or generic-method maps.");
+            }
+
+            return EmitC1M1SourceClassDeclarations(program, moduleIdentity,
+                moduleTargetRequirement, sourceClassExports, schema);
+        }
+
         var supportsL1 = schema.UsesMethodParameterLabels();
         if ((!supportsL1 && sourceTypeExports is { Count: > 0 })
             || (!supportsL1

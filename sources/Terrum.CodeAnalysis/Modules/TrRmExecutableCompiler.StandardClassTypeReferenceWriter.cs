@@ -6,7 +6,9 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
+using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Semantics;
+using Terrum.CodeAnalysis.Syntax;
 
 namespace Terrum.CodeAnalysis.Modules;
 
@@ -17,10 +19,23 @@ public static partial class TrRmExecutableCompiler
         ImmutableArray<BoundStandardClassFieldDeclaration> Fields,
         ImmutableArray<BoundStandardClassLayoutVariant> Layouts);
 
+    private sealed record C1M1Construction2SourceInitializer(
+        int ClassIndex, BoundFunction Function, uint ClassTypeSpecReference,
+        ImmutableArray<BoundFieldAssignment> FieldAssignments,
+        int InitializerMethodDefRow, int ProjectionMethodDefRow);
+
     private static byte[] EmitC1M1SourceClassDeclarations(
         BoundProgram program, string moduleIdentity,
-        uint moduleTargetRequirement, SourceClassExports sourceClassExports)
+        uint moduleTargetRequirement, SourceClassExports sourceClassExports,
+        TrRmArtifactSchema schema = TrRmArtifactSchema.C1M1Draft)
     {
+        var emitsConstruction2 = schema.UsesObjectConstruction();
+        if (schema != TrRmArtifactSchema.C1M1Draft
+            && !emitsConstruction2)
+        {
+            throw new ArgumentOutOfRangeException(nameof(schema));
+        }
+
         if (!ReferenceEquals(sourceClassExports.Program, program)
             || program.EntryPoint != -1
             || !program.StandardClassDeclarations.IsEmpty
@@ -35,12 +50,22 @@ public static partial class TrRmExecutableCompiler
             throw Unsupported(
                 "C1M1 source declaration emission requires captured local non-generic classes without imported class, generic or interface closure.");
         }
-        if (sourceClassExports.Exports.Any(static export =>
+        if (!emitsConstruction2
+            && sourceClassExports.Exports.Any(static export =>
                 export.MemberExports.Any(static member =>
                     member.Kind != SourceClassMemberKind.Field)))
         {
             throw Unsupported(
                 "C1M1 source class declarations do not publish constructor, method, or property ExportKeys; use the exact construction successor.");
+        }
+        if (emitsConstruction2
+            && sourceClassExports.Exports.Any(static export =>
+                export.MemberExports.Any(static member =>
+                    member.Kind is SourceClassMemberKind.Method
+                        or SourceClassMemberKind.Property)))
+        {
+            throw Unsupported(
+                "The bounded Construction-2 class source emitter does not yet retain ordinary method or property Bodies.");
         }
         if (program.Classes.Any(static @class =>
                 @class.HasCleanup is not false))
@@ -213,6 +238,15 @@ public static partial class TrRmExecutableCompiler
             (int ClassIndex, bool IsWritable, bool IsOptional), uint>();
         var typeSpecRowByStructure = new Dictionary<int, uint>();
         var exportRows = new List<(uint DefinitionId, string Key)>();
+        var methodRows = new List<TrRmMethodDefRow>();
+        var methodNames = new List<string>();
+        var methodSignatureRows = new List<TrRmMethodSigRow>();
+        var parameterRows = new List<TrRmParamRow>();
+        var contractRows = new List<TrRmContractRow>();
+        var bodyRows = new List<ReadOnlyMemory<byte>>();
+        var featureRows = new List<TrRmFeatureRow>();
+        var constructionInitializers
+            = new List<C1M1Construction2SourceInitializer>();
         var sourceNames = new HashSet<(string Namespace, string Name)>();
         var typeDefRowByClass = exportKeysByClass.Keys
             .Select(static (classIndex, ordinal) =>
@@ -294,6 +328,37 @@ public static partial class TrRmExecutableCompiler
             }
 
             return GetC1M1SourceScalarTypeSpecReference(type);
+        }
+
+        int AppendC1M1Construction2Parameters(
+            int signatureRow, BoundFunction function, int firstVariable)
+        {
+            var parameterCount = function.ParameterCount - firstVariable;
+            if (parameterCount < 0
+                || parameterCount > SemanticVerifier.MaximumArguments)
+            {
+                throw Unsupported(
+                    "A Construction-2 constructor exceeds the checked logical parameter limit.");
+            }
+
+            var firstParam = parameterCount == 0
+                ? 0 : parameterRows.Count + 1;
+            for (var ordinal = 0; ordinal < parameterCount; ordinal++)
+            {
+                var variable = function.Variables[firstVariable + ordinal];
+                if (variable.IsMutable || variable.IsOut || variable.IsInit
+                    || variable.IsImplicitRef
+                    || variable.Type == PrimitiveType.Void)
+                {
+                    throw Unsupported(
+                        "The bounded Construction-2 constructor projection supports only immutable by-value parameters.");
+                }
+
+                parameterRows.Add(new TrRmParamRow(signatureRow, ordinal,
+                    FieldTypeSpecReference(variable.Type), 0));
+            }
+
+            return firstParam;
         }
 
         foreach (var (isClass, sourceIndex) in typeDefOrder)
@@ -419,15 +484,272 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
+        if (emitsConstruction2)
+        {
+            var sourceClassDeclarationsByIndex
+                = sourceClassProgram.Declarations.ToDictionary(
+                    static declaration => declaration.ClassIndex);
+            var constructorFunctionsBySourceDeclaration
+                = program.Functions
+                    .Select(static (function, functionIndex) =>
+                        (function, functionIndex))
+                    .Where(static candidate =>
+                        candidate.function.IsClassConstructor)
+                    .GroupBy(static candidate => (
+                        candidate.function.SourceDeclarationInputOrdinal,
+                        candidate.function.SourceDeclarationSpan))
+                    .ToDictionary(static group => group.Key,
+                        static group => group.ToArray());
+            var memberExportsByClassAndFunction
+                = sourceClassExports.Exports
+                    .SelectMany(static export =>
+                        export.MemberExports.Select(member => (
+                            export.Declaration.ClassIndex, Member: member)))
+                    .GroupBy(static candidate => (
+                        candidate.ClassIndex,
+                        candidate.Member.FunctionIndex))
+                    .ToDictionary(static group => group.Key,
+                        static group => group
+                            .Select(static candidate => candidate.Member)
+                            .ToArray());
+            foreach (var classIndex in exportKeysByClass.Keys)
+            {
+                if (!sourceClassDeclarationsByIndex.TryGetValue(classIndex,
+                        out var declaration))
+                {
+                    throw new InvalidDataException(
+                        "A retained class TypeDef has no exact source declaration.");
+                }
+
+                var constructorDeclarations = new List<(
+                    BoundSourceClassPart Part, SyntaxNode Declaration)>();
+                foreach (var part in declaration.Parts)
+                {
+                    foreach (var member in part.Declaration.Children
+                        .OfType<SyntaxNode>())
+                    {
+                        if (member.Kind == SyntaxKind.FieldDeclaration)
+                        {
+                            if (member.Children
+                                .OfType<SyntaxTokenElement>()
+                                .Any(static token => token.Token.Kind
+                                    == TokenKind.StaticKeyword))
+                            {
+                                throw Unsupported(
+                                    "The bounded Construction-2 class source emitter does not preserve static field initialization.");
+                            }
+
+                            continue;
+                        }
+
+                        if (member.Kind != SyntaxKind.ConstructorDeclaration)
+                        {
+                            throw Unsupported(
+                                "The bounded Construction-2 class source emitter does not yet retain ordinary methods, properties, or partial constructors.");
+                        }
+
+                        if (HasC1M1Construction2ParameterDefaults(member))
+                        {
+                            throw Unsupported(
+                                "The bounded Construction-2 class source emitter does not yet retain constructor parameter defaults.");
+                        }
+
+                        constructorDeclarations.Add((part, member));
+                    }
+                }
+
+                if (constructorDeclarations.Count != 1)
+                {
+                    throw Unsupported(
+                        "The bounded Construction-2 class source emitter requires one complete source constructor per retained class.");
+                }
+
+                var (constructorPart, constructorDeclaration)
+                    = constructorDeclarations[0];
+                if (!constructorFunctionsBySourceDeclaration.TryGetValue((
+                        constructorPart.SourceInputOrdinal,
+                        constructorDeclaration.Span),
+                        out var constructorFunctions)
+                    || constructorFunctions.Length != 1)
+                {
+                    throw new InvalidDataException(
+                        "A retained source class constructor has no unique checked initializer.");
+                }
+
+                var (function, functionIndex) = constructorFunctions[0];
+                var classDeclaration
+                    = program.Classes[classIndex];
+                var receiverType = function.Variables.IsEmpty
+                    ? PrimitiveType.Void : function.Variables[0].Type;
+                if (!function.IsClassConstructor
+                    || function.IsConstructor || function.IsStatic
+                    || function.IsExternal || function.IsPartialConstructor
+                    || function.Intrinsic != BoundIntrinsic.None
+                    || function.ClassConstructor != -1
+                    || function.DeclaringStruct != classDeclaration.Name
+                    || function.ReturnType != PrimitiveType.Void
+                    || function.ParameterCount < 1
+                    || function.ParameterCount != function.Variables.Length
+                    || function.RequiresUnsafeCaller
+                    || function.DeclaredRequiresUnsafeCaller
+                    || function.DoesNotReturn || function.NoFailureProof
+                    || !function.CapturedParameters.IsEmpty
+                    || !function.DeclarationContractClauses.IsEmpty
+                    || function.ModuleImport is not null
+                    || function.GenericMethodInstantiation is not null
+                    || ManagedClassTypes.IsOptional(receiverType)
+                    || !ManagedClassTypes.IsClass(receiverType)
+                    || ManagedClassTypes.ClassIndex(receiverType) != classIndex
+                    || ManagedClassTypes.IsWritable(receiverType)
+                        != classDeclaration.IsMutable
+                    || (function.IsPrivate && function.IsInternal))
+                {
+                    throw Unsupported(
+                        "The bounded Construction-2 class source emitter cannot discard constructor ownership, signature, access, effect, or completion facts.");
+                }
+
+                var fieldAssignments
+                    = GetC1M1Construction2FieldAssignments(function,
+                        classDeclaration);
+                foreach (var field in classDeclaration.Fields)
+                {
+                    _ = GetC1M1SourceScalarTypeSpecReference(field.Type);
+                }
+
+                var memberExports
+                    = memberExportsByClassAndFunction.TryGetValue((
+                        classIndex, functionIndex), out var mappedExports)
+                        ? mappedExports
+                        : Array.Empty<SourceClassMemberExport>();
+                if (memberExports.Any(static member =>
+                        member.Kind != SourceClassMemberKind.Constructor))
+                {
+                    throw new InvalidDataException(
+                        "A class constructor mapping contains a non-constructor member.");
+                }
+                var initializerExportKeys = memberExports
+                    .Select(static member => member.ExportKey)
+                    .ToImmutableArray();
+                var projectionExportKeys = memberExports
+                    .Where(static member =>
+                        member.ConstructionProjectionExportKey is not null)
+                    .Select(static member =>
+                        member.ConstructionProjectionExportKey!)
+                    .ToImmutableArray();
+                var classTypeSpecReference
+                    = FieldTypeSpecReference(receiverType);
+                var initializerMethodDefRow = methodRows.Count + 1;
+                var projectionMethodDefRow
+                    = initializerMethodDefRow + 1;
+                var initializerSignatureRow
+                    = methodSignatureRows.Count + 1;
+                var initializerParamFirst
+                    = AppendC1M1Construction2Parameters(
+                        initializerSignatureRow, function, 1);
+                methodSignatureRows.Add(new TrRmMethodSigRow(
+                    0xF200_0000u, classTypeSpecReference,
+                    initializerParamFirst,
+                    function.ParameterCount - 1, 0, 0));
+                var projectionSignatureRow
+                    = methodSignatureRows.Count + 1;
+                var projectionParamFirst
+                    = AppendC1M1Construction2Parameters(
+                        projectionSignatureRow, function, 1);
+                methodSignatureRows.Add(new TrRmMethodSigRow(
+                    classTypeSpecReference, 0, projectionParamFirst,
+                    function.ParameterCount - 1, 0, 0));
+
+                var initializerContractFirst
+                    = contractRows.Count + 1;
+                contractRows.Add(new TrRmContractRow(
+                    0x1600_0000u
+                        | checked((uint)initializerMethodDefRow),
+                    0x0003,
+                    EncodeC1M1Construction2InitializerContract(
+                        fieldAssignments, fieldDefRowByClassAndIndex,
+                        classIndex)));
+                var projectionContractFirst
+                    = contractRows.Count + 1;
+                contractRows.Add(new TrRmContractRow(
+                    0x1600_0000u
+                        | checked((uint)projectionMethodDefRow),
+                    0x0003,
+                    EncodeC1M1Construction2ProjectionContract(
+                        initializerMethodDefRow)));
+
+                var visibility = function.IsPrivate ? 0u
+                    : function.IsInternal ? 1u : 2u;
+                methodRows.Add(new TrRmMethodDefRow(
+                    typeDefRowByClass[classIndex], 0,
+                    initializerSignatureRow, visibility,
+                    initializerContractFirst, 1, 0));
+                methodNames.Add(function.Name);
+                methodRows.Add(new TrRmMethodDefRow(
+                    typeDefRowByClass[classIndex], 0,
+                    projectionSignatureRow,
+                    projectionExportKeys.IsEmpty ? 0u : 2u,
+                    projectionContractFirst, 1, 0));
+                methodNames.Add(function.Name);
+
+                foreach (var exportKey in initializerExportKeys)
+                {
+                    exportRows.Add((
+                        0x1600_0000u
+                            | checked((uint)initializerMethodDefRow),
+                        exportKey));
+                }
+
+                foreach (var exportKey in projectionExportKeys)
+                {
+                    exportRows.Add((
+                        0x1600_0000u
+                            | checked((uint)projectionMethodDefRow),
+                        exportKey));
+                }
+
+                constructionInitializers.Add(
+                    new C1M1Construction2SourceInitializer(
+                        classIndex, function, classTypeSpecReference,
+                        fieldAssignments, initializerMethodDefRow,
+                        projectionMethodDefRow));
+            }
+
+            featureRows.Add(
+                TrRmFeatureRow.ClassConstructionBodiesCandidate);
+            foreach (var initializer in constructionInitializers)
+            {
+                bodyRows.Add(EncodeC1M1Construction2InitializerBody(
+                    initializer, fieldDefRowByClassAndIndex,
+                    FieldTypeSpecReference, contractRows.Count, schema));
+                methodRows[initializer.InitializerMethodDefRow - 1]
+                    = methodRows[initializer.InitializerMethodDefRow - 1]
+                        with { BodyRow = bodyRows.Count };
+                bodyRows.Add(EncodeC1M1Construction2ProjectionBody(
+                    initializer, FieldTypeSpecReference,
+                    contractRows.Count, schema));
+                methodRows[initializer.ProjectionMethodDefRow - 1]
+                    = methodRows[initializer.ProjectionMethodDefRow - 1]
+                        with { BodyRow = bodyRows.Count };
+            }
+        }
+
         var totalRows = (long)typeDefRows.Count + fieldRows.Count
             + layoutRows.Count + layoutFieldRows.Count
-            + typeSpecRows.Count + exportRows.Count;
+            + typeSpecRows.Count + exportRows.Count + methodRows.Count
+            + methodSignatureRows.Count + parameterRows.Count
+            + contractRows.Count + bodyRows.Count + featureRows.Count;
         if (typeDefRows.Count > 0xFF_FFFF
             || fieldRows.Count > 0xFF_FFFF
             || layoutRows.Count > 0xFF_FFFF
             || layoutFieldRows.Count > 0xFF_FFFF
             || typeSpecRows.Count > 0xFF_FFFF
             || exportRows.Count > 0xFF_FFFF
+            || methodRows.Count > 0xFF_FFFF
+            || methodSignatureRows.Count > 0xFF_FFFF
+            || parameterRows.Count > 0xFF_FFFF
+            || contractRows.Count > 0xFF_FFFF
+            || bodyRows.Count > 0xFF_FFFF
+            || featureRows.Count > 0xFF_FFFF
             || totalRows > SemanticVerifier.MaximumAnalysisVisits)
         {
             throw Unsupported(
@@ -460,6 +782,11 @@ public static partial class TrRmExecutableCompiler
             _ = AddString(fieldName);
         }
 
+        foreach (var methodName in methodNames)
+        {
+            _ = AddString(methodName);
+        }
+
         foreach (var (_, exportKey) in exportRows)
         {
             _ = AddString(exportKey);
@@ -484,31 +811,74 @@ public static partial class TrRmExecutableCompiler
             };
         }
 
+        for (var methodIndex = 0;
+            methodIndex < methodRows.Count; methodIndex++)
+        {
+            methodRows[methodIndex] = methodRows[methodIndex] with {
+                NameStringRow = stringRows[methodNames[methodIndex]],
+            };
+        }
+
+        var featureBytes = featureRows.Count == 0 ? []
+            : TrRmFeatureTableWriter.Encode(featureRows, schema);
+        var features = featureRows.Count == 0 ? default
+            : new TrRmFeatureTableReader(featureBytes,
+                featureRows.Count, schema);
         var moduleBytes = TrRmModuleTableWriter.Encode([
             new TrRmModuleRow(moduleIdentityStringRow,
                 moduleTargetRequirement, (uint)program.RuntimePolicy, 0,
-                1, 1, 1, 1, 0, 0),
-        ], strings, 0, typeDefRows.Count, 0, 0, 0);
+                1, 1, 1, 1,
+                featureRows.Count == 0 ? 0u : 1u,
+                checked((uint)featureRows.Count)),
+        ], strings, 0, typeDefRows.Count, methodRows.Count, 0,
+            featureRows.Count);
         var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
-            0, typeDefRows.Count, 0, 0, 0);
+            0, typeDefRows.Count, methodRows.Count, 0,
+            featureRows.Count);
         var typeDefBytes = TrRmTypeDefTableWriter.Encode(typeDefRows,
-            strings, modules, fieldRows.Count, 0, layoutRows.Count, 0,
-            TrRmArtifactSchema.C1M1Draft);
+            strings, modules, fieldRows.Count, methodRows.Count,
+            layoutRows.Count, contractRows.Count, schema);
         var typeDefs = new TrRmTypeDefTableReader(typeDefBytes,
-            typeDefRows.Count, strings, modules, fieldRows.Count, 0,
-            layoutRows.Count, 0, TrRmArtifactSchema.C1M1Draft);
+            typeDefRows.Count, strings, modules, fieldRows.Count,
+            methodRows.Count, layoutRows.Count, contractRows.Count, schema);
         var typeSpecBytes = typeSpecRows.Count == 0 ? [] :
             TrRmTypeSpecTableWriter.Encode(typeSpecRows, typeDefRows.Count,
-                0, 0, 0, TrRmArtifactSchema.C1M1Draft);
+                0, 0, 0, schema, methodDefCount: methodRows.Count);
         var typeSpecs = new TrRmTypeSpecTableReader(
             typeSpecRows.Count == 0
                 ? new byte[sizeof(uint)] : typeSpecBytes,
             typeSpecRows.Count, typeDefRows.Count, 0, 0, 0,
-            TrRmArtifactSchema.C1M1Draft);
+            schema, methodDefCount: methodRows.Count);
         var fieldBytes = TrRmFieldDefTableWriter.Encode(fieldRows, strings,
-            typeDefs, typeSpecs);
+            typeDefs, typeSpecs, schema);
         var fields = new TrRmFieldDefTableReader(fieldBytes,
             fieldRows.Count, strings, typeDefs, typeSpecs);
+        var signatureBytes = methodSignatureRows.Count == 0 ? []
+            : TrRmMethodSigTableWriter.Encode(methodSignatureRows,
+                typeSpecs, parameterRows.Count, 0);
+        var signatures = methodSignatureRows.Count == 0 ? default
+            : new TrRmMethodSigTableReader(signatureBytes,
+                methodSignatureRows.Count, typeSpecs,
+                parameterRows.Count, 0);
+        var parameterBytes = parameterRows.Count == 0 ? []
+            : TrRmParamTableWriter.Encode(parameterRows, signatures,
+                typeSpecs, schema);
+        var parameters = parameterRows.Count == 0 ? default
+            : new TrRmParamTableReader(parameterBytes,
+                parameterRows.Count, signatures, typeSpecs, schema);
+        var methodBytes = methodRows.Count == 0 ? []
+            : TrRmMethodDefTableWriter.Encode(methodRows, strings, modules,
+                typeDefs, signatures, contractRows.Count, bodyRows.Count,
+                schema);
+        var methods = methodRows.Count == 0 ? default
+            : new TrRmMethodDefTableReader(methodBytes, methodRows.Count,
+                strings, modules, typeDefs, signatures, contractRows.Count,
+                bodyRows.Count, schema);
+        var contractBytes = contractRows.Count == 0 ? []
+            : TrRmContractTableWriter.EncodeC1M1Construction2Draft(
+                contractRows, typeDefs, methods, signatures, parameters,
+                typeSpecs, fields, default, default, features, modules,
+                predicateGraphCount: 0);
         var targetProfiles = new TrRmTargetProfileTableReader([], 0);
         var layoutBytes = TrRmLayoutTableWriter.Encode(layoutRows, typeDefs,
             targetProfiles, layoutFieldRows.Count);
@@ -535,19 +905,48 @@ public static partial class TrRmExecutableCompiler
             new TrRmSection(0x0023, 0,
                 checked((uint)layoutFieldRows.Count), layoutFieldBytes),
         };
+        if (featureRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x0004, 0,
+                checked((uint)featureRows.Count), featureBytes));
+        }
         if (typeSpecRows.Count != 0)
         {
             sections.Add(new TrRmSection(0x0011, 0,
                 checked((uint)typeSpecRows.Count), typeSpecBytes));
         }
+        if (methodRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x0016, 0,
+                checked((uint)methodRows.Count), methodBytes));
+            sections.Add(new TrRmSection(0x0017, 0,
+                checked((uint)methodSignatureRows.Count),
+                signatureBytes));
+        }
+        if (parameterRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x0018, 0,
+                checked((uint)parameterRows.Count), parameterBytes));
+        }
+        if (contractRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x001B, 0,
+                checked((uint)contractRows.Count), contractBytes));
+        }
+        if (bodyRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x0020, 0,
+                checked((uint)bodyRows.Count),
+                TrRmVariableTableWriter.EncodeBodies(bodyRows)));
+        }
 
         sections.Sort(static (left, right) =>
             left.Kind.CompareTo(right.Kind));
         var artifact = TrRmArtifactWriter.Encode(sections,
-            TrRmArtifactSchema.C1M1Draft);
+            schema);
         _ = TrRmStructuralMetadataValidator
             .ValidateC1AndGetExecutionTables(
-                TrRmArtifactIndex.ForC1M1Draft(artifact));
+                new TrRmArtifactIndex(artifact, schema));
         return artifact;
     }
 
@@ -584,6 +983,306 @@ public static partial class TrRmExecutableCompiler
                 $"C1M1 source class field type '{type}' has no supported local scalar TypeSpec."),
         };
         return 0xF200_0000u | checked((uint)typeCode);
+    }
+
+    private static bool HasC1M1Construction2ParameterDefaults(
+        SyntaxNode declaration)
+    {
+        var parameterList = declaration.Children
+            .OfType<SyntaxNode>()
+            .SingleOrDefault(static child =>
+                child.Kind == SyntaxKind.ParameterList);
+        return parameterList is not null
+            && ContainsTokenKind(parameterList, TokenKind.Equals);
+
+        static bool ContainsTokenKind(SyntaxNode node, TokenKind kind)
+        {
+            foreach (var child in node.Children)
+            {
+                if (child is SyntaxTokenElement token
+                    && token.Token.Kind == kind)
+                {
+                    return true;
+                }
+
+                if (child is SyntaxNode nested
+                    && ContainsTokenKind(nested, kind))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    }
+
+    private static ImmutableArray<BoundFieldAssignment>
+        GetC1M1Construction2FieldAssignments(
+            BoundFunction function, BoundClass @class)
+    {
+        if (function.Variables.Length != function.ParameterCount
+            || function.Body.Statements.IsDefault)
+        {
+            throw Unsupported(
+                "The bounded Construction-2 initializer requires a checked body without untracked local storage.");
+        }
+
+        var assignments = ImmutableArray.CreateBuilder<
+            BoundFieldAssignment>(@class.Fields.Length);
+        var assignedFields = new HashSet<int>();
+        var returned = false;
+        Collect(function.Body);
+        if (assignments.Count != @class.Fields.Length
+            || assignedFields.Count != @class.Fields.Length)
+        {
+            throw Unsupported(
+                "The bounded Construction-2 initializer must initialize every class field exactly once.");
+        }
+
+        return assignments.MoveToImmutable();
+
+        void Collect(BoundBlock block)
+        {
+            foreach (var statement in block.Statements)
+            {
+                if (returned)
+                {
+                    throw Unsupported(
+                        "A Construction-2 initializer cannot continue after its unit return.");
+                }
+
+                if (statement is BoundBlock nested)
+                {
+                    Collect(nested);
+                    continue;
+                }
+
+                if (statement is BoundReturn { Value: null })
+                {
+                    returned = true;
+                    continue;
+                }
+
+                if (statement is not BoundFieldAssignment assignment
+                    || assignment.Variable != 0
+                    || !assignment.NestedFields.IsEmpty
+                    || assignment.IsUnsafeAuthorized
+                    || assignment.Field < 0
+                    || assignment.Field >= @class.Fields.Length
+                    || !assignedFields.Add(assignment.Field)
+                    || assignment.Value is not BoundRead read
+                    || read.Variable <= 0
+                    || read.Variable >= function.ParameterCount
+                    || read.Type != @class.Fields[assignment.Field].Type
+                    || function.Variables[read.Variable].Type != read.Type)
+                {
+                    throw Unsupported(
+                        "The bounded Construction-2 initializer supports only direct, single-use scalar parameter-to-field stores.");
+                }
+
+                _ = GetC1M1SourceScalarTypeSpecReference(read.Type);
+                assignments.Add(assignment);
+            }
+        }
+    }
+
+    private static byte[] EncodeC1M1Construction2InitializerContract(
+        ImmutableArray<BoundFieldAssignment> assignments,
+        Dictionary<(int ClassIndex, int FieldIndex), int>
+            fieldDefRowByClassAndIndex,
+        int classIndex)
+    {
+        var payload = new byte[checked(8 + (assignments.Length * sizeof(uint)))];
+        payload[0] = 1;
+        BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(4),
+            checked((uint)assignments.Length));
+        for (var index = 0; index < assignments.Length; index++)
+        {
+            if (!fieldDefRowByClassAndIndex.TryGetValue(
+                    (classIndex, assignments[index].Field),
+                    out var fieldDefRow))
+            {
+                throw new InvalidDataException(
+                    "A Construction-2 initializer field has no emitted FieldDef.");
+            }
+
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                payload.AsSpan(8 + (index * sizeof(uint))),
+                0x1400_0000u | checked((uint)fieldDefRow));
+        }
+
+        return payload;
+    }
+
+    private static byte[] EncodeC1M1Construction2ProjectionContract(
+        int initializerMethodDefRow)
+    {
+        var payload = new byte[8];
+        payload[0] = 2;
+        BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(4),
+            checked((uint)initializerMethodDefRow));
+        return payload;
+    }
+
+    private static byte[] EncodeC1M1Construction2InitializerBody(
+        C1M1Construction2SourceInitializer initializer,
+        Dictionary<(int ClassIndex, int FieldIndex), int>
+            fieldDefRowByClassAndIndex,
+        Func<PrimitiveType, uint> typeSpecReferenceFor,
+        int contractCount, TrRmArtifactSchema schema)
+    {
+        var function = initializer.Function;
+        var typeTokens = function.Variables
+            .Select(variable => CreateStandardBodyTypeMapToken(
+                typeSpecReferenceFor(variable.Type)))
+            .ToArray();
+        var maps = TrRmRegisterBodyMapBuilder.Create(typeTokens, []);
+        var homeMap = new byte[checked(function.Variables.Length * 8)];
+        for (var variableIndex = 0;
+            variableIndex < function.Variables.Length; variableIndex++)
+        {
+            var home = homeMap.AsSpan(variableIndex * 8, 8);
+            home[0] = variableIndex == 0 ? (byte)1 : (byte)2;
+            BinaryPrimitives.WriteUInt16LittleEndian(home[2..],
+                checked((ushort)maps.GetTypeMapIndex(
+                    typeTokens[variableIndex])));
+            if (variableIndex != 0)
+            {
+                BinaryPrimitives.WriteUInt16LittleEndian(home[4..],
+                    checked((ushort)(variableIndex - 1)));
+            }
+        }
+
+        var records = new List<ReadOnlyMemory<byte>> {
+            new(new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 }),
+        };
+        var code = new List<byte>();
+        foreach (var assignment in initializer.FieldAssignments)
+        {
+            if (assignment.Value is not BoundRead read
+                || !fieldDefRowByClassAndIndex.TryGetValue((
+                    initializer.ClassIndex, assignment.Field),
+                    out var fieldDefRow))
+            {
+                throw new InvalidDataException(
+                    "A Construction-2 initializer Body cannot bind its checked field assignment.");
+            }
+
+            var fieldTypeToken = CreateStandardBodyTypeMapToken(
+                typeSpecReferenceFor(
+                    function.Variables[read.Variable].Type));
+            var selectionRecord = records.Count;
+            records.Add(TrRmRegisterBodyRecordWriter.EncodePlaceSelection(
+                targetKind: 2, accessKind: 3, destinationKind: 1,
+                baseKind: 2, destinationIndex: 0, baseIndex: 0,
+                indexKind: 0, targetRefKind: 1, indexIndex: 0,
+                targetRef: checked((uint)fieldDefRow),
+                referentTypeMapIndex: checked((ushort)
+                    maps.GetTypeMapIndex(fieldTypeToken)),
+                schema));
+            var storeRecord = records.Count;
+            records.Add(TrRmRegisterBodyRecordWriter.EncodeSemanticStore(
+                placeKind: 1, sourceKind: 2, transition: 1,
+                sourceUse: 1, placeIndex: 0,
+                sourceIndex: checked((ushort)read.Variable), schema));
+            AppendRecordReference(0xD8, selectionRecord);
+            AppendRecordReference(0xD9, storeRecord);
+        }
+
+        code.Add(0x18);
+        code.Add(0);
+        var codeBytes = code.ToArray();
+        return TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
+            default, default, default,
+            [new TrRmRegisterBodyBlock(0,
+                checked((uint)codeBytes.Length), 0)],
+            records, codeBytes, contractCount: contractCount,
+            schema: schema,
+            generalPredicateGraphsInitializationReferenceBodies
+                : schema.UsesGeneralPredicateGraphs());
+
+        void AppendRecordReference(byte opcode, int recordIndex)
+        {
+            code.Add(opcode);
+            code.Add(0);
+            var index = checked((ushort)recordIndex);
+            code.Add((byte)index);
+            code.Add((byte)(index >> 8));
+        }
+    }
+
+    private static byte[] EncodeC1M1Construction2ProjectionBody(
+        C1M1Construction2SourceInitializer initializer,
+        Func<PrimitiveType, uint> typeSpecReferenceFor,
+        int contractCount, TrRmArtifactSchema schema)
+    {
+        var function = initializer.Function;
+        var typeTokens = new uint[function.ParameterCount];
+        typeTokens[0] = CreateStandardBodyTypeMapToken(
+            initializer.ClassTypeSpecReference);
+        for (var parameterIndex = 1;
+            parameterIndex < function.ParameterCount; parameterIndex++)
+        {
+            typeTokens[parameterIndex]
+                = CreateStandardBodyTypeMapToken(
+                    typeSpecReferenceFor(
+                        function.Variables[parameterIndex].Type));
+        }
+
+        var methodMapToken = 0x1600_0000u
+            | checked((uint)initializer.InitializerMethodDefRow);
+        var maps = TrRmRegisterBodyMapBuilder.Create(typeTokens,
+            [methodMapToken]);
+        var homeMap = new byte[checked(
+            (function.ParameterCount + 1) * 8)];
+        homeMap[0] = 4;
+        BinaryPrimitives.WriteUInt16LittleEndian(homeMap.AsSpan(2),
+            checked((ushort)maps.GetTypeMapIndex(typeTokens[0])));
+        homeMap[8] = 3;
+        BinaryPrimitives.WriteUInt16LittleEndian(homeMap.AsSpan(10),
+            checked((ushort)maps.GetTypeMapIndex(typeTokens[0])));
+        var inputs = new List<TrRmRegisterBodyCallInput>(
+            function.ParameterCount) {
+            new(2, 5, 0),
+        };
+        for (var parameterIndex = 1;
+            parameterIndex < function.ParameterCount; parameterIndex++)
+        {
+            var homeIndex = parameterIndex + 1;
+            var home = homeMap.AsSpan(homeIndex * 8, 8);
+            home[0] = 2;
+            BinaryPrimitives.WriteUInt16LittleEndian(home[2..],
+                checked((ushort)maps.GetTypeMapIndex(
+                    typeTokens[parameterIndex])));
+            BinaryPrimitives.WriteUInt16LittleEndian(home[4..],
+                checked((ushort)(parameterIndex - 1)));
+            inputs.Add(new TrRmRegisterBodyCallInput(2, 1,
+                checked((ushort)homeIndex)));
+        }
+
+        var records = new ReadOnlyMemory<byte>[] {
+            new(new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 }),
+            TrRmRegisterBodyRecordWriter.EncodeObjectConstruction(1, 0,
+                0, 0, schema),
+            TrRmRegisterBodyRecordWriter.EncodeCallSite(1, 0, 1, 0,
+                inputs, [], schema: schema),
+            TrRmRegisterBodyRecordWriter.EncodeObjectConstruction(2, 2,
+                0, 1, schema),
+        };
+        var code = new byte[] {
+            0xED, 0, 1, 0,
+            0xE0, 0, 2, 0,
+            0xED, 0, 3, 0,
+            0xB8, 1,
+        };
+        return TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
+            maps.MethodMap, default, default,
+            [new TrRmRegisterBodyBlock(0,
+                checked((uint)code.Length), 0)],
+            records, code, contractCount: contractCount,
+            schema: schema,
+            generalPredicateGraphsInitializationReferenceBodies
+                : schema.UsesGeneralPredicateGraphs());
     }
 
     private static bool TryGetC1M1SourceClassFieldType(

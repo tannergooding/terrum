@@ -136,10 +136,21 @@ I/P signatures, owner/mutability agreement, direct instance FieldDef
 guarantees, bodyful actuals and bodyless imported expectations. Construction-2
 Body validation now uses direct nominal normal-class TypeSpecs for I receivers,
 P results/contexts and ordinary class receivers; updated fixture regressions
-remain unverified under the active hold. Construction successor class
-member/MethodDef/Body closure, independent carrier TypeSpec
-verification, generic TypeDef dependencies, broader remapping/replacement,
-interfaces/witnesses and runtime execution remain open.
+remain unverified under the active hold. The exact C2 source-class route now
+emits local class TypeDef/FieldDef closure and real role-1 initializer I and
+role-2 projection P MethodDefs, MethodSigs, Params, Construction clauses,
+Feature 25 and Bodies for one non-partial constructor per class whose fields
+are initialized directly from scalar parameters. It preserves explicit I/P
+ExportKeys and does not substitute `ClassTryCreate`; keyed and private-P
+producer regressions are added but unverified under the hold. Ordinary method
+and property Bodies, multiple/partial constructors, class-backed field
+initialization, parameter defaults, expected/provider class binding and
+re-emission, class FieldDef Imports, CLI transport, independent carrier
+TypeSpec verification, generic TypeDef dependencies, interfaces/witnesses and
+runtime execution remain open. The user-authorized provisional
+[CM1 class parameter-default proposal](proposals/standard-trrm-c1-class-parameter-defaults.md)
+defines a candidate exact owner/schema; no producer or consumer currently
+emits or consumes those defaults.
 The checked development and Standard TRRM type-reference
 paths now carry exact generic nominal TypeDef/provider identities, formal
 domains/defaults, ordered substitutions and TypeSpec qualifications into

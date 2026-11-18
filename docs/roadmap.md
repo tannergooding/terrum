@@ -116,6 +116,11 @@ prerequisite has already been met.
    typed API. The separate [class-source CLI proposal](proposals/standard-trrm-c1-class-source-cli-transport.md)
    is unapproved and unimplemented; transport depends on complete
    class/member/Body closure and targets Construction-1/2 L1R1 and PI1 successors.
+   Construction-2 source production now emits a bounded real initializer I /
+   projection P pair for direct scalar parameter-to-field initialization;
+   ordinary member Bodies and the unapproved, provisionally actionable
+   [CM1 class parameter-default proposal](proposals/standard-trrm-c1-class-parameter-defaults.md)
+   remain prerequisites to complete class binding and transport.
    A separate [C1 enum-closure proposal](proposals/standard-trrm-c1-enum-closure-composition.md)
    defines enum-bearing EN1 successors and class-manifest v2; this route also
    remains unimplemented.

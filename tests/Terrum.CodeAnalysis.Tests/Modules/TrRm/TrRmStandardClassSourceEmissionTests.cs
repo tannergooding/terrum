@@ -18,6 +18,8 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1";
     private const string C1M1SchemaIdentity
         = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1";
+    private const string C1M1Construction2SchemaIdentity
+        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2";
 
     [Test]
     public void EmitsCapturedC1M1ClassDeclarationsAndRemapsWithoutSource()
@@ -161,6 +163,97 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         Assert.That(remappedReference.StandardClassDeclarations.Select(
                 static declaration => declaration.Declaration.TypeDefFlags),
             Is.EquivalentTo(new[] { 0x8Au, 0x0Au }));
+    }
+
+    [Test]
+    public void EmitsConstruction2InitializerAndProjectionBodies()
+    {
+        var tree = SyntaxTree.Parse("""
+            public class Box {
+                public int32 Value;
+                public Box(int32 value) { Value = value; }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var memberNodes = classDeclaration.Children.OfType<SyntaxNode>();
+        var fieldDeclaration = memberNodes.Single(static node =>
+            node.Kind == SyntaxKind.FieldDeclaration);
+        var constructorDeclaration = memberNodes.Single(static node =>
+            node.Kind == SyntaxKind.ConstructorDeclaration);
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "Construction2Box", C1M1Construction2SchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, 0,
+                    classDeclaration.Span, "BoxKey", [
+                        new TrRmSourceClassMemberExport(0,
+                            fieldDeclaration.Span, "Box.Value"),
+                        new TrRmSourceClassMemberExport(0,
+                            constructorDeclaration.Span, "Box.Initialize") {
+                            ConstructionProjectionExportKey = "Box.Create",
+                        },
+                    ]),
+            ]);
+        var index = TrRmArtifactIndex.ForC1M1Construction2Draft(
+            artifact);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(index);
+
+        Assert.That(tables.Methods.Count, Is.EqualTo(2));
+        Assert.That(tables.Signatures.Count, Is.EqualTo(2));
+        Assert.That(tables.Parameters.Count, Is.EqualTo(2));
+        Assert.That(tables.Contracts.Count, Is.EqualTo(2));
+        Assert.That(tables.Bodies.Count, Is.EqualTo(2));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.Initialize", out var initializer), Is.True);
+        Assert.That(initializer >> 24, Is.EqualTo(0x16u));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.Create", out var projection), Is.True);
+        Assert.That(projection >> 24, Is.EqualTo(0x16u));
+
+        for (var methodRow = 1; methodRow <= tables.Methods.Count;
+            methodRow++)
+        {
+            tables.ValidateRegisterBodyMapsForMethod(methodRow);
+        }
+
+        var privateProjectionArtifact
+            = TrRmExecutableCompiler.EmitStandard(program,
+                "Construction2PrivateProjection",
+                C1M1Construction2SchemaIdentity,
+                TrRmModuleTableReader
+                    .WindowsX64NativeTargetRequirement,
+                [], [], [
+                    new TrRmSourceClassExport(program, 0,
+                        classDeclaration.Span, "PrivateBoxKey", [
+                            new TrRmSourceClassMemberExport(0,
+                                constructorDeclaration.Span,
+                                "Box.Initialize"),
+                        ]),
+                ]);
+        var privateProjectionTables
+            = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(
+                    TrRmArtifactIndex.ForC1M1Construction2Draft(
+                        privateProjectionArtifact));
+        Assert.That(privateProjectionTables.Methods.GetFlags(2),
+            Is.Zero);
+        Assert.That(privateProjectionTables.Exports
+            .TryGetDefinitionForKey(1, "Box.Create", out _), Is.False);
+        for (var methodRow = 1;
+            methodRow <= privateProjectionTables.Methods.Count;
+            methodRow++)
+        {
+            privateProjectionTables.ValidateRegisterBodyMapsForMethod(
+                methodRow);
+        }
     }
 
     [Test]
