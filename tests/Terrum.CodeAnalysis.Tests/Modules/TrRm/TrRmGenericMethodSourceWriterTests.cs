@@ -4282,6 +4282,18 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             Is.LessThan(construction.Row));
         Assert.That(tables.TypeSpecs.GetTypeSpecRef(fieldArgumentTypeSpec).Row,
             Is.LessThan(construction.Row));
+        var nestedConstruction = tables.TypeSpecs.GetTypeSpecRef(
+            fieldArgumentTypeSpec);
+        Assert.That(nestedConstruction.Form, Is.EqualTo(0x05));
+        var nestedConstructionRow
+            = tables.TypeSpecs.GetRow(nestedConstruction.Row);
+        var nestedGenericTypeSpec = ReadUInt32(nestedConstructionRow, 2);
+        var nestedFieldArgument = ReadUInt32(nestedConstructionRow, 6);
+        Assert.That(tables.TypeSpecs.GetTypeSpecRef(nestedGenericTypeSpec).Row,
+            Is.LessThan(nestedConstruction.Row));
+        Assert.That(tables.TypeSpecs.GetTypeSpecRef(nestedFieldArgument).Row,
+            Is.LessThan(nestedConstruction.Row));
+        Assert.That(nestedConstruction.Row, Is.LessThan(construction.Row));
         Assert.That(construction.Row, Is.LessThan(fieldTypeSpec.Row));
 
         var emittedReference = TrRmExecutableCompiler.CreateStandardReference(
@@ -7309,11 +7321,16 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             var fieldTypeArgument = fieldTypeSpec;
             rewrittenTypeSpecRows.Add(
                 TrRmTypeSpecTableWriter.Reference(0x04, 1));
-            var constructionTypeSpec = checked(
+            var innerConstructionTypeSpec = checked(
                 (uint)rewrittenTypeSpecRows.Count + 1);
             rewrittenTypeSpecRows.Add(
                 TrRmTypeSpecTableWriter.Constructed(
                     boxDefinitionTypeSpec, [fieldTypeArgument]));
+            var constructionTypeSpec = checked(
+                (uint)rewrittenTypeSpecRows.Count + 1);
+            rewrittenTypeSpecRows.Add(
+                TrRmTypeSpecTableWriter.Constructed(
+                    boxDefinitionTypeSpec, [innerConstructionTypeSpec]));
             fieldTypeSpec = checked(
                 (uint)rewrittenTypeSpecRows.Count + 1);
             rewrittenTypeSpecRows.Add(
