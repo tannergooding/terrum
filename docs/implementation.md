@@ -1524,6 +1524,9 @@ active hold.
 Expected imported MethodDefs also retain constructed nominal type defaults
 through checked TypeDef/Import closure; provider-chain, relocation and
 incompatible replacement coverage remains unverified under the active hold.
+G1 type-default emission now also composes an indexed Span element with a
+non-optional, non-GC checked-reference wrapper; source-free import binding and
+forwarded-formal coverage are added but remain unverified under the hold.
 The writer now copies all retained TypeDef Import expectation views; a
 reference-set emission regression is added but remains unverified. Fresh
 generic TypeDef source declarations, source-free generic MethodDef re-emission

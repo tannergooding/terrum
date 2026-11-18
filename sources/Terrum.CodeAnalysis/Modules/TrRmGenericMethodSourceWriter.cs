@@ -6763,7 +6763,9 @@ public static partial class TrRmExecutableCompiler
                 allowSpanType: true,
                 allowFormal: false);
         }
-        else if (elementTerm.Kind == BoundGenericMethodTypeTermKind.Span)
+        else if (elementTerm.Kind is
+            BoundGenericMethodTypeTermKind.Span
+                or BoundGenericMethodTypeTermKind.CheckedReference)
         {
             typeSpecRef = GenericMethodTypeDefaultSpecRef(elementTerm,
                 formalOrdinal, definition, formalTypeSpecRows,
