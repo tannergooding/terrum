@@ -38,12 +38,15 @@ not authority to change those source rules:
 
 The active [construction fixture](../../tests/Terrum.CodeAnalysis.Tests/Modules/TrRm/TrRmObjectConstructionBodyTests.cs#L124-L133)
 exercises P→I, and [compact negatives](../../tests/Terrum.CodeAnalysis.Tests/Modules/TrRm/TrRmObjectConstructionBodyTests.cs#L240-L248)
-reject I. Its [types/signatures](../../tests/Terrum.CodeAnalysis.Tests/Modules/TrRm/TrRmObjectConstructionBodyTests.cs#L615-L645)
-use a `0C/8A` Span-of-class stand-in for the receiver/context, not the
-constructor proposal's nominal C. [Receiver Home tests](../../tests/Terrum.CodeAnalysis.Tests/Modules/TrRm/TrRmRegisterBodyReaderTests.cs#L1028-L1061)
-check Home/signature agreement; [normal-runtime source tests](../../tests/Terrum.CodeAnalysis.Tests/Native/Modules/NativeManagedClassModuleTests.NormalBacking.cs#L12-L43)
+reject I. Its Body tests now use direct nominal class TypeSpecs for I
+receivers, P results/contexts and ordinary class receivers; the writer and
+source-free class-member closure remain unimplemented. [Receiver Home
+tests](../../tests/Terrum.CodeAnalysis.Tests/Modules/TrRm/TrRmRegisterBodyReaderTests.cs#L1028-L1061)
+check Home/signature agreement; [normal-runtime source
+tests](../../tests/Terrum.CodeAnalysis.Tests/Native/Modules/NativeManagedClassModuleTests.NormalBacking.cs#L12-L43)
 use the source factory/backend, not Standard ordinary-call reconstruction.
-These files are included by the current [test project](../../tests/Terrum.CodeAnalysis.Tests/Terrum.CodeAnalysis.Tests.csproj);
+These files are included by the current [test
+project](../../tests/Terrum.CodeAnalysis.Tests/Terrum.CodeAnalysis.Tests.csproj);
 they are intended coverage, **not results from this review**.
 
 ## Proposed exact mapping

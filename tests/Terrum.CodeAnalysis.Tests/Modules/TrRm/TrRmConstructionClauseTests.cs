@@ -80,6 +80,8 @@ internal sealed class TrRmConstructionClauseTests
         _ = Assert.Throws<InvalidDataException>(() =>
             Create([0x1400_0001], mutableClass: true,
                 classHandleQualifier: 0));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            Create([0x1400_0001], classHandleQualifier: 0x02));
     }
 
     private static ConstructionResult Create(uint[] memberDefIds,
@@ -119,14 +121,14 @@ internal sealed class TrRmConstructionClauseTests
         var handleQualifier = classHandleQualifier
             ?? (mutableClass ? (byte)1 : (byte)0);
         ReadOnlyMemory<byte>[] typeSpecRows = [
-            TrRmTypeSpecTableWriter.Reference(0x02, 1),
-            new byte[] { 0x0C, handleQualifier, 0x8A, 1, 0, 0, 0 },
+            TrRmTypeSpecTableWriter.Reference(0x02, 1,
+                handleQualifier),
         ];
         var typeSpecBytes = TrRmTypeSpecTableWriter.Encode(typeSpecRows,
             typeDefCount: 1, importCount: 0, genericParamCount: 0,
             nativeFunctionPointerSignatureCount: 0, schema,
             methodDefCount: 2);
-        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes, 2,
+        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes, 1,
             typeDefCount: 1, importCount: 0, genericParamCount: 0,
             nativeFunctionPointerSignatureCount: 0, schema,
             methodDefCount: 2);
@@ -145,8 +147,8 @@ internal sealed class TrRmConstructionClauseTests
         var fields = new TrRmFieldDefTableReader(fieldBytes, 2, strings,
             types, typeSpecs);
         var signatureBytes = TrRmMethodSigTableWriter.Encode([
-            new TrRmMethodSigRow(0xF200_0000, 2, 0, 0, 0, 0),
-            new TrRmMethodSigRow(2, 0, 0, 0, 0, 0),
+            new TrRmMethodSigRow(0xF200_0000, 1, 0, 0, 0, 0),
+            new TrRmMethodSigRow(1, 0, 0, 0, 0, 0),
         ], typeSpecs, paramCount: 0, genericParamCount: 0);
         var signatures = new TrRmMethodSigTableReader(signatureBytes, 2,
             typeSpecs, paramCount: 0, genericParamCount: 0);

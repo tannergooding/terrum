@@ -129,8 +129,11 @@ remain unsupported in this type-only route.
 The exact C1M1 construction successor has a
 class-free emission route and a Construction `0003` reader/writer that checks
 I/P signatures, owner/mutability agreement, direct instance FieldDef
-guarantees, bodyful actuals and bodyless imported expectations. Construction
-successor class member/MethodDef/Body closure, independent carrier TypeSpec
+guarantees, bodyful actuals and bodyless imported expectations. Construction-2
+Body validation now uses direct nominal normal-class TypeSpecs for I receivers,
+P results/contexts and ordinary class receivers; updated fixture regressions
+remain unverified under the active hold. Construction successor class
+member/MethodDef/Body closure, independent carrier TypeSpec
 verification, generic TypeDef dependencies, broader remapping/replacement,
 interfaces/witnesses and runtime execution remain open.
 The checked development and Standard TRRM type-reference

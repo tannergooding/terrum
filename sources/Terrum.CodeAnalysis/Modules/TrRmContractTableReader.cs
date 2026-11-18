@@ -1628,31 +1628,22 @@ public readonly ref struct TrRmContractTableReader
             return false;
         }
 
-        var type = _typeSpecs.GetTypeSpecBytes(typeSpecRef);
-        if (type.Length != 7 || type[0] != 0x0C
-            || type[2] != 0x8A || type[1] is not (0 or 1))
+        var type = _typeSpecs.GetTypeSpecRef(typeSpecRef);
+        if (!type.IsRow || type.Form is not (0x02 or 0x03)
+            || (type.Qualifiers & ~0x01) != 0)
         {
             return false;
         }
 
-        var classTypeSpecRef = Read(type, 3);
-        var classTypeSpec = _typeSpecs.GetTypeSpecRef(classTypeSpecRef);
-        if (!classTypeSpec.IsRow || classTypeSpec.Form != 0x02
-            || classTypeSpec.Qualifiers != 0)
-        {
-            return false;
-        }
-
-        var classType = _typeSpecs.GetRow(classTypeSpec.Row);
-        if (classType.Length != 6
-            || Read(classType, 2) != (uint)typeDefRow
+        if (_typeSpecs.GetNominalTypeDefRow(typeSpecRef, _types,
+                _imports) != typeDefRow
             || !_types.TryGetDeclaredClassMutability(typeDefRow,
                 out var isMutable))
         {
             return false;
         }
 
-        return type[1] == (isMutable ? 1 : 0);
+        return type.Qualifiers == (isMutable ? (byte)0x01 : (byte)0);
     }
 
     private bool IsExpectedMethodRow(int methodRow)

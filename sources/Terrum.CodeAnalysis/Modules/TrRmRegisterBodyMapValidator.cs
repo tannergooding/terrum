@@ -672,7 +672,7 @@ internal static class TrRmRegisterBodyMapValidator
                     }
                     ValidateConstructionContextHome(body, methodDefRow,
                         ownerModule, typeMapIndex, types, methods,
-                        typeSpecs, contracts);
+                        typeSpecs, imports, contracts);
                     break;
             }
         }
@@ -799,6 +799,7 @@ internal static class TrRmRegisterBodyMapValidator
         int typeMapIndex, TrRmTypeDefTableReader types,
         TrRmMethodDefTableReader methods,
         TrRmTypeSpecTableReader typeSpecs,
+        TrRmImportTableReader imports,
         TrRmContractTableReader contracts)
     {
         var ownerType = methods.GetOwnerType(methodDefRow);
@@ -817,37 +818,21 @@ internal static class TrRmRegisterBodyMapValidator
             throw InvalidMap();
         }
 
-        var typeSpec = typeSpecs.GetTypeSpecBytes(
-            GetTypeMapTypeSpecRef(body, typeMapIndex));
-        if (typeSpec.Length != 7 || typeSpec[0] != 0x0C
-            || (typeSpec[1] & 0x06) != 0
-            || typeSpec[2] != 0x8A)
+        if (!TryGetNormalClassHandleTypeSpec(
+                GetTypeMapTypeSpecRef(body, typeMapIndex), types, typeSpecs,
+                imports, out var contextTypeDef,
+                out var contextQualifiers))
         {
             throw InvalidMap();
         }
 
-        var classType = typeSpecs.GetTypeSpecRef(
-            ReadUInt32(body, typeSpec, 3));
-        if (!classType.IsRow || classType.Form != 0x02
-            || classType.Qualifiers != 0)
-        {
-            throw InvalidMap();
-        }
-
-        var classTypeRow = typeSpecs.GetRow(classType.Row);
-        if (classTypeRow.Length != 6 || classTypeRow[0] != 0x02)
-        {
-            throw InvalidMap();
-        }
-
-        var contextTypeDef = checked((int)ReadUInt32(body, classTypeRow, 2));
         if (contextTypeDef <= 0 || contextTypeDef > types.Count
             || types.GetKind(contextTypeDef) != 2
             || types.GetOwnerModule(contextTypeDef) != ownerModule
             || (callerRole == 2 && contextTypeDef != ownerType)
             || !types.TryGetDeclaredClassMutability(contextTypeDef,
                 out var isMutable)
-            || typeSpec[1] != (isMutable ? 1 : 0))
+            || contextQualifiers != (isMutable ? (byte)0x01 : (byte)0))
         {
             throw InvalidMap();
         }
@@ -3691,19 +3676,9 @@ internal static class TrRmRegisterBodyMapValidator
         TrRmTypeSpecTableReader typeSpecs, TrRmImportTableReader imports,
         out int classTypeDefRow, out byte qualifiers)
     {
-        var typeSpec = typeSpecs.GetTypeSpecBytes(typeSpecRef);
-        if (typeSpec.Length != 7 || typeSpec[0] != 0x0C
-            || typeSpec[2] != 0x8A || (typeSpec[1] & 0x06) != 0)
-        {
-            classTypeDefRow = 0;
-            qualifiers = 0;
-            return false;
-        }
-
-        var classTypeSpecRef = ReadUInt32(typeSpec, 3);
-        var classType = typeSpecs.GetTypeSpecRef(classTypeSpecRef);
-        if (!classType.IsRow || classType.Form is not (0x02 or 0x03)
-            || classType.Qualifiers != 0)
+        var typeSpec = typeSpecs.GetTypeSpecRef(typeSpecRef);
+        if (!typeSpec.IsRow || typeSpec.Form is not (0x02 or 0x03)
+            || (typeSpec.Qualifiers & ~0x01) != 0)
         {
             classTypeDefRow = 0;
             qualifiers = 0;
@@ -3711,8 +3686,8 @@ internal static class TrRmRegisterBodyMapValidator
         }
 
         classTypeDefRow = typeSpecs.GetNominalTypeDefRow(
-            classTypeSpecRef, types, imports);
-        qualifiers = typeSpec[1];
+            typeSpecRef, types, imports);
+        qualifiers = typeSpec.Qualifiers;
         return types.GetKind(classTypeDefRow) == 2;
     }
 

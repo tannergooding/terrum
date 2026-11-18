@@ -179,6 +179,18 @@ internal sealed class TrRmObjectConstructionBodyTests
     }
 
     [Test]
+    public void RejectsGcClassConstructionContexts()
+    {
+        _ = Assert.Throws<InvalidDataException>(() =>
+            ValidateProjectionBody([
+                0xED, 0, 1, 0,
+                0xE0, 0, 2, 0,
+                0xED, 0, 3, 0,
+                0xB8, 1,
+            ], classTypeQualifiers: 0x02));
+    }
+
+    [Test]
     public void ReadsFinalFieldsThroughTheUnpublishedConstructionContext()
     {
         ValidateProjectionBody([
@@ -785,7 +797,8 @@ internal sealed class TrRmObjectConstructionBodyTests
         bool publishToRegister = false,
         bool ordinaryMethodHasParameter = false,
         bool initializerIsImported = false,
-        bool ordinaryMethodReturnsClass = false)
+        bool ordinaryMethodReturnsClass = false,
+        byte classTypeQualifiers = 0)
     {
         var featureRows = new[] {
             TrRmFeatureRow.PublishedPredicates,
@@ -829,20 +842,18 @@ internal sealed class TrRmObjectConstructionBodyTests
                 strings, modules)
             : default;
         var typeSpecRows = new List<ReadOnlyMemory<byte>> {
-            TrRmTypeSpecTableWriter.Reference(0x02, 1),
-            new byte[] {
-                0x0C, (byte)(mutableClass ? 1 : 0), 0x8A, 1, 0, 0, 0,
-            },
+            TrRmTypeSpecTableWriter.Reference(0x02, 1,
+                (byte)(classTypeQualifiers
+                    | (mutableClass ? 0x01 : 0))),
         };
-        var ordinaryReceiverTypeSpecRef = 2u;
+        var ordinaryReceiverTypeSpecRef = 1u;
         if (callOrdinaryClassMethod
             && mutableClass != ordinaryReceiverWritable)
         {
-            typeSpecRows.Add(new byte[] {
-                0x0C, (byte)(ordinaryReceiverWritable ? 1 : 0),
-                0x8A, 1, 0, 0, 0,
-            });
-            ordinaryReceiverTypeSpecRef = 3;
+            ordinaryReceiverTypeSpecRef = checked(
+                (uint)typeSpecRows.Count + 1);
+            typeSpecRows.Add(TrRmTypeSpecTableWriter.Reference(0x02, 1,
+                ordinaryReceiverWritable ? (byte)0x01 : (byte)0));
         }
         var typeSpecBytes = TrRmTypeSpecTableWriter.Encode(typeSpecRows,
             1, 0, 0, 0, Schema,
@@ -864,8 +875,8 @@ internal sealed class TrRmObjectConstructionBodyTests
         var fields = new TrRmFieldDefTableReader(fieldBytes, 1, strings,
             types, typeSpecs);
         var signatureRows = new List<TrRmMethodSigRow> {
-            new(0xF200_0000, 2, 1, 1, 0, 0),
-            new(2, 0, 2, 1, 0, 0),
+            new(0xF200_0000, 1, 1, 1, 0, 0),
+            new(1, 0, 2, 1, 0, 0),
         };
         if (callOrdinaryClassMethod)
         {
@@ -985,7 +996,7 @@ internal sealed class TrRmObjectConstructionBodyTests
         homes[8] = 2;
         BinaryPrimitives.WriteUInt16LittleEndian(homes.AsSpan(10), 1);
         var typeMap = new byte[8];
-        BinaryPrimitives.WriteUInt32LittleEndian(typeMap, 0x1100_0002);
+        BinaryPrimitives.WriteUInt32LittleEndian(typeMap, 0x1100_0001);
         BinaryPrimitives.WriteUInt32LittleEndian(typeMap.AsSpan(4),
             0xF200_0008);
         var entryState = new byte[8];
@@ -1044,7 +1055,7 @@ internal sealed class TrRmObjectConstructionBodyTests
         BinaryPrimitives.WriteUInt16LittleEndian(homes.AsSpan(18), 1);
         BinaryPrimitives.WriteUInt16LittleEndian(homes.AsSpan(20), 0);
         var typeMap = new byte[8];
-        BinaryPrimitives.WriteUInt32LittleEndian(typeMap, 0x1100_0002);
+        BinaryPrimitives.WriteUInt32LittleEndian(typeMap, 0x1100_0001);
         BinaryPrimitives.WriteUInt32LittleEndian(typeMap.AsSpan(4),
             0xF200_0008);
         var methodMap = new byte[
