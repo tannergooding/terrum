@@ -1021,6 +1021,92 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 .Identity).Value.Declaration.Site.DefinitionId,
             Is.EqualTo(relocatedShadeDefinition));
 
+        var relocatedMiddleTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public struct Padding { public int32 Value; }
+                public struct Wrapper { public Leaf Child; }
+                public struct WrapperTwin { public Leaf Child; }
+            }
+            """);
+        var relocatedMiddleCompilation = Compilation.CreateLibrary(
+            relocatedMiddleTree, leafReference);
+        Assert.That(relocatedMiddleCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                relocatedMiddleCompilation.Diagnostics));
+        var relocatedMiddleProgram
+            = (BoundProgram)relocatedMiddleCompilation.Program!;
+        var relocatedMiddleArtifact = TrRmExecutableCompiler.EmitStandard(
+            relocatedMiddleProgram, "StructMiddleProvider", schemaIdentity,
+            1, [
+                new TrRmSourceTypeExport("Demo", "Padding",
+                    "type.padding"),
+                wrapperExport,
+                wrapperTwinExport,
+            ], [], [], []);
+        var relocatedMiddleTables
+            = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                    relocatedMiddleArtifact, SchemaFor(schemaIdentity)));
+        var originalWrapperDefinition
+            = middleTables.Exports.GetExportsForModule(1)
+                .Single(static export =>
+                    export.ExportKey == "type.wrapper").Definition;
+        var relocatedWrapperDefinition
+            = relocatedMiddleTables.Exports.GetExportsForModule(1)
+                .Single(static export =>
+                    export.ExportKey == "type.wrapper").Definition;
+        var originalWrapperFieldDefinition
+            = middleTables.Exports.GetExportsForModule(1)
+                .Single(static export =>
+                    export.ExportKey == "field.wrapper.child").Definition;
+        var relocatedWrapperFieldDefinition
+            = relocatedMiddleTables.Exports.GetExportsForModule(1)
+                .Single(static export =>
+                    export.ExportKey == "field.wrapper.child").Definition;
+        Assert.That(relocatedWrapperDefinition,
+            Is.Not.EqualTo(originalWrapperDefinition));
+        Assert.That(relocatedWrapperFieldDefinition,
+            Is.Not.EqualTo(originalWrapperFieldDefinition));
+
+        var relocatedMiddleInput = new TrRmStandardArtifactInput(
+            schemaIdentity, relocatedMiddleArtifact);
+        var relocatedMiddleProviders = new[] {
+            relocatedMiddleInput, leafInput,
+        };
+        var relocatedMiddleReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                consumerInput, "StructConsumer", relocatedMiddleProviders,
+                ["type.packet"]);
+        var remappedWrapper = relocatedMiddleReference.Structures.Single(
+            static structure => structure.Name == "Demo.Wrapper");
+        Assert.That(remappedWrapper.StandardTypeOrigin!.DefinitionId,
+            Is.EqualTo(relocatedWrapperDefinition));
+        Assert.That(remappedWrapper.Fields.Single(
+            static field => field.Name == "Child")
+            .StandardFieldOrigin!.DefinitionId,
+            Is.EqualTo(relocatedWrapperFieldDefinition));
+        var relocatedMiddleSourceFree = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), relocatedMiddleReference);
+        Assert.That(relocatedMiddleSourceFree.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                relocatedMiddleSourceFree.Diagnostics));
+        var relocatedMiddleReemitted = TrRmExecutableCompiler.EmitStandard(
+            relocatedMiddleSourceFree.Program!, "StructConsumer",
+            schemaIdentity, 1);
+        var relocatedMiddleReloaded
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    relocatedMiddleReemitted), "StructConsumer",
+                relocatedMiddleProviders, ["type.packet"]);
+        var reloadedWrapper = relocatedMiddleReloaded.Structures.Single(
+            static structure => structure.Name == "Demo.Wrapper");
+        Assert.That(reloadedWrapper.StandardTypeOrigin!.DefinitionId,
+            Is.EqualTo(relocatedWrapperDefinition));
+        Assert.That(reloadedWrapper.Fields.Single(
+            static field => field.Name == "Child")
+            .StandardFieldOrigin!.DefinitionId,
+            Is.EqualTo(relocatedWrapperFieldDefinition));
+
         var incompatibleLeafTree = SyntaxTree.Parse("""
             namespace Demo {
                 public enum Shade : int8 { Dark = -1 }
