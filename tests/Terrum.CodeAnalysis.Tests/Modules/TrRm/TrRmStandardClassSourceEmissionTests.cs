@@ -707,6 +707,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     int32 copy = value;
                     return copy;
                 }
+                public int32 XorThroughLocal(int32 left, int32 right) {
+                    int32 copy = left;
+                    return copy ^ right;
+                }
             }
             """);
         var compilation = Compilation.CreateLibrary(tree);
@@ -732,6 +736,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name == "CopyThroughLocal"));
+        var xorThroughLocal = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "XorThroughLocal"));
         var artifact = TrRmExecutableCompiler.EmitStandard(program,
             "ClassInstanceXor", C1M1Construction2SchemaIdentity,
             TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
@@ -750,6 +758,8 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                             xorAfterCall.Span, "Box.XorAfterCall"),
                         new TrRmSourceClassMemberExport(0,
                             copyThroughLocal.Span, "Box.CopyThroughLocal"),
+                        new TrRmSourceClassMemberExport(0,
+                            xorThroughLocal.Span, "Box.XorThroughLocal"),
                     ]),
             ]);
         var tables = TrRmStructuralMetadataValidator
@@ -817,6 +827,30 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 0xD6, 0x10, 2, 0,
                 0xEB, 0, 2, 0,
             }));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.XorThroughLocal", out var xorLocalDefinition), Is.True);
+        var xorLocalMethodRow
+            = checked((int)(xorLocalDefinition & 0x00FF_FFFF));
+        var xorLocalBodyRow = tables.Methods.GetBodyRow(xorLocalMethodRow);
+        Assert.That(xorLocalBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(xorLocalBodyRow,
+            tables.Contracts.Count);
+        var xorLocalBody = tables.Bodies.GetRegisterBody(xorLocalBodyRow,
+            tables.Contracts.Count);
+        Assert.That(xorLocalBody.HomeCount, Is.EqualTo(4));
+        Assert.That(xorLocalBody.HomeMap[0], Is.EqualTo(1));
+        Assert.That(xorLocalBody.HomeMap[8], Is.EqualTo(2));
+        Assert.That(xorLocalBody.HomeMap[16], Is.EqualTo(2));
+        Assert.That(xorLocalBody.HomeMap[24], Is.EqualTo(3));
+        Assert.That(xorLocalBody.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD5, 0, 1, 0,
+                0xD6, 0x10, 3, 0,
+                0xD5, 0, 3, 0,
+                0xD5, 1, 2, 0,
+                0xC1, 0x03, 0xF0, 0x10,
+                0x17, 0,
+            }));
 
         var reference = TrRmExecutableCompiler.CreateStandardReference(
             new TrRmStandardArtifactInput(C1M1Construction2SchemaIdentity,
@@ -829,6 +863,9 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             }
             int32 UseLocal(Box value) {
                 return value.CopyThroughLocal(4);
+            }
+            int32 UseLocalXor(Box value) {
+                return value.XorThroughLocal(4, 5);
             }
             """), reference);
         Assert.That(consumer.HasErrors, Is.False,
