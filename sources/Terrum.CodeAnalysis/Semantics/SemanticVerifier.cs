@@ -5237,6 +5237,67 @@ public static partial class SemanticVerifier
                 return false;
             }
             case BoundFieldAssignment fieldAssignment:
+                if ((uint)fieldAssignment.Variable
+                        < (uint)initialized.Length
+                    && !fieldAssignment.NestedFields.IsDefault
+                    && fieldAssignment.NestedFields.IsEmpty
+                    && BoundStandardClassDeclarationContract
+                        .TryGetSelectedConstruction2ClassDeclaration(
+                            function.Variables[
+                                fieldAssignment.Variable].Type,
+                            program.GenericNominalTypeInstances,
+                            program.GenericNominalTypeDefinitions,
+                            program.StandardClassDeclarations,
+                            out var standardClass))
+                {
+                    var standardClassType
+                        = function.Variables[
+                            fieldAssignment.Variable].Type;
+                    var standardClassInstance
+                        = program.GenericNominalTypeInstances[
+                            BoundGenericNominalTypeTypes.Index(
+                                standardClassType)];
+                    if ((uint)fieldAssignment.Field
+                            >= (uint)standardClass.Declaration.Fields.Length)
+                    {
+                        throw Invalid(fieldAssignment.Span);
+                    }
+
+                    var standardClassField
+                        = standardClass.Declaration.Fields[
+                            fieldAssignment.Field];
+                    if (!initialized[fieldAssignment.Variable]
+                        || HasActiveInitializationReservationForPlace(
+                            fieldAssignment.Variable,
+                            StorageProjection.WholeObject, initialized)
+                        || (standardClassInstance.Qualifiers & 0x01) == 0
+                        || (standardClass.Declaration.TypeDefFlags
+                            & 0x80) == 0
+                        || (standardClassField.Flags & 3) != 2
+                        || (standardClassField.Flags & 0x08) != 0
+                        || (standardClassField.Flags & 0x04) == 0
+                        || standardClassField.SelectedExportKeys.IsEmpty
+                        || !PrimitiveTypeFacts.IsBuiltInScalar(
+                            standardClassField.Type)
+                        || standardClassField.Type
+                            != fieldAssignment.Value.Type
+                        || fieldAssignment.IsUnsafeAuthorized
+                        || fieldAssignment.IsInitializationAuthority)
+                    {
+                        throw Invalid(fieldAssignment.Span);
+                    }
+
+                    if (!EvaluateExpression(fieldAssignment.Value,
+                            initialized, fieldMasks, declarations, function,
+                            program, ref remaining, depth + 1, failures,
+                            cleanupCounterStep: cleanupCounterStep))
+                    {
+                        return true;
+                    }
+
+                    return false;
+                }
+
                 if (fieldAssignment.Variable < 0 || fieldAssignment.Variable >= initialized.Length
                     || (!function.Variables[fieldAssignment.Variable].IsMutable
                         && !ManagedClassTypes.IsClass(function.Variables[fieldAssignment.Variable].Type))

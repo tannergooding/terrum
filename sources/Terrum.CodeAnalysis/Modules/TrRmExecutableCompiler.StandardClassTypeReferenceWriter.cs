@@ -52,7 +52,8 @@ public static partial class TrRmExecutableCompiler
 
     private readonly record struct C1M1Construction2NestedFieldWrite(
         ImmutableArray<int> FieldDefRows,
-        ImmutableArray<PrimitiveType> FieldTypes);
+        ImmutableArray<PrimitiveType> FieldTypes,
+        int BaseVariableIndex);
 
     private readonly record struct C1M1ParameterSurfaceRow(
         int MethodDefRow, int Ordinal, string Name,
@@ -1311,8 +1312,16 @@ public static partial class TrRmExecutableCompiler
                             && TryGetC1M1Construction2DirectFieldWrite(
                                 methodFunction,
                                 out directFieldWriteIndex);
-                    var nestedFieldWrite
+                    C1M1Construction2NestedFieldWrite? nestedFieldWrite
                         = !isSupportedDirectFieldWriteInstanceMethod
+                            ? TryGetC1M1Construction2ImportedClassFieldWrite(
+                                program, methodFunction,
+                                standardClassIndexByIdentity,
+                                typeImportPlanByStandardClass,
+                                fieldDefRowByStandardClassAndIndex)
+                            : null;
+                    nestedFieldWrite ??=
+                        !isSupportedDirectFieldWriteInstanceMethod
                             ? TryGetC1M1Construction2NestedFieldWrite(
                                 program, methodFunction, classIndex,
                                 sourceStructDeclarations,
@@ -1473,8 +1482,16 @@ public static partial class TrRmExecutableCompiler
 
                             if (!isUnitParameter)
                             {
-                                _ = GetC1M1SourceScalarTypeSpecReference(
-                                    variable.Type);
+                                if (!TryGetC1M1SourceScalarTypeSpecReference(
+                                        variable.Type, out _)
+                                    && !TryGetC1M1ImportedClassFieldType(
+                                        variable.Type, program,
+                                        standardClassIndexByIdentity,
+                                        out _, out _))
+                                {
+                                    throw Unsupported(
+                                        "The bounded Construction-2 static method producer supports scalar or selected imported class-handle value parameters.");
+                                }
                             }
                         }
                     }
@@ -1512,8 +1529,16 @@ public static partial class TrRmExecutableCompiler
 
                             if (!isUnitParameter)
                             {
-                                _ = GetC1M1SourceScalarTypeSpecReference(
-                                    variable.Type);
+                                if (!TryGetC1M1SourceScalarTypeSpecReference(
+                                        variable.Type, out _)
+                                    && !TryGetC1M1ImportedClassFieldType(
+                                        variable.Type, program,
+                                        standardClassIndexByIdentity,
+                                        out _, out _))
+                                {
+                                    throw Unsupported(
+                                        "The bounded Construction-2 instance method producer supports scalar or selected imported class-handle value parameters.");
+                                }
                             }
                         }
                     }
@@ -3890,10 +3915,13 @@ public static partial class TrRmExecutableCompiler
         Func<PrimitiveType, uint> typeSpecReferenceFor,
         int contractCount, TrRmArtifactSchema schema)
     {
-        if (function.IsStatic || function.ParameterCount != 2
+        if (function.ParameterCount != 2
             || function.Variables.Length != 2
-            || !function.Variables[0].IsMutable
-            || fieldWrite.FieldDefRows.Length < 2
+            || fieldWrite.BaseVariableIndex != 0
+            || (function.IsStatic
+                ? fieldWrite.FieldDefRows.Length != 1
+                : !function.Variables[0].IsMutable
+                    || fieldWrite.FieldDefRows.Length < 2)
             || fieldWrite.FieldDefRows.Length
                 != fieldWrite.FieldTypes.Length
             || fieldWrite.FieldTypes[^1]
@@ -3922,13 +3950,14 @@ public static partial class TrRmExecutableCompiler
         for (var index = 0; index < function.ParameterCount; index++)
         {
             var home = homeMap.AsSpan(index * 8, 8);
-            home[0] = index == 0 ? (byte)1 : (byte)2;
+            var isReceiver = !function.IsStatic && index == 0;
+            home[0] = isReceiver ? (byte)1 : (byte)2;
             BinaryPrimitives.WriteUInt16LittleEndian(home[2..],
                 checked((ushort)maps.GetTypeMapIndex(typeTokens[index])));
-            if (index != 0)
+            if (!isReceiver)
             {
                 BinaryPrimitives.WriteUInt16LittleEndian(home[4..],
-                    checked((ushort)(index - 1)));
+                    checked((ushort)(index - (function.IsStatic ? 0 : 1))));
             }
         }
 
@@ -3951,7 +3980,9 @@ public static partial class TrRmExecutableCompiler
                 targetKind: 2, accessKind: 2, destinationKind: 1,
                 baseKind: index == 0 ? (byte)2 : (byte)1,
                 destinationIndex: 1,
-                baseIndex: index == 0 ? (ushort)0 : (ushort)1,
+                baseIndex: index == 0
+                    ? checked((ushort)fieldWrite.BaseVariableIndex)
+                    : (ushort)1,
                 indexKind: 0, targetRefKind: 1, indexIndex: 0,
                 targetRef: checked((uint)fieldWrite.FieldDefRows[index]),
                 referentTypeMapIndex: checked((ushort)
@@ -5770,6 +5801,115 @@ public static partial class TrRmExecutableCompiler
     }
 
     private static C1M1Construction2NestedFieldWrite?
+        TryGetC1M1Construction2ImportedClassFieldWrite(
+            BoundProgram program, BoundFunction function,
+            IReadOnlyDictionary<BoundGenericNominalTypeIdentity, int>
+                standardClassIndexByIdentity,
+            IReadOnlyDictionary<int, C1M1ImportedClassImportPlan>
+                typeImportPlanByStandardClass,
+            IReadOnlyDictionary<(int StandardClassIndex, int FieldIndex),
+                int> fieldDefRowByStandardClassAndIndex)
+    {
+        if (!function.IsStatic || function.ReturnType != PrimitiveType.Void
+            || function.ParameterCount != 2
+            || function.Variables.Length != 2
+            || !function.Body.RetiredManagedLocals.IsEmpty)
+        {
+            return null;
+        }
+
+        BoundFieldAssignment? assignment = null;
+        var returned = false;
+        var isSupported = true;
+        Visit(function.Body);
+        if (!isSupported || assignment is null
+            || assignment.Variable != 0
+            || !assignment.NestedFields.IsEmpty
+            || assignment.NestedFields.IsDefault
+            || assignment.IsUnsafeAuthorized
+            || assignment.Value is not BoundRead value
+            || value.Variable != 1
+            || value.Type != function.Variables[1].Type
+            || !returned
+            || !TryGetC1M1ImportedClassFieldType(
+                function.Variables[0].Type, program,
+                standardClassIndexByIdentity,
+                out var standardClassIndex, out var instanceIndex)
+            || !typeImportPlanByStandardClass.TryGetValue(
+                standardClassIndex, out var importPlan))
+        {
+            return null;
+        }
+
+        var classDeclaration
+            = program.StandardClassDeclarations[standardClassIndex]
+                .Declaration;
+        var classTypeInstance
+            = program.GenericNominalTypeInstances[instanceIndex];
+        if ((classTypeInstance.Qualifiers & 0x01) == 0
+            || (classDeclaration.TypeDefFlags & 0x80) == 0
+            || (uint)assignment.Field >= (uint)classDeclaration.Fields.Length)
+        {
+            return null;
+        }
+
+        var field = classDeclaration.Fields[assignment.Field];
+        if ((field.Flags & 3) != 2 || (field.Flags & 0x08) != 0
+            || (field.Flags & 0x04) == 0
+            || field.SelectedExportKeys.IsEmpty
+            || field.Type != value.Type
+            || !TryGetC1M1SourceScalarTypeSpecReference(field.Type, out _)
+            || !IsC1M1ImportedClassFieldImportable(classDeclaration,
+                field, importPlan)
+            || !fieldDefRowByStandardClassAndIndex.TryGetValue((
+                standardClassIndex, assignment.Field), out var fieldDefRow))
+        {
+            return null;
+        }
+
+        return new C1M1Construction2NestedFieldWrite(
+            [fieldDefRow], [field.Type], 0);
+
+        void Visit(BoundBlock block)
+        {
+            if (!block.RetiredManagedLocals.IsEmpty)
+            {
+                isSupported = false;
+                return;
+            }
+
+            foreach (var statement in block.Statements)
+            {
+                if (!isSupported || returned)
+                {
+                    isSupported = false;
+                    return;
+                }
+
+                if (statement is BoundBlock nested)
+                {
+                    Visit(nested);
+                }
+                else if (statement is BoundFieldAssignment fieldWrite
+                    && assignment is null)
+                {
+                    assignment = fieldWrite;
+                }
+                else if (statement is BoundReturn { Value: null }
+                    && assignment is not null)
+                {
+                    returned = true;
+                }
+                else
+                {
+                    isSupported = false;
+                    return;
+                }
+            }
+        }
+    }
+
+    private static C1M1Construction2NestedFieldWrite?
         TryGetC1M1Construction2NestedFieldWrite(
             BoundProgram program, BoundFunction function, int classIndex,
             IReadOnlyDictionary<int, BoundSourceTypeDeclaration>
@@ -5906,7 +6046,7 @@ public static partial class TrRmExecutableCompiler
 
         return new C1M1Construction2NestedFieldWrite(
             fieldDefRows.MoveToImmutable(),
-            fieldTypes.MoveToImmutable());
+            fieldTypes.MoveToImmutable(), 0);
 
         void Visit(BoundBlock block)
         {

@@ -6286,11 +6286,14 @@ internal static class TrRmRegisterBodyMapValidator
         var fieldFlags = fields.GetFlags(fieldRow);
         var memberDefId = 0x1400_0000u | checked((uint)fieldRow);
         var isInitializedMember = false;
-        foreach (var initializedMember
-            in construction.InitializedMemberDefIds)
+        if (!construction.InitializedMemberDefIds.IsDefaultOrEmpty)
         {
-            ConsumeWork(body);
-            isInitializedMember |= initializedMember == memberDefId;
+            foreach (var initializedMember
+                in construction.InitializedMemberDefIds)
+            {
+                ConsumeWork(body);
+                isInitializedMember |= initializedMember == memberDefId;
+            }
         }
 
         var originsMatch = true;
@@ -6300,6 +6303,49 @@ internal static class TrRmRegisterBodyMapValidator
             originsMatch &= origin.RootHomeIndex == contextHomeIndex
                 && origin.PlaceSelectionRecordIndex
                     == selectionRecordIndex;
+        }
+
+        if (ReadByte(body, selection, 1) == 2
+            && ReadByte(body, contextHome, 0) == 2
+            && construction.RoleTag == 0)
+        {
+            var contextTypeSpecRef = GetTypeMapTypeSpecRef(body,
+                ReadUInt16(body, contextHome, 2));
+            if (place.AccessKind != 2
+                || !originsMatch
+                || ReadByte(body, store, 2) != 2
+                || ReadByte(body, store, 3) != 1
+                || ReadUInt32(body, store, 8) != 0
+                || ReadByte(body, store, 12) != 0
+                || ReadByte(body, store, 13) != 0
+                || ReadUInt16(body, store, 14) != 0
+                || ReadByte(body, contextHome, 1) != 0
+                || ReadUInt16(body, contextHome, 6) != 0
+                || methods.GetOwnerModule(methodDefRow)
+                    != types.GetOwnerModule(fieldOwnerType)
+                || types.GetKind(fieldOwnerType) != 2
+                || (fieldFlags & 0x08) != 0
+                || (fieldFlags & 3) != 2
+                || (fieldFlags & 0x04) == 0
+                || !TryGetNormalClassHandleTypeSpec(contextTypeSpecRef,
+                    types, typeSpecs, imports, out var contextClassType,
+                    out var contextClassQualifiers)
+                || contextClassType != fieldOwnerType
+                || (contextClassQualifiers & 0x01) == 0
+                || (types.GetFlags(contextClassType) & 0x80) == 0
+                || !typeSpecs.AreEquivalentTypeSpecRefs(
+                    sourceTypeSpecRef, fieldTypeSpecRef)
+                || !IsCopyableRegisterValueType(typeSpecs,
+                    sourceTypeSpecRef, constantValues, body.Schema)
+                || !typeSpecs.AreEquivalentTypeSpecRefs(
+                    fieldTypeSpecRef,
+                    GetTypeMapTypeSpecRef(body,
+                        ReadUInt16(body, selection, 16))))
+            {
+                throw InvalidMap();
+            }
+
+            return true;
         }
 
         if (ReadByte(body, selection, 1) != 3
@@ -7283,7 +7329,7 @@ internal static class TrRmRegisterBodyMapValidator
         var contextTypeSpec = typeSpecs.GetTypeSpecBytes(
             contextTypeSpecRef);
         if (contextRole == 2 && construction.RoleTag == 0
-            && accessKind == 1)
+            && accessKind is 1 or 2)
         {
             if (ReadByte(body, contextHome, 1) != 0
                 || ReadUInt16(body, contextHome, 6) != 0
@@ -7294,8 +7340,12 @@ internal static class TrRmRegisterBodyMapValidator
                 || (fieldFlags & 3) != 2
                 || !TryGetNormalClassHandleTypeSpec(contextTypeSpecRef,
                     types, typeSpecs, imports, out var contextClassType,
-                    out _)
-                || contextClassType != fieldOwnerType)
+                    out var contextClassQualifiers)
+                || contextClassType != fieldOwnerType
+                || (accessKind == 2
+                    && ((contextClassQualifiers & 0x01) == 0
+                        || (types.GetFlags(contextClassType) & 0x80) == 0
+                        || (fieldFlags & 0x04) == 0)))
             {
                 throw InvalidMap();
             }

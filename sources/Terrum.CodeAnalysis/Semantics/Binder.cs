@@ -16989,6 +16989,59 @@ internal sealed partial class Binder
             _ = BindExpression(value, null);
             return new BoundBlock([], span);
         }
+        if (fields.Count == 0 && members.Count == 1
+            && BoundStandardClassDeclarationContract
+                .TryGetSelectedConstruction2ClassDeclaration(
+                    _variables[variable].Type,
+                    _genericNominalTypeInstances,
+                    _genericNominalTypeDefinitions,
+                    _standardClassDeclarations,
+                    out var standardClassDeclaration)
+            && TryFindStandardClassField(standardClassDeclaration,
+                members.Peek().Name, out var standardClassFieldIndex,
+                out var standardClassField))
+        {
+            if ((standardClassField.Flags & 3) != 2
+                || (standardClassField.Flags & 8) != 0
+                || standardClassField.SelectedExportKeys.IsEmpty)
+            {
+                Report("TRM3008",
+                    $"Field '{members.Peek().Text}' is not an accessible public instance FieldDef with a selected ExportKey.",
+                    members.Peek().Span);
+                _ = BindExpression(value, standardClassField.Type);
+                return new BoundBlock([], span);
+            }
+
+            var classType = _variables[variable].Type;
+            var instanceIndex = BoundGenericNominalTypeTypes.Index(classType);
+            var classTypeInstance
+                = _genericNominalTypeInstances[instanceIndex];
+            if ((classTypeInstance.Qualifiers & 0x01) == 0
+                || (standardClassDeclaration.Declaration.TypeDefFlags
+                    & 0x80) == 0
+                || (standardClassField.Flags & 0x04) == 0)
+            {
+                Report("TRM3008",
+                    $"Field '{members.Peek().Text}' requires a write-qualified mutable class handle and mutable FieldDef.",
+                    members.Peek().Span);
+                _ = BindExpression(value, standardClassField.Type);
+                return new BoundBlock([], span);
+            }
+            if (!PrimitiveTypeFacts.IsBuiltInScalar(
+                    standardClassField.Type))
+            {
+                Report("TRM3005",
+                    $"Field '{members.Peek().Text}' has an unsupported TypeSpec for the bounded class-field write Body.",
+                    members.Peek().Span);
+                _ = BindExpression(value, standardClassField.Type);
+                return new BoundBlock([], span);
+            }
+
+            var boundValue = BindExpression(value, standardClassField.Type);
+            return new BoundFieldAssignment(variable,
+                standardClassFieldIndex, boundValue, span);
+        }
+
         var type = _variables[variable].Type;
         var isUnsafeAuthorized = false;
         if (fields.Count != 0)

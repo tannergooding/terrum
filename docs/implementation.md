@@ -138,14 +138,18 @@ in method signatures, including root-owned imported TypeDef expectations.
 Readonly methods can read one selected public field through readonly or
 write-qualified imported class-handle formals; source binding, mandatory
 verification, Body-01 D8/DA
-encoding and exact FieldDef/owner TypeDef Import checks are implemented.
+encoding and exact FieldDef/owner TypeDef Import checks are implemented. A
+static method can also Copy-store one scalar formal to a selected public
+mutable imported FieldDef through a write-qualified class-handle formal using
+Body-01 D8 and SemanticStore.
 Direct producer/consumer/provider-replacement and unselected-field rejection,
 plus a Leaf-to-Wrapper-to-Container provider-chain regression covering
-compatible TypeDef-row relocation and incompatible replacement, are added but
-remain unverified under the active hold. Further provider alias/closure cases,
-optional or writable wrappers, nested imported-class
-dereferences, mutable imported field stores, aggregate stores and source-free
-class member re-emission remain open.
+compatible TypeDef-row relocation and incompatible replacement, plus
+write-qualified field-store and readonly-authority rejection regressions, are
+added but remain unverified under the active hold. Further provider
+alias/closure cases, optional wrappers, nested imported-class dereferences,
+aggregate imported-field stores and source-free class member re-emission
+remain open.
 The exact C1M1 construction successor has a
 class-free emission route and a Construction `0003` reader/writer that checks
 I/P signatures, owner/mutability agreement, direct instance FieldDef

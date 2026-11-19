@@ -496,6 +496,161 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
     }
 
     [Test]
+    public void EmitsMutableStoresThroughWritableImportedClassHandles()
+    {
+        var schemaIdentity
+            = C1M1Construction2ClassParameterDefaultsSchemaIdentity;
+        var provider = CreateClassArtifact("ClassProvider", "Leaf",
+            "LeafKey", 0xF200_0008, schemaIdentity, layoutKind: 0, pack: 0,
+            fieldExportKey: "Leaf.Value", fieldFlags: 0x06);
+        SetTypeDefFlags(provider, 0x8A);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, provider),
+            "ClassProvider", [], ["LeafKey"], ["Leaf.Value"]);
+
+        var tree = SyntaxTree.Parse("""
+            public class Container {
+                private int32 _seed;
+                public Container(int32 seed) { _seed = seed; }
+                public static void Write(write Leaf leaf, int32 value) {
+                    leaf.Value = value;
+                    return;
+                }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree, reference);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var members = classDeclaration.Children.OfType<SyntaxNode>();
+        var constructor = members.Single(static node =>
+            node.Kind == SyntaxKind.ConstructorDeclaration);
+        var write = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Write"));
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "ImportedClassFieldWrite", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, 0,
+                    classDeclaration.Span, "ContainerKey", [
+                        new TrRmSourceClassMemberExport(0,
+                            constructor.Span, "Container.Initialize") {
+                            ConstructionProjectionExportKey
+                                = "Container.Create",
+                        },
+                        new TrRmSourceClassMemberExport(0, write.Span,
+                            "Container.Write"),
+                    ]),
+            ]);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                        artifact));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Container.Write", out var writeDefinition), Is.True);
+        var writeMethodRow
+            = checked((int)(writeDefinition & 0x00FF_FFFF));
+        var writeBodyRow = tables.Methods.GetBodyRow(writeMethodRow);
+        Assert.That(writeBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(writeBodyRow,
+            tables.Contracts.Count);
+        tables.ValidateRegisterBodyMapsForMethod(writeMethodRow);
+        var writeBody = tables.Bodies.GetRegisterBody(writeBodyRow,
+            tables.Contracts.Count);
+        Assert.That(writeBody.HomeCount, Is.EqualTo(2));
+        Assert.That(writeBody.GetRecord(1)[5], Is.EqualTo(2));
+        Assert.That(writeBody.GetBlockCode(0).ToArray(), Is.EqualTo(
+            new byte[] {
+                0xD8, 1, 1, 0,
+                0xD9, 0, 2, 0,
+                0x18, 0,
+            }));
+        var writeSignature = tables.Methods.GetSignature(writeMethodRow);
+        var (parameterStart, parameterCount)
+            = tables.Signatures.GetParamRange(writeSignature);
+        Assert.That(parameterCount, Is.EqualTo(2));
+        var receiverTypeSpec = tables.TypeSpecs.GetTypeSpecRef(
+            tables.Parameters.GetTypeSpec(parameterStart));
+        Assert.That(receiverTypeSpec.Form, Is.EqualTo((byte)0x03));
+        Assert.That(receiverTypeSpec.Qualifiers, Is.EqualTo((byte)0x01));
+
+        var outputReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, artifact),
+                "ImportedClassFieldWrite", [
+                    new TrRmStandardArtifactInput(schemaIdentity, provider),
+                ], ["ContainerKey"], ["Leaf.Value"]);
+        var consumer = Compilation.CreateLibrary(
+            SyntaxTree.Parse("public void Use(Container value) {}"),
+            outputReference);
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
+
+        var incompatibleProvider = CreateClassArtifact("ClassProvider",
+            "Leaf", "LeafKey", 0xF200_000A, schemaIdentity,
+            layoutKind: 0, pack: 0, fieldExportKey: "Leaf.Value",
+            fieldFlags: 0x06);
+        SetTypeDefFlags(incompatibleProvider, 0x8A);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, artifact),
+                "ImportedClassFieldWrite", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        incompatibleProvider),
+                ], ["ContainerKey"], ["Leaf.Value"]));
+    }
+
+    [Test]
+    public void RejectsImportedClassFieldStoresWithoutWriteAuthority()
+    {
+        var schemaIdentity
+            = C1M1Construction2ClassParameterDefaultsSchemaIdentity;
+        var mutableProvider = CreateClassArtifact("ClassProvider", "Leaf",
+            "LeafKey", 0xF200_0008, schemaIdentity, layoutKind: 0, pack: 0,
+            fieldExportKey: "Leaf.Value", fieldFlags: 0x06);
+        SetTypeDefFlags(mutableProvider, 0x8A);
+        var mutableReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    mutableProvider),
+                "ClassProvider", [], ["LeafKey"], ["Leaf.Value"]);
+        var readonlyHandle = Compilation.CreateLibrary(
+            SyntaxTree.Parse(
+                "public void Write(Leaf leaf, int32 value) { leaf.Value = value; }"),
+            mutableReference);
+        Assert.That(readonlyHandle.HasErrors, Is.True,
+            string.Join(Environment.NewLine, readonlyHandle.Diagnostics));
+        Assert.That(readonlyHandle.Diagnostics.Any(
+            static diagnostic => diagnostic.Code == "TRM3008"), Is.True,
+            string.Join(Environment.NewLine, readonlyHandle.Diagnostics));
+
+        var readonlyFieldProvider = CreateClassArtifact("ClassProvider",
+            "Leaf", "LeafKey", 0xF200_0008, schemaIdentity,
+            layoutKind: 0, pack: 0, fieldExportKey: "Leaf.Value");
+        SetTypeDefFlags(readonlyFieldProvider, 0x8A);
+        var readonlyFieldReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    readonlyFieldProvider),
+                "ClassProvider", [], ["LeafKey"], ["Leaf.Value"]);
+        var readonlyField = Compilation.CreateLibrary(
+            SyntaxTree.Parse(
+                "public void Write(write Leaf leaf, int32 value) { leaf.Value = value; }"),
+            readonlyFieldReference);
+        Assert.That(readonlyField.HasErrors, Is.True,
+            string.Join(Environment.NewLine, readonlyField.Diagnostics));
+        Assert.That(readonlyField.Diagnostics.Any(
+            static diagnostic => diagnostic.Code == "TRM3008"), Is.True,
+            string.Join(Environment.NewLine, readonlyField.Diagnostics));
+    }
+
+    [Test]
     public void ReemitsTransitiveImportedClassTypeProviders()
     {
         var schemaIdentity
@@ -1032,10 +1187,11 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
         string typeName, string exportKey, uint fieldTypeSpecReference,
         string schemaIdentity = C1M1SchemaIdentity,
         byte layoutKind = 1, uint pack = 1,
-        string? fieldExportKey = null)
+        string? fieldExportKey = null, uint fieldFlags = 2)
         => CreateArtifact(moduleIdentity, typeName, exportKey,
             fieldTypeSpecReference, schemaIdentity, null, null, null,
-            layoutKind, pack, fieldExportKey: fieldExportKey);
+            layoutKind, pack, fieldExportKey: fieldExportKey,
+            fieldFlags: fieldFlags);
 
     private static byte[] CreateRelocatedClassProvider(
         string moduleIdentity, string schemaIdentity)
@@ -1085,7 +1241,7 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
         byte[]? importedFieldTypeSpec, byte layoutKind = 1, uint pack = 1,
         string? localDependencyTypeName = null,
         bool useRequestedLayoutForImports = false,
-        string? fieldExportKey = null)
+        string? fieldExportKey = null, uint fieldFlags = 2)
     {
         var seedCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
@@ -1217,12 +1373,12 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
             && localDependencyTypeName is null
             ? new[] {
                 new TrRmFieldDefRow(1, fieldNameRow,
-                    fieldTypeSpecReference, 2),
+                    fieldTypeSpecReference, fieldFlags),
             }
             : importCount == 0
             ? new[] {
                 new TrRmFieldDefRow(1, fieldNameRow,
-                    boxFieldTypeSpecReference, 2),
+                    boxFieldTypeSpecReference, fieldFlags),
                 new TrRmFieldDefRow(2, fieldNameRow,
                     localDependencyFieldTypeSpecReference, 2),
             }
