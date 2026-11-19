@@ -32,7 +32,7 @@ public static partial class TrRmExecutableCompiler
         BoundBinary? CallBinaryExpression = null);
 
     private readonly record struct C1M1Construction2ConditionalReturn(
-        int ConditionVariable, BoundExpression TrueValue,
+        BoundExpression Condition, BoundExpression TrueValue,
         BoundExpression FalseValue);
 
     private readonly record struct C1M1ParameterSurfaceRow(
@@ -2040,14 +2040,10 @@ public static partial class TrRmExecutableCompiler
                         - (function.IsStatic ? 0 : 1)));
         }
 
-        var conditionHome
-            = checked((ushort)conditionalReturn.ConditionVariable);
         var edgeRecordIndex = checked((ushort)1);
-        var conditionCode = new byte[] {
-            0xD5, 0, (byte)conditionHome, (byte)(conditionHome >> 8),
-            0xE4, 0, (byte)edgeRecordIndex,
-            (byte)(edgeRecordIndex >> 8),
-        };
+        var conditionCode
+            = EncodeCondition(conditionalReturn.Condition,
+                edgeRecordIndex);
         var constantRows = new List<TrRmFrozenScalarValueReference>();
         var codeBlocks = new[] {
             conditionCode,
@@ -2086,6 +2082,63 @@ public static partial class TrRmExecutableCompiler
             contractCount: contractCount, schema: schema,
             generalPredicateGraphsInitializationReferenceBodies
                 : schema.UsesGeneralPredicateGraphs());
+
+        byte[] EncodeCondition(BoundExpression condition,
+            ushort edgeIndex)
+        {
+            var instructions = new List<byte>(18);
+            if (condition is BoundRead read)
+            {
+                AppendHomeLoad(instructions, 0, read.Variable);
+            }
+            else if (condition is BoundBinary {
+                         Left: BoundRead left,
+                         Right: BoundRead right,
+                     } comparison
+                     && left.Type == PrimitiveType.Bool
+                     && right.Type == PrimitiveType.Bool)
+            {
+                AppendHomeLoad(instructions, 0, left.Variable);
+                AppendHomeLoad(instructions, 1, right.Variable);
+                const byte destinationRegister = 0;
+                const byte leftRegister = 0;
+                const byte rightRegister = 1;
+                var payload = (ushort)(destinationRegister
+                    | (0x0F << 4) | (leftRegister << 8)
+                    | (rightRegister << 12));
+                instructions.Add(0xC2);
+                instructions.Add(comparison.Operator switch
+                {
+                    TokenKind.EqualsEquals => (byte)0x01,
+                    TokenKind.BangEquals => (byte)0x02,
+                    _ => throw new InvalidDataException(
+                        "A Construction-2 conditional Body has an unsupported Boolean comparison."),
+                });
+                instructions.Add((byte)payload);
+                instructions.Add((byte)(payload >> 8));
+            }
+            else
+            {
+                throw new InvalidDataException(
+                    "A Construction-2 conditional Body lost its checked Boolean condition.");
+            }
+
+            instructions.Add(0xE4);
+            instructions.Add(0);
+            instructions.Add((byte)edgeIndex);
+            instructions.Add((byte)(edgeIndex >> 8));
+            return instructions.ToArray();
+        }
+
+        static void AppendHomeLoad(List<byte> instructions,
+            byte destination, int homeIndex)
+        {
+            var home = checked((ushort)homeIndex);
+            instructions.Add(0xD5);
+            instructions.Add(destination);
+            instructions.Add((byte)home);
+            instructions.Add((byte)(home >> 8));
+        }
 
         byte[] EncodeReturnBlock(BoundExpression value)
         {
@@ -3957,7 +4010,6 @@ public static partial class TrRmExecutableCompiler
             || function.ParameterCount != function.Variables.Length
             || function.Body.Statements.Length != 1
             || function.Body.Statements[0] is not BoundIf conditional
-            || conditional.Condition is not BoundRead condition
             || conditional.Else is null
             || !function.Body.RetiredManagedLocals.IsEmpty
             || !conditional.GenericUniquePropertyWhenTrue.IsEmpty
@@ -3993,8 +4045,8 @@ public static partial class TrRmExecutableCompiler
         var trueReturn = GetSingleScalarReturn(conditional.Then);
         var falseReturn = GetSingleScalarReturn(conditional.Else);
         if (trueReturn is null || falseReturn is null
-            || condition.Type != PrimitiveType.Bool
-            || !IsScalarRead(condition)
+            || conditional.Condition.Type != PrimitiveType.Bool
+            || !IsSupportedCondition(conditional.Condition)
             || trueReturn.Type != function.ReturnType
             || falseReturn.Type != function.ReturnType
             || (function.ReturnType != PrimitiveType.Bool
@@ -4007,7 +4059,7 @@ public static partial class TrRmExecutableCompiler
         }
 
         return new C1M1Construction2ConditionalReturn(
-            condition.Variable, trueReturn, falseReturn);
+            conditional.Condition, trueReturn, falseReturn);
 
         bool IsScalarParameter(int variableIndex)
         {
@@ -4030,6 +4082,27 @@ public static partial class TrRmExecutableCompiler
         bool IsScalarRead(BoundRead read)
             => IsScalarParameter(read.Variable)
                 && function.Variables[read.Variable].Type == read.Type;
+
+        bool IsSupportedCondition(BoundExpression expression)
+        {
+            if (expression is BoundRead read)
+            {
+                return IsScalarRead(read)
+                    && read.Type == PrimitiveType.Bool;
+            }
+
+            return expression is BoundBinary {
+                       Left: BoundRead left,
+                       Right: BoundRead right,
+                   } comparison
+                && comparison.Type == PrimitiveType.Bool
+                && comparison.Operator is (TokenKind.EqualsEquals
+                    or TokenKind.BangEquals)
+                && left.Type == PrimitiveType.Bool
+                && right.Type == PrimitiveType.Bool
+                && IsScalarRead(left)
+                && IsScalarRead(right);
+        }
 
         bool IsScalarReturn(BoundExpression value)
             => value is BoundRead read

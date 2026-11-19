@@ -333,6 +333,11 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     if (condition) { return whenTrue; }
                     else { return whenFalse; }
                 }
+                public static int32 SelectEqual(bool left, bool right,
+                    int32 whenEqual, int32 whenDifferent) {
+                    if (left == right) { return whenEqual; }
+                    else { return whenDifferent; }
+                }
                 public int32 SelectInstance(bool condition, int32 whenTrue) {
                     if (condition) { return whenTrue; }
                     else { return 42; }
@@ -359,6 +364,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name == "SelectInstance"));
+        var selectEqual = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "SelectEqual"));
 
         var artifact = TrRmExecutableCompiler.EmitStandard(program,
             "ConditionalClassMethod", C1M1Construction2SchemaIdentity,
@@ -374,6 +383,8 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                         },
                         new TrRmSourceClassMemberExport(0, select.Span,
                             "Box.Select"),
+                        new TrRmSourceClassMemberExport(0,
+                            selectEqual.Span, "Box.SelectEqual"),
                         new TrRmSourceClassMemberExport(0,
                             selectInstance.Span, "Box.SelectInstance"),
                     ]),
@@ -408,6 +419,27 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         Assert.That(body.GetBlockCode(2).ToArray(),
             Is.EqualTo(new byte[] {
                 0xD5, 0, 2, 0, 0x17, 0,
+            }));
+
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.SelectEqual", out var equalDefinition), Is.True);
+        var equalMethodRow
+            = checked((int)(equalDefinition & 0x00FF_FFFF));
+        var equalBodyRow = tables.Methods.GetBodyRow(equalMethodRow);
+        Assert.That(equalBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(equalBodyRow,
+            tables.Contracts.Count);
+        tables.ValidateRegisterBodyMapsForMethod(equalMethodRow);
+        var equalBody = tables.Bodies.GetRegisterBody(equalBodyRow,
+            tables.Contracts.Count);
+        Assert.That(equalBody.BlockCount, Is.EqualTo(3));
+        Assert.That(equalBody.HomeCount, Is.EqualTo(4));
+        Assert.That(equalBody.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD5, 0, 0, 0,
+                0xD5, 1, 1, 0,
+                0xC2, 0x01, 0xF0, 0x10,
+                0xE4, 0, 1, 0,
             }));
 
         Assert.That(tables.Exports.TryGetDefinitionForKey(1,
