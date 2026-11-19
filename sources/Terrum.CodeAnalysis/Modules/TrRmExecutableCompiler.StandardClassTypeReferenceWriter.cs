@@ -5143,7 +5143,8 @@ public static partial class TrRmExecutableCompiler
         }
 
         var operationType = function.Variables[receiverCount].Type;
-        if (!IsC1M1Construction2BodyNumericType(operationType)
+        if ((!IsC1M1Construction2BodyNumericType(operationType)
+                && operationType != PrimitiveType.Bool)
             || function.ReturnType != operationType
             || (!function.IsStatic && function.Variables[0].IsMutable)
             || function.Variables[receiverCount].IsMutable
@@ -5171,7 +5172,7 @@ public static partial class TrRmExecutableCompiler
             || returnedRead.Variable != localVariable)
         {
             throw Unsupported(
-                "A Construction-2 local-copy Body requires one initialized numeric local copied from a same-typed value formal and returned directly.");
+                "A Construction-2 local-copy Body requires one initialized scalar local copied from a same-typed value formal and returned directly.");
         }
 
         var typeTokens = new uint[function.Variables.Length];
@@ -7457,7 +7458,8 @@ public static partial class TrRmExecutableCompiler
         }
 
         var operationType = function.Variables[formalVariable].Type;
-        return IsC1M1Construction2BodyNumericType(operationType)
+        return (IsC1M1Construction2BodyNumericType(operationType)
+                || operationType == PrimitiveType.Bool)
             && function.ReturnType == operationType
             && (function.IsStatic || !function.Variables[0].IsMutable)
             && !function.Variables[formalVariable].IsMutable

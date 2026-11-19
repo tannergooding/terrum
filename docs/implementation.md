@@ -187,8 +187,9 @@ operands through ConstantMap; fixed scalar returns use the provisional Feature
 `11/1` path and Blob section `0003`. Same-class static and readonly-instance
 fixed-integer or floating CallSite bodies can feed a following same-typed
 binary/comparison with a direct formal or SF1 ConstantMap operand.
-Static and instance bodies support one-formal numeric local-copy returns and
-ordered numeric copy chains feeding numeric binary/comparison operations.
+Static and instance bodies support one-formal numeric or Boolean local-copy
+returns and ordered numeric copy chains feeding numeric binary/comparison
+operations.
 They also emit bounded one-local unary returns after an exact numeric formal
 copy for static and readonly-instance methods. Producer, source-free
 re-emission and caller-binding regressions remain unverified under the active

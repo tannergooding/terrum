@@ -1461,6 +1461,107 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
+    public void EmitsAndReemitsBooleanLocalCopyReturnForReadonlyInstanceMethod()
+    {
+        var tree = SyntaxTree.Parse("""
+            public class Box {
+                public int32 Value;
+                public Box(int32 value) { Value = value; }
+                public bool Copy(bool value) {
+                    bool copy = value;
+                    return copy;
+                }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node => node.Kind == SyntaxKind.ClassDeclaration);
+        var members = classDeclaration.Children.OfType<SyntaxNode>().ToArray();
+        var classIndex = Enumerable.Range(0, program.Classes.Length)
+            .Single(index => program.Classes[index].Name == "Box");
+        var field = members.Single(static node =>
+            node.Kind == SyntaxKind.FieldDeclaration);
+        var constructor = members.Single(static node =>
+            node.Kind == SyntaxKind.ConstructorDeclaration);
+        var method = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Copy"));
+        var schemaIdentity
+            = C1M1Construction2ClassParameterDefaultsSchemaIdentity;
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "BooleanLocalCopy", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, classIndex,
+                    classDeclaration.Span, "BoxKey", [
+                        new TrRmSourceClassMemberExport(0,
+                            field.Span, "Box.Value"),
+                        new TrRmSourceClassMemberExport(0,
+                            constructor.Span, "Box.Initialize") {
+                            ConstructionProjectionExportKey = "Box.Create",
+                        },
+                        new TrRmSourceClassMemberExport(0,
+                            method.Span, "Box.Copy"),
+                    ]),
+            ]);
+
+        byte[] GetBody(byte[] image)
+        {
+            var tables = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(
+                    TrRmArtifactIndex
+                        .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                            image));
+            Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+                "Box.Copy", out var definition), Is.True);
+            var methodRow = checked((int)(definition & 0x00FF_FFFF));
+            var bodyRow = tables.Methods.GetBodyRow(methodRow);
+            Assert.That(bodyRow, Is.GreaterThan(0));
+            tables.Bodies.ValidateSelectedImplementation(bodyRow,
+                tables.Contracts.Count);
+            var body = tables.Bodies.GetRegisterBody(bodyRow,
+                tables.Contracts.Count);
+            Assert.That(body.HomeCount, Is.EqualTo(3));
+            return body.GetBlockCode(0).ToArray();
+        }
+
+        var bodyCode = GetBody(artifact);
+        Assert.That(bodyCode, Is.EqualTo(new byte[] {
+            0xD5, 0, 1, 0,
+            0xD6, 0x10, 2, 0,
+            0xEB, 0, 2, 0,
+        }));
+
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "BooleanLocalCopy", [], ["BoxKey"]);
+        var sourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), reference);
+        Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceFreeCompilation.Diagnostics));
+        var reemitted = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)sourceFreeCompilation.Program!,
+            "BooleanLocalCopyReemitted", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        Assert.That(GetBody(reemitted), Is.EqualTo(bodyCode));
+
+        var reemittedReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+                "BooleanLocalCopyReemitted", [], ["BoxKey"]);
+        var consumer = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            bool Use(Box value, bool input) { return value.Copy(input); }
+            """), reemittedReference);
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
+    }
+
+    [Test]
     public void EmitsNestedInlineStructFieldReadThroughPlaceSelections()
     {
         var tree = SyntaxTree.Parse("""
