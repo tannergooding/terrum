@@ -4916,49 +4916,70 @@ internal sealed class TrRmGenericMethodSourceWriterTests
     [Test]
     public void ReemitsCM1AR1RelationFromIndependentInterfaceProvider()
     {
-        var interfaceTree = SyntaxTree.Parse("""
-            namespace Example {
-                public interface ISource<T> { type Item = T; }
-                public class LibraryRoot { }
+        byte[] EmitInterfaceProvider(bool includePrefixTypeDef,
+            string associatedDefault)
+        {
+            var prefixDeclaration = includePrefixTypeDef
+                ? "public class Prefix { }" : string.Empty;
+            var tree = SyntaxTree.Parse($$"""
+                namespace Example {
+                    {{prefixDeclaration}}
+                    public interface ISource<T> {
+                        type Item = {{associatedDefault}};
+                    }
+                    public class LibraryRoot { }
+                }
+                """);
+            var compilation = Compilation.CreateLibrary(tree);
+            Assert.That(compilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    compilation.Diagnostics));
+            var program = compilation.Program!;
+            var sourceInterface = program.Interfaces.Single();
+            var associatedType = sourceInterface.Members.Single();
+            var namespaceDeclaration = tree.Root.Children
+                .OfType<SyntaxNode>()
+                .Single(static node =>
+                    node.Kind == SyntaxKind.NamespaceDeclaration);
+            var sourceClasses = namespaceDeclaration.Children
+                .OfType<SyntaxNode>()
+                .Where(static node =>
+                    node.Kind == SyntaxKind.ClassDeclaration)
+                .ToArray();
+            string[] classNames = includePrefixTypeDef
+                ? ["Prefix", "LibraryRoot"] : ["LibraryRoot"];
+            var classExports = new List<TrRmSourceClassExport>(
+                classNames.Length);
+            foreach (var className in classNames)
+            {
+                var classDeclaration = sourceClasses.Single(node =>
+                    node.Children.OfType<SyntaxTokenElement>().Any(
+                        token => token.Token.Name == className));
+                var classIndex = Enumerable.Range(0, program.Classes.Length)
+                    .Single(index =>
+                        program.Classes[index].Name == className);
+                classExports.Add(new TrRmSourceClassExport(program,
+                    classIndex, classDeclaration.Span,
+                    $"example.class/{className}", []));
             }
-            """);
-        var interfaceCompilation = Compilation.CreateLibrary(interfaceTree);
-        Assert.That(interfaceCompilation.HasErrors, Is.False,
-            string.Join(Environment.NewLine,
-                interfaceCompilation.Diagnostics));
-        var interfaceProgram = interfaceCompilation.Program!;
-        var sourceInterface = interfaceProgram.Interfaces.Single();
-        var associatedType = sourceInterface.Members.Single();
-        var interfaceNamespace = interfaceTree.Root.Children
-            .OfType<SyntaxNode>()
-            .Single(static node =>
-                node.Kind == SyntaxKind.NamespaceDeclaration);
-        var libraryRootDeclaration = interfaceNamespace.Children
-            .OfType<SyntaxNode>()
-            .Single(static node =>
-                node.Kind == SyntaxKind.ClassDeclaration);
-        var libraryRootClassIndex = Enumerable.Range(0,
-                interfaceProgram.Classes.Length)
-            .Single(index =>
-                interfaceProgram.Classes[index].Name == "LibraryRoot");
-        var interfaceExport = new TrRmSourceTypeExport("Example",
-            "ISource", "example.interface/ISource") {
-            GenericArity = sourceInterface.Formals.Length,
-            InterfaceMethodExports = [],
-            InterfaceAssociatedTypeExports = [
-                new TrRmSourceInterfaceAssociatedTypeExport(
-                    associatedType.SourceInputOrdinal,
-                    associatedType.SourceDeclarationSpan,
-                    "example.interface/ISource.Item"),
-            ],
-        };
-        var interfaceArtifact = TrRmExecutableCompiler.EmitStandard(
-            interfaceProgram, "cm1ar1.interface.provider",
-            CM1AR1SchemaIdentity, 0, [interfaceExport], [], [
-                new TrRmSourceClassExport(interfaceProgram,
-                    libraryRootClassIndex, libraryRootDeclaration.Span,
-                    "example.class/LibraryRoot", []),
-            ]);
+
+            var typeExport = new TrRmSourceTypeExport("Example",
+                "ISource", "example.interface/ISource") {
+                GenericArity = sourceInterface.Formals.Length,
+                InterfaceMethodExports = [],
+                InterfaceAssociatedTypeExports = [
+                    new TrRmSourceInterfaceAssociatedTypeExport(
+                        associatedType.SourceInputOrdinal,
+                        associatedType.SourceDeclarationSpan,
+                        "example.interface/ISource.Item"),
+                ],
+            };
+            return TrRmExecutableCompiler.EmitStandard(program,
+                "cm1ar1.interface.provider", CM1AR1SchemaIdentity, 0,
+                [typeExport], [], classExports);
+        }
+
+        var interfaceArtifact = EmitInterfaceProvider(false, "T");
         var interfaceInput = new TrRmStandardArtifactInput(
             CM1AR1SchemaIdentity, interfaceArtifact);
         var interfaceReference = TrRmExecutableCompiler
@@ -5018,6 +5039,26 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         Assert.That(importedMethod.Formals[0].AssociatedRelations[0]
             .AssociatedType.DeclaringInterface.ModuleImport!
             .ProducerIdentity, Is.EqualTo("cm1ar1.interface.provider"));
+        var relocatedInterfaceArtifact
+            = EmitInterfaceProvider(true, "T");
+        var relocatedInterfaceReference
+            = TrRmExecutableCompiler.CreateStandardReference(classInput,
+                "cm1ar1.class.provider", [
+                    new TrRmStandardArtifactInput(CM1AR1SchemaIdentity,
+                        relocatedInterfaceArtifact),
+                ], ["example.class/Box"]);
+        Assert.That(relocatedInterfaceReference.GenericMethodImports.Single(
+                static import => import.Origin.ExportKey
+                    == "Box.Constrained")
+            .Formals[0].AssociatedRelations, Has.Length.EqualTo(1));
+        var changedDefaultInterfaceArtifact
+            = EmitInterfaceProvider(false, "int32");
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(classInput,
+                "cm1ar1.class.provider", [
+                    new TrRmStandardArtifactInput(CM1AR1SchemaIdentity,
+                        changedDefaultInterfaceArtifact),
+                ], ["example.class/Box"]));
 
         var sourceFreeCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(string.Empty), classReference);
