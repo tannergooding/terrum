@@ -6244,7 +6244,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
 
     private static byte[] RewriteGenericMethodTypeFormal(byte[] artifact,
         byte ownershipDomain, uint defaultArgumentReference,
-        bool includeUniqueConstraint)
+        bool includeUniqueConstraint, bool useFormalParameter = false)
     {
         var schema
             = TrRmArtifactSchema
@@ -6309,6 +6309,42 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             signatureBytes.AsSpan(signatureOffset + 16), 1);
         BinaryPrimitives.WriteUInt32LittleEndian(
             signatureBytes.AsSpan(signatureOffset + 20), 1);
+        byte[]? parameterBytes = null;
+        ReadOnlyMemory<byte>[] typeSpecRows = [];
+        byte[]? typeSpecBytes = null;
+        if (useFormalParameter)
+        {
+            var (parameterFirst, parameterCount)
+                = tables.Signatures.GetParamRange(signatureRow);
+            if (parameterCount != 1
+                || !artifactIndex.TryGetSection(0x0018,
+                    out var parameterSection, out var parameterRecordCount)
+                || parameterRecordCount != (uint)tables.Parameters.Count
+                || !artifactIndex.TryGetSection(0x0011,
+                    out _, out var typeSpecRecordCount)
+                || typeSpecRecordCount != (uint)tables.TypeSpecs.Count)
+            {
+                throw new InvalidDataException(
+                    "The generic class MethodDef fixture cannot add a type-formal parameter TypeSpec.");
+            }
+
+            typeSpecRows
+                = new ReadOnlyMemory<byte>[tables.TypeSpecs.Count + 1];
+            for (var row = 1; row <= tables.TypeSpecs.Count; row++)
+            {
+                typeSpecRows[row - 1]
+                    = tables.TypeSpecs.GetRow(row).ToArray();
+            }
+            typeSpecRows[^1]
+                = TrRmTypeSpecTableWriter.Reference(0x04, 1);
+            typeSpecBytes = TrRmTypeSpecTableWriter.Encode(typeSpecRows,
+                tables.TypeDefs.Count, tables.Imports.Count, 1);
+            parameterBytes = parameterSection.ToArray();
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                parameterBytes.AsSpan(
+                    checked((parameterFirst - 1) * 16 + 8)),
+                0x1100_0000u | checked((uint)typeSpecRows.Length));
+        }
 
         var featureRows = new List<TrRmFeatureRow>();
         var hasFeatureSection = artifactIndex.TryGetSection(0x0004,
@@ -6361,6 +6397,13 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     featureBytes),
                 0x0017 => new TrRmSection(kind, flags, recordCount,
                     signatureBytes),
+                0x0018 when parameterBytes is not null
+                    => new TrRmSection(kind, flags, recordCount,
+                        parameterBytes),
+                0x0011 when typeSpecBytes is not null
+                    => new TrRmSection(kind, flags,
+                        checked((uint)typeSpecRows.Length),
+                        typeSpecBytes),
                 _ => new TrRmSection(kind, flags, recordCount,
                     section.ToArray()),
             });
@@ -6447,6 +6490,137 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 expectation.ExportKey == "Box.Echo");
         Assert.That(importedMethod.ProviderDefinitionId >> 24,
             Is.EqualTo(0x16u));
+
+        var sourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), reference);
+        Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceFreeCompilation.Diagnostics));
+        var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)sourceFreeCompilation.Program!,
+            "GenericClassMethodConsumerReemitted", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var reemittedTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                        reemittedArtifact));
+        var reemittedMethodImportRow = Enumerable.Range(1,
+                reemittedTables.Imports.Count)
+            .Single(row => reemittedTables.Imports
+                .GetBindingForImportRow(row).ExportKey == "Box.Echo");
+        var reemittedMethodId = reemittedTables.Imports
+            .GetExpectedDefinitionForImportRow(reemittedMethodImportRow);
+        var reemittedMethodRow = checked((int)(
+            reemittedMethodId & 0x00FF_FFFF));
+        var reemittedSignatureRow = reemittedTables.Methods
+            .GetSignature(reemittedMethodRow);
+        Assert.That(reemittedTables.Signatures
+            .GetGenericCount(reemittedSignatureRow), Is.EqualTo(1));
+        var (formalFirst, formalCount) = reemittedTables.Signatures
+            .GetGenericRange(reemittedSignatureRow);
+        Assert.That(formalCount, Is.EqualTo(1));
+        Assert.That(reemittedTables.GenericParams
+            .GetOwnerDefId(formalFirst), Is.EqualTo(reemittedMethodId));
+        Assert.That(reemittedTables.GenericParams
+            .GetDefaultArgumentRef(formalFirst), Is.EqualTo(0xF200_0008u));
+        Assert.That(Enumerable.Range(1, reemittedTables.Imports.Count)
+            .Where(row => reemittedTables.Imports
+                .GetExpectedDefinitionForImportRow(row)
+                == reemittedMethodId)
+            .Select(row => reemittedTables.Imports
+                .GetBindingForImportRow(row).ExportKey),
+            Is.EquivalentTo(["Box.Echo", "Box.EchoAlias"]));
+        var reloadedReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, reemittedArtifact),
+            "GenericClassMethodConsumerReemitted", [providerInput],
+            ["ContainerKey"]);
+        Assert.That(reloadedReference.StandardClassDeclarations
+            .Single(static declaration =>
+                declaration.Declaration.Name == "Box"
+                && !declaration.Expectations.IsEmpty)
+            .Expectations.SelectMany(static expectation =>
+                expectation.MethodExpectations)
+            .Any(static expectation => expectation.ExportKey == "Box.Echo"),
+            Is.True);
+
+        var constrainedProviderInput = new TrRmStandardArtifactInput(
+            schemaIdentity, CreateGenericClassProvider(true, 2,
+                0xF200_0008u, includeUniqueConstraint: true,
+                useFormalParameter: true));
+        var constrainedConsumerArtifact = AddGenericClassMethodImport(
+            consumerArtifact, 0xF200_0008u,
+            ownershipDomain: 2, includeUniqueConstraint: true,
+            useFormalParameter: true);
+        var constrainedReference = TrRmExecutableCompiler
+            .CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    constrainedConsumerArtifact),
+                "GenericClassMethodConsumer",
+                [constrainedProviderInput], ["ContainerKey"]);
+        var constrainedSourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), constrainedReference);
+        Assert.That(constrainedSourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                constrainedSourceFreeCompilation.Diagnostics));
+        var constrainedReemittedArtifact
+            = TrRmExecutableCompiler.EmitStandard(
+                (BoundProgram)constrainedSourceFreeCompilation.Program!,
+                "GenericClassMethodConsumerConstrainedReemitted",
+                schemaIdentity,
+                TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var constrainedReemittedTables
+            = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(
+                    TrRmArtifactIndex
+                        .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                            constrainedReemittedArtifact));
+        var constrainedMethodImportRow = Enumerable.Range(1,
+                constrainedReemittedTables.Imports.Count)
+            .Single(row => constrainedReemittedTables.Imports
+                .GetBindingForImportRow(row).ExportKey == "Box.Echo");
+        var constrainedMethodId = constrainedReemittedTables.Imports
+            .GetExpectedDefinitionForImportRow(constrainedMethodImportRow);
+        var constrainedMethodRow = checked((int)(
+            constrainedMethodId & 0x00FF_FFFF));
+        var constrainedSignature = constrainedReemittedTables.Methods
+            .GetSignature(constrainedMethodRow);
+        var (constrainedFormalFirst, constrainedFormalCount)
+            = constrainedReemittedTables.Signatures
+                .GetGenericRange(constrainedSignature);
+        Assert.That(constrainedFormalCount, Is.EqualTo(1));
+        var constrainedFormal = constrainedFormalFirst;
+        Assert.That(constrainedReemittedTables.GenericParams
+            .GetOwnershipDomain(constrainedFormal), Is.EqualTo((byte)2));
+        var (constraintFirst, constraintCount)
+            = constrainedReemittedTables.GenericParams
+                .GetConstraintRange(constrainedFormal);
+        Assert.That(constraintCount, Is.EqualTo(1));
+        Assert.That(constrainedReemittedTables.Constraints
+            .GetOwnerGenericParam(constraintFirst),
+            Is.EqualTo(constrainedFormal));
+        Assert.That(constrainedReemittedTables.Constraints
+            .GetKind(constraintFirst), Is.EqualTo((ushort)2));
+        Assert.That(constrainedReemittedTables.Constraints
+            .GetPayload(constraintFirst), Is.EqualTo(1u));
+        var (constrainedParameterFirst, constrainedParameterCount)
+            = constrainedReemittedTables.Signatures
+                .GetParamRange(constrainedSignature);
+        Assert.That(constrainedParameterCount, Is.EqualTo(1));
+        var constrainedParameterTypeSpec
+            = constrainedReemittedTables.Parameters.GetTypeSpec(
+                constrainedParameterFirst);
+        var constrainedParameterType
+            = constrainedReemittedTables.TypeSpecs.GetTypeSpecRef(
+                constrainedParameterTypeSpec);
+        Assert.That(constrainedParameterType.Form, Is.EqualTo((byte)0x04));
+        Assert.That(constrainedParameterType.Row,
+            Is.EqualTo(constrainedFormal));
+        _ = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                constrainedReemittedArtifact),
+            "GenericClassMethodConsumerConstrainedReemitted",
+            [constrainedProviderInput], ["ContainerKey"]);
 
         var callerTree = SyntaxTree.Parse("""
             public class Caller {
@@ -6657,19 +6831,17 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 [incompatibleDefaultProvider], ["ContainerKey"]));
 
         byte[] CreateGenericClassProvider(bool isStatic,
-            byte ownershipDomain, uint defaultArgumentReference)
+            byte ownershipDomain, uint defaultArgumentReference,
+            bool includeUniqueConstraint = false,
+            bool useFormalParameter = false)
         {
-            var providerTree = SyntaxTree.Parse(isStatic
-                ? """
-                    public class Box {
-                        public static int32 Echo(int32 value) { return value; }
-                    }
-                    """
-                : """
-                    public class Box {
-                        public int32 Echo(int32 value) { return value; }
-                    }
-                    """);
+            var returnStatement = useFormalParameter
+                ? "return 42;" : "return value;";
+            var methodDeclaration = isStatic
+                ? $"public static int32 Echo(int32 value) {{ {returnStatement} }}"
+                : $"public int32 Echo(int32 value) {{ {returnStatement} }}";
+            var providerTree = SyntaxTree.Parse(
+                $"public class Box {{ {methodDeclaration} }}");
             var providerCompilation
                 = Compilation.CreateLibrary(providerTree);
             Assert.That(providerCompilation.HasErrors, Is.False,
@@ -6701,14 +6873,20 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                                 echo.Span, "Box.Echo"),
                         ]),
                 ]);
-            var formalProvider = RewriteGenericMethodTypeFormal(provider,
+            var providerWithAlias = AddMethodExportAlias(provider,
+                "Box.Echo", "Box.EchoAlias");
+            var formalProvider = RewriteGenericMethodTypeFormal(
+                providerWithAlias,
                     ownershipDomain, defaultArgumentReference,
-                    includeUniqueConstraint: false);
+                    includeUniqueConstraint, useFormalParameter);
             return formalProvider;
         }
 
         static byte[] AddGenericClassMethodImport(byte[] artifact,
-            uint defaultArgumentReference, bool hasReceiver = false)
+            uint defaultArgumentReference, bool hasReceiver = false,
+            byte ownershipDomain = 1,
+            bool includeUniqueConstraint = false,
+            bool useFormalParameter = false)
         {
             var schema
                 = TrRmArtifactSchema
@@ -6746,7 +6924,12 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 || parameterTableCount != (uint)tables.Parameters.Count
                 || !index.TryGetSection(0x0066, out var labelSection,
                     out var labelCount)
-                || labelCount != (uint)tables.MethodParameterLabels.Count)
+                || labelCount != (uint)tables.MethodParameterLabels.Count
+                || (useFormalParameter
+                    && (!index.TryGetSection(0x0011, out _,
+                            out var typeSpecRecordCount)
+                        || typeSpecRecordCount
+                            != (uint)tables.TypeSpecs.Count)))
             {
                 throw new InvalidDataException(
                     "The generic class MethodDef import fixture has an unexpected source shape.");
@@ -6799,6 +6982,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
 
             var methodNameStringRow = GetStringRow("Echo");
             var exportKeyStringRow = GetStringRow("Box.Echo");
+            var exportKeyAliasStringRow = GetStringRow("Box.EchoAlias");
             var formalNameStringRow = GetStringRow("T");
             var parameterNameStringRow = GetStringRow("value");
             var stringBytes = TrRmStringTableWriter.EncodeTextRows(
@@ -6807,6 +6991,25 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             var methodRow = checked(tables.Methods.Count + 1);
             var signatureRow = checked(tables.Signatures.Count + 1);
             var formalRow = checked(tables.GenericParams.Count + 1);
+            ReadOnlyMemory<byte>[] typeSpecRows = useFormalParameter
+                ? new ReadOnlyMemory<byte>[tables.TypeSpecs.Count + 1]
+                : [];
+            var formalTypeSpecReference = 0u;
+            if (useFormalParameter)
+            {
+                for (var row = 1; row <= tables.TypeSpecs.Count; row++)
+                {
+                    typeSpecRows[row - 1]
+                        = tables.TypeSpecs.GetRow(row).ToArray();
+                }
+
+                typeSpecRows[^1]
+                    = TrRmTypeSpecTableWriter.Reference(0x04,
+                        checked((uint)formalRow));
+                formalTypeSpecReference = 0x1100_0000u
+                    | checked((uint)typeSpecRows.Length);
+            }
+
             var methodBytes = methodSection.ToArray();
             Array.Resize(ref methodBytes, methodBytes.Length + 28);
             var methodOffset = methodBytes.Length - 28;
@@ -6852,6 +7055,12 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 parameterBytes.AsSpan(parameterOffset + 4), 0);
             BinaryPrimitives.WriteUInt32LittleEndian(
                 parameterBytes.AsSpan(parameterOffset + 8), 0xF200_0008u);
+            if (useFormalParameter)
+            {
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    parameterBytes.AsSpan(parameterOffset + 8),
+                    formalTypeSpecReference);
+            }
 
             var labelBytes = labelSection.ToArray();
             Array.Resize(ref labelBytes, labelBytes.Length + 16);
@@ -6872,14 +7081,29 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 genericParam.AsSpan(8),
                 checked((uint)formalNameStringRow));
             genericParam[20] = 1;
-            genericParam[21] = 1;
+            genericParam[21] = ownershipDomain;
             genericParam[22] = 1;
             BinaryPrimitives.WriteUInt32LittleEndian(
                 genericParam.AsSpan(28), defaultArgumentReference);
+            byte[]? constraint = null;
+            if (includeUniqueConstraint)
+            {
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    genericParam.AsSpan(12), 1);
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    genericParam.AsSpan(16), 1);
+                constraint = new byte[12];
+                BinaryPrimitives.WriteUInt32LittleEndian(constraint,
+                    checked((uint)formalRow));
+                BinaryPrimitives.WriteUInt16LittleEndian(
+                    constraint.AsSpan(4), 2);
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    constraint.AsSpan(8), 1);
+            }
 
             var importBytes = importSection.ToArray();
-            Array.Resize(ref importBytes, importBytes.Length + 12);
-            var importOffset = importBytes.Length - 12;
+            Array.Resize(ref importBytes, importBytes.Length + 24);
+            var importOffset = importBytes.Length - 24;
             BinaryPrimitives.WriteUInt32LittleEndian(
                 importBytes.AsSpan(importOffset),
                 checked((uint)moduleRefRow));
@@ -6888,6 +7112,15 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 checked((uint)exportKeyStringRow));
             BinaryPrimitives.WriteUInt32LittleEndian(
                 importBytes.AsSpan(importOffset + 8),
+                0x1600_0000u | checked((uint)methodRow));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                importBytes.AsSpan(importOffset + 12),
+                checked((uint)moduleRefRow));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                importBytes.AsSpan(importOffset + 16),
+                checked((uint)exportKeyAliasStringRow));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                importBytes.AsSpan(importOffset + 20),
                 0x1600_0000u | checked((uint)methodRow));
 
             var featureRows = new List<TrRmFeatureRow>();
@@ -6938,7 +7171,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             BinaryPrimitives.WriteUInt32LittleEndian(
                 moduleBytes.AsSpan(28), outputFeatureCount);
 
-            var sections = new List<TrRmSection>(index.SectionCount + 3);
+            var sections = new List<TrRmSection>(index.SectionCount + 4);
             for (var sectionIndex = 0;
                 sectionIndex < index.SectionCount; sectionIndex++)
             {
@@ -6961,8 +7194,14 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     0x0018 => new TrRmSection(kind, flags,
                         checked((uint)tables.Parameters.Count + 1),
                         parameterBytes),
+                    0x0011 when useFormalParameter
+                        => new TrRmSection(kind, flags,
+                            checked((uint)typeSpecRows.Length),
+                            TrRmTypeSpecTableWriter.Encode(typeSpecRows,
+                                tables.TypeDefs.Count,
+                                tables.Imports.Count, 1)),
                     0x001C => new TrRmSection(kind, flags,
-                        checked((uint)tables.Imports.Count + 1), importBytes),
+                        checked((uint)tables.Imports.Count + 2), importBytes),
                     0x0066 => new TrRmSection(kind, flags,
                         checked((uint)tables.MethodParameterLabels.Count
                             + 1), labelBytes),
@@ -6971,6 +7210,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 });
             }
             sections.Add(new TrRmSection(0x0019, 0, 1, genericParam));
+            if (constraint is not null)
+            {
+                sections.Add(new TrRmSection(0x001A, 0, 1, constraint));
+            }
             if (!hasFeatureSection)
             {
                 sections.Add(new TrRmSection(0x0004, 0,

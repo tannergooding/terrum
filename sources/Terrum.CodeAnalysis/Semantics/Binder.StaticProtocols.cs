@@ -11410,20 +11410,29 @@ internal sealed partial class Binder
             }
 
             var tree = _trees[0];
+            var templateName = hasClassMethod
+                ? ownerName + "." + classMethod.Name
+                : proofFunction.Name;
             var template = new GenericTemplate(
-                proofFunction.Name, typeParameters.ToImmutable(),
+                templateName, typeParameters.ToImmutable(),
                 scalarReturnType,
                 returnFormalOrdinal, parameters.ToImmutable(),
                 tree.Root, tree.Root, tree) {
                 DefinitionOrdinal = -1,
                 FormalTypeOwnerOrdinal =
                     imported.FormalTypeOwnerOrdinal,
-                IsPublic = true,
+                IsPublic = hasClassMethod
+                    ? (classMethod.Flags & 3) == 2 : true,
                 RequiresUnsafeCaller =
                     imported.Signature.RequiresUnsafeCaller,
                 DoesNotReturn =
                     imported.ProofFunction.DoesNotReturn,
-                IsStatic = true,
+                IsStatic = imported.Signature.IsStatic,
+                IsMutable = imported.Signature.IsMutable,
+                MemberName = hasClassMethod ? classMethod.Name : null,
+                ContainingType = hasClassMethod ? ownerName : null,
+                OwnerName = hasClassMethod ? ownerName : null,
+                OwnerType = ownerType,
                 FormalOrder = imported.Signature.FormalOrder,
                 ImportedMethod = imported,
                 ReturnTypeTerm = returnTypeTerm,
@@ -11440,7 +11449,7 @@ internal sealed partial class Binder
         }
     }
 
-    private static GenericTemplate CreateGenericTemplateFromImport(
+    private GenericTemplate CreateGenericTemplateFromImport(
         BoundGenericMethodImport imported, SyntaxTree tree,
         IReadOnlyList<BoundSpanTypeDefinition> spanTypes)
     {
@@ -11461,22 +11470,87 @@ internal sealed partial class Binder
         }
 
         var proofFunction = imported.ProofFunction;
+        var hasClassOwner
+            = imported.Origin.ClassOwner is BoundGenericMethodClassOwner;
+        var receiverCount = imported.Signature.IsStatic ? 0 : 1;
+        var parameterCount = proofFunction.ParameterCount - receiverCount;
+        var ownerName = hasClassOwner
+            ? proofFunction.DeclaringStruct ?? string.Empty
+            : string.Empty;
+        PrimitiveType? ownerType = null;
+        if (parameterCount < 0
+            || proofFunction.Variables.Length < proofFunction.ParameterCount
+            || (receiverCount != 0
+                && (proofFunction.ParameterCount == 0
+                    || proofFunction.Variables.IsDefaultOrEmpty
+                    || proofFunction.Variables[0].Name != "this")))
+        {
+            throw new InvalidOperationException(
+                "The imported generic method has an invalid receiver or parameter view.");
+        }
+
+        if (hasClassOwner)
+        {
+            if (receiverCount != 0)
+            {
+                var receiverType = proofFunction.Variables[0].Type;
+                if (!BoundGenericNominalTypeContract.IsNominalClassType(
+                        receiverType, _genericNominalTypeInstances,
+                        _genericNominalTypeDefinitions)
+                    || _genericNominalTypeInstances[
+                        BoundGenericNominalTypeTypes.Index(receiverType)]
+                        .Definition
+                        != imported.Origin.ClassOwner!.Identity)
+                {
+                    throw new InvalidOperationException(
+                        "The imported generic instance MethodDef has an invalid class receiver.");
+                }
+
+                ownerType = receiverType;
+            }
+            else
+            {
+                for (var index = 0;
+                    index < _genericNominalTypeInstances.Count; index++)
+                {
+                    var instance = _genericNominalTypeInstances[index];
+                    if (instance.Definition
+                            == imported.Origin.ClassOwner!.Identity
+                        && instance.Arguments.IsEmpty
+                        && instance.Qualifiers == 0
+                        && instance.TypeSpecReference == 0
+                        && instance.TypeSpecProviderIdentity is null
+                        && instance.TypeSpecForm == 0)
+                    {
+                        ownerType = BoundGenericNominalTypeTypes.Type(index);
+                        break;
+                    }
+                }
+
+                if (ownerType is null)
+                {
+                    throw new InvalidOperationException(
+                        "An imported generic class MethodDef has no selected owner TypeDef instance.");
+                }
+            }
+        }
+
         var importedDefaults = imported.OrdinaryParameterDefaults;
         if (!importedDefaults.IsDefaultOrEmpty
-            && importedDefaults.Length != proofFunction.ParameterCount)
+            && importedDefaults.Length != parameterCount)
         {
             throw new InvalidOperationException(
                 "The imported generic method default vector has an invalid extent.");
         }
 
         var parameters = ImmutableArray.CreateBuilder<GenericParameter>(
-            proofFunction.ParameterCount);
-        for (var parameter = 0;
-            parameter < proofFunction.ParameterCount; parameter++)
+            parameterCount);
+        for (var parameter = 0; parameter < parameterCount; parameter++)
         {
-            var variable = proofFunction.Variables[parameter];
+            var variable = proofFunction.Variables[
+                receiverCount + parameter];
             var parameterDefault = importedDefaults.Length
-                == proofFunction.ParameterCount
+                == parameterCount
                     ? importedDefaults[parameter] : null;
             var formalOrdinal = -1;
             for (var ordinal = 0;
@@ -11556,8 +11630,8 @@ internal sealed partial class Binder
             returnTypeTerm = candidateReturnTypeTerm;
         }
 
-        var name = hasClassMethod
-            ? ownerName + "." + classMethod.Name
+        var name = hasClassOwner
+            ? ownerName + "." + proofFunction.Name
             : imported.Origin.IsMethodDefTarget
             ? "<MethodDef:"
                 + imported.Origin.MethodDefId.ToString("X8",
@@ -11569,20 +11643,18 @@ internal sealed partial class Binder
             returnFormalOrdinal, parameters.ToImmutable(), tree.Root,
             tree.Root, tree) {
             DefinitionOrdinal = -1,
-            IsPublic = hasClassMethod
-                ? (classMethod.Flags & 3) == 2
+            IsPublic = hasClassOwner
+                ? imported.Signature.IsPublic
                 : !imported.Origin.IsMethodDefTarget,
             FormalTypeOwnerOrdinal =
                 imported.FormalTypeOwnerOrdinal,
             RequiresUnsafeCaller = imported.Signature.RequiresUnsafeCaller,
             DoesNotReturn = proofFunction.DoesNotReturn,
-            IsStatic = hasClassMethod
-                ? imported.Signature.IsStatic : true,
-            IsMutable = hasClassMethod
-                && (classMethod.Flags & 4) != 0,
-            MemberName = hasClassMethod ? classMethod.Name : null,
-            ContainingType = hasClassMethod ? ownerName : null,
-            OwnerName = hasClassMethod ? ownerName : null,
+            IsStatic = imported.Signature.IsStatic,
+            IsMutable = imported.Signature.IsMutable,
+            MemberName = hasClassOwner ? proofFunction.Name : null,
+            ContainingType = hasClassOwner ? ownerName : null,
+            OwnerName = hasClassOwner ? ownerName : null,
             OwnerType = ownerType,
             FormalOrder = imported.Signature.FormalOrder,
             ImportedMethod = imported,

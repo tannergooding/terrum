@@ -8905,6 +8905,51 @@ public static partial class TrRmExecutableCompiler
             methodDefRowMap.Add(oldMethodDefRow, ++nextMethodDefRow);
         }
 
+        var genericParamRowMap = new Dictionary<int, int>();
+        var methodGenericParamRanges
+            = new Dictionary<int, (int First, int Count)>();
+        var genericParamRows = new List<TrRmGenericParamRow>();
+        var genericParamNames = new List<string>();
+        var genericConstraintRows = new List<TrRmConstraintRow>();
+        foreach (var (oldMethodRow, plan) in methodEmissionPlans)
+        {
+            var formals = plan.Method.GenericParameters;
+            if (formals.IsDefault
+                || formals.Length != plan.Method.GenericParameterCount
+                || formals.Length > 8)
+            {
+                throw Unsupported(
+                    "C1M1 generic class MethodDefs require their exact ordered formal rows.");
+            }
+
+            var formalFirst = formals.IsEmpty
+                ? 0 : genericParamRows.Count + 1;
+            for (var ordinal = 0; ordinal < formals.Length; ordinal++)
+            {
+                var formal = formals[ordinal];
+                if (formal is null || formal.Row <= 0
+                    || formal.OwnerDefinitionId
+                        != plan.Method.DefinitionId
+                    || formal.Ordinal != (uint)ordinal
+                    || formal.FormalKind != 1
+                    || formal.ConstantTypeSpecReference != 0
+                    || formal.Constraints.IsDefault
+                    || string.IsNullOrEmpty(formal.Name)
+                    || !genericParamRowMap.TryAdd(formal.Row,
+                        genericParamRows.Count + 1))
+                {
+                    throw new InvalidDataException(
+                        "A retained class MethodDef GenericParam row has an invalid owner, ordinal or type-formal shape.");
+                }
+
+                genericParamRows.Add(default);
+                genericParamNames.Add(formal.Name);
+            }
+
+            methodGenericParamRanges.Add(oldMethodRow,
+                (formalFirst, formals.Length));
+        }
+
         var importRowMap = new Dictionary<int, int>();
         var nextImportRow = 0;
         foreach (var oldImportRow in bindingsByImportRow.Keys
@@ -9043,12 +9088,14 @@ public static partial class TrRmExecutableCompiler
             var method = plan.Method;
             var ownerTypeDefRow
                 = GetTypeDefRow(plan.Owner.Identity.DefinitionId);
+            var newMethodDefRow = methodDefRowMap[oldMethodRow];
+            var (genericFirst, genericCount)
+                = methodGenericParamRanges[oldMethodRow];
             var hasBody = !plan.Body.IsEmpty;
             if ((hasBody
                     ? method.BodyRow == 0 || !plan.Imports.IsEmpty
                     : method.BodyRow != 0 || plan.Imports.IsEmpty
                         || !plan.ExportKeys.IsEmpty)
-                || method.GenericParameterCount != 0
                 || method.ConstructionRole != 0
                 || method.InitializerMethodDefinitionId != 0
                 || method.ConstructionPropertyDefinitionId != 0
@@ -9064,7 +9111,7 @@ public static partial class TrRmExecutableCompiler
                     out var newOwnerTypeDefRow))
             {
                 throw Unsupported(
-                    "C1M1 source-free class re-emission supports bodyless public MethodDef Imports and bounded local nongeneric method Bodies without construction roles.");
+                    "C1M1 source-free class re-emission supports bodyless public MethodDef Imports and bounded local type-formal MethodDefs without construction roles.");
             }
 
             if (method.ReceiverTypeSpecReference != 0)
@@ -9086,16 +9133,72 @@ public static partial class TrRmExecutableCompiler
                 }
             }
 
+            for (var ordinal = 0; ordinal < genericCount; ordinal++)
+            {
+                var formal = method.GenericParameters[ordinal];
+                var genericParamRow = genericFirst + ordinal;
+                var constraintFirst = genericConstraintRows.Count + 1;
+                foreach (var constraint in formal.Constraints)
+                {
+                    if (constraint.OwnerGenericParamRow != formal.Row)
+                    {
+                        throw new InvalidDataException(
+                            "A retained class MethodDef Constraint has an invalid owner.");
+                    }
+
+                    var payload = constraint.Kind switch {
+                        1 => RemapC1M1ClassTypeSpec(rootTables,
+                            constraint.Payload, typeDefRowMap, importRowMap,
+                            outputTypeSpecRows, typeSpecRowMap,
+                            activeTypeSpecRows, depth: 0,
+                            genericParamRowMap: genericParamRowMap),
+                        2 when constraint.Payload is >= 1 and <= 3
+                            => constraint.Payload,
+                        3 => throw Unsupported(
+                            "CM1 source-free generic class MethodDef re-emission does not yet retain associated-relation constraints."),
+                        _ => throw new InvalidDataException(
+                            "A retained class MethodDef Constraint has an unsupported kind or payload."),
+                    };
+                    genericConstraintRows.Add(new TrRmConstraintRow(
+                        genericParamRow, constraint.Kind, payload));
+                }
+
+                var constraintCount = genericConstraintRows.Count
+                        - constraintFirst + 1;
+                if (constraintCount == 0)
+                {
+                    constraintFirst = 0;
+                }
+
+                var defaultArgumentReference
+                    = formal.DefaultArgumentReference == 0 ? 0
+                        : RemapC1M1ClassTypeSpec(rootTables,
+                            formal.DefaultArgumentReference,
+                            typeDefRowMap, importRowMap,
+                            outputTypeSpecRows, typeSpecRowMap,
+                            activeTypeSpecRows, depth: 0,
+                            genericParamRowMap: genericParamRowMap);
+                genericParamRows[genericParamRow - 1]
+                    = new TrRmGenericParamRow(
+                        0x1600_0000u | checked((uint)newMethodDefRow),
+                        ordinal, 0, constraintFirst, constraintCount,
+                        formal.FormalKind, formal.OwnershipDomain,
+                        formal.NullabilityDomain, 0,
+                        defaultArgumentReference);
+            }
+
             var resultTypeSpec = RemapC1M1ClassTypeSpec(rootTables,
                 method.ReturnTypeSpecReference, typeDefRowMap,
                 importRowMap, outputTypeSpecRows, typeSpecRowMap,
-                activeTypeSpecRows, depth: 0);
+                activeTypeSpecRows, depth: 0,
+                genericParamRowMap: genericParamRowMap);
             var receiverTypeSpec = method.ReceiverTypeSpecReference == 0
                 ? 0
                 : RemapC1M1ClassTypeSpec(rootTables,
                     method.ReceiverTypeSpecReference, typeDefRowMap,
                     importRowMap, outputTypeSpecRows, typeSpecRowMap,
-                    activeTypeSpecRows, depth: 0);
+                        activeTypeSpecRows, depth: 0,
+                        genericParamRowMap: genericParamRowMap);
             var signatureRow = methodSignatureRows.Count + 1;
             var parameterFirst = method.Parameters.IsEmpty
                 ? 0 : parameterRows.Count + 1;
@@ -9117,7 +9220,8 @@ public static partial class TrRmExecutableCompiler
                 var remappedTypeSpec = RemapC1M1ClassTypeSpec(rootTables,
                     parameter.TypeSpecReference, typeDefRowMap,
                     importRowMap, outputTypeSpecRows, typeSpecRowMap,
-                    activeTypeSpecRows, depth: 0);
+                    activeTypeSpecRows, depth: 0,
+                    genericParamRowMap: genericParamRowMap);
                 parameterRows.Add(new TrRmParamRow(signatureRow, ordinal,
                     remappedTypeSpec, parameter.Mode, parameter.Flags));
 
@@ -9162,13 +9266,12 @@ public static partial class TrRmExecutableCompiler
 
             methodSignatureRows.Add(new TrRmMethodSigRow(
                 resultTypeSpec, receiverTypeSpec, parameterFirst,
-                method.Parameters.Length, 0, 0));
+                method.Parameters.Length, genericFirst, genericCount));
 
             var contractFirst = 0;
             var methodContractCount = 0;
             var methodDependencyContractRowMap
                 = new Dictionary<int, int>();
-            var newMethodDefRow = methodDefRowMap[oldMethodRow];
             if (method.EffectsMask != 0)
             {
                 contractFirst = contractRows.Count + 1;
@@ -9227,7 +9330,8 @@ public static partial class TrRmExecutableCompiler
                     fieldPathRows, fieldPathRowsByIdentity,
                     methodDependencyContractRowMap,
                     frozenScalarValueBuilder, outputTypeSpecRows,
-                    typeSpecRowMap, activeTypeSpecRows, schema));
+                    typeSpecRowMap, activeTypeSpecRows, schema,
+                    genericParamRowMap));
             }
 
             methodRows.Add(new TrRmMethodDefRow(newOwnerTypeDefRow, 0,
@@ -9341,6 +9445,7 @@ public static partial class TrRmExecutableCompiler
 
         var methodClosureRowCount = (long)methodRows.Count
             + methodSignatureRows.Count + parameterRows.Count
+            + genericParamRows.Count + genericConstraintRows.Count
             + parameterSurfaceRows.Count + contractRows.Count
             + bodyRows.Count + fieldPathRows.Count
             + frozenScalarValueBuilder.BlobCount
@@ -9349,6 +9454,8 @@ public static partial class TrRmExecutableCompiler
         if (methodRows.Count > 0xFF_FFFF
             || methodSignatureRows.Count > 0xFF_FFFF
             || parameterRows.Count > 0xFF_FFFF
+            || genericParamRows.Count > 0xFF_FFFF
+            || genericConstraintRows.Count > 0xFF_FFFF
             || parameterSurfaceRows.Count > 0xFF_FFFF
             || contractRows.Count > 0xFF_FFFF
             || bodyRows.Count > 0xFF_FFFF
@@ -9393,6 +9500,16 @@ public static partial class TrRmExecutableCompiler
             .Select(static feature => new TrRmFeatureRow(feature.FeatureId,
                 feature.RuleRevision))
             .ToArray();
+        if (genericParamRows.Count != 0
+            && !featureRows.Any(static feature =>
+                feature.FeatureId
+                    == TrRmFeatureTableReader.GenericMethodCallsFeatureId))
+        {
+            featureRows = [
+                .. featureRows,
+                TrRmFeatureRow.GenericMethodCallsCandidate,
+            ];
+        }
 
         var textRows = new List<(string Text, int Encoding)>();
         var stringRows = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -9423,6 +9540,10 @@ public static partial class TrRmExecutableCompiler
         foreach (var methodName in methodNames)
         {
             AddString(methodName);
+        }
+        foreach (var genericParamName in genericParamNames)
+        {
+            AddString(genericParamName);
         }
         foreach (var parameterSurface in parameterSurfaceRows)
         {
@@ -9474,17 +9595,28 @@ public static partial class TrRmExecutableCompiler
                 NameStringRow = stringRows[methodNames[methodIndex]],
             };
         }
+        for (var genericParamIndex = 0;
+            genericParamIndex < genericParamRows.Count;
+            genericParamIndex++)
+        {
+            genericParamRows[genericParamIndex]
+                = genericParamRows[genericParamIndex] with {
+                    NameStringRow = stringRows[
+                        genericParamNames[genericParamIndex]],
+                };
+        }
 
         var outputTypeSpecBytes = outputTypeSpecRows.Count == 0
             ? []
             : TrRmTypeSpecTableWriter.Encode(outputTypeSpecRows,
-                outputTypeDefRows.Count, importRowMap.Count, 0, 0,
+                outputTypeDefRows.Count, importRowMap.Count,
+                genericParamRows.Count, 0,
                 schema, methodDefCount: methodRows.Count);
         var typeSpecReaderBytes = outputTypeSpecRows.Count == 0
             ? new byte[sizeof(uint)] : outputTypeSpecBytes;
         var typeSpecs = new TrRmTypeSpecTableReader(typeSpecReaderBytes,
             outputTypeSpecRows.Count, outputTypeDefRows.Count,
-            importRowMap.Count, 0, 0, schema,
+            importRowMap.Count, genericParamRows.Count, 0, schema,
             methodDefCount: methodRows.Count);
 
         var targetProfileBytes = GetTargetProfileSection(rootIndex,
@@ -9509,11 +9641,11 @@ public static partial class TrRmExecutableCompiler
             methodRows.Count, 0,
             featureRows.Length);
         var typeDefBytes = TrRmTypeDefTableWriter.Encode(outputTypeDefRows,
-            strings, moduleTables, fieldRows.Count, methodRows.Count,
+            strings, moduleTables, fieldRows.Count, genericParamRows.Count,
             layoutRows.Count, 0, schema);
         var typeDefs = new TrRmTypeDefTableReader(typeDefBytes,
             outputTypeDefRows.Count, strings, moduleTables, fieldRows.Count,
-            methodRows.Count, layoutRows.Count, 0, schema);
+            genericParamRows.Count, layoutRows.Count, 0, schema);
 
         var layoutFieldCount = layoutFieldRows.Count;
         var fieldBytes = fieldRows.Count == 0 ? []
@@ -9549,11 +9681,11 @@ public static partial class TrRmExecutableCompiler
                 moduleRefRows.Length, strings, moduleTables);
         var signatureBytes = methodSignatureRows.Count == 0 ? []
             : TrRmMethodSigTableWriter.Encode(methodSignatureRows,
-                typeSpecs, parameterRows.Count, 0);
+                typeSpecs, parameterRows.Count, genericParamRows.Count);
         var signatures = methodSignatureRows.Count == 0 ? default
             : new TrRmMethodSigTableReader(signatureBytes,
                 methodSignatureRows.Count, typeSpecs,
-                parameterRows.Count, 0);
+                parameterRows.Count, genericParamRows.Count);
         var parameterBytes = parameterRows.Count == 0 ? []
             : TrRmParamTableWriter.Encode(parameterRows, signatures,
                 typeSpecs, schema);
@@ -9586,6 +9718,20 @@ public static partial class TrRmExecutableCompiler
             : new TrRmImportTableReader(importBytes, classImportRows.Length,
                 strings, moduleRefs, typeDefs, methods, default, default,
                 default, fields, featureReader, moduleTables, schema);
+        var genericParamBytes = genericParamRows.Count == 0 ? []
+            : TrRmGenericParamTableWriter.Encode(genericParamRows,
+                strings, typeDefs, methods, signatures, typeSpecs,
+                genericConstraintRows.Count);
+        var genericParams = genericParamRows.Count == 0 ? default
+            : new TrRmGenericParamTableReader(genericParamBytes,
+                genericParamRows.Count, strings, typeDefs, methods,
+                signatures, typeSpecs, genericConstraintRows.Count);
+        var associatedRelations
+            = new TrRmAssociatedRelationTableReader([], 0, typeSpecs, 0,
+                imports);
+        var constraintBytes = genericConstraintRows.Count == 0 ? []
+            : TrRmConstraintTableWriter.Encode(genericConstraintRows,
+                genericParams, typeSpecs, associatedRelations);
         var fieldPathBytes = fieldPathRows.Count == 0 ? []
             : TrRmFieldPathTableWriter.Encode(fieldPathRows, typeSpecs,
                 fields, imports);
@@ -9674,6 +9820,17 @@ public static partial class TrRmExecutableCompiler
                 checked((uint)methodRows.Count), methodBytes));
             sections.Add(new TrRmSection(0x0017, 0,
                 checked((uint)methodSignatureRows.Count), signatureBytes));
+        }
+        if (genericParamRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x0019, 0,
+                checked((uint)genericParamRows.Count), genericParamBytes));
+        }
+        if (genericConstraintRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x001A, 0,
+                checked((uint)genericConstraintRows.Count),
+                constraintBytes));
         }
         if (parameterRows.Count != 0)
         {
@@ -10059,7 +10216,8 @@ public static partial class TrRmExecutableCompiler
                     method.DefinitionId == providerMethodDefinitionId);
             if (actualMethod is null
                 || actualMethod.BodyRow == 0
-                || actualMethod.GenericParameterCount != 0
+                || actualMethod.GenericParameterCount
+                    != retained.Method.GenericParameterCount
                 || actualMethod.ConstructionRole != 0
                 || !actualMethod.ExportKeys.Contains(
                     retained.Method.ExportKey, StringComparer.Ordinal))
@@ -10248,7 +10406,8 @@ public static partial class TrRmExecutableCompiler
         TrRmFrozenScalarValueBuilder frozenScalarValueBuilder,
         List<ReadOnlyMemory<byte>> outputTypeSpecRows,
         Dictionary<int, uint> typeSpecRowMap,
-        HashSet<int> activeTypeSpecRows, TrRmArtifactSchema schema)
+        HashSet<int> activeTypeSpecRows, TrRmArtifactSchema schema,
+        Dictionary<int, int> genericParamRowMap)
     {
         if (!bodyBytes.IsEmpty && bodyBytes.Span[0] is (0x02 or 0x03))
         {
@@ -10288,7 +10447,7 @@ public static partial class TrRmExecutableCompiler
             var remappedTypeSpec = RemapC1M1ClassTypeSpec(sourceTables,
                 typeSpecReference, typeDefRowMap, importRowMap,
                 outputTypeSpecRows, typeSpecRowMap, activeTypeSpecRows,
-                depth: 0);
+                depth: 0, genericParamRowMap: genericParamRowMap);
             BinaryPrimitives.WriteUInt32LittleEndian(typeMap.AsSpan(offset),
                 CreateStandardBodyTypeMapToken(remappedTypeSpec));
         }
@@ -10306,7 +10465,7 @@ public static partial class TrRmExecutableCompiler
             var rootTypeSpec = RemapC1M1ClassTypeSpec(sourceTables,
                 sourceRootTypeSpec, typeDefRowMap, importRowMap,
                 outputTypeSpecRows, typeSpecRowMap, activeTypeSpecRows,
-                depth: 0);
+                depth: 0, genericParamRowMap: genericParamRowMap);
             var fieldCount = sourceTables.FieldPaths.GetFieldCount(
                 sourceRow);
             var fieldReferences = new uint[fieldCount];
@@ -10603,7 +10762,8 @@ public static partial class TrRmExecutableCompiler
         uint typeSpecReference, Dictionary<int, int> typeDefRowMap,
         Dictionary<int, int> importRowMap,
         List<ReadOnlyMemory<byte>> outputRows,
-        Dictionary<int, uint> rowMap, HashSet<int> activeRows, int depth)
+        Dictionary<int, uint> rowMap, HashSet<int> activeRows, int depth,
+        Dictionary<int, int>? genericParamRowMap = null)
     {
         if (depth > SemanticVerifier.MaximumDepth)
         {
@@ -10667,6 +10827,52 @@ public static partial class TrRmExecutableCompiler
                     break;
                 }
 
+                case 0x04:
+                {
+                    var oldGenericParamRow = checked((int)
+                        BinaryPrimitives.ReadUInt32LittleEndian(
+                            row.AsSpan(2)));
+                    if (genericParamRowMap is null
+                        || !genericParamRowMap.TryGetValue(
+                            oldGenericParamRow,
+                            out var newGenericParamRow))
+                    {
+                        throw Unsupported(
+                            "A retained class MethodDef TypeSpec refers to an unretained GenericParam.");
+                    }
+
+                    Write(row, 2, checked((uint)newGenericParamRow));
+                    break;
+                }
+
+                case 0x05:
+                {
+                    if (row.Length < 10 || (row.Length - 6) % 4 != 0)
+                    {
+                        throw new InvalidDataException(
+                            "A retained constructed TypeSpec has an invalid extent.");
+                    }
+
+                    var genericTypeSpec = BinaryPrimitives
+                        .ReadUInt32LittleEndian(row.AsSpan(2));
+                    var remappedGenericType = RemapC1M1ClassTypeSpec(
+                        sourceTables, genericTypeSpec, typeDefRowMap,
+                        importRowMap, outputRows, rowMap, activeRows,
+                        depth + 1, genericParamRowMap);
+                    Write(row, 2, remappedGenericType);
+                    for (var offset = 6; offset < row.Length; offset += 4)
+                    {
+                        var argument = BinaryPrimitives
+                            .ReadUInt32LittleEndian(row.AsSpan(offset));
+                        var remappedArgument = RemapC1M1ClassTypeSpec(
+                            sourceTables, argument, typeDefRowMap,
+                            importRowMap, outputRows, rowMap, activeRows,
+                            depth + 1, genericParamRowMap);
+                        Write(row, offset, remappedArgument);
+                    }
+                    break;
+                }
+
                 case >= 0x06 and <= 0x0B:
                 case 0x0E:
                 {
@@ -10674,7 +10880,8 @@ public static partial class TrRmExecutableCompiler
                         row.AsSpan(2));
                     var remappedChild = RemapC1M1ClassTypeSpec(
                         sourceTables, child, typeDefRowMap, importRowMap,
-                        outputRows, rowMap, activeRows, depth + 1);
+                        outputRows, rowMap, activeRows, depth + 1,
+                        genericParamRowMap);
                     Write(row, 2, remappedChild);
                     break;
                 }
@@ -10685,7 +10892,8 @@ public static partial class TrRmExecutableCompiler
                         row.AsSpan(3));
                     var remappedChild = RemapC1M1ClassTypeSpec(
                         sourceTables, child, typeDefRowMap, importRowMap,
-                        outputRows, rowMap, activeRows, depth + 1);
+                        outputRows, rowMap, activeRows, depth + 1,
+                        genericParamRowMap);
                     Write(row, 3, remappedChild);
                     break;
                 }
