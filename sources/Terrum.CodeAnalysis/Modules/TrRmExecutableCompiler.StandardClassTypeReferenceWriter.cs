@@ -79,6 +79,40 @@ public static partial class TrRmExecutableCompiler
         int MethodDefRow, int Ordinal, string Name,
         uint DefaultConstantSourceRow);
 
+    private readonly struct C1M1FieldPathIdentity
+        : IEquatable<C1M1FieldPathIdentity>
+    {
+        private readonly uint _rootTypeSpecRef;
+        private readonly ImmutableArray<uint> _fieldReferences;
+
+        internal C1M1FieldPathIdentity(uint rootTypeSpecRef,
+            ImmutableArray<uint> fieldReferences)
+        {
+            _rootTypeSpecRef = rootTypeSpecRef;
+            _fieldReferences = fieldReferences;
+        }
+
+        public bool Equals(C1M1FieldPathIdentity other)
+            => _rootTypeSpecRef == other._rootTypeSpecRef
+                && _fieldReferences.AsSpan().SequenceEqual(
+                    other._fieldReferences.AsSpan());
+
+        public override bool Equals(object? obj)
+            => obj is C1M1FieldPathIdentity other && Equals(other);
+
+        public override int GetHashCode()
+        {
+            var hashCode = new HashCode();
+            hashCode.Add(_rootTypeSpecRef);
+            foreach (var fieldReference in _fieldReferences)
+            {
+                hashCode.Add(fieldReference);
+            }
+
+            return hashCode.ToHashCode();
+        }
+    }
+
     private static byte[] EmitC1M1SourceClassDeclarations(
         BoundProgram program, string moduleIdentity,
         uint moduleTargetRequirement, SourceClassExports sourceClassExports,
@@ -8499,6 +8533,10 @@ public static partial class TrRmExecutableCompiler
         var parameterRows = new List<TrRmParamRow>();
         var methodNames = new List<string>();
         var bodyRows = new List<ReadOnlyMemory<byte>>();
+        var fieldPathRows = new List<TrRmFieldPathRow>();
+        var fieldPathRowMap = new Dictionary<int, int>();
+        var fieldPathRowsByIdentity
+            = new Dictionary<C1M1FieldPathIdentity, int>();
         var parameterSurfaceRows = new List<C1M1ParameterSurfaceRow>();
         var contractRows = new List<TrRmContractRow>();
         var frozenScalarValueBuilder = new TrRmFrozenScalarValueBuilder();
@@ -8732,9 +8770,10 @@ public static partial class TrRmExecutableCompiler
             {
                 bodyRows.Add(RemapC1M1ClassMethodBody(rootTables,
                     plan.Body, typeDefRowMap, methodDefRowMap,
-                    fieldRowMap, importRowMap, frozenScalarValueBuilder,
-                    outputTypeSpecRows, typeSpecRowMap, activeTypeSpecRows,
-                    schema));
+                    fieldRowMap, importRowMap, fieldPathRowMap,
+                    fieldPathRows, fieldPathRowsByIdentity,
+                    frozenScalarValueBuilder, outputTypeSpecRows,
+                    typeSpecRowMap, activeTypeSpecRows, schema));
             }
 
             methodRows.Add(new TrRmMethodDefRow(newOwnerTypeDefRow, 0,
@@ -8849,7 +8888,7 @@ public static partial class TrRmExecutableCompiler
         var methodClosureRowCount = (long)methodRows.Count
             + methodSignatureRows.Count + parameterRows.Count
             + parameterSurfaceRows.Count + contractRows.Count
-            + bodyRows.Count
+            + bodyRows.Count + fieldPathRows.Count
             + frozenScalarValueBuilder.BlobCount
             + frozenScalarValueBuilder.FrozenValueNodeCount
             + frozenScalarValueBuilder.ConstantSourceCount;
@@ -8859,6 +8898,7 @@ public static partial class TrRmExecutableCompiler
             || parameterSurfaceRows.Count > 0xFF_FFFF
             || contractRows.Count > 0xFF_FFFF
             || bodyRows.Count > 0xFF_FFFF
+            || fieldPathRows.Count > 0xFF_FFFF
             || methodClosureRowCount > SemanticVerifier.MaximumAnalysisVisits)
         {
             throw Unsupported(
@@ -9088,6 +9128,13 @@ public static partial class TrRmExecutableCompiler
             : TrRmImportTableWriter.Encode(classImportRows, strings,
                 moduleRefs, typeDefs, methods, default, default, default,
                 fields, featureReader, moduleTables, schema);
+        var imports = classImportRows.Length == 0 ? default
+            : new TrRmImportTableReader(importBytes, classImportRows.Length,
+                strings, moduleRefs, typeDefs, methods, default, default,
+                default, fields, featureReader, moduleTables, schema);
+        var fieldPathBytes = fieldPathRows.Count == 0 ? []
+            : TrRmFieldPathTableWriter.Encode(fieldPathRows, typeSpecs,
+                fields, imports);
         var frozenScalarValueTables
             = frozenScalarValueBuilder.Encode(typeSpecs);
         var parameterSurfaceBytes
@@ -9209,6 +9256,11 @@ public static partial class TrRmExecutableCompiler
             sections.Add(new TrRmSection(0x0066, 0,
                 checked((uint)parameterSurfaceRows.Count),
                 parameterSurfaceBytes));
+        }
+        if (fieldPathRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x004B, 0,
+                checked((uint)fieldPathRows.Count), fieldPathBytes));
         }
 
         sections.Sort(static (left, right) =>
@@ -9735,6 +9787,9 @@ public static partial class TrRmExecutableCompiler
         ReadOnlyMemory<byte> bodyBytes, Dictionary<int, int> typeDefRowMap,
         Dictionary<int, int> methodDefRowMap,
         Dictionary<int, int> fieldRowMap, Dictionary<int, int> importRowMap,
+        Dictionary<int, int> fieldPathRowMap,
+        List<TrRmFieldPathRow> fieldPathRows,
+        Dictionary<C1M1FieldPathIdentity, int> fieldPathRowsByIdentity,
         TrRmFrozenScalarValueBuilder frozenScalarValueBuilder,
         List<ReadOnlyMemory<byte>> outputTypeSpecRows,
         Dictionary<int, uint> typeSpecRowMap,
@@ -9763,6 +9818,64 @@ public static partial class TrRmExecutableCompiler
                 depth: 0);
             BinaryPrimitives.WriteUInt32LittleEndian(typeMap.AsSpan(offset),
                 CreateStandardBodyTypeMapToken(remappedTypeSpec));
+        }
+
+        int RemapFieldPath(int sourceRow)
+        {
+            if (fieldPathRowMap.TryGetValue(sourceRow,
+                    out var existingRow))
+            {
+                return existingRow;
+            }
+
+            var sourceRootTypeSpec = sourceTables.FieldPaths
+                .GetRootTypeSpecRef(sourceRow);
+            var rootTypeSpec = RemapC1M1ClassTypeSpec(sourceTables,
+                sourceRootTypeSpec, typeDefRowMap, importRowMap,
+                outputTypeSpecRows, typeSpecRowMap, activeTypeSpecRows,
+                depth: 0);
+            var fieldCount = sourceTables.FieldPaths.GetFieldCount(
+                sourceRow);
+            var fieldReferences = new uint[fieldCount];
+            for (var fieldIndex = 0; fieldIndex < fieldCount; fieldIndex++)
+            {
+                var token = sourceTables.FieldPaths.GetFieldReference(
+                    sourceRow, fieldIndex);
+                var row = checked((int)(token & 0x00FF_FFFF));
+                fieldReferences[fieldIndex] = (byte)(token >> 24) switch
+                {
+                    0x14 when fieldRowMap.TryGetValue(row,
+                        out var localFieldRow)
+                        => 0x1400_0000u
+                            | checked((uint)localFieldRow),
+                    0x1C when importRowMap.TryGetValue(row,
+                        out var fieldImportRow)
+                        => 0x1C00_0000u
+                            | checked((uint)fieldImportRow),
+                    _ => throw Unsupported(
+                        "CM1 local class MethodDef Body FieldPath steps must target retained FieldDefs or FieldDef Imports."),
+                };
+            }
+
+            var identity = new C1M1FieldPathIdentity(rootTypeSpec,
+                ImmutableArray.CreateRange(fieldReferences));
+            if (!fieldPathRowsByIdentity.TryGetValue(identity,
+                    out var outputRow))
+            {
+                if (fieldPathRows.Count >= 0xFF_FFFF)
+                {
+                    throw Unsupported(
+                        "CM1 local class MethodDef Bodies exceed the FieldPath row limit.");
+                }
+
+                outputRow = checked(fieldPathRows.Count + 1);
+                fieldPathRows.Add(new TrRmFieldPathRow(rootTypeSpec,
+                    fieldReferences));
+                fieldPathRowsByIdentity.Add(identity, outputRow);
+            }
+
+            fieldPathRowMap.Add(sourceRow, outputRow);
+            return outputRow;
         }
 
         var methodMap = body.MethodMap.ToArray();
@@ -9803,8 +9916,10 @@ public static partial class TrRmExecutableCompiler
                 0x1C when importRowMap.TryGetValue(row,
                     out var fieldImportRow)
                     => 0x1C00_0000u | checked((uint)fieldImportRow),
+                0x1D => 0x1D00_0000u
+                    | checked((uint)RemapFieldPath(row)),
                 _ => throw Unsupported(
-                    "CM1 local class MethodDef Body FieldMap targets must be retained local FieldDefs or FieldDef Imports."),
+                    "CM1 local class MethodDef Body FieldMap targets must be retained local FieldDefs, FieldDef Imports or FieldPaths."),
             };
 
             BinaryPrimitives.WriteUInt32LittleEndian(fieldMap.AsSpan(offset),

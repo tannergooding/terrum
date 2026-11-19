@@ -223,14 +223,18 @@ FieldDef/Import tokens, MethodDef/Body rows and method ExportKeys follow the
 retained maps.
 ConstantMap is limited to inline scalar TypeSpecs with frozen scalar
 ConstantSources; its scalar values are rebuilt into the output
-Blob/FrozenValueNode/ConstantSource tables. FieldPath targets, other
-ConstantMap forms and contract-row Body references reject re-emission,
+Blob/FrozenValueNode/ConstantSource tables. FieldPath Body maps remap root
+TypeSpecs and ordered FieldDef/Import steps, interning identical remapped
+paths. Other ConstantMap forms and contract-row Body references reject
+re-emission,
 while imported MethodDef expectation Bodies remain provider-owned.
 Provider/owner-row relocation and
 compatible/incompatible replacement, local Body producer/consumer and scalar
 ConstantMap-payload regressions are added but unverified under the active hold.
 An imported-struct FieldDef provider/consumer and source-free re-emission
-regression is also added but unverified.
+regression is also added but unverified. A FieldPath Body-map re-emission
+regression checks root TypeSpec and imported FieldDef step remapping, also
+unverified.
 Compiler-owned source-class anchors and explicit member-key capture are
 implemented, but complete bodyful
 local class member/MethodDef closure, provider

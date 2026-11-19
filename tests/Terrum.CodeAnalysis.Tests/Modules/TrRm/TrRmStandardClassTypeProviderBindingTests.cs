@@ -607,9 +607,12 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
             .GetExportsForModule(1)
             .Single(static export =>
                 export.ExportKey == "Container.Read").Definition;
+        var artifactReadMethodRow = checked((int)(
+            artifactReadDefinition & 0x00FF_FFFF));
+        var artifactReadBodyRow = artifactTables.Methods.GetBodyRow(
+            artifactReadMethodRow);
         var artifactReadBody = artifactTables.Bodies.GetRegisterBody(
-            artifactTables.Methods.GetBodyRow(checked((int)(
-                artifactReadDefinition & 0x00FF_FFFF))),
+            artifactReadBodyRow,
             artifactTables.Contracts.Count);
         Assert.That(artifactReadBody.FieldCount, Is.EqualTo(1));
         var artifactFieldMapToken
@@ -678,6 +681,92 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
         Assert.That(reemittedReadBody.Code.ToArray(),
             Is.EqualTo(artifactReadBody.Code.ToArray()));
 
+        var pathRootTypeSpecRef = Enumerable.Range(1,
+                artifactTables.TypeSpecs.Count)
+            .Select(static row => checked((uint)row))
+            .First(typeSpecRef => {
+                var type = artifactTables.TypeSpecs.GetTypeSpecRef(
+                    typeSpecRef);
+                return type.Form == 0x03
+                    && type.Row == artifactTypeImportRow;
+            });
+        var fieldPathArtifact = RewriteC1M1BodyFieldMapAsFieldPath(artifact,
+            artifactReadBodyRow, pathRootTypeSpecRef);
+        var fieldPathTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                        fieldPathArtifact));
+        Assert.That(fieldPathTables.FieldPaths.Count, Is.EqualTo(1));
+        var fieldPathBody = fieldPathTables.Bodies.GetRegisterBody(
+            fieldPathTables.Methods.GetBodyRow(artifactReadMethodRow),
+            fieldPathTables.Contracts.Count);
+        var fieldPathToken
+            = BinaryPrimitives.ReadUInt32LittleEndian(
+                fieldPathBody.FieldMap);
+        Assert.That(fieldPathToken, Is.EqualTo(0x1D00_0001u));
+
+        var fieldPathReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    fieldPathArtifact),
+                "StructFieldConsumer", [providerInput], ["ContainerKey"]);
+        var fieldPathCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), fieldPathReference);
+        Assert.That(fieldPathCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                fieldPathCompilation.Diagnostics));
+        var fieldPathReemitted = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)fieldPathCompilation.Program!,
+            "StructFieldPathConsumerReemitted", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var fieldPathReemittedTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                        fieldPathReemitted));
+        Assert.That(fieldPathReemittedTables.FieldPaths.Count,
+            Is.EqualTo(1));
+        var fieldPathReemittedStructRow = Enumerable.Range(1,
+                fieldPathReemittedTables.TypeDefs.Count)
+            .Single(row =>
+                fieldPathReemittedTables.TypeDefs.GetName(row) == "Leaf");
+        var fieldPathReemittedTypeImportRow = Enumerable.Range(1,
+                fieldPathReemittedTables.Imports.Count)
+            .Single(row => fieldPathReemittedTables.Imports
+                .GetExpectedDefinitionForImportRow(row)
+                == (0x1300_0000u
+                    | checked((uint)fieldPathReemittedStructRow)));
+        var fieldPathReemittedFieldImportRow = Enumerable.Range(1,
+                fieldPathReemittedTables.Imports.Count)
+            .Single(row => fieldPathReemittedTables.Imports
+                .GetExpectedDefinitionForImportRow(row) >> 24 == 0x14);
+        var remappedFieldPathRoot
+            = fieldPathReemittedTables.FieldPaths
+                .GetRootTypeSpecRef(1);
+        var remappedFieldPathRootType
+            = fieldPathReemittedTables.TypeSpecs.GetTypeSpecRef(
+                remappedFieldPathRoot);
+        Assert.That(remappedFieldPathRootType.Form, Is.EqualTo((byte)0x03));
+        Assert.That(checked((int)remappedFieldPathRootType.Row),
+            Is.EqualTo(fieldPathReemittedTypeImportRow));
+        Assert.That(fieldPathReemittedTables.FieldPaths
+                .GetFieldReference(1, 0),
+            Is.EqualTo(0x1C00_0000u
+                | checked((uint)fieldPathReemittedFieldImportRow)));
+        var fieldPathReemittedReadDefinition
+            = fieldPathReemittedTables.Exports.GetExportsForModule(1)
+                .Single(static export =>
+                    export.ExportKey == "Container.Read").Definition;
+        var fieldPathReemittedBody
+            = fieldPathReemittedTables.Bodies.GetRegisterBody(
+                fieldPathReemittedTables.Methods.GetBodyRow(checked((int)(
+                    fieldPathReemittedReadDefinition & 0x00FF_FFFF))),
+                fieldPathReemittedTables.Contracts.Count);
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                fieldPathReemittedBody.FieldMap),
+            Is.EqualTo(0x1D00_0001u));
+
         var relocatedProvider = CreateRelocatedClassProvider(
             "StructProvider", schemaIdentity);
         SetTypeDefFlags(relocatedProvider, 0x06, typeDefRow: 2);
@@ -693,8 +782,9 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
         Assert.That(relocatedLeafRow, Is.Not.EqualTo(1));
         var reloadedReference
             = TrRmExecutableCompiler.CreateStandardReference(
-                new TrRmStandardArtifactInput(schemaIdentity, reemitted),
-                "StructFieldConsumerReemitted", [
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    fieldPathReemitted),
+                "StructFieldPathConsumerReemitted", [
                     new TrRmStandardArtifactInput(schemaIdentity,
                         relocatedProvider),
                 ], ["ContainerKey"]);
@@ -709,8 +799,9 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
         SetTypeDefFlags(incompatibleProvider, 0x06);
         Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.CreateStandardReference(
-                new TrRmStandardArtifactInput(schemaIdentity, reemitted),
-                "StructFieldConsumerReemitted", [
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    fieldPathReemitted),
+                "StructFieldPathConsumerReemitted", [
                     new TrRmStandardArtifactInput(schemaIdentity,
                         incompatibleProvider),
                 ], ["ContainerKey"]));
@@ -1898,6 +1989,104 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
         var artifact = TrRmArtifactWriter.Encode(sections, artifactSchema);
         _ = ReadTables(artifact, schemaIdentity);
         return artifact;
+    }
+
+    private static byte[] RewriteC1M1BodyFieldMapAsFieldPath(
+        byte[] artifact, int bodyRow, uint rootTypeSpecRef)
+    {
+        var schema
+            = TrRmArtifactSchema
+                .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft;
+        var index = TrRmArtifactIndex
+            .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                artifact);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(index);
+        var body = tables.Bodies.GetRegisterBody(bodyRow,
+            tables.Contracts.Count);
+        if (body.FieldCount != 1)
+        {
+            throw new InvalidDataException(
+                "The FieldPath fixture requires one FieldMap entry.");
+        }
+
+        var fieldReference
+            = BinaryPrimitives.ReadUInt32LittleEndian(body.FieldMap);
+        if ((fieldReference >> 24) != 0x1C)
+        {
+            throw new InvalidDataException(
+                "The FieldPath fixture requires a selected FieldDef Import.");
+        }
+
+        var fieldPathBytes = TrRmFieldPathTableWriter.Encode([
+            new TrRmFieldPathRow(rootTypeSpecRef, [fieldReference]),
+        ], tables.TypeSpecs, tables.Fields, tables.Imports);
+        var fieldMap = body.FieldMap.ToArray();
+        BinaryPrimitives.WriteUInt32LittleEndian(fieldMap,
+            0x1D00_0001u);
+
+        var blocks = new TrRmRegisterBodyBlock[body.BlockCount];
+        for (var blockIndex = 0; blockIndex < body.BlockCount; blockIndex++)
+        {
+            var block = body.GetBlock(blockIndex);
+            blocks[blockIndex] = new(
+                BinaryPrimitives.ReadUInt32LittleEndian(block),
+                BinaryPrimitives.ReadUInt32LittleEndian(
+                    block.Slice(sizeof(uint))),
+                BinaryPrimitives.ReadUInt16LittleEndian(
+                    block.Slice(2 * sizeof(uint))));
+        }
+
+        var records = new ReadOnlyMemory<byte>[body.RecordCount];
+        for (var recordIndex = 0; recordIndex < body.RecordCount;
+            recordIndex++)
+        {
+            records[recordIndex] = body.GetRecord(recordIndex).ToArray();
+        }
+
+        var rewrittenBody = TrRmRegisterBodyWriter.Encode(
+            body.HomeMap.ToArray(), body.TypeMap.ToArray(),
+            body.MethodMap.ToArray(), fieldMap,
+            body.ConstantMap.ToArray(), blocks, records,
+            contractCount: tables.Contracts.Count, schema: schema);
+        var bodyRows = new ReadOnlyMemory<byte>[tables.Bodies.Count];
+        for (var row = 1; row <= tables.Bodies.Count; row++)
+        {
+            bodyRows[row - 1] = row == bodyRow
+                ? rewrittenBody : tables.Bodies.GetRow(row).ToArray();
+        }
+
+        var bodyBytes = TrRmVariableTableWriter.EncodeBodies(bodyRows);
+        var sections = new List<TrRmSection>(index.SectionCount + 1);
+        var hasBodySection = false;
+        for (var sectionIndex = 0;
+            sectionIndex < index.SectionCount; sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var recordCount);
+            if (kind == 0x0020)
+            {
+                sections.Add(new TrRmSection(kind, flags,
+                    checked((uint)tables.Bodies.Count), bodyBytes));
+                hasBodySection = true;
+            }
+            else if (kind != 0x004B)
+            {
+                sections.Add(new TrRmSection(kind, flags,
+                    checked((uint)recordCount), bytes.ToArray()));
+            }
+        }
+
+        if (!hasBodySection)
+        {
+            throw new InvalidDataException(
+                "The FieldPath fixture has no Body section.");
+        }
+
+        sections.Add(new TrRmSection(0x004B, 0, 1, fieldPathBytes));
+        sections.Sort(static (left, right) =>
+            left.Kind.CompareTo(right.Kind));
+        return TrRmArtifactWriter.Encode(sections);
     }
 
     private static TrRmStructuralMetadataValidator.ValidatedExecutionTables
