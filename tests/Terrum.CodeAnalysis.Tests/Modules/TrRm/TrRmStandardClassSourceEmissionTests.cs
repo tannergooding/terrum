@@ -6229,8 +6229,13 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         Assert.That(formal.OwnershipDomain, Is.EqualTo((byte)1));
         Assert.That(formal.NullabilityDomain, Is.EqualTo((byte)1));
         Assert.That(formal.ConstantTypeSpecReference, Is.Zero);
-        Assert.That(formal.DefaultArgumentReference, Is.Zero);
-        Assert.That(formal.Constraints, Is.Empty);
+        Assert.That(formal.DefaultArgumentReference, Is.EqualTo(0xF200_0008u));
+        Assert.That(formal.Constraints, Has.Length.EqualTo(1));
+        Assert.That(formal.Constraints[0].Row, Is.EqualTo(1));
+        Assert.That(formal.Constraints[0].OwnerGenericParamRow,
+            Is.EqualTo(formal.Row));
+        Assert.That(formal.Constraints[0].Kind, Is.EqualTo((ushort)2));
+        Assert.That(formal.Constraints[0].Payload, Is.EqualTo(1u));
 
         static byte[] AddGenericTypeFormal(byte[] artifact)
         {
@@ -6251,6 +6256,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             var signatureRow = tables.Methods.GetSignature(methodRow);
             if (tables.Signatures.GetGenericCount(signatureRow) != 0
                 || artifactIndex.TryGetSection(0x0019, out _, out _)
+                || artifactIndex.TryGetSection(0x001A, out _, out _)
                 || !artifactIndex.TryGetSection(0x0017, out var signatureSection,
                     out var signatureCount)
                 || signatureCount != (uint)tables.Signatures.Count)
@@ -6266,9 +6272,22 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 methodDefinition);
             BinaryPrimitives.WriteUInt32LittleEndian(
                 genericParam.AsSpan(8), checked((uint)formalNameRow));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                genericParam.AsSpan(12), 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                genericParam.AsSpan(16), 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                genericParam.AsSpan(28), 0xF200_0008u);
             genericParam[20] = 1;
             genericParam[21] = 1;
             genericParam[22] = 1;
+
+            var constraint = new byte[12];
+            BinaryPrimitives.WriteUInt32LittleEndian(constraint, 1);
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                constraint.AsSpan(4), 2);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                constraint.AsSpan(8), 1);
 
             var signatureBytes = signatureSection.ToArray();
             var signatureOffset = checked((signatureRow - 1) * 24);
@@ -6319,7 +6338,8 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             BinaryPrimitives.WriteUInt32LittleEndian(
                 moduleBytes.AsSpan(28), outputFeatureCount);
             var sections = new List<TrRmSection>(
-                artifactIndex.SectionCount + (hasFeatureSection ? 0 : 1));
+                artifactIndex.SectionCount + (hasFeatureSection ? 0 : 1)
+                    + 2);
             for (var sectionIndex = 0;
                 sectionIndex < artifactIndex.SectionCount; sectionIndex++)
             {
@@ -6339,6 +6359,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                                 section.ToArray()));
             }
             sections.Add(new TrRmSection(0x0019, 0, 1, genericParam));
+            sections.Add(new TrRmSection(0x001A, 0, 1, constraint));
             if (!hasFeatureSection)
             {
                 sections.Add(new TrRmSection(0x0004, 0,

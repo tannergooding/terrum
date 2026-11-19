@@ -543,6 +543,8 @@ internal static class BoundStandardClassDeclarationContract
 
         var methods = new Dictionary<uint,
             BoundStandardClassMethodDeclaration>();
+        var genericParameterRows = new HashSet<int>();
+        var genericConstraintRows = new HashSet<int>();
         var previousMethodRow = 0u;
         foreach (var method in view.Methods)
         {
@@ -602,6 +604,10 @@ internal static class BoundStandardClassDeclarationContract
                 var formal = method.GenericParameters[ordinal];
                 if (formal is null || formal.Row <= 0
                     || formal.Row > 0x00FF_FFFF
+                    || !genericParameterRows.Add(formal.Row)
+                    || (ordinal != 0
+                        && formal.Row
+                            != method.GenericParameters[ordinal - 1].Row + 1)
                     || formal.OwnerDefinitionId != method.DefinitionId
                     || formal.Ordinal != (uint)ordinal
                     || !IsValidText(formal.Name)
@@ -630,10 +636,18 @@ internal static class BoundStandardClassDeclarationContract
                     return false;
                 }
 
-                foreach (var constraint in formal.Constraints)
+                for (var constraintOrdinal = 0;
+                    constraintOrdinal < formal.Constraints.Length;
+                    constraintOrdinal++)
                 {
+                    var constraint = formal.Constraints[constraintOrdinal];
                     if (constraint.Row <= 0
                         || constraint.Row > 0x00FF_FFFF
+                        || !genericConstraintRows.Add(constraint.Row)
+                        || (constraintOrdinal != 0
+                            && constraint.Row
+                                != formal.Constraints[
+                                    constraintOrdinal - 1].Row + 1)
                         || constraint.OwnerGenericParamRow
                             != formal.Row
                         || constraint.Kind is not (1 or 2 or 3)
