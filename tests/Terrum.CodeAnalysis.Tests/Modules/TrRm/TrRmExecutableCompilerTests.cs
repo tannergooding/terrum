@@ -5024,28 +5024,50 @@ internal sealed class TrRmExecutableCompilerTests
             LayoutCoreRegistration
                 = LayoutCoreRegistrationTestData.Create(),
         };
-        var leafCompilation = Compilation.CreateLibrary(
-            SyntaxTree.Parse("""
-                namespace Example {
-                    [Blittable]
-                    [Layout(LayoutKind.Sequential, Packing: 1)]
-                    public struct Leaf {
-                        public uint8 Tag;
-                        public uint32 Value;
+        byte[] EmitLeafProvider(bool includePrefixTypeDef,
+            bool useDifferentFieldType)
+        {
+            var prefixType = includePrefixTypeDef
+                ? """
+                  [Blittable]
+                  [Layout(LayoutKind.Sequential, Packing: 1)]
+                  public struct Prefix { public uint8 Value; }
+                  """
+                : string.Empty;
+            var fieldType = useDifferentFieldType ? "uint16" : "uint32";
+            var compilation = Compilation.CreateLibrary(
+                SyntaxTree.Parse($$"""
+                    namespace Example {
+                        {{prefixType}}
+                        [Blittable]
+                        [Layout(LayoutKind.Sequential, Packing: 1)]
+                        public struct Leaf {
+                            public uint8 Tag;
+                            public {{fieldType}} Value;
+                        }
                     }
-                }
-                """), layoutOptions);
-        Assert.That(leafCompilation.HasErrors, Is.False,
-            string.Join(Environment.NewLine, leafCompilation.Diagnostics));
-        var leafArtifact = TrRmExecutableCompiler.EmitStandard(
-            leafCompilation.Program!, "LeafProvider", schemaIdentity,
-            targetRequirement, [
-                new TrRmSourceTypeExport("Example", "Leaf", "leaf-key") {
-                    FieldExports = [
-                        new TrRmSourceFieldExport("Value", "leaf-value"),
-                    ],
-                },
-            ]);
+                    """), layoutOptions);
+            Assert.That(compilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    compilation.Diagnostics));
+            var typeExports = new List<TrRmSourceTypeExport>();
+            if (includePrefixTypeDef)
+            {
+                typeExports.Add(new TrRmSourceTypeExport("Example",
+                    "Prefix", "prefix-key"));
+            }
+            typeExports.Add(new TrRmSourceTypeExport("Example", "Leaf",
+                "leaf-key") {
+                FieldExports = [
+                    new TrRmSourceFieldExport("Value", "leaf-value"),
+                ],
+            });
+            return TrRmExecutableCompiler.EmitStandard(
+                compilation.Program!, "LeafProvider", schemaIdentity,
+                targetRequirement, typeExports);
+        }
+
+        var leafArtifact = EmitLeafProvider(false, false);
         var leafReference = TrRmExecutableCompiler.CreateStandardReference(
             new TrRmStandardArtifactInput(schemaIdentity, leafArtifact),
             "LeafProvider", Array.Empty<TrRmStandardArtifactInput>(),
@@ -5080,8 +5102,10 @@ internal sealed class TrRmExecutableCompilerTests
                     ],
                 },
             ]);
+        var pairInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
         var reference = TrRmExecutableCompiler.CreateStandardReference(
-            new TrRmStandardArtifactInput(schemaIdentity, providerArtifact),
+            pairInput,
             "PairProvider", [
                 new TrRmStandardArtifactInput(schemaIdentity, leafArtifact),
             ], ["pair"], ["pair-inner", "pair-tag"]);
@@ -5224,6 +5248,68 @@ internal sealed class TrRmExecutableCompilerTests
             ]);
         Assert.That(NativeJit.Execute(composedLoaded,
             NativeRuntimePolicy.FailFast), Is.EqualTo(1));
+
+        var relocatedLeafArtifact = EmitLeafProvider(true, false);
+        var originalLeafTables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(
+                new TrRmArtifactIndex(leafArtifact));
+        var relocatedLeafTables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(
+                new TrRmArtifactIndex(relocatedLeafArtifact));
+        Assert.That(originalLeafTables.Exports.TryGetDefinitionForKey(1,
+            "leaf-key", out var originalLeafDefinition), Is.True);
+        Assert.That(relocatedLeafTables.Exports.TryGetDefinitionForKey(1,
+            "leaf-key", out var relocatedLeafDefinition), Is.True);
+        Assert.That(relocatedLeafDefinition,
+            Is.Not.EqualTo(originalLeafDefinition));
+        var relocatedLeafInput = new TrRmStandardArtifactInput(schemaIdentity,
+            relocatedLeafArtifact);
+        var relocatedPairReference
+            = TrRmExecutableCompiler.CreateStandardReference(pairInput,
+                "PairProvider", [relocatedLeafInput], ["pair"],
+                ["pair-inner", "pair-tag"]);
+        var relocatedLeafReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                relocatedLeafInput, "LeafProvider", [], ["leaf-key"],
+                ["leaf-value"]);
+        var relocatedComposedReference
+            = TrRmExecutableCompiler.CreateStandardReferenceSet([
+                relocatedPairReference, relocatedLeafReference,
+            ]);
+        var relocatedConsumerCompilation = Compilation.Create(
+            SyntaxTree.Parse("""
+                using Example;
+                int32 Main() {
+                    return int32(offsetof(Pair, Inner.Value));
+                }
+                """), relocatedComposedReference, new CompilationOptions {
+                LayoutCoreRegistration
+                    = LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(relocatedConsumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                relocatedConsumerCompilation.Diagnostics));
+        var relocatedConsumerProgram = relocatedConsumerCompilation.Program
+            ?? throw new InvalidOperationException(
+                "The relocated imported layout consumer did not bind.");
+        var relocatedConsumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            relocatedConsumerProgram, "RelocatedComposedConsumer",
+            schemaIdentity, targetRequirement);
+        var relocatedLoaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                relocatedConsumerArtifact),
+            "RelocatedComposedConsumer", [
+                pairInput, relocatedLeafInput,
+            ]);
+        Assert.That(NativeJit.Execute(relocatedLoaded,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(1));
+
+        var incompatibleLeafInput = new TrRmStandardArtifactInput(
+            schemaIdentity, EmitLeafProvider(false, true));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(pairInput,
+                "PairProvider", [incompatibleLeafInput], ["pair"],
+                ["pair-inner", "pair-tag"]));
 
         var composedLoopCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
