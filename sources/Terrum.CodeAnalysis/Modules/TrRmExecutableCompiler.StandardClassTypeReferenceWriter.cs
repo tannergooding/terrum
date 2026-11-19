@@ -48,6 +48,10 @@ public static partial class TrRmExecutableCompiler
         int MethodRow, int FormalOrdinal, int GenericParamRow,
         int Kind, uint Payload, int InterfaceConstraintOrdinal);
 
+    private readonly record struct C1M1GenericMethodTypeSpecPlan(
+        int MethodRow, int MethodSigRow, int ParameterRow,
+        int ParameterOrdinal, bool IsResult);
+
     private sealed record C1M1GenericMethodTypeEmissionContext(
         BoundGenericMethodImport Root,
         BoundGenericMethodDefinition Definition,
@@ -9277,6 +9281,8 @@ public static partial class TrRmExecutableCompiler
         var genericConstraintRows = new List<TrRmConstraintRow>();
         var genericConstraintPlans
             = new List<C1M1GenericConstraintPlan>();
+        var genericMethodTypeSpecPlans
+            = new List<C1M1GenericMethodTypeSpecPlan>();
         foreach (var (oldMethodRow, plan) in methodEmissionPlans)
         {
             var formals = plan.Method.GenericParameters;
@@ -9576,11 +9582,24 @@ public static partial class TrRmExecutableCompiler
                         defaultArgumentReference);
             }
 
-            var resultTypeSpec = RemapC1M1ClassTypeSpec(rootTables,
-                method.ReturnTypeSpecReference, typeDefRowMap,
-                importRowMap, outputTypeSpecRows, typeSpecRowMap,
-                activeTypeSpecRows, depth: 0,
-                genericParamRowMap: genericParamRowMap);
+            var signatureRow = methodSignatureRows.Count + 1;
+            var deferredResultType
+                = IsC1M1ImportedGenericNominalMethodTypeSpec(rootTables,
+                    method.ReturnTypeSpecReference, nominalTypeImportRows);
+            var resultTypeSpec = deferredResultType
+                ? AppendC1M1MethodTypePlaceholder(outputTypeSpecRows,
+                    newOwnerTypeDefRow)
+                : RemapC1M1ClassTypeSpec(rootTables,
+                    method.ReturnTypeSpecReference, typeDefRowMap,
+                    importRowMap, outputTypeSpecRows, typeSpecRowMap,
+                    activeTypeSpecRows, depth: 0,
+                    genericParamRowMap: genericParamRowMap);
+            if (deferredResultType)
+            {
+                genericMethodTypeSpecPlans.Add(
+                    new C1M1GenericMethodTypeSpecPlan(oldMethodRow,
+                        signatureRow, 0, -1, IsResult: true));
+            }
             var receiverTypeSpec = method.ReceiverTypeSpecReference == 0
                 ? 0
                 : RemapC1M1ClassTypeSpec(rootTables,
@@ -9588,7 +9607,6 @@ public static partial class TrRmExecutableCompiler
                     importRowMap, outputTypeSpecRows, typeSpecRowMap,
                         activeTypeSpecRows, depth: 0,
                         genericParamRowMap: genericParamRowMap);
-            var signatureRow = methodSignatureRows.Count + 1;
             var parameterFirst = method.Parameters.IsEmpty
                 ? 0 : parameterRows.Count + 1;
             for (var ordinal = 0; ordinal < method.Parameters.Length;
@@ -9606,13 +9624,27 @@ public static partial class TrRmExecutableCompiler
                         "A retained class MethodDef parameter must use the bounded ordinary mode and supported source-call flags.");
                 }
 
-                var remappedTypeSpec = RemapC1M1ClassTypeSpec(rootTables,
-                    parameter.TypeSpecReference, typeDefRowMap,
-                    importRowMap, outputTypeSpecRows, typeSpecRowMap,
-                    activeTypeSpecRows, depth: 0,
-                    genericParamRowMap: genericParamRowMap);
+                var deferredParameterType
+                    = IsC1M1ImportedGenericNominalMethodTypeSpec(
+                        rootTables, parameter.TypeSpecReference,
+                        nominalTypeImportRows);
+                var remappedTypeSpec = deferredParameterType
+                    ? AppendC1M1MethodTypePlaceholder(outputTypeSpecRows,
+                        newOwnerTypeDefRow)
+                    : RemapC1M1ClassTypeSpec(rootTables,
+                        parameter.TypeSpecReference, typeDefRowMap,
+                        importRowMap, outputTypeSpecRows, typeSpecRowMap,
+                        activeTypeSpecRows, depth: 0,
+                        genericParamRowMap: genericParamRowMap);
                 parameterRows.Add(new TrRmParamRow(signatureRow, ordinal,
                     remappedTypeSpec, parameter.Mode, parameter.Flags));
+                if (deferredParameterType)
+                {
+                    genericMethodTypeSpecPlans.Add(
+                        new C1M1GenericMethodTypeSpecPlan(oldMethodRow,
+                            signatureRow, parameterRows.Count, ordinal,
+                            IsResult: false));
+                }
 
                 if (schema.UsesClassParameterDefaults())
                 {
@@ -9759,6 +9791,14 @@ public static partial class TrRmExecutableCompiler
             }
 
             var methodPlan = matches[0];
+            var oldMethodRow = GetMethodDefRow(
+                methodPlan.Method.DefinitionId);
+            var deferredMethodTypes = genericMethodTypeSpecPlans
+                .Where(plan => plan.MethodRow == oldMethodRow)
+                .ToArray();
+            var methodRoot = deferredMethodTypes.Length == 0 ? null
+                : FindC1M1ClassMethodImport(
+                    program.RetainedGenericMethodRoots, oldMethodRow);
             var providerIdentity = methodPlan.Imports.IsEmpty
                 ? rootSnapshot.ModuleIdentity
                 : methodPlan.Imports[0].Provider.ModuleIdentity;
@@ -9777,6 +9817,18 @@ public static partial class TrRmExecutableCompiler
                         : methodPlan.Imports.Any(import =>
                             StringComparer.Ordinal.Equals(import.ExportKey,
                                 selectedImport.ExportKey)));
+            var hasDeferredResultType = deferredMethodTypes.Any(
+                static plan => plan.IsResult);
+            var returnTypeMatches = hasDeferredResultType
+                ? methodRoot is not null
+                    && AreC1M1MethodSignatureTypesEquivalent(
+                        function.ReturnType, function, program,
+                        methodRoot.ProofFunction.ReturnType,
+                        methodRoot.ProofFunction)
+                : TryGetC1M1ClassScalarType(rootTables,
+                    methodPlan.Method.ReturnTypeSpecReference,
+                    out var methodReturnType)
+                    && function.ReturnType == methodReturnType;
             if (function.ModuleImport is not BoundModuleImport functionImport
                 || !function.IsExternal
                 || function.IsStatic
@@ -9795,10 +9847,7 @@ public static partial class TrRmExecutableCompiler
                 || functionImport.RuntimePolicy
                     != providerRuntimePolicy
                 || !hasSelectedExport
-                || !TryGetC1M1ClassScalarType(rootTables,
-                    methodPlan.Method.ReturnTypeSpecReference,
-                    out var methodReturnType)
-                || function.ReturnType != methodReturnType
+                || !returnTypeMatches
                 || function.ParameterCount
                     != methodPlan.Method.Parameters.Length
                         + (methodPlan.Method.ReceiverTypeSpecReference == 0
@@ -9813,12 +9862,36 @@ public static partial class TrRmExecutableCompiler
                     != ((methodPlan.Method.EffectsMask & 2) != 0))
             {
                 throw Unsupported(
-                    "A retained class MethodDef call view does not match its complete scalar Import expectation.");
+                    "A retained class MethodDef call view does not match its complete checked Import expectation.");
             }
 
             for (var ordinal = 0;
                 ordinal < methodPlan.Method.Parameters.Length; ordinal++)
             {
+                if (deferredMethodTypes.Any(plan =>
+                        !plan.IsResult
+                        && plan.ParameterOrdinal == ordinal))
+                {
+                    var proofIndex = ordinal
+                        + (methodPlan.Method.ReceiverTypeSpecReference == 0
+                            ? 0 : 1);
+                    if (methodRoot is null
+                        || (uint)proofIndex
+                            >= (uint)methodRoot.ProofFunction.Variables.Length
+                        || !AreC1M1MethodSignatureTypesEquivalent(
+                            function.Variables[proofIndex].Type, function,
+                            program,
+                            methodRoot.ProofFunction.Variables[proofIndex]
+                                .Type,
+                            methodRoot.ProofFunction))
+                    {
+                        throw Unsupported(
+                            "A retained class MethodDef generic nominal parameter differs from its checked imported signature.");
+                    }
+
+                    continue;
+                }
+
                 if (!TryGetC1M1ClassScalarType(rootTables,
                         methodPlan.Method.Parameters[ordinal]
                             .TypeSpecReference, out var parameterType)
@@ -10267,13 +10340,14 @@ public static partial class TrRmExecutableCompiler
             left.Kind.CompareTo(right.Kind));
         var artifact = TrRmArtifactWriter.Encode(sections,
             schema);
-        if (schema.UsesAssociatedRelationConstraints()
-            && genericConstraintPlans.Count != 0)
+        if (genericConstraintPlans.Count != 0
+            || genericMethodTypeSpecPlans.Count != 0)
         {
             artifact = ReemitC1M1ClassAssociatedRelationConstraints(
                 artifact, program, rootTables, rootModuleRow, rootSnapshot,
                 schema, genericConstraintPlans, genericParamRows.Count,
-                genericParamRowMap, typeDefRowMap, importRowMap);
+                genericParamRowMap, typeDefRowMap, importRowMap,
+                genericMethodTypeSpecPlans);
         }
 
         _ = TrRmStructuralMetadataValidator
@@ -10385,6 +10459,24 @@ public static partial class TrRmExecutableCompiler
 
         return match ?? throw Unsupported(
             "A retained CM1AR1 MethodDef has no typed import root.");
+    }
+
+    private static bool AreC1M1MethodSignatureTypesEquivalent(
+        PrimitiveType functionType, BoundFunction function,
+        BoundProgram program, PrimitiveType proofType,
+        BoundFunction proofFunction)
+    {
+        var proofProgram = program with {
+            Functions = [proofFunction],
+        };
+        return SemanticVerifier.TryGetGenericMethodActualTypeTerm(
+                functionType, function, program, 0,
+                out var functionTerm)
+            && SemanticVerifier.TryGetGenericMethodActualTypeTerm(
+                proofType, proofFunction, proofProgram, 0,
+                out var proofTerm)
+            && SemanticVerifier.AreGenericMethodTypeTermsEqual(
+                functionTerm, proofTerm, 0);
     }
 
     private static BoundModuleImport GetC1M1AssociatedInterfaceModuleImport(
@@ -11000,18 +11092,22 @@ public static partial class TrRmExecutableCompiler
         int classGenericParamCount,
         Dictionary<int, int> genericParamRowMap,
         Dictionary<int, int> typeDefRowMap,
-        Dictionary<int, int> importRowMap)
+        Dictionary<int, int> importRowMap,
+        IReadOnlyList<C1M1GenericMethodTypeSpecPlan>
+            genericMethodTypeSpecPlans)
     {
-        var reemissionProgram
-            = CreateC1M1AssociatedRelationReemissionProgram(program,
-                rootTables, rootModuleRow, rootSnapshot,
-                constraintPlans);
+        var reemissionProgram = constraintPlans.Count == 0 ? program
+            : CreateC1M1AssociatedRelationReemissionProgram(program,
+                rootTables, rootModuleRow, rootSnapshot, constraintPlans);
         var importedAssociatedTypeImportRows
             = new Dictionary<GenericImportedInterfaceAssociatedTypeKey,
                 uint>();
-        artifact = AddImportedGenericInterfaceMetadata(artifact,
-            reemissionProgram, schema, null,
-            out importedAssociatedTypeImportRows);
+        if (constraintPlans.Count != 0)
+        {
+            artifact = AddImportedGenericInterfaceMetadata(artifact,
+                reemissionProgram, schema, null,
+                out importedAssociatedTypeImportRows);
+        }
 
         var outputIndex = new TrRmArtifactIndex(artifact, schema);
         var outputTables = TrRmStructuralMetadataValidator
@@ -11041,16 +11137,20 @@ public static partial class TrRmExecutableCompiler
                 checked((int)importRow));
         }
 
-        foreach (var definition in reemissionProgram.Interfaces)
+        if (constraintPlans.Count != 0)
         {
-            MapC1M1ReemittedInterfaceType(definition,
-                interfaceImportRowsByOwner, rootTables, outputTables,
-                rootModuleRow, typeDefRowMap, importRowMap);
+            foreach (var definition in reemissionProgram.Interfaces)
+            {
+                MapC1M1ReemittedInterfaceType(definition,
+                    interfaceImportRowsByOwner, rootTables, outputTables,
+                    rootModuleRow, typeDefRowMap, importRowMap);
+            }
         }
 
         var outputTypeSpecRows
             = new List<ReadOnlyMemory<byte>>(outputTables.TypeSpecs.Count
-                + constraintPlans.Count * 2);
+                + constraintPlans.Count * 2
+                + genericMethodTypeSpecPlans.Count);
         for (var row = 1; row <= outputTables.TypeSpecs.Count; row++)
         {
             outputTypeSpecRows.Add(
@@ -11219,6 +11319,56 @@ public static partial class TrRmExecutableCompiler
             = new Dictionary<int, int>();
         var exportedInterfaceTypeSpecRows
             = new Dictionary<(string QualifiedName, int Arity), uint>();
+        var emittedMethodTypeSpecReferences
+            = new Dictionary<C1M1GenericMethodTypeSpecPlan, uint>();
+        foreach (var plan in genericMethodTypeSpecPlans)
+        {
+            if (!typeEmissionContexts.TryGetValue(plan.MethodRow,
+                    out var typeContext))
+            {
+                var methodRoot = FindC1M1ClassMethodImport(
+                    reemissionProgram.RetainedGenericMethodRoots,
+                    plan.MethodRow);
+                typeContext
+                    = CreateC1M1GenericMethodTypeEmissionContext(
+                        reemissionProgram, methodRoot, plan.MethodRow,
+                        rootTables, genericParamRowMap,
+                        outputTypeSpecRows);
+                typeEmissionContexts.Add(plan.MethodRow, typeContext);
+            }
+
+            var proofFunction = typeContext.Root.ProofFunction;
+            PrimitiveType proofType;
+            if (plan.IsResult)
+            {
+                proofType = proofFunction.ReturnType;
+            }
+            else
+            {
+                var proofIndex = plan.ParameterOrdinal
+                    + (typeContext.Root.Signature.IsStatic ? 0 : 1);
+                if ((uint)proofIndex
+                    >= (uint)proofFunction.Variables.Length)
+                {
+                    throw new InvalidDataException(
+                        "A retained class MethodDef generic parameter has no checked proof type.");
+                }
+
+                proofType = proofFunction.Variables[proofIndex].Type;
+            }
+
+            var typeSpecReference = nominalTypeWriter.TypeSpecRef(
+                proofType, typeContext.Definition,
+                typeContext.FormalTypeSpecRows,
+                typeContext.BuiltInTypeSpecRows, depth: 0);
+            if (!emittedMethodTypeSpecReferences.TryAdd(plan,
+                    typeSpecReference))
+            {
+                throw new InvalidDataException(
+                    "A retained class MethodDef generic TypeSpec is emitted more than once.");
+            }
+        }
+
         foreach (var plan in constraintPlans)
         {
             if (!typeEmissionContexts.TryGetValue(plan.MethodRow,
@@ -11404,7 +11554,8 @@ public static partial class TrRmExecutableCompiler
             constraintRows.Count * 12);
 
         for (var genericParamRow = 1;
-            genericParamRow <= genericParamCount;
+            constraintRows.Count != 0
+                && genericParamRow <= genericParamCount;
             genericParamRow++)
         {
             var offset = (genericParamRow - 1) * 32;
@@ -11445,6 +11596,78 @@ public static partial class TrRmExecutableCompiler
                 outputTables.Imports.Count, genericParamCount,
                 outputTables.NativeFunctionPointerSignatures.Count, schema,
                 outputTables.Methods.Count);
+        if (genericMethodTypeSpecPlans.Count != 0)
+        {
+            var totalParameterCount = outputTables.Signatures.ParamCount;
+            var resultTypeSpecs = new Dictionary<int, uint>();
+            var parameterTypeSpecs = new Dictionary<int, uint>();
+            foreach (var plan in genericMethodTypeSpecPlans)
+            {
+                var typeSpecReference
+                    = emittedMethodTypeSpecReferences[plan];
+                var references = plan.IsResult
+                    ? resultTypeSpecs : parameterTypeSpecs;
+                var row = plan.IsResult
+                    ? plan.MethodSigRow : plan.ParameterRow;
+                if (!references.TryAdd(row, typeSpecReference))
+                {
+                    throw new InvalidDataException(
+                        "A retained class MethodSig has multiple generic nominal TypeSpec replacements.");
+                }
+            }
+
+            var signatureRows = new TrRmMethodSigRow[
+                outputTables.Signatures.Count];
+            for (var row = 1; row <= signatureRows.Length; row++)
+            {
+                var (parameterFirst, parameterCount)
+                    = outputTables.Signatures.GetParamRange(row);
+                var (genericFirst, genericCount)
+                    = outputTables.Signatures.GetGenericRange(row);
+                signatureRows[row - 1] = new TrRmMethodSigRow(
+                    resultTypeSpecs.TryGetValue(row, out var resultTypeSpec)
+                        ? resultTypeSpec
+                        : outputTables.Signatures
+                            .GetResultTypeSpec(row),
+                    outputTables.Signatures.GetReceiverTypeSpec(row),
+                    parameterFirst, parameterCount,
+                    genericFirst, genericCount);
+            }
+
+            var signatureBytes = TrRmMethodSigTableWriter.Encode(
+                signatureRows, typeSpecs, totalParameterCount,
+                genericParamCount);
+            var signatures = new TrRmMethodSigTableReader(signatureBytes,
+                signatureRows.Length, typeSpecs,
+                totalParameterCount, genericParamCount);
+            var parameterRows = new TrRmParamRow[totalParameterCount];
+            for (var row = 1; row <= parameterRows.Length; row++)
+            {
+                var owner = outputTables.Signatures.GetParamOwner(row);
+                var (parameterFirst, _) = outputTables.Signatures
+                    .GetParamRange(owner);
+                parameterRows[row - 1] = new TrRmParamRow(owner,
+                    row - parameterFirst,
+                    parameterTypeSpecs.TryGetValue(row,
+                        out var parameterTypeSpec)
+                        ? parameterTypeSpec
+                        : outputTables.Parameters.GetTypeSpec(row),
+                    outputTables.Parameters.GetMode(row),
+                    outputTables.Parameters.GetFlags(row));
+            }
+
+            var parameterBytes = parameterRows.Length == 0 ? []
+                : TrRmParamTableWriter.Encode(parameterRows, signatures,
+                    typeSpecs, schema);
+            outputSections[0x0017] = new TrRmSection(0x0017, 0,
+                checked((uint)signatureRows.Length), signatureBytes);
+            if (parameterBytes.Length != 0)
+            {
+                outputSections[0x0018] = new TrRmSection(0x0018, 0,
+                    checked((uint)parameterRows.Length), parameterBytes);
+            }
+        }
+
         var associatedRelationBytes
             = outputAssociatedRelations.Count == 0 ? []
                 : outputTypeSpecRows.Count == 0
@@ -12364,6 +12587,47 @@ public static partial class TrRmExecutableCompiler
         BinaryPrimitives.WriteUInt32LittleEndian(remappedBody.AsSpan(4),
             (methodToken & 0xFF00_0000u) | checked((uint)remappedRow));
         return remappedBody;
+    }
+
+    private static bool IsC1M1ImportedGenericNominalMethodTypeSpec(
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables
+            sourceTables,
+        uint typeSpecReference, HashSet<int> nominalTypeImportRows)
+    {
+        var reference = sourceTables.TypeSpecs.GetTypeSpecRef(
+            typeSpecReference);
+        if (!reference.IsRow || reference.Form != 0x05)
+        {
+            return false;
+        }
+
+        var row = sourceTables.TypeSpecs.GetRow(reference.Row).Span;
+        if (row.Length < 10 || (row.Length - 6) % sizeof(uint) != 0)
+        {
+            throw new InvalidDataException(
+                "A retained constructed class MethodDef TypeSpec has an invalid extent.");
+        }
+
+        var genericTypeSpec = BinaryPrimitives
+            .ReadUInt32LittleEndian(row.Slice(2, sizeof(uint)));
+        var genericType = sourceTables.TypeSpecs.GetTypeSpecRef(
+            genericTypeSpec);
+        return genericType.IsRow && genericType.Form == 0x03
+            && nominalTypeImportRows.Contains(
+                checked((int)genericType.Row));
+    }
+
+    private static uint AppendC1M1MethodTypePlaceholder(
+        List<ReadOnlyMemory<byte>> outputTypeSpecRows,
+        int ownerTypeDefRow)
+    {
+        // The staging artifact must remain structurally valid before the
+        // generic TypeDef and Import closure is copied.
+        var typeSpecReference
+            = checked((uint)outputTypeSpecRows.Count + 1);
+        outputTypeSpecRows.Add(TrRmTypeSpecTableWriter.Reference(0x02,
+            checked((uint)ownerTypeDefRow)));
+        return typeSpecReference;
     }
 
     private static uint RemapC1M1ClassTypeSpec(

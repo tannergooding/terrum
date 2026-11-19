@@ -5151,6 +5151,35 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             new TrRmStandardArtifactInput(CM1SchemaIdentity, classArtifact),
             "cm1.generic-type.class-provider", [typeInput],
             ["container-key"]);
+        var sourceFreeClassCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), classReference);
+        Assert.That(sourceFreeClassCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceFreeClassCompilation.Diagnostics));
+        var reemittedClassArtifact = TrRmExecutableCompiler.EmitStandard(
+            sourceFreeClassCompilation.Program!,
+            "cm1.generic-type.class-reemitted", CM1SchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var reemittedClassReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(CM1SchemaIdentity,
+                    reemittedClassArtifact),
+                "cm1.generic-type.class-reemitted", [typeInput],
+                ["container-key"]);
+        var reemittedConsumer = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                namespace Example {
+                    public class Consumer {
+                        public static Box<T> Forward<T>(Box<T> value) {
+                            return Container.Accept<T>(move value);
+                        }
+                    }
+                }
+                """), reemittedClassReference);
+        Assert.That(reemittedConsumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                reemittedConsumer.Diagnostics));
+
         var relocatedTypeInput = new TrRmStandardArtifactInput(
             CM1SchemaIdentity,
             RelocateConstructedNominalProviderTypeDef(typeArtifact,
@@ -5158,6 +5187,11 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         _ = TrRmExecutableCompiler.CreateStandardReference(
             new TrRmStandardArtifactInput(CM1SchemaIdentity, classArtifact),
             "cm1.generic-type.class-provider", [relocatedTypeInput],
+            ["container-key"]);
+        _ = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(CM1SchemaIdentity,
+                reemittedClassArtifact),
+            "cm1.generic-type.class-reemitted", [relocatedTypeInput],
             ["container-key"]);
         var incompatibleTypeArtifact
             = AddConstructedGenericNominalMethodTypes(typeBaseArtifact,
@@ -5168,6 +5202,14 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                 new TrRmStandardArtifactInput(CM1SchemaIdentity,
                     classArtifact),
                 "cm1.generic-type.class-provider", [
+                    new TrRmStandardArtifactInput(CM1SchemaIdentity,
+                        incompatibleTypeArtifact),
+                ], ["container-key"]));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(CM1SchemaIdentity,
+                    reemittedClassArtifact),
+                "cm1.generic-type.class-reemitted", [
                     new TrRmStandardArtifactInput(CM1SchemaIdentity,
                         incompatibleTypeArtifact),
                 ], ["container-key"]));
