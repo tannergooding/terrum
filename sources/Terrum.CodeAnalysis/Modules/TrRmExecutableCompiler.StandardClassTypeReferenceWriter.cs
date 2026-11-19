@@ -8185,11 +8185,10 @@ public static partial class TrRmExecutableCompiler
 
                 var body = rootTables.Bodies.GetRegisterBody(bodyRow,
                     rootTables.Contracts.Count);
-                if (body.MethodCount != 0 || body.FieldCount != 0
-                    || body.ConstantCount != 0)
+                if (body.ConstantCount != 0)
                 {
                     throw Unsupported(
-                        "CM1 local class MethodDef Bodies with MethodMap, FieldMap or ConstantMap dependencies are not supported.");
+                        "CM1 local class MethodDef Bodies with ConstantMap dependencies are not supported.");
                 }
 
                 for (var typeMapIndex = 0;
@@ -8603,7 +8602,8 @@ public static partial class TrRmExecutableCompiler
             if (hasBody)
             {
                 bodyRows.Add(RemapC1M1ClassMethodBody(rootTables,
-                    plan.Body, typeDefRowMap, importRowMap,
+                    plan.Body, typeDefRowMap, methodDefRowMap,
+                    fieldRowMap, importRowMap,
                     outputTypeSpecRows, typeSpecRowMap, activeTypeSpecRows,
                     schema));
             }
@@ -9599,18 +9599,18 @@ public static partial class TrRmExecutableCompiler
     private static byte[] RemapC1M1ClassMethodBody(
         TrRmStructuralMetadataValidator.ValidatedExecutionTables sourceTables,
         ReadOnlyMemory<byte> bodyBytes, Dictionary<int, int> typeDefRowMap,
-        Dictionary<int, int> importRowMap,
+        Dictionary<int, int> methodDefRowMap,
+        Dictionary<int, int> fieldRowMap, Dictionary<int, int> importRowMap,
         List<ReadOnlyMemory<byte>> outputTypeSpecRows,
         Dictionary<int, uint> typeSpecRowMap,
         HashSet<int> activeTypeSpecRows, TrRmArtifactSchema schema)
     {
         var body = new TrRmRegisterBodyReader(bodyBytes.Span,
             sourceTables.Contracts.Count, schema);
-        if (body.MethodCount != 0 || body.FieldCount != 0
-            || body.ConstantCount != 0)
+        if (body.ConstantCount != 0)
         {
             throw Unsupported(
-                "CM1 local class MethodDef Bodies with MethodMap, FieldMap or ConstantMap dependencies are not supported.");
+                "CM1 local class MethodDef Bodies with ConstantMap dependencies are not supported.");
         }
 
         var typeMap = body.TypeMap.ToArray();
@@ -9633,6 +9633,47 @@ public static partial class TrRmExecutableCompiler
                 depth: 0);
             BinaryPrimitives.WriteUInt32LittleEndian(typeMap.AsSpan(offset),
                 CreateStandardBodyTypeMapToken(remappedTypeSpec));
+        }
+
+        var methodMap = body.MethodMap.ToArray();
+        for (var methodMapIndex = 0; methodMapIndex < body.MethodCount;
+            methodMapIndex++)
+        {
+            var offset = methodMapIndex * sizeof(uint);
+            var token = BinaryPrimitives.ReadUInt32LittleEndian(
+                methodMap.AsSpan(offset));
+            var row = checked((int)(token & 0x00FF_FFFF));
+            var remappedRow = (byte)(token >> 24) switch
+            {
+                0x16 when methodDefRowMap.TryGetValue(row,
+                    out var localMethodRow) => localMethodRow,
+                0x1C when importRowMap.TryGetValue(row,
+                    out var importRow) => importRow,
+                _ => throw Unsupported(
+                    "CM1 local class MethodDef Body MethodMap targets must be retained local or imported MethodDefs.")
+            };
+
+            BinaryPrimitives.WriteUInt32LittleEndian(methodMap.AsSpan(offset),
+                (token & 0xFF00_0000u) | checked((uint)remappedRow));
+        }
+
+        var fieldMap = body.FieldMap.ToArray();
+        for (var fieldMapIndex = 0; fieldMapIndex < body.FieldCount;
+            fieldMapIndex++)
+        {
+            var offset = fieldMapIndex * sizeof(uint);
+            var token = BinaryPrimitives.ReadUInt32LittleEndian(
+                fieldMap.AsSpan(offset));
+            var row = checked((int)(token & 0x00FF_FFFF));
+            if ((byte)(token >> 24) != 0x14
+                || !fieldRowMap.TryGetValue(row, out var remappedRow))
+            {
+                throw Unsupported(
+                    "CM1 local class MethodDef Body FieldMap targets must be retained local FieldDefs.");
+            }
+
+            BinaryPrimitives.WriteUInt32LittleEndian(fieldMap.AsSpan(offset),
+                0x1400_0000u | checked((uint)remappedRow));
         }
 
         var blocks = new TrRmRegisterBodyBlock[body.BlockCount];
@@ -9667,7 +9708,7 @@ public static partial class TrRmExecutableCompiler
         }
 
         return TrRmRegisterBodyWriter.Encode(body.HomeMap.ToArray(),
-            typeMap, body.MethodMap.ToArray(), body.FieldMap.ToArray(),
+            typeMap, methodMap, fieldMap,
             body.ConstantMap.ToArray(), blocks, records,
             body.Code.ToArray(), contractCount: 0, schema: schema);
     }

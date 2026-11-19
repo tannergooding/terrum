@@ -227,14 +227,15 @@ owner TypeDefs, MethodSigs, Params, Effects, aliases and class parameter
 surfaces/defaults without copying provider Bodies. Mutable receivers and
 construction-role methods outside the selected R1 route remain unsupported in
 this slice. It also re-emits local public nongeneric MethodDefs whose
-Body-01 Body has inline F2/F3 or row-backed TypeMap entries and no MethodMap,
-FieldMap or ConstantMap dependencies, but only under the exact Construction-2/CM1
-profile. Row-backed TypeMap entries are remapped through the retained
-TypeDef/Import closure; MethodDef and Body rows and method ExportKeys are also
-remapped. Contract-row Body references and unsupported maps reject
-re-emission; imported MethodDef expectation Bodies remain provider-owned.
+Body-01 Body has inline F2/F3 or row-backed TypeMap entries, MethodMap targets
+retained local/imported MethodDefs and FieldMap targets retained local
+FieldDefs, but only under the exact Construction-2/CM1 profile. Row-backed
+TypeMap entries, MethodDef/Body rows, FieldDef rows and method ExportKeys are
+remapped. ConstantMap, imported FieldDef/FieldPath targets and contract-row
+Body references reject re-emission; imported MethodDef expectation Bodies
+remain provider-owned.
 Provider/owner-row relocation and compatible/incompatible replacement
-regressions plus local Body producer/consumer and FieldMap-rejection
+regressions plus local Body producer/consumer and ConstantMap-rejection
 regressions are added but unverified under the hold. Remaining gaps include non-identity
 instance calls, broader nested field paths and aggregate stores, locals and
 control flow, properties, constructor failure/cleanup behavior, class-backed

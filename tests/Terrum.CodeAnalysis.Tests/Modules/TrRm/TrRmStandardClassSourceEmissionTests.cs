@@ -5011,13 +5011,14 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
-    public void ReemitsLocalScalarClassMethodBodiesWithoutSource()
+    public void ReemitsLocalClassFieldReadBodiesWithoutSource()
     {
         var schemaIdentity
             = C1M1Construction2ClassParameterDefaultsSchemaIdentity;
         var providerArtifact
             = EmitScalarBodyfulClassArtifact("BodyProvider",
-                includePrefix: true);
+                readsField: true, includePrefix: true,
+                includeMethodCall: true);
         var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
             providerArtifact);
         var reference = TrRmExecutableCompiler.CreateStandardReference(
@@ -5052,6 +5053,12 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         var reemittedMethodRow = Enumerable.Range(reemittedMethodStart,
                 reemittedMethodEnd - reemittedMethodStart)
             .Single(row => reemittedTables.Methods.GetName(row) == "Read");
+        var providerCallMethodRow = Enumerable.Range(providerMethodStart,
+                providerMethodEnd - providerMethodStart)
+            .Single(row => providerTables.Methods.GetName(row) == "CallRead");
+        var reemittedCallMethodRow = Enumerable.Range(reemittedMethodStart,
+                reemittedMethodEnd - reemittedMethodStart)
+            .Single(row => reemittedTables.Methods.GetName(row) == "CallRead");
         var providerBodyRow
             = providerTables.Methods.GetBodyRow(providerMethodRow);
         var reemittedBodyRow
@@ -5071,6 +5078,25 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             providerBodyRow, providerTables.Contracts.Count);
         var reemittedBody = reemittedTables.Bodies.GetRegisterBody(
             reemittedBodyRow, reemittedTables.Contracts.Count);
+        Assert.That(providerBody.FieldCount, Is.EqualTo(1));
+        Assert.That(reemittedBody.FieldCount, Is.EqualTo(1));
+        var providerFieldMapToken
+            = BinaryPrimitives.ReadUInt32LittleEndian(
+                providerBody.FieldMap);
+        var reemittedFieldMapToken
+            = BinaryPrimitives.ReadUInt32LittleEndian(
+                reemittedBody.FieldMap);
+        Assert.That(providerFieldMapToken >> 24, Is.EqualTo(0x14u));
+        Assert.That(reemittedFieldMapToken >> 24, Is.EqualTo(0x14u));
+        var oldFieldRow = checked((int)(
+            providerFieldMapToken & 0x00FF_FFFF));
+        var newFieldRow = checked((int)(
+            reemittedFieldMapToken & 0x00FF_FFFF));
+        Assert.That(oldFieldRow, Is.Not.EqualTo(newFieldRow));
+        Assert.That(providerTables.Fields.GetOwnerTypeDef(oldFieldRow),
+            Is.EqualTo(oldBoxTypeDefRow));
+        Assert.That(reemittedTables.Fields.GetOwnerTypeDef(newFieldRow),
+            Is.EqualTo(newBoxTypeDefRow));
         var providerClassTypeMapToken = Enumerable.Range(0,
                 providerBody.TypeCount)
             .Select(index => BinaryPrimitives.ReadUInt32LittleEndian(
@@ -5091,6 +5117,22 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             Is.EqualTo(newBoxTypeDefRow));
         Assert.That(reemittedBody.Code.ToArray(),
             Is.EqualTo(providerBody.Code.ToArray()));
+        var providerCallBody = providerTables.Bodies.GetRegisterBody(
+            providerTables.Methods.GetBodyRow(providerCallMethodRow),
+            providerTables.Contracts.Count);
+        var reemittedCallBody = reemittedTables.Bodies.GetRegisterBody(
+            reemittedTables.Methods.GetBodyRow(reemittedCallMethodRow),
+            reemittedTables.Contracts.Count);
+        Assert.That(providerCallBody.MethodCount, Is.EqualTo(1));
+        Assert.That(reemittedCallBody.MethodCount, Is.EqualTo(1));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                providerCallBody.MethodMap),
+            Is.EqualTo(0x1600_0000u
+                | checked((uint)providerMethodRow)));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                reemittedCallBody.MethodMap),
+            Is.EqualTo(0x1600_0000u
+                | checked((uint)reemittedMethodRow)));
         Assert.That(reemittedTables.Exports.TryGetDefinitionForKey(1,
             "Box.Read", out var reemittedMethodDefinition), Is.True);
         Assert.That(reemittedMethodDefinition,
@@ -5108,15 +5150,16 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
-    public void RejectsLocalClassMethodBodiesWithFieldDependencies()
+    public void RejectsLocalClassMethodBodiesWithConstantDependencies()
     {
         var schemaIdentity
             = C1M1Construction2ClassParameterDefaultsSchemaIdentity;
         var providerArtifact = EmitScalarBodyfulClassArtifact(
-            "BodyProviderWithFieldDependency", readsField: true);
+            "BodyProviderWithConstantDependency",
+            returnsConstant: true);
         var reference = TrRmExecutableCompiler.CreateStandardReference(
             new TrRmStandardArtifactInput(schemaIdentity, providerArtifact),
-            "BodyProviderWithFieldDependency", [], ["BoxKey"]);
+            "BodyProviderWithConstantDependency", [], ["BoxKey"]);
         var sourceFreeCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(string.Empty), reference);
         Assert.That(sourceFreeCompilation.HasErrors, Is.False,
@@ -5126,7 +5169,8 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         Assert.Throws<NotSupportedException>(() =>
             TrRmExecutableCompiler.EmitStandard(
                 (BoundProgram)sourceFreeCompilation.Program!,
-                "BodyProviderWithFieldDependencyReemitted", schemaIdentity,
+                "BodyProviderWithConstantDependencyReemitted",
+                schemaIdentity,
                 TrRmModuleTableReader.WindowsX64NativeTargetRequirement));
     }
 
@@ -5571,11 +5615,17 @@ internal sealed class TrRmStandardClassSourceEmissionTests
 
     private static byte[] EmitScalarBodyfulClassArtifact(
         string moduleIdentity, bool readsField = false,
-        bool includePrefix = false)
+        bool returnsConstant = false, bool includePrefix = false,
+        bool includeMethodCall = false)
     {
         var methodText = readsField
             ? "public int32 Read() { return Value; }"
-            : "public int32 Read(int32 value) { return value; }";
+            : returnsConstant
+                ? "public static int32 Read() { return 42; }"
+                : "public int32 Read(int32 value) { return value; }";
+        var methodCallText = includeMethodCall
+            ? "public int32 CallRead() { return Read(); }"
+            : string.Empty;
         var prefixText = includePrefix
             ? "public class Prefix { public int32 Marker; }"
             : string.Empty;
@@ -5584,6 +5634,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             public class Box {
                 public int32 Value;
                 {{methodText}}
+                {{methodCallText}}
             }
             """);
         var compilation = Compilation.CreateLibrary(tree);
@@ -5604,7 +5655,18 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         var methodDeclaration = classDeclaration.Children
             .OfType<SyntaxNode>()
             .Single(static node =>
-                node.Kind == SyntaxKind.FunctionDeclaration);
+                node.Kind == SyntaxKind.FunctionDeclaration
+                && node.Children.OfType<SyntaxTokenElement>().Any(token =>
+                    token.Token.Kind == TokenKind.Identifier
+                    && token.Token.Name == "Read"));
+        var methodCallDeclaration = includeMethodCall
+            ? classDeclaration.Children.OfType<SyntaxNode>()
+                .Single(static node =>
+                    node.Kind == SyntaxKind.FunctionDeclaration
+                    && node.Children.OfType<SyntaxTokenElement>().Any(
+                        token => token.Token.Kind == TokenKind.Identifier
+                            && token.Token.Name == "CallRead"))
+            : null;
         var boxClassIndex = Enumerable.Range(0, program.Classes.Length)
             .Single(index => program.Classes[index].Name == "Box");
         var classExports = new List<TrRmSourceClassExport>();
@@ -5629,13 +5691,19 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 ]));
         }
 
+        var boxMemberExports = new List<TrRmSourceClassMemberExport> {
+            new(boxClassIndex, fieldDeclaration.Span, "Box.Value"),
+            new(boxClassIndex, methodDeclaration.Span, "Box.Read"),
+        };
+        if (methodCallDeclaration is not null)
+        {
+            boxMemberExports.Add(new TrRmSourceClassMemberExport(
+                boxClassIndex, methodCallDeclaration.Span,
+                "Box.CallRead"));
+        }
+
         classExports.Add(new TrRmSourceClassExport(program, boxClassIndex,
-            classDeclaration.Span, "BoxKey", [
-                new TrRmSourceClassMemberExport(boxClassIndex,
-                    fieldDeclaration.Span, "Box.Value"),
-                new TrRmSourceClassMemberExport(boxClassIndex,
-                    methodDeclaration.Span, "Box.Read"),
-            ]));
+            classDeclaration.Span, "BoxKey", boxMemberExports));
         return TrRmExecutableCompiler.EmitStandard(program, moduleIdentity,
             C1M1Construction2ClassParameterDefaultsSchemaIdentity,
             TrRmModuleTableReader.WindowsX64NativeTargetRequirement, [], [],
