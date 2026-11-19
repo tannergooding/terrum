@@ -5060,6 +5060,143 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                         changedDefaultInterfaceArtifact),
                 ], ["example.class/Box"]));
 
+        byte[] EmitClassReplacement(string requiredType,
+            bool includePrefixMethod)
+        {
+            var prefixDeclaration = includePrefixMethod
+                ? "public class Prefix { public static int32 Ping() { return 1; } }"
+                : string.Empty;
+            var tree = SyntaxTree.Parse($$"""
+                namespace Example {
+                    {{prefixDeclaration}}
+                    public class Box {
+                        public static int32 Constrained<T, U>()
+                            where T : ISource<T>
+                            where T.via<ISource<T>>.Item is {{requiredType}} {
+                            return 7;
+                        }
+                    }
+                }
+                """);
+            var compilation = Compilation.CreateLibrary(tree,
+                interfaceReference);
+            Assert.That(compilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    compilation.Diagnostics));
+            var program = compilation.Program!;
+            var namespaceNode = tree.Root.Children
+                .OfType<SyntaxNode>()
+                .Single(static node =>
+                    node.Kind == SyntaxKind.NamespaceDeclaration);
+            var classNodes = namespaceNode.Children
+                .OfType<SyntaxNode>()
+                .Where(static node =>
+                    node.Kind == SyntaxKind.ClassDeclaration)
+                .ToArray();
+            var classExports = new List<TrRmSourceClassExport>(
+                classNodes.Length);
+            foreach (var classNode in classNodes)
+            {
+                var name = classNode.Children
+                    .OfType<SyntaxTokenElement>()
+                    .First(static token =>
+                        token.Token.Kind == TokenKind.Identifier)
+                    .Token.Name;
+                var classIndex = Enumerable.Range(0,
+                        program.Classes.Length)
+                    .Single(index => program.Classes[index].Name == name);
+                var members = name == "Prefix"
+                    ? classNode.Children.OfType<SyntaxNode>()
+                        .Where(static member =>
+                            member.Kind == SyntaxKind.FunctionDeclaration)
+                        .Select(methodNode =>
+                            new TrRmSourceClassMemberExport(classIndex,
+                                methodNode.Span, "Prefix.Ping"))
+                        .ToImmutableArray()
+                    : ImmutableArray<TrRmSourceClassMemberExport>.Empty;
+                classExports.Add(new TrRmSourceClassExport(program,
+                    classIndex, classNode.Span,
+                    $"example.class/{name}", members));
+            }
+
+            var method = program.GenericMethodDefinitions.Single();
+            return TrRmExecutableCompiler.EmitStandard(program,
+                "cm1ar1.class.provider", CM1AR1SchemaIdentity, 0, [], [
+                    new TrRmSourceGenericMethodExport(program,
+                        method.SourceInputOrdinal, method.Span,
+                        "Box.Constrained"),
+                ], classExports);
+        }
+
+        var callerTree = SyntaxTree.Parse("""
+            namespace Example {
+                public class Forwarder {
+                    public static int32 Forward<T, U>(T value)
+                        where T : ISource<T>
+                        where T.via<ISource<T>>.Item is U {
+                        return Box.Constrained<T, U>();
+                    }
+                }
+            }
+            """);
+        var callerCompilation = Compilation.CreateLibrary(callerTree,
+            classReference);
+        Assert.That(callerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                callerCompilation.Diagnostics));
+        var callerProgram = callerCompilation.Program!;
+        var callerMethod = callerProgram.GenericMethodDefinitions.Single();
+        var callerNamespace = callerTree.Root.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.NamespaceDeclaration);
+        var forwarderDeclaration = callerNamespace.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var forwarderClassIndex = Enumerable.Range(0,
+                callerProgram.Classes.Length)
+            .Single(index =>
+                callerProgram.Classes[index].Name == "Forwarder");
+        var callerArtifact = TrRmExecutableCompiler.EmitStandard(
+            callerProgram, "cm1ar1.replacement.consumer",
+            CM1AR1SchemaIdentity, 0, [], [
+                new TrRmSourceGenericMethodExport(callerProgram,
+                    callerMethod.SourceInputOrdinal, callerMethod.Span,
+                    "Forwarder.Forward"),
+            ], [
+                new TrRmSourceClassExport(callerProgram,
+                    forwarderClassIndex, forwarderDeclaration.Span,
+                    "example.class/Forwarder", []),
+            ]);
+        var callerInput = new TrRmStandardArtifactInput(
+            CM1AR1SchemaIdentity, callerArtifact);
+        var relocatedClassProvider = EmitClassReplacement("U",
+            includePrefixMethod: true);
+        Assert.That(GetExportedMethodDefId(relocatedClassProvider,
+            "Box.Constrained"), Is.Not.EqualTo(
+                GetExportedMethodDefId(classArtifact,
+                    "Box.Constrained")));
+        var relocatedCaller = TrRmExecutableCompiler.CreateStandardReference(
+            callerInput, "cm1ar1.replacement.consumer", [
+                new TrRmStandardArtifactInput(CM1AR1SchemaIdentity,
+                    relocatedClassProvider),
+                interfaceInput,
+            ], ["example.class/Forwarder"]);
+        Assert.That(relocatedCaller.GenericMethodImports.Single(
+                static import => import.Origin.ExportKey
+                    == "Forwarder.Forward")
+            .Formals[0].AssociatedRelations, Has.Length.EqualTo(1));
+        var incompatibleClassProvider = EmitClassReplacement("int32",
+            includePrefixMethod: true);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(callerInput,
+                "cm1ar1.replacement.consumer", [
+                    new TrRmStandardArtifactInput(CM1AR1SchemaIdentity,
+                        incompatibleClassProvider),
+                    interfaceInput,
+                ], ["example.class/Forwarder"]));
+
         var sourceFreeCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(string.Empty), classReference);
         Assert.That(sourceFreeCompilation.HasErrors, Is.False,
