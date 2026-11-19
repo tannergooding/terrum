@@ -1552,6 +1552,25 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
         Assert.That(reemittedTables.TypeDefs.GetName(
             reemittedTables.Fields.GetOwnerTypeDef(reemittedFieldRow)),
             Is.EqualTo("Leaf"));
+        Assert.That(reemittedTables.Exports.TryGetDefinitionForKey(1,
+            "Container.WriteConstant",
+            out var reemittedWriteConstantDefinition), Is.True);
+        var reemittedWriteConstantMethodRow = checked((int)(
+            reemittedWriteConstantDefinition & 0x00FF_FFFF));
+        var reemittedWriteConstantBodyRow
+            = reemittedTables.Methods.GetBodyRow(
+                reemittedWriteConstantMethodRow);
+        Assert.That(reemittedWriteConstantBodyRow, Is.GreaterThan(0));
+        var reemittedWriteConstantBody
+            = reemittedTables.Bodies.GetRegisterBody(
+                reemittedWriteConstantBodyRow,
+                reemittedTables.Contracts.Count);
+        Assert.That(reemittedWriteConstantBody.ConstantCount,
+            Is.EqualTo(1));
+        Assert.That(reemittedWriteConstantBody.GetBlockCode(0).ToArray(),
+            Is.EqualTo(writeConstantBody.GetBlockCode(0).ToArray()));
+        Assert.That(reemittedTables.Features.TryGetFeature(11, out _),
+            Is.True);
         var reemittedReference
             = TrRmExecutableCompiler.CreateStandardReference(
                 new TrRmStandardArtifactInput(schemaIdentity, reemitted),
