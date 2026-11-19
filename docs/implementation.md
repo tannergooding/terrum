@@ -153,9 +153,10 @@ remain unverified under the active hold. The exact C2 source-class route now
 emits local class TypeDef/FieldDef closure and real role-1 initializer I and
 role-2 projection P MethodDefs, MethodSigs, Params, Construction clauses,
 Feature 25 and Bodies for multiple non-partial constructors per class whose
-fields are initialized directly from Copy scalar parameters or recursively
-safe local or selected direct imported non-generic auto-layout struct
-parameters.
+fields are initialized directly from Copy scalar parameters, bounded
+canonical scalar ConstantMap/SF1 values, or recursively safe local or selected
+direct imported non-generic auto-layout struct parameters. The mixed
+parameter/constant initializer regression remains unverified under the hold.
 Partial-constructor pairs retain the primary
 I/P export identity and use the implementing secondary Body. It preserves
 explicit I/P ExportKeys and does not substitute `ClassTryCreate`; constructor

@@ -322,6 +322,90 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
+    public void EmitsMixedParameterAndConstantConstructorFieldStores()
+    {
+        var tree = SyntaxTree.Parse("""
+            public class Box {
+                public int32 Value;
+                public bool Enabled;
+                public Box(int32 value) {
+                    Value = value;
+                    Enabled = true;
+                }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var members = classDeclaration.Children.OfType<SyntaxNode>();
+        var fields = members.Where(static node =>
+            node.Kind == SyntaxKind.FieldDeclaration).ToArray();
+        var constructor = members.Single(static node =>
+            node.Kind == SyntaxKind.ConstructorDeclaration);
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "Construction2ConstantInitializer",
+            C1M1Construction2SchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, 0,
+                    classDeclaration.Span, "BoxKey", [
+                        new TrRmSourceClassMemberExport(0,
+                            fields[0].Span, "Box.Value"),
+                        new TrRmSourceClassMemberExport(0,
+                            fields[1].Span, "Box.Enabled"),
+                        new TrRmSourceClassMemberExport(0,
+                            constructor.Span, "Box.Initialize") {
+                            ConstructionProjectionExportKey = "Box.Create",
+                        },
+                    ]),
+            ]);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex.ForC1M1Construction2Draft(artifact));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.Initialize", out var initializer), Is.True);
+        var initializerRow
+            = checked((int)(initializer & 0x00FF_FFFF));
+        var bodyRow = tables.Methods.GetBodyRow(initializerRow);
+        Assert.That(bodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(bodyRow,
+            tables.Contracts.Count);
+        tables.ValidateRegisterBodyMapsForMethod(initializerRow);
+
+        var body = tables.Bodies.GetRegisterBody(bodyRow,
+            tables.Contracts.Count);
+        Assert.That(body.ConstantCount, Is.EqualTo(1));
+        Assert.That(body.ConstantMap.Length, Is.EqualTo(8));
+        Assert.That(tables.Features.TryGetFeature(11, out _), Is.True);
+        var typeDefRow = Enumerable.Range(1, tables.TypeDefs.Count)
+            .Single(row => tables.TypeDefs.GetName(row) == "Box");
+        var (fieldStart, fieldCount)
+            = tables.TypeDefs.GetFieldRange(typeDefRow);
+        var enabledFieldRow = Enumerable.Range(fieldStart, fieldCount)
+            .Single(row => tables.Fields.GetName(row) == "Enabled");
+        Assert.That(tables.TypeSpecs.AreEquivalentTypeSpecRefs(
+                BinaryPrimitives.ReadUInt32LittleEndian(body.ConstantMap),
+                tables.Fields.GetTypeSpecRef(enabledFieldRow)),
+            Is.True);
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                body.ConstantMap.Slice(sizeof(uint))),
+            Is.GreaterThan(0u));
+        Assert.That(body.GetBlockCode(0).ToArray(), Is.EqualTo(
+            new byte[] {
+                0xD8, 0, 1, 0,
+                0xD9, 0, 2, 0,
+                0xD8, 0, 3, 0,
+                0xD4, 1, 0, 0,
+                0xD9, 0, 4, 0,
+                0x18, 0,
+            }));
+    }
+
+    [Test]
     public void EmitsSeparateInitializerAndProjectionForEachConstructor()
     {
         var tree = SyntaxTree.Parse("""

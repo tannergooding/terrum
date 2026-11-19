@@ -1725,7 +1725,7 @@ public static partial class TrRmExecutableCompiler
                 bodyRows.Add(EncodeC1M1Construction2InitializerBody(
                     initializer, fieldDefRowByClassAndIndex,
                     Construction2ValueTypeSpecReference,
-                    contractRows.Count, schema));
+                    frozenScalarValueBuilder, contractRows.Count, schema));
                 methodRows[initializer.InitializerMethodDefRow - 1]
                     = methodRows[initializer.InitializerMethodDefRow - 1]
                         with { BodyRow = bodyRows.Count };
@@ -2319,17 +2319,41 @@ public static partial class TrRmExecutableCompiler
                     || assignment.IsUnsafeAuthorized
                     || assignment.Field < 0
                     || assignment.Field >= @class.Fields.Length
-                    || !assignedFields.Add(assignment.Field)
-                    || assignment.Value is not BoundRead read
-                    || read.Variable <= 0
-                    || read.Variable >= function.ParameterCount
-                    || read.Type != @class.Fields[assignment.Field].Type
-                    || function.Variables[read.Variable].Type != read.Type
-                    || !IsC1M1Construction2SourceCopyType(read.Type,
-                        program, sourceStructDeclarations))
+                    || !assignedFields.Add(assignment.Field))
                 {
                     throw Unsupported(
-                        "The bounded Construction-2 initializer supports only direct Copy parameter-to-field stores with each field initialized once.");
+                        "The bounded Construction-2 initializer supports only direct field stores with each field initialized once.");
+                }
+
+                var fieldType = @class.Fields[assignment.Field].Type;
+                if (assignment.Value is BoundRead read)
+                {
+                    if (read.Variable <= 0
+                        || read.Variable >= function.ParameterCount
+                        || read.Type != fieldType
+                        || function.Variables[read.Variable].Type
+                            != read.Type
+                        || !IsC1M1Construction2SourceCopyType(read.Type,
+                            program, sourceStructDeclarations))
+                    {
+                        throw Unsupported(
+                            "A Construction-2 initializer parameter store must copy a matching checked value formal.");
+                    }
+                }
+                else if (assignment.Value is BoundConstant constant)
+                {
+                    if (constant.Type != fieldType
+                        || !TryGetC1M1SourceScalarTypeSpecReference(
+                            constant.Type, out _))
+                    {
+                        throw Unsupported(
+                            "A Construction-2 initializer constant store must match a supported scalar field type.");
+                    }
+                }
+                else
+                {
+                    throw Unsupported(
+                        "A Construction-2 initializer store must use a direct formal or scalar constant.");
                 }
 
                 assignments.Add(assignment);
@@ -2452,12 +2476,16 @@ public static partial class TrRmExecutableCompiler
         Dictionary<(int ClassIndex, int FieldIndex), int>
             fieldDefRowByClassAndIndex,
         Func<PrimitiveType, uint> typeSpecReferenceFor,
+        TrRmFrozenScalarValueBuilder frozenScalarValueBuilder,
         int contractCount, TrRmArtifactSchema schema)
     {
         var function = initializer.Function;
         var typeTokens = function.Variables
             .Select(variable => CreateStandardBodyTypeMapToken(
                 typeSpecReferenceFor(variable.Type)))
+            .Concat(initializer.FieldAssignments.Select(assignment =>
+                CreateStandardBodyTypeMapToken(
+                    typeSpecReferenceFor(assignment.Value.Type))))
             .ToArray();
         var maps = TrRmRegisterBodyMapBuilder.Create(typeTokens, []);
         var homeMap = new byte[checked(function.Variables.Length * 8)];
@@ -2480,10 +2508,10 @@ public static partial class TrRmExecutableCompiler
             new(new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 }),
         };
         var code = new List<byte>();
+        var constantRows = new List<TrRmFrozenScalarValueReference>();
         foreach (var assignment in initializer.FieldAssignments)
         {
-            if (assignment.Value is not BoundRead read
-                || !fieldDefRowByClassAndIndex.TryGetValue((
+            if (!fieldDefRowByClassAndIndex.TryGetValue((
                     initializer.ClassIndex, assignment.Field),
                     out var fieldDefRow))
             {
@@ -2492,8 +2520,7 @@ public static partial class TrRmExecutableCompiler
             }
 
             var fieldTypeToken = CreateStandardBodyTypeMapToken(
-                typeSpecReferenceFor(
-                    function.Variables[read.Variable].Type));
+                typeSpecReferenceFor(assignment.Value.Type));
             var selectionRecord = records.Count;
             records.Add(TrRmRegisterBodyRecordWriter.EncodePlaceSelection(
                 targetKind: 2, accessKind: 3, destinationKind: 1,
@@ -2503,26 +2530,88 @@ public static partial class TrRmExecutableCompiler
                 referentTypeMapIndex: checked((ushort)
                     maps.GetTypeMapIndex(fieldTypeToken)),
                 schema));
+            AppendRecordReference(0xD8, selectionRecord);
+
+            byte sourceKind;
+            ushort sourceIndex;
+            if (assignment.Value is BoundRead read)
+            {
+                sourceKind = 2;
+                sourceIndex = checked((ushort)read.Variable);
+            }
+            else if (assignment.Value is BoundConstant constant)
+            {
+                sourceKind = 1;
+                sourceIndex = 1;
+                var constantIndex = checked((ushort)
+                    GetConstantMapIndex(constant));
+                code.Add(0xD4);
+                code.Add(1);
+                code.Add((byte)constantIndex);
+                code.Add((byte)(constantIndex >> 8));
+            }
+            else
+            {
+                throw new InvalidDataException(
+                    "A Construction-2 initializer Body contains an unsupported field value.");
+            }
+
             var storeRecord = records.Count;
             records.Add(TrRmRegisterBodyRecordWriter.EncodeSemanticStore(
-                placeKind: 1, sourceKind: 2, transition: 1,
-                sourceUse: 1, placeIndex: 0,
-                sourceIndex: checked((ushort)read.Variable), schema));
-            AppendRecordReference(0xD8, selectionRecord);
+                placeKind: 1, sourceKind: sourceKind, transition: 1,
+                sourceUse: 1, placeIndex: 0, sourceIndex: sourceIndex,
+                schema: schema));
             AppendRecordReference(0xD9, storeRecord);
         }
 
         code.Add(0x18);
         code.Add(0);
         var codeBytes = code.ToArray();
+        var constantMap = new byte[checked(constantRows.Count * 8)];
+        for (var index = 0; index < constantRows.Count; index++)
+        {
+            var offset = index * 8;
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                constantMap.AsSpan(offset), constantRows[index].TypeSpecRef);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                constantMap.AsSpan(offset + sizeof(uint)),
+                constantRows[index].ConstantSourceRow);
+        }
+
         return TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
-            default, default, default,
+            default, default, constantMap,
             [new TrRmRegisterBodyBlock(0,
                 checked((uint)codeBytes.Length), 0)],
             records, codeBytes, contractCount: contractCount,
             schema: schema,
             generalPredicateGraphsInitializationReferenceBodies
                 : schema.UsesGeneralPredicateGraphs());
+
+        int GetConstantMapIndex(BoundConstant constant)
+        {
+            var frozenValue = frozenScalarValueBuilder.Add(constant);
+            if (frozenValue.TypeSpecRef
+                != typeSpecReferenceFor(constant.Type))
+            {
+                throw Unsupported(
+                    "A Construction-2 initializer ConstantMap requires the exact field TypeSpecRef.");
+            }
+
+            var constantIndex = constantRows.IndexOf(frozenValue);
+            if (constantIndex < 0)
+            {
+                if (constantRows.Count > ushort.MaxValue)
+                {
+                    throw Unsupported(
+                        "A Construction-2 initializer Body exceeds the ConstantMap index limit.");
+                }
+
+                constantIndex = constantRows.Count;
+                constantRows.Add(frozenValue);
+            }
+
+            return constantIndex;
+        }
 
         void AppendRecordReference(byte opcode, int recordIndex)
         {
