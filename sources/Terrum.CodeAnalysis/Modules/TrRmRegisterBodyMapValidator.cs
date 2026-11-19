@@ -7169,9 +7169,10 @@ internal static class TrRmRegisterBodyMapValidator
             = body.Schema.UsesPropertyInitializedState();
         if ((!body.Schema.UsesObjectConstruction()
                 && !body.Schema.UsesPropertyInitializedState())
-            || payload.Length != 20 || accessKind is not (1 or 3)
+            || payload.Length != 20 || accessKind is not (1 or 2 or 3)
             || destinationKind != 1 || destinationIndex != destination
             || destination >= 14 || baseKind is not (1 or 2)
+            || (baseKind == 1 && accessKind is not (1 or 2))
             || (baseKind == 1 ? contextHomeIndex >= 14
                 : contextHomeIndex >= body.HomeCount)
             || indexKind != 0
@@ -7205,9 +7206,9 @@ internal static class TrRmRegisterBodyMapValidator
                 contextHomeIndex);
             var baseTypeSpecRef = GetRegisterTypeSpecRef(body, baseState);
             var baseType = typeSpecs.GetTypeSpecRef(baseTypeSpecRef);
-            if (construction.RoleTag != 0 || accessKind != 1
+            if (construction.RoleTag != 0 || accessKind is not (1 or 2)
                 || !baseState.IsPlaceHandle
-                || baseState.AccessKind != 1
+                || baseState.AccessKind != accessKind
                 || baseState.PlaceOrigins.IsDefaultOrEmpty
                 || !baseType.IsRow || baseType.Form != 0x02
                 || baseType.Qualifiers != 0
@@ -7216,6 +7217,7 @@ internal static class TrRmRegisterBodyMapValidator
                 || typeSpecs.GetNominalTypeDefRow(baseTypeSpecRef,
                     types, imports) != fieldOwnerType
                 || (fieldFlags & 0x08) != 0
+                || (accessKind == 2 && (fieldFlags & 0x04) == 0)
                 || (fieldFlags & 3) > 2
                 || ((fieldFlags & 3) == 0
                     && methods.GetOwnerType(methodDefRow)
@@ -7257,19 +7259,23 @@ internal static class TrRmRegisterBodyMapValidator
         var contextTypeSpec = typeSpecs.GetTypeSpecBytes(
             contextTypeSpecRef);
         if (contextRole == 1 && construction.RoleTag == 0
-            && accessKind == 1)
+            && accessKind is 1 or 2)
         {
             var contextReceiverType
                 = typeSpecs.GetTypeSpecRef(contextTypeSpecRef);
+            var isWrite = accessKind == 2;
+            var expectedReceiverQualifiers = isWrite ? (byte)0x01 : (byte)0;
             if (ReadByte(body, contextHome, 1) != 0
                 || ReadUInt16(body, contextHome, 4) != 0
                 || ReadUInt16(body, contextHome, 6) != 0
-                || (methods.GetFlags(methodDefRow) & 4) != 0
+                || (((methods.GetFlags(methodDefRow) & 4) != 0)
+                    != isWrite)
                 || methods.GetOwnerModule(methodDefRow) != ownerModule
                 || types.GetKind(ownerType) != 2
                 || ownerType != fieldOwnerType
                 || types.GetOwnerModule(fieldOwnerType) != ownerModule
                 || (fieldFlags & 0x08) != 0
+                || (isWrite && (fieldFlags & 0x04) == 0)
                 || (fieldFlags & 3) > 2
                 || ((fieldFlags & 3) == 0
                     && ownerType != fieldOwnerType)
@@ -7282,7 +7288,7 @@ internal static class TrRmRegisterBodyMapValidator
                 || contextClassType != ownerType
                 || !contextReceiverType.IsRow
                 || contextReceiverType.Form != 0x02
-                || contextQualifiers != 0)
+                || contextQualifiers != expectedReceiverQualifiers)
             {
                 throw InvalidMap();
             }
@@ -7298,6 +7304,7 @@ internal static class TrRmRegisterBodyMapValidator
         }
 
         if (contextRole is not (1 or 4)
+            || accessKind == 2
             || (contextRole == 4
                 && (!body.Schema.UsesObjectConstruction()
                     || (!isPropertyInitializedState

@@ -38,6 +38,10 @@ public static partial class TrRmExecutableCompiler
         ImmutableArray<int> FieldDefRows,
         ImmutableArray<PrimitiveType> FieldTypes);
 
+    private readonly record struct C1M1Construction2NestedFieldWrite(
+        ImmutableArray<int> FieldDefRows,
+        ImmutableArray<PrimitiveType> FieldTypes);
+
     private readonly record struct C1M1ParameterSurfaceRow(
         int MethodDefRow, int Ordinal, string Name,
         uint DefaultConstantSourceRow);
@@ -929,6 +933,14 @@ public static partial class TrRmExecutableCompiler
                             && TryGetC1M1Construction2DirectFieldWrite(
                                 methodFunction,
                                 out directFieldWriteIndex);
+                    var nestedFieldWrite
+                        = !isSupportedDirectFieldWriteInstanceMethod
+                            ? TryGetC1M1Construction2NestedFieldWrite(
+                                program, methodFunction, classIndex,
+                                sourceStructDeclarations,
+                                fieldDefRowByClassAndIndex,
+                                fieldDefRowByStructureAndIndex)
+                            : null;
                     var conditionalReturn
                         = TryGetC1M1Construction2ConditionalReturn(
                             methodFunction);
@@ -966,6 +978,7 @@ public static partial class TrRmExecutableCompiler
                             && !isSupportedDirectFieldReadInstanceMethod
                             && nestedFieldRead is null
                             && !isSupportedDirectFieldWriteInstanceMethod
+                            && nestedFieldWrite is null
                             && !isSupportedIdentityForwarder
                             && !isSupportedUnitIdentityForwarder
                             && directNumericBinary is null
@@ -1027,7 +1040,7 @@ public static partial class TrRmExecutableCompiler
                             && methodFunction.IsInternal))
                     {
                         throw Unsupported(
-                            "The bounded Construction-2 class method producer supports effect-free scalar static methods, exact identity forwarders, readonly instance int32/Boolean operations and same-class call-binary methods, scalar local-copy/binary returns, empty unit instance methods, readonly instance methods returning one scalar value parameter and direct scalar field reads/writes.");
+                            "The bounded Construction-2 class method producer supports effect-free scalar static methods, exact identity forwarders, readonly instance int32/Boolean operations and same-class call-binary methods, scalar local-copy/binary returns, empty unit instance methods, readonly instance methods returning one scalar value parameter, direct scalar field reads and direct or nested inline-struct scalar field writes.");
                     }
 
                     if (methodFunction.ReturnType != PrimitiveType.Void)
@@ -1197,6 +1210,14 @@ public static partial class TrRmExecutableCompiler
                         encodedBody
                             = EncodeC1M1Construction2FieldWriteBody(
                                 fieldDefRow, 0, sourceUse: 1);
+                    }
+                    else if (nestedFieldWrite is not null)
+                    {
+                        encodedBody
+                            = EncodeC1M1Construction2NestedFieldWriteBody(
+                                methodFunction, nestedFieldWrite,
+                                Construction2ValueTypeSpecReference,
+                                contractRows.Count, schema);
                     }
                     else if (directNumericBinary is not null)
                     {
@@ -3274,6 +3295,113 @@ public static partial class TrRmExecutableCompiler
         return body;
     }
 
+    private static byte[] EncodeC1M1Construction2NestedFieldWriteBody(
+        BoundFunction function,
+        C1M1Construction2NestedFieldWrite fieldWrite,
+        Func<PrimitiveType, uint> typeSpecReferenceFor,
+        int contractCount, TrRmArtifactSchema schema)
+    {
+        if (function.IsStatic || function.ParameterCount != 2
+            || function.Variables.Length != 2
+            || !function.Variables[0].IsMutable
+            || fieldWrite.FieldDefRows.Length < 2
+            || fieldWrite.FieldDefRows.Length
+                != fieldWrite.FieldTypes.Length
+            || fieldWrite.FieldTypes[^1]
+                != function.Variables[1].Type)
+        {
+            throw new InvalidDataException(
+                "A nested class FieldWrite Body has an invalid receiver, formal or path.");
+        }
+
+        var typeTokens = new uint[checked(
+            function.ParameterCount + fieldWrite.FieldTypes.Length)];
+        for (var index = 0; index < function.ParameterCount; index++)
+        {
+            typeTokens[index] = CreateStandardBodyTypeMapToken(
+                typeSpecReferenceFor(function.Variables[index].Type));
+        }
+        for (var index = 0; index < fieldWrite.FieldTypes.Length; index++)
+        {
+            typeTokens[function.ParameterCount + index]
+                = CreateStandardBodyTypeMapToken(
+                    typeSpecReferenceFor(fieldWrite.FieldTypes[index]));
+        }
+
+        var maps = TrRmRegisterBodyMapBuilder.Create(typeTokens, []);
+        var homeMap = new byte[checked(function.ParameterCount * 8)];
+        for (var index = 0; index < function.ParameterCount; index++)
+        {
+            var home = homeMap.AsSpan(index * 8, 8);
+            home[0] = index == 0 ? (byte)1 : (byte)2;
+            BinaryPrimitives.WriteUInt16LittleEndian(home[2..],
+                checked((ushort)maps.GetTypeMapIndex(typeTokens[index])));
+            if (index != 0)
+            {
+                BinaryPrimitives.WriteUInt16LittleEndian(home[4..],
+                    checked((ushort)(index - 1)));
+            }
+        }
+
+        var records = new List<ReadOnlyMemory<byte>> {
+            new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 },
+        };
+        var code = new List<byte>(checked(
+            (fieldWrite.FieldDefRows.Length * 4) + 6));
+        for (var index = 0;
+            index < fieldWrite.FieldDefRows.Length; index++)
+        {
+            if (records.Count > ushort.MaxValue)
+            {
+                throw Unsupported(
+                    "A nested class FieldWrite Body exceeds the PlaceSelection index limit.");
+            }
+
+            var recordIndex = checked((ushort)records.Count);
+            records.Add(TrRmRegisterBodyRecordWriter.EncodePlaceSelection(
+                targetKind: 2, accessKind: 2, destinationKind: 1,
+                baseKind: index == 0 ? (byte)2 : (byte)1,
+                destinationIndex: 1,
+                baseIndex: index == 0 ? (ushort)0 : (ushort)1,
+                indexKind: 0, targetRefKind: 1, indexIndex: 0,
+                targetRef: checked((uint)fieldWrite.FieldDefRows[index]),
+                referentTypeMapIndex: checked((ushort)
+                    maps.GetTypeMapIndex(typeTokens[
+                        function.ParameterCount + index])),
+                schema: schema));
+            code.Add(0xD8);
+            code.Add(1);
+            code.Add((byte)recordIndex);
+            code.Add((byte)(recordIndex >> 8));
+        }
+
+        if (records.Count > ushort.MaxValue)
+        {
+            throw Unsupported(
+                "A nested class FieldWrite Body exceeds the SemanticStore index limit.");
+        }
+
+        var storeRecordIndex = checked((ushort)records.Count);
+        records.Add(TrRmRegisterBodyRecordWriter.EncodeSemanticStore(
+            placeKind: 1, sourceKind: 2, transition: 2, sourceUse: 1,
+            placeIndex: 1, sourceIndex: 1, schema: schema));
+        code.Add(0xD9);
+        code.Add(0);
+        code.Add((byte)storeRecordIndex);
+        code.Add((byte)(storeRecordIndex >> 8));
+        code.Add(0x18);
+        code.Add(0);
+        var codeBytes = code.ToArray();
+        return TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
+            default, default, default,
+            [new TrRmRegisterBodyBlock(0,
+                checked((uint)codeBytes.Length), 0)],
+            records, codeBytes, contractCount: contractCount,
+            schema: schema,
+            generalPredicateGraphsInitializationReferenceBodies
+                : schema.UsesGeneralPredicateGraphs());
+    }
+
     private static byte[] EncodeC1M1Construction2DirectNumericBinaryBody(
         BoundFunction function, BoundBinary binary,
         TrRmFrozenScalarValueBuilder frozenScalarValueBuilder,
@@ -4938,6 +5066,168 @@ public static partial class TrRmExecutableCompiler
 
         fieldIndex = assignment.Field;
         return fieldIndex >= 0;
+
+        void Visit(BoundBlock block)
+        {
+            if (!block.RetiredManagedLocals.IsEmpty)
+            {
+                isSupported = false;
+                return;
+            }
+
+            foreach (var statement in block.Statements)
+            {
+                if (!isSupported || returned)
+                {
+                    isSupported = false;
+                    return;
+                }
+
+                if (statement is BoundBlock nested)
+                {
+                    Visit(nested);
+                }
+                else if (statement is BoundFieldAssignment fieldWrite
+                    && assignment is null)
+                {
+                    assignment = fieldWrite;
+                }
+                else if (statement is BoundReturn { Value: null }
+                    && assignment is not null)
+                {
+                    returned = true;
+                }
+                else
+                {
+                    isSupported = false;
+                    return;
+                }
+            }
+        }
+    }
+
+    private static C1M1Construction2NestedFieldWrite?
+        TryGetC1M1Construction2NestedFieldWrite(
+            BoundProgram program, BoundFunction function, int classIndex,
+            IReadOnlyDictionary<int, BoundSourceTypeDeclaration>
+                sourceStructDeclarations,
+            IReadOnlyDictionary<(int ClassIndex, int FieldIndex), int>
+                fieldDefRowByClassAndIndex,
+            IReadOnlyDictionary<(int StructureIndex, int FieldIndex), int>
+                fieldDefRowByStructureAndIndex)
+    {
+        if (function.IsStatic || function.ReturnType != PrimitiveType.Void
+            || function.ParameterCount != 2
+            || function.Variables.Length != 2
+            || !function.Variables[0].IsMutable
+            || !function.Body.RetiredManagedLocals.IsEmpty)
+        {
+            return null;
+        }
+
+        BoundFieldAssignment? assignment = null;
+        var returned = false;
+        var isSupported = true;
+        Visit(function.Body);
+        if (!isSupported || assignment is null
+            || assignment.Variable != 0
+            || assignment.NestedFields.IsDefaultOrEmpty
+            || assignment.IsUnsafeAuthorized
+            || assignment.Value is not BoundRead value
+            || value.Variable != 1
+            || value.Type != function.Variables[1].Type
+            || !returned)
+        {
+            return null;
+        }
+
+        var fieldCount = checked(assignment.NestedFields.Length + 1);
+        if (fieldCount > SemanticVerifier.MaximumAnalysisVisits
+            || !ManagedClassTypes.IsClass(function.Variables[0].Type)
+            || ManagedClassTypes.IsOptional(function.Variables[0].Type)
+            || ManagedClassTypes.ClassIndex(function.Variables[0].Type)
+                != classIndex)
+        {
+            return null;
+        }
+
+        var fieldDefRows = ImmutableArray.CreateBuilder<int>(fieldCount);
+        var fieldTypes
+            = ImmutableArray.CreateBuilder<PrimitiveType>(fieldCount);
+        var ownerType = function.Variables[0].Type;
+        for (var index = 0; index < fieldCount; index++)
+        {
+            var fieldIndex = index == 0 ? assignment.Field
+                : assignment.NestedFields[index - 1];
+            int fieldDefRow;
+            BoundStructField field;
+            if (index == 0)
+            {
+                if ((uint)fieldIndex
+                        >= (uint)program.Classes[classIndex].Fields.Length
+                    || !fieldDefRowByClassAndIndex.TryGetValue((
+                        classIndex, fieldIndex), out fieldDefRow))
+                {
+                    return null;
+                }
+
+                field = program.Classes[classIndex].Fields[fieldIndex];
+            }
+            else
+            {
+                if (!TryGetC1M1SourceStructFieldType(ownerType,
+                        sourceStructDeclarations,
+                        out var structureIndex)
+                    || (uint)structureIndex
+                        >= (uint)program.Structures.Length
+                    || (uint)fieldIndex
+                        >= (uint)program.Structures[structureIndex]
+                            .Fields.Length
+                    || !IsC1M1SourceStructLayoutSupported(
+                        program.Structures[structureIndex])
+                    || !fieldDefRowByStructureAndIndex.TryGetValue((
+                        structureIndex, fieldIndex), out fieldDefRow))
+                {
+                    return null;
+                }
+
+                field = program.Structures[structureIndex]
+                    .Fields[fieldIndex];
+            }
+
+            if (field is null || !field.IsMutable
+                || field.RequiresUnsafeCaller)
+            {
+                return null;
+            }
+
+            var fieldType = field.Type;
+            if (index + 1 < fieldCount
+                && (!TryGetC1M1SourceStructFieldType(fieldType,
+                        sourceStructDeclarations,
+                        out var nestedStructureIndex)
+                    || (uint)nestedStructureIndex
+                        >= (uint)program.Structures.Length
+                    || !IsC1M1SourceStructLayoutSupported(
+                        program.Structures[nestedStructureIndex])))
+            {
+                return null;
+            }
+
+            fieldDefRows.Add(fieldDefRow);
+            fieldTypes.Add(fieldType);
+            ownerType = fieldType;
+        }
+
+        if (fieldTypes[^1] != value.Type
+            || !TryGetC1M1SourceScalarTypeSpecReference(value.Type, out _))
+        {
+            return null;
+        }
+
+        return new C1M1Construction2NestedFieldWrite(
+            fieldDefRows.MoveToImmutable(),
+            fieldTypes.MoveToImmutable());
 
         void Visit(BoundBlock block)
         {
