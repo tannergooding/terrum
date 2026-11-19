@@ -5542,6 +5542,274 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
+    public void ReemitsFieldReferenceBodiesAndRemapsDependencyRows()
+    {
+        var schemaIdentity
+            = C1M1Construction2ClassParameterDefaultsSchemaIdentity;
+        var tree = SyntaxTree.Parse("""
+            public class Box {
+                public int32 Value;
+                public int32 ReadValue() {
+                    return this.Value;
+                }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var members = classDeclaration.Children.OfType<SyntaxNode>();
+        var field = members.Single(static node =>
+            node.Kind == SyntaxKind.FieldDeclaration);
+        var read = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "ReadValue"));
+        var boxClassIndex = Enumerable.Range(0, program.Classes.Length)
+            .Single(index => program.Classes[index].Name == "Box");
+        var sourceArtifact = TrRmExecutableCompiler.EmitStandard(program,
+            "FieldReferenceProvider", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, boxClassIndex,
+                    classDeclaration.Span, "BoxKey", [
+                        new TrRmSourceClassMemberExport(boxClassIndex,
+                            field.Span, "Box.Value"),
+                        new TrRmSourceClassMemberExport(boxClassIndex,
+                            read.Span, "Box.ReadValue"),
+                    ]),
+            ]);
+        var artifact = RewriteFieldReadAsReferenceGetter(sourceArtifact);
+        var artifactTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                        artifact));
+        var methodDefinition = artifactTables.Exports
+            .GetExportsForModule(1)
+            .Single(static export =>
+                export.ExportKey == "Box.ReadValue").Definition;
+        var methodRow = checked((int)(
+            methodDefinition & 0x00FF_FFFF));
+        var body = artifactTables.Bodies.GetRow(
+            artifactTables.Methods.GetBodyRow(methodRow));
+        Assert.That(body[0], Is.EqualTo((byte)0x04));
+        var dependency = artifactTables.Contracts
+            .GetDependencyContracts(methodRow).Single();
+        Assert.That(dependency, Is.EqualTo(new TrRmDependencyContract(
+            1, 2, 1, 1, 0, 0)));
+        Assert.That(artifactTables.Contracts.GetEffectsMask(methodRow),
+            Is.EqualTo(4u));
+
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            artifact);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, "FieldReferenceProvider", [], ["BoxKey"]);
+        var sourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), reference);
+        Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceFreeCompilation.Diagnostics));
+        var reemitted = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)sourceFreeCompilation.Program!,
+            "FieldReferenceProviderReemitted", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var reemittedTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                        reemitted));
+        var reemittedMethodDefinition = reemittedTables.Exports
+            .GetExportsForModule(1)
+            .Single(static export =>
+                export.ExportKey == "Box.ReadValue").Definition;
+        var reemittedMethodRow = checked((int)(
+            reemittedMethodDefinition & 0x00FF_FFFF));
+        var reemittedBody = reemittedTables.Bodies.GetRow(
+            reemittedTables.Methods.GetBodyRow(reemittedMethodRow));
+        Assert.That(reemittedBody[0], Is.EqualTo((byte)0x04));
+        var remappedDependency = reemittedTables.Contracts
+            .GetDependencyContractRows(reemittedMethodRow).Single();
+        Assert.That(remappedDependency.Row, Is.EqualTo(2));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                reemittedBody.Slice(8)),
+            Is.EqualTo(checked((uint)remappedDependency.Row)));
+
+        var reloadedReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+                "FieldReferenceProviderReemitted", [], ["BoxKey"]);
+        var callerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                public unsafe int32 Read(Box value) {
+                    return *value.ReadValue();
+                }
+                """), reloadedReference);
+        Assert.That(callerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                callerCompilation.Diagnostics));
+
+        static byte[] RewriteFieldReadAsReferenceGetter(byte[] artifact)
+        {
+            var schema
+                = TrRmArtifactSchema
+                    .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft;
+            var index = TrRmArtifactIndex
+                .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                    artifact);
+            var tables = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(index);
+            if (tables.Contracts.Count != 0
+                || index.TryGetSection(0x001B, out _, out _))
+            {
+                throw new InvalidDataException(
+                    "The field-reference Body fixture expects no original Contract rows.");
+            }
+
+            var methodDefinition = tables.Exports
+                .GetExportsForModule(1)
+                .Single(static export =>
+                    export.ExportKey == "Box.ReadValue").Definition;
+            var methodRow = checked((int)(
+                methodDefinition & 0x00FF_FFFF));
+            var signatureRow = tables.Methods.GetSignature(methodRow);
+            if (Enumerable.Range(1, tables.Methods.Count)
+                .Any(row => row != methodRow
+                    && tables.Methods.GetSignature(row) == signatureRow))
+            {
+                throw new InvalidDataException(
+                    "The field-reference Body fixture requires a unique MethodSig.");
+            }
+
+            var bodyRow = tables.Methods.GetBodyRow(methodRow);
+            var sourceBody = tables.Bodies.GetRow(bodyRow);
+            if (sourceBody.Length != 8 || sourceBody[0] != 0x02)
+            {
+                throw new InvalidDataException(
+                    "The field-reference Body fixture requires a compact field-read Body.");
+            }
+
+            var oldResultTypeSpec = tables.Signatures
+                .GetResultTypeSpec(signatureRow);
+            var typeSpecRows = new List<ReadOnlyMemory<byte>>(
+                tables.TypeSpecs.Count + 1);
+            for (var row = 1; row <= tables.TypeSpecs.Count; row++)
+            {
+                typeSpecRows.Add(tables.TypeSpecs.GetRow(row).ToArray());
+            }
+            typeSpecRows.Add(TrRmTypeSpecTableWriter.Wrapped(0x07,
+                oldResultTypeSpec));
+            var referenceTypeSpec = checked((uint)typeSpecRows.Count);
+            var typeSpecBytes = TrRmTypeSpecTableWriter.Encode(typeSpecRows,
+                tables.TypeDefs.Count, tables.Imports.Count,
+                tables.GenericParams.Count, 0, schema,
+                tables.Methods.Count);
+
+            if (!index.TryGetSection(0x0016, out var methodSection,
+                    out var methodCount)
+                || !index.TryGetSection(0x0017, out var signatureSection,
+                    out var signatureCount)
+                || !index.TryGetSection(0x0020, out _, out var bodyCount)
+                || methodCount != (uint)tables.Methods.Count
+                || signatureCount != (uint)tables.Signatures.Count
+                || bodyCount != (uint)tables.Bodies.Count)
+            {
+                throw new InvalidDataException(
+                    "The field-reference Body fixture is missing a declaration section.");
+            }
+
+            var methodBytes = methodSection.ToArray();
+            var methodOffset = (methodRow - 1) * 28;
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                methodBytes.AsSpan(methodOffset + 16), 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                methodBytes.AsSpan(methodOffset + 20), 2);
+
+            var signatureBytes = signatureSection.ToArray();
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                signatureBytes.AsSpan((signatureRow - 1) * 24),
+                referenceTypeSpec);
+
+            // Put Dependency before Effects so re-emission must remap its Body row.
+            var dependencyRow = new byte[20];
+            BinaryPrimitives.WriteUInt32LittleEndian(dependencyRow,
+                methodDefinition);
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                dependencyRow.AsSpan(4), 4);
+            dependencyRow[8] = 1;
+            dependencyRow[9] = 2;
+            dependencyRow[10] = 1;
+            dependencyRow[11] = 1;
+            var effectsRow = new byte[12];
+            BinaryPrimitives.WriteUInt32LittleEndian(effectsRow,
+                methodDefinition);
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                effectsRow.AsSpan(4), 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                effectsRow.AsSpan(8), 4);
+            var contractBytes = TrRmVariableTableWriter.EncodeBlobs([
+                dependencyRow,
+                effectsRow,
+            ]);
+
+            var bodyRows = new ReadOnlyMemory<byte>[tables.Bodies.Count];
+            for (var row = 1; row <= bodyRows.Length; row++)
+            {
+                if (row != bodyRow)
+                {
+                    bodyRows[row - 1]
+                        = tables.Bodies.GetRow(row).ToArray();
+                    continue;
+                }
+
+                var referenceBody = new byte[12];
+                referenceBody[0] = 0x04;
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    referenceBody.AsSpan(4),
+                    BinaryPrimitives.ReadUInt32LittleEndian(
+                        sourceBody.Slice(4)));
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    referenceBody.AsSpan(8), 1);
+                bodyRows[row - 1] = referenceBody;
+            }
+            var bodyBytes = TrRmVariableTableWriter.EncodeBodies(bodyRows);
+
+            var sections = new List<TrRmSection>(index.SectionCount + 1);
+            for (var sectionIndex = 0;
+                sectionIndex < index.SectionCount; sectionIndex++)
+            {
+                index.GetSection(sectionIndex, out var kind, out var flags,
+                    out var section, out var recordCount);
+                sections.Add(kind switch
+                {
+                    0x0011 => new TrRmSection(kind, flags,
+                        checked((uint)typeSpecRows.Count), typeSpecBytes),
+                    0x0016 => new TrRmSection(kind, flags, recordCount,
+                        methodBytes),
+                    0x0017 => new TrRmSection(kind, flags, recordCount,
+                        signatureBytes),
+                    0x0020 => new TrRmSection(kind, flags, recordCount,
+                        bodyBytes),
+                    _ => new TrRmSection(kind, flags, recordCount,
+                        section.ToArray()),
+                });
+            }
+            if (!index.TryGetSection(0x0011, out _, out _))
+            {
+                sections.Add(new TrRmSection(0x0011, 0,
+                    checked((uint)typeSpecRows.Count), typeSpecBytes));
+            }
+            sections.Add(new TrRmSection(0x001B, 0, 2, contractBytes));
+            sections.Sort(static (left, right) =>
+                left.Kind.CompareTo(right.Kind));
+            return TrRmArtifactWriter.Encode(sections, schema);
+        }
+    }
+
+    [Test]
     public void ComposesClassGenericAndInterfaceParameterDefaultSurfaces()
     {
         var tree = SyntaxTree.Parse("""

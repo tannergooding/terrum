@@ -249,14 +249,17 @@ ConstantSource/Blob/FrozenValueNode dependencies are rebuilt. Imported-struct
 FieldDef Imports now retain their owner TypeDef Imports and remap Body
 FieldMap targets. FieldPath Body maps remap root TypeSpecs and ordered
 FieldDef/Import steps, interning identical remapped paths. Non-scalar
-ConstantMap forms and contract-row Body references reject re-emission;
-imported MethodDef expectation Bodies remain provider-owned.
+ConstantMap forms and Body-01 record contract-row references remain
+unsupported. Compact Body-04 field-reference Bodies remap their local/imported
+FieldDef token and owning MethodDef Dependency row; source-free callable views
+preserve plain scalar checked-reference results with normal-result Dependency
+clauses. Imported MethodDef expectation Bodies remain provider-owned.
 Provider/owner-row relocation and compatible/incompatible replacement
 regressions are added but unverified under the hold. Local Body
 provider/consumer, imported-struct FieldDef and FieldPath root/step
 re-emission, and scalar ConstantMap payload-preservation regressions are also
-added but unverified. Body-05 and compact field-access re-emission regressions
-are also added but remain unverified under the hold.
+added but unverified. Body-04, Body-05 and compact field-access re-emission
+regressions are also added but remain unverified under the hold.
 Remaining
 gaps include non-identity
 instance calls, broader nested field paths and aggregate stores, locals and

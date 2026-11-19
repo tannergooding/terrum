@@ -1365,6 +1365,50 @@ public readonly ref struct TrRmContractTableReader
             : throw InvalidContract();
     }
 
+    internal ImmutableArray<(int Row, TrRmDependencyContract Contract)>
+        GetDependencyContractRows(int methodRow)
+    {
+        ConsumeWork();
+        if (methodRow <= 0 || methodRow > _methods.Count)
+        {
+            throw InvalidContract();
+        }
+
+        var (first, count) = _methods.GetContractRange(methodRow);
+        var dependencies = _dependencyContracts[methodRow];
+        if (dependencies.IsDefaultOrEmpty)
+        {
+            return [];
+        }
+
+        var dependencyCount = dependencies.Length;
+        var rows = ImmutableArray.CreateBuilder<
+            (int Row, TrRmDependencyContract Contract)>(dependencyCount);
+        for (var index = 0; index < count; index++)
+        {
+            ConsumeWork();
+            var row = first + index;
+            var clause = GetRow(row);
+            if (BinaryPrimitives.ReadUInt16LittleEndian(clause[4..]) != 4)
+            {
+                continue;
+            }
+
+            ConsumeWork();
+            rows.Add((row, new TrRmDependencyContract(
+                clause[8], clause[9], clause[10], clause[11],
+                Read(clause, 12), Read(clause, 16))));
+        }
+
+        if (rows.Count != dependencyCount)
+        {
+            throw InvalidContract();
+        }
+
+        ConsumeWork(checked((ulong)rows.Count + 1UL));
+        return rows.MoveToImmutable();
+    }
+
     internal bool HasStaticInitializationRole(int methodRow)
     {
         ConsumeWork();

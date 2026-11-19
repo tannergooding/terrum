@@ -26,6 +26,10 @@ internal sealed record BoundStandardClassMethodParameter(
     string Name, uint TypeSpecReference, byte Mode, byte Flags,
     BoundConstant? DefaultValue);
 
+internal readonly record struct BoundStandardClassMethodDependencyClause(
+    byte DestinationKind, byte SourceKind, byte Relationship, byte Phase,
+    uint DestinationOrdinal, uint SourceOrdinal);
+
 internal sealed record BoundStandardClassMethodDeclaration(
     uint DefinitionId, string Name, uint Flags,
     uint EffectsMask, uint ReturnTypeSpecReference,
@@ -35,7 +39,14 @@ internal sealed record BoundStandardClassMethodDeclaration(
     int GenericParameterCount, uint BodyRow, byte ConstructionRole,
     uint InitializerMethodDefinitionId,
     uint ConstructionPropertyDefinitionId,
-    ImmutableArray<uint> InitializedMemberDefinitionIds);
+    ImmutableArray<uint> InitializedMemberDefinitionIds)
+{
+    internal ImmutableArray<BoundStandardClassMethodDependencyClause>
+        DependencyClauses
+    {
+        get; init;
+    } = [];
+}
 
 internal sealed record BoundStandardClassTypeView(
     BoundGenericNominalTypeIdentity Identity, string Namespace, string Name,
@@ -536,6 +547,9 @@ internal static class BoundStandardClassDeclarationContract
                 || method.Parameters.IsDefault
                 || method.Parameters.Length
                     > SemanticVerifier.MaximumArguments
+                || method.DependencyClauses.IsDefault
+                || method.DependencyClauses.Length
+                    > SemanticVerifier.MaximumAnalysisVisits
                 || method.ExportKeys.IsDefault
                 || !IsUniqueText(method.ExportKeys)
                 || method.SelectedExportKeys.IsDefault
@@ -581,6 +595,58 @@ internal static class BoundStandardClassDeclarationContract
                 {
                     return false;
                 }
+            }
+
+            var dependencyKeys = new HashSet<(
+                byte DestinationKind, uint DestinationOrdinal, byte Phase,
+                byte SourceKind, uint SourceOrdinal)>();
+            var emptyDependencyDestinations
+                = new HashSet<(byte Kind, uint Ordinal, byte Phase)>();
+            var sourcedDependencyDestinations
+                = new HashSet<(byte Kind, uint Ordinal, byte Phase)>();
+            foreach (var dependency in method.DependencyClauses)
+            {
+                var destinationValid = dependency.DestinationKind switch
+                {
+                    1 => dependency.DestinationOrdinal == 0,
+                    2 or 3 => dependency.DestinationOrdinal
+                        < (uint)method.Parameters.Length,
+                    4 => dependency.DestinationOrdinal == 0
+                        && method.ReceiverTypeSpecReference != 0,
+                    _ => false,
+                };
+                var sourceValid = dependency.SourceKind switch
+                {
+                    0 => dependency.Relationship == 0
+                        && dependency.SourceOrdinal == 0,
+                    1 => dependency.Relationship is >= 1 and <= 3
+                        && dependency.SourceOrdinal
+                            < (uint)method.Parameters.Length,
+                    2 => dependency.Relationship is >= 1 and <= 3
+                        && dependency.SourceOrdinal == 0
+                        && method.ReceiverTypeSpecReference != 0,
+                    _ => false,
+                };
+                if (dependency.Phase is < 1 or > 3
+                    || !destinationValid || !sourceValid
+                    || !dependencyKeys.Add((
+                        dependency.DestinationKind,
+                        dependency.DestinationOrdinal, dependency.Phase,
+                        dependency.SourceKind, dependency.SourceOrdinal)))
+                {
+                    return false;
+                }
+
+                var destinationKey = (dependency.DestinationKind,
+                    dependency.DestinationOrdinal, dependency.Phase);
+                _ = dependency.SourceKind == 0
+                    ? emptyDependencyDestinations.Add(destinationKey)
+                    : sourcedDependencyDestinations.Add(destinationKey);
+            }
+            if (emptyDependencyDestinations.Overlaps(
+                    sourcedDependencyDestinations))
+            {
+                return false;
             }
 
             if (method.ConstructionRole != 1

@@ -227,7 +227,10 @@ ConstantMap is limited to inline scalar TypeSpecs with frozen scalar
 ConstantSources; its scalar values are rebuilt into the output
 Blob/FrozenValueNode/ConstantSource tables. FieldPath Body maps remap root
 TypeSpecs and ordered FieldDef/Import steps, interning identical remapped
-paths. Other ConstantMap forms and contract-row Body references reject
+paths. Body-04 field-reference Bodies remap their local/imported FieldDef
+token and owning MethodDef Dependency row; source-free callable views preserve
+plain scalar checked-reference results with normal-result Dependency clauses.
+Other ConstantMap forms and Body-01 record contract-row references reject
 re-emission,
 while imported MethodDef expectation Bodies remain provider-owned.
 Provider/owner-row relocation and
@@ -243,8 +246,8 @@ adaptation coverage is added but remains unverified. Source-free class
 reference views reconstruct plain scalar checked-reference parameter
 identities for callable local and imported MethodDef proxies and preserve the
 implicit-reference flag for caller adaptation.
-Body-05 and compact field-access re-emission regressions are added but remain
-unverified under the validation hold.
+Body-04, Body-05 and compact field-access re-emission regressions are added but
+remain unverified under the validation hold.
 Compiler-owned source-class anchors and explicit member-key capture are
 implemented, but complete bodyful
 local class member/MethodDef closure, provider

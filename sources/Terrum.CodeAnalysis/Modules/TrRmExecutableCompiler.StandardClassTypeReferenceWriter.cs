@@ -8494,10 +8494,10 @@ public static partial class TrRmExecutableCompiler
                         }
                     }
                 }
-                else if (bodyBytes[0] is not (0x02 or 0x03 or 0x05))
+                else if (bodyBytes[0] is not (0x02 or 0x03 or 0x04 or 0x05))
                 {
                     throw Unsupported(
-                        "CM1 local class MethodDef re-emission supports Body kind 01 streams, kinds 02-03 field accessors and kind 05 identity forwarders.");
+                        "CM1 local class MethodDef re-emission supports Body kind 01 streams, kinds 02-04 field accessors and kind 05 identity forwarders.");
                 }
 
                 methodEmissionPlans.Add(methodRow,
@@ -8905,14 +8905,58 @@ public static partial class TrRmExecutableCompiler
                 resultTypeSpec, receiverTypeSpec, parameterFirst,
                 method.Parameters.Length, 0, 0));
 
-            var contractFirst = method.EffectsMask == 0
-                ? 0 : contractRows.Count + 1;
+            var contractFirst = 0;
+            var methodContractCount = 0;
+            var methodDependencyContractRowMap
+                = new Dictionary<int, int>();
+            var newMethodDefRow = methodDefRowMap[oldMethodRow];
             if (method.EffectsMask != 0)
             {
+                contractFirst = contractRows.Count + 1;
                 contractRows.Add(new TrRmContractRow(
-                    0x1600_0000u
-                        | checked((uint)methodDefRowMap[oldMethodRow]),
+                    0x1600_0000u | checked((uint)newMethodDefRow),
                     1, s_effectPayloads[method.EffectsMask]));
+                methodContractCount++;
+            }
+
+            var dependencyContractRows
+                = rootTables.Contracts.GetDependencyContractRows(
+                    oldMethodRow);
+            var dependencyClauseView
+                = CreateC1M1ClassMethodDependencyClauseView(
+                    dependencyContractRows
+                        .Select(static row => row.Contract)
+                        .ToImmutableArray());
+            if (!dependencyClauseView.AsSpan().SequenceEqual(
+                    method.DependencyClauses.AsSpan()))
+            {
+                throw new InvalidDataException(
+                    "A retained class MethodDef Dependency view differs from its Contract rows.");
+            }
+
+            foreach (var (oldContractRow, dependency)
+                in dependencyContractRows)
+            {
+                if (contractFirst == 0)
+                {
+                    contractFirst = contractRows.Count + 1;
+                }
+
+                var payload = new byte[12];
+                payload[0] = dependency.DestinationKind;
+                payload[1] = dependency.SourceKind;
+                payload[2] = dependency.Relationship;
+                payload[3] = dependency.Phase;
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    payload.AsSpan(4), dependency.DestinationOrdinal);
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    payload.AsSpan(8), dependency.SourceOrdinal);
+                contractRows.Add(new TrRmContractRow(
+                    0x1600_0000u | checked((uint)newMethodDefRow),
+                    4, payload));
+                methodDependencyContractRowMap.Add(oldContractRow,
+                    contractRows.Count);
+                methodContractCount++;
             }
 
             var outputBodyRow = hasBody ? bodyRows.Count + 1 : 0;
@@ -8922,13 +8966,14 @@ public static partial class TrRmExecutableCompiler
                     plan.Body, typeDefRowMap, methodDefRowMap,
                     fieldRowMap, importRowMap, fieldPathRowMap,
                     fieldPathRows, fieldPathRowsByIdentity,
+                    methodDependencyContractRowMap,
                     frozenScalarValueBuilder, outputTypeSpecRows,
                     typeSpecRowMap, activeTypeSpecRows, schema));
             }
 
             methodRows.Add(new TrRmMethodDefRow(newOwnerTypeDefRow, 0,
                 signatureRow, method.Flags, contractFirst,
-                method.EffectsMask == 0 ? 0 : 1, outputBodyRow));
+                methodContractCount, outputBodyRow));
             methodNames.Add(method.Name);
             foreach (var exportKey in plan.ExportKeys)
             {
@@ -9940,6 +9985,7 @@ public static partial class TrRmExecutableCompiler
         Dictionary<int, int> fieldPathRowMap,
         List<TrRmFieldPathRow> fieldPathRows,
         Dictionary<C1M1FieldPathIdentity, int> fieldPathRowsByIdentity,
+        Dictionary<int, int> dependencyContractRowMap,
         TrRmFrozenScalarValueBuilder frozenScalarValueBuilder,
         List<ReadOnlyMemory<byte>> outputTypeSpecRows,
         Dictionary<int, uint> typeSpecRowMap,
@@ -9949,6 +9995,12 @@ public static partial class TrRmExecutableCompiler
         {
             return RemapC1M1ClassFieldAccessBody(bodyBytes,
                 fieldRowMap, importRowMap);
+        }
+
+        if (!bodyBytes.IsEmpty && bodyBytes.Span[0] == 0x04)
+        {
+            return RemapC1M1ClassFieldReferenceBody(bodyBytes,
+                fieldRowMap, importRowMap, dependencyContractRowMap);
         }
 
         if (!bodyBytes.IsEmpty && bodyBytes.Span[0] == 0x05)
@@ -10210,6 +10262,49 @@ public static partial class TrRmExecutableCompiler
         var remappedBody = bodyBytes.ToArray();
         BinaryPrimitives.WriteUInt32LittleEndian(remappedBody.AsSpan(4),
             (fieldToken & 0xFF00_0000u) | checked((uint)remappedRow));
+        return remappedBody;
+    }
+
+    private static byte[] RemapC1M1ClassFieldReferenceBody(
+        ReadOnlyMemory<byte> bodyBytes, Dictionary<int, int> fieldRowMap,
+        Dictionary<int, int> importRowMap,
+        Dictionary<int, int> dependencyContractRowMap)
+    {
+        var body = bodyBytes.Span;
+        if (body.Length != 12 || body[1] != 0
+            || BinaryPrimitives.ReadUInt16LittleEndian(body.Slice(2)) != 0)
+        {
+            throw Invalid(
+                "A retained CM1 field-reference Body has invalid flags, reserved bytes or length.");
+        }
+
+        var fieldToken = BinaryPrimitives.ReadUInt32LittleEndian(
+            body.Slice(4));
+        var fieldRow = checked((int)(fieldToken & 0x00FF_FFFF));
+        var remappedFieldRow = (byte)(fieldToken >> 24) switch
+        {
+            0x14 when fieldRowMap.TryGetValue(fieldRow,
+                out var localFieldRow) => localFieldRow,
+            0x1C when importRowMap.TryGetValue(fieldRow,
+                out var fieldImportRow) => fieldImportRow,
+            _ => throw Unsupported(
+                "A CM1 field-reference Body must target a retained local or imported FieldDef."),
+        };
+        var dependencyContractRow = checked((int)
+            BinaryPrimitives.ReadUInt32LittleEndian(body.Slice(8)));
+        if (!dependencyContractRowMap.TryGetValue(dependencyContractRow,
+                out var remappedDependencyContractRow))
+        {
+            throw Invalid(
+                "A retained CM1 field-reference Body must target a Dependency clause owned by its MethodDef.");
+        }
+
+        var remappedBody = bodyBytes.ToArray();
+        BinaryPrimitives.WriteUInt32LittleEndian(remappedBody.AsSpan(4),
+            (fieldToken & 0xFF00_0000u)
+                | checked((uint)remappedFieldRow));
+        BinaryPrimitives.WriteUInt32LittleEndian(remappedBody.AsSpan(8),
+            checked((uint)remappedDependencyContractRow));
         return remappedBody;
     }
 
@@ -10700,6 +10795,8 @@ public static partial class TrRmExecutableCompiler
                 right.ExportKeys.AsSpan())
             || !left.SelectedExportKeys.AsSpan().SequenceEqual(
                 right.SelectedExportKeys.AsSpan())
+            || !left.DependencyClauses.AsSpan().SequenceEqual(
+                right.DependencyClauses.AsSpan())
             || left.Parameters.Length != right.Parameters.Length)
         {
             return false;

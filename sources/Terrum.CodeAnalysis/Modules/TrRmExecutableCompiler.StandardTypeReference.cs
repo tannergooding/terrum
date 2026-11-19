@@ -1154,11 +1154,11 @@ public static partial class TrRmExecutableCompiler
 
                 if (method.GenericParameterCount != 0
                     || method.BodyRow == 0
-                    || !TryGetScalarType(method.ReturnTypeSpecReference,
-                        out var returnType))
+                    || !TryGetClassMethodResultType(
+                        method.ReturnTypeSpecReference, out var returnType))
                 {
                     throw Unsupported(
-                        "The bounded CM1 class source reference supports only bodyful nongeneric scalar member methods.");
+                        "The bounded CM1 class source reference supports only bodyful nongeneric scalar or plain checked-reference member results.");
                 }
 
                 var variables = ImmutableArray.CreateBuilder<BoundVariable>(
@@ -1257,6 +1257,11 @@ public static partial class TrRmExecutableCompiler
                     DeclaredRequiresUnsafeCaller =
                         (method.EffectsMask & 4) != 0,
                     DoesNotReturn = (method.EffectsMask & 2) != 0,
+                    DependencyContracts =
+                        DecodeC1M1ClassMethodDependencyContracts(
+                            method.DependencyClauses,
+                            method.Parameters.Length,
+                            method.ReceiverTypeSpecReference != 0),
                     ModuleImport = new BoundModuleImport(
                         declaration.Declaration.Provider.ModuleIdentity,
                         exportKey, targetRequirement, runtimePolicy),
@@ -1331,12 +1336,12 @@ public static partial class TrRmExecutableCompiler
                         .Single(candidate => candidate.DefinitionId
                             == methodExpectation.ProviderDefinitionId);
                     if (method.BodyRow != 0 || providerMethod.BodyRow == 0
-                        || !TryGetScalarType(
+                        || !TryGetClassMethodResultType(
                             method.ReturnTypeSpecReference,
                             out var returnType))
                     {
                         throw Unsupported(
-                            "The bounded CM1 class source reference supports only bodyless expected Methods with bodyful nongeneric scalar providers.");
+                            "The bounded CM1 class source reference supports only bodyless expected Methods with bodyful nongeneric scalar or plain checked-reference providers.");
                     }
 
                     var isStatic = method.ReceiverTypeSpecReference == 0;
@@ -1424,6 +1429,11 @@ public static partial class TrRmExecutableCompiler
                         DeclaredRequiresUnsafeCaller =
                             (method.EffectsMask & 4) != 0,
                         DoesNotReturn = (method.EffectsMask & 2) != 0,
+                        DependencyContracts =
+                            DecodeC1M1ClassMethodDependencyContracts(
+                                method.DependencyClauses,
+                                method.Parameters.Length,
+                                method.ReceiverTypeSpecReference != 0),
                         ModuleImport = new BoundModuleImport(
                             methodExpectation.Provider.ModuleIdentity,
                             methodExpectation.ExportKey,
@@ -1447,6 +1457,19 @@ public static partial class TrRmExecutableCompiler
                 && typeSpec.Qualifiers == 0
                 && TrRmConstantSourceValueValidator
                     .TryGetBoundScalarType(typeSpec.TypeCode, out type);
+        }
+
+        bool TryGetClassMethodResultType(uint typeSpecReference,
+            out PrimitiveType type)
+        {
+            if (TryGetScalarType(typeSpecReference, out type))
+            {
+                return true;
+            }
+
+            return TryGetClassMethodParameterType(typeSpecReference, 0,
+                    out type, out var isImplicitRef)
+                && !isImplicitRef;
         }
 
         bool TryGetClassMethodParameterType(uint typeSpecReference,
@@ -1524,6 +1547,137 @@ public static partial class TrRmExecutableCompiler
                 genericNominalTypeInstances.ToImmutable(),
             standardClassDeclarations: classDeclarations.ToImmutable(),
             checkedReferenceTypes: checkedReferenceTypeTable);
+    }
+
+    private static ImmutableArray<BoundDependencyContract>
+        DecodeC1M1ClassMethodDependencyContracts(
+            ImmutableArray<BoundStandardClassMethodDependencyClause>
+                dependencies,
+            int parameterCount, bool hasReceiver)
+    {
+        if (dependencies.IsDefault)
+        {
+            throw Invalid(
+                "A CM1 class MethodDef has an invalid Dependency clause view.");
+        }
+        if (dependencies.IsEmpty)
+        {
+            return [];
+        }
+
+        var dependsOnSources
+            = ImmutableArray.CreateBuilder<BoundDependencySource>(
+                dependencies.Length);
+        var borrowedSources
+            = ImmutableArray.CreateBuilder<BoundDependencySource>();
+        var forwardedSources
+            = ImmutableArray.CreateBuilder<BoundDependencySource>();
+        foreach (var dependency in dependencies)
+        {
+            if (dependency.DestinationKind != 1
+                || dependency.DestinationOrdinal != 0
+                || dependency.Phase != 1)
+            {
+                throw Unsupported(
+                    "CM1 class method references currently support only normal-result Dependency clauses.");
+            }
+
+            if (dependency.SourceKind == 0)
+            {
+                if (dependencies.Length != 1
+                    || dependency.Relationship != 0
+                    || dependency.SourceOrdinal != 0)
+                {
+                    throw Invalid(
+                        "A CM1 class MethodDef has an invalid empty result Dependency source set.");
+                }
+
+                continue;
+            }
+
+            var source = dependency.SourceKind switch
+            {
+                1 when dependency.SourceOrdinal
+                    < (uint)parameterCount
+                    => new BoundDependencySource(
+                        BoundDependencySourceKind.Formal,
+                        checked((int)dependency.SourceOrdinal)),
+                2 when hasReceiver && dependency.SourceOrdinal == 0
+                    => new BoundDependencySource(
+                        BoundDependencySourceKind.Receiver, null),
+                _ => throw Invalid(
+                    "A CM1 class MethodDef has an invalid result Dependency source."),
+            };
+            if (dependency.Relationship is < 1 or > 3)
+            {
+                throw Invalid(
+                    "A CM1 class MethodDef has an invalid result Dependency relationship.");
+            }
+
+            dependsOnSources.Add(source);
+            if (dependency.Relationship == 1)
+            {
+                borrowedSources.Add(source);
+            }
+            else if (dependency.Relationship == 2)
+            {
+                forwardedSources.Add(source);
+            }
+        }
+
+        static ImmutableArray<BoundDependencySource> CanonicalizeSources(
+            ImmutableArray<BoundDependencySource>.Builder sources)
+            => sources.ToImmutable()
+                .OrderBy(static source => source.Kind)
+                .ThenBy(static source => source.FormalOrdinal ?? -1)
+                .ToImmutableArray();
+
+        var result = ImmutableArray.CreateBuilder<BoundDependencyContract>(3);
+        result.Add(new BoundDependencyContract(
+            BoundDependencyRelation.DependsOn,
+            BoundDependencyDestination.Result, null,
+            CanonicalizeSources(dependsOnSources)));
+        if (!borrowedSources.IsEmpty)
+        {
+            result.Add(new BoundDependencyContract(
+                BoundDependencyRelation.BorrowSourceStorage,
+                BoundDependencyDestination.Result, null,
+                CanonicalizeSources(borrowedSources)));
+        }
+        if (!forwardedSources.IsEmpty)
+        {
+            result.Add(new BoundDependencyContract(
+                BoundDependencyRelation.ForwardsBacking,
+                BoundDependencyDestination.Result, null,
+                CanonicalizeSources(forwardedSources)));
+        }
+        return result.ToImmutable();
+    }
+
+    private static ImmutableArray<
+        BoundStandardClassMethodDependencyClause>
+        CreateC1M1ClassMethodDependencyClauseView(
+            ImmutableArray<TrRmDependencyContract> dependencies)
+    {
+        if (dependencies.IsDefault)
+        {
+            throw Invalid(
+                "A CM1 class MethodDef has an invalid Dependency clause view.");
+        }
+
+        return dependencies
+            .OrderBy(static dependency => dependency.DestinationKind)
+            .ThenBy(static dependency => dependency.DestinationOrdinal)
+            .ThenBy(static dependency => dependency.Phase)
+            .ThenBy(static dependency => dependency.SourceKind)
+            .ThenBy(static dependency => dependency.SourceOrdinal)
+            .Select(static dependency =>
+                new BoundStandardClassMethodDependencyClause(
+                    dependency.DestinationKind, dependency.SourceKind,
+                    dependency.Relationship, dependency.Phase,
+                    dependency.DestinationOrdinal,
+                    dependency.SourceOrdinal))
+            .ToImmutableArray();
     }
 
     private static BoundStandardClassTypeView CreateStandardClassTypeView(
@@ -1731,7 +1885,11 @@ public static partial class TrRmExecutableCompiler
                 genericParameterCount,
                 checked((uint)tables.Methods.GetBodyRow(methodRow)),
                 constructionRole, initializerMethodDefinitionId,
-                constructionPropertyDefinitionId, initializedMembers));
+                constructionPropertyDefinitionId, initializedMembers) {
+                DependencyClauses =
+                    CreateC1M1ClassMethodDependencyClauseView(
+                        tables.Contracts.GetDependencyContracts(methodRow)),
+            });
         }
 
         return new BoundStandardClassTypeView(identity,
