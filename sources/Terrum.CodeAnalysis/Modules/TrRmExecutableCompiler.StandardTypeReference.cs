@@ -109,10 +109,14 @@ public static partial class TrRmExecutableCompiler
                 && !StringComparer.Ordinal.Equals(schemaIdentities[0],
                     StandardCM1AR1SchemaIdentity)
                 && !StringComparer.Ordinal.Equals(schemaIdentities[0],
-                    StandardC1M1Construction2L1R1ClassParameterDefaultsSchemaIdentity))
+                    StandardC1M1Construction2L1R1ClassParameterDefaultsSchemaIdentity)
+                && !StringComparer.Ordinal.Equals(schemaIdentities[0],
+                    StandardC1M1ConstructionL1R1SchemaIdentity)
+                && !StringComparer.Ordinal.Equals(schemaIdentities[0],
+                    StandardC1M1Construction2L1R1SchemaIdentity))
             {
                 throw Unsupported(
-                    "Complete Standard class declarations require the exact C1M1 or CM1 schema.");
+                    "Complete Standard class declarations require an exact class schema.");
             }
 
             if (schemaIdentities.Skip(1).Any(schemaIdentity =>
@@ -171,7 +175,7 @@ public static partial class TrRmExecutableCompiler
     /// <param name="providers">The complete explicitly supplied provider artifact set.</param>
     /// <param name="typeExportKeys">The exact TypeDef ExportKeys that select source type roots.</param>
     /// <param name="fieldExportKeys">The exact FieldDef ExportKeys selected within those roots' checked type closure.</param>
-    /// <returns>The selected type and field declarations under exact C1M1, CM1, CM1AR1, LayoutQueries, nested FieldPath or EN1 schema selection.</returns>
+    /// <returns>The selected type and field declarations under exact C1M1, CM1, CM1AR1, Construction-1/2, LayoutQueries, nested FieldPath or EN1 schema selection.</returns>
     /// <exception cref="ArgumentNullException">An input, list or selected key is null.</exception>
     /// <exception cref="ArgumentException">A selected key is empty, duplicated, missing or has the wrong kind.</exception>
     /// <exception cref="NotSupportedException">The selected provider closure is outside the bounded projection.</exception>
@@ -203,6 +207,10 @@ public static partial class TrRmExecutableCompiler
             && schemaIdentities.All(static schemaIdentity =>
                 StringComparer.Ordinal.Equals(schemaIdentity,
                     StandardC1M1SchemaIdentity)
+                || StringComparer.Ordinal.Equals(schemaIdentity,
+                    StandardC1M1ConstructionL1R1SchemaIdentity)
+                || StringComparer.Ordinal.Equals(schemaIdentity,
+                    StandardC1M1Construction2L1R1SchemaIdentity)
                 || StandardGenericMethodSchema
                     .IsCM1ClassParameterDefaults(schemaIdentity)))
         {
@@ -278,14 +286,18 @@ public static partial class TrRmExecutableCompiler
             schemaIdentities[0]);
         var isCM1 = StandardGenericMethodSchema.IsCM1ClassParameterDefaults(
             schemaIdentities[0]);
-        if ((!isEN1 && !isCM1 && !StringComparer.Ordinal.Equals(
-                    schemaIdentities[0], StandardC1M1SchemaIdentity))
+        var isConstruction = schemaIdentities[0] is
+            StandardC1M1ConstructionL1R1SchemaIdentity
+            or StandardC1M1Construction2L1R1SchemaIdentity;
+        if ((!isEN1 && !isCM1 && !isConstruction
+                && !StringComparer.Ordinal.Equals(schemaIdentities[0],
+                    StandardC1M1SchemaIdentity))
             || schemaIdentities.Skip(1).Any(schemaIdentity =>
                 !StringComparer.Ordinal.Equals(schemaIdentity,
                     schemaIdentities[0])))
         {
             throw Unsupported(
-                "The C1 class source-reference projection requires one exact C1M1 or EN1 schema selection for every provider.");
+                "The C1 class source-reference projection requires one exact C1M1, CM1, Construction-1/2 or EN1 schema selection for every provider.");
         }
         if (allowClassLayoutQueryBody
             && !IsSelectedC1ClassInstanceLayoutSchemaIdentity(
@@ -321,7 +333,7 @@ public static partial class TrRmExecutableCompiler
                 && !isCM1))
         {
             throw Unsupported(
-                "The C1 metadata-only class projection requires a type-only Module without MethodDefs.");
+                "The bounded class source-reference projection does not retain MethodDefs for this exact schema.");
         }
 
         var selectedTypeDefs = new Dictionary<int, List<string>>();

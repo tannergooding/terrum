@@ -1011,6 +1011,86 @@ internal sealed partial class CliTests
         }
     }
 
+    [TestCase(
+        "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-1-parameter-labels-1-receiver-access-1")]
+    [TestCase(
+        "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1")]
+    public async Task CompileTrRmComposesVersionTwoConstructionClassProvidersAsync(
+        string schemaIdentity)
+    {
+        var firstProviderIdentity
+            = $"source-provider-cli-construction-first-{Guid.NewGuid():N}";
+        var secondProviderIdentity
+            = $"source-provider-cli-construction-second-{Guid.NewGuid():N}";
+        var firstProviderArtifact = Path.Combine(
+            TestArtifactPaths.DirectoryPath,
+            $"source-provider-cli-construction-first-{Guid.NewGuid():N}.trrm");
+        var secondProviderArtifact = Path.Combine(
+            TestArtifactPaths.DirectoryPath,
+            $"source-provider-cli-construction-second-{Guid.NewGuid():N}.trrm");
+        var providerSelections = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"source-provider-cli-construction-{Guid.NewGuid():N}.json");
+        var consumerArtifact = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"source-provider-cli-construction-{Guid.NewGuid():N}.trrm");
+        try
+        {
+            await File.WriteAllBytesAsync(firstProviderArtifact,
+                CreateC1M1ClassProvider(firstProviderIdentity, "Box",
+                    "type.box", schemaIdentity)).ConfigureAwait(true);
+            await File.WriteAllBytesAsync(secondProviderArtifact,
+                CreateC1M1ClassProvider(secondProviderIdentity, "Other",
+                    "type.other", schemaIdentity)).ConfigureAwait(true);
+            var configuration = JsonSerializer.Serialize(new {
+                schemaVersion = 2,
+                providers = new[] {
+                    new { schemaIdentity, path = firstProviderArtifact },
+                    new { schemaIdentity, path = secondProviderArtifact },
+                },
+                references = new[] {
+                    new {
+                        providerInputOrdinal = 0,
+                        moduleIdentity = firstProviderIdentity,
+                        typeExportKeys = new[] { "type.box" },
+                        fieldExportKeys = Array.Empty<string>(),
+                    },
+                    new {
+                        providerInputOrdinal = 1,
+                        moduleIdentity = secondProviderIdentity,
+                        typeExportKeys = new[] { "type.other" },
+                        fieldExportKeys = Array.Empty<string>(),
+                    },
+                },
+            });
+            await File.WriteAllTextAsync(providerSelections, configuration,
+                new UTF8Encoding(false)).ConfigureAwait(true);
+
+            var (exit, result, error) = await RunAsync(
+                Encoding.UTF8.GetBytes(
+                    "void Consume(Box box, Other other) {}"),
+                "compile-trrm", "-", "--identity",
+                $"source-provider-cli-construction-consumer-{Guid.NewGuid():N}",
+                "--trrm-schema", schemaIdentity, "--trrm-source-providers",
+                providerSelections, "--library", "-o", consumerArtifact,
+                "--runtime", "fail-fast", "--json")
+                .ConfigureAwait(false);
+            Assert.That(exit, Is.Zero,
+                $"{result}{Environment.NewLine}{error}");
+            Assert.That(error, Is.Empty);
+            Assert.That(new FileInfo(consumerArtifact).Length, Is.GreaterThan(0));
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(firstProviderArtifact)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(secondProviderArtifact)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(providerSelections)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(consumerArtifact)
+                .ConfigureAwait(true);
+        }
+    }
+
     private static byte[] CreateC1M1ClassProvider(string moduleIdentity,
         string typeName, string exportKey, string schemaIdentity)
     {

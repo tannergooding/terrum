@@ -80,6 +80,10 @@ internal sealed record BoundStandardClassTypeView(
         if (Provider is not null
             && (StringComparer.Ordinal.Equals(Provider.SchemaIdentity,
                     "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1")
+                || StringComparer.Ordinal.Equals(Provider.SchemaIdentity,
+                    "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-1-parameter-labels-1-receiver-access-1")
+                || StringComparer.Ordinal.Equals(Provider.SchemaIdentity,
+                    "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1")
                 || StandardGenericMethodSchema.IsCM1ClassParameterDefaults(
                     Provider.SchemaIdentity)
                 || BoundStandardEnumDeclarationContract
@@ -130,6 +134,10 @@ internal static class BoundStandardClassDeclarationContract
         = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1";
     private const string C1M1SchemaIdentity
         = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1";
+    private const string C1M1ConstructionL1R1SchemaIdentity
+        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-1-parameter-labels-1-receiver-access-1";
+    private const string C1M1Construction2L1R1SchemaIdentity
+        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1";
     internal static bool TryGetSelectedConstruction2ClassDeclaration(
         PrimitiveType type,
         IReadOnlyList<BoundGenericNominalTypeInstance> instances,
@@ -487,6 +495,10 @@ internal static class BoundStandardClassDeclarationContract
                 C1SchemaIdentity)
                 && !StringComparer.Ordinal.Equals(view.Provider.SchemaIdentity,
                     C1M1SchemaIdentity)
+                && !StringComparer.Ordinal.Equals(view.Provider.SchemaIdentity,
+                    C1M1ConstructionL1R1SchemaIdentity)
+                && !StringComparer.Ordinal.Equals(view.Provider.SchemaIdentity,
+                    C1M1Construction2L1R1SchemaIdentity)
                 && !StandardGenericMethodSchema
                     .IsCM1ClassParameterDefaults(
                         view.Provider.SchemaIdentity)
@@ -501,6 +513,10 @@ internal static class BoundStandardClassDeclarationContract
         var schemaAllowsMutability
             = StringComparer.Ordinal.Equals(view.Provider.SchemaIdentity,
                 C1M1SchemaIdentity)
+                || StringComparer.Ordinal.Equals(view.Provider.SchemaIdentity,
+                    C1M1ConstructionL1R1SchemaIdentity)
+                || StringComparer.Ordinal.Equals(view.Provider.SchemaIdentity,
+                    C1M1Construction2L1R1SchemaIdentity)
                 || StandardGenericMethodSchema
                     .IsCM1ClassParameterDefaults(
                         view.Provider.SchemaIdentity)

@@ -878,6 +878,10 @@ public static partial class TrRmExecutableCompiler
         static bool IsSupportedClassTypeOnlySchema(string schemaIdentity)
             => StringComparer.Ordinal.Equals(schemaIdentity,
                     StandardC1M1SchemaIdentity)
+                || StringComparer.Ordinal.Equals(schemaIdentity,
+                    StandardC1M1ConstructionL1R1SchemaIdentity)
+                || StringComparer.Ordinal.Equals(schemaIdentity,
+                    StandardC1M1Construction2L1R1SchemaIdentity)
                 || StandardGenericMethodSchema.IsCM1ClassParameterDefaults(
                     schemaIdentity)
                 || IsSelectedC1EnumClosureSchemaIdentity(schemaIdentity);
