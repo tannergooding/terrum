@@ -5740,6 +5740,178 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
+    public void EmitsAndReemitsImportedClassFieldReferenceBodies()
+    {
+        var schemaIdentity
+            = C1M1Construction2ClassParameterDefaultsSchemaIdentity;
+        var providerArtifact = EmitLeafProvider("int32");
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var leafReference = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, "FieldReferenceLeafProvider", [], ["LeafKey"],
+            ["Leaf.Value"]);
+        var tree = SyntaxTree.Parse("""
+            public class Box {
+                [return: DependsOn(nameof(value))]
+                public unsafe ref<int32> Read(Leaf value) {
+                    return ref value.Value;
+                }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree, leafReference);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var read = classDeclaration.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.FunctionDeclaration
+                && node.Children.OfType<SyntaxTokenElement>().Any(
+                    static token => token.Token.Name == "Read"));
+        var boxClassIndex = Enumerable.Range(0, program.Classes.Length)
+            .Single(index => program.Classes[index].Name == "Box");
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "FieldReferenceBox", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, boxClassIndex,
+                    classDeclaration.Span, "BoxKey", [
+                        new TrRmSourceClassMemberExport(boxClassIndex,
+                            read.Span, "Box.Read"),
+                    ]),
+            ]);
+        var artifactInput = new TrRmStandardArtifactInput(schemaIdentity,
+            artifact);
+        var artifactTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                        artifact));
+        var methodDefinition = artifactTables.Exports
+            .GetExportsForModule(1)
+            .Single(static export =>
+                export.ExportKey == "Box.Read").Definition;
+        var methodRow = checked((int)(
+            methodDefinition & 0x00FF_FFFF));
+        var body = artifactTables.Bodies.GetRow(
+            artifactTables.Methods.GetBodyRow(methodRow));
+        Assert.That(body[0], Is.EqualTo((byte)0x04));
+        var fieldImportRow = Enumerable.Range(1,
+                artifactTables.Imports.Count)
+            .Single(row =>
+                artifactTables.Imports
+                    .GetExpectedDefinitionForImportRow(row) >> 24 == 0x14
+                && artifactTables.Imports.GetBindingForImportRow(row)
+                    .ExportKey == "Leaf.Value");
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(body.Slice(4)),
+            Is.EqualTo(0x1C00_0000u | checked((uint)fieldImportRow)));
+        Assert.That(artifactTables.Contracts
+                .GetDependencyContracts(methodRow).Single(),
+            Is.EqualTo(new TrRmDependencyContract(1, 1, 3, 1, 0, 0)));
+        Assert.That(artifactTables.Contracts.GetEffectsMask(methodRow),
+            Is.EqualTo(4u));
+
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            artifactInput, "FieldReferenceBox", [providerInput], ["BoxKey"],
+            ["Leaf.Value"]);
+        var sourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), reference);
+        Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceFreeCompilation.Diagnostics));
+        var reemitted = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)sourceFreeCompilation.Program!,
+            "FieldReferenceBoxReemitted", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var reemittedTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                        reemitted));
+        var reemittedMethodDefinition = reemittedTables.Exports
+            .GetExportsForModule(1)
+            .Single(static export =>
+                export.ExportKey == "Box.Read").Definition;
+        var reemittedMethodRow = checked((int)(
+            reemittedMethodDefinition & 0x00FF_FFFF));
+        var reemittedBody = reemittedTables.Bodies.GetRow(
+            reemittedTables.Methods.GetBodyRow(reemittedMethodRow));
+        var reemittedFieldImportRow = Enumerable.Range(1,
+                reemittedTables.Imports.Count)
+            .Single(row =>
+                reemittedTables.Imports
+                    .GetExpectedDefinitionForImportRow(row) >> 24 == 0x14
+                && reemittedTables.Imports.GetBindingForImportRow(row)
+                    .ExportKey == "Leaf.Value");
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                reemittedBody.Slice(4)),
+            Is.EqualTo(0x1C00_0000u
+                | checked((uint)reemittedFieldImportRow)));
+        var reloadedReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+                "FieldReferenceBoxReemitted", [providerInput], ["BoxKey"],
+                ["Leaf.Value"]);
+        var callerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                public unsafe int32 Use(Box box, Leaf value) {
+                    return *box.Read(value);
+                }
+                """), reloadedReference);
+        Assert.That(callerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                callerCompilation.Diagnostics));
+
+        var incompatibleArtifact = EmitLeafProvider("int64");
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                artifactInput, "FieldReferenceBox", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        incompatibleArtifact),
+                ], ["BoxKey"], ["Leaf.Value"]));
+
+        byte[] EmitLeafProvider(string fieldType)
+        {
+            var providerTree = SyntaxTree.Parse($$"""
+                public class Leaf {
+                    public {{fieldType}} Value;
+                }
+                """);
+            var providerCompilation
+                = Compilation.CreateLibrary(providerTree);
+            Assert.That(providerCompilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    providerCompilation.Diagnostics));
+            var providerProgram = (BoundProgram)providerCompilation.Program!;
+            var leafClassDeclaration
+                = providerTree.Root.Children.OfType<SyntaxNode>()
+                    .Single(static node =>
+                        node.Kind == SyntaxKind.ClassDeclaration);
+            var field = leafClassDeclaration.Children
+                .OfType<SyntaxNode>()
+                .Single(static node =>
+                    node.Kind == SyntaxKind.FieldDeclaration);
+            var leafClassIndex = Enumerable.Range(0,
+                    providerProgram.Classes.Length)
+                .Single(index => providerProgram.Classes[index].Name
+                    == "Leaf");
+            return TrRmExecutableCompiler.EmitStandard(providerProgram,
+                "FieldReferenceLeafProvider", schemaIdentity,
+                TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+                [], [], [
+                    new TrRmSourceClassExport(providerProgram,
+                        leafClassIndex, leafClassDeclaration.Span, "LeafKey",
+                        [
+                            new TrRmSourceClassMemberExport(
+                                leafClassIndex, field.Span, "Leaf.Value"),
+                        ]),
+                ]);
+        }
+    }
+
+    [Test]
     public void ComposesClassGenericAndInterfaceParameterDefaultSurfaces()
     {
         var tree = SyntaxTree.Parse("""
