@@ -8424,15 +8424,11 @@ public static partial class TrRmExecutableCompiler
                 || (method.Flags & 4) != 0
                 || (method.EffectsMask & ~6u) != 0
                 || plan.Imports.IsEmpty
-                || !TryGetC1M1ClassScalarType(rootTables,
-                    method.ReturnTypeSpecReference, out var returnType)
-                || returnType is PrimitiveType.NativeInt
-                    or PrimitiveType.NativeUInt
                 || !typeDefRowMap.TryGetValue(ownerTypeDefRow,
                     out var newOwnerTypeDefRow))
             {
                 throw Unsupported(
-                    "C1M1 source-free class re-emission supports bodyless public nongeneric scalar MethodDef Imports without construction roles.");
+                    "C1M1 source-free class re-emission supports bodyless public nongeneric MethodDef Imports without construction roles.");
             }
 
             if (method.ReceiverTypeSpecReference != 0)
@@ -8452,6 +8448,16 @@ public static partial class TrRmExecutableCompiler
                 }
             }
 
+            var resultTypeSpec = RemapC1M1ClassTypeSpec(rootTables,
+                method.ReturnTypeSpecReference, typeDefRowMap,
+                importRowMap, outputTypeSpecRows, typeSpecRowMap,
+                activeTypeSpecRows, depth: 0);
+            var receiverTypeSpec = method.ReceiverTypeSpecReference == 0
+                ? 0
+                : RemapC1M1ClassTypeSpec(rootTables,
+                    method.ReceiverTypeSpecReference, typeDefRowMap,
+                    importRowMap, outputTypeSpecRows, typeSpecRowMap,
+                    activeTypeSpecRows, depth: 0);
             var signatureRow = methodSignatureRows.Count + 1;
             var parameterFirst = method.Parameters.IsEmpty
                 ? 0 : parameterRows.Count + 1;
@@ -8459,15 +8465,10 @@ public static partial class TrRmExecutableCompiler
                 ordinal++)
             {
                 var parameter = method.Parameters[ordinal];
-                if (parameter.Mode != 0 || parameter.Flags != 0
-                    || !TryGetC1M1ClassScalarType(rootTables,
-                        parameter.TypeSpecReference,
-                        out var parameterType)
-                    || parameterType is (PrimitiveType.NativeInt
-                        or PrimitiveType.NativeUInt))
+                if (parameter.Mode != 0 || parameter.Flags != 0)
                 {
                     throw Unsupported(
-                        "A retained class MethodDef parameter must be a by-value scalar.");
+                        "A retained class MethodDef parameter must use the bounded by-value mode.");
                 }
 
                 var remappedTypeSpec = RemapC1M1ClassTypeSpec(rootTables,
@@ -8482,7 +8483,12 @@ public static partial class TrRmExecutableCompiler
                     uint defaultConstantSourceRow = 0;
                     if (parameter.DefaultValue is BoundConstant value)
                     {
-                        if (value.Type != parameterType
+                        if (!TryGetC1M1ClassScalarType(rootTables,
+                                parameter.TypeSpecReference,
+                                out var parameterType)
+                            || parameterType is (PrimitiveType.NativeInt
+                                or PrimitiveType.NativeUInt)
+                            || value.Type != parameterType
                             || value.RepresentationType != parameterType
                             || parameterType is PrimitiveType.NativeInt
                                 or PrimitiveType.NativeUInt
@@ -8511,16 +8517,6 @@ public static partial class TrRmExecutableCompiler
                 }
             }
 
-            var resultTypeSpec = RemapC1M1ClassTypeSpec(rootTables,
-                method.ReturnTypeSpecReference, typeDefRowMap,
-                importRowMap, outputTypeSpecRows, typeSpecRowMap,
-                activeTypeSpecRows, depth: 0);
-            var receiverTypeSpec = method.ReceiverTypeSpecReference == 0
-                ? 0
-                : RemapC1M1ClassTypeSpec(rootTables,
-                    method.ReceiverTypeSpecReference, typeDefRowMap,
-                    importRowMap, outputTypeSpecRows, typeSpecRowMap,
-                    activeTypeSpecRows, depth: 0);
             methodSignatureRows.Add(new TrRmMethodSigRow(
                 resultTypeSpec, receiverTypeSpec, parameterFirst,
                 method.Parameters.Length, 0, 0));
