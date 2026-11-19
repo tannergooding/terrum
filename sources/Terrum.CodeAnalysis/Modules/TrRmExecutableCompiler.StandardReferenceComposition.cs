@@ -879,7 +879,8 @@ public static partial class TrRmExecutableCompiler
             => StringComparer.Ordinal.Equals(schemaIdentity,
                     StandardC1M1SchemaIdentity)
                 || StandardGenericMethodSchema.IsCM1ClassParameterDefaults(
-                    schemaIdentity);
+                    schemaIdentity)
+                || IsSelectedC1EnumClosureSchemaIdentity(schemaIdentity);
     }
 
     private static bool IsStandardClassTypeOnlyComposedFieldType(
