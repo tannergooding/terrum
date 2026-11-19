@@ -1234,6 +1234,34 @@ internal sealed partial class CliTests
     }
 
     [Test]
+    public void EmitsConstruction2OrdinaryUnitClassMethodCallBody()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2";
+        const string providerIdentity
+            = "construction2-unit-result-provider";
+        var provider = CreateConstructionClassMethodProvider(
+            providerIdentity, "Box", "type.box", "Box.Touch",
+            schemaIdentity, unitResult: true);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, provider),
+            providerIdentity, [], ["type.box"]);
+        var consumer = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public void Consume(Box box) { box.Touch(); }"), reference);
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)consumer.Program!,
+            "construction2-unit-result-consumer", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex.ForC1M1Construction2Draft(artifact));
+        Assert.That(tables.Methods.Count, Is.EqualTo(4));
+    }
+
+    [Test]
     public void Construction2RejectsWritableReceiverOnImmutableClass()
     {
         const string schemaIdentity
@@ -1379,14 +1407,17 @@ internal sealed partial class CliTests
         string moduleIdentity, string typeName, string exportKey,
         string methodExportKey, string schemaIdentity,
         bool mutableType = false, bool mutableReceiver = false,
-        bool unitParameter = false)
+        bool unitParameter = false, bool unitResult = false)
     {
         var typeMutability = mutableType ? "mut " : string.Empty;
         var methodMutability = mutableReceiver ? "mut " : string.Empty;
         var methodParameters = unitParameter
             ? "int32 value, void token" : "int32 value";
+        var methodDeclaration = unitResult
+            ? $"public {methodMutability}void Touch() {{}}"
+            : $"public {methodMutability}int32 Read({methodParameters}) {{ return value; }}";
         var tree = SyntaxTree.Parse(
-            $"public {typeMutability}class {typeName} {{ public int32 Value; public {typeName}(int32 initial) {{ Value = initial; }} public {methodMutability}int32 Read({methodParameters}) {{ return value; }} }}");
+            $"public {typeMutability}class {typeName} {{ public int32 Value; public {typeName}(int32 initial) {{ Value = initial; }} {methodDeclaration} }}");
         var compilation = Compilation.CreateLibrary(tree);
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));

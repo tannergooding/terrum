@@ -10334,12 +10334,28 @@ public static partial class TrRmExecutableCompiler
             if (function.ModuleImport is null && !function.IsExternal
                 && function.DeclaringStruct is null)
             {
-                var directCall = function.Body.Statements is [
-                    BoundReturn { Value: BoundCall returnedCall },
-                ] ? returnedCall : null;
+                var directCall = function.Body.Statements switch
+                {
+                    [BoundReturn { Value: BoundCall returnedCall }]
+                        => returnedCall,
+                    [
+                        BoundExpressionStatement {
+                            Expression: BoundCall statementCall,
+                        },
+                        BoundReturn { Value: null },
+                    ] when function.ReturnType == PrimitiveType.Void
+                        && statementCall.Type == PrimitiveType.Void
+                        => statementCall,
+                    _ => null,
+                };
+                var unitReturnHasNoWork
+                    = function.Body.Statements.IsEmpty
+                        || function.Body.Statements is [
+                            BoundReturn { Value: null },
+                        ];
                 var isNoOpUnitFunction
                     = function.ReturnType == PrimitiveType.Void
-                        && function.Body.Statements.IsEmpty;
+                        && unitReturnHasNoWork;
                 if (function.IsStatic || function.IsConstructor
                     || function.IsClassConstructor
                     || function.ClassConstructor != -1
@@ -10420,12 +10436,12 @@ public static partial class TrRmExecutableCompiler
                         : SourceFunctionTypeSpecReference(
                             function.ReturnType);
                 if (directCall is not null
-                    && (function.ReturnType == PrimitiveType.Void
-                        || !TryGetC1M1SourceScalarTypeSpecReference(
+                    && (function.ReturnType != PrimitiveType.Void
+                        && !TryGetC1M1SourceScalarTypeSpecReference(
                             function.ReturnType, out _)))
                 {
                     throw Unsupported(
-                        "A local class-reference call return must be a fixed scalar value.");
+                        "A local class-reference call return must be unit or a fixed scalar value.");
                 }
 
                 methodSignatureRows.Add(new TrRmMethodSigRow(
@@ -10503,13 +10519,23 @@ public static partial class TrRmExecutableCompiler
                             "This ordinary class-call Body requires a direct normal class receiver TypeSpec.");
                     }
 
-                    if (!TryGetC1M1ClassScalarType(rootTables,
-                            targetPlan.Method.ReturnTypeSpecReference,
-                            out var targetReturnType)
-                        || targetReturnType != function.ReturnType)
+                    var targetReturnTypeSpec
+                        = rootTables.TypeSpecs.GetTypeSpecRef(
+                            targetPlan.Method.ReturnTypeSpecReference);
+                    var targetReturnMatches
+                        = function.ReturnType == PrimitiveType.Void
+                            ? !targetReturnTypeSpec.IsRow
+                                && targetReturnTypeSpec.Form == 1
+                                && targetReturnTypeSpec.Qualifiers == 0
+                                && targetReturnTypeSpec.TypeCode == 0
+                            : TryGetC1M1ClassScalarType(rootTables,
+                                targetPlan.Method.ReturnTypeSpecReference,
+                                out var targetReturnType)
+                                && targetReturnType == function.ReturnType;
+                    if (!targetReturnMatches)
                     {
                         throw Unsupported(
-                            "This ordinary class-call Body requires a matching fixed-scalar MethodDef result.");
+                            "This ordinary class-call Body requires a matching unit or fixed-scalar MethodDef result.");
                     }
 
                     bodyRows.Add(
@@ -11201,9 +11227,9 @@ public static partial class TrRmExecutableCompiler
         if (schema != TrRmArtifactSchema.C1M1Construction2Draft
             || !schema.UsesObjectConstruction()
             || schema.UsesMethodReceiverAccess()
-            || function.ReturnType == PrimitiveType.Void
-            || !TryGetC1M1SourceScalarTypeSpecReference(
-                function.ReturnType, out _)
+            || (function.ReturnType != PrimitiveType.Void
+                && !TryGetC1M1SourceScalarTypeSpecReference(
+                    function.ReturnType, out _))
             || call.Type != function.ReturnType
             || targetFunction.ReturnType != function.ReturnType
             || targetFunction.IsStatic
@@ -11237,7 +11263,7 @@ public static partial class TrRmExecutableCompiler
             || targetMethodDefRow is <= 0 or > 0xFF_FFFF)
         {
             throw Unsupported(
-                "The bounded Construction-2 class-reference Body supports only a direct scalar-returning ordinary class call with value formals.");
+                "The bounded Construction-2 class-reference Body supports only a direct unit- or scalar-returning ordinary class call with supported value inputs.");
         }
 
         var receiverType = targetFunction.Variables[0].Type;
@@ -11435,14 +11461,18 @@ public static partial class TrRmExecutableCompiler
                     typeTokens[homeIndex])));
         }
 
-        var callSite = TrRmRegisterBodyRecordWriter.EncodeCallSite(1, 1,
+        var isUnitResult = function.ReturnType == PrimitiveType.Void;
+        var callSite = TrRmRegisterBodyRecordWriter.EncodeCallSite(1,
+            isUnitResult ? (byte)0 : (byte)1,
             maps.GetMethodMapIndex(targetMethodToken), 0, callInputs, [],
             schema: schema);
         ReadOnlyMemory<byte>[] records = [
             new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 },
             new(callSite),
         ];
-        var code = new byte[] { 0xE0, 0, 1, 0, 0x17, 0 };
+        var code = isUnitResult
+            ? new byte[] { 0xE0, 0, 1, 0, 0x18, 0 }
+            : new byte[] { 0xE0, 0, 1, 0, 0x17, 0 };
         return TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
             maps.MethodMap, default, default,
             [new TrRmRegisterBodyBlock(0,
