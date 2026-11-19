@@ -2199,6 +2199,44 @@ public static partial class TrRmExecutableCompiler
                 ];
             }
 
+            if (value is BoundBinary binary
+                && binary.Left is BoundRead left
+                && binary.Right is BoundRead right
+                && binary.Left.Type == binary.Type
+                && binary.Right.Type == binary.Type
+                && IsC1M1Construction2BodyNumericType(binary.Type))
+            {
+                var instructions = new List<byte>(14);
+                AppendHomeLoad(instructions, 0, left.Variable);
+                AppendHomeLoad(instructions, 1, right.Variable);
+                const byte destinationRegister = 0;
+                const byte leftRegister = 0;
+                const byte rightRegister = 1;
+                var payload = (ushort)(destinationRegister
+                    | (0x0F << 4) | (leftRegister << 8)
+                    | (rightRegister << 12));
+                if (PrimitiveTypeFacts.IsFloating(binary.Type))
+                {
+                    instructions.Add(0xC0);
+                    instructions.Add(
+                        GetC1M1Construction2FloatingBinaryControl(
+                            binary.Operator));
+                }
+                else
+                {
+                    var (opcode, control)
+                        = GetC1M1Construction2IntegerBinaryEncoding(
+                            binary.Operator, binary.OverflowBehavior);
+                    instructions.Add(opcode);
+                    instructions.Add(control);
+                }
+                instructions.Add((byte)payload);
+                instructions.Add((byte)(payload >> 8));
+                instructions.Add(0x17);
+                instructions.Add(0);
+                return instructions.ToArray();
+            }
+
             throw new InvalidDataException(
                 "A Construction-2 conditional Body lost its checked scalar return.");
         }
@@ -4136,14 +4174,68 @@ public static partial class TrRmExecutableCompiler
         }
 
         bool IsScalarReturn(BoundExpression value)
-            => value is BoundRead read
-                ? IsScalarRead(read)
-                : value is BoundConstant constant
-                    && constant.Type == function.ReturnType
+        {
+            if (value is BoundRead read)
+            {
+                return IsScalarRead(read);
+            }
+
+            if (value is BoundConstant constant)
+            {
+                return constant.Type == function.ReturnType
                     && constant.RepresentationType
                         == function.ReturnType
                     && constant.Bits.IsCanonicalFor(
                         function.ReturnType);
+            }
+
+            if (value is BoundBinary binary)
+            {
+                return IsScalarBinaryReturn(binary);
+            }
+
+            return false;
+        }
+
+        bool IsScalarBinaryReturn(BoundBinary binary)
+        {
+            if (binary.Type != function.ReturnType
+                || !IsC1M1Construction2BodyNumericType(binary.Type)
+                || binary.Left is not BoundRead left
+                || binary.Right is not BoundRead right
+                || left.Type != binary.Type
+                || right.Type != binary.Type
+                || !IsScalarRead(left)
+                || !IsScalarRead(right))
+            {
+                return false;
+            }
+
+            if (PrimitiveTypeFacts.IsFloating(binary.Type))
+            {
+                return binary.Operator is TokenKind.Plus
+                    or TokenKind.Minus or TokenKind.Star or TokenKind.Slash
+                    or TokenKind.Percent;
+            }
+
+            if (binary.Operator is TokenKind.Ampersand
+                or TokenKind.Pipe or TokenKind.Caret)
+            {
+                return true;
+            }
+
+            return binary.Operator switch
+            {
+                TokenKind.Plus or TokenKind.Minus or TokenKind.Star
+                    => binary.OverflowBehavior is
+                        BoundIntegerOverflowBehavior.Checked
+                        or BoundIntegerOverflowBehavior.Wrapping,
+                TokenKind.Slash or TokenKind.Percent
+                    => binary.OverflowBehavior
+                        == BoundIntegerOverflowBehavior.Checked,
+                _ => false,
+            };
+        }
 
         static BoundExpression? GetSingleScalarReturn(
             BoundStatement statement)
@@ -4163,6 +4255,7 @@ public static partial class TrRmExecutableCompiler
             {
                 BoundReturn { Value: BoundRead read } => read,
                 BoundReturn { Value: BoundConstant constant } => constant,
+                BoundReturn { Value: BoundBinary binary } => binary,
                 _ => null,
             };
         }

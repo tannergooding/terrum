@@ -343,6 +343,11 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     if (left < right) { return less; }
                     else { return greaterOrEqual; }
                 }
+                public static int32 SelectArithmetic(bool condition,
+                    int32 left, int32 right) {
+                    if (condition) { return left + right; }
+                    else { return left - right; }
+                }
                 public static float64 SelectFloatLess(float64 left,
                     float64 right, float64 less, float64 greaterOrEqual) {
                     if (left < right) { return less; }
@@ -386,6 +391,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name == "SelectFloatLess"));
+        var selectArithmetic = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "SelectArithmetic"));
 
         var artifact = TrRmExecutableCompiler.EmitStandard(program,
             "ConditionalClassMethod", C1M1Construction2SchemaIdentity,
@@ -407,6 +416,9 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                             selectLess.Span, "Box.SelectLess"),
                         new TrRmSourceClassMemberExport(0,
                             selectFloatLess.Span, "Box.SelectFloatLess"),
+                        new TrRmSourceClassMemberExport(0,
+                            selectArithmetic.Span,
+                            "Box.SelectArithmetic"),
                         new TrRmSourceClassMemberExport(0,
                             selectInstance.Span, "Box.SelectInstance"),
                     ]),
@@ -491,6 +503,34 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     0xE4, 0, 1, 0,
                 }));
         }
+
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.SelectArithmetic", out var arithmeticDefinition), Is.True);
+        var arithmeticMethodRow
+            = checked((int)(arithmeticDefinition & 0x00FF_FFFF));
+        var arithmeticBodyRow
+            = tables.Methods.GetBodyRow(arithmeticMethodRow);
+        Assert.That(arithmeticBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(arithmeticBodyRow,
+            tables.Contracts.Count);
+        tables.ValidateRegisterBodyMapsForMethod(arithmeticMethodRow);
+        var arithmeticBody = tables.Bodies.GetRegisterBody(
+            arithmeticBodyRow, tables.Contracts.Count);
+        Assert.That(arithmeticBody.BlockCount, Is.EqualTo(3));
+        Assert.That(arithmeticBody.GetBlockCode(1).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD5, 0, 1, 0,
+                0xD5, 1, 2, 0,
+                0xC0, 0x01, 0xF0, 0x10,
+                0x17, 0,
+            }));
+        Assert.That(arithmeticBody.GetBlockCode(2).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD5, 0, 1, 0,
+                0xD5, 1, 2, 0,
+                0xC0, 0x02, 0xF0, 0x10,
+                0x17, 0,
+            }));
 
         Assert.That(tables.Exports.TryGetDefinitionForKey(1,
             "Box.SelectInstance", out var instanceDefinition), Is.True);
