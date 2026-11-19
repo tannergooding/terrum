@@ -1405,6 +1405,59 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             expectedHomeCount: 3);
         AssertUnaryBody("Box.StaticNegatedCopy", "StaticNegatedCopy",
             expectedHomeCount: 2);
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.NegatedCopy", out var originalMethod), Is.True);
+        var originalMethodRow = checked((int)(
+            originalMethod & 0x00FF_FFFF));
+        var originalBody = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(originalMethodRow),
+            tables.Contracts.Count);
+
+        var sourceFreeReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(
+                    C1M1Construction2ClassParameterDefaultsSchemaIdentity,
+                    artifact),
+                "LocalUnaryReturns", [], ["BoxKey"]);
+        var sourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), sourceFreeReference);
+        Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceFreeCompilation.Diagnostics));
+        var reemitted = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)sourceFreeCompilation.Program!,
+            "LocalUnaryReturnsReemitted",
+            C1M1Construction2ClassParameterDefaultsSchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var reemittedTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                        reemitted));
+        Assert.That(reemittedTables.Exports.TryGetDefinitionForKey(1,
+            "Box.NegatedCopy", out var reemittedMethod), Is.True);
+        var reemittedMethodRow = checked((int)(
+            reemittedMethod & 0x00FF_FFFF));
+        var reemittedBodyRow
+            = reemittedTables.Methods.GetBodyRow(reemittedMethodRow);
+        Assert.That(reemittedBodyRow, Is.GreaterThan(0));
+        var reemittedBody = reemittedTables.Bodies.GetRegisterBody(
+            reemittedBodyRow, reemittedTables.Contracts.Count);
+        Assert.That(reemittedBody.GetBlockCode(0).ToArray(), Is.EqualTo(
+            originalBody.GetBlockCode(0).ToArray()));
+        var reemittedReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(
+                    C1M1Construction2ClassParameterDefaultsSchemaIdentity,
+                    reemitted),
+                "LocalUnaryReturnsReemitted", [], ["BoxKey"]);
+        var consumer = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            int32 Call(Box value, int32 input) {
+                return value.NegatedCopy(input);
+            }
+            """), reemittedReference);
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
     }
 
     [Test]
