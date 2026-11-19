@@ -99,14 +99,16 @@ route does not broaden class or type publication manifests, artifact-command
 provider options, or schema admission.
 The [version-2 C1 source-provider candidate](../proposals/standard-trrm-c1-source-provider-cli-transport.md)
 adds a closed exact schema set. Its reader, pairing gate and single-reference
-C1M1/CM1/CM1AR1 type and primitive-field selection are implemented through
-the checked explicit-root factories. The checked reference composer also
+C1M1/CM1/CM1AR1 type and primitive-field selection, plus one EN1 class-field
+selection path, are implemented through the checked explicit-root factories.
+The checked reference composer also
 supports multiple disjoint C1M1 type-only class roots with primitive fields
 and explicit FieldDef selections, but without class-valued dependencies,
 methods, layouts or imported expectations. CLI binding and composition
 regressions are added but unverified under the active hold. Multi-reference
-class-valued fields/member/provider-expectation views, the other listed class
-schemas, mixed class/type composition and composition with the separate
+class-valued fields/member/provider-expectation views, the other EN1,
+class-layout and constructor schema variants, mixed class/type composition
+and composition with the separate
 class-source publication file remain open; the candidate schema gate alone
 does not establish those routes.
 Artifact commands accept exact per-artifact schema identities and a root
