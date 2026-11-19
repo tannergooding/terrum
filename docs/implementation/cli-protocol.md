@@ -81,8 +81,9 @@ but is not implemented and requires complete class/member/Body closure; it
 does not broaden the G1 map. An unapproved [C1 enum-closure proposal](../proposals/standard-trrm-c1-enum-closure-composition.md)
 defines a version-2 class manifest for separate EN1 successors; it is also
 unimplemented and does not compose NominalEnumsDraft into C1.
-The class-source route does not admit source-provider inputs or schema aliases;
-see the [G1/C1 parameter-label proposal](../proposals/standard-trrm-g1-interface-parameter-labels.md).
+The class-source publication manifest does not carry provider fields. Its
+composition with the separate consumer source-provider input is specified only
+by the provisional version-2 source-provider candidate below.
 The enum mapping remains enum-specific. The separate
 [`--trrm-source-type-exports`](../proposals/standard-trrm-source-type-cli-transport.md)
 file publishes explicit TypeDef/FieldDef keys for the exact nested FieldPath
@@ -96,6 +97,13 @@ compile/run/build coverage and malformed-selection, schema and alias rejection
 cases are added but remain unverified under the active validation hold. This
 route does not broaden class or type publication manifests, artifact-command
 provider options, or schema admission.
+The [version-2 C1 source-provider candidate](../proposals/standard-trrm-c1-source-provider-cli-transport.md)
+adds a closed exact schema set. Its reader, pairing gate and single-reference
+C1M1 type-only dispatch are partially implemented, with a CLI binding
+regression added but unverified under the active hold. C1 field selections,
+the other listed class schemas, multi-reference class composition and
+composition with the separate class-source publication file remain open;
+the candidate schema gate alone does not establish those routes.
 Artifact commands accept exact per-artifact schema identities and a root
 Module identity, plus repeatable explicitly selected provider schema/path
 pairs. The current whitelist includes F/F+S, A2/A2E/A2EU/A2EU+SF1,

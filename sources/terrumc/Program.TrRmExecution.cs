@@ -916,11 +916,17 @@ internal static partial class Program
 
                     try
                     {
+                        var input = providerInputs[
+                            selection.ProviderInputOrdinal];
                         references[referenceIndex]
-                            = TrRmExecutableCompiler.CreateStandardReference(
-                                providerInputs[
-                                    selection.ProviderInputOrdinal],
-                                selection.ModuleIdentity,
+                            = sourceProvidersFile.SchemaVersion == 2
+                                && selection.FieldExportKeys.IsEmpty
+                            ? TrRmExecutableCompiler.CreateStandardReference(
+                                input, selection.ModuleIdentity,
+                                providersForReference,
+                                selection.TypeExportKeys)
+                            : TrRmExecutableCompiler.CreateStandardReference(
+                                input, selection.ModuleIdentity,
                                 providersForReference,
                                 selection.TypeExportKeys,
                                 selection.FieldExportKeys);

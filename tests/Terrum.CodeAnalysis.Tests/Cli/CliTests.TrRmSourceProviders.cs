@@ -2,10 +2,15 @@
 
 using System;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using NUnit.Framework;
+using Terrum.CodeAnalysis;
+using Terrum.CodeAnalysis.Modules;
+using Terrum.CodeAnalysis.Semantics;
+using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
@@ -572,6 +577,81 @@ internal sealed partial class CliTests
             await TestFileCleanup.DeleteWithRetryAsync(providerSelections)
                 .ConfigureAwait(true);
             await TestFileCleanup.DeleteWithRetryAsync(output)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public async Task CompileTrRmBindsVersionTwoC1ClassSourceProviderAsync()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1";
+        const string providerIdentity = "source-provider-cli-c1-provider";
+        const string consumerIdentity = "source-provider-cli-c1-consumer";
+        var providerArtifact = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"source-provider-cli-c1-{Guid.NewGuid():N}.trrm");
+        var providerSelections = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"source-provider-cli-c1-{Guid.NewGuid():N}.json");
+        var consumerArtifact = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"source-provider-cli-c1-{Guid.NewGuid():N}.trrm");
+        try
+        {
+            var tree = SyntaxTree.Parse("public class Box {}");
+            var compilation = Compilation.CreateLibrary(tree);
+            Assert.That(compilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            var program = (BoundProgram)compilation.Program!;
+            var declaration = tree.Root.Children.OfType<SyntaxNode>()
+                .Single(static node =>
+                    node.Kind == SyntaxKind.ClassDeclaration);
+            var classIndex = Enumerable.Range(0, program.Classes.Length)
+                .Single(index => program.Classes[index].Name == "Box");
+            var provider = TrRmExecutableCompiler.EmitStandard(program,
+                providerIdentity, schemaIdentity,
+                TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+                [], [], [
+                    new TrRmSourceClassExport(program, classIndex,
+                        declaration.Span, "type.box", []),
+                ]);
+            await File.WriteAllBytesAsync(providerArtifact, provider)
+                .ConfigureAwait(true);
+
+            var configuration = JsonSerializer.Serialize(new {
+                schemaVersion = 2,
+                providers = new[] {
+                    new { schemaIdentity, path = providerArtifact },
+                },
+                references = new[] {
+                    new {
+                        providerInputOrdinal = 0,
+                        moduleIdentity = providerIdentity,
+                        typeExportKeys = new[] { "type.box" },
+                        fieldExportKeys = Array.Empty<string>(),
+                    },
+                },
+            });
+            await File.WriteAllTextAsync(providerSelections, configuration,
+                new UTF8Encoding(false)).ConfigureAwait(true);
+
+            var (exit, result, error) = await RunAsync(
+                Encoding.UTF8.GetBytes("void Consume(Box value) {}"),
+                "compile-trrm", "-", "--identity", consumerIdentity,
+                "--trrm-schema", schemaIdentity, "--trrm-source-providers",
+                providerSelections, "--library", "-o", consumerArtifact,
+                "--runtime", "fail-fast", "--json")
+                .ConfigureAwait(false);
+            Assert.That(exit, Is.Zero,
+                $"{result}{Environment.NewLine}{error}");
+            Assert.That(error, Is.Empty);
+            Assert.That(new FileInfo(consumerArtifact).Length, Is.GreaterThan(0));
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(providerArtifact)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(providerSelections)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(consumerArtifact)
                 .ConfigureAwait(true);
         }
     }
