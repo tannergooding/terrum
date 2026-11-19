@@ -271,6 +271,7 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
                 private int32 _value;
                 public Container(int32 value) { _value = value; }
                 public static void Accept(Leaf value) {}
+                public static void AcceptOptional(Leaf? value) {}
             }
             """);
         var compilation = Compilation.CreateLibrary(tree, reference);
@@ -287,6 +288,10 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name == "Accept"));
+        var acceptOptional = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "AcceptOptional"));
         var artifact = TrRmExecutableCompiler.EmitStandard(program,
             "ClassHandleConsumer", schemaIdentity,
             TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
@@ -300,6 +305,9 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
                         },
                         new TrRmSourceClassMemberExport(0, accept.Span,
                             "Container.Accept"),
+                        new TrRmSourceClassMemberExport(0,
+                            acceptOptional.Span,
+                            "Container.AcceptOptional"),
                     ]),
             ]);
         var tables = TrRmStructuralMetadataValidator
@@ -329,6 +337,26 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
             tables.Parameters.GetTypeSpec(parameterFirst));
         Assert.That(parameterType.Form, Is.EqualTo((byte)0x03));
         Assert.That(parameterType.Row, Is.EqualTo(classImportRow));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Container.AcceptOptional", out var optionalAcceptDefinition),
+            Is.True);
+        var optionalAcceptSignature = tables.Methods.GetSignature(
+            checked((int)(optionalAcceptDefinition & 0x00FF_FFFF)));
+        var (optionalParameterFirst, optionalParameterCount)
+            = tables.Signatures.GetParamRange(optionalAcceptSignature);
+        Assert.That(optionalParameterCount, Is.EqualTo(1));
+        var optionalParameterTypeSpec
+            = tables.Parameters.GetTypeSpec(optionalParameterFirst);
+        var optionalParameterType = tables.TypeSpecs
+            .GetTypeSpecRef(optionalParameterTypeSpec);
+        Assert.That(optionalParameterType.Form, Is.EqualTo((byte)0x06));
+        var optionalInnerTypeSpec = BinaryPrimitives.ReadUInt32LittleEndian(
+            tables.TypeSpecs.GetRow(
+                checked((int)optionalParameterTypeSpec)).Slice(2, 4));
+        var optionalInnerType = tables.TypeSpecs
+            .GetTypeSpecRef(optionalInnerTypeSpec);
+        Assert.That(optionalInnerType.Form, Is.EqualTo((byte)0x03));
+        Assert.That(optionalInnerType.Row, Is.EqualTo(classImportRow));
 
         var outputReference
             = TrRmExecutableCompiler.CreateStandardReference(
@@ -341,6 +369,66 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
             outputReference);
         Assert.That(consumer.HasErrors, Is.False,
             string.Join(Environment.NewLine, consumer.Diagnostics));
+
+        var sourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), outputReference);
+        Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceFreeCompilation.Diagnostics));
+        var reemitted = TrRmExecutableCompiler.EmitStandard(
+            sourceFreeCompilation.Program!, "ClassHandleReemitted",
+            schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var reemittedIndex = TrRmArtifactIndex
+            .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                reemitted);
+        var reemittedTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(reemittedIndex);
+        Assert.That(reemittedTables.Exports.TryGetDefinitionForKey(1,
+            "Container.AcceptOptional", out var reemittedMethod), Is.True);
+        var reemittedSignature = reemittedTables.Methods.GetSignature(
+            checked((int)(reemittedMethod & 0x00FF_FFFF)));
+        var (reemittedParameterFirst, reemittedParameterCount)
+            = reemittedTables.Signatures.GetParamRange(reemittedSignature);
+        Assert.That(reemittedParameterCount, Is.EqualTo(1));
+        var reemittedOptionalTypeSpec
+            = reemittedTables.Parameters.GetTypeSpec(
+                reemittedParameterFirst);
+        Assert.That(reemittedTables.TypeSpecs
+            .GetTypeSpecRef(reemittedOptionalTypeSpec).Form,
+            Is.EqualTo((byte)0x06));
+        var reemittedOptionalInner = BinaryPrimitives
+            .ReadUInt32LittleEndian(reemittedTables.TypeSpecs.GetRow(
+                checked((int)reemittedOptionalTypeSpec)).Slice(2, 4));
+        var reemittedOptionalInnerType = reemittedTables.TypeSpecs
+            .GetTypeSpecRef(reemittedOptionalInner);
+        Assert.That(reemittedOptionalInnerType.Form,
+            Is.EqualTo((byte)0x03));
+        var reemittedClassImportRow = Enumerable.Range(1,
+                reemittedTables.Imports.Count)
+            .Single(row =>
+            {
+                var expected = reemittedTables.Imports
+                    .GetExpectedDefinitionForImportRow(row);
+                return (expected >> 24) == 0x13
+                    && reemittedTables.TypeDefs.GetName(
+                        checked((int)(expected & 0x00FF_FFFF)))
+                        == "Leaf";
+            });
+        Assert.That(reemittedOptionalInnerType.Row,
+            Is.EqualTo(reemittedClassImportRow));
+        var reemittedReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+                "ClassHandleReemitted", [
+                    new TrRmStandardArtifactInput(schemaIdentity, provider),
+                ], ["ContainerKey"]);
+        var reemittedConsumer = Compilation.CreateLibrary(
+            SyntaxTree.Parse("public void Use(Container value) {}"),
+            reemittedReference);
+        Assert.That(reemittedConsumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                reemittedConsumer.Diagnostics));
 
         var incompatibleProvider = CreateClassArtifact("ClassProvider",
             "Leaf", "LeafKey", 0xF200_000A, schemaIdentity,

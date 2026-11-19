@@ -546,32 +546,48 @@ public static partial class TrRmExecutableCompiler
                 static structureIndex => (Kind: 2,
                     Index: structureIndex)));
 
+        uint ImportedClassTypeSpecReference(
+            int standardClassIndex, int instanceIndex)
+        {
+            if (!typeImportRowByStandardClass.TryGetValue(
+                    standardClassIndex, out var importRow))
+            {
+                throw new InvalidDataException(
+                    "A captured source type refers to an unretained Standard class TypeDef.");
+            }
+
+            if (!typeSpecRowByStandardClassType.TryGetValue(instanceIndex,
+                    out var typeSpecRow))
+            {
+                var instance = program.GenericNominalTypeInstances[
+                    instanceIndex];
+                var importedTypeSpecRow
+                    = checked((uint)typeSpecRows.Count + 1);
+                typeSpecRows.Add(TrRmTypeSpecTableWriter.Reference(0x03,
+                    checked((uint)importRow), instance.Qualifiers));
+                typeSpecRow = importedTypeSpecRow;
+                if (instance.TypeSpecForm == 0x06)
+                {
+                    typeSpecRow = checked((uint)typeSpecRows.Count + 1);
+                    typeSpecRows.Add(TrRmTypeSpecTableWriter.Wrapped(0x06,
+                        importedTypeSpecRow));
+                }
+
+                typeSpecRowByStandardClassType.Add(instanceIndex,
+                    typeSpecRow);
+            }
+
+            return typeSpecRow;
+        }
+
         uint FieldTypeSpecReference(PrimitiveType type)
         {
             if (TryGetC1M1ImportedClassFieldType(type, program,
                     standardClassIndexByIdentity,
                     out var standardClassIndex, out var instanceIndex))
             {
-                if (!typeImportRowByStandardClass.TryGetValue(
-                        standardClassIndex, out var importRow))
-                {
-                    throw new InvalidDataException(
-                        "A captured source class field refers to an unretained Standard class TypeDef.");
-                }
-
-                if (!typeSpecRowByStandardClassType.TryGetValue(
-                        instanceIndex, out var typeSpecRow))
-                {
-                    typeSpecRow = checked((uint)typeSpecRows.Count + 1);
-                    typeSpecRows.Add(TrRmTypeSpecTableWriter.Reference(
-                        0x03, checked((uint)importRow),
-                        program.GenericNominalTypeInstances[
-                            instanceIndex].Qualifiers));
-                    typeSpecRowByStandardClassType.Add(instanceIndex,
-                        typeSpecRow);
-                }
-
-                return typeSpecRow;
+                return ImportedClassTypeSpecReference(
+                    standardClassIndex, instanceIndex);
             }
 
             if (TryGetC1M1SourceClassFieldType(type,
@@ -640,9 +656,23 @@ public static partial class TrRmExecutableCompiler
             return GetC1M1SourceScalarTypeSpecReference(type);
         }
 
+        uint MethodTypeSpecReference(PrimitiveType type)
+        {
+            if (TryGetC1M1ImportedClassFieldType(type, program,
+                    standardClassIndexByIdentity,
+                    out var standardClassIndex, out var instanceIndex,
+                    allowOptionalWrapper: true))
+            {
+                return ImportedClassTypeSpecReference(
+                    standardClassIndex, instanceIndex);
+            }
+
+            return FieldTypeSpecReference(type);
+        }
+
         uint Construction2ValueTypeSpecReference(PrimitiveType type)
             => type == PrimitiveType.Void
-                ? 0xF200_0000u : FieldTypeSpecReference(type);
+                ? 0xF200_0000u : MethodTypeSpecReference(type);
 
         var noOpMethodReferenceTypeSpecRows
             = new Dictionary<PrimitiveType, uint>();
@@ -650,7 +680,8 @@ public static partial class TrRmExecutableCompiler
         {
             if (!CheckedReferenceTypes.IsType(type))
             {
-                return Construction2ValueTypeSpecReference(type);
+                return type == PrimitiveType.Void
+                    ? 0xF200_0000u : MethodTypeSpecReference(type);
             }
 
             if (!IsC1M1NoOpReadonlyScalarReferenceType(type,
@@ -1650,7 +1681,8 @@ public static partial class TrRmExecutableCompiler
                                     && !TryGetC1M1ImportedClassFieldType(
                                         variable.Type, program,
                                         standardClassIndexByIdentity,
-                                        out _, out _))
+                                        out _, out _,
+                                        allowOptionalWrapper: true))
                                 {
                                     throw Unsupported(
                                         "The bounded Construction-2 static method producer supports scalar or selected imported class-handle value parameters.");
@@ -1707,7 +1739,8 @@ public static partial class TrRmExecutableCompiler
                                     && !TryGetC1M1ImportedClassFieldType(
                                         variable.Type, program,
                                         standardClassIndexByIdentity,
-                                        out _, out _)
+                                        out _, out _,
+                                        allowOptionalWrapper: true)
                                     && !isNoOpReferenceParameter)
                                 {
                                     throw Unsupported(
@@ -1864,11 +1897,11 @@ public static partial class TrRmExecutableCompiler
                             : isSupportedFieldReferenceBody
                                 ? NoOpMethodTypeSpecReference(
                                     methodFunction.ReturnType)
-                                : FieldTypeSpecReference(
+                                : MethodTypeSpecReference(
                                     methodFunction.ReturnType);
                     var methodReceiverTypeSpecReference
                         = methodFunction.IsStatic ? 0u
-                            : FieldTypeSpecReference(
+                            : MethodTypeSpecReference(
                                 methodFunction.Variables[0].Type);
                     methodSignatureRows.Add(new TrRmMethodSigRow(
                         methodResultTypeSpecReference,
@@ -7538,7 +7571,8 @@ public static partial class TrRmExecutableCompiler
         PrimitiveType type, BoundProgram program,
         IReadOnlyDictionary<BoundGenericNominalTypeIdentity, int>
             standardClassIndexByIdentity,
-        out int classIndex, out int instanceIndex)
+        out int classIndex, out int instanceIndex,
+        bool allowOptionalWrapper = false)
     {
         if (!BoundGenericNominalTypeTypes.IsType(type))
         {
@@ -7561,7 +7595,9 @@ public static partial class TrRmExecutableCompiler
         var instance = program.GenericNominalTypeInstances[instanceIndex];
         if (!instance.Arguments.IsEmpty
             || (instance.Qualifiers & ~0x01) != 0
-            || instance.TypeSpecForm is not (0 or 0x02 or 0x03)
+            || (instance.TypeSpecForm is not (0 or 0x02 or 0x03)
+                && !(allowOptionalWrapper
+                    && instance.TypeSpecForm == 0x06))
             || !standardClassIndexByIdentity.TryGetValue(
                 instance.Definition, out classIndex))
         {
@@ -8014,7 +8050,10 @@ public static partial class TrRmExecutableCompiler
                     & (isRelationNominal ? ~0x03 : ~0x01)) != 0
                 || (isRelationNominal
                     ? instance.TypeSpecForm is not (0 or 0x02 or 0x03 or 0x05 or 0x06)
-                    : instance.TypeSpecForm is not (0 or 0x02 or 0x03))
+                    : instance.TypeSpecForm is not (0 or 0x02 or 0x03)
+                        && !(instance.TypeSpecForm == 0x06
+                            && standardClassIdentities.Contains(
+                                instance.Definition)))
                 || !IsImportedNominalIdentity(instance.Definition))
             {
                 return false;
