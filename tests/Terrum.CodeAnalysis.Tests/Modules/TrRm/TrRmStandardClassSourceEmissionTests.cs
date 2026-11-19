@@ -2133,6 +2133,84 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
+    public void EmitsWritableReceiverForSameClassCallBody()
+    {
+        var tree = SyntaxTree.Parse("""
+            public mut class Crate {
+                public mut int32 Value;
+                public Crate(int32 value) { Value = value; }
+                public mut int32 Step(int32 left, int32 right) {
+                    return left;
+                }
+                public mut int32 Combine(int32 left, int32 right) {
+                    return Step(left, right) + right;
+                }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node => node.Kind == SyntaxKind.ClassDeclaration);
+        var members = classDeclaration.Children.OfType<SyntaxNode>();
+        var field = members.Single(static node =>
+            node.Kind == SyntaxKind.FieldDeclaration);
+        var constructor = members.Single(static node =>
+            node.Kind == SyntaxKind.ConstructorDeclaration);
+        var step = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Step"));
+        var combine = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Combine"));
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "Construction2WritableReceiverCall",
+            C1M1Construction2SchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, 0,
+                    classDeclaration.Span, "type.crate", [
+                        new TrRmSourceClassMemberExport(0, field.Span,
+                            "field.crate.value"),
+                        new TrRmSourceClassMemberExport(0,
+                            constructor.Span, "member.crate.constructor") {
+                            ConstructionProjectionExportKey
+                                = "member.crate.create",
+                        },
+                        new TrRmSourceClassMemberExport(0, step.Span,
+                            "member.crate.step"),
+                        new TrRmSourceClassMemberExport(0, combine.Span,
+                            "member.crate.combine"),
+                    ]),
+            ]);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex.ForC1M1Construction2Draft(artifact));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "member.crate.combine", out var combineDefinition), Is.True);
+        var combineMethodRow = checked((int)(
+            combineDefinition & 0x00FF_FFFF));
+        var signature = tables.Methods.GetSignature(combineMethodRow);
+        var receiverTypeSpec = tables.Signatures.GetReceiverTypeSpec(
+            signature);
+        Assert.That(tables.Methods.GetFlags(combineMethodRow) & 4,
+            Is.Zero);
+        Assert.That(tables.TypeSpecs.GetTypeSpecRef(receiverTypeSpec)
+            .Qualifiers, Is.EqualTo(1));
+        var bodyRow = tables.Methods.GetBodyRow(combineMethodRow);
+        Assert.That(bodyRow, Is.GreaterThan(0));
+        var body = tables.Bodies.GetRegisterBody(bodyRow,
+            tables.Contracts.Count);
+        var callSite = body.GetRecord(1);
+        Assert.That(callSite[0], Is.EqualTo(0x02));
+        Assert.That(callSite[20], Is.EqualTo(2));
+        Assert.That(callSite[21], Is.EqualTo(4));
+    }
+
+    [Test]
     public void EmitsRegisterBodyForReadonlyInstanceXorMethod()
     {
         var tree = SyntaxTree.Parse("""

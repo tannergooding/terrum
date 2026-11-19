@@ -1551,7 +1551,7 @@ public static partial class TrRmExecutableCompiler
                             methodFunction);
                     var callNumericBinary
                         = TryGetC1M1Construction2DirectCallNumericBinary(
-                            methodFunction, program.Functions);
+                            methodFunction, program.Functions, program);
                     var localCopyReturn
                         = TryGetC1M1Construction2LocalCopyReturn(
                             methodFunction);
@@ -2115,7 +2115,7 @@ public static partial class TrRmExecutableCompiler
                         body = EncodeC1M1Construction2CallNumericBinaryBody(
                             method.Function, callBinaryExpression,
                             targetMethodDefRow,
-                            program.Functions[targetCall.Function],
+                            program.Functions[targetCall.Function], program,
                             frozenScalarValueBuilder,
                             Construction2ValueTypeSpecReference,
                             contractRows.Count, schema);
@@ -4868,9 +4868,49 @@ public static partial class TrRmExecutableCompiler
                 : schema.UsesGeneralPredicateGraphs());
     }
 
+    private static bool IsC1M1Construction2ReceiverTypeCompatible(
+        PrimitiveType sourceType, bool sourceWritable,
+        PrimitiveType targetType, bool targetWritable, BoundProgram program)
+    {
+        if (ManagedClassTypes.IsClass(sourceType)
+            && ManagedClassTypes.IsClass(targetType))
+        {
+            return ManagedClassTypes.ClassIndex(sourceType)
+                    == ManagedClassTypes.ClassIndex(targetType)
+                && ManagedClassTypes.IsWritable(sourceType) == sourceWritable
+                && ManagedClassTypes.IsWritable(targetType) == targetWritable
+                && (!targetWritable || sourceWritable);
+        }
+
+        if (!BoundGenericNominalTypeTypes.IsType(sourceType)
+            || !BoundGenericNominalTypeTypes.IsType(targetType)
+            || !BoundGenericNominalTypeContract.IsNominalClassType(
+                sourceType, program.GenericNominalTypeInstances,
+                program.GenericNominalTypeDefinitions)
+            || !BoundGenericNominalTypeContract.IsNominalClassType(
+                targetType, program.GenericNominalTypeInstances,
+                program.GenericNominalTypeDefinitions))
+        {
+            return false;
+        }
+
+        var sourceInstance = program.GenericNominalTypeInstances[
+            BoundGenericNominalTypeTypes.Index(sourceType)];
+        var targetInstance = program.GenericNominalTypeInstances[
+            BoundGenericNominalTypeTypes.Index(targetType)];
+        return sourceInstance.Definition == targetInstance.Definition
+            && sourceInstance.Arguments.IsEmpty
+            && targetInstance.Arguments.IsEmpty
+            && (sourceInstance.Qualifiers & ~0x01) == 0
+            && (targetInstance.Qualifiers & ~0x01) == 0
+            && ((sourceInstance.Qualifiers & 1) != 0) == sourceWritable
+            && ((targetInstance.Qualifiers & 1) != 0) == targetWritable
+            && (!targetWritable || sourceWritable);
+    }
+
     private static byte[] EncodeC1M1Construction2CallNumericBinaryBody(
         BoundFunction function, BoundBinary binary, int targetMethodDefRow,
-        BoundFunction targetFunction,
+        BoundFunction targetFunction, BoundProgram program,
         TrRmFrozenScalarValueBuilder frozenScalarValueBuilder,
         Func<PrimitiveType, uint> typeSpecReferenceFor, int contractCount,
         TrRmArtifactSchema schema)
@@ -4889,7 +4929,6 @@ public static partial class TrRmExecutableCompiler
         var rightConstant = binary.Right as BoundConstant;
         if (targetMethodDefRow <= 0 || targetMethodDefRow > 0xFF_FFFF
             || !IsC1M1Construction2BodyNumericType(operationType)
-            || (!function.IsStatic && function.Variables[0].IsMutable)
             || function.Variables.Skip(callerReceiverCount).Any(
                 variable => variable.Type != operationType
                 || variable.IsMutable
@@ -4921,8 +4960,6 @@ public static partial class TrRmExecutableCompiler
             || targetFunction.ParameterCount != targetReceiverCount + 2
             || targetFunction.Variables.Length
                 < targetFunction.ParameterCount
-            || (!targetFunction.IsStatic
-                && targetFunction.Variables[0].IsMutable)
             || targetFunction.Variables.Skip(targetReceiverCount)
                 .Take(2).Any(variable =>
                     variable.Type != operationType
@@ -4948,8 +4985,6 @@ public static partial class TrRmExecutableCompiler
                 || call.Arguments[parameter] is not BoundRead argument
                 || argument.Variable != sourceVariable
                 || argument.Type != source.Type
-                || source.Type != targetParameter.Type
-                || source.IsMutable != targetParameter.IsMutable
                 || source.IsOut != targetParameter.IsOut
                 || source.IsInit != targetParameter.IsInit
                 || source.IsImplicitRef != targetParameter.IsImplicitRef
@@ -4958,6 +4993,18 @@ public static partial class TrRmExecutableCompiler
             {
                 throw Unsupported(
                     "A Construction-2 call-binary Body requires direct argument Homes matching the selected MethodSig.");
+            }
+
+            var isReceiver = !targetFunction.IsStatic && parameter == 0;
+            if (isReceiver
+                ? !IsC1M1Construction2ReceiverTypeCompatible(
+                    source.Type, source.IsMutable, targetParameter.Type,
+                    targetParameter.IsMutable, program)
+                : source.Type != targetParameter.Type
+                    || source.IsMutable != targetParameter.IsMutable)
+            {
+                throw Unsupported(
+                    "A Construction-2 call-binary Body does not preserve the selected receiver access or formal type.");
             }
         }
 
@@ -5048,7 +5095,9 @@ public static partial class TrRmExecutableCompiler
                 : parameter == 0 ? 0
                     : callerReceiverCount + parameter - 1;
             var sourceUse = !targetFunction.IsStatic && parameter == 0
-                ? (byte)3 : (byte)1;
+                ? targetFunction.Variables[0].IsMutable
+                    ? (byte)4 : (byte)3
+                : (byte)1;
             callInputs[parameter] = new(2, sourceUse,
                 checked((ushort)sourceHome));
         }
@@ -7339,12 +7388,12 @@ public static partial class TrRmExecutableCompiler
 
     private static BoundBinary?
         TryGetC1M1Construction2DirectCallNumericBinary(
-        BoundFunction function, ImmutableArray<BoundFunction> functions)
+        BoundFunction function, ImmutableArray<BoundFunction> functions,
+        BoundProgram program)
     {
         var callerReceiverCount = function.IsStatic ? 0 : 1;
         if (function.ParameterCount != callerReceiverCount + 2
-            || function.ParameterCount != function.Variables.Length
-            || (!function.IsStatic && function.Variables[0].IsMutable))
+            || function.ParameterCount != function.Variables.Length)
         {
             return null;
         }
@@ -7447,13 +7496,22 @@ public static partial class TrRmExecutableCompiler
                 || call.Arguments[parameter] is not BoundRead argument
                 || argument.Variable != sourceVariable
                 || argument.Type != source.Type
-                || source.Type != targetParameter.Type
-                || source.IsMutable != targetParameter.IsMutable
                 || source.IsOut != targetParameter.IsOut
                 || source.IsInit != targetParameter.IsInit
                 || source.IsImplicitRef != targetParameter.IsImplicitRef
                 || source.IsInitializationLocal
                     != targetParameter.IsInitializationLocal)
+            {
+                return null;
+            }
+
+            var isReceiver = !target.IsStatic && parameter == 0;
+            if (isReceiver
+                ? !IsC1M1Construction2ReceiverTypeCompatible(
+                    source.Type, source.IsMutable, targetParameter.Type,
+                    targetParameter.IsMutable, program)
+                : source.Type != targetParameter.Type
+                    || source.IsMutable != targetParameter.IsMutable)
             {
                 return null;
             }
@@ -7734,8 +7792,7 @@ public static partial class TrRmExecutableCompiler
         returnHomeIndex = -1;
         if (function.ReturnType == PrimitiveType.Void
             || function.ParameterCount != function.Variables.Length
-            || function.ParameterCount < 2
-            || function.Variables[0].IsMutable)
+            || function.ParameterCount < 2)
         {
             return false;
         }

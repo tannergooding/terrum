@@ -144,6 +144,8 @@ ConstantMap and `D4`, and `sourceUse=3/4` for readonly/writable
 access carried by the exact receiver TypeSpec, with writable access requiring a
 mutable class owner). Structural validation and the class-reference binder
 enforce that owner constraint. These paths remain unverified;
+same-class call-binary Bodies also retain writable receiver access through
+TypeSpec qualifiers and `sourceUse=4` without a MethodDef receiver flag.
 imported I/P expectations, broader Bodies, field use, multi-provider output,
 source-free re-emission of top-level functions and ordinary EN1 class
 consumers remain open. The label-free Construction-2 source-provider CLI
