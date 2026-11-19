@@ -1158,6 +1158,49 @@ internal sealed partial class CliTests
         }
     }
 
+    [Test]
+    [TestCase(false, "Box")]
+    [TestCase(true, "write Box")]
+    public void EmitsConstruction2OrdinaryClassMethodCallBody(
+        bool mutableReceiver, string receiverType)
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2";
+        const string providerIdentity
+            = "construction2-ordinary-call-provider";
+        var provider = CreateConstructionClassMethodProvider(
+            providerIdentity, "Box", "type.box", "Box.Read",
+            schemaIdentity, mutableType: mutableReceiver,
+            mutableReceiver: mutableReceiver);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, provider),
+            providerIdentity, [], ["type.box"]);
+        var consumer = Compilation.CreateLibrary(SyntaxTree.Parse(
+            $"public int32 Consume({receiverType} box, int32 value) {{ return box.Read(value); }}"),
+            reference);
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
+
+        if (mutableReceiver)
+        {
+            var readonlyConsumer = Compilation.CreateLibrary(
+                SyntaxTree.Parse(
+                    "public int32 Consume(Box box, int32 value) { return box.Read(value); }"),
+                reference);
+            Assert.That(readonlyConsumer.HasErrors, Is.True,
+                "A readonly class handle must not call a write-qualified receiver.");
+        }
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)consumer.Program!,
+            "construction2-ordinary-call-consumer", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex.ForC1M1Construction2Draft(artifact));
+        Assert.That(tables.Methods.Count, Is.EqualTo(4));
+    }
+
     private static byte[] CreateC1M1ClassProvider(string moduleIdentity,
         string typeName, string exportKey, string schemaIdentity)
     {
@@ -1207,10 +1250,13 @@ internal sealed partial class CliTests
 
     private static byte[] CreateConstructionClassMethodProvider(
         string moduleIdentity, string typeName, string exportKey,
-        string methodExportKey, string schemaIdentity)
+        string methodExportKey, string schemaIdentity,
+        bool mutableType = false, bool mutableReceiver = false)
     {
+        var typeMutability = mutableType ? "mut " : string.Empty;
+        var methodMutability = mutableReceiver ? "mut " : string.Empty;
         var tree = SyntaxTree.Parse(
-            $"public class {typeName} {{ public int32 Read(int32 value) {{ return value; }} }}");
+            $"public {typeMutability}class {typeName} {{ public int32 Value; public {typeName}(int32 initial) {{ Value = initial; }} public {methodMutability}int32 Read(int32 value) {{ return value; }} }}");
         var compilation = Compilation.CreateLibrary(tree);
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1218,6 +1264,10 @@ internal sealed partial class CliTests
         var declaration = tree.Root.Children.OfType<SyntaxNode>()
             .Single(static node =>
                 node.Kind == SyntaxKind.ClassDeclaration);
+        var field = declaration.Children.OfType<SyntaxNode>().Single(
+            static node => node.Kind == SyntaxKind.FieldDeclaration);
+        var constructor = declaration.Children.OfType<SyntaxNode>().Single(
+            static node => node.Kind == SyntaxKind.ConstructorDeclaration);
         var method = declaration.Children.OfType<SyntaxNode>().Single(
             static node => node.Kind == SyntaxKind.FunctionDeclaration);
         return TrRmExecutableCompiler.EmitStandard(program, moduleIdentity,
@@ -1226,6 +1276,14 @@ internal sealed partial class CliTests
             [], [], [
                 new TrRmSourceClassExport(program, 0, declaration.Span,
                     exportKey, [
+                        new TrRmSourceClassMemberExport(0, field.Span,
+                            $"field.{typeName}.value"),
+                        new TrRmSourceClassMemberExport(0,
+                            constructor.Span,
+                            $"member.{typeName}.constructor") {
+                            ConstructionProjectionExportKey
+                                = $"member.{typeName}.create",
+                        },
                         new TrRmSourceClassMemberExport(0, method.Span,
                             methodExportKey),
                     ]),

@@ -879,6 +879,8 @@ public static partial class TrRmExecutableCompiler
             => StringComparer.Ordinal.Equals(schemaIdentity,
                     StandardC1M1SchemaIdentity)
                 || StringComparer.Ordinal.Equals(schemaIdentity,
+                    StandardC1M1Construction2SchemaIdentity)
+                || StringComparer.Ordinal.Equals(schemaIdentity,
                     StandardC1M1ConstructionL1R1SchemaIdentity)
                 || StringComparer.Ordinal.Equals(schemaIdentity,
                     StandardC1M1Construction2L1R1SchemaIdentity)

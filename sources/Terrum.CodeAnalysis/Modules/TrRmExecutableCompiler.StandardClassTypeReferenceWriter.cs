@@ -19,6 +19,8 @@ public static partial class TrRmExecutableCompiler
         => schemaIdentity switch {
             StandardC1M1SchemaIdentity
                 => TrRmArtifactSchema.C1M1Draft,
+            StandardC1M1Construction2SchemaIdentity
+                => TrRmArtifactSchema.C1M1Construction2Draft,
             StandardC1M1ConstructionL1R1SchemaIdentity
                 => TrRmArtifactSchema.C1M1ConstructionParameterLabelsReceiverAccessDraft,
             StandardC1M1Construction2L1R1SchemaIdentity
@@ -2013,13 +2015,16 @@ public static partial class TrRmExecutableCompiler
                     if (!methodFunction.IsStatic
                         && methodFunction.Variables[0].IsMutable)
                     {
-                        if (!schema.UsesMethodReceiverAccess())
+                        if (schema.UsesMethodReceiverAccess())
+                        {
+                            methodVisibility |= 4u;
+                        }
+                        else if (schema
+                            != TrRmArtifactSchema.C1M1Construction2Draft)
                         {
                             throw Unsupported(
-                                "A mutable class method receiver requires the exact receiver-access successor.");
+                                "A mutable class method receiver requires Construction-2 TypeSpec access or the exact receiver-access successor.");
                         }
-
-                        methodVisibility |= 4u;
                     }
 
                     methodRows.Add(new TrRmMethodDefRow(
@@ -9743,14 +9748,32 @@ public static partial class TrRmExecutableCompiler
             var (genericFirst, genericCount)
                 = methodGenericParamRanges[oldMethodRow];
             var hasBody = !plan.Body.IsEmpty;
+            var constructionShapeIsSupported
+                = method.ConstructionRole switch
+                {
+                    0 => method.InitializerMethodDefinitionId == 0
+                        && method.ConstructionPropertyDefinitionId == 0
+                        && method.InitializedMemberDefinitionIds
+                            .IsDefaultOrEmpty,
+                    1 => schema.UsesObjectConstruction()
+                        && method.InitializerMethodDefinitionId == 0
+                        && method.ConstructionPropertyDefinitionId == 0
+                        && !method.InitializedMemberDefinitionIds.IsDefault,
+                    2 => schema.UsesObjectConstruction()
+                        && (method.InitializerMethodDefinitionId >> 24)
+                            == 0x16u
+                        && (method.InitializerMethodDefinitionId
+                            & 0x00FF_FFFFu) != 0
+                        && method.ConstructionPropertyDefinitionId == 0
+                        && method.InitializedMemberDefinitionIds
+                            .IsDefaultOrEmpty,
+                    _ => false,
+                };
             if ((hasBody
                     ? method.BodyRow == 0 || !plan.Imports.IsEmpty
                     : method.BodyRow != 0 || plan.Imports.IsEmpty
                         || !plan.ExportKeys.IsEmpty)
-                || method.ConstructionRole != 0
-                || method.InitializerMethodDefinitionId != 0
-                || method.ConstructionPropertyDefinitionId != 0
-                || !method.InitializedMemberDefinitionIds.IsEmpty
+                || !constructionShapeIsSupported
                 || (method.Flags & 3) == 3
                 || (!plan.Imports.IsEmpty
                     && (method.Flags & 3) != 2)
@@ -9762,25 +9785,33 @@ public static partial class TrRmExecutableCompiler
                     out var newOwnerTypeDefRow))
             {
                 throw Unsupported(
-                    "C1M1 source-free class re-emission supports bodyless public MethodDef Imports and bounded local type-formal MethodDefs without construction roles.");
+                    "C1M1 source-free class re-emission supports bodyless public MethodDef Imports and bounded local type-formal MethodDefs with FieldDef-only Construction roles.");
             }
 
             if (method.ReceiverTypeSpecReference != 0)
             {
                 var receiver = rootTables.TypeSpecs.GetTypeSpecRef(
                     method.ReceiverTypeSpecReference);
-                var mutableReceiver = (method.Flags & 4) != 0;
+                var mutableReceiver = (receiver.Qualifiers & 1) != 0;
+                var usesConstruction2ReceiverAccess
+                    = StringComparer.Ordinal.Equals(schemaIdentity,
+                        StandardC1M1Construction2SchemaIdentity);
                 if (!receiver.IsRow
                     || receiver.Form is not (0x02 or 0x03)
-                    || receiver.Qualifiers
-                        != (mutableReceiver ? 0x01 : 0x00)
+                    || (receiver.Qualifiers & ~0x01) != 0
+                    || (!schema.UsesMethodReceiverAccess()
+                        && !usesConstruction2ReceiverAccess
+                        && mutableReceiver)
+                    || (schema.UsesMethodReceiverAccess()
+                        ? ((method.Flags & 4) != 0) != mutableReceiver
+                        : (method.Flags & 4) != 0)
                     || rootTables.TypeSpecs.GetNominalTypeDefRow(
                         method.ReceiverTypeSpecReference,
                         rootTables.TypeDefs, rootTables.Imports)
                         != ownerTypeDefRow)
                 {
                     throw Unsupported(
-                        "A retained class MethodDef receiver must be the exact unqualified expected class handle.");
+                        "A retained class MethodDef receiver must use the exact schema-authorized nominal class access.");
                 }
             }
 
@@ -10006,6 +10037,101 @@ public static partial class TrRmExecutableCompiler
                 methodContractCount++;
             }
 
+            if (method.ConstructionRole is 1 or 2)
+            {
+                byte[] constructionPayload;
+                if (method.ConstructionRole == 1)
+                {
+                    var initializedMemberIds
+                        = new uint[method.InitializedMemberDefinitionIds
+                            .Length];
+                    var seenMembers = new HashSet<uint>();
+                    for (var memberIndex = 0;
+                        memberIndex < initializedMemberIds.Length;
+                        memberIndex++)
+                    {
+                        var memberDefinitionId
+                            = method.InitializedMemberDefinitionIds[
+                                memberIndex];
+                        if ((memberDefinitionId >> 24) != 0x14
+                            || !seenMembers.Add(memberDefinitionId))
+                        {
+                            throw Unsupported(
+                                "The bounded class-reference re-emitter supports Construction guarantees only for unique FieldDef members.");
+                        }
+
+                        var oldFieldRow = GetFieldDefRow(
+                            memberDefinitionId);
+                        if (rootTables.Fields.GetOwnerTypeDef(oldFieldRow)
+                                != ownerTypeDefRow
+                            || (rootTables.Fields.GetFlags(oldFieldRow)
+                                & 0x08) != 0
+                            || !fieldRowMap.TryGetValue(oldFieldRow,
+                                out var newFieldRow))
+                        {
+                            throw new InvalidDataException(
+                                "A retained Construction guarantee does not resolve to an emitted instance FieldDef.");
+                        }
+
+                        initializedMemberIds[memberIndex]
+                            = 0x1400_0000u
+                                | checked((uint)newFieldRow);
+                    }
+
+                    constructionPayload = new byte[checked(
+                        8 + (initializedMemberIds.Length * sizeof(uint)))];
+                    constructionPayload[0] = 1;
+                    BinaryPrimitives.WriteUInt32LittleEndian(
+                        constructionPayload.AsSpan(4),
+                        checked((uint)initializedMemberIds.Length));
+                    for (var memberIndex = 0;
+                        memberIndex < initializedMemberIds.Length;
+                        memberIndex++)
+                    {
+                        BinaryPrimitives.WriteUInt32LittleEndian(
+                            constructionPayload.AsSpan(
+                                8 + (memberIndex * sizeof(uint))),
+                            initializedMemberIds[memberIndex]);
+                    }
+                }
+                else
+                {
+                    var oldInitializerMethodRow = GetMethodDefRow(
+                        method.InitializerMethodDefinitionId);
+                    if (!methodEmissionPlans.TryGetValue(
+                            oldInitializerMethodRow,
+                            out var initializerPlan)
+                        || initializerPlan.Method.ConstructionRole != 1
+                        || initializerPlan.Owner.Identity
+                            != plan.Owner.Identity
+                        || rootTables.Methods.GetOwnerType(
+                            oldInitializerMethodRow) != ownerTypeDefRow
+                        || rootTables.Methods.GetOwnerModule(
+                            oldInitializerMethodRow) != rootModuleRow
+                        || !methodDefRowMap.TryGetValue(
+                            oldInitializerMethodRow,
+                            out var newInitializerMethodRow))
+                    {
+                        throw new InvalidDataException(
+                            "A retained Construction projection does not reference its exact owner initializer MethodDef.");
+                    }
+
+                    constructionPayload
+                        = EncodeC1M1Construction2ProjectionContract(
+                            newInitializerMethodRow);
+                }
+
+                if (contractFirst == 0)
+                {
+                    contractFirst = contractRows.Count + 1;
+                }
+
+                contractRows.Add(new TrRmContractRow(
+                    0x1600_0000u | checked((uint)newMethodDefRow),
+                    0x0003, constructionPayload));
+                methodContractCount++;
+            }
+
             var dependencyContractRows
                 = rootTables.Contracts.GetDependencyContractRows(
                     oldMethodRow);
@@ -10203,6 +10329,12 @@ public static partial class TrRmExecutableCompiler
             if (function.ModuleImport is null && !function.IsExternal
                 && function.DeclaringStruct is null)
             {
+                var directCall = function.Body.Statements is [
+                    BoundReturn { Value: BoundCall returnedCall },
+                ] ? returnedCall : null;
+                var isNoOpUnitFunction
+                    = function.ReturnType == PrimitiveType.Void
+                        && function.Body.Statements.IsEmpty;
                 if (function.IsStatic || function.IsConstructor
                     || function.IsClassConstructor
                     || function.ClassConstructor != -1
@@ -10233,13 +10365,14 @@ public static partial class TrRmExecutableCompiler
                         != function.Variables.Length
                     || function.ParameterCount
                         > SemanticVerifier.MaximumArguments
-                    || function.ReturnType != PrimitiveType.Void
-                    || !function.Body.Statements.IsEmpty
+                    || (!isNoOpUnitFunction && directCall is null)
+                    || (directCall is not null
+                        && directCall.Type != function.ReturnType)
                     || !function.Body.RetiredManagedLocals.IsEmpty
                     || (function.IsPrivate && function.IsInternal))
                 {
                     throw Unsupported(
-                        "A local class-reference function must be an ordinary, no-op unit function with value-formal parameters.");
+                        "A local class-reference function must be an ordinary unit no-op or a direct class-method call return.");
                 }
 
                 var signatureRow = methodSignatureRows.Count + 1;
@@ -10277,8 +10410,22 @@ public static partial class TrRmExecutableCompiler
                     }
                 }
 
+                var resultTypeSpecReference
+                    = function.ReturnType == PrimitiveType.Void
+                        ? 0xF200_0000u
+                        : SourceFunctionTypeSpecReference(
+                            function.ReturnType);
+                if (directCall is not null
+                    && (function.ReturnType == PrimitiveType.Void
+                        || !TryGetC1M1SourceScalarTypeSpecReference(
+                            function.ReturnType, out _)))
+                {
+                    throw Unsupported(
+                        "A local class-reference call return must be a fixed scalar value.");
+                }
+
                 methodSignatureRows.Add(new TrRmMethodSigRow(
-                    0xF200_0000u, 0, parameterFirst,
+                    resultTypeSpecReference, 0, parameterFirst,
                     function.ParameterCount, 0, 0));
                 if (methodRows.Count >= 0xFF_FFFF
                     || bodyRows.Count >= 0xFF_FFFF)
@@ -10289,8 +10436,87 @@ public static partial class TrRmExecutableCompiler
 
                 var newMethodDefRow = methodRows.Count + 1;
                 var bodyRow = bodyRows.Count + 1;
-                bodyRows.Add(
-                    EncodeC1M1MetadataClassNoOpUnitBody(schema));
+                if (directCall is null)
+                {
+                    bodyRows.Add(
+                        EncodeC1M1MetadataClassNoOpUnitBody(schema));
+                }
+                else
+                {
+                    if (!StringComparer.Ordinal.Equals(schemaIdentity,
+                            StandardC1M1Construction2SchemaIdentity)
+                        || (uint)directCall.Function
+                            >= (uint)program.Functions.Length)
+                    {
+                        throw Unsupported(
+                            "Ordinary class MethodDef calls require the exact Construction-2 schema and a selected method view.");
+                    }
+
+                    var targetFunction
+                        = program.Functions[directCall.Function];
+                    var targetPlans = methodEmissionPlans.Values.Where(plan =>
+                            StringComparer.Ordinal.Equals(
+                                targetFunction.Name,
+                                (string.IsNullOrEmpty(plan.Owner.Namespace)
+                                    ? plan.Owner.Name
+                                    : plan.Owner.Namespace + "."
+                                        + plan.Owner.Name)
+                                + "." + plan.Method.Name))
+                        .ToArray();
+                    if (targetPlans.Length != 1)
+                    {
+                        throw Unsupported(
+                            "An ordinary class call requires exactly one retained selected MethodDef view.");
+                    }
+
+                    var targetPlan = targetPlans[0];
+                    var oldTargetMethodRow = GetMethodDefRow(
+                        targetPlan.Method.DefinitionId);
+                    if (!methodDefRowMap.TryGetValue(oldTargetMethodRow,
+                            out var targetMethodDefRow))
+                    {
+                        throw new InvalidDataException(
+                            "A selected ordinary class MethodDef has no output row.");
+                    }
+
+                    var receiverTypeSpec
+                        = targetPlan.Method.ReceiverTypeSpecReference;
+                    if (receiverTypeSpec == 0
+                        || (targetPlan.Method.Flags & 4) != 0)
+                    {
+                        throw Unsupported(
+                            "This ordinary class-call Body requires an ordinary receiver in the exact Construction-2 schema.");
+                    }
+
+                    var receiverType
+                        = rootTables.TypeSpecs.GetTypeSpecRef(
+                            receiverTypeSpec);
+                    if (!receiverType.IsRow
+                        || receiverType.Form is not (0x02 or 0x03)
+                        || (receiverType.Qualifiers & ~0x01) != 0)
+                    {
+                        throw Unsupported(
+                            "This ordinary class-call Body requires a direct normal class receiver TypeSpec.");
+                    }
+
+                    if (!TryGetC1M1ClassScalarType(rootTables,
+                            targetPlan.Method.ReturnTypeSpecReference,
+                            out var targetReturnType)
+                        || targetReturnType != function.ReturnType)
+                    {
+                        throw Unsupported(
+                            "This ordinary class-call Body requires a matching fixed-scalar MethodDef result.");
+                    }
+
+                    bodyRows.Add(
+                        EncodeC1M1MetadataClassDirectCallBody(
+                            function, directCall, targetFunction,
+                            targetPlan, targetMethodDefRow,
+                            (receiverType.Qualifiers & 1) != 0,
+                            program, SourceFunctionTypeSpecReference,
+                            schema));
+                }
+
                 methodRows.Add(new TrRmMethodDefRow(0, 0, signatureRow,
                     function.IsPrivate ? 0u
                         : function.IsInternal ? 1u : 2u,
@@ -10356,6 +10582,15 @@ public static partial class TrRmExecutableCompiler
                                 selectedImport.ExportKey)));
             var hasDeferredResultType = deferredMethodTypes.Any(
                 static plan => plan.IsResult);
+            var methodReceiverWritable
+                = methodPlan.Method.ReceiverTypeSpecReference != 0
+                    && (schema.UsesMethodReceiverAccess()
+                        ? (methodPlan.Method.Flags & 4) != 0
+                        : StringComparer.Ordinal.Equals(schemaIdentity,
+                            StandardC1M1Construction2SchemaIdentity)
+                            && (rootTables.TypeSpecs.GetTypeSpecRef(
+                                methodPlan.Method.ReceiverTypeSpecReference)
+                                .Qualifiers & 1) != 0);
             var returnTypeMatches = hasDeferredResultType
                 ? methodRoot is not null
                     && AreC1M1MethodSignatureTypesEquivalent(
@@ -10392,7 +10627,7 @@ public static partial class TrRmExecutableCompiler
                 || function.Variables.Length < function.ParameterCount
                 || (!function.IsStatic
                 && function.Variables[0].IsMutable
-                    != ((methodPlan.Method.Flags & 4) != 0))
+                    != methodReceiverWritable)
                 || function.RequiresUnsafeCaller
                     != ((methodPlan.Method.EffectsMask & 4) != 0)
                 || function.DoesNotReturn
@@ -10943,6 +11178,214 @@ public static partial class TrRmExecutableCompiler
         var code = new byte[] { 0x18, 0 };
         return TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
             default, default, default,
+            [new TrRmRegisterBodyBlock(0,
+                checked((uint)code.Length), 0)],
+            records, code, contractCount: 0, schema: schema,
+            generalPredicateGraphsInitializationReferenceBodies
+                : schema.UsesGeneralPredicateGraphs());
+    }
+
+    private static byte[] EncodeC1M1MetadataClassDirectCallBody(
+        BoundFunction function, BoundCall call,
+        BoundFunction targetFunction,
+        C1M1MethodEmissionPlan targetPlan, int targetMethodDefRow,
+        bool targetWritable, BoundProgram program,
+        Func<PrimitiveType, uint> typeSpecReferenceFor,
+        TrRmArtifactSchema schema)
+    {
+        var method = targetPlan.Method;
+        if (schema != TrRmArtifactSchema.C1M1Construction2Draft
+            || !schema.UsesObjectConstruction()
+            || schema.UsesMethodReceiverAccess()
+            || function.ReturnType == PrimitiveType.Void
+            || !TryGetC1M1SourceScalarTypeSpecReference(
+                function.ReturnType, out _)
+            || call.Type != function.ReturnType
+            || targetFunction.ReturnType != function.ReturnType
+            || targetFunction.IsStatic
+            || targetFunction.IsClassConstructor
+            || targetFunction.IsConstructor
+            || targetFunction.IsCleanup
+            || targetFunction.IsOperator
+            || targetFunction.Intrinsic != BoundIntrinsic.None
+            || targetFunction.RequiresUnsafeCaller
+            || targetFunction.DoesNotReturn
+            || !targetFunction.DependencyContracts.IsEmpty
+            || targetFunction.ParameterCount
+                != method.Parameters.Length + 1
+            || targetFunction.Variables.Length
+                < targetFunction.ParameterCount
+            || method.ReceiverTypeSpecReference == 0
+            || method.ConstructionRole != 0
+            || method.InitializerMethodDefinitionId != 0
+            || method.ConstructionPropertyDefinitionId != 0
+            || !method.InitializedMemberDefinitionIds.IsEmpty
+            || method.GenericParameterCount != 0
+            || method.EffectsMask != 0
+            || !method.DependencyClauses.IsDefaultOrEmpty
+            || (method.Flags & 4) != 0
+            || call.Arguments.Length != targetFunction.ParameterCount
+            || !call.DefaultedArguments.IsDefaultOrEmpty
+            || call.InterfaceCallIdentity is not null
+            || call.GenericMethodCall is not null
+            || call.ImportedGenericMethodCall is not null
+            || call.IsUnsafeAuthorized
+            || targetMethodDefRow is <= 0 or > 0xFF_FFFF)
+        {
+            throw Unsupported(
+                "The bounded Construction-2 class-reference Body supports only a direct scalar-returning ordinary class call with value formals.");
+        }
+
+        var receiverType = targetFunction.Variables[0].Type;
+        if (!BoundGenericNominalTypeTypes.IsType(receiverType)
+            || !BoundGenericNominalTypeContract.IsNominalClassType(
+                receiverType, program.GenericNominalTypeInstances,
+                program.GenericNominalTypeDefinitions)
+            || targetFunction.Variables[0].IsMutable != targetWritable)
+        {
+            throw Unsupported(
+                "The ordinary class call target does not have the selected direct receiver view.");
+        }
+
+        var receiverInstance = program.GenericNominalTypeInstances[
+            BoundGenericNominalTypeTypes.Index(receiverType)];
+        if (!receiverInstance.Arguments.IsEmpty
+            || (receiverInstance.Qualifiers & ~0x01) != 0
+            || ((receiverInstance.Qualifiers & 0x01) != 0)
+                != targetWritable)
+        {
+            throw Unsupported(
+                "The ordinary class call target has a receiver outside the direct Construction-2 access contract.");
+        }
+
+        var inputSeen = new bool[targetFunction.ParameterCount];
+        var callInputs = new TrRmRegisterBodyCallInput[
+            targetFunction.ParameterCount];
+        for (var argumentIndex = 0;
+            argumentIndex < call.Arguments.Length; argumentIndex++)
+        {
+            var formalOrdinal = call.ParameterIndex(argumentIndex);
+            if ((uint)formalOrdinal >= (uint)targetFunction.ParameterCount
+                || inputSeen[formalOrdinal]
+                || call.ImplicitReferenceTemporary(argumentIndex) != -1
+                || call.Arguments[argumentIndex] is not BoundRead read
+                || (uint)read.Variable >= (uint)function.ParameterCount
+                || read.Type != function.Variables[read.Variable].Type)
+            {
+                throw Unsupported(
+                    "The ordinary class call Body requires direct, distinct value-formal Homes for every selected MethodSig input.");
+            }
+
+            var targetVariable = targetFunction.Variables[formalOrdinal];
+            var sourceVariable = function.Variables[read.Variable];
+            if (sourceVariable.IsMutable || sourceVariable.IsOut
+                || sourceVariable.IsInit || sourceVariable.IsImplicitRef
+                || sourceVariable.IsInitializationLocal
+                || targetVariable.IsOut || targetVariable.IsInit
+                || targetVariable.IsImplicitRef
+                || targetVariable.IsInitializationLocal
+                || (formalOrdinal > 0
+                    && (method.Parameters[formalOrdinal - 1].Mode != 0
+                        || method.Parameters[formalOrdinal - 1].Flags != 0
+                        || method.Parameters[formalOrdinal - 1]
+                            .DefaultValue is not null))
+                || targetVariable.Type == PrimitiveType.Void)
+            {
+                throw Unsupported(
+                    "The ordinary class call Body does not encode mutable, output, initialization, implicit-reference or unit formals.");
+            }
+
+            if (formalOrdinal == 0)
+            {
+                if (!BoundGenericNominalTypeTypes.IsType(
+                        sourceVariable.Type)
+                    || !BoundGenericNominalTypeContract.IsNominalClassType(
+                        sourceVariable.Type,
+                        program.GenericNominalTypeInstances,
+                        program.GenericNominalTypeDefinitions))
+                {
+                    throw Unsupported(
+                        "The ordinary class receiver actual must be a selected normal class handle.");
+                }
+
+                var sourceReceiver = program.GenericNominalTypeInstances[
+                    BoundGenericNominalTypeTypes.Index(
+                        sourceVariable.Type)];
+                if (sourceReceiver.Definition != receiverInstance.Definition
+                    || !sourceReceiver.Arguments.IsEmpty
+                    || (targetWritable
+                        && (sourceReceiver.Qualifiers & 0x01) == 0))
+                {
+                    throw Unsupported(
+                        "The ordinary class receiver actual does not preserve the target owner and required access.");
+                }
+            }
+            else if (!AreC1M1MethodSignatureTypesEquivalent(
+                         sourceVariable.Type, function, program,
+                         targetVariable.Type, targetFunction))
+            {
+                throw Unsupported(
+                    "An ordinary class call value actual differs from its selected MethodSig formal.");
+            }
+
+            callInputs[formalOrdinal] = new(2,
+                formalOrdinal == 0
+                    ? targetWritable ? (byte)4 : (byte)3
+                    : (byte)1,
+                checked((ushort)read.Variable));
+            inputSeen[formalOrdinal] = true;
+        }
+
+        if (inputSeen.Any(static seen => !seen))
+        {
+            throw Unsupported(
+                "The ordinary class call Body omits its receiver or a selected MethodSig formal.");
+        }
+
+        var typeTokens = new uint[function.ParameterCount];
+        var homeMap = new byte[checked(function.ParameterCount * 8)];
+        for (var parameter = 0; parameter < function.ParameterCount;
+            parameter++)
+        {
+            if (function.Variables[parameter].Type == PrimitiveType.Void)
+            {
+                throw Unsupported(
+                    "The ordinary class call Body does not materialize unit-valued formal Homes.");
+            }
+
+            var typeToken = CreateStandardBodyTypeMapToken(
+                typeSpecReferenceFor(function.Variables[parameter].Type));
+            typeTokens[parameter] = typeToken;
+            var offset = parameter * 8;
+            homeMap[offset] = 2;
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                homeMap.AsSpan(offset + 4, 2),
+                checked((ushort)parameter));
+        }
+
+        var targetMethodToken
+            = 0x1600_0000u | checked((uint)targetMethodDefRow);
+        var maps = TrRmRegisterBodyMapBuilder.Create(typeTokens,
+            [targetMethodToken]);
+        for (var parameter = 0; parameter < function.ParameterCount;
+            parameter++)
+        {
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                homeMap.AsSpan(parameter * 8 + 2, 2),
+                checked((ushort)maps.GetTypeMapIndex(
+                    typeTokens[parameter])));
+        }
+
+        var callSite = TrRmRegisterBodyRecordWriter.EncodeCallSite(1, 1,
+            maps.GetMethodMapIndex(targetMethodToken), 0, callInputs, [],
+            schema: schema);
+        ReadOnlyMemory<byte>[] records = [
+            new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 },
+            new(callSite),
+        ];
+        var code = new byte[] { 0xE0, 0, 1, 0, 0x17, 0 };
+        return TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
+            maps.MethodMap, default, default,
             [new TrRmRegisterBodyBlock(0,
                 checked((uint)code.Length), 0)],
             records, code, contractCount: 0, schema: schema,

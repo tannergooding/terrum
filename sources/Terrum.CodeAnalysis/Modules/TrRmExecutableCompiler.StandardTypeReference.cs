@@ -105,6 +105,8 @@ public static partial class TrRmExecutableCompiler
             if (!StringComparer.Ordinal.Equals(schemaIdentities[0],
                     StandardC1M1SchemaIdentity)
                 && !StringComparer.Ordinal.Equals(schemaIdentities[0],
+                    StandardC1M1Construction2SchemaIdentity)
+                && !StringComparer.Ordinal.Equals(schemaIdentities[0],
                     StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsSchemaIdentity)
                 && !StringComparer.Ordinal.Equals(schemaIdentities[0],
                     StandardCM1AR1SchemaIdentity)
@@ -207,6 +209,8 @@ public static partial class TrRmExecutableCompiler
             && schemaIdentities.All(static schemaIdentity =>
                 StringComparer.Ordinal.Equals(schemaIdentity,
                     StandardC1M1SchemaIdentity)
+                || StringComparer.Ordinal.Equals(schemaIdentity,
+                    StandardC1M1Construction2SchemaIdentity)
                 || StringComparer.Ordinal.Equals(schemaIdentity,
                     StandardC1M1ConstructionL1R1SchemaIdentity)
                 || StringComparer.Ordinal.Equals(schemaIdentity,
@@ -321,6 +325,12 @@ public static partial class TrRmExecutableCompiler
             CreateForeignInvocationIndex(artifacts[0], schemaIdentities[0]),
             schemaIdentities[0], null, createA3ResourceLedger: false);
         EnsureC1ClassDeclarationTablesSupported(rootTables);
+        var usesMethodReceiverAccess
+            = !isEN1 && GetC1M1ClassMetadataSchema(
+                schemaIdentities[0]).UsesMethodReceiverAccess();
+        var usesConstruction2ReceiverAccess
+            = StringComparer.Ordinal.Equals(schemaIdentities[0],
+                StandardC1M1Construction2SchemaIdentity);
         if (isEN1 && rootTables.Schema.UsesPropertyInitializedState())
         {
             throw Unsupported(
@@ -328,12 +338,23 @@ public static partial class TrRmExecutableCompiler
         }
         var (methodStart, methodEnd)
             = rootTables.Modules.GetMethodDefRange(rootModuleRow);
+        var hasUnsupportedClassMethod = false;
+        for (var methodRow = methodStart;
+            methodRow < methodEnd; methodRow++)
+        {
+            if (rootTables.Methods.GetOwnerType(methodRow) != 0)
+            {
+                hasUnsupportedClassMethod = true;
+                break;
+            }
+        }
+
         if (rootTables.Modules.GetEntryMethod(rootModuleRow) != 0
-            || (methodStart != methodEnd && !allowClassLayoutQueryBody
+            || (hasUnsupportedClassMethod && !allowClassLayoutQueryBody
                 && !isCM1 && !isConstruction))
         {
             throw Unsupported(
-                "The bounded class source-reference projection does not retain MethodDefs for this exact schema.");
+                "The bounded class source-reference projection does not retain class-owned MethodDefs for this exact schema.");
         }
 
         var selectedTypeDefs = new Dictionary<int, List<string>>();
@@ -1346,24 +1367,22 @@ public static partial class TrRmExecutableCompiler
                 var isStatic = method.ReceiverTypeSpecReference == 0;
                 if (!isStatic)
                 {
-                    if ((method.Flags & 4) != 0
-                        || !classTypeInstanceIndexes.TryGetValue(
-                            declaration.Declaration.Identity,
-                            out var receiverTypeIndex))
-                    {
-                        throw Unsupported(
-                            "Mutable class receivers or unselected class identities are not admitted by this bounded source reference.");
-                    }
-
                     var receiverTypeSpec = rootTables.TypeSpecs
                         .GetTypeSpecRef(
                             method.ReceiverTypeSpecReference);
                     if (!receiverTypeSpec.IsRow
                         || receiverTypeSpec.Form is not (0x02 or 0x03)
-                        || receiverTypeSpec.Qualifiers != 0)
+                        || (receiverTypeSpec.Qualifiers & ~0x01) != 0
+                        || (!usesMethodReceiverAccess
+                            && !usesConstruction2ReceiverAccess
+                            && receiverTypeSpec.Qualifiers != 0)
+                        || (usesMethodReceiverAccess
+                            ? ((method.Flags & 4) != 0)
+                                != ((receiverTypeSpec.Qualifiers & 1) != 0)
+                            : (method.Flags & 4) != 0))
                     {
                         throw Unsupported(
-                            "A class method receiver requires an unqualified nominal class handle.");
+                            "A class method receiver requires the exact selected class access contract.");
                     }
 
                     var receiverTypeDefRow = rootTables.TypeSpecs
@@ -1378,9 +1397,17 @@ public static partial class TrRmExecutableCompiler
                             "A class method receiver does not match the selected class handle view.");
                     }
 
+                    if (!TryGetClassMethodNominalType(
+                            method.ReceiverTypeSpecReference,
+                            out var receiverType))
+                    {
+                        throw Unsupported(
+                            "A class method receiver has no selected normal class TypeSpec.");
+                    }
+
                     variables.Add(new BoundVariable("this",
-                        BoundGenericNominalTypeTypes.Type(receiverTypeIndex),
-                        false, default));
+                        receiverType,
+                        (receiverTypeSpec.Qualifiers & 1) != 0, default));
                 }
 
                 var defaults
@@ -1530,21 +1557,42 @@ public static partial class TrRmExecutableCompiler
                                 + (isStatic ? 0 : 1));
                     if (!isStatic)
                     {
-                        if ((method.Flags & 4) != 0
-                            || !classTypeInstanceIndexes.TryGetValue(
-                                declaration.Declaration.Identity,
-                                out var receiverTypeIndex))
-                        {
-                            throw Unsupported(
-                                "Mutable class receivers or unselected class identities are not admitted by this bounded source reference.");
-                        }
-
+                        var expectedReceiverTypeSpec
+                            = rootTables.TypeSpecs.GetTypeSpecRef(
+                                method.ReceiverTypeSpecReference);
                         var receiverTypeSpec = providerTables.TypeSpecs
                             .GetTypeSpecRef(
                                 providerMethod.ReceiverTypeSpecReference);
-                        if (!receiverTypeSpec.IsRow
+                        if (!expectedReceiverTypeSpec.IsRow
+                            || expectedReceiverTypeSpec.Form
+                                is not (0x02 or 0x03)
+                            || (expectedReceiverTypeSpec.Qualifiers
+                                & ~0x01) != 0
+                            || !receiverTypeSpec.IsRow
                             || receiverTypeSpec.Form is not (0x02 or 0x03)
-                            || receiverTypeSpec.Qualifiers != 0
+                            || (receiverTypeSpec.Qualifiers & ~0x01) != 0
+                            || (!usesMethodReceiverAccess
+                                && !usesConstruction2ReceiverAccess
+                                && expectedReceiverTypeSpec.Qualifiers != 0)
+                            || expectedReceiverTypeSpec.Qualifiers
+                                != receiverTypeSpec.Qualifiers
+                            || (usesMethodReceiverAccess
+                                ? ((method.Flags & 4) != 0)
+                                    != ((expectedReceiverTypeSpec
+                                        .Qualifiers & 1) != 0)
+                                    || ((providerMethod.Flags & 4) != 0)
+                                        != ((receiverTypeSpec.Qualifiers
+                                            & 1) != 0)
+                                : (method.Flags & 4) != 0
+                                    || (providerMethod.Flags & 4) != 0)
+                            || rootTables.TypeSpecs
+                                .GetNominalTypeDefRow(
+                                    method.ReceiverTypeSpecReference,
+                                    rootTables.TypeDefs,
+                                    rootTables.Imports)
+                                != GetTypeDefRow(
+                                    methodExpectation
+                                        .ExpectedOwnerDefinitionId)
                             || providerTables.TypeSpecs
                                 .GetNominalTypeDefRow(
                                     providerMethod.ReceiverTypeSpecReference,
@@ -1556,10 +1604,18 @@ public static partial class TrRmExecutableCompiler
                                 "A class MethodDef Import receiver does not match its selected provider class.");
                         }
 
+                        if (!TryGetClassMethodNominalType(
+                                method.ReceiverTypeSpecReference,
+                                out var receiverType))
+                        {
+                            throw Invalid(
+                                "A class MethodDef Import receiver has no selected normal class TypeSpec.");
+                        }
+
                         variables.Add(new BoundVariable("this",
-                            BoundGenericNominalTypeTypes.Type(
-                                receiverTypeIndex),
-                            false, default));
+                            receiverType,
+                            (expectedReceiverTypeSpec.Qualifiers & 1) != 0,
+                            default));
                     }
 
                     var defaults = ImmutableArray.CreateBuilder<
@@ -2469,7 +2525,8 @@ public static partial class TrRmExecutableCompiler
     private static bool IsSelectedC1ClassConstructionSchemaIdentity(
         string schemaIdentity)
         => schemaIdentity is
-            StandardC1M1ConstructionL1R1SchemaIdentity
+            StandardC1M1Construction2SchemaIdentity
+            or StandardC1M1ConstructionL1R1SchemaIdentity
             or StandardC1M1Construction2L1R1SchemaIdentity
             or StandardC1M1ConstructionL1R1EnumClosureSchemaIdentity
             or StandardC1M1Construction2L1R1EnumClosureSchemaIdentity

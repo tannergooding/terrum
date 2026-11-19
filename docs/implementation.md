@@ -135,9 +135,15 @@ remain unsupported in this type-only route.
 On the consumer side, class-reference re-emission now carries local no-op
 unit module functions with immutable scalar or selected nongeneric class
 value parameters, including the exact method-label/CM1 parameter-surface
-forms. This single-root Body-01 subset remains unverified; calls, field use,
-multi-provider output, source-free re-emission of these module functions and
-ordinary EN1 class consumers remain open.
+forms. The exact label-free Construction-2 single-root API path now re-emits
+field-only I/P Construction clauses and supported Body maps and lowers a
+top-level direct scalar-return call to a selected ordinary class MethodDef
+with receiver-first MethodMap inputs (`sourceUse=3/4` for readonly/writable
+access carried by the exact receiver TypeSpec). These paths remain unverified;
+imported I/P expectations, broader Bodies, field use, multi-provider output,
+source-free re-emission of top-level functions and ordinary EN1 class
+consumers remain open. The label-free Construction-2 source-provider CLI
+pairing remains unselected.
 The Construction-2 source-class producer also emits direct selected Standard
 class TypeDef/FieldDef/layout stubs and remaps readonly class-handle TypeSpecs
 in method signatures, including root-owned imported TypeDef expectations.

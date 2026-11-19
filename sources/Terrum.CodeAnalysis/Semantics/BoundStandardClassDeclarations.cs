@@ -83,6 +83,8 @@ internal sealed record BoundStandardClassTypeView(
                 || StringComparer.Ordinal.Equals(Provider.SchemaIdentity,
                     "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-1-parameter-labels-1-receiver-access-1")
                 || StringComparer.Ordinal.Equals(Provider.SchemaIdentity,
+                    "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2")
+                || StringComparer.Ordinal.Equals(Provider.SchemaIdentity,
                     "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1")
                 || StandardGenericMethodSchema.IsCM1ClassParameterDefaults(
                     Provider.SchemaIdentity)

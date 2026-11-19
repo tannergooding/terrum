@@ -636,6 +636,8 @@ public static partial class TrRmExecutableCompiler
                 StandardC1M1ConstructionL1R1SchemaIdentity
                     => TrRmArtifactSchema
                         .C1M1ConstructionParameterLabelsReceiverAccessDraft,
+                StandardC1M1Construction2SchemaIdentity
+                    => TrRmArtifactSchema.C1M1Construction2Draft,
                 StandardC1M1Construction2L1R1SchemaIdentity
                     => TrRmArtifactSchema
                         .C1M1Construction2ParameterLabelsReceiverAccessDraft,
