@@ -3727,9 +3727,13 @@ internal sealed class TrRmC1EnumClosureSourceTests
             ]);
         var providerEnumExport = CreateExport(providerProgram,
             providerTree, 0, "Marker", ["type.marker"], "marker");
-        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+        var providerArtifactWithoutFieldAlias
+            = TrRmExecutableCompiler.EmitStandard(
             providerProgram, "ShelfProvider", schemaIdentity, 1,
             [], [], [providerClassExport], [providerEnumExport]);
+        var providerArtifact = AddExportAlias(
+            providerArtifactWithoutFieldAlias, schemaIdentity,
+            "field.shelf.id", "field.shelf.id.alias");
         var providerTables = TrRmStructuralMetadataValidator
             .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
                 providerArtifact, SchemaFor(schemaIdentity)));
@@ -3792,11 +3796,12 @@ internal sealed class TrRmC1EnumClosureSourceTests
             schemaIdentity, "ShelfProvider", "type.shelf",
             0x1300_0000u | checked((uint)expectedShelfTypeDefRow),
             "field.shelf.id",
-            0x1400_0000u | checked((uint)shelfFieldStart));
+            0x1400_0000u | checked((uint)shelfFieldStart),
+            "field.shelf.id.alias");
         consumerTables = TrRmStructuralMetadataValidator
             .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
                 consumerArtifact, SchemaFor(schemaIdentity)));
-        Assert.That(consumerTables.Imports.Count, Is.EqualTo(2));
+        Assert.That(consumerTables.Imports.Count, Is.EqualTo(3));
         consumerArtifact = RewriteFieldTypeSpecAsImport(consumerArtifact,
             schemaIdentity, shelfFieldRow, 1);
 
@@ -3818,9 +3823,29 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 && !declaration.Expectations.IsEmpty);
         Assert.That(importedShelf.Expectations, Has.Length.EqualTo(1));
         Assert.That(importedShelf.Expectations[0].FieldExpectations,
-            Has.Length.EqualTo(1));
+            Has.Length.EqualTo(2));
         Assert.That(importedShelf.Expectations[0].FieldExpectations[0]
             .ExportKey, Is.EqualTo("field.shelf.id"));
+        Assert.That(importedShelf.Expectations[0].FieldExpectations.Select(
+                static field => field.ExportKey),
+            Is.EquivalentTo([
+                "field.shelf.id", "field.shelf.id.alias",
+            ]));
+        Assert.That(importedShelf.Expectations[0].FieldExpectations.Select(
+                static field => field.ProviderDefinitionId).Distinct()
+                .Count(), Is.EqualTo(1));
+
+        var splitAliasProvider = AddExportAlias(
+            providerArtifactWithoutFieldAlias, schemaIdentity,
+            "type.shelf", "field.shelf.id.alias");
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    consumerArtifact),
+                "PaletteConsumer", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        splitAliasProvider),
+                ], ["type.palette"]));
 
         var fieldSelectedReference
             = TrRmExecutableCompiler.CreateStandardReference(
@@ -4606,10 +4631,13 @@ internal sealed class TrRmC1EnumClosureSourceTests
     private static byte[] AddTypeDefImport(byte[] artifact,
         string schemaIdentity, string providerIdentity, string exportKey,
         uint expectedDefinitionId, string? fieldImportExportKey = null,
-        uint? expectedFieldDefinitionId = null)
+        uint? expectedFieldDefinitionId = null,
+        string? fieldImportExportAliasKey = null)
     {
         if ((fieldImportExportKey is null)
             != (expectedFieldDefinitionId is null)
+            || (fieldImportExportAliasKey is not null
+                && expectedFieldDefinitionId is null)
             || (expectedFieldDefinitionId is uint fieldDefinition
                 && ((fieldDefinition >> 24) != 0x14
                     || (fieldDefinition & 0x00FF_FFFF) == 0)))
@@ -4657,6 +4685,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var exportKeyRow = AddString(exportKey);
         var fieldImportExportKeyRow = fieldImportExportKey is null
             ? 0 : AddString(fieldImportExportKey);
+        var fieldImportExportAliasRow = fieldImportExportAliasKey is null
+            ? 0 : AddString(fieldImportExportAliasKey);
         var stringBytes = TrRmStringTableWriter.EncodeTextRows(textRows);
         var strings = new TrRmStringTableReader(stringBytes,
             textRows.Count);
@@ -4701,6 +4731,11 @@ internal sealed class TrRmC1EnumClosureSourceTests
         {
             importRows.Add(new TrRmImportRow(1,
                 fieldImportExportKeyRow, fieldDefinitionId));
+            if (fieldImportExportAliasKey is not null)
+            {
+                importRows.Add(new TrRmImportRow(1,
+                    fieldImportExportAliasRow, fieldDefinitionId));
+            }
         }
         var importBytes = TrRmImportTableWriter.Encode(importRows, strings,
             moduleRefs, typeDefs, default, default, default, default, default,

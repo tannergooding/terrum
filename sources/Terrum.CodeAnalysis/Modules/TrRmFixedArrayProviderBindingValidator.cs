@@ -1645,10 +1645,33 @@ internal static class TrRmFixedArrayProviderBindingValidator
                 {
                     throw InvalidFieldBinding();
                 }
-                if (!fieldBindingsByExpectedField.TryAdd((
-                        binding.ConsumerArtifactIndex,
-                        binding.ConsumerModuleRow,
-                        binding.ExpectedFieldDefRow), binding))
+                var expectedFieldKey = (
+                    binding.ConsumerArtifactIndex,
+                    binding.ConsumerModuleRow,
+                    binding.ExpectedFieldDefRow);
+                if (!fieldBindingsByExpectedField.TryAdd(expectedFieldKey,
+                        binding)
+                    && fieldBindingsByExpectedField.TryGetValue(
+                        expectedFieldKey, out var existingFieldBinding)
+                    && (existingFieldBinding.ExpectedOwnerTypeDefRow
+                            != binding.ExpectedOwnerTypeDefRow
+                        || existingFieldBinding.OwnerImportRow
+                            != binding.OwnerImportRow
+                        || existingFieldBinding.ProviderArtifactIndex
+                            != binding.ProviderArtifactIndex
+                        || existingFieldBinding.ProviderModuleRow
+                            != binding.ProviderModuleRow
+                        || existingFieldBinding.ProviderTypeDefRow
+                            != binding.ProviderTypeDefRow
+                        || existingFieldBinding.ProviderFieldDefRow
+                            != binding.ProviderFieldDefRow
+                        || !StringComparer.Ordinal.Equals(
+                            existingFieldBinding.ProducerIdentity,
+                            binding.ProducerIdentity)
+                        || existingFieldBinding.TargetRequirement
+                            != binding.TargetRequirement
+                        || existingFieldBinding.RuntimePolicy
+                            != binding.RuntimePolicy))
                 {
                     throw InvalidFieldBinding();
                 }

@@ -315,6 +315,8 @@ internal static class BoundStandardClassDeclarationContract
                 var actualFields = declaration.Declaration.Fields
                     .ToDictionary(static field => field.DefinitionId);
                 var fieldImportRows = new HashSet<int>();
+                var providerFieldByExpectedDefinition = new Dictionary<
+                    uint, BoundStandardClassFieldExpectation>();
                 foreach (var fieldExpectation in expectation.FieldExpectations)
                 {
                     if (fieldExpectation is null
@@ -352,6 +354,28 @@ internal static class BoundStandardClassDeclarationContract
                             declaration.Declaration.Provider))
                     {
                         return false;
+                    }
+
+                    if (providerFieldByExpectedDefinition.TryGetValue(
+                            fieldExpectation.ExpectedDefinitionId,
+                            out var existingFieldExpectation))
+                    {
+                        if (existingFieldExpectation.ProviderDefinitionId
+                                != fieldExpectation.ProviderDefinitionId
+                            || existingFieldExpectation
+                                .ProviderOwnerDefinitionId
+                                != fieldExpectation.ProviderOwnerDefinitionId
+                            || !SnapshotsMatch(existingFieldExpectation.Provider,
+                                fieldExpectation.Provider))
+                        {
+                            return false;
+                        }
+                    }
+                    else
+                    {
+                        providerFieldByExpectedDefinition.Add(
+                            fieldExpectation.ExpectedDefinitionId,
+                            fieldExpectation);
                     }
                 }
 

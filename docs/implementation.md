@@ -150,6 +150,10 @@ rejections, are added but remain unverified under the active hold. Further provi
 alias/closure cases, optional wrappers, nested imported-class dereferences,
 aggregate imported-field stores and source-free class member re-emission beyond
 bodyless public scalar MethodDef Imports remain open.
+The shared class FieldDef Import contract also requires every alias for one
+expected field to bind to one exact provider FieldDef; a same-target alias
+round-trip and a wrong-kind alias rejection regression are added but remain
+unverified under the active hold.
 The exact C1M1 construction successor has a
 class-free emission route and a Construction `0003` reader/writer that checks
 I/P signatures, owner/mutability agreement, direct instance FieldDef
