@@ -8421,7 +8421,9 @@ public static partial class TrRmExecutableCompiler
                 || method.ConstructionPropertyDefinitionId != 0
                 || !method.InitializedMemberDefinitionIds.IsEmpty
                 || (method.Flags & 3) != 2
-                || (method.Flags & 4) != 0
+                || ((method.Flags & 4) != 0
+                    && (method.ReceiverTypeSpecReference == 0
+                        || !schema.UsesMethodReceiverAccess()))
                 || (method.EffectsMask & ~6u) != 0
                 || plan.Imports.IsEmpty
                 || !typeDefRowMap.TryGetValue(ownerTypeDefRow,
@@ -8435,9 +8437,11 @@ public static partial class TrRmExecutableCompiler
             {
                 var receiver = rootTables.TypeSpecs.GetTypeSpecRef(
                     method.ReceiverTypeSpecReference);
+                var mutableReceiver = (method.Flags & 4) != 0;
                 if (!receiver.IsRow
                     || receiver.Form is not (0x02 or 0x03)
-                    || receiver.Qualifiers != 0
+                    || receiver.Qualifiers
+                        != (mutableReceiver ? 0x01 : 0x00)
                     || rootTables.TypeSpecs.GetNominalTypeDefRow(
                         method.ReceiverTypeSpecReference,
                         rootTables.TypeDefs, rootTables.Imports)
@@ -8583,6 +8587,9 @@ public static partial class TrRmExecutableCompiler
                         + (methodPlan.Method.ReceiverTypeSpecReference == 0
                             ? 0 : 1)
                 || function.Variables.Length < function.ParameterCount
+                || (!function.IsStatic
+                && function.Variables[0].IsMutable
+                    != ((methodPlan.Method.Flags & 4) != 0))
                 || function.RequiresUnsafeCaller
                     != ((methodPlan.Method.EffectsMask & 4) != 0)
                 || function.DoesNotReturn

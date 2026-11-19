@@ -209,7 +209,8 @@ validates Construction `0003` initializer/projection rows, class-handle
 qualifications, direct instance FieldDef guarantees, and actual/imported Body
 state. The Construction-2 source-class producer also persists assigned Effects
 clauses for retained class Methods. Exact-CM1 source-free metadata re-emission
-preserves bodyless public nongeneric static and readonly-instance by-value
+preserves bodyless public nongeneric static, readonly-instance and selected-R1
+mutable-instance by-value
 class MethodDef Imports whose TypeSpec forms are supported by the remapper,
 including owner/signature/parameter rows, aliases, Effects and class parameter
 surfaces/defaults without copying provider Bodies. Provider/owner-row

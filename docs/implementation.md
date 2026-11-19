@@ -219,11 +219,13 @@ persist their assigned Effects mask; unsafe provider-mismatch and
 source-free-import regressions are added but remain unverified. A separate
 exact-CM1 source-free metadata
 emitter now preserves bodyless public nongeneric class MethodDef Import
-expectations with static or readonly-instance receivers and by-value
+expectations with static, readonly-instance or selected-R1 mutable-instance
+receivers and by-value
 signatures whose TypeSpec forms are supported by the C1M1 remapper, remapping
 owner TypeDefs, MethodSigs, Params, Effects, aliases and class parameter
 surfaces/defaults without copying provider Bodies. Mutable receivers and
-construction-role methods remain unsupported in this slice.
+construction-role methods outside the selected R1 route remain unsupported in
+this slice.
 Provider/owner-row relocation and compatible/incompatible replacement
 regressions are added but unverified under the hold. Remaining gaps include non-identity
 instance calls, broader nested field paths and aggregate stores, locals and

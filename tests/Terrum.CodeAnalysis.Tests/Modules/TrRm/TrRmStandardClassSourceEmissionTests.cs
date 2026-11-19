@@ -4786,15 +4786,17 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     {
         var expectedArtifact = EmitClassMethodReemissionArtifact(
             "MethodExpected", 7, includePrefixType: true,
-            readIsUnsafe: true);
+            readIsUnsafe: true, mutableReceiver: true);
         var providerArtifact = AddMethodExportAlias(
             EmitClassMethodReemissionArtifact("MethodProvider", 9,
-                includePrefix: true, readIsUnsafe: true),
+                includePrefix: true, readIsUnsafe: true,
+                mutableReceiver: true),
             "Box.Read", "Box.ReadAlias");
         var consumerArtifact = CreateExpectedClassMethodImportArtifact(
             expectedArtifact, providerArtifact, "MethodConsumer",
             "MethodProvider", [
                 "Box.Read", "Box.ReadBox", "Box.ReadInstance",
+                "Box.ReadMutable",
             ], "Box.Read", "Box.ReadAlias", "ContainerKey");
         var schemaIdentity
             = C1M1Construction2ClassParameterDefaultsSchemaIdentity;
@@ -4844,18 +4846,18 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             .Where(row => reemittedTables.Imports
                 .GetExpectedDefinitionForImportRow(row) >> 24 == 0x16)
             .ToArray();
-        Assert.That(methodImportRows, Has.Length.EqualTo(4));
+        Assert.That(methodImportRows, Has.Length.EqualTo(5));
         Assert.That(methodImportRows.Select(row => reemittedTables.Imports
                 .GetBindingForImportRow(row).ExportKey),
             Is.EquivalentTo([
                 "Box.Read", "Box.ReadAlias", "Box.ReadBox",
-                "Box.ReadInstance",
+                "Box.ReadInstance", "Box.ReadMutable",
             ]));
         var expectedMethodDefinitions = methodImportRows.Select(row =>
                 reemittedTables.Imports
                     .GetExpectedDefinitionForImportRow(row))
             .Distinct().ToArray();
-        Assert.That(expectedMethodDefinitions, Has.Length.EqualTo(3));
+        Assert.That(expectedMethodDefinitions, Has.Length.EqualTo(4));
         var expectedMethodRow = checked((int)(
             expectedMethodDefinitions[0] & 0x00FF_FFFF));
         var newBoxTypeImport = Enumerable.Range(1,
@@ -4866,6 +4868,8 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             reemittedTables.Imports.GetExpectedDefinitionForImportRow(
                 newBoxTypeImport) & 0x00FF_FFFF));
         Assert.That(newBoxTypeDefRow, Is.Not.EqualTo(oldBoxTypeDefRow));
+        Assert.That(reemittedTables.TypeDefs.GetFlags(newBoxTypeDefRow)
+            & 0x80u, Is.EqualTo(0x80u));
         Assert.That(reemittedTables.Methods.GetOwnerType(expectedMethodRow),
             Is.EqualTo(newBoxTypeDefRow));
         Assert.That(reemittedTables.Methods.GetBodyRow(expectedMethodRow),
@@ -4918,6 +4922,23 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             Is.EqualTo(newBoxTypeDefRow));
         Assert.That(reemittedTables.Signatures.GetResultTypeSpec(
             readBoxSignature), Is.EqualTo(0xF200_0000u));
+        var mutableMethodRow = Enumerable.Range(methodStart,
+                methodEnd - methodStart)
+            .Single(row => reemittedTables.Methods.GetName(row)
+                == "ReadMutable");
+        Assert.That(reemittedTables.Methods.GetFlags(mutableMethodRow) & 4u,
+            Is.EqualTo(4u));
+        var mutableSignature = reemittedTables.Methods
+            .GetSignature(mutableMethodRow);
+        var mutableReceiverTypeSpec = reemittedTables.Signatures
+            .GetReceiverTypeSpec(mutableSignature);
+        var mutableReceiverType = reemittedTables.TypeSpecs
+            .GetTypeSpecRef(mutableReceiverTypeSpec);
+        Assert.That(mutableReceiverType.Qualifiers & 1, Is.EqualTo(1));
+        Assert.That(reemittedTables.TypeSpecs.GetNominalTypeDefRow(
+                mutableReceiverTypeSpec, reemittedTables.TypeDefs,
+                reemittedTables.Imports),
+            Is.EqualTo(newBoxTypeDefRow));
 
         var reemittedReference
             = TrRmExecutableCompiler.CreateStandardReference(
@@ -4938,16 +4959,25 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             Is.EqualTo(7));
         Assert.That(providerMethod.Parameters[0].DefaultValue!.Value,
             Is.EqualTo(9));
+        var expectedMutableMethod = expectation.ExpectedDeclaration.Methods
+            .Single(static method => method.Name == "ReadMutable");
+        var providerMutableMethod = declaration.Declaration.Methods
+            .Single(static method => method.Name == "ReadMutable");
+        Assert.That(expectedMutableMethod.BodyRow, Is.Zero);
+        Assert.That(expectedMutableMethod.Flags & 4u, Is.EqualTo(4u));
+        Assert.That(providerMutableMethod.BodyRow, Is.GreaterThan(0));
+        Assert.That(providerMutableMethod.Flags & 4u, Is.EqualTo(4u));
         Assert.That(expectation.MethodExpectations.Select(
                 static method => method.ExportKey),
             Is.EquivalentTo([
                 "Box.Read", "Box.ReadAlias", "Box.ReadBox",
-                "Box.ReadInstance",
+                "Box.ReadInstance", "Box.ReadMutable",
             ]));
 
         var relocatedProvider = AddMethodExportAlias(
             EmitClassMethodReemissionArtifact("MethodProvider", 11,
-                includePrefix: true, readIsUnsafe: true),
+                includePrefix: true, readIsUnsafe: true,
+                mutableReceiver: true),
             "Box.Read", "Box.ReadAlias");
         var relocatedReference
             = TrRmExecutableCompiler.CreateStandardReference(
@@ -4969,7 +4999,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         var incompatibleProvider = AddMethodExportAlias(
             EmitClassMethodReemissionArtifact("MethodProvider", 11,
                 includePrefix: true, parameterType: "int64",
-                readIsUnsafe: true),
+                readIsUnsafe: true, mutableReceiver: true),
             "Box.Read", "Box.ReadAlias");
         Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.CreateStandardReference(
@@ -5316,7 +5346,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         string moduleIdentity, int defaultValue,
         bool includePrefix = false, string parameterType = "int32",
         bool readIsUnsafe = false,
-        bool includePrefixType = false)
+        bool includePrefixType = false, bool mutableReceiver = false)
     {
         var prefix = includePrefix
             ? "public class Prefix { public static int32 Before() { return 1; } }"
@@ -5325,9 +5355,15 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             ? "return value;" : "return 17;";
         var readModifiers = readIsUnsafe
             ? "public static unsafe" : "public static";
+        var boxDeclaration = mutableReceiver
+            ? "public mut class Box {" : "public class Box {";
+        var mutableMembers = mutableReceiver
+            ? "public mut int32 Value; public mut void ReadMutable() {}"
+            : string.Empty;
         var tree = SyntaxTree.Parse($$"""
             {{prefix}}
-            public class Box {
+            {{boxDeclaration}}
+                {{mutableMembers}}
                 {{readModifiers}} int32 Read({{parameterType}} value = {{defaultValue}}) {
                     {{readBody}}
                 }
@@ -5371,6 +5407,13 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 member.Kind == SyntaxKind.FunctionDeclaration
                 && member.Children.OfType<SyntaxTokenElement>().Any(
                     static token => token.Token.Name == "ReadBox"));
+        var readMutableDeclaration = mutableReceiver
+            ? boxDeclaration.Children.OfType<SyntaxNode>()
+                .Single(static member =>
+                    member.Kind == SyntaxKind.FunctionDeclaration
+                    && member.Children.OfType<SyntaxTokenElement>().Any(
+                        static token => token.Token.Name == "ReadMutable"))
+            : null;
         var boxClassIndex = Enumerable.Range(0, program.Classes.Length)
             .Single(index => StringComparer.Ordinal.Equals(
                 program.Classes[index].Name, "Box"));
@@ -5379,20 +5422,25 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             .Single(index => StringComparer.Ordinal.Equals(
                 program.Classes[index].Name, "Container"));
 
+        var boxMemberExports = new List<TrRmSourceClassMemberExport> {
+            new(boxClassIndex, readDeclaration.Span, "Box.Read"),
+            new(boxClassIndex, readInstanceDeclaration.Span,
+                "Box.ReadInstance"),
+            new(boxClassIndex, readBoxDeclaration.Span, "Box.ReadBox"),
+        };
+        if (readMutableDeclaration is not null)
+        {
+            boxMemberExports.Add(new TrRmSourceClassMemberExport(
+                boxClassIndex, readMutableDeclaration.Span,
+                "Box.ReadMutable"));
+        }
+
         return TrRmExecutableCompiler.EmitStandard(program, moduleIdentity,
             C1M1Construction2ClassParameterDefaultsSchemaIdentity,
             TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
             [], [], [
                 new TrRmSourceClassExport(program, boxClassIndex,
-                    boxDeclaration.Span, "BoxKey", [
-                        new TrRmSourceClassMemberExport(boxClassIndex,
-                            readDeclaration.Span, "Box.Read"),
-                        new TrRmSourceClassMemberExport(boxClassIndex,
-                            readInstanceDeclaration.Span,
-                            "Box.ReadInstance"),
-                        new TrRmSourceClassMemberExport(boxClassIndex,
-                            readBoxDeclaration.Span, "Box.ReadBox"),
-                    ]),
+                    boxDeclaration.Span, "BoxKey", boxMemberExports),
                 new TrRmSourceClassExport(program, containerClassIndex,
                     containerDeclaration.Span, "ContainerKey", []),
             ]);
