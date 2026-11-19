@@ -1203,6 +1203,37 @@ internal sealed partial class CliTests
     }
 
     [Test]
+    [TestCase("public int32 Consume(Box box, int32 value) { return box.Read(value, ()); }")]
+    [TestCase("public int32 Consume(Box box, int32 value, void token) { return box.Read(value, token); }")]
+    public void EmitsConstruction2OrdinaryClassCallWithUnitFormal(
+        string consumerSource)
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2";
+        const string providerIdentity
+            = "construction2-unit-call-provider";
+        var provider = CreateConstructionClassMethodProvider(
+            providerIdentity, "Box", "type.box", "Box.Read",
+            schemaIdentity, unitParameter: true);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, provider),
+            providerIdentity, [], ["type.box"]);
+        var consumer = Compilation.CreateLibrary(
+            SyntaxTree.Parse(consumerSource), reference);
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)consumer.Program!,
+            "construction2-unit-call-consumer", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex.ForC1M1Construction2Draft(artifact));
+        Assert.That(tables.Methods.Count, Is.EqualTo(4));
+    }
+
+    [Test]
     public void Construction2RejectsWritableReceiverOnImmutableClass()
     {
         const string schemaIdentity
@@ -1347,12 +1378,15 @@ internal sealed partial class CliTests
     private static byte[] CreateConstructionClassMethodProvider(
         string moduleIdentity, string typeName, string exportKey,
         string methodExportKey, string schemaIdentity,
-        bool mutableType = false, bool mutableReceiver = false)
+        bool mutableType = false, bool mutableReceiver = false,
+        bool unitParameter = false)
     {
         var typeMutability = mutableType ? "mut " : string.Empty;
         var methodMutability = mutableReceiver ? "mut " : string.Empty;
+        var methodParameters = unitParameter
+            ? "int32 value, void token" : "int32 value";
         var tree = SyntaxTree.Parse(
-            $"public {typeMutability}class {typeName} {{ public int32 Value; public {typeName}(int32 initial) {{ Value = initial; }} public {methodMutability}int32 Read(int32 value) {{ return value; }} }}");
+            $"public {typeMutability}class {typeName} {{ public int32 Value; public {typeName}(int32 initial) {{ Value = initial; }} public {methodMutability}int32 Read({methodParameters}) {{ return value; }} }}");
         var compilation = Compilation.CreateLibrary(tree);
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));

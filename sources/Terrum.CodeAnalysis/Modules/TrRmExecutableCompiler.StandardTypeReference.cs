@@ -1424,7 +1424,7 @@ public static partial class TrRmExecutableCompiler
                             out var isImplicitRef))
                     {
                         throw Unsupported(
-                            "The bounded CM1 class source reference supports scalar, selected class-handle or plain checked-reference member parameters.");
+                            "The bounded CM1 class source reference supports unit, scalar, selected class-handle or plain checked-reference member parameters.");
                     }
 
                     variables.Add(new BoundVariable(parameter.Name,
@@ -1631,7 +1631,7 @@ public static partial class TrRmExecutableCompiler
                                 out var isImplicitRef))
                         {
                             throw Unsupported(
-                                "The bounded CM1 class source reference supports scalar, selected class-handle or plain checked-reference imported member parameters.");
+                                "The bounded CM1 class source reference supports unit, scalar, selected class-handle or plain checked-reference imported member parameters.");
                         }
 
                         variables.Add(new BoundVariable(parameter.Name,
@@ -1806,6 +1806,16 @@ public static partial class TrRmExecutableCompiler
             if (flags > 1)
             {
                 return false;
+            }
+
+            var parameterTypeSpec = rootTables.TypeSpecs.GetTypeSpecRef(
+                typeSpecReference);
+            if (!parameterTypeSpec.IsRow
+                && parameterTypeSpec.Form == 1
+                && parameterTypeSpec.Qualifiers == 0
+                && parameterTypeSpec.TypeCode == 0)
+            {
+                return flags == 0;
             }
 
             if (TryGetScalarType(typeSpecReference, out type))

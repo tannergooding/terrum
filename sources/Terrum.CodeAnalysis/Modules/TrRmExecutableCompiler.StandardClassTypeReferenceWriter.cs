@@ -10223,6 +10223,11 @@ public static partial class TrRmExecutableCompiler
                 byte Qualifiers), uint>();
         uint SourceFunctionTypeSpecReference(PrimitiveType type)
         {
+            if (type == PrimitiveType.Void)
+            {
+                return 0xF200_0000u;
+            }
+
             if (TryGetC1M1SourceScalarTypeSpecReference(type,
                     out var scalarTypeSpecReference))
             {
@@ -10384,8 +10389,7 @@ public static partial class TrRmExecutableCompiler
                     var parameter = function.Variables[ordinal];
                     if (parameter.IsMutable || parameter.IsOut
                         || parameter.IsInit || parameter.IsImplicitRef
-                        || parameter.IsInitializationLocal
-                        || parameter.Type == PrimitiveType.Void)
+                        || parameter.IsInitializationLocal)
                     {
                         throw Unsupported(
                             "A local class-reference function parameter must be an immutable value formal.");
@@ -11258,6 +11262,23 @@ public static partial class TrRmExecutableCompiler
                 "The ordinary class call target has a receiver outside the direct Construction-2 access contract.");
         }
 
+        var typeTokens = new List<uint>(function.ParameterCount);
+        var homeIndexByVariable = new int[function.ParameterCount];
+        Array.Fill(homeIndexByVariable, -1);
+        for (var parameter = 0; parameter < function.ParameterCount;
+            parameter++)
+        {
+            if (function.Variables[parameter].Type == PrimitiveType.Void)
+            {
+                continue;
+            }
+
+            var typeToken = CreateStandardBodyTypeMapToken(
+                typeSpecReferenceFor(function.Variables[parameter].Type));
+            homeIndexByVariable[parameter] = typeTokens.Count;
+            typeTokens.Add(typeToken);
+        }
+
         var inputSeen = new bool[targetFunction.ParameterCount];
         var callInputs = new TrRmRegisterBodyCallInput[
             targetFunction.ParameterCount];
@@ -11267,32 +11288,69 @@ public static partial class TrRmExecutableCompiler
             var formalOrdinal = call.ParameterIndex(argumentIndex);
             if ((uint)formalOrdinal >= (uint)targetFunction.ParameterCount
                 || inputSeen[formalOrdinal]
-                || call.ImplicitReferenceTemporary(argumentIndex) != -1
-                || call.Arguments[argumentIndex] is not BoundRead read
+                || call.ImplicitReferenceTemporary(argumentIndex) != -1)
+            {
+                throw Unsupported(
+                    "The ordinary class call Body requires direct, distinct value-formal Homes for every non-unit MethodSig input.");
+            }
+
+            var targetVariable = targetFunction.Variables[formalOrdinal];
+            if (formalOrdinal > 0
+                && (method.Parameters[formalOrdinal - 1].Mode != 0
+                    || method.Parameters[formalOrdinal - 1].Flags != 0
+                    || method.Parameters[formalOrdinal - 1]
+                        .DefaultValue is not null))
+            {
+                throw Unsupported(
+                    "The ordinary class call Body does not encode parameter modes, flags or defaults.");
+            }
+
+            var argument = call.Arguments[argumentIndex];
+            if (targetVariable.Type == PrimitiveType.Void)
+            {
+                var isUnitActual = argument is BoundConstant {
+                    Type: PrimitiveType.Void,
+                    RepresentationType: PrimitiveType.Void,
+                } || argument is BoundRead unitRead
+                    && (uint)unitRead.Variable
+                        < (uint)function.ParameterCount
+                    && unitRead.Type == PrimitiveType.Void
+                    && function.Variables[unitRead.Variable].Type
+                        == PrimitiveType.Void
+                    && !function.Variables[unitRead.Variable].IsOut
+                    && !function.Variables[unitRead.Variable].IsInit
+                    && !function.Variables[unitRead.Variable].IsImplicitRef
+                    && !function.Variables[unitRead.Variable]
+                        .IsInitializationLocal;
+                if (!isUnitActual)
+                {
+                    throw Unsupported(
+                        "A unit class-method formal requires a direct unit value and carries no CallSite Home.");
+                }
+
+                callInputs[formalOrdinal] = new(0, 0, 0);
+                inputSeen[formalOrdinal] = true;
+                continue;
+            }
+
+            if (argument is not BoundRead read
                 || (uint)read.Variable >= (uint)function.ParameterCount
                 || read.Type != function.Variables[read.Variable].Type)
             {
                 throw Unsupported(
-                    "The ordinary class call Body requires direct, distinct value-formal Homes for every selected MethodSig input.");
+                    "The ordinary class call Body requires direct, distinct value-formal Homes for every non-unit MethodSig input.");
             }
 
-            var targetVariable = targetFunction.Variables[formalOrdinal];
             var sourceVariable = function.Variables[read.Variable];
             if (sourceVariable.IsMutable || sourceVariable.IsOut
                 || sourceVariable.IsInit || sourceVariable.IsImplicitRef
                 || sourceVariable.IsInitializationLocal
                 || targetVariable.IsOut || targetVariable.IsInit
                 || targetVariable.IsImplicitRef
-                || targetVariable.IsInitializationLocal
-                || (formalOrdinal > 0
-                    && (method.Parameters[formalOrdinal - 1].Mode != 0
-                        || method.Parameters[formalOrdinal - 1].Flags != 0
-                        || method.Parameters[formalOrdinal - 1]
-                            .DefaultValue is not null))
-                || targetVariable.Type == PrimitiveType.Void)
+                || targetVariable.IsInitializationLocal)
             {
                 throw Unsupported(
-                    "The ordinary class call Body does not encode mutable, output, initialization, implicit-reference or unit formals.");
+                    "The ordinary class call Body does not encode mutable, output, initialization or implicit-reference formals.");
             }
 
             if (formalOrdinal == 0)
@@ -11328,11 +11386,18 @@ public static partial class TrRmExecutableCompiler
                     "An ordinary class call value actual differs from its selected MethodSig formal.");
             }
 
+            var sourceHomeIndex = homeIndexByVariable[read.Variable];
+            if (sourceHomeIndex < 0)
+            {
+                throw Unsupported(
+                    "A non-unit class call input has no materialized formal Home.");
+            }
+
             callInputs[formalOrdinal] = new(2,
                 formalOrdinal == 0
                     ? targetWritable ? (byte)4 : (byte)3
                     : (byte)1,
-                checked((ushort)read.Variable));
+                checked((ushort)sourceHomeIndex));
             inputSeen[formalOrdinal] = true;
         }
 
@@ -11342,38 +11407,32 @@ public static partial class TrRmExecutableCompiler
                 "The ordinary class call Body omits its receiver or a selected MethodSig formal.");
         }
 
-        var typeTokens = new uint[function.ParameterCount];
-        var homeMap = new byte[checked(function.ParameterCount * 8)];
+        var homeMap = new byte[checked(typeTokens.Count * 8)];
         for (var parameter = 0; parameter < function.ParameterCount;
             parameter++)
         {
-            if (function.Variables[parameter].Type == PrimitiveType.Void)
+            var homeIndex = homeIndexByVariable[parameter];
+            if (homeIndex < 0)
             {
-                throw Unsupported(
-                    "The ordinary class call Body does not materialize unit-valued formal Homes.");
+                continue;
             }
 
-            var typeToken = CreateStandardBodyTypeMapToken(
-                typeSpecReferenceFor(function.Variables[parameter].Type));
-            typeTokens[parameter] = typeToken;
-            var offset = parameter * 8;
+            var offset = homeIndex * 8;
             homeMap[offset] = 2;
-            BinaryPrimitives.WriteUInt16LittleEndian(
-                homeMap.AsSpan(offset + 4, 2),
-                checked((ushort)parameter));
+            BinaryPrimitives.WriteUInt16LittleEndian(homeMap.AsSpan(
+                offset + 4, 2), checked((ushort)parameter));
         }
 
         var targetMethodToken
             = 0x1600_0000u | checked((uint)targetMethodDefRow);
         var maps = TrRmRegisterBodyMapBuilder.Create(typeTokens,
             [targetMethodToken]);
-        for (var parameter = 0; parameter < function.ParameterCount;
-            parameter++)
+        for (var homeIndex = 0; homeIndex < typeTokens.Count; homeIndex++)
         {
             BinaryPrimitives.WriteUInt16LittleEndian(
-                homeMap.AsSpan(parameter * 8 + 2, 2),
+                homeMap.AsSpan(homeIndex * 8 + 2, 2),
                 checked((ushort)maps.GetTypeMapIndex(
-                    typeTokens[parameter])));
+                    typeTokens[homeIndex])));
         }
 
         var callSite = TrRmRegisterBodyRecordWriter.EncodeCallSite(1, 1,
