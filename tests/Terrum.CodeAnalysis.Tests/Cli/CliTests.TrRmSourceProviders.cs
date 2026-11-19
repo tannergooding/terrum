@@ -1091,6 +1091,73 @@ internal sealed partial class CliTests
         }
     }
 
+    [Test]
+    public async Task CompileTrRmBindsVersionTwoConstructionClassMethodProviderAsync()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1";
+        const string providerIdentity
+            = "source-provider-cli-construction-method-provider";
+        var providerArtifact = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"source-provider-cli-construction-method-{Guid.NewGuid():N}.trrm");
+        var providerSelections = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"source-provider-cli-construction-method-{Guid.NewGuid():N}.json");
+        var consumerArtifact = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"source-provider-cli-construction-method-{Guid.NewGuid():N}.trrm");
+        try
+        {
+            var provider = CreateConstructionClassMethodProvider(
+                providerIdentity,
+                "Box", "type.box", "Box.Read", schemaIdentity);
+            var reference = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, provider),
+                providerIdentity, [], ["type.box"]);
+            var method = reference.Functions.Single(function =>
+                function.Name == "Box.Read");
+            Assert.That(method.Variables[1].Name, Is.EqualTo("value"));
+            await File.WriteAllBytesAsync(providerArtifact, provider)
+                .ConfigureAwait(true);
+            var configuration = JsonSerializer.Serialize(new {
+                schemaVersion = 2,
+                providers = new[] {
+                    new { schemaIdentity, path = providerArtifact },
+                },
+                references = new[] {
+                    new {
+                        providerInputOrdinal = 0,
+                        moduleIdentity = providerIdentity,
+                        typeExportKeys = new[] { "type.box" },
+                        fieldExportKeys = Array.Empty<string>(),
+                    },
+                },
+            });
+            await File.WriteAllTextAsync(providerSelections, configuration,
+                new UTF8Encoding(false)).ConfigureAwait(true);
+
+            var (exit, result, error) = await RunAsync(
+                Encoding.UTF8.GetBytes("void Consume(Box value) {}"),
+                "compile-trrm", "-", "--identity",
+                "source-provider-cli-construction-method-consumer",
+                "--trrm-schema", schemaIdentity, "--trrm-source-providers",
+                providerSelections, "--library", "-o", consumerArtifact,
+                "--runtime", "fail-fast", "--json")
+                .ConfigureAwait(false);
+            Assert.That(exit, Is.Zero,
+                $"{result}{Environment.NewLine}{error}");
+            Assert.That(error, Is.Empty);
+            Assert.That(new FileInfo(consumerArtifact).Length, Is.GreaterThan(0));
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(providerArtifact)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(providerSelections)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(consumerArtifact)
+                .ConfigureAwait(true);
+        }
+    }
+
     private static byte[] CreateC1M1ClassProvider(string moduleIdentity,
         string typeName, string exportKey, string schemaIdentity)
     {
@@ -1134,6 +1201,33 @@ internal sealed partial class CliTests
                     exportKey, [
                         new TrRmSourceClassMemberExport(0, field.Span,
                             fieldExportKey),
+                    ]),
+            ]);
+    }
+
+    private static byte[] CreateConstructionClassMethodProvider(
+        string moduleIdentity, string typeName, string exportKey,
+        string methodExportKey, string schemaIdentity)
+    {
+        var tree = SyntaxTree.Parse(
+            $"public class {typeName} {{ public int32 Read(int32 value) {{ return value; }} }}");
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var declaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var method = declaration.Children.OfType<SyntaxNode>().Single(
+            static node => node.Kind == SyntaxKind.FunctionDeclaration);
+        return TrRmExecutableCompiler.EmitStandard(program, moduleIdentity,
+            schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, 0, declaration.Span,
+                    exportKey, [
+                        new TrRmSourceClassMemberExport(0, method.Span,
+                            methodExportKey),
                     ]),
             ]);
     }

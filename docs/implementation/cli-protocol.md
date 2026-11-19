@@ -100,17 +100,18 @@ provider options, or schema admission.
 The [version-2 C1 source-provider candidate](../proposals/standard-trrm-c1-source-provider-cli-transport.md)
 adds a closed exact schema set. Its reader, pairing gate and single-reference
 C1M1/CM1/CM1AR1 and method-free Construction-1/2 type/primitive-field
-selection, plus EN1 C1/Construction-2 class-field layout selection paths, are
-implemented through the checked explicit-root factories.
+selection, plus bodyful nongeneric ordinary class-method views under the
+Construction-1/2 schemas and EN1 C1/Construction-2 class-field layout
+selection paths, are implemented through the checked explicit-root factories.
 The checked reference composer also
 supports multiple disjoint C1M1/CM1/CM1AR1, method-free Construction-1/2 and
 bounded EN1 class roots with primitive fields and explicit FieldDef
 selections, but without class-valued dependencies, enum/struct closure,
 methods, layouts or imported expectations. CLI binding and composition
-regressions are added but unverified under the active hold. Multi-reference
-class-valued fields/member/provider-expectation views, constructor-bearing
-Construction-1/2, PI1 and other EN1 schema variants, mixed class/type
-composition and composition with the separate
+regressions are added but unverified under the active hold. Constructor I/P
+invocation, generic/overloaded or mutable class methods, multi-reference
+class-valued fields/member/provider-expectation views, PI1 and other EN1 schema
+variants, mixed class/type composition and composition with the separate
 class-source publication file remain open; the candidate schema gate alone
 does not establish those routes.
 Artifact commands accept exact per-artifact schema identities and a root

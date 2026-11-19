@@ -286,9 +286,9 @@ public static partial class TrRmExecutableCompiler
             schemaIdentities[0]);
         var isCM1 = StandardGenericMethodSchema.IsCM1ClassParameterDefaults(
             schemaIdentities[0]);
-        var isConstruction = schemaIdentities[0] is
-            StandardC1M1ConstructionL1R1SchemaIdentity
-            or StandardC1M1Construction2L1R1SchemaIdentity;
+        var isConstruction
+            = IsSelectedC1ClassConstructionSchemaIdentity(
+                schemaIdentities[0]);
         if ((!isEN1 && !isCM1 && !isConstruction
                 && !StringComparer.Ordinal.Equals(schemaIdentities[0],
                     StandardC1M1SchemaIdentity))
@@ -330,7 +330,7 @@ public static partial class TrRmExecutableCompiler
             = rootTables.Modules.GetMethodDefRange(rootModuleRow);
         if (rootTables.Modules.GetEntryMethod(rootModuleRow) != 0
             || (methodStart != methodEnd && !allowClassLayoutQueryBody
-                && !isCM1))
+                && !isCM1 && !isConstruction))
         {
             throw Unsupported(
                 "The bounded class source-reference projection does not retain MethodDefs for this exact schema.");
@@ -2309,6 +2309,8 @@ public static partial class TrRmExecutableCompiler
             var hasClassParameterSurface
                 = tables.Schema.UsesClassParameterDefaults()
                     && genericParameterCount == 0;
+            var hasParameterLabels
+                = tables.Schema.UsesMethodParameterLabels();
             var parameters = ImmutableArray.CreateBuilder<
                 BoundStandardClassMethodParameter>(parameterCount);
             for (var ordinal = 0; ordinal < parameterCount; ordinal++)
@@ -2317,12 +2319,21 @@ public static partial class TrRmExecutableCompiler
                 var name = "arg" + ordinal.ToString(
                     System.Globalization.CultureInfo.InvariantCulture);
                 BoundConstant? defaultValue = null;
-                if (hasClassParameterSurface)
+                if (hasParameterLabels)
                 {
                     if (!tables.MethodParameterLabels.TryGetNameStringRow(
                             methodRow, checked((uint)ordinal),
-                            out var nameStringRow)
-                        || !tables.MethodParameterLabels
+                            out var nameStringRow))
+                    {
+                        throw Invalid(
+                            "A class MethodDef has an incomplete parameter-label surface.");
+                    }
+
+                    name = tables.Strings.DecodeName(nameStringRow);
+                }
+                if (hasClassParameterSurface)
+                {
+                    if (!tables.MethodParameterLabels
                             .TryGetDefaultConstantSourceRow(methodRow,
                                 checked((uint)ordinal),
                                 out var constantSourceRow))
@@ -2331,7 +2342,6 @@ public static partial class TrRmExecutableCompiler
                             "A CM1 class MethodDef has an incomplete parameter surface.");
                     }
 
-                    name = tables.Strings.DecodeName(nameStringRow);
                     if (constantSourceRow != 0)
                     {
                         var ownerModule
@@ -2438,12 +2448,14 @@ public static partial class TrRmExecutableCompiler
         var schemaIdentity = schemaIdentities[artifactIndex];
         if (!StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardC1M1SchemaIdentity)
-            && !StringComparer.Ordinal.Equals(schemaIdentity,
-                StandardC1M1Construction2L1R1ClassParameterDefaultsSchemaIdentity)
+            && !StandardGenericMethodSchema
+                .IsCM1ClassParameterDefaults(schemaIdentity)
+            && !IsSelectedC1ClassConstructionSchemaIdentity(
+                schemaIdentity)
             && !IsSelectedC1EnumClosureSchemaIdentity(schemaIdentity))
         {
             throw Unsupported(
-                "The C1 class provider closure requires exact C1M1, CM1 or EN1 selections.");
+                "The C1 class provider closure requires an exact supported C1, CM1, Construction or EN1 selection.");
         }
 
         var tables = ValidateForeignInvocationArtifact(
@@ -2453,6 +2465,16 @@ public static partial class TrRmExecutableCompiler
         EnsureC1ClassDeclarationTablesSupported(tables);
         return tables;
     }
+
+    private static bool IsSelectedC1ClassConstructionSchemaIdentity(
+        string schemaIdentity)
+        => schemaIdentity is
+            StandardC1M1ConstructionL1R1SchemaIdentity
+            or StandardC1M1Construction2L1R1SchemaIdentity
+            or StandardC1M1ConstructionL1R1EnumClosureSchemaIdentity
+            or StandardC1M1Construction2L1R1EnumClosureSchemaIdentity
+            or StandardC1M1ConstructionL1R1ClassInstanceLayoutSchemaIdentity
+            or StandardC1M1Construction2L1R1ClassInstanceLayoutSchemaIdentity;
 
     private static ImmutableArray<string> GetStandardTypeExportKeys(
         TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
