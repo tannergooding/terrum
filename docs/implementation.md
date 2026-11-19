@@ -142,11 +142,11 @@ encoding and exact FieldDef/owner TypeDef Import checks are implemented. A
 static method can also Copy-store a scalar formal or canonical scalar
 ConstantMap/SF1 value to one selected public mutable imported FieldDef through
 a write-qualified class-handle formal using Body-01 D8 and SemanticStore.
-Direct producer/consumer/provider-replacement and unselected-field rejection,
-plus a Leaf-to-Wrapper-to-Container provider-chain regression covering
-compatible TypeDef-row relocation and incompatible replacement, plus
-write-qualified field-store and readonly-authority rejection regressions, are
-added but remain unverified under the active hold. Further provider
+Direct producer/consumer/provider-replacement, unselected-field rejection and
+multiple-ExportKey alias regressions, plus a Leaf-to-Wrapper-to-Container
+provider-chain regression covering compatible TypeDef-row relocation and
+incompatible replacement, and write-qualified field-store/readonly-authority
+rejections, are added but remain unverified under the active hold. Further provider
 alias/closure cases, optional wrappers, nested imported-class dereferences,
 aggregate imported-field stores and source-free class member re-emission
 remain open.
