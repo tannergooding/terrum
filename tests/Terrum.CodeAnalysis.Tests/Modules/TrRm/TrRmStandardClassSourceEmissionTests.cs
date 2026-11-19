@@ -1305,6 +1305,149 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
+    public void EmitsClassFieldBodiesThroughImportedStructFieldStubs()
+    {
+        var schemaIdentity
+            = C1M1Construction2ClassParameterDefaultsSchemaIdentity;
+        var providerTree = SyntaxTree.Parse("""
+            public struct Leaf {
+                public mut int32 Id;
+            }
+            """);
+        var providerCompilation = Compilation.CreateLibrary(providerTree);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerProgram = (BoundProgram)providerCompilation.Program!;
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, "ImportedStructProvider", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement, [
+                new TrRmSourceTypeExport(string.Empty, "Leaf", "LeafKey") {
+                    FieldExports = [
+                        new TrRmSourceFieldExport("Id", "Leaf.Id"),
+                    ],
+                },
+            ]);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, providerArtifact),
+            "ImportedStructProvider", [], ["LeafKey"]);
+
+        var tree = SyntaxTree.Parse("""
+            public mut class Box {
+                private mut Leaf _leaf;
+                public Box(Leaf leaf) { _leaf = leaf; }
+                public int32 ReadId() { return _leaf.Id; }
+                public mut void SetId(int32 value) {
+                    this._leaf.Id = value;
+                }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree, reference);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var members = classDeclaration.Children.OfType<SyntaxNode>();
+        var constructor = members.Single(static node =>
+            node.Kind == SyntaxKind.ConstructorDeclaration);
+        var read = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "ReadId"));
+        var write = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "SetId"));
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "ImportedClassFieldBodies", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, 0,
+                    classDeclaration.Span, "BoxKey", [
+                        new TrRmSourceClassMemberExport(0,
+                            constructor.Span, "Box.Initialize") {
+                            ConstructionProjectionExportKey = "Box.Create",
+                        },
+                        new TrRmSourceClassMemberExport(0, read.Span,
+                            "Box.ReadId"),
+                        new TrRmSourceClassMemberExport(0, write.Span,
+                            "Box.SetId"),
+                    ]),
+            ]);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                        artifact));
+        Assert.That(tables.Imports.Count, Is.EqualTo(2));
+        Assert.That(Enumerable.Range(1, tables.Imports.Count)
+                .Select(row => tables.Imports
+                    .GetExpectedDefinitionForImportRow(row) >> 24),
+            Is.EquivalentTo([0x13u, 0x14u]));
+
+        var leafTypeDefRow = Enumerable.Range(1, tables.TypeDefs.Count)
+            .Single(row => tables.TypeDefs.GetName(row) == "Leaf");
+        var (leafFieldRow, _) = tables.TypeDefs.GetFieldRange(
+            leafTypeDefRow);
+        var boxTypeDefRow = Enumerable.Range(1, tables.TypeDefs.Count)
+            .Single(row => tables.TypeDefs.GetName(row) == "Box");
+        var (boxFieldRow, _) = tables.TypeDefs.GetFieldRange(boxTypeDefRow);
+        var fieldType = tables.TypeSpecs.GetTypeSpecRef(
+            tables.Fields.GetTypeSpecRef(boxFieldRow));
+        Assert.That(fieldType.Form, Is.EqualTo((byte)0x03));
+        Assert.That(fieldType.Row, Is.EqualTo(1));
+        Assert.That(tables.Imports.GetExpectedDefinitionForImportRow(1),
+            Is.EqualTo(0x1300_0000u | checked((uint)leafTypeDefRow)));
+        Assert.That(tables.Imports.GetExpectedDefinitionForImportRow(2),
+            Is.EqualTo(0x1400_0000u | checked((uint)leafFieldRow)));
+
+        var referenceToBox = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "ImportedClassFieldBodies", [
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    providerArtifact),
+            ], ["BoxKey"]);
+        var consumer = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                int32 Read(Box value) { return value.ReadId(); }
+                """), referenceToBox);
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
+
+        var incompatibleProviderTree = SyntaxTree.Parse("""
+            public struct Leaf {
+                public mut int64 Id;
+            }
+            """);
+        var incompatibleProviderCompilation
+            = Compilation.CreateLibrary(incompatibleProviderTree);
+        Assert.That(incompatibleProviderCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                incompatibleProviderCompilation.Diagnostics));
+        var incompatibleProviderArtifact
+            = TrRmExecutableCompiler.EmitStandard(
+                (BoundProgram)incompatibleProviderCompilation.Program!,
+                "ImportedStructProvider", schemaIdentity,
+                TrRmModuleTableReader.WindowsX64NativeTargetRequirement, [
+                    new TrRmSourceTypeExport(string.Empty, "Leaf",
+                        "LeafKey") {
+                        FieldExports = [
+                            new TrRmSourceFieldExport("Id", "Leaf.Id"),
+                        ],
+                    },
+                ]);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, artifact),
+                "ImportedClassFieldBodies", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        incompatibleProviderArtifact),
+                ], ["BoxKey"]));
+    }
+
+    [Test]
     public void EmitsNestedInlineStructFieldWriteThroughPlaceSelections()
     {
         var tree = SyntaxTree.Parse("""

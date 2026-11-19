@@ -123,8 +123,9 @@ retained public constructors, methods and properties. The bounded C1M1 source
 emitter includes every local source class TypeDef, but exports only explicitly
 selected class roots and mapped fields. It publishes captured class TypeDefs,
 fields, and explicitly mapped public FieldDef
-ExportKeys with scalar, local normal class-handle and plain auto-layout
-local-struct closure. Class field TypeSpecs preserve source write/optional
+ExportKeys with scalar, local normal class-handle, local plain auto-layout
+struct and selected direct imported non-generic auto-layout struct closure.
+Class field TypeSpecs preserve source write/optional
 qualifications without synthesizing GC backing; focused C1M1 and EN1
 regressions remain unverified under the active hold. It rejects mapped
 constructor, method, and property keys rather than
@@ -139,9 +140,11 @@ P results/contexts and ordinary class receivers; updated fixture regressions
 remain unverified under the active hold. The exact C2 source-class route now
 emits local class TypeDef/FieldDef closure and real role-1 initializer I and
 role-2 projection P MethodDefs, MethodSigs, Params, Construction clauses,
-Feature 25 and Bodies for one non-partial constructor per class whose fields
-are initialized directly from scalar parameters. It preserves explicit I/P
-ExportKeys and does not substitute `ClassTryCreate`; keyed and private-P
+Feature 25 and Bodies for multiple non-partial constructors per class whose
+fields are initialized directly from Copy scalar or recursively safe
+auto-layout struct parameters. Partial-constructor pairs retain the primary
+I/P export identity and use the implementing secondary Body. It preserves
+explicit I/P ExportKeys and does not substitute `ClassTryCreate`; constructor
 producer regressions are added but unverified under the hold.
 Construction-2 class methods emit assigned register Body kind `01` for
 direct-formal returns, fixed-width integer unary/binary operations (bitwise,
@@ -186,11 +189,13 @@ effects, modes and construction roles after TypeSpec remapping while retaining
 separate expected/provider defaults and Import aliases. Provider-source-free
 caller and compatible/incompatible provider regressions are added but remain
 unverified under the active hold. Remaining gaps include non-identity
-instance calls, nested field paths, locals and control flow, properties,
-multiple/partial constructors, class-backed field initialization, source-free
-class method re-emission and its replacement/remapping paths, class FieldDef
-Imports, CLI transport, independent carrier TypeSpec verification, generic
-TypeDef dependencies, interfaces/witnesses outside D1, and runtime execution.
+instance calls, broader nested field paths and aggregate stores, locals and
+control flow, properties, constructor failure/cleanup behavior, class-backed
+field initialization, source-free class method re-emission and its
+replacement/remapping paths, imported class-handle closure, transitive
+imported-struct closure, CLI transport, independent carrier TypeSpec
+verification, generic TypeDef dependencies, interfaces/witnesses outside D1,
+and runtime execution.
 The user-authorized provisional
 [CM1 class parameter-default proposal](proposals/standard-trrm-c1-class-parameter-defaults.md)
 defines the exact candidate owner/schema and remains pending later review.

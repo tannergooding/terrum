@@ -31,6 +31,9 @@ public static partial class TrRmExecutableCompiler
         byte[]? EncodedBody = null,
         BoundBinary? CallBinaryExpression = null);
 
+    private sealed record C1M1SourceImport(
+        int ModuleRefRow, string ExportKey, uint ExpectedDefinitionId);
+
     private readonly record struct C1M1Construction2ConditionalReturn(
         BoundIf Root);
 
@@ -59,20 +62,23 @@ public static partial class TrRmExecutableCompiler
             throw new ArgumentOutOfRangeException(nameof(schema));
         }
 
+        SemanticVerifier.VerifyLibraryReferences(program);
+        var sourceStructDeclarations
+            = CreateC1M1SourceStructDeclarations(program);
         if (!ReferenceEquals(sourceClassExports.Program, program)
             || program.EntryPoint != -1
             || !program.StandardClassDeclarations.IsEmpty
             || !program.InterfaceWitnesses.IsEmpty
             || !program.GenericMethodSignatures.IsEmpty
             || !program.GenericMethodOperatorProtocols.IsEmpty
-            || !program.GenericNominalTypeDefinitions.IsEmpty
-            || !program.GenericNominalTypeInstances.IsEmpty
+            || !HasSupportedC1M1ImportedStructNominalClosure(program,
+                sourceStructDeclarations)
             || (!schema.UsesClassParameterDefaults()
                 && (!program.Interfaces.IsEmpty
-                    || !program.GenericMethodDefinitions.IsEmpty))
+                    || !program.GenericMethodDefinitions.IsEmpty)))
         {
             throw Unsupported(
-                "C1M1 source declaration emission requires captured local non-generic classes without imported class, generic or interface closure.");
+                "C1M1 source declaration emission requires captured local non-generic classes and bounded direct imported struct closure without imported class, generic or interface closure.");
         }
         if (!emitsConstruction2
             && sourceClassExports.Exports.Any(static export =>
@@ -104,7 +110,6 @@ public static partial class TrRmExecutableCompiler
                 "Property backing fields require the exact PI1 schema and cannot be emitted as named FieldDefs.");
         }
 
-        SemanticVerifier.VerifyLibraryReferences(program);
         var exportKeysByClass = new SortedDictionary<int, List<string>>();
         foreach (var export in sourceClassExports.Exports)
         {
@@ -145,8 +150,6 @@ public static partial class TrRmExecutableCompiler
         var localClassIndexes = sourceClassProgram.Declarations
             .Select(static declaration => declaration.ClassIndex)
             .ToHashSet();
-        var sourceStructDeclarations = program.SourceTypeDeclarations
-            .ToDictionary(static declaration => declaration.StructureIndex);
         var pendingTypeDefinitions = new Queue<(bool IsClass, int Index)>(
             exportKeysByClass.Keys.Select(static classIndex =>
                 (IsClass: true, classIndex)));
@@ -186,10 +189,11 @@ public static partial class TrRmExecutableCompiler
             else
             {
                 var structure = program.Structures[pendingDefinition.Index];
-                if (!IsC1M1SourceStructLayoutSupported(structure))
+                if (!IsC1M1SourceStructLayoutSupported(structure,
+                        sourceStructDeclarations[pendingDefinition.Index]))
                 {
                     throw Unsupported(
-                        "C1M1 class declaration closure supports only non-generic local structs with auto layout and no ownership or cleanup contract.");
+                        "C1M1 class declaration closure supports only non-generic local or imported structs with auto layout and no ownership or cleanup contract.");
                 }
 
                 pendingFields = structure.Fields;
@@ -292,6 +296,67 @@ public static partial class TrRmExecutableCompiler
                 (structureIndex, typeDefRow: ordinal + 1))
             .ToDictionary(static item => item.structureIndex,
                 item => item.typeDefRow + exportKeysByClass.Count);
+        var typeImportRowByStructure = new Dictionary<int, int>();
+        var moduleReferences = new List<(
+            string ProducerIdentity, uint TargetRequirement,
+            uint RuntimePolicy)>();
+        var moduleReferenceRows = new Dictionary<(
+            string ProducerIdentity, uint TargetRequirement,
+            uint RuntimePolicy), int>();
+        var imports = new List<C1M1SourceImport>();
+        var importIdentities = new HashSet<(
+            int ModuleRefRow, string ExportKey, uint ExpectedDefinitionId)>();
+
+        int GetModuleRefRow(string producerIdentity,
+            uint targetRequirement, uint runtimePolicy)
+        {
+            var key = (producerIdentity, targetRequirement, runtimePolicy);
+            if (!moduleReferenceRows.TryGetValue(key, out var moduleRefRow))
+            {
+                moduleRefRow = moduleReferences.Count + 1;
+                moduleReferences.Add(key);
+                moduleReferenceRows.Add(key, moduleRefRow);
+            }
+
+            return moduleRefRow;
+        }
+
+        void AddImport(string producerIdentity, uint targetRequirement,
+            uint runtimePolicy, string exportKey, uint expectedDefinitionId)
+        {
+            var moduleRefRow = GetModuleRefRow(producerIdentity,
+                targetRequirement, runtimePolicy);
+            if (importIdentities.Add((moduleRefRow, exportKey,
+                    expectedDefinitionId)))
+            {
+                imports.Add(new C1M1SourceImport(moduleRefRow, exportKey,
+                    expectedDefinitionId));
+            }
+        }
+
+        foreach (var structureIndex in retainedStructureIndexes.Order())
+        {
+            var structure = program.Structures[structureIndex];
+            if (structure.StandardTypeOrigin is not
+                BoundStandardTypeOrigin origin)
+            {
+                continue;
+            }
+
+            var typeDefRow = typeDefRowByStructure[structureIndex];
+            var importKeys = GetC1M1ImportedStructExportKeys(origin);
+            foreach (var exportKey in importKeys)
+            {
+                AddImport(origin.Provider.ModuleIdentity,
+                    origin.Provider.TargetRequirement,
+                    origin.Provider.RuntimePolicy, exportKey,
+                    0x1300_0000u | checked((uint)typeDefRow));
+            }
+
+            typeImportRowByStructure.Add(structureIndex,
+                imports.Count - importKeys.Length + 1);
+        }
+
         var typeDefOrder = exportKeysByClass.Keys
             .Select(static classIndex => (IsClass: true, Index: classIndex))
             .Concat(retainedStructureIndexes.Order().Select(
@@ -350,8 +415,13 @@ public static partial class TrRmExecutableCompiler
                 {
                     typeSpecRow
                         = checked((uint)typeSpecRows.Count + 1);
-                    typeSpecRows.Add(TrRmTypeSpecTableWriter.Reference(0x02,
-                        checked((uint)typeDefRow)));
+                    var typeSpecForm = typeImportRowByStructure.TryGetValue(
+                        structureIndex, out var typeImportRow) ? (byte)0x03
+                        : (byte)0x02;
+                    typeSpecRows.Add(TrRmTypeSpecTableWriter.Reference(
+                        typeSpecForm,
+                        checked((uint)(typeSpecForm == 0x03
+                            ? typeImportRow : typeDefRow))));
                     typeSpecRowByStructure.Add(structureIndex, typeSpecRow);
                 }
 
@@ -589,6 +659,57 @@ public static partial class TrRmExecutableCompiler
             layoutRows.Add(new TrRmLayoutRow(typeDefRow, 0, 0, 0, 0, 0,
                 typeFields.IsEmpty ? 0 : layoutFieldFirst,
                 typeFields.Length));
+        }
+
+        foreach (var structureIndex in retainedStructureIndexes.Order())
+        {
+            var structure = program.Structures[structureIndex];
+            if (structure.StandardTypeOrigin is not
+                BoundStandardTypeOrigin)
+            {
+                continue;
+            }
+
+            for (var fieldIndex = 0;
+                fieldIndex < structure.Fields.Length; fieldIndex++)
+            {
+                var field = structure.Fields[fieldIndex];
+                if (field.StandardFieldOrigin is not
+                    BoundStandardFieldOrigin fieldOrigin)
+                {
+                    continue;
+                }
+
+                if (!fieldOrigin.ExportKeys.IsDefaultOrEmpty)
+                {
+                    if (!IsC1M1ImportedStructFieldImportable(structure,
+                            field))
+                    {
+                        throw Unsupported(
+                            "C1M1 class source emission requires selected public FieldDef exports from the exact imported struct provider.");
+                    }
+
+                    if (!fieldDefRowByStructureAndIndex.TryGetValue((
+                            structureIndex, fieldIndex), out var fieldDefRow))
+                    {
+                        throw new InvalidDataException(
+                            "A selected imported struct FieldDef has no local expected stub.");
+                    }
+
+                    var importKeys
+                        = fieldOrigin.SelectedExportKeys.IsDefaultOrEmpty
+                            ? fieldOrigin.ExportKeys
+                            : fieldOrigin.SelectedExportKeys;
+                    foreach (var exportKey in importKeys)
+                    {
+                        AddImport(fieldOrigin.Provider.ModuleIdentity,
+                            fieldOrigin.Provider.TargetRequirement,
+                            fieldOrigin.Provider.RuntimePolicy, exportKey,
+                            0x1400_0000u
+                                | checked((uint)fieldDefRow));
+                    }
+                }
+            }
         }
 
         foreach (var classExport in sourceClassExports.Exports)
@@ -1461,7 +1582,8 @@ public static partial class TrRmExecutableCompiler
 
         var totalRows = (long)typeDefRows.Count + fieldRows.Count
             + layoutRows.Count + layoutFieldRows.Count
-            + typeSpecRows.Count + exportRows.Count + methodRows.Count
+            + typeSpecRows.Count + exportRows.Count
+            + moduleReferences.Count + imports.Count + methodRows.Count
             + methodSignatureRows.Count + parameterRows.Count
             + parameterSurfaceRows.Count + contractRows.Count
             + bodyRows.Count + featureRows.Count
@@ -1474,6 +1596,8 @@ public static partial class TrRmExecutableCompiler
             || layoutFieldRows.Count > 0xFF_FFFF
             || typeSpecRows.Count > 0xFF_FFFF
             || exportRows.Count > 0xFF_FFFF
+            || moduleReferences.Count > 0xFF_FFFF
+            || imports.Count > 0xFF_FFFF
             || methodRows.Count > 0xFF_FFFF
             || methodSignatureRows.Count > 0xFF_FFFF
             || parameterRows.Count > 0xFF_FFFF
@@ -1531,6 +1655,16 @@ public static partial class TrRmExecutableCompiler
             _ = AddString(exportKey);
         }
 
+        foreach (var (producerIdentity, _, _) in moduleReferences)
+        {
+            _ = AddString(producerIdentity);
+        }
+
+        foreach (var import in imports)
+        {
+            _ = AddString(import.ExportKey);
+        }
+
         var stringBytes = TrRmStringTableWriter.EncodeTextRows(textRows);
         var strings = new TrRmStringTableReader(stringBytes,
             textRows.Count);
@@ -1563,17 +1697,29 @@ public static partial class TrRmExecutableCompiler
         var features = featureRows.Count == 0 ? default
             : new TrRmFeatureTableReader(featureBytes,
                 featureRows.Count, schema);
+        var moduleRefRows = moduleReferences.Select(reference =>
+            new TrRmModuleRefRow(
+                stringRows[reference.ProducerIdentity],
+                reference.TargetRequirement, reference.RuntimePolicy))
+            .ToArray();
         var moduleBytes = TrRmModuleTableWriter.Encode([
             new TrRmModuleRow(moduleIdentityStringRow,
                 moduleTargetRequirement, (uint)program.RuntimePolicy, 0,
                 1, 1, 1, 1,
                 featureRows.Count == 0 ? 0u : 1u,
                 checked((uint)featureRows.Count)),
-        ], strings, 0, typeDefRows.Count, methodRows.Count, 0,
+        ], strings, moduleRefRows.Length, typeDefRows.Count,
+            methodRows.Count, 0,
             featureRows.Count);
         var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
-            0, typeDefRows.Count, methodRows.Count, 0,
+            moduleRefRows.Length, typeDefRows.Count, methodRows.Count, 0,
             featureRows.Count);
+        var moduleRefBytes = moduleRefRows.Length == 0 ? []
+            : TrRmModuleRefTableWriter.Encode(moduleRefRows, strings,
+                modules);
+        var moduleRefs = moduleRefRows.Length == 0 ? default
+            : new TrRmModuleRefTableReader(moduleRefBytes,
+                moduleRefRows.Length, strings, modules);
         var typeDefBytes = TrRmTypeDefTableWriter.Encode(typeDefRows,
             strings, modules, fieldRows.Count, methodRows.Count,
             layoutRows.Count, contractRows.Count, schema);
@@ -1582,11 +1728,12 @@ public static partial class TrRmExecutableCompiler
             methodRows.Count, layoutRows.Count, contractRows.Count, schema);
         var typeSpecBytes = typeSpecRows.Count == 0 ? [] :
             TrRmTypeSpecTableWriter.Encode(typeSpecRows, typeDefRows.Count,
-                0, 0, 0, schema, methodDefCount: methodRows.Count);
+                imports.Count, 0, 0, schema,
+                methodDefCount: methodRows.Count);
         var typeSpecs = new TrRmTypeSpecTableReader(
             typeSpecRows.Count == 0
                 ? new byte[sizeof(uint)] : typeSpecBytes,
-            typeSpecRows.Count, typeDefRows.Count, 0, 0, 0,
+            typeSpecRows.Count, typeDefRows.Count, imports.Count, 0, 0,
             schema, methodDefCount: methodRows.Count);
         var frozenScalarValueTables
             = frozenScalarValueBuilder.Encode(typeSpecs);
@@ -1613,6 +1760,10 @@ public static partial class TrRmExecutableCompiler
             typeDefs, typeSpecs, schema);
         var fields = new TrRmFieldDefTableReader(fieldBytes,
             fieldRows.Count, strings, typeDefs, typeSpecs);
+        var importRows = imports.Select(import =>
+            new TrRmImportRow(import.ModuleRefRow,
+                stringRows[import.ExportKey],
+                import.ExpectedDefinitionId)).ToArray();
         var signatureBytes = methodSignatureRows.Count == 0 ? []
             : TrRmMethodSigTableWriter.Encode(methodSignatureRows,
                 typeSpecs, parameterRows.Count, 0);
@@ -1634,6 +1785,10 @@ public static partial class TrRmExecutableCompiler
             : new TrRmMethodDefTableReader(methodBytes, methodRows.Count,
                 strings, modules, typeDefs, signatures, contractRows.Count,
                 bodyRows.Count, schema);
+        var importBytes = importRows.Length == 0 ? []
+            : TrRmImportTableWriter.Encode(importRows, strings, moduleRefs,
+                typeDefs, methods, default, default, default, fields,
+                features, modules, schema);
         var contractBytes = contractRows.Count == 0 ? []
             : TrRmContractTableWriter.EncodeC1M1Construction2Draft(
                 contractRows, typeDefs, methods, signatures, parameters,
@@ -1674,6 +1829,16 @@ public static partial class TrRmExecutableCompiler
         {
             sections.Add(new TrRmSection(0x0011, 0,
                 checked((uint)typeSpecRows.Count), typeSpecBytes));
+        }
+        if (moduleRefRows.Length != 0)
+        {
+            sections.Add(new TrRmSection(0x0010, 0,
+                checked((uint)moduleRefRows.Length), moduleRefBytes));
+        }
+        if (importRows.Length != 0)
+        {
+            sections.Add(new TrRmSection(0x001C, 0,
+                checked((uint)importRows.Length), importBytes));
         }
         if (methodRows.Count != 0)
         {
@@ -1982,7 +2147,10 @@ public static partial class TrRmExecutableCompiler
             }
 
             var structure = program.Structures[structureIndex];
-            if (!IsC1M1SourceStructLayoutSupported(structure))
+            if (!sourceStructDeclarations.TryGetValue(structureIndex,
+                    out var declaration)
+                || !IsC1M1SourceStructLayoutSupported(structure,
+                    declaration))
             {
                 return false;
             }
@@ -5063,8 +5231,14 @@ public static partial class TrRmExecutableCompiler
                     || (uint)fieldRead.Field
                         >= (uint)program.Structures[structureIndex]
                             .Fields.Length
+                    || !sourceStructDeclarations.TryGetValue(
+                        structureIndex, out var declaration)
                     || !IsC1M1SourceStructLayoutSupported(
-                        program.Structures[structureIndex])
+                        program.Structures[structureIndex], declaration)
+                    || !IsC1M1ImportedStructFieldImportable(
+                        program.Structures[structureIndex],
+                        program.Structures[structureIndex]
+                            .Fields[fieldRead.Field])
                     || !fieldDefRowByStructureAndIndex.TryGetValue((
                         structureIndex, fieldRead.Field),
                         out fieldDefRow))
@@ -5087,8 +5261,11 @@ public static partial class TrRmExecutableCompiler
                         out var nestedStructureIndex)
                     || (uint)nestedStructureIndex
                         >= (uint)program.Structures.Length
+                    || !sourceStructDeclarations.TryGetValue(
+                        nestedStructureIndex, out var nestedDeclaration)
                     || !IsC1M1SourceStructLayoutSupported(
-                        program.Structures[nestedStructureIndex])
+                        program.Structures[nestedStructureIndex],
+                        nestedDeclaration)
                     || fieldPath[index + 1].Receiver.Type != fieldType))
             {
                 return null;
@@ -5248,8 +5425,14 @@ public static partial class TrRmExecutableCompiler
                     || (uint)fieldIndex
                         >= (uint)program.Structures[structureIndex]
                             .Fields.Length
+                    || !sourceStructDeclarations.TryGetValue(
+                        structureIndex, out var declaration)
                     || !IsC1M1SourceStructLayoutSupported(
-                        program.Structures[structureIndex])
+                        program.Structures[structureIndex], declaration)
+                    || !IsC1M1ImportedStructFieldImportable(
+                        program.Structures[structureIndex],
+                        program.Structures[structureIndex]
+                            .Fields[fieldIndex])
                     || !fieldDefRowByStructureAndIndex.TryGetValue((
                         structureIndex, fieldIndex), out fieldDefRow))
                 {
@@ -5273,8 +5456,11 @@ public static partial class TrRmExecutableCompiler
                         out var nestedStructureIndex)
                     || (uint)nestedStructureIndex
                         >= (uint)program.Structures.Length
+                    || !sourceStructDeclarations.TryGetValue(
+                        nestedStructureIndex, out var nestedDeclaration)
                     || !IsC1M1SourceStructLayoutSupported(
-                        program.Structures[nestedStructureIndex])))
+                        program.Structures[nestedStructureIndex],
+                        nestedDeclaration)))
             {
                 return null;
             }
@@ -6254,6 +6440,214 @@ public static partial class TrRmExecutableCompiler
             && structure.CleanupMethod is null
             && structure.StandardTypeOrigin is null
             && structure.SourceGenericTypeDefinitionIndex < 0;
+
+    private static bool IsC1M1SourceStructLayoutSupported(
+        BoundStruct structure, BoundSourceTypeDeclaration declaration)
+    {
+        if (structure.StandardTypeOrigin is not
+            BoundStandardTypeOrigin origin)
+        {
+            return IsC1M1SourceStructLayoutSupported(structure)
+                && structure == declaration.DeclarationSnapshot;
+        }
+
+        if (!structure.StandardLayoutOnly
+            || origin.DefinitionId >> 24 != 0x13
+            || (origin.DefinitionId & 0x00FF_FFFF) == 0
+            || origin.Provider is null
+            || origin.ExportKeys.IsDefaultOrEmpty
+            || origin.SelectedExportKeys.IsDefault
+            || !IsC1M1SourceStructLayoutSupported(
+                declaration.DeclarationSnapshot))
+        {
+            return false;
+        }
+
+        var actual = structure with {
+            Fields = [.. structure.Fields.Select(static field => field with {
+                StandardFieldOrigin = null,
+            })],
+            StandardTypeOrigin = null,
+            StandardLayoutOnly = false,
+        };
+        return actual == declaration.DeclarationSnapshot
+            && (origin.ExpectedDeclaration is null
+                || origin.ExpectedDeclaration
+                    == declaration.DeclarationSnapshot);
+    }
+
+    private static bool IsC1M1ImportedStructFieldImportable(
+        BoundStruct owner, BoundStructField field)
+    {
+        if (owner.StandardTypeOrigin is not
+            BoundStandardTypeOrigin ownerOrigin)
+        {
+            return true;
+        }
+
+        if (field.StandardFieldOrigin is not
+            BoundStandardFieldOrigin fieldOrigin
+            || fieldOrigin.Provider is null
+            || !SameA2SourceTypeProviderSnapshot(fieldOrigin.Provider,
+                ownerOrigin.Provider)
+            || fieldOrigin.DefinitionId >> 24 != 0x14
+            || (fieldOrigin.DefinitionId & 0x00FF_FFFF) == 0
+            || field.IsPrivate || field.IsInternal
+            || fieldOrigin.ExportKeys.IsDefaultOrEmpty)
+        {
+            return false;
+        }
+
+        var exportKeys = fieldOrigin.ExportKeys.ToHashSet(
+            StringComparer.Ordinal);
+        if (exportKeys.Count != fieldOrigin.ExportKeys.Length
+            || exportKeys.Any(static key =>
+                !BoundEnumTypes.IsValidModuleDeclarationKey(key)))
+        {
+            return false;
+        }
+
+        if (!fieldOrigin.SelectedExportKeys.IsDefaultOrEmpty)
+        {
+            var selectedKeys = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var exportKey in fieldOrigin.SelectedExportKeys)
+            {
+                if (!BoundEnumTypes.IsValidModuleDeclarationKey(exportKey)
+                    || !exportKeys.Contains(exportKey)
+                    || !selectedKeys.Add(exportKey))
+                {
+                    return false;
+                }
+            }
+        }
+
+        var actualField = field with {
+            StandardFieldOrigin = null,
+        };
+        return fieldOrigin.ExpectedDeclaration is null
+            || actualField == fieldOrigin.ExpectedDeclaration;
+    }
+
+    private static ImmutableArray<string>
+        GetC1M1ImportedStructExportKeys(
+            BoundStandardTypeOrigin origin)
+    {
+        if (!origin.IsLookupRoot
+            || !origin.Expectations.IsDefaultOrEmpty
+            || origin.SelectedExportKeys.IsDefaultOrEmpty
+            || origin.ExportKeys.IsDefaultOrEmpty)
+        {
+            throw Unsupported(
+                "C1M1 class source emission requires an explicitly selected direct Standard struct TypeDef Export.");
+        }
+
+        var exportKeys = origin.ExportKeys.ToHashSet(StringComparer.Ordinal);
+        var selectedKeys = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var exportKey in origin.SelectedExportKeys)
+        {
+            if (!BoundEnumTypes.IsValidModuleDeclarationKey(exportKey)
+                || !exportKeys.Contains(exportKey)
+                || !selectedKeys.Add(exportKey))
+            {
+                throw Unsupported(
+                    "C1M1 class source emission requires exact selected Standard struct TypeDef ExportKeys.");
+            }
+        }
+
+        return origin.SelectedExportKeys;
+    }
+
+    private static Dictionary<int, BoundSourceTypeDeclaration>
+        CreateC1M1SourceStructDeclarations(BoundProgram program)
+    {
+        var declarations = program.SourceTypeDeclarations.ToDictionary(
+            static declaration => declaration.StructureIndex);
+        for (var structureIndex = 0;
+            structureIndex < program.Structures.Length; structureIndex++)
+        {
+            var structure = program.Structures[structureIndex];
+            if (structure.StandardTypeOrigin is null)
+            {
+                continue;
+            }
+
+            var separator = structure.Name.LastIndexOf('.',
+                StringComparison.Ordinal);
+            var namespaceName = separator < 0
+                ? string.Empty : structure.Name[..separator];
+            var typeName = separator < 0
+                ? structure.Name : structure.Name[(separator + 1)..];
+            var declarationSnapshot = structure with {
+                Fields = [.. structure.Fields.Select(static field => field with {
+                    StandardFieldOrigin = null,
+                })],
+                StandardTypeOrigin = null,
+                StandardLayoutOnly = false,
+            };
+            if (string.IsNullOrEmpty(typeName)
+                || !declarations.TryAdd(structureIndex,
+                    new BoundSourceTypeDeclaration(structureIndex,
+                        namespaceName, typeName,
+                        structure.StandardTypeOrigin.ExpectedDeclaration
+                            ?? declarationSnapshot)))
+            {
+                throw new InvalidDataException(
+                    "A standard struct view has no unique source declaration identity.");
+            }
+        }
+
+        return declarations;
+    }
+
+    private static bool HasSupportedC1M1ImportedStructNominalClosure(
+        BoundProgram program,
+        IReadOnlyDictionary<int, BoundSourceTypeDeclaration>
+            sourceStructDeclarations)
+    {
+        var importedStructIdentities
+            = new HashSet<BoundGenericNominalTypeIdentity>();
+        for (var structureIndex = 0;
+            structureIndex < program.Structures.Length; structureIndex++)
+        {
+            if (sourceStructDeclarations.ContainsKey(structureIndex)
+                && program.Structures[structureIndex]
+                    .StandardTypeOrigin is
+                    BoundStandardTypeOrigin origin)
+            {
+                importedStructIdentities.Add(
+                    new BoundGenericNominalTypeIdentity(
+                        origin.Provider.ModuleIdentity,
+                        origin.Provider.ModuleIdentity,
+                        origin.DefinitionId));
+            }
+        }
+
+        bool IsImportedStructIdentity(
+            BoundGenericNominalTypeIdentity identity)
+            => identity.IsValid && importedStructIdentities.Contains(identity);
+
+        foreach (var definition in program.GenericNominalTypeDefinitions)
+        {
+            if (definition.NominalKind != 1
+                || !definition.Formals.IsEmpty
+                || !IsImportedStructIdentity(definition.Identity))
+            {
+                return false;
+            }
+        }
+
+        foreach (var instance in program.GenericNominalTypeInstances)
+        {
+            if (!instance.Arguments.IsEmpty || instance.Qualifiers != 0
+                || instance.TypeSpecForm is not (0 or 0x02 or 0x03)
+                || !IsImportedStructIdentity(instance.Definition))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     private static byte[] EmitC1M1MetadataClassTypeReference(
         BoundProgram program, string moduleIdentity,
