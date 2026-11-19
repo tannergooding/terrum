@@ -374,6 +374,8 @@ public static partial class TrRmExecutableCompiler
                         rootModuleRow);
             typeProviderBindings
                 = classProviderValidation.TypeBindings;
+            fieldProviderBindings
+                = classProviderValidation.FieldBindings;
             methodProviderBindings
                 = classProviderValidation.MethodBindings;
         }

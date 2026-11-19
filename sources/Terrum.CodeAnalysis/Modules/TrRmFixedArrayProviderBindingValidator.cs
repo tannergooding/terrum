@@ -40,6 +40,7 @@ internal readonly record struct TrRmStandardFieldProviderValidation(
 
 internal readonly record struct TrRmStandardClassProviderValidation(
     ImmutableArray<TrRmStandardTypeProviderBinding> TypeBindings,
+    ImmutableArray<TrRmStandardFieldProviderBinding> FieldBindings,
     ImmutableArray<TrRmStandardMethodProviderBinding> MethodBindings);
 
 internal readonly record struct TrRmStandardMethodTypeSpecPair(
@@ -168,10 +169,17 @@ internal static class TrRmFixedArrayProviderBindingValidator
             && schemaIdentities.All(schemaIdentity =>
                 StringComparer.Ordinal.Equals(schemaIdentity,
                     schemaIdentities[0]));
+        var isC1M1ProviderSchema = schemaIdentities.Length != 0
+            && IsC1M1SchemaIdentity(schemaIdentities[0])
+            && schemaIdentities.All(schemaIdentity =>
+                StringComparer.Ordinal.Equals(schemaIdentity,
+                    schemaIdentities[0]));
         if (consumer.Schema is not (TrRmArtifactSchema.Standard
                 or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft
                 or TrRmArtifactSchema.C1Draft
-                or TrRmArtifactSchema.C1M1Draft)
+                or TrRmArtifactSchema.C1M1Draft
+                or TrRmArtifactSchema
+                    .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft)
             && !(consumer.Schema.UsesC1EnumClosure()
                 && isEN1ProviderSchema)
             || artifacts.Length != schemaIdentities.Length
@@ -190,7 +198,7 @@ internal static class TrRmFixedArrayProviderBindingValidator
                 StringComparer.Ordinal.Equals(schemaIdentity,
                     LayoutQueriesSchemaIdentity));
         if (!layoutQueries && !nestedFieldDestinations
-            && !isEN1ProviderSchema)
+            && !isEN1ProviderSchema && !isC1M1ProviderSchema)
         {
             throw new InvalidDataException(
                 "Invalid TRRM Standard FieldDef provider binding.");
@@ -203,6 +211,8 @@ internal static class TrRmFixedArrayProviderBindingValidator
                 && !(nestedFieldDestinations
                     && StringComparer.Ordinal.Equals(schemaIdentity,
                         InitializationReferenceNestedFieldDestinationsSchemaIdentity))
+                && !(isC1M1ProviderSchema
+                    && IsC1M1SchemaIdentity(schemaIdentity))
                 && !(isEN1ProviderSchema
                     && TrRmExecutableCompiler
                         .IsSelectedC1EnumClosureSchemaIdentity(
@@ -216,7 +226,7 @@ internal static class TrRmFixedArrayProviderBindingValidator
         var context = new ValidationContext(consumer, artifacts,
             schemaIdentities, modules, a3ResourceLedger: null);
         return context.ValidateFieldDefImports(rootModuleRow,
-            nestedFieldDestinations);
+            nestedFieldDestinations, isC1M1ProviderSchema);
     }
 
     internal static ImmutableArray<TrRmStandardTypeProviderBinding>
@@ -271,8 +281,11 @@ internal static class TrRmFixedArrayProviderBindingValidator
             schemaIdentities, modules, a3ResourceLedger: null);
         var typeBindings
             = context.ValidateC1M1TypeDefImports(rootModuleRow);
+        var fieldValidation = context.ValidateFieldDefImports(rootModuleRow,
+            nestedFieldDestinations: false,
+            allowC1M1MethodImports: true);
         return new TrRmStandardClassProviderValidation(typeBindings,
-            context.MethodProviderBindings);
+            fieldValidation.FieldBindings, context.MethodProviderBindings);
     }
 
     internal static TrRmStandardTypeProviderBinding
@@ -544,7 +557,8 @@ internal static class TrRmFixedArrayProviderBindingValidator
 
         internal TrRmStandardFieldProviderValidation
             ValidateFieldDefImports(int rootModuleRow,
-                bool nestedFieldDestinations)
+                bool nestedFieldDestinations,
+                bool allowC1M1MethodImports = false)
         {
             if (_artifacts.Length != _schemaIdentities.Length
                 || _artifacts.Length == 0 || rootModuleRow <= 0
@@ -680,7 +694,8 @@ internal static class TrRmFixedArrayProviderBindingValidator
                                 throw InvalidFieldBinding();
                             }
                             if (!isRootModule
-                                && nestedFieldDestinations
+                                && (nestedFieldDestinations
+                                    || allowC1M1MethodImports)
                                 && (expectedDefinition >> 24) == 0x16)
                             {
                                 usedModuleRefs[moduleRefRow] = true;
@@ -804,10 +819,15 @@ internal static class TrRmFixedArrayProviderBindingValidator
                         usedModuleRefs[moduleRefRow] = true;
                         continue;
                     }
+                    if (expectedKind == 0x14)
+                    {
+                        usedModuleRefs[moduleRefRow] = true;
+                        continue;
+                    }
                     if (expectedKind != 0x13)
                     {
                         throw new NotSupportedException(
-                            "A selected C1 class type-reference Module may retain only TypeDef and MethodDef Imports.");
+                            "A selected C1 class type-reference Module may retain only TypeDef, FieldDef and MethodDef Imports.");
                     }
 
                     var resolution = ResolveImport(module.ArtifactIndex,

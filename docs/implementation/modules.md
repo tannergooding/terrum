@@ -216,13 +216,14 @@ including owner/signature/parameter rows, aliases, Effects and class parameter
 surfaces/defaults without copying provider Bodies. It also re-emits local
 public nongeneric MethodDefs with Body-01 Bodies only when every TypeMap entry
 is inline F2/F3 or row-backed, MethodMap entries target retained local/imported
-MethodDefs, and FieldMap entries target retained local FieldDefs, and only
-under the exact Construction-2/CM1 profile. TypeMap TypeSpecs and FieldDef
-rows follow the remapped metadata; MethodDef/Body rows and method ExportKeys
-are remapped. ConstantMap is limited to inline scalar TypeSpecs with frozen
-scalar ConstantSources; its scalar values are rebuilt into the output
-Blob/FrozenValueNode/ConstantSource tables. Imported FieldDef/FieldPath targets,
-other ConstantMap forms and contract-row Body references reject re-emission,
+MethodDefs, and FieldMap entries target retained local FieldDefs or selected
+class FieldDef Imports under their exact owner TypeDef Imports, and only under
+the exact Construction-2/CM1 profile. TypeMap TypeSpecs, FieldDef/Import
+tokens, MethodDef/Body rows and method ExportKeys follow the retained maps.
+ConstantMap is limited to inline scalar TypeSpecs with frozen scalar
+ConstantSources; its scalar values are rebuilt into the output
+Blob/FrozenValueNode/ConstantSource tables. Imported-struct FieldDefs,
+FieldPath targets, other ConstantMap forms and contract-row Body references reject re-emission,
 while imported MethodDef expectation Bodies remain provider-owned.
 Provider/owner-row relocation and
 compatible/incompatible replacement, local Body producer/consumer and scalar

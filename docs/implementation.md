@@ -229,12 +229,14 @@ construction-role methods outside the selected R1 route remain unsupported in
 this slice. It also re-emits local public nongeneric MethodDefs whose
 Body-01 Body has inline F2/F3 or row-backed TypeMap entries, MethodMap targets
 retained local/imported MethodDefs and FieldMap targets retained local
-FieldDefs, with ConstantMap entries restricted to inline scalar TypeSpecs and
+FieldDefs or selected class FieldDef Imports under their exact owner TypeDef
+Imports, with ConstantMap entries restricted to inline scalar TypeSpecs and
 frozen-scalar ConstantSource rows, but only under the exact Construction-2/CM1
-profile. Row-backed TypeMap entries, MethodDef/Body rows, FieldDef rows,
-method ExportKeys and scalar ConstantSource/Blob/FrozenValueNode dependencies
-are remapped or rebuilt. Imported FieldDef/FieldPath targets, non-scalar
-ConstantMap forms and contract-row Body references reject re-emission;
+profile. Row-backed TypeMap entries, local/imported MethodDef and FieldDef
+tokens, Body rows and method ExportKeys are remapped; scalar
+ConstantSource/Blob/FrozenValueNode dependencies are rebuilt. Imported-struct
+FieldDefs, FieldPath targets, non-scalar ConstantMap forms and contract-row
+Body references reject re-emission;
 imported MethodDef expectation Bodies remain provider-owned.
 Provider/owner-row relocation and compatible/incompatible replacement
 regressions are added but unverified under the hold. Local Body

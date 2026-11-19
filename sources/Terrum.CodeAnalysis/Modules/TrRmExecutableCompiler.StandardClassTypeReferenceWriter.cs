@@ -7838,6 +7838,11 @@ public static partial class TrRmExecutableCompiler
             foreach (var expectation in declaration.Expectations)
             {
                 AddProviderInput(expectation.Binding.Provider);
+                foreach (var fieldExpectation
+                    in expectation.FieldExpectations)
+                {
+                    AddProviderInput(fieldExpectation.Provider);
+                }
                 foreach (var methodExpectation
                     in expectation.MethodExpectations)
                 {
@@ -7943,6 +7948,8 @@ public static partial class TrRmExecutableCompiler
 
         var bindingsByImportRow = new SortedDictionary<int,
             BoundSourceTypeExpectation>();
+        var fieldBindingsByImportRow = new SortedDictionary<int,
+            BoundStandardClassFieldExpectation>();
         foreach (var declaration in program.StandardClassDeclarations)
         {
             foreach (var expectation in declaration.Expectations)
@@ -7991,6 +7998,76 @@ public static partial class TrRmExecutableCompiler
                     typeViewsByOldRow.Add(expectedTypeDefRow,
                         parsedExpectedView);
                     exportsByOldRow.Add(expectedTypeDefRow, []);
+                }
+
+                foreach (var fieldExpectation
+                    in expectation.FieldExpectations)
+                {
+                    if (fieldExpectation.ImportRow <= 0
+                        || fieldExpectation.ImportRow
+                            > rootTables.Imports.Count)
+                    {
+                        throw new InvalidDataException(
+                            "A retained class FieldDef Import row is out of range.");
+                    }
+
+                    var fieldRow = GetFieldDefRow(
+                        fieldExpectation.ExpectedDefinitionId);
+                    var expectedOwnerTypeDefRow = GetTypeDefRow(
+                        fieldExpectation.ExpectedOwnerDefinitionId);
+                    var fieldModuleRefRow = rootTables.Imports
+                        .GetModuleRefForImportRow(
+                            fieldExpectation.ImportRow);
+                    var fieldImportBinding = rootTables.Imports
+                        .GetBindingForImportRow(
+                            fieldExpectation.ImportRow);
+                    var fieldRequirements = rootTables.ModuleRefs
+                        .GetRequirements(fieldModuleRefRow);
+                    if ((fieldExpectation.ExpectedDefinitionId >> 24)
+                            != 0x14
+                        || (fieldExpectation.ProviderDefinitionId >> 24)
+                            != 0x14
+                        || (fieldExpectation.ExpectedOwnerDefinitionId
+                            >> 24) != 0x13
+                        || (fieldExpectation.ProviderOwnerDefinitionId
+                            >> 24) != 0x13
+                        || fieldExpectation.OwnerImportRow
+                            != binding.ImportRow
+                        || fieldExpectation.ExpectedOwnerDefinitionId
+                            != binding.ExpectedDefinitionId
+                        || fieldExpectation.ProviderOwnerDefinitionId
+                            != binding.ProviderDefinitionId
+                        || rootTables.TypeDefs.GetOwnerModule(
+                            expectedOwnerTypeDefRow) != rootModuleRow
+                        || rootTables.Fields.GetOwnerTypeDef(fieldRow)
+                            != expectedOwnerTypeDefRow
+                        || !rootTables.Imports.IsExpectedDefinition(
+                            fieldExpectation.ExpectedDefinitionId)
+                        || rootTables.Imports
+                            .GetExpectedDefinitionForImportRow(
+                                fieldExpectation.ImportRow)
+                            != fieldExpectation.ExpectedDefinitionId
+                        || rootTables.ModuleRefs.GetOwnerModule(
+                            fieldModuleRefRow) != rootModuleRow
+                        || !SourceTypeSnapshotsMatch(
+                            fieldExpectation.Provider, binding.Provider)
+                        || !StringComparer.Ordinal.Equals(
+                            fieldImportBinding.ExportKey,
+                            fieldExpectation.ExportKey)
+                        || !StringComparer.Ordinal.Equals(
+                            rootTables.ModuleRefs.GetProducerIdentity(
+                                fieldModuleRefRow),
+                            fieldExpectation.Provider.ModuleIdentity)
+                        || fieldRequirements
+                            != (fieldExpectation.Provider.TargetRequirement,
+                                fieldExpectation.Provider.RuntimePolicy)
+                        || !fieldBindingsByImportRow.TryAdd(
+                            fieldExpectation.ImportRow,
+                            fieldExpectation))
+                    {
+                        throw new InvalidDataException(
+                            "A retained class FieldDef Import no longer matches its owner and selected provider.");
+                    }
                 }
             }
         }
@@ -8226,19 +8303,21 @@ public static partial class TrRmExecutableCompiler
             rootImportCount++;
             var definitionKind = rootTables.Imports
                 .GetExpectedDefinitionForImportRow(importRow) >> 24;
-            if (definitionKind is not (0x13 or 0x16)
+            if (definitionKind is not (0x13 or 0x14 or 0x16)
                 || (definitionKind == 0x13
                     ? !bindingsByImportRow.ContainsKey(importRow)
-                    : !methodBindingsByImportRow.ContainsKey(importRow)))
+                    : definitionKind == 0x14
+                        ? !fieldBindingsByImportRow.ContainsKey(importRow)
+                        : !methodBindingsByImportRow.ContainsKey(importRow)))
             {
                 throw new NotSupportedException(
-                    "C1M1 class re-emission only retains selected TypeDef and bodyless class MethodDef Imports.");
+                    "C1M1 class re-emission only retains selected TypeDef, FieldDef and bodyless MethodDef Imports.");
             }
         }
 
         if (typeDefViewsByOldRow.Count == 0
-            || bindingsByImportRow.Count + methodBindingsByImportRow.Count
-                != rootImportCount)
+            || bindingsByImportRow.Count + fieldBindingsByImportRow.Count
+                + methodBindingsByImportRow.Count != rootImportCount)
         {
             throw new InvalidDataException(
                 "The retained C1M1 class provider closure is incomplete.");
@@ -8259,31 +8338,42 @@ public static partial class TrRmExecutableCompiler
             = rootTables.Modules.GetModuleRefRange(rootModuleRow);
         var moduleRefRowsByOldRow = new SortedSet<int>();
         foreach (var importRow in bindingsByImportRow.Keys
+            .Concat(fieldBindingsByImportRow.Keys)
             .Concat(methodBindingsByImportRow.Keys).Order())
         {
             var isMethodImport
                 = methodBindingsByImportRow.TryGetValue(importRow,
                     out var methodBinding);
-            var binding = isMethodImport ? null
+            var isFieldImport
+                = fieldBindingsByImportRow.TryGetValue(importRow,
+                    out var fieldBinding);
+            var binding = isMethodImport || isFieldImport ? null
                 : bindingsByImportRow[importRow];
             var expectedDefinitionId = isMethodImport
                 ? methodBinding!.ExpectedDefinitionId
-                : binding!.ExpectedDefinitionId;
+                : isFieldImport ? fieldBinding!.ExpectedDefinitionId
+                    : binding!.ExpectedDefinitionId;
             var producerIdentity = isMethodImport
                 ? methodBinding!.Provider.ModuleIdentity
-                : binding!.ProducerIdentity;
+                : isFieldImport ? fieldBinding!.Provider.ModuleIdentity
+                    : binding!.ProducerIdentity;
             var exportKey = isMethodImport
-                ? methodBinding!.ExportKey : binding!.ExportKey;
+                ? methodBinding!.ExportKey
+                : isFieldImport ? fieldBinding!.ExportKey
+                    : binding!.ExportKey;
             var targetRequirement = isMethodImport
                 ? methodBinding!.Provider.TargetRequirement
-                : binding!.TargetRequirement;
+                : isFieldImport ? fieldBinding!.Provider.TargetRequirement
+                    : binding!.TargetRequirement;
             var runtimePolicy = isMethodImport
                 ? methodBinding!.Provider.RuntimePolicy
-                : binding!.RuntimePolicy;
+                : isFieldImport ? fieldBinding!.Provider.RuntimePolicy
+                    : binding!.RuntimePolicy;
             if (importRow <= 0 || importRow > rootTables.Imports.Count
                 || (rootTables.Imports
                         .GetExpectedDefinitionForImportRow(importRow) >> 24)
-                    != (isMethodImport ? 0x16u : 0x13u)
+                    != (isMethodImport ? 0x16u
+                        : isFieldImport ? 0x14u : 0x13u)
                 || rootTables.Imports.GetExpectedDefinitionForImportRow(
                     importRow) != expectedDefinitionId
                 || !StringComparer.Ordinal.Equals(
@@ -8338,6 +8428,7 @@ public static partial class TrRmExecutableCompiler
         var importRowMap = new Dictionary<int, int>();
         var nextImportRow = 0;
         foreach (var oldImportRow in bindingsByImportRow.Keys
+            .Concat(fieldBindingsByImportRow.Keys)
             .Concat(methodBindingsByImportRow.Keys).Order())
         {
             importRowMap.Add(oldImportRow, ++nextImportRow);
@@ -8807,6 +8898,10 @@ public static partial class TrRmExecutableCompiler
         {
             AddString(binding.ExportKey);
         }
+        foreach (var binding in fieldBindingsByImportRow.Values)
+        {
+            AddString(binding.ExportKey);
+        }
         foreach (var binding in methodBindingsByImportRow.Values)
         {
             AddString(binding.ExportKey);
@@ -8937,15 +9032,16 @@ public static partial class TrRmExecutableCompiler
             : new TrRmMethodDefTableReader(methodBytes, methodRows.Count,
                 strings, moduleTables, typeDefs, signatures,
                 contractRows.Count, 0, schema);
-        var methodImportRows = CreateC1M1ClassImports(
-            bindingsByImportRow, methodBindingsByImportRow, importRowMap,
-            moduleRefRowMap, typeDefRowMap, methodDefRowMap, stringRows,
+        var classImportRows = CreateC1M1ClassImports(
+            bindingsByImportRow, fieldBindingsByImportRow,
+            methodBindingsByImportRow, importRowMap, moduleRefRowMap,
+            typeDefRowMap, fieldRowMap, methodDefRowMap, stringRows,
             rootTables);
         var featureReader = featureRows.Length == 0 ? default
             : new TrRmFeatureTableReader(featureBytes, featureRows.Length,
                 schema);
-        var importBytes = methodImportRows.Length == 0 ? []
-            : TrRmImportTableWriter.Encode(methodImportRows, strings,
+        var importBytes = classImportRows.Length == 0 ? []
+            : TrRmImportTableWriter.Encode(classImportRows, strings,
                 moduleRefs, typeDefs, methods, default, default, default,
                 fields, featureReader, moduleTables, schema);
         var frozenScalarValueTables
@@ -9020,7 +9116,7 @@ public static partial class TrRmExecutableCompiler
         if (importBytes.Length != 0)
         {
             sections.Add(new TrRmSection(0x001C, 0,
-                checked((uint)methodImportRows.Length), importBytes));
+                checked((uint)classImportRows.Length), importBytes));
         }
         if (exportBytes.Length != 0)
         {
@@ -9655,15 +9751,20 @@ public static partial class TrRmExecutableCompiler
             var token = BinaryPrimitives.ReadUInt32LittleEndian(
                 fieldMap.AsSpan(offset));
             var row = checked((int)(token & 0x00FF_FFFF));
-            if ((byte)(token >> 24) != 0x14
-                || !fieldRowMap.TryGetValue(row, out var remappedRow))
+            var remappedToken = (byte)(token >> 24) switch
             {
-                throw Unsupported(
-                    "CM1 local class MethodDef Body FieldMap targets must be retained local FieldDefs.");
-            }
+                0x14 when fieldRowMap.TryGetValue(row,
+                    out var localFieldRow)
+                    => 0x1400_0000u | checked((uint)localFieldRow),
+                0x1C when importRowMap.TryGetValue(row,
+                    out var fieldImportRow)
+                    => 0x1C00_0000u | checked((uint)fieldImportRow),
+                _ => throw Unsupported(
+                    "CM1 local class MethodDef Body FieldMap targets must be retained local FieldDefs or FieldDef Imports."),
+            };
 
             BinaryPrimitives.WriteUInt32LittleEndian(fieldMap.AsSpan(offset),
-                0x1400_0000u | checked((uint)remappedRow));
+                remappedToken);
         }
 
         var constantMap = body.ConstantMap.ToArray();
@@ -10015,18 +10116,23 @@ public static partial class TrRmExecutableCompiler
 
     private static TrRmImportRow[] CreateC1M1ClassImports(
         SortedDictionary<int, BoundSourceTypeExpectation> bindingsByImportRow,
+        SortedDictionary<int, BoundStandardClassFieldExpectation>
+            fieldBindingsByImportRow,
         SortedDictionary<int, BoundStandardClassMethodExpectation>
             methodBindingsByImportRow,
         Dictionary<int, int> importRowMap,
         Dictionary<int, int> moduleRefRowMap,
         Dictionary<int, int> typeDefRowMap,
+        Dictionary<int, int> fieldRowMap,
         Dictionary<int, int> methodDefRowMap,
         Dictionary<string, int> stringRows,
         TrRmStructuralMetadataValidator.ValidatedExecutionTables sourceTables)
     {
         var rows = new TrRmImportRow[checked(bindingsByImportRow.Count
+            + fieldBindingsByImportRow.Count
             + methodBindingsByImportRow.Count)];
         foreach (var oldImportRow in bindingsByImportRow.Keys
+            .Concat(fieldBindingsByImportRow.Keys)
             .Concat(methodBindingsByImportRow.Keys).Order())
         {
             var newImportRow = importRowMap[oldImportRow];
@@ -10044,6 +10150,19 @@ public static partial class TrRmExecutableCompiler
                     newModuleRefRow,
                     stringRows[typeBinding.ExportKey],
                     0x1300_0000u | checked((uint)expectedNewTypeDefRow));
+                continue;
+            }
+
+            if (fieldBindingsByImportRow.TryGetValue(oldImportRow,
+                    out var fieldBinding))
+            {
+                var expectedOldFieldDefRow
+                    = GetFieldDefRow(fieldBinding.ExpectedDefinitionId);
+                rows[newImportRow - 1] = new TrRmImportRow(
+                    newModuleRefRow,
+                    stringRows[fieldBinding.ExportKey],
+                    0x1400_0000u | checked((uint)fieldRowMap[
+                        expectedOldFieldDefRow]));
                 continue;
             }
 
