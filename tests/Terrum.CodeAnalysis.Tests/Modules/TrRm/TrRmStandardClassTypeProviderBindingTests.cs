@@ -980,6 +980,7 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
             public class Container {
                 public int32 Marker;
                 public void Observe(ref<int32> value) {}
+                public void ObserveImplicit(implicit ref<int32> value) {}
             }
             """);
         var compilation = Compilation.CreateLibrary(tree);
@@ -996,6 +997,10 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name == "Observe"));
+        var observeImplicit = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "ObserveImplicit"));
         var containerClassIndex = Enumerable.Range(0,
                 program.Classes.Length)
             .Single(index =>
@@ -1010,16 +1015,19 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
                             field.Span, "Container.Marker"),
                         new TrRmSourceClassMemberExport(containerClassIndex,
                             observe.Span, "Container.Observe"),
+                        new TrRmSourceClassMemberExport(containerClassIndex,
+                            observeImplicit.Span,
+                            "Container.ObserveImplicit"),
                     ]),
             ]);
 
         static void AssertReferenceParameter(
-            TrRmStructuralMetadataValidator.ValidatedExecutionTables tables)
+            TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+            string exportKey, byte expectedFlags)
         {
             var methodDefinition = tables.Exports
                 .GetExportsForModule(1)
-                .Single(static export =>
-                    export.ExportKey == "Container.Observe").Definition;
+                .Single(export => export.ExportKey == exportKey).Definition;
             var methodRow = checked((int)(
                 methodDefinition & 0x00FF_FFFF));
             var signature = tables.Methods.GetSignature(methodRow);
@@ -1027,7 +1035,8 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
                 = tables.Signatures.GetParamRange(signature);
             Assert.That(parameterCount, Is.EqualTo(1));
             Assert.That(tables.Parameters.GetMode(parameterFirst), Is.Zero);
-            Assert.That(tables.Parameters.GetFlags(parameterFirst), Is.Zero);
+            Assert.That(tables.Parameters.GetFlags(parameterFirst),
+                Is.EqualTo(expectedFlags));
             var parameterType = tables.TypeSpecs.GetTypeSpecRef(
                 tables.Parameters.GetTypeSpec(parameterFirst));
             Assert.That(parameterType.Form, Is.EqualTo((byte)0x07));
@@ -1050,7 +1059,9 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
                 TrRmArtifactIndex
                     .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
                         artifact));
-        AssertReferenceParameter(artifactTables);
+        AssertReferenceParameter(artifactTables, "Container.Observe", 0);
+        AssertReferenceParameter(artifactTables,
+            "Container.ObserveImplicit", 1);
 
         var artifactInput = new TrRmStandardArtifactInput(schemaIdentity,
             artifact);
@@ -1070,7 +1081,9 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
                 TrRmArtifactIndex
                     .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
                         reemitted));
-        AssertReferenceParameter(reemittedTables);
+        AssertReferenceParameter(reemittedTables, "Container.Observe", 0);
+        AssertReferenceParameter(reemittedTables,
+            "Container.ObserveImplicit", 1);
 
         var reloadedReference
             = TrRmExecutableCompiler.CreateStandardReference(
@@ -1081,11 +1094,21 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
                 declaration.Declaration.Name == "Container")
             .Declaration.Methods.Single(static method =>
                 method.Name == "Observe");
+        var reloadedImplicitMethod
+            = reloadedReference.StandardClassDeclarations
+                .Single(static declaration =>
+                    declaration.Declaration.Name == "Container")
+                .Declaration.Methods.Single(static method =>
+                    method.Name == "ObserveImplicit");
         Assert.That(reloadedReference.StandardClassDeclarations.Length,
             Is.EqualTo(1));
         Assert.That(reloadedMethod.Parameters, Has.Length.EqualTo(1));
         Assert.That(reloadedMethod.Parameters[0].Mode, Is.Zero);
         Assert.That(reloadedMethod.Parameters[0].Flags, Is.Zero);
+        Assert.That(reloadedImplicitMethod.Parameters,
+            Has.Length.EqualTo(1));
+        Assert.That(reloadedImplicitMethod.Parameters[0].Mode, Is.Zero);
+        Assert.That(reloadedImplicitMethod.Parameters[0].Flags, Is.EqualTo(1));
     }
 
     [Test]

@@ -195,9 +195,10 @@ receiver/formal Homes in declaration order. Exact same-class static and
 readonly-instance scalar/unit identity forwarders use assigned Body kind `05`;
 empty unit instance bodies are emitted, including no-op instance methods with
 supported Copy-struct value parameters and plain readonly scalar `ref<T>`
-parameters. Writable, GC, optional, initialization, implicit-adaptation and
-nested-reference forms remain outside this subset. These producer and
-imported-caller regressions remain unverified under the hold.
+parameters; `implicit ref<T>` retains Param flag `0x01`. Writable, GC,
+optional, initialization and nested-reference forms remain outside this
+subset. Actual caller adaptation through the re-emitted class-method view and
+these regressions remain unverified under the hold.
 
 Other static and instance operations, local expression forms and control flow
 remain open.

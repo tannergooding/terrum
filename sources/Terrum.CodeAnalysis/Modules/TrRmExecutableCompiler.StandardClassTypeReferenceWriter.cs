@@ -672,7 +672,8 @@ public static partial class TrRmExecutableCompiler
             {
                 var variable = function.Variables[firstVariable + ordinal];
                 if (variable.IsMutable || variable.IsOut || variable.IsInit
-                    || variable.IsImplicitRef
+                    || (variable.IsImplicitRef
+                        && !allowNoOpReadonlyScalarReferences)
                     || variable.IsInitializationLocal)
                 {
                     throw Unsupported(
@@ -684,7 +685,9 @@ public static partial class TrRmExecutableCompiler
                         ? NoOpMethodTypeSpecReference(variable.Type)
                         : ParameterTypeSpecReference(variable.Type);
                 parameterRows.Add(new TrRmParamRow(signatureRow, ordinal,
-                    typeSpecReference, 0));
+                    typeSpecReference, 0,
+                    allowNoOpReadonlyScalarReferences
+                        && variable.IsImplicitRef ? (byte)1 : (byte)0));
             }
 
             return firstParam;
@@ -1619,7 +1622,11 @@ public static partial class TrRmExecutableCompiler
                             if ((variable.Type == PrimitiveType.Void
                                     && !isUnitParameter)
                                 || variable.IsOut || variable.IsInit
-                                || variable.IsImplicitRef
+                                || (variable.IsImplicitRef
+                                    && (!isSupportedNoOpInstanceMethod
+                                        || !IsC1M1NoOpReadonlyScalarReferenceType(
+                                            variable.Type,
+                                            program.CheckedReferenceTypes)))
                                 || variable.IsInitializationLocal)
                             {
                                 throw Unsupported(
@@ -2359,6 +2366,25 @@ public static partial class TrRmExecutableCompiler
             && !CheckedReferenceTypes.IsType(reference.ReferentType)
             && TryGetC1M1SourceScalarTypeSpecReference(
                 reference.ReferentType, out _);
+    }
+
+    private static bool IsC1M1NoOpReadonlyScalarReferenceTypeSpec(
+        TrRmTypeSpecTableReader typeSpecs, uint typeSpecReference)
+    {
+        var type = typeSpecs.GetTypeSpecRef(typeSpecReference);
+        if (!type.IsRow || type.Form != 0x07 || type.Qualifiers != 0)
+        {
+            return false;
+        }
+
+        var row = typeSpecs.GetRow(type.Row);
+        var referentTypeSpecRef
+            = BinaryPrimitives.ReadUInt32LittleEndian(row.Slice(2));
+        var referent = typeSpecs.GetTypeSpecRef(referentTypeSpecRef);
+        return !referent.IsRow && referent.Form == 0x01
+            && referent.Qualifiers == 0
+            && TrRmConstantSourceValueValidator.TryGetBoundScalarType(
+                referent.TypeCode, out _);
     }
 
     private static bool AreC1M1ClassCheckedReferenceTypesSupported(
@@ -8802,10 +8828,15 @@ public static partial class TrRmExecutableCompiler
                 ordinal++)
             {
                 var parameter = method.Parameters[ordinal];
-                if (parameter.Mode != 0 || parameter.Flags != 0)
+                if (parameter.Mode != 0
+                    || (parameter.Flags & ~1) != 0
+                    || (parameter.Flags == 1
+                        && !IsC1M1NoOpReadonlyScalarReferenceTypeSpec(
+                            rootTables.TypeSpecs,
+                            parameter.TypeSpecReference)))
                 {
                     throw Unsupported(
-                        "A retained class MethodDef parameter must use the bounded by-value mode.");
+                        "A retained class MethodDef parameter must use the bounded ordinary mode and supported source-call flags.");
                 }
 
                 var remappedTypeSpec = RemapC1M1ClassTypeSpec(rootTables,
