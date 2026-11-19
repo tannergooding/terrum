@@ -7099,9 +7099,11 @@ public static partial class TrRmExecutableCompiler
     private static bool IsC1M1ImportedClassLayoutSupported(
         BoundStandardClassDeclaration declaration)
     {
-        if (!declaration.Expectations.IsDefaultOrEmpty
-            || declaration.SelectedExportKeys.IsDefaultOrEmpty
-            || declaration.ExportKeys.IsDefaultOrEmpty)
+        if (declaration.Expectations.IsDefault
+            || declaration.SelectedExportKeys.IsDefault
+            || declaration.ExportKeys.IsDefaultOrEmpty
+            || (declaration.Expectations.IsEmpty
+                && declaration.SelectedExportKeys.IsEmpty))
         {
             return false;
         }
@@ -7174,9 +7176,58 @@ public static partial class TrRmExecutableCompiler
                 "C1M1 class source emission supports directly selected imported non-generic classes with one default Auto Layout variant.");
         }
 
+        var view = declaration.Declaration;
+        var exportKeys = declaration.ExportKeys.ToHashSet(
+            StringComparer.Ordinal);
+        var selectedExportKeys = new HashSet<string>(StringComparer.Ordinal);
+        if (!declaration.SelectedExportKeys.IsEmpty)
+        {
+            foreach (var exportKey in declaration.SelectedExportKeys)
+            {
+                if (!BoundEnumTypes.IsValidModuleDeclarationKey(exportKey)
+                    || !exportKeys.Contains(exportKey)
+                    || !selectedExportKeys.Add(exportKey))
+                {
+                    throw new InvalidDataException(
+                        "A selected imported class TypeDef key is absent from its checked provider view.");
+                }
+            }
+        }
+        else
+        {
+            foreach (var expectation in declaration.Expectations)
+            {
+                var binding = expectation.Binding;
+                if (!SameA2SourceTypeProviderSnapshot(binding.Provider,
+                        view.Provider)
+                    || binding.ProviderDefinitionId
+                        != view.Identity.DefinitionId
+                    || !StringComparer.Ordinal.Equals(
+                        binding.ProducerIdentity,
+                        view.Provider.ModuleIdentity)
+                    || binding.TargetRequirement
+                        != view.Provider.TargetRequirement
+                    || binding.RuntimePolicy != view.Provider.RuntimePolicy
+                    || !BoundEnumTypes.IsValidModuleDeclarationKey(
+                        binding.ExportKey)
+                    || !exportKeys.Contains(binding.ExportKey))
+                {
+                    throw new InvalidDataException(
+                        "An imported class TypeDef expectation lost its exact provider ExportKey.");
+                }
+
+                _ = selectedExportKeys.Add(binding.ExportKey);
+            }
+        }
+
+        if (selectedExportKeys.Count == 0)
+        {
+            throw Unsupported(
+                "C1M1 class source emission requires a selected class TypeDef Import or ExportKey.");
+        }
+
         return new C1M1ImportedClassImportPlan(
-            declaration.Declaration.Provider,
-            declaration.SelectedExportKeys);
+            view.Provider, [.. selectedExportKeys]);
     }
 
     private static byte[] EmitC1M1MetadataClassTypeReference(

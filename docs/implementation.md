@@ -134,10 +134,10 @@ silently dropping them; class MethodDefs, Bodies and construction records
 remain unsupported in this type-only route.
 The Construction-2 source-class producer also emits direct selected Standard
 class TypeDef/FieldDef/layout stubs and remaps readonly class-handle TypeSpecs
-in method signatures. Producer/consumer/provider-replacement regressions are
-added but remain unverified under the active hold. Imported class expectation
-chains, optional or writable class-handle wrappers and class-field Bodies
-remain open.
+in method signatures, including root-owned imported TypeDef expectations.
+Producer/consumer/provider-replacement regressions are added but remain
+unverified under the active hold. Multi-hop class provider chains, optional
+or writable class-handle wrappers and class-field Bodies remain open.
 The exact C1M1 construction successor has a
 class-free emission route and a Construction `0003` reader/writer that checks
 I/P signatures, owner/mutability agreement, direct instance FieldDef
@@ -201,8 +201,8 @@ unverified under the active hold. Remaining gaps include non-identity
 instance calls, broader nested field paths and aggregate stores, locals and
 control flow, properties, constructor failure/cleanup behavior, class-backed
 field initialization, source-free class method re-emission and its
-replacement/remapping paths, imported class expectation chains, optional or
-writable class-handle wrappers, nested class-field Bodies, transitive
+replacement/remapping paths, multi-hop imported class provider chains,
+optional or writable class-handle wrappers, nested class-field Bodies, transitive
 imported-struct provider chains, CLI transport, independent carrier TypeSpec
 verification, generic TypeDef dependencies, interfaces/witnesses outside D1,
 and runtime execution.
