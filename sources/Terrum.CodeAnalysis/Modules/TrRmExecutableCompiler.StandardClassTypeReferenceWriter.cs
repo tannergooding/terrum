@@ -8090,93 +8090,14 @@ public static partial class TrRmExecutableCompiler
         BoundProgram program,
         HashSet<BoundGenericNominalTypeIdentity> identities)
     {
-        var remaining = SemanticVerifier.MaximumAnalysisVisits;
-        foreach (var definition in program.GenericMethodDefinitions)
+        foreach (var instance in program.GenericNominalTypeInstances)
         {
-            var proofProgram = definition.ProofProgram;
-            if ((uint)definition.FunctionIndex
-                >= (uint)proofProgram.Functions.Length)
+            if (!instance.Definition.IsValid)
             {
                 return false;
             }
 
-            var function = proofProgram.Functions[definition.FunctionIndex];
-            bool AddType(PrimitiveType type)
-            {
-                if (--remaining < 0
-                    || !SemanticVerifier.TryGetGenericMethodActualTypeTerm(
-                        type, function, proofProgram, 0, out var term))
-                {
-                    return false;
-                }
-
-                AddC1M1RelationNominalIdentities(term, identities);
-                return true;
-            }
-
-            if (!AddType(function.ReturnType))
-            {
-                return false;
-            }
-            foreach (var variable in function.Variables)
-            {
-                if (!AddType(variable.Type))
-                {
-                    return false;
-                }
-            }
-
-            foreach (var formal in definition.Formals)
-            {
-                if (formal.TypeDefault is { } typeDefault)
-                {
-                    AddC1M1RelationNominalIdentities(typeDefault.Term,
-                        identities);
-                }
-            }
-
-            var valid = true;
-            if (!BoundTreeTraversal.VisitExpressions(function.Body,
-                    expression =>
-                    {
-                        if (--remaining < 0
-                            || !AddType(expression.Type))
-                        {
-                            valid = false;
-                            return;
-                        }
-
-                        if (expression is not BoundCall call)
-                        {
-                            return;
-                        }
-
-                        if (call.GenericMethodCall is { } genericCall)
-                        {
-                            foreach (var argument in genericCall.TypeArguments)
-                            {
-                                if (!AddType(argument))
-                                {
-                                    valid = false;
-                                    return;
-                                }
-                            }
-                        }
-
-                        foreach (var argument
-                            in call.ImportedGenericMethodTypeArguments)
-                        {
-                            if (!AddType(argument))
-                            {
-                                valid = false;
-                                return;
-                            }
-                        }
-                    })
-                || !valid)
-            {
-                return false;
-            }
+            _ = identities.Add(instance.Definition);
         }
 
         return true;
