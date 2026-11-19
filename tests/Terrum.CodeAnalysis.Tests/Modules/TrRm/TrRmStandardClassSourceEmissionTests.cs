@@ -338,6 +338,16 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     if (left == right) { return whenEqual; }
                     else { return whenDifferent; }
                 }
+                public static int32 SelectLess(int32 left, int32 right,
+                    int32 less, int32 greaterOrEqual) {
+                    if (left < right) { return less; }
+                    else { return greaterOrEqual; }
+                }
+                public static float64 SelectFloatLess(float64 left,
+                    float64 right, float64 less, float64 greaterOrEqual) {
+                    if (left < right) { return less; }
+                    else { return greaterOrEqual; }
+                }
                 public int32 SelectInstance(bool condition, int32 whenTrue) {
                     if (condition) { return whenTrue; }
                     else { return 42; }
@@ -368,6 +378,14 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name == "SelectEqual"));
+        var selectLess = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "SelectLess"));
+        var selectFloatLess = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "SelectFloatLess"));
 
         var artifact = TrRmExecutableCompiler.EmitStandard(program,
             "ConditionalClassMethod", C1M1Construction2SchemaIdentity,
@@ -385,6 +403,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                             "Box.Select"),
                         new TrRmSourceClassMemberExport(0,
                             selectEqual.Span, "Box.SelectEqual"),
+                        new TrRmSourceClassMemberExport(0,
+                            selectLess.Span, "Box.SelectLess"),
+                        new TrRmSourceClassMemberExport(0,
+                            selectFloatLess.Span, "Box.SelectFloatLess"),
                         new TrRmSourceClassMemberExport(0,
                             selectInstance.Span, "Box.SelectInstance"),
                     ]),
@@ -441,6 +463,34 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 0xC2, 0x01, 0xF0, 0x10,
                 0xE4, 0, 1, 0,
             }));
+
+        foreach (var methodName in new[] {
+            "Box.SelectLess",
+            "Box.SelectFloatLess",
+        })
+        {
+            Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+                methodName, out var comparisonDefinition), Is.True);
+            var comparisonMethodRow
+                = checked((int)(comparisonDefinition & 0x00FF_FFFF));
+            var comparisonBodyRow
+                = tables.Methods.GetBodyRow(comparisonMethodRow);
+            Assert.That(comparisonBodyRow, Is.GreaterThan(0));
+            tables.Bodies.ValidateSelectedImplementation(comparisonBodyRow,
+                tables.Contracts.Count);
+            tables.ValidateRegisterBodyMapsForMethod(
+                comparisonMethodRow);
+            var comparisonBody = tables.Bodies.GetRegisterBody(
+                comparisonBodyRow, tables.Contracts.Count);
+            Assert.That(comparisonBody.GetBlockCode(0).ToArray(),
+                Is.EqualTo(new byte[] {
+                    0xD5, 0, 0, 0,
+                    0xD5, 1, 1, 0,
+                    0xC2, 0, 0xF0, 0x10,
+                    0xC3, 1, 0, 0xFF,
+                    0xE4, 0, 1, 0,
+                }));
+        }
 
         Assert.That(tables.Exports.TryGetDefinitionForKey(1,
             "Box.SelectInstance", out var instanceDefinition), Is.True);

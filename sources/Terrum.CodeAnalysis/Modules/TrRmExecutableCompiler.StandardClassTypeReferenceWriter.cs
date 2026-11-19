@@ -2095,8 +2095,7 @@ public static partial class TrRmExecutableCompiler
                          Left: BoundRead left,
                          Right: BoundRead right,
                      } comparison
-                     && left.Type == PrimitiveType.Bool
-                     && right.Type == PrimitiveType.Bool)
+                     && comparison.Type == PrimitiveType.Bool)
             {
                 AppendHomeLoad(instructions, 0, left.Variable);
                 AppendHomeLoad(instructions, 1, right.Variable);
@@ -2106,16 +2105,43 @@ public static partial class TrRmExecutableCompiler
                 var payload = (ushort)(destinationRegister
                     | (0x0F << 4) | (leftRegister << 8)
                     | (rightRegister << 12));
-                instructions.Add(0xC2);
-                instructions.Add(comparison.Operator switch
+                if (left.Type == PrimitiveType.Bool
+                    && right.Type == PrimitiveType.Bool
+                    && comparison.Operator is (TokenKind.EqualsEquals
+                        or TokenKind.BangEquals))
                 {
-                    TokenKind.EqualsEquals => (byte)0x01,
-                    TokenKind.BangEquals => (byte)0x02,
-                    _ => throw new InvalidDataException(
-                        "A Construction-2 conditional Body has an unsupported Boolean comparison."),
-                });
-                instructions.Add((byte)payload);
-                instructions.Add((byte)(payload >> 8));
+                    instructions.Add(0xC2);
+                    instructions.Add(comparison.Operator
+                        == TokenKind.EqualsEquals
+                            ? (byte)0x01 : (byte)0x02);
+                    instructions.Add((byte)payload);
+                    instructions.Add((byte)(payload >> 8));
+                }
+                else if (left.Type == right.Type
+                    && IsC1M1Construction2BodyNumericType(left.Type)
+                    && IsC1M1Construction2IntegerComparisonOperator(
+                        comparison.Operator))
+                {
+                    instructions.Add(0xC2);
+                    instructions.Add(0);
+                    instructions.Add((byte)payload);
+                    instructions.Add((byte)(payload >> 8));
+                    var predicatePayload = (ushort)(
+                        destinationRegister
+                        | (destinationRegister << 4) | (0x0F << 8)
+                        | (0x0F << 12));
+                    instructions.Add(0xC3);
+                    instructions.Add(
+                        GetC1M1Construction2IntegerComparisonPredicate(
+                            comparison.Operator));
+                    instructions.Add((byte)predicatePayload);
+                    instructions.Add((byte)(predicatePayload >> 8));
+                }
+                else
+                {
+                    throw new InvalidDataException(
+                        "A Construction-2 conditional Body has an unsupported comparison.");
+                }
             }
             else
             {
@@ -4096,12 +4122,17 @@ public static partial class TrRmExecutableCompiler
                        Right: BoundRead right,
                    } comparison
                 && comparison.Type == PrimitiveType.Bool
-                && comparison.Operator is (TokenKind.EqualsEquals
-                    or TokenKind.BangEquals)
-                && left.Type == PrimitiveType.Bool
-                && right.Type == PrimitiveType.Bool
                 && IsScalarRead(left)
-                && IsScalarRead(right);
+                && IsScalarRead(right)
+                && ((left.Type == PrimitiveType.Bool
+                        && right.Type == PrimitiveType.Bool
+                        && comparison.Operator is (
+                            TokenKind.EqualsEquals
+                            or TokenKind.BangEquals))
+                    || (left.Type == right.Type
+                        && IsC1M1Construction2BodyNumericType(left.Type)
+                        && IsC1M1Construction2IntegerComparisonOperator(
+                            comparison.Operator)));
         }
 
         bool IsScalarReturn(BoundExpression value)
