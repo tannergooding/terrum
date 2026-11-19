@@ -149,7 +149,8 @@ incompatible replacement, and write-qualified field-store/readonly-authority
 rejections, are added but remain unverified under the active hold. Further provider
 alias/closure cases, optional wrappers, nested imported-class dereferences,
 aggregate imported-field stores and source-free class member re-emission beyond
-bodyless public scalar MethodDef Imports remain open.
+bodyless public scalar MethodDef Imports and the bounded local Body-01
+Construction-2/CM1 subset remain open.
 The shared class FieldDef Import contract also requires every alias for one
 expected field to bind to one exact provider FieldDef; a same-target alias
 round-trip and a wrong-kind alias rejection regression are added but remain
@@ -225,13 +226,19 @@ signatures whose TypeSpec forms are supported by the C1M1 remapper, remapping
 owner TypeDefs, MethodSigs, Params, Effects, aliases and class parameter
 surfaces/defaults without copying provider Bodies. Mutable receivers and
 construction-role methods outside the selected R1 route remain unsupported in
-this slice.
+this slice. It also re-emits local public nongeneric MethodDefs whose
+Body-01 Body has inline-only F2/F3 TypeMap entries and no MethodMap, FieldMap
+or ConstantMap dependencies, but only under the exact Construction-2/CM1
+profile. It preserves raw Body bytes and method ExportKeys while remapping
+MethodDef and Body rows. Unsupported Body dependencies reject re-emission;
+imported MethodDef expectation Bodies remain provider-owned.
 Provider/owner-row relocation and compatible/incompatible replacement
+regressions plus local Body producer/consumer and FieldMap-rejection
 regressions are added but unverified under the hold. Remaining gaps include non-identity
 instance calls, broader nested field paths and aggregate stores, locals and
 control flow, properties, constructor failure/cleanup behavior, class-backed
-field initialization, bodyful local class MethodDef re-emission,
-generic/interface/contract-bearing method imports and broader
+field initialization, other Body map forms, generic/interface/contract-bearing
+method imports and broader
 replacement/remapping paths, multi-hop imported class provider chains,
 optional or writable class-handle wrappers, nested imported-class dereferences,
 transitive imported-struct provider chains, CLI transport, independent carrier TypeSpec

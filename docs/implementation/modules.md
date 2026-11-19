@@ -213,10 +213,17 @@ preserves bodyless public nongeneric static, readonly-instance and selected-R1
 mutable-instance by-value
 class MethodDef Imports whose TypeSpec forms are supported by the remapper,
 including owner/signature/parameter rows, aliases, Effects and class parameter
-surfaces/defaults without copying provider Bodies. Provider/owner-row
-relocation and compatible/incompatible replacement regressions are added but
-unverified under the active hold. Compiler-owned source-class
-anchors and explicit member-key capture are implemented, but complete bodyful
+surfaces/defaults without copying provider Bodies. It also re-emits local
+public nongeneric MethodDefs with Body-01 Bodies only when every TypeMap entry
+is inline F2/F3 and MethodMap, FieldMap and ConstantMap are empty, and only
+under the exact Construction-2/CM1 profile; it preserves raw Body bytes,
+MethodDef/Body row mapping and method ExportKeys. Unsupported Body dependencies
+reject re-emission, while imported MethodDef expectation Bodies remain
+provider-owned. Provider/owner-row relocation and
+compatible/incompatible replacement, local Body producer/consumer and
+FieldMap-rejection regressions are added but unverified under the active hold.
+Compiler-owned source-class anchors and explicit member-key capture are
+implemented, but complete bodyful
 local class member/MethodDef closure, provider
 closure for methods and Bodies, independent carrier TypeSpec verification,
 private local type dependencies, broader remapping/replacement,

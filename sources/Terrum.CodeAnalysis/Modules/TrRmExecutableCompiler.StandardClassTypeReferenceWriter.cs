@@ -31,10 +31,12 @@ public static partial class TrRmExecutableCompiler
         ImmutableArray<BoundStandardClassFieldDeclaration> Fields,
         ImmutableArray<BoundStandardClassLayoutVariant> Layouts);
 
-    private sealed record C1M1MethodImportEmissionPlan(
+    private sealed record C1M1MethodEmissionPlan(
         BoundStandardClassTypeView Owner,
         BoundStandardClassMethodDeclaration Method,
-        ImmutableArray<BoundStandardClassMethodExpectation> Imports);
+        ImmutableArray<BoundStandardClassMethodExpectation> Imports,
+        ImmutableArray<string> ExportKeys,
+        ReadOnlyMemory<byte> Body);
 
     private sealed record C1M1Construction2SourceInitializer(
         int ClassIndex, BoundFunction Function, uint ClassTypeSpecReference,
@@ -8128,7 +8130,7 @@ public static partial class TrRmExecutableCompiler
         }
 
         var methodEmissionPlans = new SortedDictionary<int,
-            C1M1MethodImportEmissionPlan>();
+            C1M1MethodEmissionPlan>();
         foreach (var (methodRow, method) in expectedMethodsByOldRow)
         {
             var imports = methodImportsByExpectedMethodRow[methodRow];
@@ -8153,9 +8155,61 @@ public static partial class TrRmExecutableCompiler
             }
 
             methodEmissionPlans.Add(methodRow,
-                new C1M1MethodImportEmissionPlan(
+                new C1M1MethodEmissionPlan(
                     expectedMethodOwnersByOldRow[methodRow], method,
-                    [.. imports]));
+                    [.. imports], [], ReadOnlyMemory<byte>.Empty));
+        }
+
+        foreach (var declaration in rootDeclarations)
+        {
+            var owner = declaration.Declaration;
+            var ownerTypeDefRow
+                = GetTypeDefRow(owner.Identity.DefinitionId);
+            foreach (var method in owner.Methods)
+            {
+                var methodRow = GetMethodDefRow(method.DefinitionId);
+                var bodyRow = checked((int)method.BodyRow);
+                if (bodyRow == 0
+                    || !schema.UsesConstructionContracts()
+                    || rootTables.TypeDefs.GetOwnerModule(ownerTypeDefRow)
+                        != rootModuleRow
+                    || rootTables.Methods.GetOwnerType(methodRow)
+                        != ownerTypeDefRow
+                    || rootTables.Methods.GetBodyRow(methodRow)
+                        != method.BodyRow
+                    || methodEmissionPlans.ContainsKey(methodRow))
+                {
+                    throw Unsupported(
+                        "CM1 local class MethodDef Bodies require the exact construction-2 profile and root-owned Body rows.");
+                }
+
+                var body = rootTables.Bodies.GetRegisterBody(bodyRow,
+                    rootTables.Contracts.Count);
+                if (body.MethodCount != 0 || body.FieldCount != 0
+                    || body.ConstantCount != 0)
+                {
+                    throw Unsupported(
+                        "C1M1 local class MethodDef Bodies with MethodMap, FieldMap or ConstantMap dependencies are not supported.");
+                }
+
+                for (var typeMapIndex = 0;
+                    typeMapIndex < body.TypeCount; typeMapIndex++)
+                {
+                    var typeMapToken = BinaryPrimitives
+                        .ReadUInt32LittleEndian(body.TypeMap.Slice(
+                            typeMapIndex * sizeof(uint), sizeof(uint)));
+                    if ((byte)(typeMapToken >> 24) is not (0xF2 or 0xF3))
+                    {
+                        throw Unsupported(
+                            "C1M1 local class MethodDef Bodies require inline-only TypeMap entries.");
+                    }
+                }
+
+                methodEmissionPlans.Add(methodRow,
+                    new C1M1MethodEmissionPlan(owner, method, [],
+                        method.ExportKeys,
+                        rootTables.Bodies.GetRow(bodyRow).ToArray()));
+            }
         }
 
         var rootImportCount = 0;
@@ -8199,7 +8253,7 @@ public static partial class TrRmExecutableCompiler
                     !methodEmissionPlans.ContainsKey(methodRow)))
         {
             throw Unsupported(
-                "C1M1 class re-emission only retains MethodDefs represented by selected bodyless class Imports.");
+                "C1M1 class re-emission only retains selected bodyless class Imports and supported local root MethodDefs.");
         }
 
         var moduleRefStartEnd
@@ -8312,6 +8366,7 @@ public static partial class TrRmExecutableCompiler
         var methodSignatureRows = new List<TrRmMethodSigRow>();
         var parameterRows = new List<TrRmParamRow>();
         var methodNames = new List<string>();
+        var bodyRows = new List<ReadOnlyMemory<byte>>();
         var parameterSurfaceRows = new List<C1M1ParameterSurfaceRow>();
         var contractRows = new List<TrRmContractRow>();
         var frozenScalarValueBuilder = new TrRmFrozenScalarValueBuilder();
@@ -8414,7 +8469,11 @@ public static partial class TrRmExecutableCompiler
             var method = plan.Method;
             var ownerTypeDefRow
                 = GetTypeDefRow(plan.Owner.Identity.DefinitionId);
-            if (method.BodyRow != 0
+            var hasBody = !plan.Body.IsEmpty;
+            if ((hasBody
+                    ? method.BodyRow == 0 || !plan.Imports.IsEmpty
+                    : method.BodyRow != 0 || plan.Imports.IsEmpty
+                        || !plan.ExportKeys.IsEmpty)
                 || method.GenericParameterCount != 0
                 || method.ConstructionRole != 0
                 || method.InitializerMethodDefinitionId != 0
@@ -8425,12 +8484,11 @@ public static partial class TrRmExecutableCompiler
                     && (method.ReceiverTypeSpecReference == 0
                         || !schema.UsesMethodReceiverAccess()))
                 || (method.EffectsMask & ~6u) != 0
-                || plan.Imports.IsEmpty
                 || !typeDefRowMap.TryGetValue(ownerTypeDefRow,
                     out var newOwnerTypeDefRow))
             {
                 throw Unsupported(
-                    "C1M1 source-free class re-emission supports bodyless public nongeneric MethodDef Imports without construction roles.");
+                    "C1M1 source-free class re-emission supports bodyless public MethodDef Imports and bounded local nongeneric method Bodies without construction roles.");
             }
 
             if (method.ReceiverTypeSpecReference != 0)
@@ -8535,10 +8593,29 @@ public static partial class TrRmExecutableCompiler
                     1, s_effectPayloads[method.EffectsMask]));
             }
 
+            var outputBodyRow = hasBody ? bodyRows.Count + 1 : 0;
+            if (hasBody)
+            {
+                bodyRows.Add(plan.Body);
+            }
+
             methodRows.Add(new TrRmMethodDefRow(newOwnerTypeDefRow, 0,
                 signatureRow, method.Flags, contractFirst,
-                method.EffectsMask == 0 ? 0 : 1, 0));
+                method.EffectsMask == 0 ? 0 : 1, outputBodyRow));
             methodNames.Add(method.Name);
+            foreach (var exportKey in plan.ExportKeys)
+            {
+                if (!exportKeys.Add(exportKey))
+                {
+                    throw new InvalidDataException(
+                        "C1M1 class MethodDef ExportKeys must be unique within the Module.");
+                }
+
+                exportRows.Add((
+                    0x1600_0000u
+                        | checked((uint)methodDefRowMap[oldMethodRow]),
+                    exportKey));
+            }
         }
 
         foreach (var function in program.Functions)
@@ -8554,10 +8631,28 @@ public static partial class TrRmExecutableCompiler
             if (matches.Length != 1)
             {
                 throw Unsupported(
-                    "The retained class MethodDef call views exceed the bodyless Import subset.");
+                    "The retained class MethodDef call views exceed the selected Import and local Body subset.");
             }
 
             var methodPlan = matches[0];
+            var providerIdentity = methodPlan.Imports.IsEmpty
+                ? rootSnapshot.ModuleIdentity
+                : methodPlan.Imports[0].Provider.ModuleIdentity;
+            var providerTargetRequirement = methodPlan.Imports.IsEmpty
+                ? rootSnapshot.TargetRequirement
+                : methodPlan.Imports[0].Provider.TargetRequirement;
+            var providerRuntimePolicy = methodPlan.Imports.IsEmpty
+                ? rootSnapshot.RuntimePolicy
+                : methodPlan.Imports[0].Provider.RuntimePolicy;
+            var hasSelectedExport
+                = function.ModuleImport is BoundModuleImport selectedImport
+                    && (methodPlan.Imports.IsEmpty
+                        ? methodPlan.ExportKeys.Contains(
+                            selectedImport.ExportKey,
+                            StringComparer.Ordinal)
+                        : methodPlan.Imports.Any(import =>
+                            StringComparer.Ordinal.Equals(import.ExportKey,
+                                selectedImport.ExportKey)));
             if (function.ModuleImport is not BoundModuleImport functionImport
                 || !function.IsExternal
                 || function.IsStatic
@@ -8570,14 +8665,12 @@ public static partial class TrRmExecutableCompiler
                             + methodPlan.Owner.Name)
                 || !StringComparer.Ordinal.Equals(
                     functionImport.ProducerIdentity,
-                    methodPlan.Imports[0].Provider.ModuleIdentity)
+                    providerIdentity)
                 || functionImport.TargetRequirement
-                    != methodPlan.Imports[0].Provider.TargetRequirement
+                    != providerTargetRequirement
                 || functionImport.RuntimePolicy
-                    != methodPlan.Imports[0].Provider.RuntimePolicy
-                || !methodPlan.Imports.Any(import =>
-                    StringComparer.Ordinal.Equals(import.ExportKey,
-                        functionImport.ExportKey))
+                    != providerRuntimePolicy
+                || !hasSelectedExport
                 || !TryGetC1M1ClassScalarType(rootTables,
                     methodPlan.Method.ReturnTypeSpecReference,
                     out var methodReturnType)
@@ -8618,6 +8711,7 @@ public static partial class TrRmExecutableCompiler
         var methodClosureRowCount = (long)methodRows.Count
             + methodSignatureRows.Count + parameterRows.Count
             + parameterSurfaceRows.Count + contractRows.Count
+            + bodyRows.Count
             + frozenScalarValueBuilder.BlobCount
             + frozenScalarValueBuilder.FrozenValueNodeCount
             + frozenScalarValueBuilder.ConstantSourceCount;
@@ -8626,6 +8720,7 @@ public static partial class TrRmExecutableCompiler
             || parameterRows.Count > 0xFF_FFFF
             || parameterSurfaceRows.Count > 0xFF_FFFF
             || contractRows.Count > 0xFF_FFFF
+            || bodyRows.Count > 0xFF_FFFF
             || methodClosureRowCount > SemanticVerifier.MaximumAnalysisVisits)
         {
             throw Unsupported(
@@ -8833,6 +8928,8 @@ public static partial class TrRmExecutableCompiler
             : TrRmMethodDefTableWriter.Encode(methodRows, strings,
                 moduleTables, typeDefs, signatures, contractRows.Count, 0,
                 schema);
+        var bodyBytes = bodyRows.Count == 0 ? []
+            : TrRmVariableTableWriter.EncodeBodies(bodyRows);
         var methods = methodRows.Count == 0 ? default
             : new TrRmMethodDefTableReader(methodBytes, methodRows.Count,
                 strings, moduleTables, typeDefs, signatures,
@@ -8938,6 +9035,11 @@ public static partial class TrRmExecutableCompiler
         {
             sections.Add(new TrRmSection(0x0018, 0,
                 checked((uint)parameterRows.Count), parameterBytes));
+        }
+        if (bodyRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x0020, 0,
+                checked((uint)bodyRows.Count), bodyBytes));
         }
         if (contractRows.Count != 0)
         {
