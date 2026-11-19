@@ -10639,14 +10639,14 @@ public static partial class TrRmExecutableCompiler
             if (match is not null)
             {
                 throw Unsupported(
-                    "A retained CM1AR1 MethodDef has multiple typed import roots.");
+                    "A retained C1M1 MethodDef has multiple typed import roots.");
             }
 
             match = root;
         }
 
         return match ?? throw Unsupported(
-            "A retained CM1AR1 MethodDef has no typed import root.");
+            "A retained C1M1 MethodDef has no typed import root.");
     }
 
     private static bool AreC1M1MethodSignatureTypesEquivalent(
@@ -11120,7 +11120,7 @@ public static partial class TrRmExecutableCompiler
                         || formal.AssociatedRelations.IsDefault))
         {
             throw Unsupported(
-                "A retained CM1AR1 class MethodDef has an unsupported generic type-formal view.");
+                "A retained C1M1 class MethodDef has an unsupported generic type-formal view.");
         }
 
         var formalTypeSpecRows = new Dictionary<PrimitiveType, uint>();
@@ -11132,7 +11132,7 @@ public static partial class TrRmExecutableCompiler
                         out var genericParamRow))
             {
                 throw new InvalidDataException(
-                        "A retained CM1AR1 method formal has no output GenericParam row.");
+                        "A retained C1M1 method formal has no output GenericParam row.");
             }
 
             genericParamRows[ordinal] = genericParamRow;
@@ -11144,7 +11144,7 @@ public static partial class TrRmExecutableCompiler
                         formalTypeSpecRow))
             {
                 throw Unsupported(
-                        "A retained CM1AR1 class MethodDef has duplicate placeholder type identities.");
+                        "A retained C1M1 class MethodDef has duplicate placeholder type identities.");
             }
         }
 
@@ -11229,7 +11229,7 @@ public static partial class TrRmExecutableCompiler
         if (moduleSection.RecordCount != 1)
         {
             throw Unsupported(
-                "CM1AR1 nominal TypeDef closure requires one output Module.");
+                "C1M1 nominal TypeDef closure requires one output Module.");
         }
 
         var oldFeatureFirst = ReadUInt32(moduleBytes, 24);
@@ -11423,7 +11423,7 @@ public static partial class TrRmExecutableCompiler
                     nominalReference))
             {
                 throw new InvalidDataException(
-                    "A retained CM1AR1 nominal TypeDef has duplicate reusable references.");
+                    "A retained C1M1 nominal TypeDef has duplicate reusable references.");
             }
         }
         nominalTypeWriter.ImportDefinitionReferences(
@@ -11545,10 +11545,15 @@ public static partial class TrRmExecutableCompiler
                 proofType = proofFunction.Variables[proofIndex].Type;
             }
 
-            var typeSpecReference = nominalTypeWriter.TypeSpecRef(
-                proofType, typeContext.Definition,
+            var proofProgram = typeContext.Definition.ProofProgram;
+            var typeSpecReference = GenericMethodTypeSpecRef(proofType,
                 typeContext.FormalTypeSpecRows,
-                typeContext.BuiltInTypeSpecRows, depth: 0);
+                typeContext.BuiltInTypeSpecRows, outputTypeSpecRows,
+                proofProgram.SpanTypes,
+                proofProgram.CheckedReferenceTypes,
+                typeContext.Definition.DefinitionOrdinal,
+                typeContext.Definition, allowSpanType: true,
+                nominalTypes: nominalTypeWriter, depth: 0);
             if (!emittedMethodTypeSpecReferences.TryAdd(plan,
                     typeSpecReference))
             {
@@ -12782,27 +12787,71 @@ public static partial class TrRmExecutableCompiler
             sourceTables,
         uint typeSpecReference, HashSet<int> nominalTypeImportRows)
     {
-        var reference = sourceTables.TypeSpecs.GetTypeSpecRef(
-            typeSpecReference);
-        if (!reference.IsRow || reference.Form != 0x05)
-        {
-            return false;
-        }
+        var activeRows = new HashSet<int>();
+        var remainingVisits = SemanticVerifier.MaximumAnalysisVisits;
+        return Visit(typeSpecReference, depth: 0);
 
-        var row = sourceTables.TypeSpecs.GetRow(reference.Row).Span;
-        if (row.Length < 10 || (row.Length - 6) % sizeof(uint) != 0)
+        bool Visit(uint referenceValue, int depth)
         {
-            throw new InvalidDataException(
-                "A retained constructed class MethodDef TypeSpec has an invalid extent.");
-        }
+            if (depth > SemanticVerifier.MaximumDepth
+                || --remainingVisits < 0)
+            {
+                throw Unsupported(
+                    "A retained class MethodDef generic TypeSpec exceeds the checked traversal limits.");
+            }
 
-        var genericTypeSpec = BinaryPrimitives
-            .ReadUInt32LittleEndian(row.Slice(2, sizeof(uint)));
-        var genericType = sourceTables.TypeSpecs.GetTypeSpecRef(
-            genericTypeSpec);
-        return genericType.IsRow && genericType.Form == 0x03
-            && nominalTypeImportRows.Contains(
-                checked((int)genericType.Row));
+            var reference = sourceTables.TypeSpecs.GetTypeSpecRef(
+                referenceValue);
+            if (!reference.IsRow)
+            {
+                return false;
+            }
+
+            var rowNumber = checked((int)reference.Row);
+            if (!activeRows.Add(rowNumber))
+            {
+                throw new InvalidDataException(
+                    "A retained class MethodDef TypeSpec contains a cycle.");
+            }
+
+            try
+            {
+                var row = sourceTables.TypeSpecs.GetRow(
+                    reference.Row).Span;
+                if (reference.Form == 0x05)
+                {
+                    if (row.Length < 10
+                        || (row.Length - 6) % sizeof(uint) != 0)
+                    {
+                        throw new InvalidDataException(
+                            "A retained constructed class MethodDef TypeSpec has an invalid extent.");
+                    }
+
+                    var genericTypeSpec = BinaryPrimitives
+                        .ReadUInt32LittleEndian(row.Slice(2,
+                            sizeof(uint)));
+                    var genericType = sourceTables.TypeSpecs
+                        .GetTypeSpecRef(genericTypeSpec);
+                    return genericType.IsRow && genericType.Form == 0x03
+                        && nominalTypeImportRows.Contains(
+                            checked((int)genericType.Row));
+                }
+
+                if (reference.Form != 0x07 || reference.Qualifiers != 0
+                    || row.Length != 6)
+                {
+                    return false;
+                }
+
+                var referentTypeSpec = BinaryPrimitives
+                    .ReadUInt32LittleEndian(row.Slice(2, sizeof(uint)));
+                return Visit(referentTypeSpec, depth + 1);
+            }
+            finally
+            {
+                _ = activeRows.Remove(rowNumber);
+            }
+        }
     }
 
     private static uint AppendC1M1MethodTypePlaceholder(

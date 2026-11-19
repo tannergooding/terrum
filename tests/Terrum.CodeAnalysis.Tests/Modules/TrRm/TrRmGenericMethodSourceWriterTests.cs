@@ -5075,6 +5075,9 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                     public static Box<T> Accept<T>(Box<T> value) {
                         return move value;
                     }
+                    public static int32 Observe<T>(ref<Box<T>> value) {
+                        return 1;
+                    }
                 }
             }
             """);
@@ -5092,6 +5095,22 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             .Children.OfType<SyntaxNode>()
             .Single(static node =>
                 node.Kind == SyntaxKind.ClassDeclaration);
+        var acceptDeclaration = classDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Accept"));
+        var observeDeclaration = classDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Observe"));
+        var method = classProgram.GenericMethodDefinitions.Single(
+            definition => definition.Span == acceptDeclaration.Span);
+        var referenceMethod = classProgram.GenericMethodDefinitions.Single(
+            definition => definition.Span == observeDeclaration.Span);
         var classIndex = Enumerable.Range(0, classProgram.Classes.Length)
             .Single(index => classProgram.Classes[index].Name == "Container");
         var classArtifact = TrRmExecutableCompiler.EmitStandard(
@@ -5100,6 +5119,9 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                 new TrRmSourceGenericMethodExport(classProgram,
                     method.SourceInputOrdinal, method.Span,
                     "Container.Accept"),
+            new TrRmSourceGenericMethodExport(classProgram,
+                referenceMethod.SourceInputOrdinal,
+                referenceMethod.Span, "Container.Observe"),
             ], [
                 new TrRmSourceClassExport(classProgram, classIndex,
                     classDeclaration.Span, "container-key", []),
@@ -5146,6 +5168,38 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         var actualType = classTables.TypeSpecs.GetTypeSpecRef(actualTypeSpec);
         Assert.That(actualType.Form, Is.EqualTo((byte)0x04));
         Assert.That(actualType.Row, Is.EqualTo(formalFirst));
+        Assert.That(classTables.Exports.TryGetDefinitionForKey(1,
+            "Container.Observe", out var observeMethodDefId), Is.True);
+        var observeMethodRow
+            = checked((int)(observeMethodDefId & 0x00FF_FFFF));
+        var observeSignature = classTables.Methods.GetSignature(
+            observeMethodRow);
+        var (observeParameterFirst, observeParameterCount)
+            = classTables.Signatures.GetParamRange(observeSignature);
+        Assert.That(observeParameterCount, Is.EqualTo(1));
+        var observeTypeSpec = classTables.Parameters.GetTypeSpec(
+            observeParameterFirst);
+        var referenceTypeSpec = classTables.TypeSpecs
+            .GetTypeSpecRef(observeTypeSpec);
+        Assert.That(referenceTypeSpec.Form, Is.EqualTo((byte)0x07));
+        var referentTypeSpec = BinaryPrimitives.ReadUInt32LittleEndian(
+            classTables.TypeSpecs.GetRow(checked((int)observeTypeSpec))
+                .Slice(2, sizeof(uint)));
+        var referentType = classTables.TypeSpecs
+            .GetTypeSpecRef(referentTypeSpec);
+        Assert.That(referentType.Form, Is.EqualTo((byte)0x05));
+        var referenceGenericTypeSpec = BinaryPrimitives
+            .ReadUInt32LittleEndian(classTables.TypeSpecs.GetRow(
+                checked((int)referentTypeSpec)).Slice(2, sizeof(uint)));
+        var referenceGenericType = classTables.TypeSpecs
+            .GetTypeSpecRef(referenceGenericTypeSpec);
+        Assert.That(referenceGenericType.Form, Is.EqualTo((byte)0x03));
+        var referenceGenericImportRow
+            = checked((int)referenceGenericType.Row);
+        Assert.That(classTables.ModuleRefs.GetProducerIdentity(
+            classTables.Imports.GetModuleRefForImportRow(
+                referenceGenericImportRow)),
+            Is.EqualTo(typeProviderIdentity));
 
         var classReference = TrRmExecutableCompiler.CreateStandardReference(
             new TrRmStandardArtifactInput(CM1SchemaIdentity, classArtifact),
@@ -5160,6 +5214,66 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             sourceFreeClassCompilation.Program!,
             "cm1.generic-type.class-reemitted", CM1SchemaIdentity,
             TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var reemittedClassTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                new TrRmArtifactIndex(reemittedClassArtifact,
+                    typeProviderSchema));
+        Assert.That(reemittedClassTables.Exports.TryGetDefinitionForKey(1,
+            "Container.Observe", out var reemittedObserveMethodDefId),
+            Is.True);
+        var reemittedObserveMethodRow = checked((int)(
+            reemittedObserveMethodDefId & 0x00FF_FFFF));
+        var reemittedObserveSignature
+            = reemittedClassTables.Methods.GetSignature(
+                reemittedObserveMethodRow);
+        var (reemittedObserveParameterFirst,
+            reemittedObserveParameterCount)
+            = reemittedClassTables.Signatures.GetParamRange(
+                reemittedObserveSignature);
+        Assert.That(reemittedObserveParameterCount, Is.EqualTo(1));
+        var reemittedObserveTypeSpec
+            = reemittedClassTables.Parameters.GetTypeSpec(
+                reemittedObserveParameterFirst);
+        var reemittedReferenceType
+            = reemittedClassTables.TypeSpecs.GetTypeSpecRef(
+                reemittedObserveTypeSpec);
+        Assert.That(reemittedReferenceType.Form, Is.EqualTo((byte)0x07));
+        var reemittedReferentTypeSpec = BinaryPrimitives
+            .ReadUInt32LittleEndian(reemittedClassTables.TypeSpecs.GetRow(
+                checked((int)reemittedObserveTypeSpec))
+                .Slice(2, sizeof(uint)));
+        var reemittedReferentType
+            = reemittedClassTables.TypeSpecs.GetTypeSpecRef(
+                reemittedReferentTypeSpec);
+        Assert.That(reemittedReferentType.Form, Is.EqualTo((byte)0x05));
+        var (reemittedFormalFirst, reemittedFormalCount)
+            = reemittedClassTables.Signatures.GetGenericRange(
+                reemittedObserveSignature);
+        Assert.That(reemittedFormalCount, Is.EqualTo(1));
+        var reemittedTypeArgumentSpec = BinaryPrimitives
+            .ReadUInt32LittleEndian(reemittedClassTables.TypeSpecs.GetRow(
+                checked((int)reemittedReferentTypeSpec))
+                .Slice(6, sizeof(uint)));
+        var reemittedTypeArgument
+            = reemittedClassTables.TypeSpecs.GetTypeSpecRef(
+                reemittedTypeArgumentSpec);
+        Assert.That(reemittedTypeArgument.Form, Is.EqualTo((byte)0x04));
+        Assert.That(reemittedTypeArgument.Row,
+            Is.EqualTo(reemittedFormalFirst));
+        var reemittedGenericTypeSpec = BinaryPrimitives
+            .ReadUInt32LittleEndian(reemittedClassTables.TypeSpecs.GetRow(
+                checked((int)reemittedReferentTypeSpec))
+                .Slice(2, sizeof(uint)));
+        var reemittedGenericType
+            = reemittedClassTables.TypeSpecs.GetTypeSpecRef(
+                reemittedGenericTypeSpec);
+        Assert.That(reemittedGenericType.Form, Is.EqualTo((byte)0x03));
+        var reemittedGenericImportRow
+            = checked((int)reemittedGenericType.Row);
+        Assert.That(reemittedClassTables.ModuleRefs.GetProducerIdentity(
+            reemittedClassTables.Imports.GetModuleRefForImportRow(
+                reemittedGenericImportRow)),
+            Is.EqualTo(typeProviderIdentity));
         var reemittedClassReference
             = TrRmExecutableCompiler.CreateStandardReference(
                 new TrRmStandardArtifactInput(CM1SchemaIdentity,
@@ -5172,6 +5286,10 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                     public class Consumer {
                         public static Box<T> Forward<T>(Box<T> value) {
                             return Container.Accept<T>(move value);
+                        }
+                        public static int32 ForwardReference<T>(
+                            ref<Box<T>> value) {
+                            return Container.Observe<T>(value);
                         }
                     }
                 }
@@ -5218,6 +5336,10 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                 public class Consumer {
                     public static Box<T> Forward<T>(Box<T> value) {
                         return Container.Accept<T>(move value);
+                    }
+                    public static int32 ForwardReference<T>(
+                        ref<Box<T>> value) {
+                        return Container.Observe<T>(value);
                     }
                 }
             }

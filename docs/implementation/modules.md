@@ -239,10 +239,12 @@ provider-owned references. Current CM1 GenericMethodCalls support remains
 type-formal-only; constant-formal support is separate under CG1. Generic
 Exact-CM1 source-free re-emission now carries imported generic nominal TypeSpec
 dependencies for bodyless generic class MethodDef parameter/result signatures
-through their TypeDef/Import and formal-row closure. Producer/consumer,
-compatible TypeDef relocation and incompatible provider regressions are added
-but remain unverified under the active hold. Generic provider compatibility,
-callable imports and broader generic-row re-emission remain open.
+through their TypeDef/Import and formal-row closure, including ordinary
+checked-reference wrappers such as `ref<Box<T>>`. Producer/consumer, compatible
+TypeDef relocation and incompatible provider regressions are added but remain
+unverified under the active hold. Optional/qualified wrappers, generic provider
+compatibility, callable imports and broader generic-row re-emission remain
+open.
 The exact Construction-2/CM1 source producer emits Body-04 for direct
 scalar-field reference getters backed by one receiver or class-handle formal,
 using the exact normal-result `DependsOn` relation and a selected FieldDef
