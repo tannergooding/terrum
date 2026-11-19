@@ -22,7 +22,8 @@ internal static partial class Program
         CoreManifestKind? CoreKind, string Path,
         bool IsSourceEnumExports,
         bool IsSourceGenericMethodExports = false,
-        bool IsSourceTypeExports = false);
+        bool IsSourceTypeExports = false,
+        bool IsSourceProviders = false);
 
     private const string A3FixedArraySchemaIdentity
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1";
@@ -62,8 +63,12 @@ internal static partial class Program
         string? sourceEnumExportsPath = null;
         string? sourceTypeExportsPath = null;
         string? sourceGenericMethodExportsPath = null;
+        string? sourceProvidersPath = null;
         IReadOnlyList<TrRmSourceTypeExport>? sourceTypeExports = null;
         TrRmSourceGenericMethodExportsFile? sourceMethodExportsFile = null;
+        TrRmSourceProvidersFile? sourceProvidersFile = null;
+        CompilationReference? sourceProvidersReference = null;
+        List<string>? sourceProvidersRouteInputPaths = null;
         var configurationFileOrder
             = new List<TrRmExecutionConfigurationFile>();
         LayoutCoreRegistrationSet? layoutCoreRegistration = null;
@@ -140,6 +145,7 @@ internal static partial class Program
                     || ((args[i] is "--trrm-schema" or "--trrm-module"
                         or "--trrm-source-enum-exports"
                         or "--trrm-source-type-exports"
+                        or "--trrm-source-providers"
                         or "--trrm-source-generic-method-exports")
                         && args[i + 1].StartsWith('-',
                             StringComparison.Ordinal)))
@@ -246,6 +252,19 @@ internal static partial class Program
                                 sourceTypeExportsFullPath, false, false,
                                 true));
                         break;
+                    case "--trrm-source-providers"
+                        when command == "compile-trrm"
+                        && sourceProvidersPath is null
+                        && value.Length != 0 && value != "-"
+                        && !value.StartsWith('-', StringComparison.Ordinal)
+                        && TryGetFullPath(value,
+                            out var sourceProvidersFullPath):
+                        sourceProvidersPath = sourceProvidersFullPath;
+                        configurationFileOrder.Add(
+                            new TrRmExecutionConfigurationFile(null,
+                                sourceProvidersFullPath, false, false,
+                                false, true));
+                        break;
                     case "--trrm-source-generic-method-exports"
                         when command == "compile-trrm"
                         && sourceGenericMethodExportsPath is null
@@ -328,6 +347,15 @@ internal static partial class Program
                 return 2;
             }
             if (sourceTypeExportsPath is not null
+                && (!StringComparer.Ordinal.Equals(schemaIdentity,
+                        NestedFieldDestinationsSchemaIdentity)
+                    || sourceEnumExportsPath is not null
+                    || sourceGenericMethodExportsPath is not null))
+            {
+                WriteInputError(json, "TRM2000", Usage);
+                return 2;
+            }
+            if (sourceProvidersPath is not null
                 && (!StringComparer.Ordinal.Equals(schemaIdentity,
                         NestedFieldDestinationsSchemaIdentity)
                     || sourceEnumExportsPath is not null
@@ -600,6 +628,40 @@ internal static partial class Program
                 }
             }
 
+            if (sourceProvidersPath is not null)
+            {
+                var preflightPaths = new List<string>();
+                foreach (var sourcePath in paths)
+                {
+                    if (sourcePath != "-")
+                    {
+                        preflightPaths.Add(sourcePath);
+                    }
+                }
+                foreach (var configurationFile in configurationFileOrder)
+                {
+                    preflightPaths.Add(configurationFile.Path);
+                }
+                if (output is not null)
+                {
+                    preflightPaths.Add(output);
+                }
+
+                for (var left = 0; left < preflightPaths.Count; left++)
+                {
+                    for (var right = 0; right < left; right++)
+                    {
+                        if (PathsAlias(preflightPaths[left],
+                                preflightPaths[right]))
+                        {
+                            WriteInputError(json, "TRM2002",
+                                "Source, configuration and output paths must be distinct when using source providers.");
+                            return 2;
+                        }
+                    }
+                }
+            }
+
             if (configurationFileOrder.Count != 0)
             {
                 LayoutCoreManifestDefinition? layoutDefinition = null;
@@ -621,6 +683,29 @@ internal static partial class Program
                         sourceTypeExports
                             = ReadTrRmSourceTypeExports(
                                 configurationFile.Path);
+                        continue;
+                    }
+                    if (configurationFile.IsSourceProviders)
+                    {
+                        sourceProvidersFile
+                            = TrRmSourceProvidersReader.Read(
+                                configurationFile.Path);
+                        for (var providerIndex = 0;
+                            providerIndex
+                                < sourceProvidersFile.Providers.Length;
+                            providerIndex++)
+                        {
+                            if (!StringComparer.Ordinal.Equals(
+                                    sourceProvidersFile
+                                        .Providers[providerIndex]
+                                        .SchemaIdentity,
+                                    NestedFieldDestinationsSchemaIdentity))
+                            {
+                                WriteInputError(json, "TRM2000",
+                                    $"Source provider {providerIndex} must explicitly select the exact nested FieldPath schema.");
+                                return 2;
+                            }
+                        }
                         continue;
                     }
                     if (configurationFile.IsSourceGenericMethodExports)
@@ -705,6 +790,127 @@ internal static partial class Program
                 evaluationFormSelection = registrations.Evaluation;
             }
 
+            if (sourceProvidersFile is not null)
+            {
+                var providerPaths = new string[
+                    sourceProvidersFile.Providers.Length];
+                for (var index = 0; index < providerPaths.Length; index++)
+                {
+                    var provider = sourceProvidersFile.Providers[index];
+                    if (!TryGetFullPath(provider.Path,
+                            out var providerPath))
+                    {
+                        WriteInputError(json, "TRM2001",
+                            $"Invalid source provider path '{provider.Path}'.");
+                        return 2;
+                    }
+                    providerPaths[index] = providerPath;
+                }
+
+                var routeInputPaths = new List<string>();
+                foreach (var sourcePath in paths)
+                {
+                    if (sourcePath != "-")
+                    {
+                        routeInputPaths.Add(sourcePath);
+                    }
+                }
+                foreach (var configurationFile in configurationFileOrder)
+                {
+                    routeInputPaths.Add(configurationFile.Path);
+                }
+                routeInputPaths.AddRange(providerPaths);
+                for (var left = 0; left < routeInputPaths.Count; left++)
+                {
+                    for (var right = 0; right < left; right++)
+                    {
+                        if (PathsAlias(routeInputPaths[left],
+                                routeInputPaths[right]))
+                        {
+                            WriteInputError(json, "TRM2002",
+                                "Source, configuration and provider files must be distinct when using source providers.");
+                            return 2;
+                        }
+                    }
+
+                    if (output is not null
+                        && PathsAlias(routeInputPaths[left], output))
+                    {
+                        WriteInputError(json, "TRM2002",
+                            "Source, configuration and provider files must be distinct from artifact output.");
+                        return 2;
+                    }
+                }
+
+                sourceProvidersRouteInputPaths = routeInputPaths;
+                for (var index = 0; index < providerPaths.Length; index++)
+                {
+                    if (!File.Exists(providerPaths[index])
+                        || Directory.Exists(providerPaths[index]))
+                    {
+                        WriteInputError(json, "TRM2001",
+                            $"Source provider file '{providerPaths[index]}' is not a regular file.");
+                        return 2;
+                    }
+                }
+
+                var providerInputs = new TrRmStandardArtifactInput[
+                    providerPaths.Length];
+                for (var index = 0; index < providerInputs.Length; index++)
+                {
+                    providerInputs[index]
+                        = new TrRmStandardArtifactInput(
+                            sourceProvidersFile.Providers[index]
+                                .SchemaIdentity,
+                            File.ReadAllBytes(providerPaths[index]));
+                }
+
+                var references = new CompilationReference[
+                    sourceProvidersFile.References.Length];
+                for (var referenceIndex = 0;
+                    referenceIndex < references.Length; referenceIndex++)
+                {
+                    var selection
+                        = sourceProvidersFile.References[referenceIndex];
+                    var providersForReference
+                        = new List<TrRmStandardArtifactInput>(
+                            providerInputs.Length - 1);
+                    for (var providerIndex = 0;
+                        providerIndex < providerInputs.Length;
+                        providerIndex++)
+                    {
+                        if (providerIndex != selection.ProviderInputOrdinal)
+                        {
+                            providersForReference.Add(
+                                providerInputs[providerIndex]);
+                        }
+                    }
+
+                    try
+                    {
+                        references[referenceIndex]
+                            = TrRmExecutableCompiler.CreateStandardReference(
+                                providerInputs[
+                                    selection.ProviderInputOrdinal],
+                                selection.ModuleIdentity,
+                                providersForReference,
+                                selection.TypeExportKeys,
+                                selection.FieldExportKeys);
+                    }
+                    catch (ArgumentException exception)
+                    {
+                        WriteInputError(json, "TRM2001",
+                            $"Invalid source provider selection at $.references[{referenceIndex}]: {exception.Message}");
+                        return 2;
+                    }
+                }
+
+                sourceProvidersReference = references.Length == 1
+                    ? references[0]
+                    : TrRmExecutableCompiler
+                        .CreateStandardReferenceSet(references);
+            }
+
             byte[] artifact;
             if (command == "compile-trrm")
             {
@@ -730,11 +936,40 @@ internal static partial class Program
                     CoreEvaluationFormIdentitySelection
                         = evaluationFormSelection,
                 };
-                var compilation = library
-                    ? snapshots.Length == 1 ? Compilation.CreateLibrary(snapshots[0], options)
-                        : Compilation.CreateLibrary(snapshots, options)
-                    : snapshots.Length == 1 ? Compilation.Create(snapshots[0], options)
+                Compilation CreateCompilation()
+                {
+                    if (sourceProvidersReference is not null)
+                    {
+                        if (library)
+                        {
+                            return snapshots.Length == 1
+                                ? Compilation.CreateLibrary(snapshots[0],
+                                    sourceProvidersReference, options)
+                                : Compilation.CreateLibrary(snapshots,
+                                    sourceProvidersReference, options);
+                        }
+
+                        return snapshots.Length == 1
+                            ? Compilation.Create(snapshots[0],
+                                sourceProvidersReference, options)
+                            : Compilation.Create(snapshots,
+                                sourceProvidersReference, options);
+                    }
+
+                    if (library)
+                    {
+                        return snapshots.Length == 1
+                            ? Compilation.CreateLibrary(snapshots[0],
+                                options)
+                            : Compilation.CreateLibrary(snapshots, options);
+                    }
+
+                    return snapshots.Length == 1
+                        ? Compilation.Create(snapshots[0], options)
                         : Compilation.Create(snapshots, options);
+                }
+
+                var compilation = CreateCompilation();
                 if (compilation.HasErrors)
                 {
                     WriteCompilationResult(command, compilation, compilation.SourceDiagnostics,
@@ -882,6 +1117,14 @@ internal static partial class Program
                 {
                     WriteInputError(json, "TRM2002",
                         "The source generic method export file must remain distinct from every source, Core manifest and artifact output.");
+                    return 2;
+                }
+                if (sourceProvidersRouteInputPaths is not null
+                    && sourceProvidersRouteInputPaths.Any(
+                        path => PathsAlias(path, artifactPath)))
+                {
+                    WriteInputError(json, "TRM2002",
+                        "Source, configuration and provider files must remain distinct from artifact output.");
                     return 2;
                 }
                 WriteArtifact(artifactPath, artifact);

@@ -81,14 +81,21 @@ but is not implemented and requires complete class/member/Body closure; it
 does not broaden the G1 map. An unapproved [C1 enum-closure proposal](../proposals/standard-trrm-c1-enum-closure-composition.md)
 defines a version-2 class manifest for separate EN1 successors; it is also
 unimplemented and does not compose NominalEnumsDraft into C1.
-Source provider inputs and schema aliases remain unsupported; see the
-[G1/C1 parameter-label proposal](../proposals/standard-trrm-g1-interface-parameter-labels.md).
-The existing enum mapping is intentionally not a general TypeDef/FieldDef
-manifest. Nested FieldPath TypeDef/FieldDef mappings are not yet a verified
-CLI capability. A separate exact-schema producer mapping is an unapproved
-candidate; `compile-trrm` still has no source-provider input, so it does not
-enable consumer-side source imports. See the
-[source type/field CLI proposal](../proposals/standard-trrm-source-type-cli-transport.md).
+The class-source route does not admit source-provider inputs or schema aliases;
+see the [G1/C1 parameter-label proposal](../proposals/standard-trrm-g1-interface-parameter-labels.md).
+The enum mapping remains enum-specific. The separate
+[`--trrm-source-type-exports`](../proposals/standard-trrm-source-type-cli-transport.md)
+file publishes explicit TypeDef/FieldDef keys for the exact nested FieldPath
+schema and does not add consumer selections to that publication manifest.
+Consumer source imports have a separate, provisionally implemented
+[`--trrm-source-providers`](../proposals/standard-trrm-source-provider-cli-transport.md)
+file for that exact schema. It validates ordered provider artifacts and
+explicit Module/type/field selections before source acquisition, then composes
+the existing checked references for `compile-trrm`. Positive nested-FieldPath
+compile/run/build coverage and malformed-selection, schema and alias rejection
+cases are added but remain unverified under the active validation hold. This
+route does not broaden class or type publication manifests, artifact-command
+provider options, or schema admission.
 Artifact commands accept exact per-artifact schema identities and a root
 Module identity, plus repeatable explicitly selected provider schema/path
 pairs. The current whitelist includes F/F+S, A2/A2E/A2EU/A2EU+SF1,

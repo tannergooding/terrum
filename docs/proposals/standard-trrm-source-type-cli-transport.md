@@ -30,11 +30,13 @@ The file transports the existing `TrRmSourceTypeExport` mapping under only
 new compiler authoring API, source syntax, TypeDef/FieldDef encoding, Feature,
 or compatibility alias. Do not extend or reinterpret the enum-specific file.
 
-This is provider-publication transport only. `compile-trrm` currently rejects
-provider inputs; this candidate does not add source dependency loading or
-consumer-side provider selection. Source consumers continue to require the
-existing checked `CreateStandardReference` handoff with explicit keys. A CLI
-route without that handoff must decline rather than derive an Import.
+This is provider-publication transport only; it adds no provider fields or
+consumer-side selection to this manifest. A separate
+[source-provider CLI candidate](standard-trrm-source-provider-cli-transport.md)
+proposes that handoff for exact local-field-layout-2 consumers. This manifest
+remains publication-only; consumer Imports require the existing checked
+`CreateStandardReference` API with explicit keys, and the separate candidate
+adds only a CLI transport for that handoff.
 
 ## Exact manifest
 
@@ -87,8 +89,9 @@ visibility, layout, and field eligibility.
   option/schema/path identity before reading source; on any failure, preserve
   existing outputs.
 - Keep artifact-command root/provider schema selection exact. This option
-  does not add provider inputs to `compile-trrm`, alter `terrum.cli/1`, or
-  change `run-trrm`/`analyze-trrm` behavior.
+  does not alter `terrum.cli/1` or change `run-trrm`/`analyze-trrm` behavior;
+  consumer provider selection is owned separately by the source-provider
+  candidate.
 - Report selection/option errors as the existing `TRM2000`, file/field-mapping
   errors as `TRM2001`, and path aliases as `TRM2002`; unsupported source
   declarations retain the compiler's existing diagnostic boundary.

@@ -129,15 +129,19 @@ Module target requirement **1**, arithmetic selection and `--library`
 behavior unchanged. Omission does not opt into this transport or waive the
 selected producer's required closure; existing defaults remain unchanged.
 
-This adds **no source-provider input**: `compile-trrm` still rejects
-`--trrm-provider`, `--trrm-module` and artifact-only anchor options. For a
-subsequent admitted constructor-family API operation, root, **every supplied
-provider including unused inputs**, and captured Clause/Origin/Plan artifacts
-must select that same exact literal before schema-dependent indexing or
-decoding. A declaration-only provider is not exempt. Retained provider origins
-must also satisfy that agreement; source mapping cannot restamp them.
-This proposal neither broadens artifact-command schema whitelists nor claims
-that these outputs can already be run or built by those commands.
+This class-publication option adds **no source-provider fields** to its
+manifest. A separate [source-provider CLI candidate](standard-trrm-source-provider-cli-transport.md)
+proposes a consumer-input route for the exact local-field-layout-2 successor;
+it does not compose this class manifest or admit its C1 successors. The
+artifact-only `--trrm-provider`, `--trrm-module` and anchor options remain
+unavailable on `compile-trrm`. For a subsequent admitted constructor-family
+API operation, root, **every supplied provider including unused inputs**, and
+captured Clause/Origin/Plan artifacts must select that same exact literal
+before schema-dependent indexing or decoding. A declaration-only provider is
+not exempt. Retained provider origins must also satisfy that agreement;
+source mapping cannot restamp them. This proposal neither broadens
+artifact-command schema whitelists nor claims that these outputs can already
+be run or built by those commands.
 
 ## Version-1 file
 
