@@ -6543,6 +6543,26 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 expectation.MethodExpectations)
             .Any(static expectation => expectation.ExportKey == "Box.Echo"),
             Is.True);
+        var relocatedProviderInput = new TrRmStandardArtifactInput(
+            schemaIdentity, CreateGenericClassProvider(true, 1,
+                0xF200_0008u, includePrefixMethod: true));
+        var relocatedReference = TrRmExecutableCompiler
+            .CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    reemittedArtifact),
+                "GenericClassMethodConsumerReemitted",
+                [relocatedProviderInput], ["ContainerKey"]);
+        var relocatedMethod = relocatedReference
+            .StandardClassDeclarations
+            .Single(static declaration =>
+                declaration.Declaration.Name == "Box"
+                && !declaration.Expectations.IsEmpty)
+            .Expectations.SelectMany(static expectation =>
+                expectation.MethodExpectations)
+            .Single(static expectation =>
+                expectation.ExportKey == "Box.Echo");
+        Assert.That(relocatedMethod.ProviderDefinitionId,
+            Is.Not.EqualTo(importedMethod.ProviderDefinitionId));
 
         var constrainedProviderInput = new TrRmStandardArtifactInput(
             schemaIdentity, CreateGenericClassProvider(true, 2,
@@ -6822,6 +6842,12 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             TrRmExecutableCompiler.CreateStandardReference(
                 consumerInput, "GenericClassMethodConsumer",
                 [incompatibleProvider], ["ContainerKey"]));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    reemittedArtifact),
+                "GenericClassMethodConsumerReemitted",
+                [incompatibleProvider], ["ContainerKey"]));
         var incompatibleDefaultProvider = new TrRmStandardArtifactInput(
             schemaIdentity, CreateGenericClassProvider(true, 1,
                 0xF200_0009u));
@@ -6829,29 +6855,44 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             TrRmExecutableCompiler.CreateStandardReference(
                 consumerInput, "GenericClassMethodConsumer",
                 [incompatibleDefaultProvider], ["ContainerKey"]));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    reemittedArtifact),
+                "GenericClassMethodConsumerReemitted",
+                [incompatibleDefaultProvider], ["ContainerKey"]));
 
         byte[] CreateGenericClassProvider(bool isStatic,
             byte ownershipDomain, uint defaultArgumentReference,
             bool includeUniqueConstraint = false,
-            bool useFormalParameter = false)
+            bool useFormalParameter = false,
+            bool includePrefixMethod = false)
         {
             var returnStatement = useFormalParameter
                 ? "return 42;" : "return value;";
             var methodDeclaration = isStatic
                 ? $"public static int32 Echo(int32 value) {{ {returnStatement} }}"
                 : $"public int32 Echo(int32 value) {{ {returnStatement} }}";
+            var prefixDeclaration = includePrefixMethod
+                ? "public class Prefix { public static int32 Before() { return 1; } }"
+                : string.Empty;
             var providerTree = SyntaxTree.Parse(
-                $"public class Box {{ {methodDeclaration} }}");
+                $"{prefixDeclaration} public class Box " +
+                $"{{ {methodDeclaration} }}");
             var providerCompilation
                 = Compilation.CreateLibrary(providerTree);
             Assert.That(providerCompilation.HasErrors, Is.False,
                 string.Join(Environment.NewLine,
                     providerCompilation.Diagnostics));
             var providerProgram = (BoundProgram)providerCompilation.Program!;
-            var boxDeclaration = providerTree.Root.Children
+            var classDeclarations = providerTree.Root.Children
                 .OfType<SyntaxNode>()
-                .Single(static node =>
+                .Where(static node =>
                     node.Kind == SyntaxKind.ClassDeclaration);
+            var boxDeclaration = classDeclarations
+                .Single(static node => node.Children
+                    .OfType<SyntaxTokenElement>()
+                    .Any(static token => token.Token.Name == "Box"));
             var echo = boxDeclaration.Children.OfType<SyntaxNode>()
                 .Single(static node =>
                     node.Kind == SyntaxKind.FunctionDeclaration);
@@ -6862,17 +6903,40 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             var providerModuleIdentity = isStatic
                 ? "GenericClassMethodProvider"
                 : "GenericInstanceClassMethodProvider";
+            var classExports = new List<TrRmSourceClassExport> {
+                new(providerProgram, boxClassIndex,
+                    boxDeclaration.Span, "BoxKey", [
+                        new TrRmSourceClassMemberExport(boxClassIndex,
+                            echo.Span, "Box.Echo"),
+                    ]),
+            };
+            if (includePrefixMethod)
+            {
+                var prefixClass = classDeclarations.Single(static node =>
+                    node.Children.OfType<SyntaxTokenElement>().Any(
+                        static token => token.Token.Name == "Prefix"));
+                var prefixMethod = prefixClass.Children
+                    .OfType<SyntaxNode>()
+                    .Single(static node =>
+                        node.Kind == SyntaxKind.FunctionDeclaration);
+                var prefixClassIndex = Enumerable.Range(0,
+                        providerProgram.Classes.Length)
+                    .Single(index =>
+                        providerProgram.Classes[index].Name == "Prefix");
+                classExports.Add(new TrRmSourceClassExport(
+                    providerProgram, prefixClassIndex,
+                    prefixClass.Span, "PrefixKey", [
+                        new TrRmSourceClassMemberExport(
+                            prefixClassIndex, prefixMethod.Span,
+                            "Prefix.Before"),
+                    ]));
+            }
+
             var provider = TrRmExecutableCompiler.EmitStandard(
                 providerProgram, providerModuleIdentity,
                 schemaIdentity,
                 TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
-                [], [], [
-                    new TrRmSourceClassExport(providerProgram,
-                        boxClassIndex, boxDeclaration.Span, "BoxKey", [
-                            new TrRmSourceClassMemberExport(boxClassIndex,
-                                echo.Span, "Box.Echo"),
-                        ]),
-                ]);
+                [], [], classExports);
             var providerWithAlias = AddMethodExportAlias(provider,
                 "Box.Echo", "Box.EchoAlias");
             var formalProvider = RewriteGenericMethodTypeFormal(
