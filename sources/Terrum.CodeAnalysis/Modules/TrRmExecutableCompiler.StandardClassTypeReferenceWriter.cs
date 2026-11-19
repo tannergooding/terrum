@@ -32,8 +32,7 @@ public static partial class TrRmExecutableCompiler
         BoundBinary? CallBinaryExpression = null);
 
     private readonly record struct C1M1Construction2ConditionalReturn(
-        BoundExpression Condition, BoundExpression TrueValue,
-        BoundExpression FalseValue);
+        BoundIf Root);
 
     private readonly record struct C1M1ParameterSurfaceRow(
         int MethodDefRow, int Ordinal, string Name,
@@ -2040,17 +2039,77 @@ public static partial class TrRmExecutableCompiler
                         - (function.IsStatic ? 0 : 1)));
         }
 
-        var edgeRecordIndex = checked((ushort)1);
-        var conditionCode
-            = EncodeCondition(conditionalReturn.Condition,
-                edgeRecordIndex);
         var constantRows = new List<TrRmFrozenScalarValueReference>();
-        var codeBlocks = new[] {
-            conditionCode,
-            EncodeReturnBlock(conditionalReturn.TrueValue),
-            EncodeReturnBlock(conditionalReturn.FalseValue),
+        var codeBlocks = new List<byte[]> { [] };
+        var records = new List<ReadOnlyMemory<byte>> {
+            new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 },
         };
-        var blocks = new List<TrRmRegisterBodyBlock>(codeBlocks.Length);
+        var pending = new Stack<(int Block, BoundStatement Statement)>();
+        pending.Push((0, conditionalReturn.Root));
+        var visits = 0;
+        while (pending.Count != 0)
+        {
+            if (++visits > SemanticVerifier.MaximumAnalysisVisits)
+            {
+                throw Unsupported(
+                    "A Construction-2 conditional Body exceeds the control-flow analysis limit.");
+            }
+
+            var (blockIndex, pendingStatement) = pending.Pop();
+            var statement = pendingStatement;
+            while (statement is BoundBlock block)
+            {
+                if (++visits > SemanticVerifier.MaximumAnalysisVisits
+                    || !block.RetiredManagedLocals.IsEmpty
+                    || block.Statements.Length != 1)
+                {
+                    throw new InvalidDataException(
+                        "A checked Construction-2 conditional branch has unsupported block structure.");
+                }
+
+                statement = block.Statements[0];
+            }
+
+            if (statement is BoundIf branch)
+            {
+                if (branch.Else is null)
+                {
+                    throw new InvalidDataException(
+                        "A checked Construction-2 conditional branch lost its false arm.");
+                }
+
+                var elseBranch = branch.Else;
+                var trueBlock = AddBlock();
+                var falseBlock = AddBlock();
+                if (records.Count > ushort.MaxValue)
+                {
+                    throw Unsupported(
+                        "A Construction-2 conditional Body exceeds the ConditionalEdge record limit.");
+                }
+
+                var edgeRecordIndex = checked((ushort)records.Count);
+                records.Add(new(
+                    TrRmRegisterBodyRecordWriter.EncodeConditionalEdge(
+                        checked((ushort)trueBlock),
+                        checked((ushort)falseBlock)));
+                codeBlocks[blockIndex] = EncodeCondition(
+                    branch.Condition, edgeRecordIndex);
+                pending.Push((falseBlock, elseBranch));
+                pending.Push((trueBlock, branch.Then));
+            }
+            else if (statement is BoundReturn { Value: not null } returned)
+            {
+                codeBlocks[blockIndex]
+                    = EncodeReturnBlock(returned.Value);
+            }
+            else
+            {
+                throw new InvalidDataException(
+                    "A checked Construction-2 conditional branch has an unsupported statement.");
+            }
+        }
+
+        var blocks = new List<TrRmRegisterBodyBlock>(codeBlocks.Count);
         var code = new List<byte>();
         foreach (var blockCode in codeBlocks)
         {
@@ -2073,15 +2132,24 @@ public static partial class TrRmExecutableCompiler
                 constant.ConstantSourceRow);
         }
 
-        ReadOnlyMemory<byte>[] records = [
-            new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 },
-            new(TrRmRegisterBodyRecordWriter.EncodeConditionalEdge(1, 2)),
-        ];
         return TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
             default, default, constantMap, blocks, records, code.ToArray(),
             contractCount: contractCount, schema: schema,
             generalPredicateGraphsInitializationReferenceBodies
                 : schema.UsesGeneralPredicateGraphs());
+
+        int AddBlock()
+        {
+            if (codeBlocks.Count > ushort.MaxValue)
+            {
+                throw Unsupported(
+                    "A Construction-2 conditional Body exceeds the Block index limit.");
+            }
+
+            var block = codeBlocks.Count;
+            codeBlocks.Add([]);
+            return block;
+        }
 
         byte[] EncodeCondition(BoundExpression condition,
             ushort edgeIndex)
@@ -4073,12 +4141,8 @@ public static partial class TrRmExecutableCompiler
         if (function.ParameterCount < receiverCount
             || function.ParameterCount != function.Variables.Length
             || function.Body.Statements.Length != 1
-            || function.Body.Statements[0] is not BoundIf conditional
-            || conditional.Else is null
-            || !function.Body.RetiredManagedLocals.IsEmpty
-            || !conditional.GenericUniquePropertyWhenTrue.IsEmpty
-            || !conditional.GenericUniquePropertyWhenFalse.IsEmpty
-            || conditional.GenericUniquePropertyKnownResult is not null)
+            || function.Body.Statements[0] is not BoundIf root
+            || !function.Body.RetiredManagedLocals.IsEmpty)
         {
             return null;
         }
@@ -4096,6 +4160,12 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
+        if (function.ReturnType != PrimitiveType.Bool
+            && !IsC1M1Construction2BodyNumericType(function.ReturnType))
+        {
+            return null;
+        }
+
         for (var parameter = 0; parameter < function.ParameterCount;
             parameter++)
         {
@@ -4106,24 +4176,57 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        var trueReturn = GetSingleScalarReturn(conditional.Then);
-        var falseReturn = GetSingleScalarReturn(conditional.Else);
-        if (trueReturn is null || falseReturn is null
-            || conditional.Condition.Type != PrimitiveType.Bool
-            || !IsSupportedCondition(conditional.Condition)
-            || trueReturn.Type != function.ReturnType
-            || falseReturn.Type != function.ReturnType
-            || (function.ReturnType != PrimitiveType.Bool
-                && !IsC1M1Construction2BodyNumericType(
-                    function.ReturnType))
-            || !IsScalarReturn(trueReturn)
-            || !IsScalarReturn(falseReturn))
+        var pending = new Stack<BoundStatement>();
+        pending.Push(root);
+        var visits = 0;
+        while (pending.Count != 0)
         {
+            if (++visits > SemanticVerifier.MaximumAnalysisVisits)
+            {
+                return null;
+            }
+
+            var statement = pending.Pop();
+            while (statement is BoundBlock block)
+            {
+                if (++visits > SemanticVerifier.MaximumAnalysisVisits
+                    || !block.RetiredManagedLocals.IsEmpty
+                    || block.Statements.Length != 1)
+                {
+                    return null;
+                }
+
+                statement = block.Statements[0];
+            }
+
+            if (statement is BoundIf branch)
+            {
+                if (branch.Else is null
+                    || !branch.GenericUniquePropertyWhenTrue.IsEmpty
+                    || !branch.GenericUniquePropertyWhenFalse.IsEmpty
+                    || branch.GenericUniquePropertyKnownResult is not null
+                    || branch.Condition.Type != PrimitiveType.Bool
+                    || !IsSupportedCondition(branch.Condition))
+                {
+                    return null;
+                }
+
+                pending.Push(branch.Else);
+                pending.Push(branch.Then);
+                continue;
+            }
+
+            if (statement is BoundReturn { Value: not null } returned
+                && returned.Value.Type == function.ReturnType
+                && IsScalarReturn(returned.Value))
+            {
+                continue;
+            }
+
             return null;
         }
 
-        return new C1M1Construction2ConditionalReturn(
-            conditional.Condition, trueReturn, falseReturn);
+        return new C1M1Construction2ConditionalReturn(root);
 
         bool IsScalarParameter(int variableIndex)
         {

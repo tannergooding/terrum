@@ -348,6 +348,13 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     if (condition) { return left + right; }
                     else { return left - right; }
                 }
+                public static int32 SelectNested(bool first, bool second,
+                    int32 innerTrue, int32 innerFalse, int32 outerFalse) {
+                    if (first) {
+                        if (second) { return innerTrue; }
+                        else { return innerFalse; }
+                    } else { return outerFalse; }
+                }
                 public static float64 SelectFloatLess(float64 left,
                     float64 right, float64 less, float64 greaterOrEqual) {
                     if (left < right) { return less; }
@@ -395,6 +402,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name == "SelectArithmetic"));
+        var selectNested = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "SelectNested"));
 
         var artifact = TrRmExecutableCompiler.EmitStandard(program,
             "ConditionalClassMethod", C1M1Construction2SchemaIdentity,
@@ -419,6 +430,8 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                         new TrRmSourceClassMemberExport(0,
                             selectArithmetic.Span,
                             "Box.SelectArithmetic"),
+                        new TrRmSourceClassMemberExport(0,
+                            selectNested.Span, "Box.SelectNested"),
                         new TrRmSourceClassMemberExport(0,
                             selectInstance.Span, "Box.SelectInstance"),
                     ]),
@@ -530,6 +543,44 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 0xD5, 1, 2, 0,
                 0xC0, 0x02, 0xF0, 0x10,
                 0x17, 0,
+            }));
+
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.SelectNested", out var nestedDefinition), Is.True);
+        var nestedMethodRow
+            = checked((int)(nestedDefinition & 0x00FF_FFFF));
+        var nestedBodyRow = tables.Methods.GetBodyRow(nestedMethodRow);
+        Assert.That(nestedBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(nestedBodyRow,
+            tables.Contracts.Count);
+        tables.ValidateRegisterBodyMapsForMethod(nestedMethodRow);
+        var nestedBody = tables.Bodies.GetRegisterBody(nestedBodyRow,
+            tables.Contracts.Count);
+        Assert.That(nestedBody.BlockCount, Is.EqualTo(5));
+        Assert.That(nestedBody.RecordCount, Is.EqualTo(3));
+        Assert.That(nestedBody.GetRecord(1).ToArray(),
+            Is.EqualTo(new byte[] { 0x06, 0, 0, 0, 1, 0, 2, 0 }));
+        Assert.That(nestedBody.GetRecord(2).ToArray(),
+            Is.EqualTo(new byte[] { 0x06, 0, 0, 0, 3, 0, 4, 0 }));
+        Assert.That(nestedBody.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD5, 0, 0, 0, 0xE4, 0, 1, 0,
+            }));
+        Assert.That(nestedBody.GetBlockCode(1).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD5, 0, 1, 0, 0xE4, 0, 2, 0,
+            }));
+        Assert.That(nestedBody.GetBlockCode(2).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD5, 0, 4, 0, 0x17, 0,
+            }));
+        Assert.That(nestedBody.GetBlockCode(3).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD5, 0, 2, 0, 0x17, 0,
+            }));
+        Assert.That(nestedBody.GetBlockCode(4).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD5, 0, 3, 0, 0x17, 0,
             }));
 
         Assert.That(tables.Exports.TryGetDefinitionForKey(1,
