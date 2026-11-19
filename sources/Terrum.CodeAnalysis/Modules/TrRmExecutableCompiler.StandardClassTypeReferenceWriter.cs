@@ -2091,7 +2091,7 @@ public static partial class TrRmExecutableCompiler
                 records.Add(new(
                     TrRmRegisterBodyRecordWriter.EncodeConditionalEdge(
                         checked((ushort)trueBlock),
-                        checked((ushort)falseBlock)));
+                        checked((ushort)falseBlock))));
                 codeBlocks[blockIndex] = EncodeCondition(
                     branch.Condition, edgeRecordIndex);
                 pending.Push((falseBlock, elseBranch));
