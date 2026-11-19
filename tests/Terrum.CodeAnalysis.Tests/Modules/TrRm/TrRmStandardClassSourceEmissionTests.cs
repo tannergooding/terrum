@@ -322,13 +322,18 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
-    public void EmitsStaticConditionalReturnBody()
+    public void EmitsStaticAndInstanceConditionalReturnBodies()
     {
         var tree = SyntaxTree.Parse("""
             public class Box {
                 public int32 Value;
                 public Box(int32 value) { Value = value; }
                 public static int32 Select(bool condition, int32 whenTrue,
+                    int32 whenFalse) {
+                    if (condition) { return whenTrue; }
+                    else { return whenFalse; }
+                }
+                public int32 SelectInstance(bool condition, int32 whenTrue,
                     int32 whenFalse) {
                     if (condition) { return whenTrue; }
                     else { return whenFalse; }
@@ -351,6 +356,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name == "Select"));
+        var selectInstance = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "SelectInstance"));
 
         var artifact = TrRmExecutableCompiler.EmitStandard(program,
             "ConditionalClassMethod", C1M1Construction2SchemaIdentity,
@@ -366,6 +375,8 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                         },
                         new TrRmSourceClassMemberExport(0, select.Span,
                             "Box.Select"),
+                        new TrRmSourceClassMemberExport(0,
+                            selectInstance.Span, "Box.SelectInstance"),
                     ]),
             ]);
         var tables = TrRmStructuralMetadataValidator
@@ -398,6 +409,39 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         Assert.That(body.GetBlockCode(2).ToArray(),
             Is.EqualTo(new byte[] {
                 0xD5, 0, 2, 0, 0x17, 0,
+            }));
+
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.SelectInstance", out var instanceDefinition), Is.True);
+        var instanceMethodRow
+            = checked((int)(instanceDefinition & 0x00FF_FFFF));
+        var instanceBodyRow
+            = tables.Methods.GetBodyRow(instanceMethodRow);
+        Assert.That(instanceBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(instanceBodyRow,
+            tables.Contracts.Count);
+        tables.ValidateRegisterBodyMapsForMethod(instanceMethodRow);
+        var instanceBody = tables.Bodies.GetRegisterBody(instanceBodyRow,
+            tables.Contracts.Count);
+        Assert.That(instanceBody.BlockCount, Is.EqualTo(3));
+        Assert.That(instanceBody.HomeCount, Is.EqualTo(4));
+        Assert.That(instanceBody.HomeMap[0], Is.EqualTo(1));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+            instanceBody.HomeMap.Slice(4, 2)), Is.Zero);
+        Assert.That(instanceBody.HomeMap[8], Is.EqualTo(2));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+            instanceBody.HomeMap.Slice(12, 2)), Is.Zero);
+        Assert.That(instanceBody.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD5, 0, 1, 0, 0xE4, 0, 1, 0,
+            }));
+        Assert.That(instanceBody.GetBlockCode(1).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD5, 0, 2, 0, 0x17, 0,
+            }));
+        Assert.That(instanceBody.GetBlockCode(2).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD5, 0, 3, 0, 0x17, 0,
             }));
     }
 

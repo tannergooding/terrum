@@ -951,6 +951,7 @@ public static partial class TrRmExecutableCompiler
                             && directNumericBinary is null
                             && directNumericUnary is null
                             && directBooleanComparison is null
+                            && conditionalReturn is null
                             && callNumericBinary is null
                             && !localCopyReturn
                             && !localNumericBinaryReturn)
@@ -1021,6 +1022,7 @@ public static partial class TrRmExecutableCompiler
                                 && directNumericBinary is null
                                 && directNumericUnary is null
                                 && directBooleanComparison is null
+                                && conditionalReturn is null
                                 && callNumericBinary is null
                                 && !localCopyReturn
                                 && !localNumericBinaryReturn)
@@ -2023,14 +2025,17 @@ public static partial class TrRmExecutableCompiler
             parameter < function.ParameterCount; parameter++)
         {
             var offset = parameter * 8;
-            homeMap[offset] = 2;
+            var isReceiver = !function.IsStatic && parameter == 0;
+            homeMap[offset] = isReceiver ? (byte)1 : (byte)2;
             BinaryPrimitives.WriteUInt16LittleEndian(
                 homeMap.AsSpan(offset + 2, 2),
                 checked((ushort)maps.GetTypeMapIndex(
                     typeTokens[parameter])));
             BinaryPrimitives.WriteUInt16LittleEndian(
                 homeMap.AsSpan(offset + 4, 2),
-                checked((ushort)parameter));
+                isReceiver ? (ushort)0
+                    : checked((ushort)(parameter
+                        - (function.IsStatic ? 0 : 1)));
         }
 
         var conditionHome
@@ -3902,7 +3907,8 @@ public static partial class TrRmExecutableCompiler
     private static C1M1Construction2ConditionalReturn?
         TryGetC1M1Construction2ConditionalReturn(BoundFunction function)
     {
-        if (!function.IsStatic
+        var receiverCount = function.IsStatic ? 0 : 1;
+        if (function.ParameterCount < receiverCount
             || function.ParameterCount != function.Variables.Length
             || function.Body.Statements.Length != 1
             || function.Body.Statements[0] is not BoundIf conditional
@@ -3916,10 +3922,24 @@ public static partial class TrRmExecutableCompiler
             return null;
         }
 
+        if (receiverCount != 0)
+        {
+            var receiver = function.Variables[0];
+            if (ManagedClassTypes.IsOptional(receiver.Type)
+                || !ManagedClassTypes.IsClass(receiver.Type)
+                || receiver.IsMutable || receiver.IsOut
+                || receiver.IsInit || receiver.IsImplicitRef
+                || receiver.IsInitializationLocal)
+            {
+                return null;
+            }
+        }
+
         for (var parameter = 0; parameter < function.ParameterCount;
             parameter++)
         {
-            if (!IsScalarParameter(parameter))
+            if (parameter >= receiverCount
+                && !IsScalarParameter(parameter))
             {
                 return null;
             }
@@ -3947,7 +3967,8 @@ public static partial class TrRmExecutableCompiler
 
         bool IsScalarParameter(int variableIndex)
         {
-            if ((uint)variableIndex >= (uint)function.ParameterCount)
+            if ((uint)variableIndex >= (uint)function.ParameterCount
+                || variableIndex < receiverCount)
             {
                 return false;
             }
