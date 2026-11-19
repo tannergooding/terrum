@@ -5016,7 +5016,8 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         var schemaIdentity
             = C1M1Construction2ClassParameterDefaultsSchemaIdentity;
         var providerArtifact
-            = EmitScalarBodyfulClassArtifact("BodyProvider");
+            = EmitScalarBodyfulClassArtifact("BodyProvider",
+                includePrefix: true);
         var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
             providerArtifact);
         var reference = TrRmExecutableCompiler.CreateStandardReference(
@@ -5057,8 +5058,39 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             = reemittedTables.Methods.GetBodyRow(reemittedMethodRow);
         Assert.That(providerBodyRow, Is.GreaterThan(0));
         Assert.That(reemittedBodyRow, Is.GreaterThan(0));
-        Assert.That(reemittedTables.Bodies.GetRow(reemittedBodyRow).ToArray(),
-            Is.EqualTo(providerTables.Bodies.GetRow(providerBodyRow).ToArray()));
+        var oldBoxDefinition = providerTables.Exports.GetExportsForModule(1)
+            .Single(static export => export.ExportKey == "BoxKey").Definition;
+        var newBoxDefinition = reemittedTables.Exports.GetExportsForModule(1)
+            .Single(static export => export.ExportKey == "BoxKey").Definition;
+        var oldBoxTypeDefRow = checked((int)(
+            oldBoxDefinition & 0x00FF_FFFF));
+        var newBoxTypeDefRow = checked((int)(
+            newBoxDefinition & 0x00FF_FFFF));
+        Assert.That(oldBoxTypeDefRow, Is.Not.EqualTo(newBoxTypeDefRow));
+        var providerBody = providerTables.Bodies.GetRegisterBody(
+            providerBodyRow, providerTables.Contracts.Count);
+        var reemittedBody = reemittedTables.Bodies.GetRegisterBody(
+            reemittedBodyRow, reemittedTables.Contracts.Count);
+        var providerClassTypeMapToken = Enumerable.Range(0,
+                providerBody.TypeCount)
+            .Select(index => BinaryPrimitives.ReadUInt32LittleEndian(
+                providerBody.TypeMap.Slice(index * sizeof(uint))))
+            .Single(token => (byte)(token >> 24) == 0x11);
+        var reemittedClassTypeMapToken = Enumerable.Range(0,
+                reemittedBody.TypeCount)
+            .Select(index => BinaryPrimitives.ReadUInt32LittleEndian(
+                reemittedBody.TypeMap.Slice(index * sizeof(uint))))
+            .Single(token => (byte)(token >> 24) == 0x11);
+        Assert.That(providerTables.TypeSpecs.GetNominalTypeDefRow(
+                providerClassTypeMapToken & 0x00FF_FFFF,
+                providerTables.TypeDefs, providerTables.Imports),
+            Is.EqualTo(oldBoxTypeDefRow));
+        Assert.That(reemittedTables.TypeSpecs.GetNominalTypeDefRow(
+                reemittedClassTypeMapToken & 0x00FF_FFFF,
+                reemittedTables.TypeDefs, reemittedTables.Imports),
+            Is.EqualTo(newBoxTypeDefRow));
+        Assert.That(reemittedBody.Code.ToArray(),
+            Is.EqualTo(providerBody.Code.ToArray()));
         Assert.That(reemittedTables.Exports.TryGetDefinitionForKey(1,
             "Box.Read", out var reemittedMethodDefinition), Is.True);
         Assert.That(reemittedMethodDefinition,
@@ -5538,12 +5570,17 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     private static byte[] EmitScalarBodyfulClassArtifact(
-        string moduleIdentity, bool readsField = false)
+        string moduleIdentity, bool readsField = false,
+        bool includePrefix = false)
     {
         var methodText = readsField
             ? "public int32 Read() { return Value; }"
-            : "public static int32 Read(int32 value) { return value; }";
+            : "public int32 Read(int32 value) { return value; }";
+        var prefixText = includePrefix
+            ? "public class Prefix { public int32 Marker; }"
+            : string.Empty;
         var tree = SyntaxTree.Parse($$"""
+            {{prefixText}}
             public class Box {
                 public int32 Value;
                 {{methodText}}
@@ -5553,9 +5590,14 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = (BoundProgram)compilation.Program!;
-        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
-            .Single(static node =>
-                node.Kind == SyntaxKind.ClassDeclaration);
+        var classDeclarations = tree.Root.Children.OfType<SyntaxNode>()
+            .Where(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration)
+            .ToArray();
+        var classDeclaration = classDeclarations.Single(node =>
+            node.Children.OfType<SyntaxTokenElement>().Any(token =>
+                token.Token.Kind == TokenKind.Identifier
+                && token.Token.Name == "Box"));
         var fieldDeclaration = classDeclaration.Children
             .OfType<SyntaxNode>()
             .Single(static node => node.Kind == SyntaxKind.FieldDeclaration);
@@ -5563,18 +5605,41 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             .OfType<SyntaxNode>()
             .Single(static node =>
                 node.Kind == SyntaxKind.FunctionDeclaration);
+        var boxClassIndex = Enumerable.Range(0, program.Classes.Length)
+            .Single(index => program.Classes[index].Name == "Box");
+        var classExports = new List<TrRmSourceClassExport>();
+        if (includePrefix)
+        {
+            var prefixDeclaration = classDeclarations.Single(node =>
+                node.Children.OfType<SyntaxTokenElement>().Any(token =>
+                    token.Token.Kind == TokenKind.Identifier
+                    && token.Token.Name == "Prefix"));
+            var prefixField = prefixDeclaration.Children
+                .OfType<SyntaxNode>()
+                .Single(static node =>
+                    node.Kind == SyntaxKind.FieldDeclaration);
+            var prefixClassIndex
+                = Enumerable.Range(0, program.Classes.Length)
+                    .Single(index =>
+                        program.Classes[index].Name == "Prefix");
+            classExports.Add(new TrRmSourceClassExport(program,
+                prefixClassIndex, prefixDeclaration.Span, "PrefixKey", [
+                    new TrRmSourceClassMemberExport(prefixClassIndex,
+                        prefixField.Span, "Prefix.Value"),
+                ]));
+        }
+
+        classExports.Add(new TrRmSourceClassExport(program, boxClassIndex,
+            classDeclaration.Span, "BoxKey", [
+                new TrRmSourceClassMemberExport(boxClassIndex,
+                    fieldDeclaration.Span, "Box.Value"),
+                new TrRmSourceClassMemberExport(boxClassIndex,
+                    methodDeclaration.Span, "Box.Read"),
+            ]));
         return TrRmExecutableCompiler.EmitStandard(program, moduleIdentity,
             C1M1Construction2ClassParameterDefaultsSchemaIdentity,
             TrRmModuleTableReader.WindowsX64NativeTargetRequirement, [], [],
-            [
-                new TrRmSourceClassExport(program, 0,
-                    classDeclaration.Span, "BoxKey", [
-                        new TrRmSourceClassMemberExport(0,
-                            fieldDeclaration.Span, "Box.Value"),
-                        new TrRmSourceClassMemberExport(0,
-                            methodDeclaration.Span, "Box.Read"),
-                    ]),
-            ]);
+            classExports);
     }
 
     private static byte[] AddMethodExportAlias(byte[] artifact,
