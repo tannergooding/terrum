@@ -48,6 +48,13 @@ public static partial class TrRmExecutableCompiler
         int MethodRow, int FormalOrdinal, int GenericParamRow,
         int Kind, uint Payload, int InterfaceConstraintOrdinal);
 
+    private sealed record C1M1GenericMethodTypeEmissionContext(
+        BoundGenericMethodImport Root,
+        BoundGenericMethodDefinition Definition,
+        Dictionary<PrimitiveType, uint> FormalTypeSpecRows,
+        int[] GenericParamRows,
+        Dictionary<PrimitiveType, uint> BuiltInTypeSpecRows);
+
     private sealed record C1M1Construction2SourceInitializer(
         int ClassIndex, BoundFunction Function, uint ClassTypeSpecReference,
         ImmutableArray<BoundFieldAssignment> FieldAssignments,
@@ -7948,11 +7955,26 @@ public static partial class TrRmExecutableCompiler
 
         var standardClassIdentities
             = standardClassIndexByIdentity.Keys.ToHashSet();
+        var relationNominalIdentities
+            = new HashSet<BoundGenericNominalTypeIdentity>();
+        foreach (var definition in program.GenericMethodDefinitions)
+        {
+            foreach (var formal in definition.Formals)
+            {
+                foreach (var relation in formal.AssociatedRelations)
+                {
+                    AddC1M1RelationNominalIdentities(
+                        relation.RequiredType, relationNominalIdentities);
+                }
+            }
+        }
+
         bool IsImportedNominalIdentity(
             BoundGenericNominalTypeIdentity identity)
             => identity.IsValid
                 && (importedStructIdentities.Contains(identity)
-                    || standardClassIdentities.Contains(identity));
+                    || standardClassIdentities.Contains(identity)
+                    || relationNominalIdentities.Contains(identity));
 
         if ((!program.StandardClassDeclarations.IsEmpty
                 && !BoundStandardClassDeclarationContract.IsValidTable(
@@ -7970,10 +7992,13 @@ public static partial class TrRmExecutableCompiler
         {
             var isImportedStruct
                 = importedStructIdentities.Contains(definition.Identity);
-            if (!definition.Formals.IsEmpty
+            var isRelationNominal
+                = relationNominalIdentities.Contains(definition.Identity);
+            if ((!definition.Formals.IsEmpty && !isRelationNominal)
                 || !IsImportedNominalIdentity(definition.Identity)
                 || definition.NominalKind is not (1 or 2)
-                || (definition.NominalKind == 1 && !isImportedStruct)
+                || (definition.NominalKind == 1 && !isImportedStruct
+                    && !isRelationNominal)
                 || (definition.NominalKind == 2 && isImportedStruct))
             {
                 return false;
@@ -7982,9 +8007,14 @@ public static partial class TrRmExecutableCompiler
 
         foreach (var instance in program.GenericNominalTypeInstances)
         {
-            if (!instance.Arguments.IsEmpty
-                || (instance.Qualifiers & ~0x01) != 0
-                || instance.TypeSpecForm is not (0 or 0x02 or 0x03)
+            var isRelationNominal
+                = relationNominalIdentities.Contains(instance.Definition);
+            if ((!instance.Arguments.IsEmpty && !isRelationNominal)
+                || (instance.Qualifiers
+                    & (isRelationNominal ? ~0x03 : ~0x01)) != 0
+                || (isRelationNominal
+                    ? instance.TypeSpecForm is not (0 or 0x02 or 0x03 or 0x05 or 0x06)
+                    : instance.TypeSpecForm is not (0 or 0x02 or 0x03))
                 || !IsImportedNominalIdentity(instance.Definition))
             {
                 return false;
@@ -7992,6 +8022,73 @@ public static partial class TrRmExecutableCompiler
         }
 
         return true;
+    }
+
+    private static void AddC1M1RelationNominalIdentities(
+        BoundGenericMethodTypeTerm root,
+        HashSet<BoundGenericNominalTypeIdentity> identities)
+    {
+        var pending = new Stack<(BoundGenericMethodTypeTerm Term, int Depth)>();
+        pending.Push((root, 0));
+        var remaining = SemanticVerifier.MaximumAnalysisVisits;
+        while (pending.TryPop(out var current))
+        {
+            if (--remaining < 0
+                || current.Depth > SemanticVerifier.MaximumDepth)
+            {
+                throw Unsupported(
+                    "CM1AR1 relation TypeSpec identity traversal exceeds its limit.");
+            }
+
+            if (current.Term.NominalTypeIdentity
+                is BoundGenericNominalTypeIdentity identity)
+            {
+                _ = identities.Add(identity);
+            }
+
+            foreach (var argument in current.Term.TypeArguments)
+            {
+                pending.Push((argument, checked(current.Depth + 1)));
+            }
+        }
+    }
+
+    private static void AddC1M1RelationNominalIdentities(
+        BoundInterfaceType root,
+        HashSet<BoundGenericNominalTypeIdentity> identities)
+    {
+        var pending = new Stack<(BoundInterfaceType Type, int Depth)>();
+        pending.Push((root, 0));
+        var remaining = SemanticVerifier.MaximumAnalysisVisits;
+        while (pending.TryPop(out var current))
+        {
+            if (--remaining < 0
+                || current.Depth > SemanticVerifier.MaximumDepth)
+            {
+                throw Unsupported(
+                    "CM1AR1 relation interface traversal exceeds its limit.");
+            }
+
+            if (current.Type.GenericNominalTypeIdentity
+                is BoundGenericNominalTypeIdentity identity)
+            {
+                _ = identities.Add(identity);
+            }
+
+            foreach (var argument in current.Type.TypeArguments)
+            {
+                if (argument.Type is not null)
+                {
+                    pending.Push((argument.Type,
+                        checked(current.Depth + 1)));
+                }
+                if (argument.ConstantType is not null)
+                {
+                    pending.Push((argument.ConstantType,
+                        checked(current.Depth + 1)));
+                }
+            }
+        }
     }
 
     private static bool IsC1M1ImportedClassLayoutSupported(
@@ -8249,48 +8346,11 @@ public static partial class TrRmExecutableCompiler
             {
                 foreach (var relation in formal.AssociatedRelations)
                 {
-                    var pendingTerms
-                        = new Stack<BoundGenericMethodTypeTerm>();
-                    pendingTerms.Push(relation.RequiredType);
-                    while (pendingTerms.TryPop(out var term))
-                    {
-                        if (term.NominalTypeIdentity
-                            is BoundGenericNominalTypeIdentity identity)
-                        {
-                            _ = relationNominalIdentities.Add(identity);
-                        }
-
-                        foreach (var argument in term.TypeArguments)
-                        {
-                            pendingTerms.Push(argument);
-                        }
-                    }
-
-                    var pendingInterfaceTypes
-                        = new Stack<BoundInterfaceType>();
-                    pendingInterfaceTypes.Push(
-                        relation.AssociatedType.DeclaringInterface);
-                    while (pendingInterfaceTypes.TryPop(out var type))
-                    {
-                        if (type.GenericNominalTypeIdentity
-                            is BoundGenericNominalTypeIdentity identity)
-                        {
-                            _ = relationNominalIdentities.Add(identity);
-                        }
-
-                        foreach (var argument in type.TypeArguments)
-                        {
-                            if (argument.Type is not null)
-                            {
-                                pendingInterfaceTypes.Push(argument.Type);
-                            }
-                            if (argument.ConstantType is not null)
-                            {
-                                pendingInterfaceTypes.Push(
-                                    argument.ConstantType);
-                            }
-                        }
-                    }
+                    AddC1M1RelationNominalIdentities(
+                        relation.RequiredType, relationNominalIdentities);
+                    AddC1M1RelationNominalIdentities(
+                        relation.AssociatedType.DeclaringInterface,
+                        relationNominalIdentities);
                 }
             }
         }
@@ -8303,7 +8363,9 @@ public static partial class TrRmExecutableCompiler
                 && !relationNominalIdentities.Contains(
                     declaration.Declaration.Identity))
             || program.GenericNominalTypeDefinitions.Any(definition =>
-                !definition.Formals.IsEmpty
+                (!definition.Formals.IsEmpty
+                    && !relationNominalIdentities.Contains(
+                        definition.Identity))
                     || (definition.NominalKind == 1
                         ? definition.ProviderExpectations.IsEmpty
                             && !relationNominalIdentities.Contains(
@@ -8658,10 +8720,71 @@ public static partial class TrRmExecutableCompiler
             typeDefViewsByOldRow.Add(typeDefRow,
                 ToC1M1TypeDefEmissionView(rootTables, typeDefRow, view));
         }
+        var nominalTypeImportRows = new SortedSet<int>();
         foreach (var definition in program.GenericNominalTypeDefinitions)
         {
             if (definition.NominalKind is not (1 or 2))
             {
+                continue;
+            }
+
+            if (!definition.Formals.IsEmpty)
+            {
+                if (!relationNominalIdentities.Contains(
+                        definition.Identity))
+                {
+                    throw Unsupported(
+                        "C1M1 class re-emission does not retain unrelated generic nominal definitions.");
+                }
+
+                foreach (var expectation in definition.ProviderExpectations)
+                {
+                    if (!SourceTypeSnapshotsMatch(
+                            expectation.UsingModule, rootSnapshot))
+                    {
+                        continue;
+                    }
+
+                    var expectedTypeDefRow = GetTypeDefRow(
+                        expectation.ExpectedDefinitionId);
+                    var moduleRefRow = rootTables.Imports
+                        .GetModuleRefForImportRow(expectation.ImportRow);
+                    var binding
+                        = rootTables.Imports.GetBindingForImportRow(
+                            expectation.ImportRow);
+                    var requirements = rootTables.ModuleRefs
+                        .GetRequirements(moduleRefRow);
+                    if ((expectation.ExpectedDefinitionId >> 24) != 0x13
+                        || rootTables.TypeDefs.GetOwnerModule(
+                            expectedTypeDefRow) != rootModuleRow
+                        || rootTables.TypeDefs.GetKind(expectedTypeDefRow)
+                            != definition.NominalKind
+                        || rootTables.TypeDefs.GetGenericRange(
+                            expectedTypeDefRow).Count
+                            != definition.Formals.Length
+                        || rootTables.TypeDefs.GetContractRange(
+                            expectedTypeDefRow).Count != 0
+                        || rootTables.Imports
+                            .GetExpectedDefinitionForImportRow(
+                                expectation.ImportRow)
+                            != expectation.ExpectedDefinitionId
+                        || !StringComparer.Ordinal.Equals(
+                            binding.ExportKey, expectation.ExportKey)
+                        || !StringComparer.Ordinal.Equals(
+                            rootTables.ModuleRefs
+                                .GetProducerIdentity(moduleRefRow),
+                            expectation.ProducerIdentity)
+                        || requirements
+                            != (expectation.TargetRequirement,
+                                expectation.RuntimePolicy))
+                    {
+                        throw new InvalidDataException(
+                            "A retained CM1AR1 generic nominal Import expectation does not match its provider snapshot.");
+                    }
+
+                    _ = nominalTypeImportRows.Add(expectation.ImportRow);
+                }
+
                 continue;
             }
 
@@ -8714,9 +8837,11 @@ public static partial class TrRmExecutableCompiler
             }
         }
         var methodConstraintTypeSpecSeeds
-            = GetC1M1ClassMethodConstraintTypeSpecSeeds(rootTables,
-                rootModuleRow, typeDefViewsByOldRow.Keys,
-                schema.UsesAssociatedRelationConstraints());
+            = schema.UsesAssociatedRelationConstraints()
+                ? ImmutableArray<uint>.Empty
+                : GetC1M1ClassMethodConstraintTypeSpecSeeds(rootTables,
+                    rootModuleRow, typeDefViewsByOldRow.Keys,
+                    usesAssociatedRelationConstraints: false);
         AddC1M1LocalNonGenericTypeClosure(rootTables, rootModuleRow,
             rootSnapshot, typeDefViewsByOldRow, exportsByOldRow,
             methodConstraintTypeSpecSeeds);
@@ -8924,6 +9049,10 @@ public static partial class TrRmExecutableCompiler
                 _ = interfaceImportRows.Add(importRow);
                 continue;
             }
+            if (nominalTypeImportRows.Contains(importRow))
+            {
+                continue;
+            }
 
             if (definitionKind is not (0x13 or 0x14 or 0x16)
                 || (definitionKind == 0x13
@@ -8940,7 +9069,8 @@ public static partial class TrRmExecutableCompiler
         if (typeDefViewsByOldRow.Count == 0
             || bindingsByImportRow.Count + fieldBindingsByImportRow.Count
                 + methodBindingsByImportRow.Count
-                + interfaceImportRows.Count != rootImportCount)
+                + interfaceImportRows.Count
+                + nominalTypeImportRows.Count != rootImportCount)
         {
             throw new InvalidDataException(
                 "The retained C1M1 class provider closure is incomplete.");
@@ -8963,8 +9093,17 @@ public static partial class TrRmExecutableCompiler
         foreach (var importRow in bindingsByImportRow.Keys
             .Concat(fieldBindingsByImportRow.Keys)
             .Concat(methodBindingsByImportRow.Keys)
-            .Concat(interfaceImportRows).Order())
+            .Concat(interfaceImportRows)
+            .Concat(nominalTypeImportRows).Order())
         {
+            if (interfaceImportRows.Contains(importRow)
+                || nominalTypeImportRows.Contains(importRow))
+            {
+                _ = moduleRefRowsByOldRow.Add(rootTables.Imports
+                    .GetModuleRefForImportRow(importRow));
+                continue;
+            }
+
             var isMethodImport
                 = methodBindingsByImportRow.TryGetValue(importRow,
                     out var methodBinding);
@@ -10601,6 +10740,177 @@ public static partial class TrRmExecutableCompiler
                         exportKey, StringComparer.Ordinal))));
     }
 
+    private static C1M1GenericMethodTypeEmissionContext
+        CreateC1M1GenericMethodTypeEmissionContext(
+            BoundProgram program, BoundGenericMethodImport root,
+            int methodRow,
+            TrRmStructuralMetadataValidator.ValidatedExecutionTables rootTables,
+            Dictionary<int, int> genericParamRowMap,
+            List<ReadOnlyMemory<byte>> typeSpecRows)
+    {
+        var methodSignature = rootTables.Methods.GetSignature(methodRow);
+        var (oldFormalFirst, oldFormalCount)
+            = rootTables.Signatures.GetGenericRange(methodSignature);
+        if (oldFormalCount != root.Formals.Length
+            || root.Signature.FormalOrder.IsDefault
+            || root.Signature.FormalOrder.Length != root.Formals.Length
+            || root.Signature.FormalOrder.Any(static formal =>
+                formal.Kind != BoundGenericMethodFormalKind.Type)
+            || root.Formals.Any(static formal =>
+                formal is null || formal.InterfaceConstraints.IsDefault
+                        || formal.AssociatedRelations.IsDefault))
+        {
+            throw Unsupported(
+                "A retained CM1AR1 class MethodDef has an unsupported generic type-formal view.");
+        }
+
+        var formalTypeSpecRows = new Dictionary<PrimitiveType, uint>();
+        var genericParamRows = new int[root.Formals.Length];
+        for (var ordinal = 0; ordinal < root.Formals.Length; ordinal++)
+        {
+            var oldFormalRow = oldFormalFirst + ordinal;
+            if (!genericParamRowMap.TryGetValue(oldFormalRow,
+                        out var genericParamRow))
+            {
+                throw new InvalidDataException(
+                        "A retained CM1AR1 method formal has no output GenericParam row.");
+            }
+
+            genericParamRows[ordinal] = genericParamRow;
+            var formalTypeSpecRow = checked((uint)typeSpecRows.Count + 1);
+            typeSpecRows.Add(TrRmTypeSpecTableWriter.Reference(0x04,
+                checked((uint)genericParamRow)));
+            if (!formalTypeSpecRows.TryAdd(
+                        root.Formals[ordinal].PlaceholderType,
+                        formalTypeSpecRow))
+            {
+                throw Unsupported(
+                        "A retained CM1AR1 class MethodDef has duplicate placeholder type identities.");
+            }
+        }
+
+        var definition = new BoundGenericMethodDefinition(
+            root.Signature.DefinitionOrdinal, root.Signature.Name,
+            root.Signature.IsPublic, root.Signature.RequiresUnsafeCaller,
+            0, -1, default, root.Formals,
+            program with { Functions = [root.ProofFunction] }) {
+            FormalTypeOwnerOrdinal = root.FormalTypeOwnerOrdinal,
+            IsStatic = root.Signature.IsStatic,
+            IsMutable = root.Signature.IsMutable,
+            Owner = root.Signature.Owner,
+            FormalOrder = root.Signature.FormalOrder,
+            OrdinaryParameterDefaults = root.OrdinaryParameterDefaults,
+            RuntimeParameterCount = root.ProofFunction.ParameterCount,
+        };
+        return new C1M1GenericMethodTypeEmissionContext(root, definition,
+            formalTypeSpecRows, genericParamRows,
+            GetBuiltInTypeSpecRows(typeSpecRows));
+    }
+
+    private static byte[] EncodeC1M1GenericParamRows(
+        IReadOnlyList<TrRmGenericParamRow> rows)
+    {
+        var bytes = new byte[checked(rows.Count * 32)];
+        for (var index = 0; index < rows.Count; index++)
+        {
+            var row = rows[index];
+            var offset = index * 32;
+            Write(bytes, offset, row.OwnerDefId);
+            Write(bytes, offset + 4, checked((uint)row.Ordinal));
+            Write(bytes, offset + 8,
+                checked((uint)row.NameStringRow));
+            Write(bytes, offset + 12,
+                checked((uint)row.ConstraintFirst));
+            Write(bytes, offset + 16,
+                checked((uint)row.ConstraintCount));
+            bytes[offset + 20] = row.FormalKind;
+            bytes[offset + 21] = row.OwnershipDomain;
+            bytes[offset + 22] = row.NullabilityDomain;
+            Write(bytes, offset + 24, row.ConstantTypeSpecRef);
+            Write(bytes, offset + 28, row.DefaultArgumentRef);
+        }
+
+        return bytes;
+    }
+
+    private static byte[] EncodeC1M1ConstraintRows(
+        IReadOnlyList<TrRmConstraintRow> rows)
+    {
+        var bytes = new byte[checked(rows.Count * 12)];
+        for (var index = 0; index < rows.Count; index++)
+        {
+            var row = rows[index];
+            var offset = index * 12;
+            Write(bytes, offset,
+                checked((uint)row.OwnerGenericParamRow));
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                bytes.AsSpan(offset + 4), row.Kind);
+            Write(bytes, offset + 8, row.Payload);
+        }
+
+        return bytes;
+    }
+
+    private static byte[] CompleteC1M1NominalTypeEmission(
+        List<TrRmSection> sections,
+        List<(string Text, int Encoding)> names,
+        List<ReadOnlyMemory<byte>> typeSpecRows,
+        List<TrRmGenericParamRow> genericParamRows,
+        List<TrRmConstraintRow> constraintRows,
+        GenericMethodNominalTypeWriter nominalTypes,
+        TrRmArtifactSchema schema)
+    {
+        nominalTypes.Complete();
+        var features = ReadFeatureRows(sections);
+        nominalTypes.MergeFeatures(features);
+        var featureBytes = TrRmFeatureTableWriter.Encode(features, schema);
+        var featureCount = featureBytes.Length / 8;
+        var moduleSection = GetSection(sections, 0x0001);
+        var moduleBytes = moduleSection.Bytes.ToArray();
+        if (moduleSection.RecordCount != 1)
+        {
+            throw Unsupported(
+                "CM1AR1 nominal TypeDef closure requires one output Module.");
+        }
+
+        var oldFeatureFirst = ReadUInt32(moduleBytes, 24);
+        if (featureCount == 0)
+        {
+            WriteUInt32(moduleBytes, 24, 0);
+        }
+        else if (oldFeatureFirst == 0)
+        {
+            WriteUInt32(moduleBytes, 24, 1);
+        }
+        WriteUInt32(moduleBytes, 28, checked((uint)featureCount));
+        SetSection(sections, 0x0001, 1, moduleBytes);
+        SetSection(sections, 0x0002, checked((uint)names.Count),
+            TrRmStringTableWriter.EncodeTextRows(names));
+        SetSection(sections, 0x0004, checked((uint)featureCount),
+            featureBytes);
+
+        var exports = ReadExportRows(sections, new HashSet<uint>());
+        exports.AddRange(nominalTypes.Exports);
+        SetSection(sections, 0x001D, checked((uint)exports.Count),
+            EncodeExportRows(exports));
+        SetSection(sections, 0x0019,
+            checked((uint)genericParamRows.Count),
+            EncodeC1M1GenericParamRows(genericParamRows));
+        SetSection(sections, 0x001A,
+            checked((uint)constraintRows.Count),
+            EncodeC1M1ConstraintRows(constraintRows));
+
+        var typeSpecBytes = TrRmTypeSpecTableWriter.Encode(typeSpecRows,
+            GetCount(sections, 0x0013), GetCount(sections, 0x001C),
+            genericParamRows.Count, GetCount(sections, 0x0052), schema,
+            GetCount(sections, 0x0016));
+        SetSection(sections, 0x0011,
+            checked((uint)typeSpecRows.Count), typeSpecBytes);
+        sections.Sort(static (left, right) =>
+            left.Kind.CompareTo(right.Kind));
+        return TrRmArtifactWriter.Encode(sections, schema);
+    }
+
     private static byte[] ReemitC1M1ClassAssociatedRelationConstraints(
         byte[] artifact, BoundProgram program,
         TrRmStructuralMetadataValidator.ValidatedExecutionTables rootTables,
@@ -10667,6 +10977,90 @@ public static partial class TrRmExecutableCompiler
             outputTypeSpecRows.Add(
                 outputTables.TypeSpecs.GetRow(row).ToArray());
         }
+
+        var nominalSections = outputSections.Values.ToList();
+        var nominalNames = new List<(string Text, int Encoding)>(
+            strings.Count + 8);
+        for (var row = 1; row <= strings.Count; row++)
+        {
+            nominalNames.Add((strings.DecodeNamespace(row), 1));
+        }
+
+        var nominalFormals = ReadGenericParamRows(nominalSections);
+        var nominalConstraints = ReadConstraintRows(nominalSections);
+        var nominalTypeWriter = new GenericMethodNominalTypeWriter(
+            nominalSections, nominalNames, outputTypeSpecRows,
+            nominalFormals, nominalConstraints, reemissionProgram,
+            Array.Empty<GenericMethodEmission>(), schema);
+        var nominalTypeReferences
+            = new Dictionary<BoundGenericNominalTypeIdentity, uint>();
+        var nominalTypeSnapshots
+            = new List<BoundSourceTypeProviderSnapshot>();
+        foreach (var definition
+            in reemissionProgram.GenericNominalTypeDefinitions)
+        {
+            if (definition.Provider is not BoundSourceTypeProviderSnapshot
+                    provider)
+            {
+                continue;
+            }
+
+            var nominalReference = 0u;
+            foreach (var expectation in definition.ProviderExpectations)
+            {
+                if (!SourceTypeSnapshotsMatch(expectation.UsingModule,
+                        rootSnapshot)
+                    || !importRowMap.TryGetValue(expectation.ImportRow,
+                        out var outputImportRow))
+                {
+                    continue;
+                }
+
+                var typeSpecReference
+                    = checked((uint)outputTypeSpecRows.Count + 1);
+                outputTypeSpecRows.Add(
+                    TrRmTypeSpecTableWriter.Reference(0x03,
+                        checked((uint)outputImportRow)));
+                nominalReference = typeSpecReference;
+                if (!nominalTypeSnapshots.Contains(expectation.Provider))
+                {
+                    nominalTypeSnapshots.Add(expectation.Provider);
+                }
+                break;
+            }
+
+            if (nominalReference == 0
+                && StringComparer.Ordinal.Equals(
+                    definition.Identity.ModuleIdentity,
+                    rootSnapshot.ModuleIdentity)
+                && StringComparer.Ordinal.Equals(
+                    definition.Identity.ProviderIdentity,
+                    rootSnapshot.ModuleIdentity)
+                && typeDefRowMap.TryGetValue(
+                    GetTypeDefRow(definition.Identity.DefinitionId),
+                    out var outputTypeDefRow))
+            {
+                nominalReference
+                    = checked((uint)outputTypeSpecRows.Count + 1);
+                outputTypeSpecRows.Add(
+                    TrRmTypeSpecTableWriter.Reference(0x02,
+                        checked((uint)outputTypeDefRow)));
+                if (!nominalTypeSnapshots.Contains(provider))
+                {
+                    nominalTypeSnapshots.Add(provider);
+                }
+            }
+
+            if (nominalReference != 0
+                && !nominalTypeReferences.TryAdd(definition.Identity,
+                    nominalReference))
+            {
+                throw new InvalidDataException(
+                    "A retained CM1AR1 nominal TypeDef has duplicate reusable references.");
+            }
+        }
+        nominalTypeWriter.ImportDefinitionReferences(
+            nominalTypeReferences, nominalTypeSnapshots);
 
         var outputAssociatedRelations
             = new List<TrRmAssociatedRelationRow>(
@@ -10740,30 +11134,59 @@ public static partial class TrRmExecutableCompiler
 
         var constraintRows = new List<TrRmConstraintRow>(
             constraintPlans.Count);
-        var typeSpecMaps = new Dictionary<
-            (int MethodRow, int FormalOrdinal),
-            (Dictionary<int, uint> Rows, HashSet<int> Active)>();
+        var typeEmissionContexts
+            = new Dictionary<int, C1M1GenericMethodTypeEmissionContext>();
+        var interfaceConstraintVisits
+            = new Dictionary<int, int>();
+        var exportedInterfaceTypeSpecRows
+            = new Dictionary<(string QualifiedName, int Arity), uint>();
         foreach (var plan in constraintPlans)
         {
-            if (!typeSpecMaps.TryGetValue(
-                    (plan.MethodRow, plan.FormalOrdinal),
-                    out var remapState))
+            if (!typeEmissionContexts.TryGetValue(plan.MethodRow,
+                    out var typeContext))
             {
-                remapState = (new Dictionary<int, uint>(),
-                    new HashSet<int>());
-                typeSpecMaps.Add((plan.MethodRow, plan.FormalOrdinal),
-                    remapState);
+                var methodRoot = FindC1M1ClassMethodImport(
+                    reemissionProgram.RetainedGenericMethodRoots,
+                    plan.MethodRow);
+                typeContext
+                    = CreateC1M1GenericMethodTypeEmissionContext(
+                        reemissionProgram, methodRoot, plan.MethodRow,
+                        rootTables, genericParamRowMap,
+                        outputTypeSpecRows);
+                typeEmissionContexts.Add(plan.MethodRow, typeContext);
+                interfaceConstraintVisits.Add(plan.MethodRow,
+                    SemanticVerifier.MaximumAnalysisVisits);
             }
 
             switch (plan.Kind)
             {
                 case 1:
                 {
-                    var typeSpec = RemapC1M1ClassTypeSpec(rootTables,
-                        plan.Payload, typeDefRowMap, importRowMap,
-                        outputTypeSpecRows, remapState.Rows,
-                        remapState.Active, depth: 0,
-                        genericParamRowMap: genericParamRowMap);
+                    var formal = typeContext.Root.Formals[
+                        plan.FormalOrdinal];
+                    if ((uint)plan.InterfaceConstraintOrdinal
+                        >= (uint)formal.InterfaceConstraints.Length)
+                    {
+                        throw new InvalidDataException(
+                            "A retained CM1AR1 interface Constraint has no typed interface view.");
+                    }
+
+                    var remainingVisits
+                        = interfaceConstraintVisits[plan.MethodRow];
+                    var typeSpec
+                        = GenericMethodInterfaceConstraintTypeSpecRef(
+                            formal.InterfaceConstraints[
+                                plan.InterfaceConstraintOrdinal],
+                            typeContext.Definition,
+                            exportedInterfaceTypeSpecRows,
+                            importedInterfaceImportRows,
+                            typeContext.FormalTypeSpecRows,
+                            typeContext.GenericParamRows,
+                            typeContext.BuiltInTypeSpecRows,
+                            outputTypeSpecRows, depth: 0,
+                            ref remainingVisits);
+                    interfaceConstraintVisits[plan.MethodRow]
+                        = remainingVisits;
                     constraintRows.Add(new TrRmConstraintRow(
                         plan.GenericParamRow, 1, typeSpec));
                     break;
@@ -10796,20 +11219,25 @@ public static partial class TrRmExecutableCompiler
                             "A retained CM1AR1 typed relation differs from its source AssociatedRelation row.");
                     }
 
-                    var declaringInterface = RemapC1M1ClassTypeSpec(
-                        rootTables,
-                        rootTables.AssociatedRelations
-                            .GetDeclaringInterfaceTypeSpecRef(
-                                sourceRelationRow),
-                        typeDefRowMap, importRowMap, outputTypeSpecRows,
-                        remapState.Rows, remapState.Active, depth: 0,
-                        genericParamRowMap: genericParamRowMap);
-                    var requiredType = RemapC1M1ClassTypeSpec(rootTables,
-                        rootTables.AssociatedRelations
-                            .GetRequiredTypeSpecRef(sourceRelationRow),
-                        typeDefRowMap, importRowMap, outputTypeSpecRows,
-                        remapState.Rows, remapState.Active, depth: 0,
-                        genericParamRowMap: genericParamRowMap);
+                    var remainingVisits
+                        = interfaceConstraintVisits[plan.MethodRow];
+                    var declaringInterface
+                        = GenericMethodInterfaceConstraintTypeSpecRef(
+                            relation.AssociatedType.DeclaringInterface,
+                            typeContext.Definition,
+                            exportedInterfaceTypeSpecRows,
+                            importedInterfaceImportRows,
+                            typeContext.FormalTypeSpecRows,
+                            typeContext.GenericParamRows,
+                            typeContext.BuiltInTypeSpecRows,
+                            outputTypeSpecRows, depth: 0,
+                            ref remainingVisits);
+                    interfaceConstraintVisits[plan.MethodRow]
+                        = remainingVisits;
+                    var requiredType = nominalTypeWriter.TypeTermRef(
+                        relation.RequiredType, typeContext.Definition,
+                        typeContext.FormalTypeSpecRows,
+                        typeContext.BuiltInTypeSpecRows, depth: 0);
                     var associatedTypeDef
                         = GenericMethodAssociatedTypeDefReference(
                             relation, [], importedAssociatedTypeImportRows);
@@ -10829,10 +11257,25 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        var genericParamSection = outputSections[0x0019];
-        var genericParamBytes = genericParamSection.Bytes.ToArray();
-        var genericParamCount
-            = checked((int)genericParamSection.RecordCount);
+        artifact = CompleteC1M1NominalTypeEmission(nominalSections,
+            nominalNames, outputTypeSpecRows, nominalFormals,
+            nominalConstraints, nominalTypeWriter, schema);
+        outputIndex = new TrRmArtifactIndex(artifact, schema);
+        outputTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(outputIndex);
+        outputSections.Clear();
+        for (var sectionIndex = 0;
+            sectionIndex < outputIndex.SectionCount; sectionIndex++)
+        {
+            outputIndex.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var count);
+            outputSections.Add(kind, new TrRmSection(kind, flags,
+                checked((uint)count), bytes.ToArray()));
+        }
+
+        var genericParamBytes
+            = EncodeC1M1GenericParamRows(nominalFormals);
+        var genericParamCount = nominalFormals.Count;
         if (genericParamCount < classGenericParamCount
             || genericParamBytes.Length
                 != checked(genericParamCount * 32))
@@ -10841,13 +11284,9 @@ public static partial class TrRmExecutableCompiler
                 "The re-emitted CM1AR1 GenericParam table has an invalid extent.");
         }
 
-        var existingConstraintSection
-            = outputSections.TryGetValue(0x001A, out var foundConstraints)
-                ? foundConstraints : default;
         var existingConstraintBytes
-            = existingConstraintSection.Bytes.ToArray();
-        var existingConstraintCount
-            = checked((int)existingConstraintSection.RecordCount);
+            = EncodeC1M1ConstraintRows(nominalConstraints);
+        var existingConstraintCount = nominalConstraints.Count;
         if (existingConstraintBytes.Length
             != checked(existingConstraintCount * 12))
         {
