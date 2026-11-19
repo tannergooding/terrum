@@ -719,165 +719,167 @@ public static partial class TrRmExecutableCompiler
                     }
                 }
 
-                if (constructorDeclarations.Count != 1)
+                if (constructorDeclarations.Count == 0)
                 {
                     throw Unsupported(
-                        "The bounded Construction-2 class source emitter requires one complete source constructor per retained class.");
+                        "The bounded Construction-2 class source emitter requires at least one complete source constructor per retained class.");
                 }
 
-                var (constructorPart, constructorDeclaration)
-                    = constructorDeclarations[0];
-                if (!constructorFunctionsBySourceDeclaration.TryGetValue((
-                        constructorPart.SourceInputOrdinal,
-                        constructorDeclaration.Span),
-                        out var constructorFunctions)
-                    || constructorFunctions.Length != 1)
+                foreach (var (constructorPart, constructorDeclaration)
+                    in constructorDeclarations)
                 {
-                    throw new InvalidDataException(
-                        "A retained source class constructor has no unique checked initializer.");
-                }
+                    if (!constructorFunctionsBySourceDeclaration.TryGetValue((
+                            constructorPart.SourceInputOrdinal,
+                            constructorDeclaration.Span),
+                            out var constructorFunctions)
+                        || constructorFunctions.Length != 1)
+                    {
+                        throw new InvalidDataException(
+                            "A retained source class constructor has no unique checked initializer.");
+                    }
 
-                var (function, functionIndex) = constructorFunctions[0];
-                var classDeclaration
-                    = program.Classes[classIndex];
-                var receiverType = function.Variables.IsEmpty
-                    ? PrimitiveType.Void : function.Variables[0].Type;
-                if (!function.IsClassConstructor
-                    || function.IsConstructor || function.IsStatic
-                    || function.IsExternal || function.IsPartialConstructor
-                    || function.Intrinsic != BoundIntrinsic.None
-                    || function.ClassConstructor != -1
-                    || function.DeclaringStruct != classDeclaration.Name
-                    || function.ReturnType != PrimitiveType.Void
-                    || function.ParameterCount < 1
-                    || function.ParameterCount != function.Variables.Length
-                    || function.RequiresUnsafeCaller
-                    || function.DeclaredRequiresUnsafeCaller
-                    || function.DoesNotReturn || function.NoFailureProof
-                    || !function.CapturedParameters.IsEmpty
-                    || !function.DeclarationContractClauses.IsEmpty
-                    || function.ModuleImport is not null
-                    || function.GenericMethodInstantiation is not null
-                    || ManagedClassTypes.IsOptional(receiverType)
-                    || !ManagedClassTypes.IsClass(receiverType)
-                    || ManagedClassTypes.ClassIndex(receiverType) != classIndex
-                    || ManagedClassTypes.IsWritable(receiverType)
-                        != classDeclaration.IsMutable
-                    || (function.IsPrivate && function.IsInternal))
-                {
-                    throw Unsupported(
-                        "The bounded Construction-2 class source emitter cannot discard constructor ownership, signature, access, effect, or completion facts.");
-                }
+                    var (function, functionIndex) = constructorFunctions[0];
+                    var classDeclaration
+                        = program.Classes[classIndex];
+                    var receiverType = function.Variables.IsEmpty
+                        ? PrimitiveType.Void : function.Variables[0].Type;
+                    if (!function.IsClassConstructor
+                        || function.IsConstructor || function.IsStatic
+                        || function.IsExternal || function.IsPartialConstructor
+                        || function.Intrinsic != BoundIntrinsic.None
+                        || function.ClassConstructor != -1
+                        || function.DeclaringStruct != classDeclaration.Name
+                        || function.ReturnType != PrimitiveType.Void
+                        || function.ParameterCount < 1
+                        || function.ParameterCount != function.Variables.Length
+                        || function.RequiresUnsafeCaller
+                        || function.DeclaredRequiresUnsafeCaller
+                        || function.DoesNotReturn || function.NoFailureProof
+                        || !function.CapturedParameters.IsEmpty
+                        || !function.DeclarationContractClauses.IsEmpty
+                        || function.ModuleImport is not null
+                        || function.GenericMethodInstantiation is not null
+                        || ManagedClassTypes.IsOptional(receiverType)
+                        || !ManagedClassTypes.IsClass(receiverType)
+                        || ManagedClassTypes.ClassIndex(receiverType) != classIndex
+                        || ManagedClassTypes.IsWritable(receiverType)
+                            != classDeclaration.IsMutable
+                        || (function.IsPrivate && function.IsInternal))
+                    {
+                        throw Unsupported(
+                            "The bounded Construction-2 class source emitter cannot discard constructor ownership, signature, access, effect, or completion facts.");
+                    }
 
-                var fieldAssignments
-                    = GetC1M1Construction2FieldAssignments(program,
-                        function, classDeclaration,
-                        sourceStructDeclarations);
-                foreach (var field in classDeclaration.Fields)
-                {
-                    _ = FieldTypeSpecReference(field.Type);
-                }
+                    var fieldAssignments
+                        = GetC1M1Construction2FieldAssignments(program,
+                            function, classDeclaration,
+                            sourceStructDeclarations);
+                    foreach (var field in classDeclaration.Fields)
+                    {
+                        _ = FieldTypeSpecReference(field.Type);
+                    }
 
-                var memberExports
-                    = memberExportsByClassAndFunction.TryGetValue((
-                        classIndex, functionIndex), out var mappedExports)
-                        ? mappedExports
-                        : Array.Empty<SourceClassMemberExport>();
-                if (memberExports.Any(static member =>
-                        member.Kind != SourceClassMemberKind.Constructor))
-                {
-                    throw new InvalidDataException(
-                        "A class constructor mapping contains a non-constructor member.");
-                }
-                var initializerExportKeys = memberExports
-                    .Select(static member => member.ExportKey)
-                    .ToImmutableArray();
-                var projectionExportKeys = memberExports
-                    .Where(static member =>
-                        member.ConstructionProjectionExportKey is not null)
-                    .Select(static member =>
-                        member.ConstructionProjectionExportKey!)
-                    .ToImmutableArray();
-                var classTypeSpecReference
-                    = FieldTypeSpecReference(receiverType);
-                var initializerMethodDefRow = methodRows.Count + 1;
-                var projectionMethodDefRow
-                    = initializerMethodDefRow + 1;
-                var initializerSignatureRow
-                    = methodSignatureRows.Count + 1;
-                var initializerParamFirst
-                    = AppendC1M1Construction2Parameters(
-                        initializerSignatureRow, function, 1);
-                methodSignatureRows.Add(new TrRmMethodSigRow(
-                    0xF200_0000u, classTypeSpecReference,
-                    initializerParamFirst,
-                    function.ParameterCount - 1, 0, 0));
-                var projectionSignatureRow
-                    = methodSignatureRows.Count + 1;
-                var projectionParamFirst
-                    = AppendC1M1Construction2Parameters(
-                        projectionSignatureRow, function, 1);
-                methodSignatureRows.Add(new TrRmMethodSigRow(
-                    classTypeSpecReference, 0, projectionParamFirst,
-                    function.ParameterCount - 1, 0, 0));
+                    var memberExports
+                        = memberExportsByClassAndFunction.TryGetValue((
+                            classIndex, functionIndex), out var mappedExports)
+                            ? mappedExports
+                            : Array.Empty<SourceClassMemberExport>();
+                    if (memberExports.Any(static member =>
+                            member.Kind != SourceClassMemberKind.Constructor))
+                    {
+                        throw new InvalidDataException(
+                            "A class constructor mapping contains a non-constructor member.");
+                    }
+                    var initializerExportKeys = memberExports
+                        .Select(static member => member.ExportKey)
+                        .ToImmutableArray();
+                    var projectionExportKeys = memberExports
+                        .Where(static member =>
+                            member.ConstructionProjectionExportKey is not null)
+                        .Select(static member =>
+                            member.ConstructionProjectionExportKey!)
+                        .ToImmutableArray();
+                    var classTypeSpecReference
+                        = FieldTypeSpecReference(receiverType);
+                    var initializerMethodDefRow = methodRows.Count + 1;
+                    var projectionMethodDefRow
+                        = initializerMethodDefRow + 1;
+                    var initializerSignatureRow
+                        = methodSignatureRows.Count + 1;
+                    var initializerParamFirst
+                        = AppendC1M1Construction2Parameters(
+                            initializerSignatureRow, function, 1);
+                    methodSignatureRows.Add(new TrRmMethodSigRow(
+                        0xF200_0000u, classTypeSpecReference,
+                        initializerParamFirst,
+                        function.ParameterCount - 1, 0, 0));
+                    var projectionSignatureRow
+                        = methodSignatureRows.Count + 1;
+                    var projectionParamFirst
+                        = AppendC1M1Construction2Parameters(
+                            projectionSignatureRow, function, 1);
+                    methodSignatureRows.Add(new TrRmMethodSigRow(
+                        classTypeSpecReference, 0, projectionParamFirst,
+                        function.ParameterCount - 1, 0, 0));
 
-                var initializerContractFirst
-                    = contractRows.Count + 1;
-                contractRows.Add(new TrRmContractRow(
-                    0x1600_0000u
-                        | checked((uint)initializerMethodDefRow),
-                    0x0003,
-                    EncodeC1M1Construction2InitializerContract(
-                        fieldAssignments, fieldDefRowByClassAndIndex,
-                        classIndex)));
-                var projectionContractFirst
-                    = contractRows.Count + 1;
-                contractRows.Add(new TrRmContractRow(
-                    0x1600_0000u
-                        | checked((uint)projectionMethodDefRow),
-                    0x0003,
-                    EncodeC1M1Construction2ProjectionContract(
-                        initializerMethodDefRow)));
-
-                var visibility = function.IsPrivate ? 0u
-                    : function.IsInternal ? 1u : 2u;
-                methodRows.Add(new TrRmMethodDefRow(
-                    typeDefRowByClass[classIndex], 0,
-                    initializerSignatureRow, visibility,
-                    initializerContractFirst, 1, 0));
-                methodNames.Add(function.Name);
-                methodRows.Add(new TrRmMethodDefRow(
-                    typeDefRowByClass[classIndex], 0,
-                    projectionSignatureRow,
-                    projectionExportKeys.IsEmpty ? 0u : 2u,
-                    projectionContractFirst, 1, 0));
-                methodNames.Add(function.Name);
-                AppendC1M1Construction2ParameterSurface(
-                    initializerMethodDefRow, function, 1);
-                AppendC1M1Construction2ParameterSurface(
-                    projectionMethodDefRow, function, 1);
-
-                foreach (var exportKey in initializerExportKeys)
-                {
-                    exportRows.Add((
+                    var initializerContractFirst
+                        = contractRows.Count + 1;
+                    contractRows.Add(new TrRmContractRow(
                         0x1600_0000u
                             | checked((uint)initializerMethodDefRow),
-                        exportKey));
-                }
-
-                foreach (var exportKey in projectionExportKeys)
-                {
-                    exportRows.Add((
+                        0x0003,
+                        EncodeC1M1Construction2InitializerContract(
+                            fieldAssignments, fieldDefRowByClassAndIndex,
+                            classIndex)));
+                    var projectionContractFirst
+                        = contractRows.Count + 1;
+                    contractRows.Add(new TrRmContractRow(
                         0x1600_0000u
                             | checked((uint)projectionMethodDefRow),
-                        exportKey));
-                }
+                        0x0003,
+                        EncodeC1M1Construction2ProjectionContract(
+                            initializerMethodDefRow)));
 
-                constructionInitializers.Add(
-                    new C1M1Construction2SourceInitializer(
-                        classIndex, function, classTypeSpecReference,
-                        fieldAssignments, initializerMethodDefRow,
-                        projectionMethodDefRow));
+                    var visibility = function.IsPrivate ? 0u
+                        : function.IsInternal ? 1u : 2u;
+                    methodRows.Add(new TrRmMethodDefRow(
+                        typeDefRowByClass[classIndex], 0,
+                        initializerSignatureRow, visibility,
+                        initializerContractFirst, 1, 0));
+                    methodNames.Add(function.Name);
+                    methodRows.Add(new TrRmMethodDefRow(
+                        typeDefRowByClass[classIndex], 0,
+                        projectionSignatureRow,
+                        projectionExportKeys.IsEmpty ? 0u : 2u,
+                        projectionContractFirst, 1, 0));
+                    methodNames.Add(function.Name);
+                    AppendC1M1Construction2ParameterSurface(
+                        initializerMethodDefRow, function, 1);
+                    AppendC1M1Construction2ParameterSurface(
+                        projectionMethodDefRow, function, 1);
+
+                    foreach (var exportKey in initializerExportKeys)
+                    {
+                        exportRows.Add((
+                            0x1600_0000u
+                                | checked((uint)initializerMethodDefRow),
+                            exportKey));
+                    }
+
+                    foreach (var exportKey in projectionExportKeys)
+                    {
+                        exportRows.Add((
+                            0x1600_0000u
+                                | checked((uint)projectionMethodDefRow),
+                            exportKey));
+                    }
+
+                    constructionInitializers.Add(
+                        new C1M1Construction2SourceInitializer(
+                            classIndex, function, classTypeSpecReference,
+                            fieldAssignments, initializerMethodDefRow,
+                            projectionMethodDefRow));
+                }
 
                 foreach (var (methodPart, methodDeclaration)
                     in methodDeclarations)

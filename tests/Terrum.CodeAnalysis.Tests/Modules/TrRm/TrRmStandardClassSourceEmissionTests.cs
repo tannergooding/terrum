@@ -322,6 +322,149 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
+    public void EmitsSeparateInitializerAndProjectionForEachConstructor()
+    {
+        var tree = SyntaxTree.Parse("""
+            public class Box {
+                public int32 Value;
+                public bool Enabled;
+                public Box(int32 value, bool enabled) {
+                    Value = value;
+                    Enabled = enabled;
+                }
+                public Box(bool enabled, int32 value) {
+                    Value = value;
+                    Enabled = enabled;
+                }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var members = classDeclaration.Children.OfType<SyntaxNode>().ToArray();
+        var fields = members.Where(static node =>
+            node.Kind == SyntaxKind.FieldDeclaration).ToArray();
+        var constructors = members.Where(static node =>
+            node.Kind == SyntaxKind.ConstructorDeclaration).ToArray();
+        Assert.That(fields, Has.Length.EqualTo(2));
+        Assert.That(constructors, Has.Length.EqualTo(2));
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "Construction2OverloadedBox", C1M1Construction2SchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, 0,
+                    classDeclaration.Span, "BoxKey", [
+                        new TrRmSourceClassMemberExport(0,
+                            fields[0].Span, "Box.Value"),
+                        new TrRmSourceClassMemberExport(0,
+                            fields[1].Span, "Box.Enabled"),
+                        new TrRmSourceClassMemberExport(0,
+                            constructors[0].Span, "Box.InitializeIntBool") {
+                            ConstructionProjectionExportKey = "Box.CreateIntBool",
+                        },
+                        new TrRmSourceClassMemberExport(0,
+                            constructors[1].Span, "Box.InitializeBoolInt") {
+                            ConstructionProjectionExportKey = "Box.CreateBoolInt",
+                        },
+                    ]),
+            ]);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex.ForC1M1Construction2Draft(artifact));
+
+        Assert.That(tables.Methods.Count, Is.EqualTo(4));
+        Assert.That(tables.Signatures.Count, Is.EqualTo(4));
+        Assert.That(tables.Parameters.Count, Is.EqualTo(8));
+        Assert.That(tables.Contracts.Count, Is.EqualTo(4));
+        Assert.That(tables.Bodies.Count, Is.EqualTo(4));
+
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.InitializeIntBool", out var intBoolInitializer), Is.True);
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.CreateIntBool", out var intBoolProjection), Is.True);
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.InitializeBoolInt", out var boolIntInitializer), Is.True);
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.CreateBoolInt", out var boolIntProjection), Is.True);
+
+        var intBoolInitializerRow = checked((int)(
+            intBoolInitializer & 0x00FF_FFFF));
+        var intBoolProjectionRow = checked((int)(
+            intBoolProjection & 0x00FF_FFFF));
+        var boolIntInitializerRow = checked((int)(
+            boolIntInitializer & 0x00FF_FFFF));
+        var boolIntProjectionRow = checked((int)(
+            boolIntProjection & 0x00FF_FFFF));
+        var intBoolInitializerParams = tables.Signatures.GetParamRange(
+            tables.Methods.GetSignature(intBoolInitializerRow));
+        var intBoolProjectionParams = tables.Signatures.GetParamRange(
+            tables.Methods.GetSignature(intBoolProjectionRow));
+        var boolIntInitializerParams = tables.Signatures.GetParamRange(
+            tables.Methods.GetSignature(boolIntInitializerRow));
+        var boolIntProjectionParams = tables.Signatures.GetParamRange(
+            tables.Methods.GetSignature(boolIntProjectionRow));
+        Assert.That(intBoolInitializerParams.Count, Is.EqualTo(2));
+        Assert.That(intBoolProjectionParams.Count, Is.EqualTo(2));
+        Assert.That(boolIntInitializerParams.Count, Is.EqualTo(2));
+        Assert.That(boolIntProjectionParams.Count, Is.EqualTo(2));
+        var intBoolFirstType = tables.Parameters.GetTypeSpec(
+            intBoolInitializerParams.Start);
+        var intBoolSecondType = tables.Parameters.GetTypeSpec(
+            intBoolInitializerParams.Start + 1);
+        var boolIntFirstType = tables.Parameters.GetTypeSpec(
+            boolIntInitializerParams.Start);
+        var boolIntSecondType = tables.Parameters.GetTypeSpec(
+            boolIntInitializerParams.Start + 1);
+        Assert.That(tables.TypeSpecs.AreEquivalentTypeSpecRefs(
+                intBoolFirstType,
+                tables.Parameters.GetTypeSpec(boolIntProjectionParams.Start
+                    + 1)), Is.True);
+        Assert.That(tables.TypeSpecs.AreEquivalentTypeSpecRefs(
+                intBoolSecondType,
+                tables.Parameters.GetTypeSpec(boolIntProjectionParams.Start)),
+            Is.True);
+        Assert.That(tables.TypeSpecs.AreEquivalentTypeSpecRefs(
+                boolIntFirstType,
+                tables.Parameters.GetTypeSpec(intBoolProjectionParams.Start
+                    + 1)), Is.True);
+        Assert.That(tables.TypeSpecs.AreEquivalentTypeSpecRefs(
+                boolIntSecondType,
+                tables.Parameters.GetTypeSpec(intBoolProjectionParams.Start)),
+            Is.True);
+        Assert.That(tables.TypeSpecs.AreEquivalentTypeSpecRefs(
+                intBoolFirstType, boolIntFirstType), Is.False);
+        foreach (var (initializerRow, projectionRow) in new[] {
+            (intBoolInitializerRow, intBoolProjectionRow),
+            (boolIntInitializerRow, boolIntProjectionRow),
+        })
+        {
+            Assert.That(tables.Contracts.GetConstructionClause(
+                initializerRow).RoleTag, Is.EqualTo(1));
+            var projectionClause
+                = tables.Contracts.GetConstructionClause(projectionRow);
+            Assert.That(projectionClause.RoleTag, Is.EqualTo(2));
+            Assert.That(projectionClause.InitializerMethodDefRow,
+                Is.EqualTo((uint)initializerRow));
+            Assert.That(tables.Methods.GetBodyRow(initializerRow),
+                Is.GreaterThan(0));
+            Assert.That(tables.Methods.GetBodyRow(projectionRow),
+                Is.GreaterThan(0));
+            tables.ValidateRegisterBodyMapsForMethod(initializerRow);
+            tables.ValidateRegisterBodyMapsForMethod(projectionRow);
+        }
+
+        Assert.That(intBoolInitializerRow, Is.Not.EqualTo(
+            boolIntInitializerRow));
+        Assert.That(intBoolProjectionRow, Is.Not.EqualTo(
+            boolIntProjectionRow));
+    }
+
+    [Test]
     public void EmitsStaticAndInstanceConditionalReturnBodies()
     {
         var tree = SyntaxTree.Parse("""
