@@ -324,13 +324,13 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     [Test]
     public void BindsC2ModuleFunctionWithClassParameterFromFullReference()
     {
+        const string classProviderIdentity = "C2ClassTypeProvider";
         const string moduleIdentity = "C2ClassFunctionProvider";
         var tree = SyntaxTree.Parse("""
             public class Box {
                 public int32 Value;
                 public Box(int32 value) { Value = value; }
             }
-            public void Consume(Box value, int32 count) {}
             """);
         var compilation = Compilation.CreateLibrary(tree);
         Assert.That(compilation.HasErrors, Is.False,
@@ -344,8 +344,8 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             node.Kind == SyntaxKind.FieldDeclaration);
         var constructorDeclaration = classMembers.Single(static node =>
             node.Kind == SyntaxKind.ConstructorDeclaration);
-        var artifact = TrRmExecutableCompiler.EmitStandard(
-            program, moduleIdentity,
+        var classArtifact = TrRmExecutableCompiler.EmitStandard(
+            program, classProviderIdentity,
             C1M1Construction2SchemaIdentity,
             TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
             [], [], [
@@ -359,6 +359,23 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                         },
                     ]),
             ]);
+
+        var classReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(
+                    C1M1Construction2SchemaIdentity, classArtifact),
+                classProviderIdentity, []);
+        var functionCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(
+                "public void Consume(Box value, int32 count) {}"),
+            classReference);
+        Assert.That(functionCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                functionCompilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)functionCompilation.Program!, moduleIdentity,
+            C1M1Construction2SchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
 
         var reference = TrRmExecutableCompiler.CreateStandardReference(
             new TrRmStandardArtifactInput(

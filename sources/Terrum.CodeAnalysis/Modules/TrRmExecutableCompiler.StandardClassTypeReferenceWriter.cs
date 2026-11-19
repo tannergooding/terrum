@@ -10649,7 +10649,6 @@ public static partial class TrRmExecutableCompiler
                     || function.NativeFunctionPointerType is not null
                     || function.NativeCallableConvention is not null
                     || function.IndexedBody is not null
-                    || function.HasOrdinaryParameterDefaultSurface
                     || !function.OrdinaryParameterDefaults.IsDefaultOrEmpty
                     || !function.DependencyContracts.IsEmpty
                     || !function.DeclarationContractClauses.IsDefaultOrEmpty
