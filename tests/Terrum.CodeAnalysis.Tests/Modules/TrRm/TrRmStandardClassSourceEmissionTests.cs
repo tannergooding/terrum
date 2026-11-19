@@ -465,6 +465,75 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
+    public void EmitsPartialConstructorUsingItsPrimaryIdentityAndSecondaryBody()
+    {
+        var tree = SyntaxTree.Parse("""
+            public class Box {
+                public int32 Value;
+                public partial Box(int32 value);
+                partial Box(int32 value) { Value = value; }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var members = classDeclaration.Children.OfType<SyntaxNode>();
+        var field = members.Single(static node =>
+            node.Kind == SyntaxKind.FieldDeclaration);
+        var primary = members.Single(static node =>
+            node.Kind == SyntaxKind.ConstructorDeclaration
+            && node.Children.OfType<SyntaxNode>().Any(
+                static child => child.Kind == SyntaxKind.ExternalBody));
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "Construction2PartialBox",
+            C1M1Construction2SchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, 0,
+                    classDeclaration.Span, "BoxKey", [
+                        new TrRmSourceClassMemberExport(0, field.Span,
+                            "Box.Value"),
+                        new TrRmSourceClassMemberExport(0, primary.Span,
+                            "Box.Initialize") {
+                            ConstructionProjectionExportKey = "Box.Create",
+                        },
+                    ]),
+            ]);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex.ForC1M1Construction2Draft(artifact));
+        Assert.That(tables.Methods.Count, Is.EqualTo(2));
+        Assert.That(tables.Signatures.Count, Is.EqualTo(2));
+        Assert.That(tables.Parameters.Count, Is.EqualTo(2));
+        Assert.That(tables.Contracts.Count, Is.EqualTo(2));
+        Assert.That(tables.Bodies.Count, Is.EqualTo(2));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.Initialize", out var initializer), Is.True);
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.Create", out var projection), Is.True);
+        var initializerRow = checked((int)(initializer & 0x00FF_FFFF));
+        var projectionRow = checked((int)(projection & 0x00FF_FFFF));
+        Assert.That(tables.Contracts.GetConstructionClause(
+            initializerRow).RoleTag, Is.EqualTo(1));
+        var projectionClause
+            = tables.Contracts.GetConstructionClause(projectionRow);
+        Assert.That(projectionClause.RoleTag, Is.EqualTo(2));
+        Assert.That(projectionClause.InitializerMethodDefRow,
+            Is.EqualTo((uint)initializerRow));
+        Assert.That(tables.Methods.GetBodyRow(initializerRow),
+            Is.GreaterThan(0));
+        Assert.That(tables.Methods.GetBodyRow(projectionRow),
+            Is.GreaterThan(0));
+        tables.ValidateRegisterBodyMapsForMethod(initializerRow);
+        tables.ValidateRegisterBodyMapsForMethod(projectionRow);
+    }
+
+    [Test]
     public void EmitsStaticAndInstanceConditionalReturnBodies()
     {
         var tree = SyntaxTree.Parse("""

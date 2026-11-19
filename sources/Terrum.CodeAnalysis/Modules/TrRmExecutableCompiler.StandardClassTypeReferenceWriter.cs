@@ -715,6 +715,11 @@ public static partial class TrRmExecutableCompiler
                                 "The bounded Construction-2 source emitter does not yet retain ordinary member parameter defaults.");
                         }
 
+                        if (IsC1M1Construction2PartialSecondary(member))
+                        {
+                            continue;
+                        }
+
                         constructorDeclarations.Add((part, member));
                     }
                 }
@@ -739,13 +744,28 @@ public static partial class TrRmExecutableCompiler
                     }
 
                     var (function, functionIndex) = constructorFunctions[0];
+                    if (function.IsPartialConstructor
+                            != IsC1M1Construction2PartialPrimary(
+                                constructorDeclaration)
+                        || (function.IsPartialConstructor
+                            && (function.SourceDeclarationInputOrdinal
+                                    != constructorPart.SourceInputOrdinal
+                                || function.SourceDeclarationSpan
+                                    != constructorDeclaration.Span
+                                || !HasC1M1Construction2PartialSecondary(
+                                    declaration.Parts, function)))
+                    {
+                        throw new InvalidDataException(
+                            "A partial source class constructor does not map its primary to one checked implementing secondary.");
+                    }
+
                     var classDeclaration
                         = program.Classes[classIndex];
                     var receiverType = function.Variables.IsEmpty
                         ? PrimitiveType.Void : function.Variables[0].Type;
                     if (!function.IsClassConstructor
                         || function.IsConstructor || function.IsStatic
-                        || function.IsExternal || function.IsPartialConstructor
+                        || function.IsExternal
                         || function.Intrinsic != BoundIntrinsic.None
                         || function.ClassConstructor != -1
                         || function.DeclaringStruct != classDeclaration.Name
@@ -1799,6 +1819,49 @@ public static partial class TrRmExecutableCompiler
             return false;
         }
     }
+
+    private static bool IsC1M1Construction2PartialPrimary(
+        SyntaxNode declaration)
+        => HasPartialConstructorModifier(declaration)
+            && declaration.Children.OfType<SyntaxNode>().Any(
+                static child => child.Kind == SyntaxKind.ExternalBody);
+
+    private static bool IsC1M1Construction2PartialSecondary(
+        SyntaxNode declaration)
+        => HasPartialConstructorModifier(declaration)
+            && declaration.Children.OfType<SyntaxNode>().All(
+                static child => child.Kind != SyntaxKind.ExternalBody);
+
+    private static bool HasC1M1Construction2PartialSecondary(
+        ImmutableArray<BoundSourceClassPart> parts,
+        BoundFunction function)
+    {
+        var matches = 0;
+        foreach (var part in parts)
+        {
+            if (part.SourceInputOrdinal != function.SourceInputOrdinal)
+            {
+                continue;
+            }
+
+            foreach (var declaration in part.Declaration.Children
+                .OfType<SyntaxNode>())
+            {
+                if (declaration.Span == function.Span
+                    && IsC1M1Construction2PartialSecondary(declaration))
+                {
+                    matches++;
+                }
+            }
+        }
+
+        return matches == 1;
+    }
+
+    private static bool HasPartialConstructorModifier(
+        SyntaxNode declaration)
+        => declaration.Children.OfType<SyntaxTokenElement>().Any(
+            static token => token.Token.Kind == TokenKind.PartialKeyword);
 
     private static ImmutableArray<BoundFieldAssignment>
         GetC1M1Construction2FieldAssignments(
