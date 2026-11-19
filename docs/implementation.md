@@ -139,7 +139,8 @@ forms. The exact label-free Construction-2 single-root API path now re-emits
 field-only I/P Construction clauses and supported Body maps and lowers a
 top-level direct unit- or scalar-returning call to a selected ordinary class
 MethodDef with receiver-first MethodMap inputs, including zero-payload unit
-formals (`selectorKind=0`) and `sourceUse=3/4` for readonly/writable
+formals (`selectorKind=0`), up to 13 fixed-scalar constants staged through
+ConstantMap and `D4`, and `sourceUse=3/4` for readonly/writable
 access carried by the exact receiver TypeSpec, with writable access requiring a
 mutable class owner). Structural validation and the class-reference binder
 enforce that owner constraint. These paths remain unverified;

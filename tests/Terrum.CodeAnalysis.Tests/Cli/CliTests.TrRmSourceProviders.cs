@@ -1234,6 +1234,35 @@ internal sealed partial class CliTests
     }
 
     [Test]
+    public void EmitsConstruction2OrdinaryClassCallWithScalarConstantInput()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2";
+        const string providerIdentity
+            = "construction2-constant-call-provider";
+        var provider = CreateConstructionClassMethodProvider(
+            providerIdentity, "Box", "type.box", "Box.Read",
+            schemaIdentity);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, provider),
+            providerIdentity, [], ["type.box"]);
+        var consumer = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public int32 Consume(Box box) { return box.Read(42); }"),
+            reference);
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)consumer.Program!,
+            "construction2-constant-call-consumer", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex.ForC1M1Construction2Draft(artifact));
+        Assert.That(tables.Methods.Count, Is.EqualTo(4));
+    }
+
+    [Test]
     public void EmitsConstruction2OrdinaryUnitClassMethodCallBody()
     {
         const string schemaIdentity

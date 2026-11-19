@@ -10543,8 +10543,8 @@ public static partial class TrRmExecutableCompiler
                             function, directCall, targetFunction,
                             targetPlan, targetMethodDefRow,
                             (receiverType.Qualifiers & 1) != 0,
-                            program, SourceFunctionTypeSpecReference,
-                            schema));
+                            program, frozenScalarValueBuilder,
+                            SourceFunctionTypeSpecReference, schema));
                 }
 
                 methodRows.Add(new TrRmMethodDefRow(0, 0, signatureRow,
@@ -10783,6 +10783,14 @@ public static partial class TrRmExecutableCompiler
             featureRows = [
                 .. featureRows,
                 TrRmFeatureRow.MethodParameterLabelsCandidate,
+            ];
+        }
+        if (frozenScalarValueBuilder.ConstantSourceCount != 0
+            && !featureRows.Contains(TrRmFeatureRow.TypedFrozenValues))
+        {
+            featureRows = [
+                .. featureRows,
+                TrRmFeatureRow.TypedFrozenValues,
             ];
         }
 
@@ -11220,6 +11228,7 @@ public static partial class TrRmExecutableCompiler
         BoundFunction targetFunction,
         C1M1MethodEmissionPlan targetPlan, int targetMethodDefRow,
         bool targetWritable, BoundProgram program,
+        TrRmFrozenScalarValueBuilder frozenScalarValueBuilder,
         Func<PrimitiveType, uint> typeSpecReferenceFor,
         TrRmArtifactSchema schema)
     {
@@ -11308,6 +11317,9 @@ public static partial class TrRmExecutableCompiler
         var inputSeen = new bool[targetFunction.ParameterCount];
         var callInputs = new TrRmRegisterBodyCallInput[
             targetFunction.ParameterCount];
+        var constantMapRows = new List<byte>();
+        var callCodePrefix = new List<byte>();
+        var constantRegisterCount = 0;
         for (var argumentIndex = 0;
             argumentIndex < call.Arguments.Length; argumentIndex++)
         {
@@ -11355,6 +11367,52 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 callInputs[formalOrdinal] = new(0, 0, 0);
+                inputSeen[formalOrdinal] = true;
+                continue;
+            }
+
+            if (argument is BoundConstant constant)
+            {
+                if (constant.Type != targetVariable.Type
+                    || constant.RepresentationType != constant.Type
+                    || constant.Type is PrimitiveType.NativeInt
+                        or PrimitiveType.NativeUInt
+                    || !constant.Bits.IsCanonicalFor(constant.Type)
+                    || !TryGetC1M1SourceScalarTypeSpecReference(
+                        constant.Type, out _)
+                    || constantRegisterCount >= 13)
+                {
+                    throw Unsupported(
+                        "A direct class-method constant input requires a canonical fixed-scalar value and an available temporary register.");
+                }
+
+                var frozenValue
+                    = frozenScalarValueBuilder.Add(constant);
+                var expectedTypeSpecReference
+                    = typeSpecReferenceFor(constant.Type);
+                if (frozenValue.TypeSpecRef != expectedTypeSpecReference)
+                {
+                    throw Unsupported(
+                        "A direct class-method constant input must retain its exact formal TypeSpec.");
+                }
+
+                var constantRow = constantMapRows.Count / 8;
+                var constantBytes = new byte[8];
+                BinaryPrimitives.WriteUInt32LittleEndian(constantBytes,
+                    frozenValue.TypeSpecRef);
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    constantBytes.AsSpan(4),
+                    frozenValue.ConstantSourceRow);
+                constantMapRows.AddRange(constantBytes);
+
+                var constantRegister = constantRegisterCount + 1;
+                callCodePrefix.Add(0xD4);
+                callCodePrefix.Add(checked((byte)constantRegister));
+                callCodePrefix.Add(checked((byte)constantRow));
+                callCodePrefix.Add(checked((byte)(constantRow >> 8)));
+                callInputs[formalOrdinal] = new(1, 1,
+                    checked((ushort)constantRegister));
+                constantRegisterCount++;
                 inputSeen[formalOrdinal] = true;
                 continue;
             }
@@ -11470,14 +11528,19 @@ public static partial class TrRmExecutableCompiler
             new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 },
             new(callSite),
         ];
-        var code = isUnitResult
-            ? new byte[] { 0xE0, 0, 1, 0, 0x18, 0 }
-            : new byte[] { 0xE0, 0, 1, 0, 0x17, 0 };
+        var code = new List<byte>(callCodePrefix.Count + 6);
+        code.AddRange(callCodePrefix);
+        code.Add(0xE0);
+        code.Add(0);
+        code.Add(1);
+        code.Add(0);
+        code.Add(isUnitResult ? (byte)0x18 : (byte)0x17);
+        code.Add(0);
         return TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
-            maps.MethodMap, default, default,
+            maps.MethodMap, default, constantMapRows.ToArray(),
             [new TrRmRegisterBodyBlock(0,
-                checked((uint)code.Length), 0)],
-            records, code, contractCount: 0, schema: schema,
+                checked((uint)code.Count), 0)],
+            records, code.ToArray(), contractCount: 0, schema: schema,
             generalPredicateGraphsInitializationReferenceBodies
                 : schema.UsesGeneralPredicateGraphs());
     }
