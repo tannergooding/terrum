@@ -333,10 +333,9 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     if (condition) { return whenTrue; }
                     else { return whenFalse; }
                 }
-                public int32 SelectInstance(bool condition, int32 whenTrue,
-                    int32 whenFalse) {
+                public int32 SelectInstance(bool condition, int32 whenTrue) {
                     if (condition) { return whenTrue; }
-                    else { return whenFalse; }
+                    else { return 42; }
                 }
             }
             """);
@@ -424,7 +423,19 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         var instanceBody = tables.Bodies.GetRegisterBody(instanceBodyRow,
             tables.Contracts.Count);
         Assert.That(instanceBody.BlockCount, Is.EqualTo(3));
-        Assert.That(instanceBody.HomeCount, Is.EqualTo(4));
+        Assert.That(instanceBody.HomeCount, Is.EqualTo(3));
+        Assert.That(instanceBody.ConstantCount, Is.EqualTo(1));
+        Assert.That(instanceBody.ConstantMap.Length, Is.EqualTo(8));
+        Assert.That(tables.Features.TryGetFeature(11, out _), Is.True);
+        Assert.That(tables.TypeSpecs.AreEquivalentTypeSpecRefs(
+                BinaryPrimitives.ReadUInt32LittleEndian(
+                    instanceBody.ConstantMap),
+                tables.Signatures.GetResultTypeSpec(
+                    tables.Methods.GetSignature(instanceMethodRow))),
+            Is.True);
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                instanceBody.ConstantMap.Slice(4)),
+            Is.GreaterThan(0u));
         Assert.That(instanceBody.HomeMap[0], Is.EqualTo(1));
         Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
             instanceBody.HomeMap.Slice(4, 2)), Is.Zero);
@@ -441,7 +452,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             }));
         Assert.That(instanceBody.GetBlockCode(2).ToArray(),
             Is.EqualTo(new byte[] {
-                0xD5, 0, 3, 0, 0x17, 0,
+                0xD4, 0, 0, 0, 0x17, 0,
             }));
     }
 

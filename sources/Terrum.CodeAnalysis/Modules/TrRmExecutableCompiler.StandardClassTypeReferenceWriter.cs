@@ -32,8 +32,8 @@ public static partial class TrRmExecutableCompiler
         BoundBinary? CallBinaryExpression = null);
 
     private readonly record struct C1M1Construction2ConditionalReturn(
-        int ConditionVariable, int TrueValueVariable,
-        int FalseValueVariable);
+        int ConditionVariable, BoundExpression TrueValue,
+        BoundExpression FalseValue);
 
     private readonly record struct C1M1ParameterSurfaceRow(
         int MethodDefRow, int Ordinal, string Name,
@@ -1199,6 +1199,7 @@ public static partial class TrRmExecutableCompiler
                         encodedBody
                             = EncodeC1M1Construction2ConditionalReturnBody(
                                 methodFunction, conditionalReturn.Value,
+                                frozenScalarValueBuilder,
                                 Construction2ValueTypeSpecReference,
                                 contractRows.Count, schema);
                     }
@@ -2007,6 +2008,7 @@ public static partial class TrRmExecutableCompiler
     private static byte[] EncodeC1M1Construction2ConditionalReturnBody(
         BoundFunction function,
         C1M1Construction2ConditionalReturn conditionalReturn,
+        TrRmFrozenScalarValueBuilder frozenScalarValueBuilder,
         Func<PrimitiveType, uint> typeSpecReferenceFor,
         int contractCount, TrRmArtifactSchema schema)
     {
@@ -2046,10 +2048,11 @@ public static partial class TrRmExecutableCompiler
             0xE4, 0, (byte)edgeRecordIndex,
             (byte)(edgeRecordIndex >> 8),
         };
+        var constantRows = new List<TrRmFrozenScalarValueReference>();
         var codeBlocks = new[] {
             conditionCode,
-            EncodeReturnBlock(conditionalReturn.TrueValueVariable),
-            EncodeReturnBlock(conditionalReturn.FalseValueVariable),
+            EncodeReturnBlock(conditionalReturn.TrueValue),
+            EncodeReturnBlock(conditionalReturn.FalseValue),
         };
         var blocks = new List<TrRmRegisterBodyBlock>(codeBlocks.Length);
         var code = new List<byte>();
@@ -2061,22 +2064,64 @@ public static partial class TrRmExecutableCompiler
             code.AddRange(blockCode);
         }
 
+        var constantMap = new byte[checked(
+            constantRows.Count * sizeof(uint) * 2)];
+        for (var index = 0; index < constantRows.Count; index++)
+        {
+            var constant = constantRows[index];
+            var offset = index * sizeof(uint) * 2;
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                constantMap.AsSpan(offset), constant.TypeSpecRef);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                constantMap.AsSpan(offset + sizeof(uint)),
+                constant.ConstantSourceRow);
+        }
+
         ReadOnlyMemory<byte>[] records = [
             new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 },
             new(TrRmRegisterBodyRecordWriter.EncodeConditionalEdge(1, 2)),
         ];
         return TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
-            default, default, default, blocks, records, code.ToArray(),
+            default, default, constantMap, blocks, records, code.ToArray(),
             contractCount: contractCount, schema: schema,
             generalPredicateGraphsInitializationReferenceBodies
                 : schema.UsesGeneralPredicateGraphs());
 
-        static byte[] EncodeReturnBlock(int homeIndex)
+        byte[] EncodeReturnBlock(BoundExpression value)
         {
-            var home = checked((ushort)homeIndex);
-            return [
-                0xD5, 0, (byte)home, (byte)(home >> 8), 0x17, 0,
-            ];
+            if (value is BoundRead read)
+            {
+                var home = checked((ushort)read.Variable);
+                return [
+                    0xD5, 0, (byte)home, (byte)(home >> 8), 0x17, 0,
+                ];
+            }
+
+            if (value is BoundConstant constant)
+            {
+                var frozenValue = frozenScalarValueBuilder.Add(constant);
+                if (frozenValue.TypeSpecRef
+                    != typeSpecReferenceFor(constant.Type))
+                {
+                    throw Unsupported(
+                        "A Construction-2 conditional Body ConstantMap requires the exact result TypeSpecRef.");
+                }
+
+                var constantIndex = constantRows.IndexOf(frozenValue);
+                if (constantIndex < 0)
+                {
+                    constantIndex = constantRows.Count;
+                    constantRows.Add(frozenValue);
+                }
+
+                var index = checked((ushort)constantIndex);
+                return [
+                    0xD4, 0, (byte)index, (byte)(index >> 8), 0x17, 0,
+                ];
+            }
+
+            throw new InvalidDataException(
+                "A Construction-2 conditional Body lost its checked scalar return.");
         }
     }
 
@@ -3945,8 +3990,8 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        var trueReturn = GetSingleReadReturn(conditional.Then);
-        var falseReturn = GetSingleReadReturn(conditional.Else);
+        var trueReturn = GetSingleScalarReturn(conditional.Then);
+        var falseReturn = GetSingleScalarReturn(conditional.Else);
         if (trueReturn is null || falseReturn is null
             || condition.Type != PrimitiveType.Bool
             || !IsScalarRead(condition)
@@ -3955,15 +4000,14 @@ public static partial class TrRmExecutableCompiler
             || (function.ReturnType != PrimitiveType.Bool
                 && !IsC1M1Construction2BodyNumericType(
                     function.ReturnType))
-            || !IsScalarRead(trueReturn)
-            || !IsScalarRead(falseReturn))
+            || !IsScalarReturn(trueReturn)
+            || !IsScalarReturn(falseReturn))
         {
             return null;
         }
 
         return new C1M1Construction2ConditionalReturn(
-            condition.Variable, trueReturn.Variable,
-            falseReturn.Variable);
+            condition.Variable, trueReturn, falseReturn);
 
         bool IsScalarParameter(int variableIndex)
         {
@@ -3987,7 +4031,18 @@ public static partial class TrRmExecutableCompiler
             => IsScalarParameter(read.Variable)
                 && function.Variables[read.Variable].Type == read.Type;
 
-        static BoundRead? GetSingleReadReturn(BoundStatement statement)
+        bool IsScalarReturn(BoundExpression value)
+            => value is BoundRead read
+                ? IsScalarRead(read)
+                : value is BoundConstant constant
+                    && constant.Type == function.ReturnType
+                    && constant.RepresentationType
+                        == function.ReturnType
+                    && constant.Bits.IsCanonicalFor(
+                        function.ReturnType);
+
+        static BoundExpression? GetSingleScalarReturn(
+            BoundStatement statement)
         {
             if (statement is BoundBlock block)
             {
@@ -4000,9 +4055,12 @@ public static partial class TrRmExecutableCompiler
                 statement = block.Statements[0];
             }
 
-            return statement is BoundReturn {
-                Value: BoundRead read
-            } ? read : null;
+            return statement switch
+            {
+                BoundReturn { Value: BoundRead read } => read,
+                BoundReturn { Value: BoundConstant constant } => constant,
+                _ => null,
+            };
         }
     }
 
