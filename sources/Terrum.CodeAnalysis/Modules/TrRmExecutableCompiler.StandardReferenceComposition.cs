@@ -671,7 +671,7 @@ public static partial class TrRmExecutableCompiler
                         >= BoundGenericNominalTypeTypes.MaximumCount)
                     {
                         throw new NotSupportedException(
-                            "The composed C1M1 nominal TypeDef closure exceeds the analysis limit.");
+                            "The composed Standard class TypeDef closure exceeds the analysis limit.");
                     }
 
                     definitionIndexes.Add(definition.Identity,
@@ -707,7 +707,7 @@ public static partial class TrRmExecutableCompiler
                         >= BoundGenericNominalTypeTypes.MaximumCount)
                     {
                         throw new NotSupportedException(
-                            "The composed C1M1 class instance table exceeds the analysis limit.");
+                            "The composed Standard class instance table exceeds the analysis limit.");
                     }
 
                     var mappedInstanceIndex = instances.Count;

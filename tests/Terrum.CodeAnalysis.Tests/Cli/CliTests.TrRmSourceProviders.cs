@@ -763,6 +763,68 @@ internal sealed partial class CliTests
         }
     }
 
+    [TestCase(
+        "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-1-parameter-labels-1-receiver-access-1-enum-closure-1-class-instance-layout-1")]
+    [TestCase(
+        "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-enum-closure-1-class-instance-layout-1")]
+    public async Task CompileTrRmBindsVersionTwoEN1ClassLayoutProviderAsync(
+        string schemaIdentity)
+    {
+        var providerIdentity
+            = $"source-provider-cli-en1-layout-{Guid.NewGuid():N}";
+        var providerArtifact = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"source-provider-cli-en1-layout-{Guid.NewGuid():N}.trrm");
+        var providerSelections = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"source-provider-cli-en1-layout-{Guid.NewGuid():N}.json");
+        var consumerArtifact = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"source-provider-cli-en1-layout-{Guid.NewGuid():N}.trrm");
+        try
+        {
+            await File.WriteAllBytesAsync(providerArtifact,
+                CreateC1M1ClassProviderWithField(providerIdentity, "Box",
+                    "type.box", "field.box.value", schemaIdentity))
+                .ConfigureAwait(true);
+            var configuration = JsonSerializer.Serialize(new {
+                schemaVersion = 2,
+                providers = new[] {
+                    new { schemaIdentity, path = providerArtifact },
+                },
+                references = new[] {
+                    new {
+                        providerInputOrdinal = 0,
+                        moduleIdentity = providerIdentity,
+                        typeExportKeys = new[] { "type.box" },
+                        fieldExportKeys = new[] { "field.box.value" },
+                    },
+                },
+            });
+            await File.WriteAllTextAsync(providerSelections, configuration,
+                new UTF8Encoding(false)).ConfigureAwait(true);
+
+            var (exit, result, error) = await RunAsync(
+                Encoding.UTF8.GetBytes("void Consume(Box value) {}"),
+                "compile-trrm", "-", "--identity",
+                $"source-provider-cli-en1-layout-consumer-{Guid.NewGuid():N}",
+                "--trrm-schema", schemaIdentity, "--trrm-source-providers",
+                providerSelections, "--library", "-o", consumerArtifact,
+                "--runtime", "fail-fast", "--json")
+                .ConfigureAwait(false);
+            Assert.That(exit, Is.Zero,
+                $"{result}{Environment.NewLine}{error}");
+            Assert.That(error, Is.Empty);
+            Assert.That(new FileInfo(consumerArtifact).Length, Is.GreaterThan(0));
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(providerArtifact)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(providerSelections)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(consumerArtifact)
+                .ConfigureAwait(true);
+        }
+    }
+
     [Test]
     public async Task CompileTrRmBindsVersionTwoC1ClassFieldSelectionAsync()
     {
