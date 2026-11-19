@@ -1397,11 +1397,20 @@ public static partial class TrRmExecutableCompiler
             }
 
             if (schema.UsesClassParameterDefaults()
-                && !program.Interfaces.IsEmpty
-                && sourceTypeExports is not { Count: > 0 })
+                && sourceTypeExports is not { Count: > 0 }
+                && program.GenericMethodDefinitions
+                    .SelectMany(static definition => definition.Formals)
+                    .Any(static formal =>
+                        formal.InterfaceConstraints.Any(static constraint =>
+                            constraint.Kind
+                                == BoundInterfaceTypeKind.Nominal
+                            && constraint.ModuleImport is null)
+                        || formal.AssociatedRelations.Any(static relation =>
+                            relation.AssociatedType.DeclaringInterface
+                                .ModuleImport is null)))
             {
                 throw Unsupported(
-                    "CM1 interface requirements require explicit source TypeDef and InterfaceMethod mappings.");
+                    "CM1 source generic methods over local interfaces require explicit source TypeDef mappings.");
             }
 
             var classArtifact = EmitC1M1SourceClassDeclarations(program,
@@ -1416,7 +1425,8 @@ public static partial class TrRmExecutableCompiler
                     standardInitializationReferenceBodies: true,
                     baseArtifact: classArtifact,
                     frozenScalarValueBuilder:
-                        frozenScalarValueBuilder);
+                        frozenScalarValueBuilder,
+                    sourceClassExports: sourceClassExports);
             }
 
             if (sourceTypeExports is { Count: > 0 }

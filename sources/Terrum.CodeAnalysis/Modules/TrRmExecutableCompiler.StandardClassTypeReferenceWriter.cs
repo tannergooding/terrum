@@ -488,7 +488,8 @@ public static partial class TrRmExecutableCompiler
         {
             var declaration
                 = program.StandardClassDeclarations[standardClassIndex];
-            var importPlan = GetC1M1ImportedClassImportPlan(declaration);
+            var importPlan = GetC1M1ImportedClassImportPlan(program,
+                declaration);
             typeImportPlanByStandardClass.Add(standardClassIndex,
                 importPlan);
             var typeDefRow
@@ -7958,8 +7959,9 @@ public static partial class TrRmExecutableCompiler
                     program.StandardClassDeclarations,
                     program.GenericNominalTypeDefinitions))
             || program.StandardClassDeclarations.Any(
-                static declaration =>
-                    !IsC1M1ImportedClassLayoutSupported(declaration)))
+                declaration =>
+                    !IsC1M1ImportedClassLayoutSupported(program,
+                        declaration))
         {
             return false;
         }
@@ -7993,6 +7995,7 @@ public static partial class TrRmExecutableCompiler
     }
 
     private static bool IsC1M1ImportedClassLayoutSupported(
+        BoundProgram program,
         BoundStandardClassDeclaration declaration)
     {
         if (declaration.Expectations.IsDefault
@@ -8010,9 +8013,10 @@ public static partial class TrRmExecutableCompiler
             || view.Fields.IsDefault
             || (view.TypeDefFlags & 3) != 2
             || (view.TypeDefFlags >> 2 & 7) != 2
-            || !view.Methods.IsDefaultOrEmpty
             || view.Layouts.IsDefault
-            || view.Layouts.Length != 1)
+            || view.Layouts.Length != 1
+            || !AreC1M1ImportedClassMethodExpectationsSupported(
+                program, declaration))
         {
             return false;
         }
@@ -8062,11 +8066,49 @@ public static partial class TrRmExecutableCompiler
         return true;
     }
 
+    private static bool AreC1M1ImportedClassMethodExpectationsSupported(
+        BoundProgram program,
+        BoundStandardClassDeclaration declaration)
+    {
+        foreach (var methodExpectation in declaration.Expectations
+            .SelectMany(static expectation =>
+                expectation.MethodExpectations))
+        {
+            var matches = program.RetainedGenericMethodRoots.Where(root =>
+                    root.Origin.MethodDefId
+                        == methodExpectation.ProviderDefinitionId
+                    && StringComparer.Ordinal.Equals(
+                        root.Origin.ProviderIdentity,
+                        methodExpectation.Provider.ModuleIdentity)
+                    && StringComparer.Ordinal.Equals(root.Origin.ExportKey,
+                        methodExpectation.ExportKey)
+                    && root.Origin.ClassOwner
+                        is BoundGenericMethodClassOwner owner
+                    && owner.ExpectedDefinitionId
+                        == methodExpectation.ExpectedOwnerDefinitionId)
+                .ToArray();
+            if (matches.Length != 1
+                || matches[0].Formals.IsDefaultOrEmpty
+                || matches[0].Signature.FormalOrder.IsDefault
+                || matches[0].Signature.FormalOrder.Any(
+                    static slot =>
+                        slot.Kind != BoundGenericMethodFormalKind.Type)
+                || matches[0].Formals.Any(static formal =>
+                    formal.InterfaceConstraints.IsDefault
+                    || formal.AssociatedRelations.IsDefault))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private static C1M1ImportedClassImportPlan
-        GetC1M1ImportedClassImportPlan(
+        GetC1M1ImportedClassImportPlan(BoundProgram program,
             BoundStandardClassDeclaration declaration)
     {
-        if (!IsC1M1ImportedClassLayoutSupported(declaration))
+        if (!IsC1M1ImportedClassLayoutSupported(program, declaration))
         {
             throw Unsupported(
                 "C1M1 class source emission supports directly selected imported non-generic classes with one default Auto Layout variant.");
@@ -8200,8 +8242,9 @@ public static partial class TrRmExecutableCompiler
             .ToHashSet();
         var relationNominalIdentities
             = new HashSet<BoundGenericNominalTypeIdentity>();
-        foreach (var root in program.RetainedGenericMethodRoots)
+        foreach (var retainedRoot in program.RetainedGenericMethodRoots)
         {
+            var root = retainedRoot.Binding?.Expected ?? retainedRoot;
             foreach (var formal in root.Formals)
             {
                 foreach (var relation in formal.AssociatedRelations)
@@ -8857,6 +8900,101 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
+        var interfaceImportRows = new SortedSet<int>();
+
+        bool IsRetainedCM1AR1InterfaceImport(int importRow)
+        {
+            if (!schema.UsesAssociatedRelationConstraints())
+            {
+                return false;
+            }
+
+            var expectedDefinitionId = rootTables.Imports
+                .GetExpectedDefinitionForImportRow(importRow);
+            var expectedKind = expectedDefinitionId >> 24;
+            var expectedRow = checked((int)(
+                expectedDefinitionId & 0x00FF_FFFF));
+            var moduleRefRow = rootTables.Imports
+                .GetModuleRefForImportRow(importRow);
+            var providerIdentity = rootTables.ModuleRefs
+                .GetProducerIdentity(moduleRefRow);
+            var requirements = rootTables.ModuleRefs
+                .GetRequirements(moduleRefRow);
+            var exportKey = rootTables.Imports
+                .GetBindingForImportRow(importRow).ExportKey;
+
+            if (expectedKind == 0x13)
+            {
+                if (rootTables.TypeDefs.GetKind(expectedRow) != 3)
+                {
+                    return false;
+                }
+
+                var qualifiedName = GetC1M1TypeDefQualifiedName(
+                    rootTables.TypeDefs, expectedRow);
+                var arity = rootTables.TypeDefs.GetGenericRange(
+                    expectedRow).Count;
+                return program.Interfaces.Any(definition =>
+                    definition.ModuleImport is BoundModuleImport ownerImport
+                    && StringComparer.Ordinal.Equals(
+                        ownerImport.ProducerIdentity, providerIdentity)
+                    && StringComparer.Ordinal.Equals(ownerImport.ExportKey,
+                        exportKey)
+                    && ownerImport.TargetRequirement
+                        == requirements.TargetRequirement
+                    && ownerImport.RuntimePolicy == requirements.RuntimePolicy
+                    && StringComparer.Ordinal.Equals(
+                        definition.QualifiedName, qualifiedName)
+                    && definition.Formals.Length == arity);
+            }
+
+            var associatedTypeImport = expectedKind == 0x20;
+            var interfaceMethodImport = expectedKind == 0x16;
+            if (!associatedTypeImport && !interfaceMethodImport)
+            {
+                return false;
+            }
+
+            var ownerTypeDefRow = associatedTypeImport
+                ? rootTables.Interfaces.GetOwnerTypeDef(
+                    rootTables.AssociatedTypeDefs.GetOwnerInterfaceDef(
+                        expectedRow))
+                : rootTables.Methods.GetOwnerType(expectedRow);
+            if (rootTables.TypeDefs.GetKind(ownerTypeDefRow) != 3)
+            {
+                return false;
+            }
+
+            var qualifiedOwnerName = GetC1M1TypeDefQualifiedName(
+                rootTables.TypeDefs, ownerTypeDefRow);
+            var ownerArity = rootTables.TypeDefs
+                .GetGenericRange(ownerTypeDefRow).Count;
+            var memberName = associatedTypeImport
+                ? rootTables.Strings.DecodeName(
+                    rootTables.AssociatedTypeDefs
+                        .GetNameStringRow(expectedRow))
+                : rootTables.Methods.GetName(expectedRow);
+            return program.Interfaces.Any(definition =>
+                definition.ModuleImport is BoundModuleImport ownerImport
+                && StringComparer.Ordinal.Equals(
+                    ownerImport.ProducerIdentity, providerIdentity)
+                && ownerImport.TargetRequirement
+                    == requirements.TargetRequirement
+                && ownerImport.RuntimePolicy == requirements.RuntimePolicy
+                && StringComparer.Ordinal.Equals(
+                    definition.QualifiedName, qualifiedOwnerName)
+                && definition.Formals.Length == ownerArity
+                && definition.Members.Any(member =>
+                    member.Kind == (associatedTypeImport
+                        ? BoundInterfaceMemberKind.AssociatedType
+                        : BoundInterfaceMemberKind.Callable)
+                    && StringComparer.Ordinal.Equals(member.Name, memberName)
+                    && (StringComparer.Ordinal.Equals(
+                            member.DeclarationKey, exportKey)
+                        || member.AdditionalDeclarationKeys.Contains(
+                            exportKey, StringComparer.Ordinal))));
+        }
+
         var rootImportCount = 0;
         for (var importRow = 1; importRow <= rootTables.Imports.Count;
             importRow++)
@@ -8872,6 +9010,12 @@ public static partial class TrRmExecutableCompiler
             rootImportCount++;
             var definitionKind = rootTables.Imports
                 .GetExpectedDefinitionForImportRow(importRow) >> 24;
+            if (IsRetainedCM1AR1InterfaceImport(importRow))
+            {
+                _ = interfaceImportRows.Add(importRow);
+                continue;
+            }
+
             if (definitionKind is not (0x13 or 0x14 or 0x16)
                 || (definitionKind == 0x13
                     ? !bindingsByImportRow.ContainsKey(importRow)
@@ -8886,7 +9030,8 @@ public static partial class TrRmExecutableCompiler
 
         if (typeDefViewsByOldRow.Count == 0
             || bindingsByImportRow.Count + fieldBindingsByImportRow.Count
-                + methodBindingsByImportRow.Count != rootImportCount)
+                + methodBindingsByImportRow.Count
+                + interfaceImportRows.Count != rootImportCount)
         {
             throw new InvalidDataException(
                 "The retained C1M1 class provider closure is incomplete.");
@@ -8908,7 +9053,8 @@ public static partial class TrRmExecutableCompiler
         var moduleRefRowsByOldRow = new SortedSet<int>();
         foreach (var importRow in bindingsByImportRow.Keys
             .Concat(fieldBindingsByImportRow.Keys)
-            .Concat(methodBindingsByImportRow.Keys).Order())
+            .Concat(methodBindingsByImportRow.Keys)
+            .Concat(interfaceImportRows).Order())
         {
             var isMethodImport
                 = methodBindingsByImportRow.TryGetValue(importRow,
@@ -10105,9 +10251,13 @@ public static partial class TrRmExecutableCompiler
             return rewritten;
         }
 
-        var retainedRelations = program.RetainedGenericMethodRoots
-            .SelectMany(root => root.Formals.SelectMany(formal =>
-                formal.AssociatedRelations))
+        var sourceRoots = program.RetainedGenericMethodRoots
+            .Select(static root => root.Binding?.Expected ?? root)
+            .ToArray();
+
+        var retainedRelations = sourceRoots
+            .SelectMany(static root => root.Formals)
+            .SelectMany(static formal => formal.AssociatedRelations)
             .Where(relation => constraintPlans.Any(plan =>
                 plan.Kind == 3
                 && plan.Payload
@@ -10119,7 +10269,7 @@ public static partial class TrRmExecutableCompiler
                 relation.AssociatedType.DeclaringInterface);
         }
 
-        foreach (var root in program.RetainedGenericMethodRoots)
+        foreach (var root in sourceRoots)
         {
             foreach (var formal in root.Formals)
             {
@@ -10134,9 +10284,9 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        var roots = program.RetainedGenericMethodRoots.Select(root =>
-        {
-            var formals = root.Formals.Select(formal => formal with {
+        ImmutableArray<BoundGenericMethodFormal> RewriteFormals(
+            ImmutableArray<BoundGenericMethodFormal> formals)
+            => [.. formals.Select(formal => formal with {
                 InterfaceConstraints = formal.InterfaceConstraints.IsDefault
                     ? formal.InterfaceConstraints
                     : [.. formal.InterfaceConstraints.Select(
@@ -10153,21 +10303,23 @@ public static partial class TrRmExecutableCompiler
                                                 .DeclaringInterface),
                                 },
                         })],
-            }).ToImmutableArray();
-            var rewrittenRoot = new BoundGenericMethodImport(root.Origin,
-                root.Signature, formals, root.ProofFunction,
-                root.FormalTypeOwnerOrdinal, root.SpanTypes,
-                root.OrdinaryParameterDefaults);
-            rewrittenRoot.CompleteProofFunction(root.ProofFunction,
-                root.ProofSupportFunctions,
-                root.FormalTypeOwnerOrdinal);
-            if (root.Binding is BoundGenericMethodImportBinding binding)
-            {
-                rewrittenRoot.CompleteBinding(binding);
-            }
+            })];
 
-            return rewrittenRoot;
-        }).ToImmutableArray();
+        BoundGenericMethodImport RewriteImport(
+            BoundGenericMethodImport source)
+        {
+            var rewritten = new BoundGenericMethodImport(source.Origin,
+                source.Signature, RewriteFormals(source.Formals),
+                source.ProofFunction,
+                source.FormalTypeOwnerOrdinal, source.SpanTypes,
+                source.OrdinaryParameterDefaults);
+            rewritten.CompleteProofFunction(source.ProofFunction,
+                source.ProofSupportFunctions,
+                source.FormalTypeOwnerOrdinal);
+            return rewritten;
+        }
+
+        var roots = sourceRoots.Select(RewriteImport).ToImmutableArray();
         var interfaces = program.Interfaces.Select(definition =>
         {
             var key = (definition.QualifiedName,
@@ -10382,21 +10534,52 @@ public static partial class TrRmExecutableCompiler
         {
             var methodDefId = 0x1600_0000u
                 | checked((uint)plan.MethodRow);
-            var matches = reemissionProgram.RetainedGenericMethodRoots
-                .Where(root => root.Origin.MethodDefId == methodDefId)
-                .SelectMany(root => root.Formals)
-                .Where(formal => formal.Ordinal == plan.FormalOrdinal)
-                .SelectMany(static formal => formal.AssociatedRelations)
-                .Where(relation => relation.AssociatedRelationRow
-                    == checked((int)plan.Payload))
-                .ToArray();
-            if (matches.Length != 1)
+            var matches = new List<BoundGenericMethodAssociatedRelation>();
+            foreach (var root in reemissionProgram.RetainedGenericMethodRoots)
+            {
+                if (root.Origin.MethodDefId == methodDefId)
+                {
+                    matches.AddRange(root.Formals
+                        .Where(formal =>
+                            formal.Ordinal == plan.FormalOrdinal)
+                        .SelectMany(static formal =>
+                            formal.AssociatedRelations)
+                        .Where(relation => relation.AssociatedRelationRow
+                            == checked((int)plan.Payload)));
+                }
+
+                if (root.Binding is not BoundGenericMethodImportBinding
+                    binding)
+                {
+                    continue;
+                }
+
+                foreach (var method in new[] {
+                    binding.Expected, binding.Provider,
+                })
+                {
+                    if (method.Origin.MethodDefId != methodDefId)
+                    {
+                        continue;
+                    }
+
+                    matches.AddRange(method.Formals.Where(formal =>
+                            formal.Ordinal == plan.FormalOrdinal)
+                        .SelectMany(static formal =>
+                            formal.AssociatedRelations)
+                        .Where(relation => relation.AssociatedRelationRow
+                            == checked((int)plan.Payload)));
+                }
+            }
+
+            var distinctMatches = matches.Distinct().ToArray();
+            if (distinctMatches.Length != 1)
             {
                 throw Unsupported(
                     "A retained CM1AR1 class Constraint has no unique typed associated relation.");
             }
 
-            return matches[0];
+            return distinctMatches[0];
         }
 
         var constraintRows = new List<TrRmConstraintRow>(

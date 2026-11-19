@@ -62,7 +62,8 @@ public static partial class TrRmExecutableCompiler
         IReadOnlyList<BoundGenericMethodDefinition>?
             retainedMethodDefinitions = null,
         byte[]? baseArtifact = null,
-        TrRmFrozenScalarValueBuilder? frozenScalarValueBuilder = null)
+        TrRmFrozenScalarValueBuilder? frozenScalarValueBuilder = null,
+        SourceClassExports? sourceClassExports = null)
     {
         if (program.GenericMethodDefinitions.IsDefault)
         {
@@ -77,6 +78,13 @@ public static partial class TrRmExecutableCompiler
             throw new ArgumentException(
                 "Source generic method mappings belong to a different checked program.",
                 nameof(sourceMethodExports));
+        }
+        if (sourceClassExports is not null
+            && !ReferenceEquals(sourceClassExports.Program, program))
+        {
+            throw new ArgumentException(
+                "Source generic class-method mappings belong to a different checked program.",
+                nameof(sourceClassExports));
         }
 
         if (baseArtifact is not null
@@ -147,6 +155,14 @@ public static partial class TrRmExecutableCompiler
         {
             throw Unsupported(
                 "CM1AR1 associated-relation constraints are selected only for class MethodDefs on nongeneric classes.");
+        }
+        if (emissionRows.Any(static emission =>
+                emission.Definition.Owner is not null)
+            && (!schema.UsesClassParameterDefaults()
+                || sourceClassExports is null))
+        {
+            throw Unsupported(
+                "Generic class MethodDefs require the exact CM1 source-class composition.");
         }
 
         var sourceProgram = program;
@@ -258,7 +274,7 @@ public static partial class TrRmExecutableCompiler
                 importedGenericMethodTargetTokens,
                 importedNominalTypeReferences,
                 importedNominalTypeSnapshots, schema,
-                methodParameterSurfaceValues);
+                methodParameterSurfaceValues, sourceClassExports);
         }
         else if (hasGenericCallTargets
             || ArtifactHasGenericWriteConstraints(artifact, schema))
@@ -393,7 +409,9 @@ public static partial class TrRmExecutableCompiler
     private static BoundFunction GetSupportedOpenGenericProofFunction(
         BoundGenericMethodDefinition definition)
     {
-        if (definition.Owner is not null || !definition.IsStatic
+        if (!IsSupportedSourceGenericClassMethodOwner(definition)
+            || (!definition.IsStatic
+                && (definition.Owner is null || definition.IsMutable))
             || definition.ConstantFormals.IsDefault
             || !definition.ConstantFormals.IsEmpty
             || definition.FormalOrder.IsDefault
@@ -405,7 +423,7 @@ public static partial class TrRmExecutableCompiler
                 >= definition.ProofProgram.Functions.Length)
         {
             throw Unsupported(
-                $"Generic MethodDef '{definition.Name}' has a G1 owner or formal shape outside the current source writer.");
+                $"Generic MethodDef '{definition.Name}' has an owner or formal shape outside the selected source writer.");
         }
 
         for (var ordinal = 0; ordinal < definition.Formals.Length; ordinal++)
@@ -429,6 +447,7 @@ public static partial class TrRmExecutableCompiler
         var function = definition.ProofProgram.Functions[
             definition.FunctionIndex];
         if (function.IsExternal
+            || function.IsStatic != definition.IsStatic
             || function.GenericMethodProofDefinitionOrdinal
                 != definition.DefinitionOrdinal
             || function.RequiresUnsafeCaller
@@ -462,6 +481,27 @@ public static partial class TrRmExecutableCompiler
         }
 
         return function;
+    }
+
+    private static bool IsSupportedSourceGenericClassMethodOwner(
+        BoundGenericMethodDefinition definition)
+    {
+        if (definition.Owner is not BoundGenericMethodOwner owner)
+        {
+            return true;
+        }
+
+        if (!ManagedClassTypes.IsClass(owner.ClosedType)
+            || owner.SourceGenericTypeDefinitionIndex != -1
+            || !owner.TypeArguments.IsDefaultOrEmpty
+            || !owner.ConstantArguments.IsDefaultOrEmpty)
+        {
+            return false;
+        }
+
+        var classIndex = ManagedClassTypes.ClassIndex(owner.ClosedType);
+        return (uint)classIndex
+            < (uint)definition.ProofProgram.Classes.Length;
     }
 
     private static bool ContainsGenericMethodCall(BoundFunction function)
@@ -3243,6 +3283,72 @@ public static partial class TrRmExecutableCompiler
                 checked((uint)count), bytes.ToArray()));
         }
 
+        var classOwnerTypeDefRows = new Dictionary<int, int>();
+        if (emissions.Any(static emission =>
+                emission.Definition.Owner is not null))
+        {
+            if (sourceClassExports is null
+                || !ReferenceEquals(sourceClassExports.Program, program))
+            {
+                throw Unsupported(
+                    "A generic class MethodDef requires the exact source-class export set.");
+            }
+
+            var baseTables = TrRmStructuralMetadataValidator
+                .ValidateGenericMethodCallsDraftAndGetExecutionTables(
+                    index);
+            foreach (var emission in emissions)
+            {
+                if (emission.Definition.Owner
+                    is not BoundGenericMethodOwner owner)
+                {
+                    continue;
+                }
+
+                var classIndex = ManagedClassTypes.ClassIndex(
+                    owner.ClosedType);
+                var classExports = sourceClassExports.Exports.Where(export =>
+                    export.Declaration.ClassIndex == classIndex).ToArray();
+                if (classExports.Length == 0)
+                {
+                    throw Unsupported(
+                        $"Generic class MethodDef '{emission.Definition.Name}' has no source TypeDef ExportKey.");
+                }
+
+                var typeDefRows = new HashSet<int>();
+                foreach (var classExport in classExports)
+                {
+                    if (!baseTables.Exports.TryGetDefinitionForKey(1,
+                            classExport.ExportKey, out var typeDefId)
+                        || (typeDefId >> 24) != 0x13)
+                    {
+                        throw new InvalidDataException(
+                            "A generic class MethodDef owner ExportKey does not identify a TypeDef.");
+                    }
+
+                    var typeDefRow = checked((int)(
+                        typeDefId & 0x00FF_FFFF));
+                    if (baseTables.TypeDefs.GetOwnerModule(typeDefRow) != 1
+                        || baseTables.TypeDefs.GetKind(typeDefRow) != 2)
+                    {
+                        throw new InvalidDataException(
+                            "A generic class MethodDef owner is not a root class TypeDef.");
+                    }
+
+                    _ = typeDefRows.Add(typeDefRow);
+                }
+
+                if (typeDefRows.Count != 1
+                    || !classOwnerTypeDefRows.TryAdd(
+                        emission.Definition.DefinitionOrdinal,
+                        typeDefRows.Single()))
+                {
+                    throw new InvalidDataException(
+                        "A generic class MethodDef maps to conflicting source TypeDefs.");
+                }
+            }
+        }
+
         var stringSection = GetSection(sections, 0x0002);
         var sourceStrings = new TrRmStringTableReader(
             stringSection.Bytes.Span,
@@ -3967,7 +4073,11 @@ public static partial class TrRmExecutableCompiler
                 2u | (signature.IsMutable ? 4u : 0u));
             AppendUInt32(methodBytes, checked((uint)contractFirst));
             AppendUInt32(methodBytes, checked((uint)contractCount));
-            AppendUInt32(methodBytes, 0);
+            AppendUInt32(methodBytes,
+                classOwnerTypeDefRows.TryGetValue(
+                    definition.DefinitionOrdinal,
+                    out var classOwnerTypeDefRow)
+                    ? checked((uint)classOwnerTypeDefRow) : 0);
         }
 
         nominalTypes.Complete();
@@ -4064,7 +4174,8 @@ public static partial class TrRmExecutableCompiler
         IReadOnlyList<BoundSourceTypeProviderSnapshot>
             importedNominalTypeSnapshots,
         TrRmArtifactSchema schema,
-        TrRmFrozenScalarValueBuilder? methodParameterSurfaceValues)
+        TrRmFrozenScalarValueBuilder? methodParameterSurfaceValues,
+        SourceClassExports? sourceClassExports)
     {
         var index = new TrRmArtifactIndex(artifact, schema);
         var sections = new List<TrRmSection>(index.SectionCount + 2);
@@ -4142,17 +4253,21 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 var function = emission.ProofFunction;
+                var receiverCount = emission.Definition.IsStatic ? 0 : 1;
+                var methodParameterCount
+                    = function.ParameterCount - receiverCount;
                 if (function.Variables.Length < function.ParameterCount)
                 {
                     throw Unsupported(
                         $"Generic MethodDef '{emission.Definition.Name}' has no complete checked parameter-name view.");
                 }
 
-                for (var ordinal = 0; ordinal < function.ParameterCount;
+                for (var ordinal = 0; ordinal < methodParameterCount;
                     ordinal++)
                 {
                     var nameRow = names.Count + 1;
-                    names.Add((function.Variables[ordinal].Name, 1));
+                    names.Add((function.Variables[
+                        ordinal + receiverCount].Name, 1));
                     var defaultOffset = schema.UsesClassParameterDefaults()
                         ? checked((methodParameterLabelCount
                             * GetMethodParameterSurfaceRowSize(schema)) + 12)
@@ -4260,6 +4375,46 @@ public static partial class TrRmExecutableCompiler
         nominalTypes.ImportDefinitionReferences(
             importedNominalTypeReferences, importedNominalTypeSnapshots);
         var baseBuiltInTypeSpecRows = GetBuiltInTypeSpecRows(typeSpecRows);
+        foreach (var emission in emissions)
+        {
+            if (emission.Definition.IsStatic)
+            {
+                continue;
+            }
+
+            if (emission.ProofFunction.Variables.IsEmpty
+                || !ManagedClassTypes.IsClass(
+                    emission.ProofFunction.Variables[0].Type)
+                || ManagedClassTypes.IsWritable(
+                    emission.ProofFunction.Variables[0].Type)
+                || ManagedClassTypes.ClassIndex(
+                    emission.ProofFunction.Variables[0].Type)
+                    != ManagedClassTypes.ClassIndex(
+                        emission.Definition.Owner!.ClosedType))
+            {
+                throw Unsupported(
+                    $"Generic instance MethodDef '{emission.Definition.Name}' has an unsupported receiver TypeSpec.");
+            }
+
+            var receiverType = emission.ProofFunction.Variables[0].Type;
+            if (!classOwnerTypeDefRows.TryGetValue(
+                    emission.Definition.DefinitionOrdinal,
+                    out var ownerTypeDefRow))
+            {
+                throw Unsupported(
+                    $"Generic instance MethodDef '{emission.Definition.Name}' has no retained class TypeDef.");
+            }
+
+            if (!baseBuiltInTypeSpecRows.ContainsKey(receiverType))
+            {
+                var receiverTypeSpec = checked((uint)typeSpecRows.Count + 1);
+                typeSpecRows.Add(TrRmTypeSpecTableWriter.Reference(0x02,
+                    checked((uint)ownerTypeDefRow)));
+                baseBuiltInTypeSpecRows.Add(receiverType,
+                    receiverTypeSpec);
+            }
+        }
+
         var hasBlittableConstraint = false;
         var hasWriteConstraint = constraintRows.Any(
             static constraint => constraint.Kind == 2
@@ -4275,15 +4430,17 @@ public static partial class TrRmExecutableCompiler
                 + emissionOrdinal + 1);
             emissionOrdinal++;
             var function = emission.ProofFunction;
-            var parameterCount = function.ParameterCount;
-            if (function.IsStatic is false
-                || parameterCount != definition.RuntimeParameterCount
-                || parameterCount != function.Variables
-                    .Take(parameterCount)
+            var runtimeParameterCount = function.ParameterCount;
+            var receiverCount = definition.IsStatic ? 0 : 1;
+            var parameterCount = runtimeParameterCount - receiverCount;
+            if (function.IsStatic != definition.IsStatic
+                || runtimeParameterCount != definition.RuntimeParameterCount
+                || runtimeParameterCount != function.Variables
+                    .Take(runtimeParameterCount)
                     .Count(static parameter => !parameter.IsOut
                         && !parameter.IsInit)
                 || parameterCount < 0
-                || parameterCount > 8)
+                || runtimeParameterCount > 8)
             {
                 throw Unsupported(
                     $"Generic MethodDef '{definition.Name}' has an unsupported parameter shape.");
@@ -4471,8 +4628,9 @@ public static partial class TrRmExecutableCompiler
                 ? 0 : (parameterBytes.Count / 16) + 1;
             for (var parameter = 0; parameter < parameterCount; parameter++)
             {
+                var functionParameterIndex = parameter + receiverCount;
                 var typeSpecRef = GenericMethodTypeSpecRef(
-                    function.Variables[parameter].Type,
+                    function.Variables[functionParameterIndex].Type,
                     formalTypeSpecRows, builtInTypeSpecRows, typeSpecRows,
                     definition.ProofProgram.SpanTypes,
                     definition.ProofProgram.CheckedReferenceTypes,
@@ -4495,10 +4653,12 @@ public static partial class TrRmExecutableCompiler
                     {
                         if (parameterDefault.ParameterIndex != parameter
                             || parameterDefault.ParameterType
-                                != function.Variables[parameter].Type
+                                != function.Variables[
+                                    functionParameterIndex].Type
                             || !StringComparer.Ordinal.Equals(
                                 parameterDefault.ParameterName,
-                                function.Variables[parameter].Name)
+                                function.Variables[
+                                    functionParameterIndex].Name)
                             || !parameterDefault.FormalDependencies
                                 .IsEmpty
                             || parameterDefault.Value
@@ -4514,7 +4674,8 @@ public static partial class TrRmExecutableCompiler
                         var frozenValue
                             = AddC1M1ParameterDefault(
                                 methodParameterSurfaceValues, constant,
-                                function.Variables[parameter].Type,
+                                function.Variables[
+                                    functionParameterIndex].Type,
                                 typeSpecRef);
                         WriteUInt32(methodParameterLabelBytes,
                             defaultOffset,
@@ -4539,7 +4700,15 @@ public static partial class TrRmExecutableCompiler
                 definition.DefinitionOrdinal, definition,
                 allowSpanType: true, nominalTypes: nominalTypes);
             AppendUInt32(signatureBytes, resultTypeSpecRef);
-            AppendUInt32(signatureBytes, 0);
+            var receiverTypeSpecRef = receiverCount == 0 ? 0
+                : GenericMethodTypeSpecRef(
+                    function.Variables[0].Type, formalTypeSpecRows,
+                    builtInTypeSpecRows, typeSpecRows,
+                    definition.ProofProgram.SpanTypes,
+                    definition.ProofProgram.CheckedReferenceTypes,
+                    definition.DefinitionOrdinal, definition,
+                    allowSpanType: true, nominalTypes: nominalTypes);
+            AppendUInt32(signatureBytes, receiverTypeSpecRef);
             AppendUInt32(signatureBytes, checked((uint)firstParameter));
             AppendUInt32(signatureBytes, checked((uint)parameterCount));
             AppendUInt32(signatureBytes,
@@ -4615,7 +4784,9 @@ public static partial class TrRmExecutableCompiler
             AppendUInt32(methodBytes, checked((uint)methodNameRows[
                 definition.DefinitionOrdinal]));
             AppendUInt32(methodBytes, checked((uint)signatureRow));
-            AppendUInt32(methodBytes, definition.IsPublic ? 2u : 0u);
+            AppendUInt32(methodBytes, (definition.IsPublic ? 2u : 0u)
+                | (schema.UsesMethodReceiverAccess()
+                    && definition.IsMutable ? 4u : 0u));
             AppendUInt32(methodBytes, checked((uint)contractFirst));
             AppendUInt32(methodBytes, checked((uint)contractCount));
             AppendUInt32(methodBytes,
@@ -4662,10 +4833,14 @@ public static partial class TrRmExecutableCompiler
         var exportBytes = EncodeExportRows(exportRows);
 
         var featureRows = ReadFeatureRows(sections);
+        var hasGenericMethodFeature = featureRows.Any(static feature =>
+            feature.FeatureId
+                == TrRmFeatureTableReader.GenericMethodCallsFeatureId);
         if (featureRows.Any(static feature =>
-                feature.FeatureId is
-                    TrRmFeatureTableReader.GenericMethodCallsFeatureId
-                    or TrRmFeatureTableReader.GenericWriteRequirementsFeatureId))
+                feature.FeatureId
+                    == TrRmFeatureTableReader.GenericWriteRequirementsFeatureId)
+            || (hasGenericMethodFeature
+                && !schema.UsesAssociatedRelationConstraints()))
         {
             throw Unsupported("The source emitter cannot replace pre-existing G1 Features.");
         }
@@ -4688,16 +4863,26 @@ public static partial class TrRmExecutableCompiler
             || GetCount(sections, 0x0027) != 0
             || associatedRelationRows.Count != 0)
         {
-            featureRows.Add(TrRmFeatureRow.GenericMethodCallsCandidate);
+            if (!hasGenericMethodFeature)
+            {
+                featureRows.Add(
+                    TrRmFeatureRow.GenericMethodCallsCandidate);
+            }
         }
-        if (hasWriteConstraint)
+        if (hasWriteConstraint
+            && !featureRows.Any(static feature =>
+                feature.FeatureId
+                    == TrRmFeatureTableReader.GenericWriteRequirementsFeatureId))
         {
             featureRows.Add(
                 TrRmFeatureRow.GenericWriteRequirementsCandidate);
         }
         if (labelBearing && (exportedDefinitionOrdinals.Count != 0
                 || GetCount(sections, 0x0024) != 0
-                || importedGenericMethodTargetTokens.Count != 0))
+                || importedGenericMethodTargetTokens.Count != 0)
+            && !featureRows.Any(static feature =>
+                feature.FeatureId
+                    == TrRmFeatureTableReader.MethodParameterLabelsFeatureId))
         {
             featureRows.Add(TrRmFeatureRow.MethodParameterLabelsCandidate);
         }
@@ -6231,15 +6416,16 @@ public static partial class TrRmExecutableCompiler
                 }
             }
         }
-        foreach (var root in program.RetainedGenericMethodRoots)
+        void CaptureFormals(
+            ImmutableArray<BoundGenericMethodFormal> formals)
         {
-            if (root.Formals.IsDefault)
+            if (formals.IsDefault)
             {
                 throw Unsupported(
                     "A retained generic MethodDef has an invalid interface-constraint view.");
             }
 
-            foreach (var formal in root.Formals)
+            foreach (var formal in formals)
             {
                 if (formal.InterfaceConstraints.IsDefault
                     || formal.AssociatedRelations.IsDefault)
@@ -6269,6 +6455,15 @@ public static partial class TrRmExecutableCompiler
 
                     Capture(relation.AssociatedType.DeclaringInterface, 0);
                 }
+            }
+        }
+        foreach (var root in program.RetainedGenericMethodRoots)
+        {
+            CaptureFormals(root.Formals);
+            if (root.Binding is BoundGenericMethodImportBinding binding)
+            {
+                CaptureFormals(binding.Expected.Formals);
+                CaptureFormals(binding.Provider.Formals);
             }
         }
 
