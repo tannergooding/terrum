@@ -367,7 +367,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 classProviderIdentity, []);
         var functionCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(
-                "public void Consume(Box value, int32 count) {}"),
+                """
+                public void Consume(Box value, int32 count) {}
+                internal void Helper(Box value) {}
+                """),
             classReference);
         Assert.That(functionCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine,
@@ -424,6 +427,16 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         Assert.That(consumeBodyRow, Is.GreaterThan(0));
         Assert.That(reemittedTables.Bodies.GetRow(consumeBodyRow)[0],
             Is.EqualTo(0x01));
+        Assert.That(reemittedTables.Exports.GetExportsForModule(1)
+            .Any(static export => export.ExportKey == "Helper"), Is.False);
+        var helperMethodRow = Enumerable.Range(1,
+                reemittedTables.Methods.Count)
+            .Single(row => reemittedTables.Methods.GetOwnerType(row) == 0
+                && reemittedTables.Methods.GetName(row) == "Helper");
+        Assert.That(reemittedTables.Methods.GetFlags(helperMethodRow) & 3u,
+            Is.EqualTo(1u));
+        Assert.That(reemittedTables.Methods.GetBodyRow(helperMethodRow),
+            Is.GreaterThan(0));
 
         var reemittedReference
             = TrRmExecutableCompiler.CreateStandardReference(

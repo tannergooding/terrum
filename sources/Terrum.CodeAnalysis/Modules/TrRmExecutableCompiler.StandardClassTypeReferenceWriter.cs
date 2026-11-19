@@ -54,6 +54,9 @@ public static partial class TrRmExecutableCompiler
         int MethodDefRow, BoundFunction Function,
         ImmutableArray<string> ExportKeys);
 
+    private sealed record C1M1PrivateModuleFunctionEmissionPlan(
+        int MethodDefRow);
+
     private readonly record struct C1M1GenericConstraintPlan(
         int MethodRow, int FormalOrdinal, int GenericParamRow,
         int Kind, uint Payload, int InterfaceConstraintOrdinal);
@@ -9266,9 +9269,86 @@ public static partial class TrRmExecutableCompiler
                 : GetC1M1ClassMethodConstraintTypeSpecSeeds(rootTables,
                     rootModuleRow, typeDefViewsByOldRow.Keys,
                     usesAssociatedRelationConstraints: false);
+        var moduleFunctionTypeSpecSeeds
+            = ImmutableArray.CreateBuilder<uint>();
+        var moduleFunctionTypeSpecSeedSet = new HashSet<uint>();
+        void AddModuleFunctionTypeSpecSeed(uint typeSpecReference)
+        {
+            if (moduleFunctionTypeSpecSeedSet.Add(typeSpecReference))
+            {
+                moduleFunctionTypeSpecSeeds.Add(typeSpecReference);
+            }
+        }
+
+        var (sourceMethodStart, sourceMethodEnd)
+            = rootTables.Modules.GetMethodDefRange(rootModuleRow);
+        for (var methodRow = sourceMethodStart;
+            methodRow < sourceMethodEnd; methodRow++)
+        {
+            if (rootTables.Methods.GetOwnerType(methodRow) != 0)
+            {
+                continue;
+            }
+
+            var signatureRow = rootTables.Methods.GetSignature(methodRow);
+            if (rootTables.Signatures.GetGenericRange(signatureRow).Count
+                != 0)
+            {
+                continue;
+            }
+
+            AddModuleFunctionTypeSpecSeed(
+                rootTables.Signatures.GetResultTypeSpec(signatureRow));
+            var (parameterStart, parameterCount)
+                = rootTables.Signatures.GetParamRange(signatureRow);
+            for (var ordinal = 0; ordinal < parameterCount; ordinal++)
+            {
+                AddModuleFunctionTypeSpecSeed(
+                    rootTables.Parameters.GetTypeSpec(
+                        parameterStart + ordinal));
+            }
+
+            var bodyRow = rootTables.Methods.GetBodyRow(methodRow);
+            if (bodyRow == 0
+                || rootTables.Bodies.GetRow(bodyRow).Span[0] != 0x01)
+            {
+                continue;
+            }
+
+            var body = rootTables.Bodies.GetRegisterBody(bodyRow,
+                rootTables.Contracts.Count);
+            for (var typeMapIndex = 0; typeMapIndex < body.TypeCount;
+                typeMapIndex++)
+            {
+                var token = BinaryPrimitives.ReadUInt32LittleEndian(
+                    body.TypeMap.Slice(typeMapIndex * sizeof(uint),
+                        sizeof(uint)));
+                if ((byte)(token >> 24) == 0x11)
+                {
+                    AddModuleFunctionTypeSpecSeed(
+                        token & 0x00FF_FFFFu);
+                }
+            }
+
+            for (var fieldMapIndex = 0; fieldMapIndex < body.FieldCount;
+                fieldMapIndex++)
+            {
+                var token = BinaryPrimitives.ReadUInt32LittleEndian(
+                    body.FieldMap.Slice(fieldMapIndex * sizeof(uint),
+                        sizeof(uint)));
+                if ((byte)(token >> 24) == 0x1D)
+                {
+                    AddModuleFunctionTypeSpecSeed(
+                        rootTables.FieldPaths.GetRootTypeSpecRef(
+                            checked((int)(token & 0x00FF_FFFFu))));
+                }
+            }
+        }
+
         AddC1M1LocalNonGenericTypeClosure(rootTables, rootModuleRow,
             rootSnapshot, typeDefViewsByOldRow, exportsByOldRow,
-            methodConstraintTypeSpecSeeds);
+            [.. methodConstraintTypeSpecSeeds,
+                .. moduleFunctionTypeSpecSeeds]);
 
         var methodBindingsByImportRow = new SortedDictionary<int,
             BoundStandardClassMethodExpectation>();
@@ -9533,6 +9613,63 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
+        var exportedMethodDefinitionIds = rootTables.Exports
+            .GetExportsForModule(rootModuleRow)
+            .Where(static export => (export.Definition >> 24) == 0x16)
+            .Select(static export => export.Definition)
+            .ToHashSet();
+        var privateModuleFunctionEmissionPlans = new SortedDictionary<int,
+            C1M1PrivateModuleFunctionEmissionPlan>();
+        var (privateMethodStart, privateMethodEnd)
+            = rootTables.Modules.GetMethodDefRange(rootModuleRow);
+        for (var methodRow = privateMethodStart;
+            methodRow < privateMethodEnd; methodRow++)
+        {
+            if (methodEmissionPlans.ContainsKey(methodRow)
+                || moduleFunctionEmissionPlans.ContainsKey(methodRow)
+                || rootTables.Methods.GetOwnerType(methodRow) != 0)
+            {
+                continue;
+            }
+
+            var definitionId = 0x1600_0000u
+                | checked((uint)methodRow);
+            if (exportedMethodDefinitionIds.Contains(definitionId)
+                || rootTables.Imports.IsExpectedDefinition(definitionId))
+            {
+                continue;
+            }
+
+            var signatureRow = rootTables.Methods.GetSignature(methodRow);
+            var bodyRow = rootTables.Methods.GetBodyRow(methodRow);
+            var flags = rootTables.Methods.GetFlags(methodRow);
+            if (!StringComparer.Ordinal.Equals(schemaIdentity,
+                    StandardC1M1Construction2SchemaIdentity)
+                || (flags & 3) is not (0 or 1)
+                || (flags & 4) != 0
+                || rootTables.Methods.GetOwnerModule(methodRow)
+                    != rootModuleRow
+                || bodyRow == 0
+                || rootTables.Signatures.GetReceiverTypeSpec(signatureRow) != 0
+                || rootTables.Signatures.GetGenericRange(signatureRow).Count
+                    != 0)
+            {
+                throw Unsupported(
+                    "Unexported top-level class-reference helpers require bodyful nongeneric Construction-2 MethodDefs without receivers.");
+            }
+
+            var body = rootTables.Bodies.GetRow(bodyRow);
+            if (body.IsEmpty
+                || body.Span[0] is not
+                    (0x01 or 0x02 or 0x03 or 0x04 or 0x05)
+                || !privateModuleFunctionEmissionPlans.TryAdd(methodRow,
+                    new C1M1PrivateModuleFunctionEmissionPlan(methodRow)))
+            {
+                throw Unsupported(
+                    "An unexported top-level class-reference helper has an unsupported Body or duplicate MethodDef.");
+            }
+        }
+
         var interfaceImportRows = new SortedSet<int>();
 
         var rootImportCount = 0;
@@ -9595,12 +9732,20 @@ public static partial class TrRmExecutableCompiler
                     "A top-level module function overlaps a retained class MethodDef.");
             }
         }
+        foreach (var methodRow in privateModuleFunctionEmissionPlans.Keys)
+        {
+            if (!retainedMethodDefRows.Add(methodRow))
+            {
+                throw new InvalidDataException(
+                    "An unexported top-level helper overlaps another retained MethodDef.");
+            }
+        }
         if (methodEnd - methodStart != retainedMethodDefRows.Count
             || Enumerable.Range(methodStart, methodEnd - methodStart)
                 .Any(methodRow => !retainedMethodDefRows.Contains(methodRow)))
         {
             throw Unsupported(
-                "C1M1 class re-emission only retains selected class MethodDefs and exported top-level module functions.");
+                "C1M1 class re-emission only retains selected class MethodDefs and supported top-level module functions.");
         }
 
         var moduleRefStartEnd
@@ -9706,6 +9851,10 @@ public static partial class TrRmExecutableCompiler
             methodDefRowMap.Add(oldMethodDefRow, ++nextMethodDefRow);
         }
         foreach (var oldMethodDefRow in moduleFunctionEmissionPlans.Keys)
+        {
+            methodDefRowMap.Add(oldMethodDefRow, ++nextMethodDefRow);
+        }
+        foreach (var oldMethodDefRow in privateModuleFunctionEmissionPlans.Keys)
         {
             methodDefRowMap.Add(oldMethodDefRow, ++nextMethodDefRow);
         }
@@ -11153,6 +11302,134 @@ public static partial class TrRmExecutableCompiler
                 exportRows.Add((
                     0x1600_0000u | checked((uint)newMethodRow), exportKey));
             }
+        }
+
+        foreach (var plan in privateModuleFunctionEmissionPlans.Values)
+        {
+            var oldMethodRow = plan.MethodDefRow;
+            var newMethodRow = methodDefRowMap[oldMethodRow];
+            var signatureRow
+                = rootTables.Methods.GetSignature(oldMethodRow);
+            var (parameterStart, parameterCount)
+                = rootTables.Signatures.GetParamRange(signatureRow);
+            var effectsMask
+                = rootTables.Contracts.GetEffectsMask(oldMethodRow);
+            var dependencyContractRows
+                = rootTables.Contracts.GetDependencyContractRows(
+                    oldMethodRow);
+            _ = DecodeC1M1ClassMethodDependencyContracts(
+                dependencyContractRows
+                    .Select(static row => row.Contract)
+                    .ToImmutableArray(),
+                parameterCount, hasReceiver: false);
+            var methodFlags
+                = rootTables.Methods.GetFlags(oldMethodRow);
+            var sourceBodyRow
+                = rootTables.Methods.GetBodyRow(oldMethodRow);
+            if (rootTables.Methods.GetOwnerType(oldMethodRow) != 0
+                || rootTables.Methods.GetOwnerModule(oldMethodRow)
+                    != rootModuleRow
+                || rootTables.Imports.IsExpectedDefinition(
+                    0x1600_0000u | checked((uint)oldMethodRow))
+                || exportedMethodDefinitionIds.Contains(
+                    0x1600_0000u | checked((uint)oldMethodRow))
+                || rootTables.Signatures.GetReceiverTypeSpec(signatureRow) != 0
+                || rootTables.Signatures.GetGenericRange(signatureRow).Count
+                    != 0
+                || (methodFlags & 3) is not (0 or 1)
+                || (methodFlags & 4) != 0
+                || (effectsMask & ~6u) != 0
+                || sourceBodyRow == 0)
+            {
+                throw new InvalidDataException(
+                    "A retained private module helper differs from its checked MethodDef contract.");
+            }
+
+            var signatureOutputRow = methodSignatureRows.Count + 1;
+            var resultTypeSpecReference
+                = rootTables.Signatures.GetResultTypeSpec(signatureRow);
+            var remappedResultTypeSpec = RemapC1M1ClassTypeSpec(
+                rootTables, resultTypeSpecReference, typeDefRowMap,
+                importRowMap, outputTypeSpecRows, typeSpecRowMap,
+                activeTypeSpecRows, depth: 0,
+                genericParamRowMap: genericParamRowMap);
+            var outputParameterStart = parameterCount == 0
+                ? 0 : parameterRows.Count + 1;
+            for (var ordinal = 0; ordinal < parameterCount; ordinal++)
+            {
+                var parameterRow = parameterStart + ordinal;
+                var typeSpecReference
+                    = rootTables.Parameters.GetTypeSpec(parameterRow);
+                var mode = rootTables.Parameters.GetMode(parameterRow);
+                var flags = rootTables.Parameters.GetFlags(parameterRow);
+                if (mode != 0 || flags > 1)
+                {
+                    throw Unsupported(
+                        "A retained private module helper requires ordinary by-value Param rows.");
+                }
+
+                var remappedTypeSpec = RemapC1M1ClassTypeSpec(rootTables,
+                    typeSpecReference, typeDefRowMap, importRowMap,
+                    outputTypeSpecRows, typeSpecRowMap, activeTypeSpecRows,
+                    depth: 0, genericParamRowMap: genericParamRowMap);
+                parameterRows.Add(new TrRmParamRow(signatureOutputRow,
+                    ordinal, remappedTypeSpec, mode, flags));
+            }
+
+            methodSignatureRows.Add(new TrRmMethodSigRow(
+                remappedResultTypeSpec, 0, outputParameterStart,
+                parameterCount, 0, 0));
+
+            var methodContractFirst = 0;
+            var methodContractCount = 0;
+            if (effectsMask != 0)
+            {
+                methodContractFirst = contractRows.Count + 1;
+                contractRows.Add(new TrRmContractRow(
+                    0x1600_0000u | checked((uint)newMethodRow), 1,
+                    s_effectPayloads[effectsMask]));
+                methodContractCount++;
+            }
+
+            var methodDependencyContractRowMap
+                = new Dictionary<int, int>();
+            foreach (var (oldContractRow, dependency)
+                in dependencyContractRows)
+            {
+                if (methodContractFirst == 0)
+                {
+                    methodContractFirst = contractRows.Count + 1;
+                }
+
+                var payload = new byte[12];
+                payload[0] = dependency.DestinationKind;
+                payload[1] = dependency.SourceKind;
+                payload[2] = dependency.Relationship;
+                payload[3] = dependency.Phase;
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    payload.AsSpan(4), dependency.DestinationOrdinal);
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    payload.AsSpan(8), dependency.SourceOrdinal);
+                contractRows.Add(new TrRmContractRow(
+                    0x1600_0000u | checked((uint)newMethodRow), 4, payload));
+                methodDependencyContractRowMap.Add(oldContractRow,
+                    contractRows.Count);
+                methodContractCount++;
+            }
+
+            var sourceBody = rootTables.Bodies.GetRow(sourceBodyRow);
+            var outputBodyRow = bodyRows.Count + 1;
+            bodyRows.Add(RemapC1M1ClassMethodBody(rootTables, sourceBody,
+                typeDefRowMap, methodDefRowMap, fieldRowMap, importRowMap,
+                fieldPathRowMap, fieldPathRows, fieldPathRowsByIdentity,
+                methodDependencyContractRowMap,
+                frozenScalarValueBuilder, outputTypeSpecRows,
+                typeSpecRowMap, activeTypeSpecRows, schema,
+                genericParamRowMap));
+            methodRows.Add(new TrRmMethodDefRow(0, 0, signatureOutputRow,
+                methodFlags, methodContractFirst, methodContractCount,
+                outputBodyRow));
+            methodNames.Add(rootTables.Methods.GetName(oldMethodRow));
         }
 
         var methodClosureRowCount = (long)methodRows.Count

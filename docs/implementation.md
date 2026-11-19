@@ -143,9 +143,12 @@ source-free provider/reload regressions are added but remain unverified
 under the active hold. Exact Construction-2 source-free re-emission now
 preserves bodyful exported nongeneric top-level MethodDefs whose Bodies fit
 the existing C1M1 remapper (kinds 01-05), including TypeSpec, Effects,
-Dependency and ExportKey remapping. Bodyless forwarded top-level Imports,
-unexported helper closure, generic functions, and other profile/provider
-combinations remain open. The exact label-free Construction-2 single-root API
+Dependency and ExportKey remapping. It also retains supported non-exported
+internal top-level helpers, including signatures, Bodies,
+Effects/Dependencies and remapped type/member references; the regression is
+added but remains unverified. Bodyless forwarded top-level Imports, helpers
+with unsupported closure or Body targets, generic functions, and other
+profile/provider combinations remain open. The exact label-free Construction-2 single-root API
 path now re-emits
 field-only I/P Construction clauses and supported Body maps and lowers a
 top-level direct unit- or scalar-returning call to a selected ordinary class
