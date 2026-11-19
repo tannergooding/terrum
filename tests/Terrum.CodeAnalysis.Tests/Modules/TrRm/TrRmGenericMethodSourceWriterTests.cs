@@ -5078,6 +5078,10 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                     public static int32 Observe<T>(ref<Box<T>> value) {
                         return 1;
                     }
+                    public static int32 ObserveNested<T>(
+                        ref<ref<Box<T>>> value) {
+                        return 1;
+                    }
                 }
             }
             """);
@@ -5107,10 +5111,20 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name == "Observe"));
+        var observeNestedDeclaration = classDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "ObserveNested"));
         var method = classProgram.GenericMethodDefinitions.Single(
             definition => definition.Span == acceptDeclaration.Span);
         var referenceMethod = classProgram.GenericMethodDefinitions.Single(
             definition => definition.Span == observeDeclaration.Span);
+        var nestedReferenceMethod
+            = classProgram.GenericMethodDefinitions.Single(
+            definition => definition.Span
+                == observeNestedDeclaration.Span);
         var classIndex = Enumerable.Range(0, classProgram.Classes.Length)
             .Single(index => classProgram.Classes[index].Name == "Container");
         var classArtifact = TrRmExecutableCompiler.EmitStandard(
@@ -5122,6 +5136,9 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             new TrRmSourceGenericMethodExport(classProgram,
                 referenceMethod.SourceInputOrdinal,
                 referenceMethod.Span, "Container.Observe"),
+            new TrRmSourceGenericMethodExport(classProgram,
+                nestedReferenceMethod.SourceInputOrdinal,
+                nestedReferenceMethod.Span, "Container.ObserveNested"),
             ], [
                 new TrRmSourceClassExport(classProgram, classIndex,
                     classDeclaration.Span, "container-key", []),
@@ -5200,6 +5217,32 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             classTables.Imports.GetModuleRefForImportRow(
                 referenceGenericImportRow)),
             Is.EqualTo(typeProviderIdentity));
+        Assert.That(classTables.Exports.TryGetDefinitionForKey(1,
+            "Container.ObserveNested",
+            out var observeNestedMethodDefId), Is.True);
+        var observeNestedMethodRow
+            = checked((int)(observeNestedMethodDefId & 0x00FF_FFFF));
+        var observeNestedSignature = classTables.Methods.GetSignature(
+            observeNestedMethodRow);
+        var (observeNestedParameterFirst, observeNestedParameterCount)
+            = classTables.Signatures.GetParamRange(observeNestedSignature);
+        Assert.That(observeNestedParameterCount, Is.EqualTo(1));
+        var observeNestedTypeSpec = classTables.Parameters.GetTypeSpec(
+            observeNestedParameterFirst);
+        Assert.That(classTables.TypeSpecs.GetTypeSpecRef(
+            observeNestedTypeSpec).Form, Is.EqualTo((byte)0x07));
+        var observeInnerReference = BinaryPrimitives
+            .ReadUInt32LittleEndian(classTables.TypeSpecs.GetRow(
+                checked((int)observeNestedTypeSpec))
+                .Slice(2, sizeof(uint)));
+        Assert.That(classTables.TypeSpecs.GetTypeSpecRef(
+            observeInnerReference).Form, Is.EqualTo((byte)0x07));
+        var observeNestedReferent = BinaryPrimitives
+            .ReadUInt32LittleEndian(classTables.TypeSpecs.GetRow(
+                checked((int)observeInnerReference))
+                .Slice(2, sizeof(uint)));
+        Assert.That(classTables.TypeSpecs.GetTypeSpecRef(
+            observeNestedReferent).Form, Is.EqualTo((byte)0x05));
 
         var classReference = TrRmExecutableCompiler.CreateStandardReference(
             new TrRmStandardArtifactInput(CM1SchemaIdentity, classArtifact),
@@ -5274,6 +5317,51 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             reemittedClassTables.Imports.GetModuleRefForImportRow(
                 reemittedGenericImportRow)),
             Is.EqualTo(typeProviderIdentity));
+        Assert.That(reemittedClassTables.Exports.TryGetDefinitionForKey(1,
+            "Container.ObserveNested",
+            out var reemittedNestedObserveMethodDefId), Is.True);
+        var reemittedNestedObserveMethodRow = checked((int)(
+            reemittedNestedObserveMethodDefId & 0x00FF_FFFF));
+        var reemittedNestedObserveSignature
+            = reemittedClassTables.Methods.GetSignature(
+                reemittedNestedObserveMethodRow);
+        var (reemittedNestedParameterFirst,
+            reemittedNestedParameterCount)
+            = reemittedClassTables.Signatures.GetParamRange(
+                reemittedNestedObserveSignature);
+        Assert.That(reemittedNestedParameterCount, Is.EqualTo(1));
+        var reemittedNestedTypeSpec
+            = reemittedClassTables.Parameters.GetTypeSpec(
+                reemittedNestedParameterFirst);
+        Assert.That(reemittedClassTables.TypeSpecs.GetTypeSpecRef(
+            reemittedNestedTypeSpec).Form, Is.EqualTo((byte)0x07));
+        var reemittedInnerReference = BinaryPrimitives
+            .ReadUInt32LittleEndian(reemittedClassTables.TypeSpecs.GetRow(
+                checked((int)reemittedNestedTypeSpec))
+                .Slice(2, sizeof(uint)));
+        Assert.That(reemittedClassTables.TypeSpecs.GetTypeSpecRef(
+            reemittedInnerReference).Form, Is.EqualTo((byte)0x07));
+        var reemittedNestedReferent = BinaryPrimitives
+            .ReadUInt32LittleEndian(reemittedClassTables.TypeSpecs.GetRow(
+                checked((int)reemittedInnerReference))
+                .Slice(2, sizeof(uint)));
+        Assert.That(reemittedClassTables.TypeSpecs.GetTypeSpecRef(
+            reemittedNestedReferent).Form, Is.EqualTo((byte)0x05));
+        var reemittedNestedGenericTypeSpec = BinaryPrimitives
+            .ReadUInt32LittleEndian(reemittedClassTables.TypeSpecs.GetRow(
+                checked((int)reemittedNestedReferent))
+                .Slice(2, sizeof(uint)));
+        var reemittedNestedGenericType
+            = reemittedClassTables.TypeSpecs.GetTypeSpecRef(
+                reemittedNestedGenericTypeSpec);
+        Assert.That(reemittedNestedGenericType.Form,
+            Is.EqualTo((byte)0x03));
+        var reemittedNestedGenericImportRow
+            = checked((int)reemittedNestedGenericType.Row);
+        Assert.That(reemittedClassTables.ModuleRefs.GetProducerIdentity(
+            reemittedClassTables.Imports.GetModuleRefForImportRow(
+                reemittedNestedGenericImportRow)),
+            Is.EqualTo(typeProviderIdentity));
         var reemittedClassReference
             = TrRmExecutableCompiler.CreateStandardReference(
                 new TrRmStandardArtifactInput(CM1SchemaIdentity,
@@ -5290,6 +5378,10 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                         public static int32 ForwardReference<T>(
                             ref<Box<T>> value) {
                             return Container.Observe<T>(value);
+                        }
+                        public static int32 ForwardNested<T>(
+                            ref<ref<Box<T>>> value) {
+                            return Container.ObserveNested<T>(value);
                         }
                     }
                 }
@@ -5340,6 +5432,10 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                     public static int32 ForwardReference<T>(
                         ref<Box<T>> value) {
                         return Container.Observe<T>(value);
+                    }
+                    public static int32 ForwardNested<T>(
+                        ref<ref<Box<T>>> value) {
+                        return Container.ObserveNested<T>(value);
                     }
                 }
             }
