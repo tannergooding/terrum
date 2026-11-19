@@ -5413,7 +5413,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 public int32 ReadValue() {
                     return this.Value;
                 }
-                private mut void SetValue(int32 value) {
+                public mut void SetValue(int32 value) {
                     this.Value = value;
                 }
             }
@@ -5472,6 +5472,8 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 artifactTables.Methods.Count)
             .Single(row => artifactTables.Methods.GetName(row)
                 == "SetValue");
+        Assert.That(artifactTables.Exports.TryGetDefinitionForKey(1,
+            "Box.SetValue", out _), Is.False);
         var artifactSetBody = artifactTables.Bodies.GetRow(
             artifactTables.Methods.GetBodyRow(artifactSetMethodRow));
         Assert.That(artifactSetBody[0], Is.EqualTo((byte)0x03));
