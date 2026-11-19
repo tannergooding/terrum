@@ -148,8 +148,8 @@ provider-chain regression covering compatible TypeDef-row relocation and
 incompatible replacement, and write-qualified field-store/readonly-authority
 rejections, are added but remain unverified under the active hold. Further provider
 alias/closure cases, optional wrappers, nested imported-class dereferences,
-aggregate imported-field stores and source-free class member re-emission
-remain open.
+aggregate imported-field stores and source-free class member re-emission beyond
+bodyless public scalar MethodDef Imports remain open.
 The exact C1M1 construction successor has a
 class-free emission route and a Construction `0003` reader/writer that checks
 I/P signatures, owner/mutability agreement, direct instance FieldDef
@@ -210,10 +210,16 @@ owner TypeDef Import to the same selected provider, comparing signatures,
 effects, modes and construction roles after TypeSpec remapping while retaining
 separate expected/provider defaults and Import aliases. Provider-source-free
 caller and compatible/incompatible provider regressions are added but remain
-unverified under the active hold. Remaining gaps include non-identity
+unverified under the active hold. A separate exact-CM1 source-free metadata
+emitter now preserves bodyless public nongeneric scalar MethodDef Import
+expectations, remapping owner TypeDefs, MethodSigs, Params, Effects, aliases
+and class parameter surfaces/defaults without copying provider Bodies.
+Provider/owner-row relocation and compatible/incompatible replacement
+regressions are added but unverified under the hold. Remaining gaps include non-identity
 instance calls, broader nested field paths and aggregate stores, locals and
 control flow, properties, constructor failure/cleanup behavior, class-backed
-field initialization, source-free class method re-emission and its
+field initialization, bodyful local class MethodDef re-emission,
+generic/interface/contract-bearing method imports and broader
 replacement/remapping paths, multi-hop imported class provider chains,
 optional or writable class-handle wrappers, nested imported-class dereferences,
 transitive imported-struct provider chains, CLI transport, independent carrier TypeSpec

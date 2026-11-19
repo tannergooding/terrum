@@ -1010,11 +1010,14 @@ public static partial class TrRmExecutableCompiler
                 moduleTargetRequirement, sourceClassExports, out _);
         }
 
-        if (StringComparer.Ordinal.Equals(schemaIdentity,
+        if ((StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardC1M1SchemaIdentity)
+                || StringComparer.Ordinal.Equals(schemaIdentity,
+                    StandardC1M1Construction2L1R1ClassParameterDefaultsSchemaIdentity))
             && !program.StandardClassDeclarations.IsEmpty)
         {
-            if (sourceTypeExports is not null
+            if (sourceClassExports is not null
+                || sourceTypeExports is not null
                 || sourceGenericMethodExports is not null)
             {
                 throw Unsupported(
@@ -1022,7 +1025,7 @@ public static partial class TrRmExecutableCompiler
             }
 
             return EmitC1M1MetadataClassTypeReference(program,
-                moduleIdentity, moduleTargetRequirement);
+                moduleIdentity, moduleTargetRequirement, schemaIdentity);
         }
 
         return schemaIdentity switch {

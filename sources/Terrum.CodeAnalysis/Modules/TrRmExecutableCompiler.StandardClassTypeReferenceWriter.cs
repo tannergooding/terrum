@@ -14,10 +14,27 @@ namespace Terrum.CodeAnalysis.Modules;
 
 public static partial class TrRmExecutableCompiler
 {
+    private static TrRmArtifactSchema GetC1M1ClassMetadataSchema(
+        string schemaIdentity)
+        => schemaIdentity switch {
+            StandardC1M1SchemaIdentity
+                => TrRmArtifactSchema.C1M1Draft,
+            StandardC1M1Construction2L1R1ClassParameterDefaultsSchemaIdentity
+                => TrRmArtifactSchema
+                    .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft,
+            _ => throw Unsupported(
+                "Source-free class MethodDef re-emission requires an exact supported C1M1 schema selection."),
+        };
+
     private sealed record C1M1TypeDefEmissionView(
         byte Kind, string Namespace, string Name, uint TypeDefFlags,
         ImmutableArray<BoundStandardClassFieldDeclaration> Fields,
         ImmutableArray<BoundStandardClassLayoutVariant> Layouts);
+
+    private sealed record C1M1MethodImportEmissionPlan(
+        BoundStandardClassTypeView Owner,
+        BoundStandardClassMethodDeclaration Method,
+        ImmutableArray<BoundStandardClassMethodExpectation> Imports);
 
     private sealed record C1M1Construction2SourceInitializer(
         int ClassIndex, BoundFunction Function, uint ClassTypeSpecReference,
@@ -7664,9 +7681,10 @@ public static partial class TrRmExecutableCompiler
 
     private static byte[] EmitC1M1MetadataClassTypeReference(
         BoundProgram program, string moduleIdentity,
-        uint moduleTargetRequirement)
+        uint moduleTargetRequirement, string schemaIdentity)
     {
-        if (program.EntryPoint != -1 || !program.Functions.IsEmpty
+        var schema = GetC1M1ClassMetadataSchema(schemaIdentity);
+        if (program.EntryPoint != -1
             || !program.Classes.IsEmpty || !program.Interfaces.IsEmpty
             || !program.InterfaceWitnesses.IsEmpty
             || !program.GenericMethodDefinitions.IsEmpty
@@ -7747,7 +7765,7 @@ public static partial class TrRmExecutableCompiler
 
         var rootSnapshot = rootDeclarations[0].Declaration.Provider;
         if (!StringComparer.Ordinal.Equals(rootSnapshot.SchemaIdentity,
-                StandardC1M1SchemaIdentity)
+                schemaIdentity)
             || rootSnapshot.ModuleRow <= 0
             || !StringComparer.Ordinal.Equals(rootSnapshot.ModuleIdentity,
                 rootDeclarations[0].Declaration.Identity.ModuleIdentity)
@@ -7772,7 +7790,7 @@ public static partial class TrRmExecutableCompiler
         void AddProviderInput(BoundSourceTypeProviderSnapshot provider)
         {
             if (!StringComparer.Ordinal.Equals(provider.SchemaIdentity,
-                    StandardC1M1SchemaIdentity)
+                    schemaIdentity)
                 || provider.ArtifactSnapshot.IsDefaultOrEmpty)
             {
                 throw new InvalidDataException(
@@ -7795,7 +7813,7 @@ public static partial class TrRmExecutableCompiler
             }
 
             providerInputs.Add(new TrRmStandardArtifactInput(
-                StandardC1M1SchemaIdentity,
+                schemaIdentity,
                 provider.ArtifactSnapshot.ToArray()));
         }
 
@@ -7804,6 +7822,11 @@ public static partial class TrRmExecutableCompiler
             foreach (var expectation in declaration.Expectations)
             {
                 AddProviderInput(expectation.Binding.Provider);
+                foreach (var methodExpectation
+                    in expectation.MethodExpectations)
+                {
+                    AddProviderInput(methodExpectation.Provider);
+                }
             }
         }
 
@@ -7818,7 +7841,7 @@ public static partial class TrRmExecutableCompiler
         var artifacts = new byte[providerInputs.Count + 1][];
         var schemaIdentities = new string[artifacts.Length];
         artifacts[0] = rootSnapshot.ArtifactSnapshot.ToArray();
-        schemaIdentities[0] = StandardC1M1SchemaIdentity;
+        schemaIdentities[0] = schemaIdentity;
         for (var index = 0; index < providerInputs.Count; index++)
         {
             artifacts[index + 1] = providerInputs[index].Artifact.ToArray();
@@ -7834,20 +7857,21 @@ public static partial class TrRmExecutableCompiler
             throw new InvalidDataException(
                 "The retained C1M1 class root Module row changed.");
         }
-        var rootIndex
-            = TrRmArtifactIndex.ForC1M1Draft(artifacts[0]);
+        var rootIndex = new TrRmArtifactIndex(artifacts[0], schema);
         var rootTables = TrRmStructuralMetadataValidator
             .ValidateC1AndGetExecutionTables(rootIndex);
         EnsureC1ClassDeclarationTablesSupported(rootTables);
-        var typeProviderBindings
+        var classProviderValidation
             = TrRmFixedArrayProviderBindingValidator
-                .ValidateC1M1TypeDefImports(rootTables, artifacts,
+                .ValidateC1M1ClassImports(rootTables, artifacts,
                     schemaIdentities, moduleValidation.Modules,
                     rootModuleRow);
         ValidateC1M1ClassCarrierBindings(program, moduleValidation.Modules,
-            artifacts, typeProviderBindings);
+            artifacts, schemaIdentities, classProviderValidation.TypeBindings,
+            classProviderValidation.MethodBindings);
         ValidateC1M1StructCarrierBindings(program, moduleValidation.Modules,
-            artifacts, typeProviderBindings);
+            artifacts, schemaIdentities,
+            classProviderValidation.TypeBindings);
         if (!StringComparer.Ordinal.Equals(
                 rootTables.Modules.GetIdentity(rootModuleRow),
                 rootSnapshot.ModuleIdentity)
@@ -7856,9 +7880,7 @@ public static partial class TrRmExecutableCompiler
                     rootSnapshot.RuntimePolicy)
             || rootTables.Modules.GetGoverningRuleEdition(rootModuleRow)
                 != rootSnapshot.GoverningRuleEdition
-            || rootTables.Modules.GetEntryMethod(rootModuleRow) != 0
-            || rootTables.Modules.GetMethodDefRange(rootModuleRow).Start
-                != rootTables.Modules.GetMethodDefRange(rootModuleRow).End)
+            || rootTables.Modules.GetEntryMethod(rootModuleRow) != 0)
         {
             throw new InvalidDataException(
                 "The retained C1M1 class root snapshot is inconsistent.");
@@ -8010,6 +8032,118 @@ public static partial class TrRmExecutableCompiler
         AddC1M1LocalNonGenericTypeClosure(rootTables, rootModuleRow,
             rootSnapshot, typeDefViewsByOldRow, exportsByOldRow);
 
+        var methodBindingsByImportRow = new SortedDictionary<int,
+            BoundStandardClassMethodExpectation>();
+        var expectedMethodsByOldRow = new SortedDictionary<int,
+            BoundStandardClassMethodDeclaration>();
+        var expectedMethodOwnersByOldRow = new Dictionary<int,
+            BoundStandardClassTypeView>();
+        var methodImportsByExpectedMethodRow = new Dictionary<int,
+            List<BoundStandardClassMethodExpectation>>();
+        foreach (var declaration in program.StandardClassDeclarations)
+        {
+            foreach (var expectation in declaration.Expectations)
+            {
+                var classBinding = expectation.Binding;
+                if (!SourceTypeSnapshotsMatch(classBinding.UsingModule,
+                        rootSnapshot))
+                {
+                    continue;
+                }
+
+                foreach (var methodExpectation
+                    in expectation.MethodExpectations)
+                {
+                    var methodRow = GetMethodDefRow(
+                        methodExpectation.ExpectedDefinitionId);
+                    var method = expectation.ExpectedDeclaration.Methods
+                        .SingleOrDefault(candidate =>
+                            candidate.DefinitionId
+                                == methodExpectation.ExpectedDefinitionId);
+                    if (method is null
+                        || expectation.ExpectedDeclaration.Identity
+                            .DefinitionId
+                            != methodExpectation.ExpectedOwnerDefinitionId
+                        || methodExpectation.OwnerImportRow
+                            != classBinding.ImportRow
+                        || methodExpectation.ExpectedOwnerDefinitionId
+                            != classBinding.ExpectedDefinitionId
+                        || !bindingsByImportRow.ContainsKey(
+                            methodExpectation.OwnerImportRow)
+                        || !methodBindingsByImportRow.TryAdd(
+                            methodExpectation.ImportRow, methodExpectation)
+                        || rootTables.Methods.GetOwnerType(methodRow)
+                            != GetTypeDefRow(
+                                methodExpectation.ExpectedOwnerDefinitionId)
+                        || rootTables.Methods.GetBodyRow(methodRow) != 0
+                        || !rootTables.Imports.IsExpectedDefinition(
+                            methodExpectation.ExpectedDefinitionId))
+                    {
+                        throw new InvalidDataException(
+                            "A retained class MethodDef Import has an invalid or unsupported local expectation.");
+                    }
+
+                    if (expectedMethodsByOldRow.TryGetValue(methodRow,
+                            out var existingMethod))
+                    {
+                        if (!StandardClassMethodsMatch(existingMethod,
+                                method))
+                        {
+                            throw new InvalidDataException(
+                                "One expected class MethodDef has conflicting retained views.");
+                        }
+                    }
+                    else
+                    {
+                        expectedMethodsByOldRow.Add(methodRow, method);
+                        expectedMethodOwnersByOldRow.Add(methodRow,
+                            expectation.ExpectedDeclaration);
+                        methodImportsByExpectedMethodRow.Add(methodRow, []);
+                    }
+
+                    if (!methodImportsByExpectedMethodRow.TryGetValue(
+                            methodRow, out var methodImports))
+                    {
+                        throw new InvalidDataException(
+                            "A retained class MethodDef Import has no expected method group.");
+                    }
+
+                    methodImports.Add(methodExpectation);
+                }
+            }
+        }
+
+        var methodEmissionPlans = new SortedDictionary<int,
+            C1M1MethodImportEmissionPlan>();
+        foreach (var (methodRow, method) in expectedMethodsByOldRow)
+        {
+            var imports = methodImportsByExpectedMethodRow[methodRow];
+            var firstImport = imports[0];
+            if (imports.Any(import =>
+                    import.ProviderDefinitionId
+                        != firstImport.ProviderDefinitionId
+                    || import.ProviderOwnerDefinitionId
+                        != firstImport.ProviderOwnerDefinitionId
+                    || !StringComparer.Ordinal.Equals(
+                        import.Provider.ModuleIdentity,
+                        firstImport.Provider.ModuleIdentity)
+                    || import.Provider.ModuleRow
+                        != firstImport.Provider.ModuleRow
+                    || !import.Provider.ProviderArtifactDigest.AsSpan()
+                        .SequenceEqual(
+                            firstImport.Provider.ProviderArtifactDigest
+                                .AsSpan())))
+            {
+                throw new InvalidDataException(
+                    "A class MethodDef alias group resolved through distinct provider views.");
+            }
+
+            methodEmissionPlans.Add(methodRow,
+                new C1M1MethodImportEmissionPlan(
+                    expectedMethodOwnersByOldRow[methodRow], method,
+                    [.. imports]));
+        }
+
         var rootImportCount = 0;
         for (var importRow = 1; importRow <= rootTables.Imports.Count;
             importRow++)
@@ -8023,44 +8157,80 @@ public static partial class TrRmExecutableCompiler
             }
 
             rootImportCount++;
-            if ((rootTables.Imports.GetExpectedDefinitionForImportRow(
-                    importRow) >> 24) != 0x13)
+            var definitionKind = rootTables.Imports
+                .GetExpectedDefinitionForImportRow(importRow) >> 24;
+            if (definitionKind is not (0x13 or 0x16)
+                || (definitionKind == 0x13
+                    ? !bindingsByImportRow.ContainsKey(importRow)
+                    : !methodBindingsByImportRow.ContainsKey(importRow)))
             {
                 throw new NotSupportedException(
-                    "C1M1 class re-emission only retains TypeDef Imports.");
+                    "C1M1 class re-emission only retains selected TypeDef and bodyless class MethodDef Imports.");
             }
         }
 
         if (typeDefViewsByOldRow.Count == 0
-            || bindingsByImportRow.Count != rootImportCount)
+            || bindingsByImportRow.Count + methodBindingsByImportRow.Count
+                != rootImportCount)
         {
             throw new InvalidDataException(
                 "The retained C1M1 class provider closure is incomplete.");
         }
 
+        var (methodStart, methodEnd)
+            = rootTables.Modules.GetMethodDefRange(rootModuleRow);
+        if (methodEnd - methodStart != methodEmissionPlans.Count
+            || Enumerable.Range(methodStart, methodEnd - methodStart)
+                .Any(methodRow =>
+                    !methodEmissionPlans.ContainsKey(methodRow)))
+        {
+            throw Unsupported(
+                "C1M1 class re-emission only retains MethodDefs represented by selected bodyless class Imports.");
+        }
+
         var moduleRefStartEnd
             = rootTables.Modules.GetModuleRefRange(rootModuleRow);
         var moduleRefRowsByOldRow = new SortedSet<int>();
-        foreach (var (importRow, binding) in bindingsByImportRow)
+        foreach (var importRow in bindingsByImportRow.Keys
+            .Concat(methodBindingsByImportRow.Keys).Order())
         {
+            var isMethodImport
+                = methodBindingsByImportRow.TryGetValue(importRow,
+                    out var methodBinding);
+            var binding = isMethodImport ? null
+                : bindingsByImportRow[importRow];
+            var expectedDefinitionId = isMethodImport
+                ? methodBinding!.ExpectedDefinitionId
+                : binding!.ExpectedDefinitionId;
+            var producerIdentity = isMethodImport
+                ? methodBinding!.Provider.ModuleIdentity
+                : binding!.ProducerIdentity;
+            var exportKey = isMethodImport
+                ? methodBinding!.ExportKey : binding!.ExportKey;
+            var targetRequirement = isMethodImport
+                ? methodBinding!.Provider.TargetRequirement
+                : binding!.TargetRequirement;
+            var runtimePolicy = isMethodImport
+                ? methodBinding!.Provider.RuntimePolicy
+                : binding!.RuntimePolicy;
             if (importRow <= 0 || importRow > rootTables.Imports.Count
                 || (rootTables.Imports
                         .GetExpectedDefinitionForImportRow(importRow) >> 24)
-                    != 0x13
+                    != (isMethodImport ? 0x16u : 0x13u)
                 || rootTables.Imports.GetExpectedDefinitionForImportRow(
-                    importRow) != binding.ExpectedDefinitionId
+                    importRow) != expectedDefinitionId
                 || !StringComparer.Ordinal.Equals(
                     rootTables.Imports.GetBindingForImportRow(importRow)
-                        .ExportKey, binding.ExportKey)
-                || !StringComparer.Ordinal.Equals(binding.ProducerIdentity,
+                        .ExportKey, exportKey)
+                || !StringComparer.Ordinal.Equals(producerIdentity,
                     rootTables.ModuleRefs.GetProducerIdentity(
                         rootTables.Imports.GetModuleRefForImportRow(
                             importRow)))
-                || binding.TargetRequirement
+                || targetRequirement
                     != rootTables.ModuleRefs.GetRequirements(
                         rootTables.Imports.GetModuleRefForImportRow(
                             importRow)).TargetRequirement
-                || binding.RuntimePolicy
+                || runtimePolicy
                     != rootTables.ModuleRefs.GetRequirements(
                         rootTables.Imports.GetModuleRefForImportRow(
                             importRow)).RuntimePolicy)
@@ -8091,9 +8261,17 @@ public static partial class TrRmExecutableCompiler
             typeDefRowMap.Add(oldTypeDefRow, ++nextTypeDefRow);
         }
 
+        var methodDefRowMap = new Dictionary<int, int>();
+        var nextMethodDefRow = 0;
+        foreach (var oldMethodDefRow in methodEmissionPlans.Keys)
+        {
+            methodDefRowMap.Add(oldMethodDefRow, ++nextMethodDefRow);
+        }
+
         var importRowMap = new Dictionary<int, int>();
         var nextImportRow = 0;
-        foreach (var oldImportRow in bindingsByImportRow.Keys)
+        foreach (var oldImportRow in bindingsByImportRow.Keys
+            .Concat(methodBindingsByImportRow.Keys).Order())
         {
             importRowMap.Add(oldImportRow, ++nextImportRow);
         }
@@ -8116,6 +8294,13 @@ public static partial class TrRmExecutableCompiler
         var typeDefNames = new List<(string Namespace, string Name)>();
         var fieldRowMap = new Dictionary<int, int>();
         var fieldNames = new List<string>();
+        var methodRows = new List<TrRmMethodDefRow>();
+        var methodSignatureRows = new List<TrRmMethodSigRow>();
+        var parameterRows = new List<TrRmParamRow>();
+        var methodNames = new List<string>();
+        var parameterSurfaceRows = new List<C1M1ParameterSurfaceRow>();
+        var contractRows = new List<TrRmContractRow>();
+        var frozenScalarValueBuilder = new TrRmFrozenScalarValueBuilder();
         var exportRows = new List<(uint DefinitionId, string Key)>();
         var exportKeys = new HashSet<string>(StringComparer.Ordinal);
 
@@ -8210,6 +8395,226 @@ public static partial class TrRmExecutableCompiler
             typeDefNames.Add((view.Namespace, view.Name));
         }
 
+        foreach (var (oldMethodRow, plan) in methodEmissionPlans)
+        {
+            var method = plan.Method;
+            var ownerTypeDefRow
+                = GetTypeDefRow(plan.Owner.Identity.DefinitionId);
+            if (method.BodyRow != 0
+                || method.GenericParameterCount != 0
+                || method.ConstructionRole != 0
+                || method.InitializerMethodDefinitionId != 0
+                || method.ConstructionPropertyDefinitionId != 0
+                || !method.InitializedMemberDefinitionIds.IsEmpty
+                || (method.Flags & 3) != 2
+                || (method.Flags & 4) != 0
+                || (method.EffectsMask & ~6u) != 0
+                || plan.Imports.IsEmpty
+                || !TryGetC1M1ClassScalarType(rootTables,
+                    method.ReturnTypeSpecReference, out var returnType)
+                || returnType is PrimitiveType.NativeInt
+                    or PrimitiveType.NativeUInt
+                || !typeDefRowMap.TryGetValue(ownerTypeDefRow,
+                    out var newOwnerTypeDefRow))
+            {
+                throw Unsupported(
+                    "C1M1 source-free class re-emission supports bodyless public nongeneric scalar MethodDef Imports without construction roles.");
+            }
+
+            if (method.ReceiverTypeSpecReference != 0)
+            {
+                var receiver = rootTables.TypeSpecs.GetTypeSpecRef(
+                    method.ReceiverTypeSpecReference);
+                if (!receiver.IsRow
+                    || receiver.Form is not (0x02 or 0x03)
+                    || receiver.Qualifiers != 0
+                    || rootTables.TypeSpecs.GetNominalTypeDefRow(
+                        method.ReceiverTypeSpecReference,
+                        rootTables.TypeDefs, rootTables.Imports)
+                        != ownerTypeDefRow)
+                {
+                    throw Unsupported(
+                        "A retained class MethodDef receiver must be the exact unqualified expected class handle.");
+                }
+            }
+
+            var signatureRow = methodSignatureRows.Count + 1;
+            var parameterFirst = method.Parameters.IsEmpty
+                ? 0 : parameterRows.Count + 1;
+            for (var ordinal = 0; ordinal < method.Parameters.Length;
+                ordinal++)
+            {
+                var parameter = method.Parameters[ordinal];
+                if (parameter.Mode != 0 || parameter.Flags != 0
+                    || !TryGetC1M1ClassScalarType(rootTables,
+                        parameter.TypeSpecReference,
+                        out var parameterType)
+                    || parameterType is (PrimitiveType.NativeInt
+                        or PrimitiveType.NativeUInt))
+                {
+                    throw Unsupported(
+                        "A retained class MethodDef parameter must be a by-value scalar.");
+                }
+
+                var remappedTypeSpec = RemapC1M1ClassTypeSpec(rootTables,
+                    parameter.TypeSpecReference, typeDefRowMap,
+                    importRowMap, outputTypeSpecRows, typeSpecRowMap,
+                    activeTypeSpecRows, depth: 0);
+                parameterRows.Add(new TrRmParamRow(signatureRow, ordinal,
+                    remappedTypeSpec, parameter.Mode, parameter.Flags));
+
+                if (schema.UsesClassParameterDefaults())
+                {
+                    uint defaultConstantSourceRow = 0;
+                    if (parameter.DefaultValue is BoundConstant value)
+                    {
+                        if (value.Type != parameterType
+                            || value.RepresentationType != parameterType
+                            || parameterType is PrimitiveType.NativeInt
+                                or PrimitiveType.NativeUInt
+                            || !value.Bits.IsCanonicalFor(parameterType))
+                        {
+                            throw Unsupported(
+                                "A retained CM1 class parameter default must be an exact fixed-width scalar value.");
+                        }
+
+                        var frozenValue
+                            = frozenScalarValueBuilder.Add(value);
+                        if (frozenValue.TypeSpecRef != remappedTypeSpec)
+                        {
+                            throw Unsupported(
+                                "A retained CM1 class parameter default changed its exact parameter TypeSpec.");
+                        }
+
+                        defaultConstantSourceRow
+                            = frozenValue.ConstantSourceRow;
+                    }
+
+                    parameterSurfaceRows.Add(
+                        new C1M1ParameterSurfaceRow(
+                            methodDefRowMap[oldMethodRow], ordinal,
+                            parameter.Name, defaultConstantSourceRow));
+                }
+            }
+
+            var resultTypeSpec = RemapC1M1ClassTypeSpec(rootTables,
+                method.ReturnTypeSpecReference, typeDefRowMap,
+                importRowMap, outputTypeSpecRows, typeSpecRowMap,
+                activeTypeSpecRows, depth: 0);
+            var receiverTypeSpec = method.ReceiverTypeSpecReference == 0
+                ? 0
+                : RemapC1M1ClassTypeSpec(rootTables,
+                    method.ReceiverTypeSpecReference, typeDefRowMap,
+                    importRowMap, outputTypeSpecRows, typeSpecRowMap,
+                    activeTypeSpecRows, depth: 0);
+            methodSignatureRows.Add(new TrRmMethodSigRow(
+                resultTypeSpec, receiverTypeSpec, parameterFirst,
+                method.Parameters.Length, 0, 0));
+
+            var contractFirst = method.EffectsMask == 0
+                ? 0 : contractRows.Count + 1;
+            if (method.EffectsMask != 0)
+            {
+                contractRows.Add(new TrRmContractRow(
+                    0x1600_0000u
+                        | checked((uint)methodDefRowMap[oldMethodRow]),
+                    1, s_effectPayloads[method.EffectsMask]));
+            }
+
+            methodRows.Add(new TrRmMethodDefRow(newOwnerTypeDefRow, 0,
+                signatureRow, method.Flags, contractFirst,
+                method.EffectsMask == 0 ? 0 : 1, 0));
+            methodNames.Add(method.Name);
+        }
+
+        foreach (var function in program.Functions)
+        {
+            var matches = methodEmissionPlans.Values.Where(plan =>
+                    StringComparer.Ordinal.Equals(function.Name,
+                        (string.IsNullOrEmpty(plan.Owner.Namespace)
+                            ? plan.Owner.Name
+                            : plan.Owner.Namespace + "."
+                                + plan.Owner.Name)
+                        + "." + plan.Method.Name))
+                .ToArray();
+            if (matches.Length != 1)
+            {
+                throw Unsupported(
+                    "The retained class MethodDef call views exceed the bodyless Import subset.");
+            }
+
+            var methodPlan = matches[0];
+            if (function.ModuleImport is not BoundModuleImport functionImport
+                || !function.IsExternal
+                || function.IsStatic
+                    != (methodPlan.Method.ReceiverTypeSpecReference == 0)
+                || !StringComparer.Ordinal.Equals(
+                    function.DeclaringStruct,
+                    string.IsNullOrEmpty(methodPlan.Owner.Namespace)
+                        ? methodPlan.Owner.Name
+                        : methodPlan.Owner.Namespace + "."
+                            + methodPlan.Owner.Name)
+                || !StringComparer.Ordinal.Equals(
+                    functionImport.ProducerIdentity,
+                    methodPlan.Imports[0].Provider.ModuleIdentity)
+                || functionImport.TargetRequirement
+                    != methodPlan.Imports[0].Provider.TargetRequirement
+                || functionImport.RuntimePolicy
+                    != methodPlan.Imports[0].Provider.RuntimePolicy
+                || !methodPlan.Imports.Any(import =>
+                    StringComparer.Ordinal.Equals(import.ExportKey,
+                        functionImport.ExportKey))
+                || !TryGetC1M1ClassScalarType(rootTables,
+                    methodPlan.Method.ReturnTypeSpecReference,
+                    out var methodReturnType)
+                || function.ReturnType != methodReturnType
+                || function.ParameterCount
+                    != methodPlan.Method.Parameters.Length
+                        + (methodPlan.Method.ReceiverTypeSpecReference == 0
+                            ? 0 : 1)
+                || function.Variables.Length < function.ParameterCount
+                || function.RequiresUnsafeCaller
+                    != ((methodPlan.Method.EffectsMask & 4) != 0)
+                || function.DoesNotReturn
+                    != ((methodPlan.Method.EffectsMask & 2) != 0))
+            {
+                throw Unsupported(
+                    "A retained class MethodDef call view does not match its complete scalar Import expectation.");
+            }
+
+            for (var ordinal = 0;
+                ordinal < methodPlan.Method.Parameters.Length; ordinal++)
+            {
+                if (!TryGetC1M1ClassScalarType(rootTables,
+                        methodPlan.Method.Parameters[ordinal]
+                            .TypeSpecReference, out var parameterType)
+                    || function.Variables[ordinal
+                        + (methodPlan.Method.ReceiverTypeSpecReference == 0
+                            ? 0 : 1)].Type != parameterType)
+                {
+                    throw Unsupported(
+                        "A retained class MethodDef call view changed its checked parameter types.");
+                }
+            }
+        }
+
+        var methodClosureRowCount = (long)methodRows.Count
+            + methodSignatureRows.Count + parameterRows.Count
+            + parameterSurfaceRows.Count + contractRows.Count
+            + frozenScalarValueBuilder.BlobCount
+            + frozenScalarValueBuilder.FrozenValueNodeCount
+            + frozenScalarValueBuilder.ConstantSourceCount;
+        if (methodRows.Count > 0xFF_FFFF
+            || methodSignatureRows.Count > 0xFF_FFFF
+            || parameterRows.Count > 0xFF_FFFF
+            || parameterSurfaceRows.Count > 0xFF_FFFF
+            || contractRows.Count > 0xFF_FFFF
+            || methodClosureRowCount > SemanticVerifier.MaximumAnalysisVisits)
+        {
+            throw Unsupported(
+                "The retained class MethodDef closure exceeds the checked metadata row limits.");
+        }
+
         foreach (var (definitionId, exportKey) in
             rootTables.Exports.GetExportsForModule(rootModuleRow))
         {
@@ -8271,11 +8676,23 @@ public static partial class TrRmExecutableCompiler
         {
             AddString(fieldName);
         }
+        foreach (var methodName in methodNames)
+        {
+            AddString(methodName);
+        }
+        foreach (var parameterSurface in parameterSurfaceRows)
+        {
+            AddString(parameterSurface.Name);
+        }
         foreach (var moduleRefRow in moduleRefRowsByOldRow)
         {
             AddString(rootTables.ModuleRefs.GetProducerIdentity(moduleRefRow));
         }
         foreach (var binding in bindingsByImportRow.Values)
+        {
+            AddString(binding.ExportKey);
+        }
+        foreach (var binding in methodBindingsByImportRow.Values)
         {
             AddString(binding.ExportKey);
         }
@@ -8302,17 +8719,25 @@ public static partial class TrRmExecutableCompiler
                 NameStringRow = stringRows[fieldNames[fieldIndex]],
             };
         }
+        for (var methodIndex = 0; methodIndex < methodRows.Count;
+            methodIndex++)
+        {
+            methodRows[methodIndex] = methodRows[methodIndex] with {
+                NameStringRow = stringRows[methodNames[methodIndex]],
+            };
+        }
 
         var outputTypeSpecBytes = outputTypeSpecRows.Count == 0
             ? []
             : TrRmTypeSpecTableWriter.Encode(outputTypeSpecRows,
                 outputTypeDefRows.Count, importRowMap.Count, 0, 0,
-                TrRmArtifactSchema.C1M1Draft);
+                schema, methodDefCount: methodRows.Count);
         var typeSpecReaderBytes = outputTypeSpecRows.Count == 0
             ? new byte[sizeof(uint)] : outputTypeSpecBytes;
         var typeSpecs = new TrRmTypeSpecTableReader(typeSpecReaderBytes,
             outputTypeSpecRows.Count, outputTypeDefRows.Count,
-            importRowMap.Count, 0, 0, TrRmArtifactSchema.C1M1Draft);
+            importRowMap.Count, 0, 0, schema,
+            methodDefCount: methodRows.Count);
 
         var targetProfileBytes = GetTargetProfileSection(rootIndex,
             out var targetProfileCount);
@@ -8321,29 +8746,31 @@ public static partial class TrRmExecutableCompiler
             : new TrRmTargetProfileTableReader(targetProfileBytes,
                 targetProfileCount);
         var featureBytes = TrRmFeatureTableWriter.Encode(featureRows,
-            TrRmArtifactSchema.C1M1Draft);
+            schema);
         var moduleBytes = TrRmModuleTableWriter.Encode([
             new TrRmModuleRow(moduleIdentityStringRow,
                 moduleTargetRequirement, rootSnapshot.RuntimePolicy, 0,
                 1, 1, 1, 1,
                 featureRows.Length == 0 ? 0 : 1,
                 featureRows.Length, rootSnapshot.GoverningRuleEdition),
-        ], strings, moduleRefRowMap.Count, outputTypeDefRows.Count, 0, 0,
+        ], strings, moduleRefRowMap.Count, outputTypeDefRows.Count,
+            methodRows.Count, 0,
             featureRows.Length);
         var moduleTables = new TrRmModuleTableReader(moduleBytes, 1,
-            strings, moduleRefRowMap.Count, outputTypeDefRows.Count, 0, 0,
+            strings, moduleRefRowMap.Count, outputTypeDefRows.Count,
+            methodRows.Count, 0,
             featureRows.Length);
         var typeDefBytes = TrRmTypeDefTableWriter.Encode(outputTypeDefRows,
-            strings, moduleTables, fieldRows.Count, 0, layoutRows.Count, 0,
-            TrRmArtifactSchema.C1M1Draft);
+            strings, moduleTables, fieldRows.Count, methodRows.Count,
+            layoutRows.Count, 0, schema);
         var typeDefs = new TrRmTypeDefTableReader(typeDefBytes,
             outputTypeDefRows.Count, strings, moduleTables, fieldRows.Count,
-            0, layoutRows.Count, 0, TrRmArtifactSchema.C1M1Draft);
+            methodRows.Count, layoutRows.Count, 0, schema);
 
         var layoutFieldCount = layoutFieldRows.Count;
         var fieldBytes = fieldRows.Count == 0 ? []
             : TrRmFieldDefTableWriter.Encode(fieldRows, strings, typeDefs,
-                typeSpecs);
+                typeSpecs, schema);
         var fields = new TrRmFieldDefTableReader(fieldBytes,
             fieldRows.Count, strings, typeDefs, typeSpecs);
         var layoutBytes = TrRmLayoutTableWriter.Encode(layoutRows,
@@ -8369,10 +8796,69 @@ public static partial class TrRmExecutableCompiler
         var moduleRefBytes = moduleRefRows.Length == 0 ? []
             : TrRmModuleRefTableWriter.Encode(moduleRefRows, strings,
                 moduleTables);
-        var importBytes = bindingsByImportRow.Count == 0 ? []
-            : EncodeC1M1ClassImports(bindingsByImportRow, importRowMap,
-                moduleRefRowMap, typeDefRowMap, stringRows,
-                rootTables);
+        var moduleRefs = moduleRefRows.Length == 0 ? default
+            : new TrRmModuleRefTableReader(moduleRefBytes,
+                moduleRefRows.Length, strings, moduleTables);
+        var signatureBytes = methodSignatureRows.Count == 0 ? []
+            : TrRmMethodSigTableWriter.Encode(methodSignatureRows,
+                typeSpecs, parameterRows.Count, 0);
+        var signatures = methodSignatureRows.Count == 0 ? default
+            : new TrRmMethodSigTableReader(signatureBytes,
+                methodSignatureRows.Count, typeSpecs,
+                parameterRows.Count, 0);
+        var parameterBytes = parameterRows.Count == 0 ? []
+            : TrRmParamTableWriter.Encode(parameterRows, signatures,
+                typeSpecs, schema);
+        var parameters = parameterRows.Count == 0 ? default
+            : new TrRmParamTableReader(parameterBytes, parameterRows.Count,
+                signatures, typeSpecs, schema);
+        var methodBytes = methodRows.Count == 0 ? []
+            : TrRmMethodDefTableWriter.Encode(methodRows, strings,
+                moduleTables, typeDefs, signatures, contractRows.Count, 0,
+                schema);
+        var methods = methodRows.Count == 0 ? default
+            : new TrRmMethodDefTableReader(methodBytes, methodRows.Count,
+                strings, moduleTables, typeDefs, signatures,
+                contractRows.Count, 0, schema);
+        var methodImportRows = CreateC1M1ClassImports(
+            bindingsByImportRow, methodBindingsByImportRow, importRowMap,
+            moduleRefRowMap, typeDefRowMap, methodDefRowMap, stringRows,
+            rootTables);
+        var featureReader = featureRows.Length == 0 ? default
+            : new TrRmFeatureTableReader(featureBytes, featureRows.Length,
+                schema);
+        var importBytes = methodImportRows.Length == 0 ? []
+            : TrRmImportTableWriter.Encode(methodImportRows, strings,
+                moduleRefs, typeDefs, methods, default, default, default,
+                fields, featureReader, moduleTables, schema);
+        var frozenScalarValueTables
+            = frozenScalarValueBuilder.Encode(typeSpecs);
+        var parameterSurfaceBytes
+            = new byte[checked(parameterSurfaceRows.Count * 16)];
+        for (var index = 0; index < parameterSurfaceRows.Count; index++)
+        {
+            var surface = parameterSurfaceRows[index];
+            var offset = index * 16;
+            Write(parameterSurfaceBytes, offset,
+                checked((uint)surface.MethodDefRow));
+            Write(parameterSurfaceBytes, offset + 4,
+                checked((uint)surface.Ordinal));
+            Write(parameterSurfaceBytes, offset + 8,
+                checked((uint)stringRows[surface.Name]));
+            Write(parameterSurfaceBytes, offset + 12,
+                surface.DefaultConstantSourceRow);
+        }
+        var contractBytes = contractRows.Count == 0 ? []
+            : schema.UsesConstructionContracts()
+                ? TrRmContractTableWriter
+                    .EncodeConstructionDraftForSchema(contractRows,
+                        typeDefs, methods, signatures, parameters, typeSpecs,
+                        fields, default, default, featureReader, moduleTables,
+                        predicateGraphCount: 0, schema: schema)
+                : TrRmContractTableWriter.EncodeWithPredicateGraphs(
+                    contractRows, typeDefs, methods, signatures, parameters,
+                    typeSpecs, featureReader, moduleTables,
+                    predicateGraphCount: 0, schema: schema);
         var exportBytes = exportRows.Count == 0 ? []
             : EncodeC1M1Exports(exportRows, stringRows);
 
@@ -8417,21 +8903,59 @@ public static partial class TrRmExecutableCompiler
         if (importBytes.Length != 0)
         {
             sections.Add(new TrRmSection(0x001C, 0,
-                checked((uint)bindingsByImportRow.Count), importBytes));
+                checked((uint)methodImportRows.Length), importBytes));
         }
         if (exportBytes.Length != 0)
         {
             sections.Add(new TrRmSection(0x001D, 0,
                 checked((uint)exportRows.Count), exportBytes));
         }
+        if (methodRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x0016, 0,
+                checked((uint)methodRows.Count), methodBytes));
+            sections.Add(new TrRmSection(0x0017, 0,
+                checked((uint)methodSignatureRows.Count), signatureBytes));
+        }
+        if (parameterRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x0018, 0,
+                checked((uint)parameterRows.Count), parameterBytes));
+        }
+        if (contractRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x001B, 0,
+                checked((uint)contractRows.Count), contractBytes));
+        }
+        if (frozenScalarValueTables.BlobCount != 0)
+        {
+            sections.Add(new TrRmSection(0x0003, 0,
+                checked((uint)frozenScalarValueTables.BlobCount),
+                frozenScalarValueTables.BlobSection));
+        }
+        if (frozenScalarValueTables.ConstantSourceCount != 0)
+        {
+            sections.Add(new TrRmSection(0x0030, 0,
+                checked((uint)frozenScalarValueTables.ConstantSourceCount),
+                frozenScalarValueTables.ConstantSourceSection));
+            sections.Add(new TrRmSection(0x003F, 0,
+                checked((uint)frozenScalarValueTables.FrozenValueNodeCount),
+                frozenScalarValueTables.FrozenValueNodeSection));
+        }
+        if (parameterSurfaceRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x0066, 0,
+                checked((uint)parameterSurfaceRows.Count),
+                parameterSurfaceBytes));
+        }
 
         sections.Sort(static (left, right) =>
             left.Kind.CompareTo(right.Kind));
         var artifact = TrRmArtifactWriter.Encode(sections,
-            TrRmArtifactSchema.C1M1Draft);
+            schema);
         _ = TrRmStructuralMetadataValidator
             .ValidateC1AndGetExecutionTables(
-                TrRmArtifactIndex.ForC1M1Draft(artifact));
+                new TrRmArtifactIndex(artifact, schema));
         return artifact;
     }
 
@@ -8439,11 +8963,18 @@ public static partial class TrRmExecutableCompiler
         BoundProgram program,
         ImmutableArray<TrRmStandardModuleSelection> modules,
         byte[][] artifacts,
-        ImmutableArray<TrRmStandardTypeProviderBinding> typeProviderBindings)
+        string[] schemaIdentities,
+        ImmutableArray<TrRmStandardTypeProviderBinding> typeProviderBindings,
+        ImmutableArray<TrRmStandardMethodProviderBinding>
+            methodProviderBindings)
     {
         var expectationsByImport = new Dictionary<
             (string ModuleIdentity, int ModuleRow, int ImportRow),
             BoundStandardClassExpectation>();
+        var methodExpectationsByImport = new Dictionary<
+            (string ModuleIdentity, int ModuleRow, int ImportRow),
+            (BoundStandardClassExpectation Owner,
+                BoundStandardClassMethodExpectation Method)>();
         foreach (var declaration in program.StandardClassDeclarations)
         {
             foreach (var expectation in declaration.Expectations)
@@ -8454,11 +8985,13 @@ public static partial class TrRmExecutableCompiler
                         binding.UsingModule.ModuleIdentity)
                     && module.ModuleRow == binding.UsingModule.ModuleRow);
                 var usingTables = GetC1M1Tables(artifacts,
-                    usingModule.ArtifactIndex);
+                    usingModule.ArtifactIndex,
+                    schemaIdentities[usingModule.ArtifactIndex]);
                 EnsureC1ClassDeclarationTablesSupported(usingTables);
                 var usingSnapshot = CreateA2SourceTypeProviderSnapshot(
                     usingTables, artifacts[usingModule.ArtifactIndex],
-                    StandardC1M1SchemaIdentity, usingModule.ModuleRow);
+                    schemaIdentities[usingModule.ArtifactIndex],
+                    usingModule.ModuleRow);
                 var expectedTypeDefRow
                     = GetTypeDefRow(binding.ExpectedDefinitionId);
                 var expectedModuleRefRow = usingTables.Imports
@@ -8504,16 +9037,39 @@ public static partial class TrRmExecutableCompiler
                         "A retained C1M1 class expectation no longer matches its TypeDef.");
                 }
 
+                foreach (var methodExpectation
+                    in expectation.MethodExpectations)
+                {
+                    if (methodExpectation.OwnerImportRow != binding.ImportRow
+                        || methodExpectation.ExpectedOwnerDefinitionId
+                            != binding.ExpectedDefinitionId
+                        || methodExpectation.ProviderOwnerDefinitionId
+                            != binding.ProviderDefinitionId
+                        || !SourceTypeSnapshotsMatch(
+                            methodExpectation.Provider, binding.Provider)
+                        || !methodExpectationsByImport.TryAdd((
+                            binding.UsingModule.ModuleIdentity,
+                            binding.UsingModule.ModuleRow,
+                            methodExpectation.ImportRow),
+                            (expectation, methodExpectation)))
+                    {
+                        throw new InvalidDataException(
+                            "A retained class MethodDef Import has an invalid owner or duplicate expectation.");
+                    }
+                }
+
                 var providerModule = modules.Single(module =>
                     StringComparer.Ordinal.Equals(module.Identity,
                         binding.ProducerIdentity)
                     && module.ModuleRow == binding.Provider.ModuleRow);
                 var providerTables = GetC1M1Tables(artifacts,
-                    providerModule.ArtifactIndex);
+                    providerModule.ArtifactIndex,
+                    schemaIdentities[providerModule.ArtifactIndex]);
                 EnsureC1ClassDeclarationTablesSupported(providerTables);
                 var providerSnapshot = CreateA2SourceTypeProviderSnapshot(
                     providerTables, artifacts[providerModule.ArtifactIndex],
-                    StandardC1M1SchemaIdentity, providerModule.ModuleRow);
+                    schemaIdentities[providerModule.ArtifactIndex],
+                    providerModule.ModuleRow);
                 var providerTypeDefRow
                     = GetTypeDefRow(binding.ProviderDefinitionId);
                 if (!SourceTypeSnapshotsMatch(binding.Provider,
@@ -8569,7 +9125,8 @@ public static partial class TrRmExecutableCompiler
                 module.ArtifactIndex == binding.ConsumerArtifactIndex
                 && module.ModuleRow == binding.ConsumerModuleRow);
             var consumerTables = GetC1M1Tables(artifacts,
-                consumerModule.ArtifactIndex);
+                consumerModule.ArtifactIndex,
+                schemaIdentities[consumerModule.ArtifactIndex]);
             if (consumerTables.TypeDefs.GetKind(
                     binding.ExpectedTypeDefRow) != 2)
             {
@@ -8610,12 +9167,152 @@ public static partial class TrRmExecutableCompiler
             throw new InvalidDataException(
                 "A retained C1M1 class Import expectation has no selected provider binding.");
         }
+
+        var boundMethodImports = new HashSet<(
+            string ModuleIdentity, int ModuleRow, int ImportRow)>();
+        foreach (var binding in methodProviderBindings)
+        {
+            var consumerModule = modules.Single(module =>
+                module.ArtifactIndex == binding.ConsumerArtifactIndex
+                && module.ModuleRow == binding.ConsumerModuleRow);
+            var consumerTables = GetC1M1Tables(artifacts,
+                consumerModule.ArtifactIndex,
+                schemaIdentities[consumerModule.ArtifactIndex]);
+            var key = (consumerModule.Identity, binding.ConsumerModuleRow,
+                binding.ImportRow);
+            if (!methodExpectationsByImport.TryGetValue(key,
+                    out var retained)
+                || !boundMethodImports.Add(key)
+                || binding.ExpectedMethodDefRow
+                    != GetMethodDefRow(
+                        retained.Method.ExpectedDefinitionId)
+                || binding.ExpectedOwnerTypeDefRow
+                    != GetTypeDefRow(
+                        retained.Method.ExpectedOwnerDefinitionId)
+                || binding.OwnerImportRow
+                    != retained.Method.OwnerImportRow
+                || binding.ProviderMethodDefRow
+                    != GetMethodDefRow(
+                        retained.Method.ProviderDefinitionId)
+                || binding.ProviderTypeDefRow
+                    != GetTypeDefRow(
+                        retained.Method.ProviderOwnerDefinitionId)
+                || !StringComparer.Ordinal.Equals(
+                    binding.ProducerIdentity,
+                    retained.Method.Provider.ModuleIdentity)
+                || !StringComparer.Ordinal.Equals(binding.ExportKey,
+                    retained.Method.ExportKey)
+                || binding.TargetRequirement
+                    != retained.Method.Provider.TargetRequirement
+                || binding.RuntimePolicy
+                    != retained.Method.Provider.RuntimePolicy)
+            {
+                throw new InvalidDataException(
+                    "C1M1 class MethodDef Imports do not match every retained expectation.");
+            }
+
+            var expectedMethodRow = binding.ExpectedMethodDefRow;
+            var expectedMethod = retained.Owner.ExpectedDeclaration.Methods
+                .SingleOrDefault(method =>
+                    method.DefinitionId
+                        == retained.Method.ExpectedDefinitionId);
+            var expectedModuleRefRow = consumerTables.Imports
+                .GetModuleRefForImportRow(binding.ImportRow);
+            var importBinding = consumerTables.Imports
+                .GetBindingForImportRow(binding.ImportRow);
+            var moduleRefRequirements = consumerTables.ModuleRefs
+                .GetRequirements(expectedModuleRefRow);
+            if (expectedMethod is null || expectedMethod.BodyRow != 0
+                || consumerTables.Methods.GetOwnerType(expectedMethodRow)
+                    != binding.ExpectedOwnerTypeDefRow
+                || consumerTables.Imports
+                    .GetExpectedDefinitionForImportRow(binding.ImportRow)
+                    != retained.Method.ExpectedDefinitionId
+                || binding.ModuleRefRow != expectedModuleRefRow
+                || !StringComparer.Ordinal.Equals(importBinding.ExportKey,
+                    retained.Method.ExportKey)
+                || !StringComparer.Ordinal.Equals(
+                    importBinding.ProducerIdentity,
+                    retained.Method.Provider.ModuleIdentity)
+                || importBinding.TargetRequirement
+                    != retained.Method.Provider.TargetRequirement
+                || importBinding.RuntimePolicy
+                    != retained.Method.Provider.RuntimePolicy
+                || moduleRefRequirements
+                    != (retained.Method.Provider.TargetRequirement,
+                        retained.Method.Provider.RuntimePolicy))
+            {
+                throw new InvalidDataException(
+                    "A retained class MethodDef expectation no longer matches its bodyless Import row.");
+            }
+
+            var providerModule = modules.Single(module =>
+                StringComparer.Ordinal.Equals(module.Identity,
+                    retained.Method.Provider.ModuleIdentity)
+                && module.ModuleRow == retained.Method.Provider.ModuleRow);
+            var providerTables = GetC1M1Tables(artifacts,
+                providerModule.ArtifactIndex,
+                schemaIdentities[providerModule.ArtifactIndex]);
+            var providerSnapshot = CreateA2SourceTypeProviderSnapshot(
+                providerTables, artifacts[providerModule.ArtifactIndex],
+                schemaIdentities[providerModule.ArtifactIndex],
+                providerModule.ModuleRow);
+            var providerMethodRow = binding.ProviderMethodDefRow;
+            var providerMethodDefinitionId = 0x1600_0000u
+                | checked((uint)providerMethodRow);
+            if (!SourceTypeSnapshotsMatch(retained.Method.Provider,
+                    providerSnapshot)
+                || binding.ProviderArtifactIndex
+                    != providerModule.ArtifactIndex
+                || binding.ProviderModuleRow != providerModule.ModuleRow
+                || providerTables.TypeDefs.GetOwnerModule(
+                    binding.ProviderTypeDefRow) != providerModule.ModuleRow
+                || providerTables.TypeDefs.GetKind(
+                    binding.ProviderTypeDefRow) != 2
+                || providerTables.Methods.GetOwnerType(providerMethodRow)
+                    != binding.ProviderTypeDefRow
+                || !providerTables.Exports.TryGetDefinitionForKey(
+                    providerModule.ModuleRow, retained.Method.ExportKey,
+                    out var providerDefinition)
+                || providerDefinition != providerMethodDefinitionId)
+            {
+                throw new InvalidDataException(
+                    "A retained class MethodDef provider selection no longer matches its Module and ExportKey.");
+            }
+
+            var providerIdentity = new BoundGenericNominalTypeIdentity(
+                providerModule.Identity, providerModule.Identity,
+                retained.Method.ProviderOwnerDefinitionId);
+            var actualDeclaration = program.StandardClassDeclarations
+                .SingleOrDefault(candidate =>
+                    candidate.Declaration.Identity == providerIdentity);
+            var actualMethod = actualDeclaration?.Declaration.Methods
+                .SingleOrDefault(method =>
+                    method.DefinitionId == providerMethodDefinitionId);
+            if (actualMethod is null
+                || actualMethod.BodyRow == 0
+                || actualMethod.GenericParameterCount != 0
+                || actualMethod.ConstructionRole != 0
+                || !actualMethod.ExportKeys.Contains(
+                    retained.Method.ExportKey, StringComparer.Ordinal))
+            {
+                throw new InvalidDataException(
+                    "A retained class MethodDef provider view is missing its selected method.");
+            }
+        }
+
+        if (boundMethodImports.Count != methodExpectationsByImport.Count)
+        {
+            throw new InvalidDataException(
+                "A retained class MethodDef Import expectation has no selected provider binding.");
+        }
     }
 
     private static void ValidateC1M1StructCarrierBindings(
         BoundProgram program,
         ImmutableArray<TrRmStandardModuleSelection> modules,
         byte[][] artifacts,
+        string[] schemaIdentities,
         ImmutableArray<TrRmStandardTypeProviderBinding> typeProviderBindings)
     {
         var expectationsByImport = new Dictionary<(
@@ -8649,7 +9346,8 @@ public static partial class TrRmExecutableCompiler
                 module.ArtifactIndex == binding.ConsumerArtifactIndex
                 && module.ModuleRow == binding.ConsumerModuleRow);
             var consumerTables = GetC1M1Tables(artifacts,
-                consumerModule.ArtifactIndex);
+                consumerModule.ArtifactIndex,
+                schemaIdentities[consumerModule.ArtifactIndex]);
             if (consumerTables.TypeDefs.GetKind(
                     binding.ExpectedTypeDefRow) != 1)
             {
@@ -8678,16 +9376,19 @@ public static partial class TrRmExecutableCompiler
 
             var usingSnapshot = CreateA2SourceTypeProviderSnapshot(
                 consumerTables, artifacts[consumerModule.ArtifactIndex],
-                StandardC1M1SchemaIdentity, consumerModule.ModuleRow);
+                schemaIdentities[consumerModule.ArtifactIndex],
+                consumerModule.ModuleRow);
             var providerModule = modules.Single(module =>
                 StringComparer.Ordinal.Equals(module.Identity,
                     expectation.ProducerIdentity)
                 && module.ModuleRow == expectation.Provider.ModuleRow);
             var providerTables = GetC1M1Tables(artifacts,
-                providerModule.ArtifactIndex);
+                providerModule.ArtifactIndex,
+                schemaIdentities[providerModule.ArtifactIndex]);
             var providerSnapshot = CreateA2SourceTypeProviderSnapshot(
                 providerTables, artifacts[providerModule.ArtifactIndex],
-                StandardC1M1SchemaIdentity, providerModule.ModuleRow);
+                schemaIdentities[providerModule.ArtifactIndex],
+                providerModule.ModuleRow);
             var expectedTypeDefRow
                 = GetTypeDefRow(expectation.ExpectedDefinitionId);
             var providerTypeDefRow
@@ -8740,7 +9441,8 @@ public static partial class TrRmExecutableCompiler
     }
 
     private static TrRmStructuralMetadataValidator.ValidatedExecutionTables
-        GetC1M1Tables(byte[][] artifacts, int artifactIndex)
+        GetC1M1Tables(byte[][] artifacts, int artifactIndex,
+            string schemaIdentity)
     {
         if ((uint)artifactIndex >= (uint)artifacts.Length)
         {
@@ -8748,10 +9450,10 @@ public static partial class TrRmExecutableCompiler
                 "A C1M1 class provider artifact index is out of range.");
         }
 
+        var schema = GetC1M1ClassMetadataSchema(schemaIdentity);
         return TrRmStructuralMetadataValidator
             .ValidateC1AndGetExecutionTables(
-                TrRmArtifactIndex.ForC1M1Draft(
-                    artifacts[artifactIndex]));
+                new TrRmArtifactIndex(artifacts[artifactIndex], schema));
     }
 
     private static byte[] GetTargetProfileSection(TrRmArtifactIndex index,
@@ -9023,34 +9725,52 @@ public static partial class TrRmExecutableCompiler
         }
     }
 
-    private static byte[] EncodeC1M1ClassImports(
+    private static TrRmImportRow[] CreateC1M1ClassImports(
         SortedDictionary<int, BoundSourceTypeExpectation> bindingsByImportRow,
+        SortedDictionary<int, BoundStandardClassMethodExpectation>
+            methodBindingsByImportRow,
         Dictionary<int, int> importRowMap,
         Dictionary<int, int> moduleRefRowMap,
         Dictionary<int, int> typeDefRowMap,
+        Dictionary<int, int> methodDefRowMap,
         Dictionary<string, int> stringRows,
         TrRmStructuralMetadataValidator.ValidatedExecutionTables sourceTables)
     {
-        var bytes = new byte[checked(bindingsByImportRow.Count * 12)];
-        foreach (var (oldImportRow, binding) in bindingsByImportRow)
+        var rows = new TrRmImportRow[checked(bindingsByImportRow.Count
+            + methodBindingsByImportRow.Count)];
+        foreach (var oldImportRow in bindingsByImportRow.Keys
+            .Concat(methodBindingsByImportRow.Keys).Order())
         {
             var newImportRow = importRowMap[oldImportRow];
             var oldModuleRefRow = sourceTables.Imports
                 .GetModuleRefForImportRow(oldImportRow);
             var newModuleRefRow = moduleRefRowMap[oldModuleRefRow];
-            var expectedOldTypeDefRow
-                = GetTypeDefRow(binding.ExpectedDefinitionId);
-            var expectedNewTypeDefRow
-                = typeDefRowMap[expectedOldTypeDefRow];
-            var offset = (newImportRow - 1) * 12;
-            Write(bytes, offset, checked((uint)newModuleRefRow));
-            Write(bytes, offset + 4,
-                checked((uint)stringRows[binding.ExportKey]));
-            Write(bytes, offset + 8,
-                0x1300_0000u | checked((uint)expectedNewTypeDefRow));
+            if (bindingsByImportRow.TryGetValue(oldImportRow,
+                    out var typeBinding))
+            {
+                var expectedOldTypeDefRow
+                    = GetTypeDefRow(typeBinding.ExpectedDefinitionId);
+                var expectedNewTypeDefRow
+                    = typeDefRowMap[expectedOldTypeDefRow];
+                rows[newImportRow - 1] = new TrRmImportRow(
+                    newModuleRefRow,
+                    stringRows[typeBinding.ExportKey],
+                    0x1300_0000u | checked((uint)expectedNewTypeDefRow));
+                continue;
+            }
+
+            var methodBinding
+                = methodBindingsByImportRow[oldImportRow];
+            var expectedOldMethodDefRow
+                = GetMethodDefRow(methodBinding.ExpectedDefinitionId);
+            rows[newImportRow - 1] = new TrRmImportRow(
+                newModuleRefRow,
+                stringRows[methodBinding.ExportKey],
+                0x1600_0000u | checked((uint)methodDefRowMap[
+                    expectedOldMethodDefRow]));
         }
 
-        return bytes;
+        return rows;
     }
 
     private static byte[] EncodeC1M1Exports(
@@ -9098,14 +9818,16 @@ public static partial class TrRmExecutableCompiler
             || left.TypeDefFlags != right.TypeDefFlags
             || !SourceTypeSnapshotsMatch(left.Provider, right.Provider)
             || left.Fields.Length != right.Fields.Length
-            || left.Layouts.Length != right.Layouts.Length)
+            || left.Layouts.Length != right.Layouts.Length
+            || left.Methods.Length != right.Methods.Length)
         {
             return false;
         }
 
         for (var index = 0; index < left.Fields.Length; index++)
         {
-            if (left.Fields[index] != right.Fields[index])
+            if (!StandardClassFieldsMatch(left.Fields[index],
+                    right.Fields[index]))
             {
                 return false;
             }
@@ -9136,7 +9858,103 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
+        for (var index = 0; index < left.Methods.Length; index++)
+        {
+            if (!StandardClassMethodsMatch(left.Methods[index],
+                    right.Methods[index]))
+            {
+                return false;
+            }
+        }
+
         return true;
+    }
+
+    private static bool StandardClassFieldsMatch(
+        BoundStandardClassFieldDeclaration left,
+        BoundStandardClassFieldDeclaration right)
+        => left.DefinitionId == right.DefinitionId
+            && left.OwnerDefinitionId == right.OwnerDefinitionId
+            && StringComparer.Ordinal.Equals(left.Name, right.Name)
+            && left.Flags == right.Flags
+            && left.TypeSpecReference == right.TypeSpecReference
+            && left.Type == right.Type
+            && left.ExportKeys.AsSpan().SequenceEqual(
+                right.ExportKeys.AsSpan());
+
+    private static bool StandardClassMethodsMatch(
+        BoundStandardClassMethodDeclaration left,
+        BoundStandardClassMethodDeclaration right)
+    {
+        if (left.DefinitionId != right.DefinitionId
+            || !StringComparer.Ordinal.Equals(left.Name, right.Name)
+            || left.Flags != right.Flags
+            || left.EffectsMask != right.EffectsMask
+            || left.ReturnTypeSpecReference
+                != right.ReturnTypeSpecReference
+            || left.ReceiverTypeSpecReference
+                != right.ReceiverTypeSpecReference
+            || left.GenericParameterCount != right.GenericParameterCount
+            || left.BodyRow != right.BodyRow
+            || left.ConstructionRole != right.ConstructionRole
+            || left.InitializerMethodDefinitionId
+                != right.InitializerMethodDefinitionId
+            || left.ConstructionPropertyDefinitionId
+                != right.ConstructionPropertyDefinitionId
+            || !left.InitializedMemberDefinitionIds.AsSpan()
+                .SequenceEqual(
+                    right.InitializedMemberDefinitionIds.AsSpan())
+            || !left.ExportKeys.AsSpan().SequenceEqual(
+                right.ExportKeys.AsSpan())
+            || !left.SelectedExportKeys.AsSpan().SequenceEqual(
+                right.SelectedExportKeys.AsSpan())
+            || left.Parameters.Length != right.Parameters.Length)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < left.Parameters.Length; index++)
+        {
+            var leftParameter = left.Parameters[index];
+            var rightParameter = right.Parameters[index];
+            if (!StringComparer.Ordinal.Equals(leftParameter.Name,
+                    rightParameter.Name)
+                || leftParameter.TypeSpecReference
+                    != rightParameter.TypeSpecReference
+                || leftParameter.Mode != rightParameter.Mode
+                || leftParameter.Flags != rightParameter.Flags
+                || !Equals(leftParameter.DefaultValue,
+                    rightParameter.DefaultValue))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static int GetMethodDefRow(uint definitionId)
+    {
+        if ((definitionId >> 24) != 0x16
+            || (definitionId & 0x00FF_FFFF) == 0)
+        {
+            throw Invalid(
+                "A C1M1 class reference has an invalid MethodDef identity.");
+        }
+
+        return checked((int)(definitionId & 0x00FF_FFFF));
+    }
+
+    private static bool TryGetC1M1ClassScalarType(
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+        uint typeSpecReference, out PrimitiveType type)
+    {
+        var typeSpec = tables.TypeSpecs.GetTypeSpecRef(typeSpecReference);
+        type = PrimitiveType.Void;
+        return typeSpec.Form == 1 && typeSpec.Row == 0
+            && typeSpec.Qualifiers == 0
+            && TrRmConstantSourceValueValidator.TryGetBoundScalarType(
+                typeSpec.TypeCode, out type);
     }
 
     private static int GetTypeDefRow(uint definitionId)

@@ -4782,6 +4782,161 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
+    public void ReemitsBodylessClassMethodImportsWithClassParameterSurfaces()
+    {
+        var expectedArtifact = EmitClassMethodReemissionArtifact(
+            "MethodExpected", 7, includePrefixType: true);
+        var providerArtifact = AddMethodExportAlias(
+            EmitClassMethodReemissionArtifact("MethodProvider", 9,
+                includePrefix: true),
+            "Box.Read", "Box.ReadAlias");
+        var consumerArtifact = CreateExpectedClassMethodImportArtifact(
+            expectedArtifact, providerArtifact, "MethodConsumer",
+            "MethodProvider", ["Box.Read"], "Box.Read", "Box.ReadAlias",
+            "ContainerKey");
+        var schemaIdentity
+            = C1M1Construction2ClassParameterDefaultsSchemaIdentity;
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
+            "MethodConsumer", [providerInput], ["ContainerKey"]);
+        var sourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), reference);
+        Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceFreeCompilation.Diagnostics));
+
+        var reemitted = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)sourceFreeCompilation.Program!,
+            "MethodConsumerReemitted", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var reemittedTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                        reemitted));
+        var consumerTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                        consumerArtifact));
+        var oldBoxTypeImport = Enumerable.Range(1,
+                consumerTables.Imports.Count)
+            .Single(row => consumerTables.Imports
+                .GetExpectedDefinitionForImportRow(row) >> 24 == 0x13);
+        var oldBoxTypeDefRow = checked((int)(
+            consumerTables.Imports.GetExpectedDefinitionForImportRow(
+                oldBoxTypeImport) & 0x00FF_FFFF));
+        var oldMethodImport = Enumerable.Range(1,
+                consumerTables.Imports.Count)
+            .First(row => consumerTables.Imports
+                .GetExpectedDefinitionForImportRow(row) >> 24 == 0x16);
+        var oldMethodDefRow = checked((int)(
+            consumerTables.Imports.GetExpectedDefinitionForImportRow(
+                oldMethodImport) & 0x00FF_FFFF));
+        Assert.That(consumerTables.Methods.GetOwnerType(oldMethodDefRow),
+            Is.EqualTo(oldBoxTypeDefRow));
+        var methodImportRows = Enumerable.Range(1,
+                reemittedTables.Imports.Count)
+            .Where(row => reemittedTables.Imports
+                .GetExpectedDefinitionForImportRow(row) >> 24 == 0x16)
+            .ToArray();
+        Assert.That(methodImportRows, Has.Length.EqualTo(2));
+        Assert.That(methodImportRows.Select(row => reemittedTables.Imports
+                .GetBindingForImportRow(row).ExportKey),
+            Is.EquivalentTo(["Box.Read", "Box.ReadAlias"]));
+        var expectedMethodDefinitions = methodImportRows.Select(row =>
+                reemittedTables.Imports
+                    .GetExpectedDefinitionForImportRow(row))
+            .Distinct().ToArray();
+        Assert.That(expectedMethodDefinitions, Has.Length.EqualTo(1));
+        var expectedMethodRow = checked((int)(
+            expectedMethodDefinitions[0] & 0x00FF_FFFF));
+        var newBoxTypeImport = Enumerable.Range(1,
+                reemittedTables.Imports.Count)
+            .Single(row => reemittedTables.Imports
+                .GetExpectedDefinitionForImportRow(row) >> 24 == 0x13);
+        var newBoxTypeDefRow = checked((int)(
+            reemittedTables.Imports.GetExpectedDefinitionForImportRow(
+                newBoxTypeImport) & 0x00FF_FFFF));
+        Assert.That(newBoxTypeDefRow, Is.Not.EqualTo(oldBoxTypeDefRow));
+        Assert.That(reemittedTables.Methods.GetOwnerType(expectedMethodRow),
+            Is.EqualTo(newBoxTypeDefRow));
+        Assert.That(reemittedTables.Methods.GetBodyRow(expectedMethodRow),
+            Is.Zero);
+        var expectedMethodSignature = reemittedTables.Methods
+            .GetSignature(expectedMethodRow);
+        Assert.That(reemittedTables.Signatures.GetParamRange(
+            expectedMethodSignature).Count, Is.EqualTo(1));
+        Assert.That(reemittedTables.MethodParameterLabels
+            .TryGetNameStringRow(expectedMethodRow, 0,
+                out var parameterNameStringRow), Is.True);
+        Assert.That(reemittedTables.Strings.DecodeName(
+            parameterNameStringRow), Is.EqualTo("value"));
+        Assert.That(reemittedTables.MethodParameterLabels
+            .TryGetDefaultConstantSourceRow(expectedMethodRow, 0,
+                out var defaultConstantSourceRow), Is.True);
+        Assert.That(defaultConstantSourceRow, Is.GreaterThan(0));
+
+        var reemittedReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+                "MethodConsumerReemitted", [providerInput],
+                ["ContainerKey"]);
+        var declaration = reemittedReference.StandardClassDeclarations
+            .Single(candidate => candidate.Declaration.Name == "Box");
+        var expectation = declaration.Expectations.Single();
+        var expectedMethod = expectation.ExpectedDeclaration.Methods
+            .Single(static method => method.Name == "Read");
+        var providerMethod = declaration.Declaration.Methods
+            .Single(static method => method.Name == "Read");
+        Assert.That(expectedMethod.BodyRow, Is.Zero);
+        Assert.That(providerMethod.BodyRow, Is.GreaterThan(0));
+        Assert.That(expectedMethod.Parameters[0].Name, Is.EqualTo("value"));
+        Assert.That(expectedMethod.Parameters[0].DefaultValue!.Value,
+            Is.EqualTo(7));
+        Assert.That(providerMethod.Parameters[0].DefaultValue!.Value,
+            Is.EqualTo(9));
+        Assert.That(expectation.MethodExpectations.Select(
+                static method => method.ExportKey),
+            Is.EquivalentTo(["Box.Read", "Box.ReadAlias"]));
+
+        var relocatedProvider = AddMethodExportAlias(
+            EmitClassMethodReemissionArtifact("MethodProvider", 11,
+                includePrefix: true),
+            "Box.Read", "Box.ReadAlias");
+        var relocatedReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+                "MethodConsumerReemitted", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        relocatedProvider),
+                ], ["ContainerKey"]);
+        var relocatedClass = relocatedReference.StandardClassDeclarations
+            .Single(candidate => candidate.Declaration.Name == "Box");
+        var relocatedExpectation = relocatedClass.Expectations.Single();
+        Assert.That(relocatedExpectation.ExpectedDeclaration.Methods
+            .Single(static method => method.Name == "Read")
+            .Parameters[0].DefaultValue!.Value, Is.EqualTo(7));
+        Assert.That(relocatedClass.Declaration.Methods
+            .Single(static method => method.Name == "Read")
+            .Parameters[0].DefaultValue!.Value, Is.EqualTo(11));
+
+        var incompatibleProvider = AddMethodExportAlias(
+            EmitClassMethodReemissionArtifact("MethodProvider", 11,
+                includePrefix: true, parameterType: "int64"),
+            "Box.Read", "Box.ReadAlias");
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+                "MethodConsumerReemitted", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        incompatibleProvider),
+                ], ["ContainerKey"]));
+    }
+
+    [Test]
     public void ComposesClassGenericAndInterfaceParameterDefaultSurfaces()
     {
         var tree = SyntaxTree.Parse("""
@@ -5113,6 +5268,66 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             ]);
     }
 
+    private static byte[] EmitClassMethodReemissionArtifact(
+        string moduleIdentity, int defaultValue,
+        bool includePrefix = false, string parameterType = "int32",
+        bool includePrefixType = false)
+    {
+        var prefix = includePrefix
+            ? "public class Prefix { public static int32 Before() { return 1; } }"
+            : includePrefixType ? "public class Prefix {}" : string.Empty;
+        var readBody = parameterType == "int32"
+            ? "return value;" : "return 17;";
+        var tree = SyntaxTree.Parse($$"""
+            {{prefix}}
+            public class Box {
+                public static int32 Read({{parameterType}} value = {{defaultValue}}) {
+                    {{readBody}}
+                }
+            }
+            public class Container {
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclarations = tree.Root.Children.OfType<SyntaxNode>()
+            .Where(static node => node.Kind == SyntaxKind.ClassDeclaration)
+            .ToArray();
+        var boxDeclaration = classDeclarations.Single(node =>
+            node.Children.OfType<SyntaxTokenElement>().Any(token =>
+                token.Token.Kind == TokenKind.Identifier
+                && token.Token.Name == "Box"));
+        var containerDeclaration = classDeclarations.Single(node =>
+            node.Children.OfType<SyntaxTokenElement>().Any(token =>
+                token.Token.Kind == TokenKind.Identifier
+                && token.Token.Name == "Container"));
+        var readDeclaration = boxDeclaration.Children.OfType<SyntaxNode>()
+            .Single(static member =>
+                member.Kind == SyntaxKind.FunctionDeclaration);
+        var boxClassIndex = Enumerable.Range(0, program.Classes.Length)
+            .Single(index => StringComparer.Ordinal.Equals(
+                program.Classes[index].Name, "Box"));
+        var containerClassIndex = Enumerable.Range(0,
+                program.Classes.Length)
+            .Single(index => StringComparer.Ordinal.Equals(
+                program.Classes[index].Name, "Container"));
+
+        return TrRmExecutableCompiler.EmitStandard(program, moduleIdentity,
+            C1M1Construction2ClassParameterDefaultsSchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, boxClassIndex,
+                    boxDeclaration.Span, "BoxKey", [
+                        new TrRmSourceClassMemberExport(boxClassIndex,
+                            readDeclaration.Span, "Box.Read"),
+                    ]),
+                new TrRmSourceClassExport(program, containerClassIndex,
+                    containerDeclaration.Span, "ContainerKey", []),
+            ]);
+    }
+
     private static byte[] AddMethodExportAlias(byte[] artifact,
         string originalExportKey, string aliasExportKey)
     {
@@ -5210,7 +5425,11 @@ internal sealed class TrRmStandardClassSourceEmissionTests
 
     private static byte[] CreateExpectedClassMethodImportArtifact(
         byte[] expectedArtifact, byte[] providerArtifact,
-        string consumerIdentity, string providerIdentity)
+        string consumerIdentity, string providerIdentity,
+        IReadOnlyList<string>? methodExportKeys = null,
+        string? aliasTargetExportKey = null,
+        string? aliasExportKey = null,
+        string? rootClassExportKey = null)
     {
         var schema = TrRmArtifactSchema
             .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft;
@@ -5242,18 +5461,32 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         var providerIdentityRow = AddString(providerIdentity);
         var importRows = new List<TrRmImportRow>();
         AddImport(expectedTables, "BoxKey");
-        AddImport(expectedTables, "Box.Initialize");
-        AddImport(expectedTables, "Box.Create");
-        AddImport(expectedTables, "Box.Read");
-        if (!expectedTables.Exports.TryGetDefinitionForKey(1, "Box.Read",
-                out var readDefinition))
+        IReadOnlyList<string> imports = methodExportKeys
+            ?? ["Box.Initialize", "Box.Create", "Box.Read"];
+        foreach (var exportKey in imports)
         {
-            throw new InvalidOperationException(
-                "The expected class artifact does not export 'Box.Read'.");
+            AddImport(expectedTables, exportKey);
         }
 
-        importRows.Add(new TrRmImportRow(1, AddString("Box.ReadAlias"),
-            readDefinition));
+        var selectedAliasExportKey = aliasExportKey
+            ?? (methodExportKeys is null ? "Box.ReadAlias" : null);
+        if (selectedAliasExportKey is not null)
+        {
+            var aliasTarget = aliasTargetExportKey
+                ?? imports.LastOrDefault()
+                ?? throw new InvalidOperationException(
+                    "A method alias requires a target method ExportKey.");
+            if (!expectedTables.Exports.TryGetDefinitionForKey(1,
+                    aliasTarget, out var methodDefinition))
+            {
+                throw new InvalidOperationException(
+                    $"The expected class artifact does not export '{aliasTarget}'.");
+            }
+
+            importRows.Add(new TrRmImportRow(1,
+                AddString(selectedAliasExportKey),
+                methodDefinition));
+        }
 
         var stringBytes = TrRmStringTableWriter.EncodeTextRows(textRows);
         var strings = new TrRmStringTableReader(stringBytes, textRows.Count);
@@ -5302,6 +5535,27 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             expectedTables.AssociatedTypeDefs, expectedTables.Fields,
             expectedTables.Features, modules, schema,
             expectedTables.AssociatedConstDefs);
+        var exportBytes = Array.Empty<byte>();
+        var exportCount = 0;
+        if (rootClassExportKey is not null)
+        {
+            if (!expectedTables.Exports.TryGetDefinitionForKey(1,
+                    rootClassExportKey, out var rootClassDefinition)
+                || (rootClassDefinition >> 24) != 0x13)
+            {
+                throw new InvalidOperationException(
+                    $"The expected class artifact does not export root class '{rootClassExportKey}'.");
+            }
+
+            exportBytes = new byte[8];
+            BinaryPrimitives.WriteUInt32LittleEndian(exportBytes,
+                rootClassDefinition);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                exportBytes.AsSpan(sizeof(uint)),
+                checked((uint)AddString(rootClassExportKey)));
+            exportCount = 1;
+            stringBytes = TrRmStringTableWriter.EncodeTextRows(textRows);
+        }
 
         var sections = new List<TrRmSection>(index.SectionCount + 2);
         for (var sectionIndex = 0; sectionIndex < index.SectionCount;
@@ -5329,6 +5583,11 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         sections.Add(new TrRmSection(0x0010, 0, 1, moduleRefBytes));
         sections.Add(new TrRmSection(0x001C, 0,
             checked((uint)importRows.Count), importBytes));
+        if (exportCount != 0)
+        {
+            sections.Add(new TrRmSection(0x001D, 0,
+                checked((uint)exportCount), exportBytes));
+        }
         sections.Sort(static (left, right) =>
             left.Kind.CompareTo(right.Kind));
         var result = TrRmArtifactWriter.Encode(sections, schema);

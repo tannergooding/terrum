@@ -207,8 +207,13 @@ preserves mapped public FieldDef ExportKeys. C1 remains
 unchanged. The C1M1 construction successor routes class-free emission and
 validates Construction `0003` initializer/projection rows, class-handle
 qualifications, direct instance FieldDef guarantees, and actual/imported Body
-state. Compiler-owned source-class anchors and explicit member-key capture
-are implemented, but complete class member/MethodDef/Body closure, provider
+state. Exact-CM1 source-free metadata re-emission now preserves bodyless public
+scalar class MethodDef Imports, their owner/signature/parameter rows, aliases,
+effects and class parameter surfaces/defaults without copying provider Bodies.
+Provider/owner-row relocation and compatible/incompatible replacement regressions
+are added but unverified under the active hold. Compiler-owned source-class
+anchors and explicit member-key capture are implemented, but complete bodyful
+local class member/MethodDef closure, provider
 closure for methods and Bodies, independent carrier TypeSpec verification,
 private local type dependencies, broader remapping/replacement,
 interfaces/witnesses and runtime support remain open. The bounded C1M1 source
