@@ -458,6 +458,129 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
     }
 
     [Test]
+    public void ReemitsTransitiveImportedClassTypeProviders()
+    {
+        var schemaIdentity
+            = C1M1Construction2ClassParameterDefaultsSchemaIdentity;
+        var leafProvider = CreateClassArtifact("LeafProvider", "Leaf",
+            "LeafKey", 0xF200_0008, schemaIdentity, layoutKind: 0, pack: 0,
+            fieldExportKey: "Leaf.Value");
+        var wrapperProvider = CreateArtifact("WrapperProvider", "Wrapper",
+            "WrapperKey", 0xF200_0008, schemaIdentity, "LeafProvider",
+            "LeafKey", TrRmTypeSpecTableWriter.Reference(0x03, 1),
+            layoutKind: 0, pack: 0, useRequestedLayoutForImports: true,
+            fieldExportKey: "Wrapper.Child");
+        var wrapperReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    wrapperProvider),
+                "WrapperProvider", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        leafProvider),
+                ], ["WrapperKey"], ["Wrapper.Child"]);
+
+        var tree = SyntaxTree.Parse("""
+            public class Container {
+                private int32 _seed;
+                public Container(int32 seed) { _seed = seed; }
+                public static void Accept(Wrapper value) {}
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree, wrapperReference);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var members = classDeclaration.Children.OfType<SyntaxNode>();
+        var constructor = members.Single(static node =>
+            node.Kind == SyntaxKind.ConstructorDeclaration);
+        var accept = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Accept"));
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "TransitiveClassConsumer", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, 0,
+                    classDeclaration.Span, "ContainerKey", [
+                        new TrRmSourceClassMemberExport(0,
+                            constructor.Span, "Container.Initialize") {
+                            ConstructionProjectionExportKey
+                                = "Container.Create",
+                        },
+                        new TrRmSourceClassMemberExport(0, accept.Span,
+                            "Container.Accept"),
+                    ]),
+            ]);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                        artifact));
+        var wrapperTypeDefRow = Enumerable.Range(1, tables.TypeDefs.Count)
+            .Single(row => tables.TypeDefs.GetName(row) == "Wrapper");
+        var leafTypeDefRow = Enumerable.Range(1, tables.TypeDefs.Count)
+            .Single(row => tables.TypeDefs.GetName(row) == "Leaf");
+        Assert.That(Enumerable.Range(1, tables.Imports.Count)
+                .Select(tables.Imports.GetExpectedDefinitionForImportRow)
+                .Where(static definition => definition >> 24 == 0x13)
+                .ToArray(),
+            Is.EquivalentTo([
+                0x1300_0000u | checked((uint)wrapperTypeDefRow),
+                0x1300_0000u | checked((uint)leafTypeDefRow),
+            ]));
+
+        var (wrapperFieldStart, wrapperFieldCount)
+            = tables.TypeDefs.GetFieldRange(wrapperTypeDefRow);
+        var wrapperFieldRow = Enumerable.Range(wrapperFieldStart,
+                wrapperFieldCount)
+            .Single(row => tables.Fields.GetName(row) == "Value");
+        var wrapperFieldType = tables.TypeSpecs.GetTypeSpecRef(
+            tables.Fields.GetTypeSpecRef(wrapperFieldRow));
+        Assert.That(wrapperFieldType.Form, Is.EqualTo((byte)0x03));
+        var leafTypeImportRow = Enumerable.Range(1, tables.Imports.Count)
+            .Single(row => tables.Imports
+                .GetExpectedDefinitionForImportRow(row)
+                == (0x1300_0000u
+                    | checked((uint)leafTypeDefRow)));
+        Assert.That(wrapperFieldType.Row, Is.EqualTo(leafTypeImportRow));
+        Assert.That(Enumerable.Range(1, tables.ModuleRefs.Count)
+                .Select(tables.ModuleRefs.GetProducerIdentity),
+            Does.Contain("WrapperProvider").And.Contain("LeafProvider"));
+
+        var outputReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, artifact),
+                "TransitiveClassConsumer", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        wrapperProvider),
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        leafProvider),
+                ], ["ContainerKey"], ["Wrapper.Child"]);
+        var consumer = Compilation.CreateLibrary(
+            SyntaxTree.Parse("public void Use(Container value) {}"),
+            outputReference);
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
+
+        var incompatibleLeaf = CreateClassArtifact("LeafProvider", "Leaf",
+            "LeafKey", 0xF200_000A, schemaIdentity, layoutKind: 0, pack: 0,
+            fieldExportKey: "Leaf.Value");
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, artifact),
+                "TransitiveClassConsumer", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        wrapperProvider),
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        incompatibleLeaf),
+                ], ["ContainerKey"], ["Wrapper.Child"]));
+    }
+
+    [Test]
     public void RejectsReadsThroughUnselectedImportedClassFields()
     {
         var schemaIdentity

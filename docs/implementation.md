@@ -138,9 +138,10 @@ in method signatures, including root-owned imported TypeDef expectations. A
 readonly method can also read one selected public field through an imported
 class-handle parameter; source binding, mandatory verification, Body-01 D8/DA
 encoding and exact FieldDef/owner TypeDef Import checks are implemented.
-Producer/consumer/provider-replacement and unselected-field rejection
-regressions are added but remain unverified under the active hold. Multi-hop
-class provider chains, optional or writable wrappers, nested imported-class
+Direct producer/consumer/provider-replacement and unselected-field rejection,
+plus a Leaf-to-Wrapper-to-Container provider-chain regression, are added but
+remain unverified under the active hold. Compatible TypeDef-row relocation,
+optional or writable wrappers, nested imported-class
 dereferences, mutable imported field stores, aggregate stores and source-free
 class member re-emission remain open.
 The exact C1M1 construction successor has a
