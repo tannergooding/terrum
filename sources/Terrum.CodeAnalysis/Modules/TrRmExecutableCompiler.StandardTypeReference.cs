@@ -171,7 +171,7 @@ public static partial class TrRmExecutableCompiler
     /// <param name="providers">The complete explicitly supplied provider artifact set.</param>
     /// <param name="typeExportKeys">The exact TypeDef ExportKeys that select source type roots.</param>
     /// <param name="fieldExportKeys">The exact FieldDef ExportKeys selected within those roots' checked type closure.</param>
-    /// <returns>The selected type and field declarations under exact LayoutQueries, nested FieldPath or EN1 schema selection.</returns>
+    /// <returns>The selected type and field declarations under exact C1M1, LayoutQueries, nested FieldPath or EN1 schema selection.</returns>
     /// <exception cref="ArgumentNullException">An input, list or selected key is null.</exception>
     /// <exception cref="ArgumentException">A selected key is empty, duplicated, missing or has the wrong kind.</exception>
     /// <exception cref="NotSupportedException">The selected provider closure is outside the bounded projection.</exception>
@@ -196,6 +196,15 @@ public static partial class TrRmExecutableCompiler
                     StandardLayoutQueriesSchemaIdentity)))
         {
             return CreateLayoutQueriesSourceTypeReference(artifacts,
+                schemaIdentities, moduleIdentity, typeKeys, fieldKeys);
+        }
+
+        if (schemaIdentities.Length != 0
+            && schemaIdentities.All(static schemaIdentity =>
+                StringComparer.Ordinal.Equals(schemaIdentity,
+                    StandardC1M1SchemaIdentity)))
+        {
+            return CreateC1M1ClassSourceTypeReference(artifacts,
                 schemaIdentities, moduleIdentity, typeKeys, fieldKeys);
         }
 

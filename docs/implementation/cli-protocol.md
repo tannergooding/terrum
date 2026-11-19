@@ -102,11 +102,12 @@ adds a closed exact schema set. Its reader, pairing gate and single-reference
 C1M1 type-only dispatch are implemented. The checked reference composer also
 supports multiple disjoint C1M1 type-only class roots without fields, methods,
 layouts or imported expectations. CLI binding and composition regressions are
-added but unverified under the active hold. C1 field selections,
-member-bearing/provider-expectation views, the other listed class schemas,
-mixed class/type composition and composition with the separate class-source
-publication file remain open; the candidate schema gate alone does not
-establish those routes.
+added but unverified under the active hold. Single-reference C1M1 FieldDef
+selection is also wired through the exact five-argument factory.
+Multi-reference field/member/provider-expectation views, the other listed
+class schemas, mixed class/type composition and composition with the separate
+class-source publication file remain open; the candidate schema gate alone
+does not establish those routes.
 Artifact commands accept exact per-artifact schema identities and a root
 Module identity, plus repeatable explicitly selected provider schema/path
 pairs. The current whitelist includes F/F+S, A2/A2E/A2EU/A2EU+SF1,

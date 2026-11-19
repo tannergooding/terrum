@@ -642,6 +642,106 @@ internal sealed partial class CliTests
     }
 
     [Test]
+    public async Task CompileTrRmBindsVersionTwoC1ClassFieldSelectionAsync()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1";
+        const string providerIdentity
+            = "source-provider-cli-c1-field-provider";
+        const string consumerIdentity
+            = "source-provider-cli-c1-field-consumer";
+        var providerArtifact = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"source-provider-cli-c1-field-{Guid.NewGuid():N}.trrm");
+        var providerSelections = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"source-provider-cli-c1-field-{Guid.NewGuid():N}.json");
+        var consumerArtifact = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"source-provider-cli-c1-field-{Guid.NewGuid():N}.trrm");
+        byte[] retained = [0xA5, 0x5A];
+        try
+        {
+            await File.WriteAllBytesAsync(providerArtifact,
+                CreateC1M1ClassProviderWithField(providerIdentity, "Box",
+                    "type.box", "field.box.value", schemaIdentity))
+                .ConfigureAwait(true);
+            var configuration = JsonSerializer.Serialize(new {
+                schemaVersion = 2,
+                providers = new[] {
+                    new { schemaIdentity, path = providerArtifact },
+                },
+                references = new[] {
+                    new {
+                        providerInputOrdinal = 0,
+                        moduleIdentity = providerIdentity,
+                        typeExportKeys = new[] { "type.box" },
+                        fieldExportKeys = new[] { "field.box.value" },
+                    },
+                },
+            });
+            await File.WriteAllTextAsync(providerSelections, configuration,
+                new UTF8Encoding(false)).ConfigureAwait(true);
+
+            var (exit, result, error) = await RunAsync(
+                Encoding.UTF8.GetBytes("void Consume(Box value) {}"),
+                "compile-trrm", "-", "--identity", consumerIdentity,
+                "--trrm-schema", schemaIdentity, "--trrm-source-providers",
+                providerSelections, "--library", "-o", consumerArtifact,
+                "--runtime", "fail-fast", "--json")
+                .ConfigureAwait(false);
+            Assert.That(exit, Is.Zero,
+                $"{result}{Environment.NewLine}{error}");
+            Assert.That(error, Is.Empty);
+
+            await File.WriteAllBytesAsync(consumerArtifact, retained)
+                .ConfigureAwait(true);
+            var invalidConfiguration = JsonSerializer.Serialize(new {
+                schemaVersion = 2,
+                providers = new[] {
+                    new { schemaIdentity, path = providerArtifact },
+                },
+                references = new[] {
+                    new {
+                        providerInputOrdinal = 0,
+                        moduleIdentity = providerIdentity,
+                        typeExportKeys = new[] { "type.box" },
+                        fieldExportKeys = new[] { "field.box.missing" },
+                    },
+                },
+            });
+            await File.WriteAllTextAsync(providerSelections,
+                invalidConfiguration, new UTF8Encoding(false))
+                .ConfigureAwait(true);
+            var (invalidExit, invalidResult, invalidError)
+                = await RunAsync(
+                    Encoding.UTF8.GetBytes("this is not valid Terrum"),
+                    "compile-trrm", "-", "--identity", consumerIdentity,
+                    "--trrm-schema", schemaIdentity,
+                    "--trrm-source-providers", providerSelections,
+                    "--library", "-o", consumerArtifact, "--runtime",
+                    "fail-fast", "--json").ConfigureAwait(false);
+            Assert.That(invalidExit, Is.EqualTo(2),
+                $"{invalidResult}{Environment.NewLine}{invalidError}");
+            Assert.That(invalidError, Is.Empty);
+            using (var document = JsonDocument.Parse(invalidResult))
+            {
+                Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM2001"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(consumerArtifact)
+                    .ConfigureAwait(true),
+                Is.EqualTo(retained));
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(providerArtifact)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(providerSelections)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(consumerArtifact)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
     public async Task CompileTrRmComposesVersionTwoC1ClassSourceProvidersAsync()
     {
         const string schemaIdentity
@@ -730,14 +830,39 @@ internal sealed partial class CliTests
         var declaration = tree.Root.Children.OfType<SyntaxNode>()
             .Single(static node =>
                 node.Kind == SyntaxKind.ClassDeclaration);
-        var classIndex = Enumerable.Range(0, program.Classes.Length)
-            .Single(index => program.Classes[index].Name == typeName);
         return TrRmExecutableCompiler.EmitStandard(program, moduleIdentity,
             schemaIdentity,
             TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
             [], [], [
-                new TrRmSourceClassExport(program, classIndex,
+                new TrRmSourceClassExport(program, 0,
                     declaration.Span, exportKey, []),
+            ]);
+    }
+
+    private static byte[] CreateC1M1ClassProviderWithField(
+        string moduleIdentity, string typeName, string exportKey,
+        string fieldExportKey, string schemaIdentity)
+    {
+        var tree = SyntaxTree.Parse(
+            $"public class {typeName} {{ public int32 Value; }}");
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var declaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var field = declaration.Children.OfType<SyntaxNode>().Single(
+            static node => node.Kind == SyntaxKind.FieldDeclaration);
+        return TrRmExecutableCompiler.EmitStandard(program, moduleIdentity,
+            schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, 0, declaration.Span,
+                    exportKey, [
+                        new TrRmSourceClassMemberExport(0, field.Span,
+                            fieldExportKey),
+                    ]),
             ]);
     }
 }
