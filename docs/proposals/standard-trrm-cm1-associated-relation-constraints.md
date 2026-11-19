@@ -21,20 +21,25 @@ and [identity](associated-type-definition-identity.md) proposals already
 make those physical choices concrete. Do not redesign them. They do **not**
 select their use in CM1: [G1 expressly excludes their composition](standard-trrm-generic-method-call-body-encoding.md#plural-generic-argument-obligations),
 and [CM1 inherits that generic contract unchanged](standard-trrm-c1-class-parameter-defaults.md#one-exact-candidate-agreement).
-The remaining decision is an exact agreement and bounded obligation-
-reconstruction scope, not a third relation encoding or new source meaning.
+The remaining decisions are an exact agreement, bounded obligation-
+reconstruction scope and checked-source publication mapping, not a third
+relation encoding or new source meaning.
 
 Current code already bounds kind-3 against AssociatedRelation in
 [TrRmConstraintTableReader](../../sources/Terrum.CodeAnalysis/Modules/TrRmConstraintTableReader.cs)
 and structurally decodes the candidate declaration union in
 [TrRmAssociatedRelationTable](../../sources/Terrum.CodeAnalysis/Modules/TrRmAssociatedRelationTable.cs).
 The earlier proposals' implementation paragraphs are not current evidence.
-[The generic reader](../../sources/Terrum.CodeAnalysis/Modules/TrRmGenericMethodSourceReader.cs)
-still rejects kind 3 and associated interface members; the
-[class re-emitter](../../sources/Terrum.CodeAnalysis/Modules/TrRmExecutableCompiler.StandardClassTypeReferenceWriter.cs)
-also rejects kind 3. Typed bound facts, owner/member provider comparison,
-source satisfaction and closure/remapping are implementation gaps once this
-composition is selected.
+Typed bound facts, owner/member provider comparison, source satisfaction and
+closure/remapping require implementation of this composition. Separately,
+[TrRmSourceTypeExport](../../sources/Terrum.CodeAnalysis/Modules/TrRmExecutableCompiler.cs)
+has only TypeDef, enum, field and InterfaceMethod key inputs.
+Hand-authored metadata can already supply associated declaration Exports;
+that suffices to exercise import/re-emission, not independent checked-source
+interface production. Direct identities cannot replace the missing published
+key for a separately imported member, and repurposing FieldExports or
+InterfaceMethodExports would itself require a new contract. The source
+producer decision below closes that gap.
 
 ## Provisional choice: CM1AR1
 
@@ -78,11 +83,12 @@ structural support is not admission.
 
 Scope is import, source-free re-emission and direct source calls for CM1's
 public static/readonly-instance generic MethodDefs on nongeneric classes,
-with type-only method formals. Supporting interfaces are public, type-formal-
-only, without bases or associated constants; retain their complete directly
-declared associated-type contract, not a sparse referenced-member cache.
-Other callable/type/default restrictions remain CM1's. Valid but unsupported
-closure is refused, not erased.
+with type-only method formals, plus checked-source publication of their
+supporting interface contracts. Those interfaces are public, type-formal-only,
+without bases or associated constants; retain their complete directly declared
+associated-type contract, not a sparse referenced-member cache. Other
+callable/type/default restrictions remain CM1's. Valid but unsupported closure
+is refused, not erased.
 
 The accepted-target fragment `where T.via<I>.Item is U` retains its existing
 [grammar/source meaning](../specs/grammar-spec.md#54-aliases-and-associated-types-declarations-and-open-binding):
@@ -110,6 +116,70 @@ Open forwarding preserves symbolic obligations without a closed witness row.
 The existing plural obligation environment reconstructs them from declarations;
 direct GenericCall retains role 1 and zero dispatch evidence. Kind 3 is never
 interface-dispatch evidence. No runtime input, check or dictionary follows.
+
+## Source interface publication
+
+Add one **provisional C# input record** following the existing source-anchored
+InterfaceMethod mapping:
+
+```csharp
+public sealed record TrRmSourceInterfaceAssociatedTypeExport(
+    int SourceInputOrdinal, TextSpan DeclarationSpan, string ExportKey);
+```
+
+Add this init-only property to the existing `TrRmSourceTypeExport`; preserve
+its positional constructor and all EmitStandard signatures:
+
+```csharp
+public ImmutableArray<TrRmSourceInterfaceAssociatedTypeExport>
+    InterfaceAssociatedTypeExports { get; init; }
+```
+
+The enclosing type mapping still selects exactly one public, local checked
+interface by namespace, name and explicit generic arity. Each new entry
+selects one **direct AssociatedTypeRequirement declaration** of that interface
+by source-input ordinal and exact full declaration span in the supplied
+checked program, never by member name, physical row or a conformance binding.
+The [binder already retains these source anchors](../../sources/Terrum.CodeAnalysis/Semantics/Binder.Interfaces.cs);
+they are selectors for this emission, not serialized declaration identities.
+
+Require exactly one entry per directly declared associated type, in their
+relative source declaration order. Default/empty means no assignments and
+is valid only when there are no such declarations. Keep
+InterfaceMethodExports callable-only, with its existing presence checks and
+its own relative declaration order; an associated-only interface supplies
+an explicit empty method vector. Interleaving methods and associated types
+does not mix their mapping vectors or InterfaceDef ranges. No source alias
+input, implicit owner-key prefix or synthesized member key is introduced.
+
+Before publication, reject missing/excess/null entries, repeated anchors,
+wrong-kind/inherited/foreign-owner/imported declarations, stale/partial spans,
+invalid source ordinals, unrepresentable access/default contracts and invalid
+keys. Apply the existing nonempty ExportKey text/encoding/size rules, including
+NUL rejection, and Module-wide ordinal uniqueness against **all** other Export
+keys, not just this owner/vector. The input supplies keys only: declaration
+names, ownership, access and optional type defaults come from checked source;
+defaults retain the declaring interface's formal scope.
+
+Emit each associated requirement into its owner's complete contiguous
+AssociatedTypeDef range and publish its supplied key as
+`Export.localDefId = 0x2000_0000 | associatedTypeDefRow`. The existing enclosing
+ExportKey independently publishes the owner TypeDef. Do not emit a MethodDef
+or witness binding for an associated declaration/default. A local relation
+can name its direct `0x20` identity. A separate consumer preserves owner and
+member keys in its independently bound TypeDef/AssociatedTypeDef expectations
+and uses the candidate imported reference; direct-binding after successful
+resolution does not erase those retained obligations.
+
+This additive API decision is selected only for CM1AR1. Default/empty new
+vectors preserve existing inputs with no associated declarations; nonempty
+vectors on non-interface mappings or other schemas reject rather than being
+ignored. It changes no metadata layout, Feature revision, schema literal,
+ordinary default rule or CLI grammar. Preserve published owner/member keys
+for compatible replacement; changing/removing a retained key is not repaired
+by equal source names/spans. Source-free re-emission retains supplied binary
+keys, aliases, defaults and expectations without requesting source mappings
+or recreating keys from labels. Wider source alias/CLI inputs remain deferred.
 
 ## Identity, providers and replacement
 
@@ -178,7 +248,10 @@ independent artifact vectors, not only writer/reader round trips.
 | Cases | Required result |
 |---|---|
 | Static and readonly-instance imports; matching open-formal direct calls; renamed formals; multiple relations | Preserve exact owner/ordinal/subject and every typed obligation through binding and source-free reload. |
+| Checked-source interface-only provider; associated-only and interleaved callable/associated declarations; explicit arbitrary owner/member keys; absent and owner-formal-dependent associated defaults | Emit complete separate ranges and explicit `0x20` Exports from the new mapping; preserve callable mappings, exact defaults and independent owner keys. No generated name-derived keys or witness rows. |
+| Missing/default-empty/excess/duplicate mapping entries; stale span, wrong source/owner/member kind, invalid or cross-kind duplicate key; nonempty vector under unchanged CM1/G1 or a non-interface owner | Reject source publication; no dropped requirement, mapping reinterpretation or output claiming the requested contract. Existing inputs without associated declarations keep their behavior. |
 | Class provider, consumer and separate interface provider; aliases; compatible provider row relocation | Bind each owner/member pair independently; retain all expected views and replacement obligations. |
+| Source interface provider -> class method provider -> open-forwarding consumer -> source-free re-emission/reload, with source/debug removed and independent row permutations | Retain owner/member keys, direct/imported declaration identity, defaults and constraint obligations without resupplying source mappings. Compatible same-key replacement passes; missing keys, wrong-owner/conflicting-alias retargeting or incompatible defaults fail. |
 | Wrong namespace/high byte/zero/out-of-range/truncated payload; wrong formal scope or overlapping ranges | Mandatory structural rejection even when another table has the same numeric row. Exercise checked 24-bit limits and extent arithmetic. |
 | Missing/wrong associated key, wrong selected interface owner, conflicting aliases, changed default or strengthened provider relation | Reject binding/replacement without name lookup, fallback provider or default reselection. |
 | No caller relation/conformance, different required type or qualification, closed actual, default offered as proof | Refuse unsatisfied/unsupported source use; do not infer equality or synthesize evidence. |
@@ -189,7 +262,8 @@ independent artifact vectors, not only writer/reader round trips.
 No wider witness/binding-origin codec, closed witness publication, inherited
 associated resolution implementation, qualified-self/existential carrier,
 associated constants, generic-class storage, shared-generic/native ABI,
-runtime/JIT/AOT acceptance, fresh source export-key API or CLI transport is
-selected. Later integration would amend the linked metadata/logical-record/
-registry owners and the G1/CM1 composition/admission clauses together; this
-proposal makes none of those edits or support claims.
+runtime/JIT/AOT acceptance or CLI transport is selected. The source-key
+addition above is the only new producer API. Later integration would amend
+the linked metadata/logical-record/registry owners and the G1/CM1 composition/
+admission clauses together; this proposal makes none of those edits or
+support claims.
