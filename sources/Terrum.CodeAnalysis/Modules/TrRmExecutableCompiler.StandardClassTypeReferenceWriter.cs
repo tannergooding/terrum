@@ -8185,12 +8185,6 @@ public static partial class TrRmExecutableCompiler
 
                 var body = rootTables.Bodies.GetRegisterBody(bodyRow,
                     rootTables.Contracts.Count);
-                if (body.ConstantCount != 0)
-                {
-                    throw Unsupported(
-                        "CM1 local class MethodDef Bodies with ConstantMap dependencies are not supported.");
-                }
-
                 for (var typeMapIndex = 0;
                     typeMapIndex < body.TypeCount; typeMapIndex++)
                 {
@@ -8603,7 +8597,7 @@ public static partial class TrRmExecutableCompiler
             {
                 bodyRows.Add(RemapC1M1ClassMethodBody(rootTables,
                     plan.Body, typeDefRowMap, methodDefRowMap,
-                    fieldRowMap, importRowMap,
+                    fieldRowMap, importRowMap, frozenScalarValueBuilder,
                     outputTypeSpecRows, typeSpecRowMap, activeTypeSpecRows,
                     schema));
             }
@@ -9601,17 +9595,13 @@ public static partial class TrRmExecutableCompiler
         ReadOnlyMemory<byte> bodyBytes, Dictionary<int, int> typeDefRowMap,
         Dictionary<int, int> methodDefRowMap,
         Dictionary<int, int> fieldRowMap, Dictionary<int, int> importRowMap,
+        TrRmFrozenScalarValueBuilder frozenScalarValueBuilder,
         List<ReadOnlyMemory<byte>> outputTypeSpecRows,
         Dictionary<int, uint> typeSpecRowMap,
         HashSet<int> activeTypeSpecRows, TrRmArtifactSchema schema)
     {
         var body = new TrRmRegisterBodyReader(bodyBytes.Span,
             sourceTables.Contracts.Count, schema);
-        if (body.ConstantCount != 0)
-        {
-            throw Unsupported(
-                "CM1 local class MethodDef Bodies with ConstantMap dependencies are not supported.");
-        }
 
         var typeMap = body.TypeMap.ToArray();
         for (var typeMapIndex = 0; typeMapIndex < body.TypeCount;
@@ -9676,6 +9666,59 @@ public static partial class TrRmExecutableCompiler
                 0x1400_0000u | checked((uint)remappedRow));
         }
 
+        var constantMap = body.ConstantMap.ToArray();
+        for (var constantMapIndex = 0;
+            constantMapIndex < body.ConstantCount; constantMapIndex++)
+        {
+            var offset = constantMapIndex * 2 * sizeof(uint);
+            var typeSpecReference = BinaryPrimitives
+                .ReadUInt32LittleEndian(constantMap.AsSpan(offset));
+            var type = sourceTables.TypeSpecs.GetTypeSpecRef(
+                typeSpecReference);
+            if (type.IsRow || type.Form != 0x01 || type.Qualifiers != 0
+                || !TrRmConstantSourceValueValidator.TryGetBoundScalarType(
+                    type.TypeCode, out var primitiveType))
+            {
+                throw Unsupported(
+                    "CM1 local class MethodDef Body ConstantMap entries require an inline scalar TypeSpec.");
+            }
+
+            var sourceRow = checked((int)BinaryPrimitives
+                .ReadUInt32LittleEndian(constantMap.AsSpan(
+                    offset + sizeof(uint))));
+            if (sourceTables.ConstantSources.GetKind(sourceRow) != 1)
+            {
+                throw Unsupported(
+                    "CM1 local class MethodDef Body ConstantMap entries require frozen scalar ConstantSources.");
+            }
+
+            var valueNodeRow = checked((int)sourceTables.ConstantSources
+                .GetPayloadReference(sourceRow));
+            if (sourceTables.FrozenValueNodes.GetTypeSpecRef(valueNodeRow)
+                != typeSpecReference)
+            {
+                throw new InvalidDataException(
+                    "A retained class MethodDef Body ConstantMap changed its frozen scalar type.");
+            }
+
+            var payload = sourceTables.FrozenValueNodes.GetScalarPayload(
+                valueNodeRow, sourceTables.Blobs);
+            var bits = ScalarBits.FromPayload(primitiveType, payload);
+            var remappedConstant = frozenScalarValueBuilder.Add(
+                new BoundConstant(bits, primitiveType, default));
+            if (remappedConstant.TypeSpecRef != typeSpecReference)
+            {
+                throw new InvalidDataException(
+                    "A retained class MethodDef Body ConstantMap changed its exact scalar TypeSpec.");
+            }
+
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                constantMap.AsSpan(offset), remappedConstant.TypeSpecRef);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                constantMap.AsSpan(offset + sizeof(uint)),
+                remappedConstant.ConstantSourceRow);
+        }
+
         var blocks = new TrRmRegisterBodyBlock[body.BlockCount];
         for (var blockIndex = 0; blockIndex < body.BlockCount; blockIndex++)
         {
@@ -9709,7 +9752,7 @@ public static partial class TrRmExecutableCompiler
 
         return TrRmRegisterBodyWriter.Encode(body.HomeMap.ToArray(),
             typeMap, methodMap, fieldMap,
-            body.ConstantMap.ToArray(), blocks, records,
+            constantMap, blocks, records,
             body.Code.ToArray(), contractCount: 0, schema: schema);
     }
 

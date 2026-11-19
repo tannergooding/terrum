@@ -219,11 +219,14 @@ is inline F2/F3 or row-backed, MethodMap entries target retained local/imported
 MethodDefs, and FieldMap entries target retained local FieldDefs, and only
 under the exact Construction-2/CM1 profile. TypeMap TypeSpecs and FieldDef
 rows follow the remapped metadata; MethodDef/Body rows and method ExportKeys
-are remapped. ConstantMap, imported FieldDef/FieldPath targets and contract-row
-Body references reject re-emission, while imported MethodDef expectation
-Bodies remain provider-owned. Provider/owner-row relocation and
-compatible/incompatible replacement, local Body producer/consumer and
-ConstantMap-rejection regressions are added but unverified under the active hold.
+are remapped. ConstantMap is limited to inline scalar TypeSpecs with frozen
+scalar ConstantSources; its scalar values are rebuilt into the output
+Blob/FrozenValueNode/ConstantSource tables. Imported FieldDef/FieldPath targets,
+other ConstantMap forms and contract-row Body references reject re-emission,
+while imported MethodDef expectation Bodies remain provider-owned.
+Provider/owner-row relocation and
+compatible/incompatible replacement, local Body producer/consumer and scalar
+ConstantMap-payload regressions are added but unverified under the active hold.
 Compiler-owned source-class anchors and explicit member-key capture are
 implemented, but complete bodyful
 local class member/MethodDef closure, provider

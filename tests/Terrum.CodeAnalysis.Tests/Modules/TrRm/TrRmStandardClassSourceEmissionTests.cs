@@ -5018,7 +5018,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         var providerArtifact
             = EmitScalarBodyfulClassArtifact("BodyProvider",
                 readsField: true, includePrefix: true,
-                includeMethodCall: true);
+                includeMethodCall: true, includeConstant: true);
         var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
             providerArtifact);
         var reference = TrRmExecutableCompiler.CreateStandardReference(
@@ -5059,6 +5059,14 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         var reemittedCallMethodRow = Enumerable.Range(reemittedMethodStart,
                 reemittedMethodEnd - reemittedMethodStart)
             .Single(row => reemittedTables.Methods.GetName(row) == "CallRead");
+        var providerConstantMethodRow = Enumerable.Range(providerMethodStart,
+                providerMethodEnd - providerMethodStart)
+            .Single(row => providerTables.Methods.GetName(row)
+                == "ReadConstant");
+        var reemittedConstantMethodRow = Enumerable.Range(
+                reemittedMethodStart, reemittedMethodEnd - reemittedMethodStart)
+            .Single(row => reemittedTables.Methods.GetName(row)
+                == "ReadConstant");
         var providerBodyRow
             = providerTables.Methods.GetBodyRow(providerMethodRow);
         var reemittedBodyRow
@@ -5133,6 +5141,40 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 reemittedCallBody.MethodMap),
             Is.EqualTo(0x1600_0000u
                 | checked((uint)reemittedMethodRow)));
+        var providerConstantBody = providerTables.Bodies.GetRegisterBody(
+            providerTables.Methods.GetBodyRow(providerConstantMethodRow),
+            providerTables.Contracts.Count);
+        var reemittedConstantBody = reemittedTables.Bodies.GetRegisterBody(
+            reemittedTables.Methods.GetBodyRow(reemittedConstantMethodRow),
+            reemittedTables.Contracts.Count);
+        Assert.That(providerConstantBody.ConstantCount, Is.EqualTo(1));
+        Assert.That(reemittedConstantBody.ConstantCount, Is.EqualTo(1));
+        var providerConstantTypeSpec
+            = BinaryPrimitives.ReadUInt32LittleEndian(
+                providerConstantBody.ConstantMap);
+        var reemittedConstantTypeSpec
+            = BinaryPrimitives.ReadUInt32LittleEndian(
+                reemittedConstantBody.ConstantMap);
+        var providerConstantSourceRow = checked((int)
+            BinaryPrimitives.ReadUInt32LittleEndian(
+                providerConstantBody.ConstantMap.Slice(sizeof(uint))));
+        var reemittedConstantSourceRow = checked((int)
+            BinaryPrimitives.ReadUInt32LittleEndian(
+                reemittedConstantBody.ConstantMap.Slice(sizeof(uint))));
+        Assert.That(providerTables.ConstantSources.GetKind(
+            providerConstantSourceRow), Is.EqualTo(1u));
+        Assert.That(reemittedTables.ConstantSources.GetKind(
+            reemittedConstantSourceRow), Is.EqualTo(1u));
+        var providerConstantNodeRow = checked((int)providerTables
+            .ConstantSources.GetPayloadReference(providerConstantSourceRow));
+        var reemittedConstantNodeRow = checked((int)reemittedTables
+            .ConstantSources.GetPayloadReference(reemittedConstantSourceRow));
+        Assert.That(reemittedTables.FrozenValueNodes.GetScalarPayload(
+                reemittedConstantNodeRow, reemittedTables.Blobs).ToArray(),
+            Is.EqualTo(providerTables.FrozenValueNodes.GetScalarPayload(
+                providerConstantNodeRow, providerTables.Blobs).ToArray()));
+        Assert.That(reemittedConstantTypeSpec,
+            Is.EqualTo(providerConstantTypeSpec));
         Assert.That(reemittedTables.Exports.TryGetDefinitionForKey(1,
             "Box.Read", out var reemittedMethodDefinition), Is.True);
         Assert.That(reemittedMethodDefinition,
@@ -5147,31 +5189,6 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             .Declaration.Methods.Single(static method =>
                 method.Name == "Read");
         Assert.That(reemittedMethod.BodyRow, Is.GreaterThan(0));
-    }
-
-    [Test]
-    public void RejectsLocalClassMethodBodiesWithConstantDependencies()
-    {
-        var schemaIdentity
-            = C1M1Construction2ClassParameterDefaultsSchemaIdentity;
-        var providerArtifact = EmitScalarBodyfulClassArtifact(
-            "BodyProviderWithConstantDependency",
-            returnsConstant: true);
-        var reference = TrRmExecutableCompiler.CreateStandardReference(
-            new TrRmStandardArtifactInput(schemaIdentity, providerArtifact),
-            "BodyProviderWithConstantDependency", [], ["BoxKey"]);
-        var sourceFreeCompilation = Compilation.CreateLibrary(
-            SyntaxTree.Parse(string.Empty), reference);
-        Assert.That(sourceFreeCompilation.HasErrors, Is.False,
-            string.Join(Environment.NewLine,
-                sourceFreeCompilation.Diagnostics));
-
-        Assert.Throws<NotSupportedException>(() =>
-            TrRmExecutableCompiler.EmitStandard(
-                (BoundProgram)sourceFreeCompilation.Program!,
-                "BodyProviderWithConstantDependencyReemitted",
-                schemaIdentity,
-                TrRmModuleTableReader.WindowsX64NativeTargetRequirement));
     }
 
     [Test]
@@ -5615,16 +5632,17 @@ internal sealed class TrRmStandardClassSourceEmissionTests
 
     private static byte[] EmitScalarBodyfulClassArtifact(
         string moduleIdentity, bool readsField = false,
-        bool returnsConstant = false, bool includePrefix = false,
-        bool includeMethodCall = false)
+        bool includePrefix = false, bool includeMethodCall = false,
+        bool includeConstant = false)
     {
         var methodText = readsField
             ? "public int32 Read() { return Value; }"
-            : returnsConstant
-                ? "public static int32 Read() { return 42; }"
-                : "public int32 Read(int32 value) { return value; }";
+            : "public int32 Read(int32 value) { return value; }";
         var methodCallText = includeMethodCall
             ? "public int32 CallRead() { return Read(); }"
+            : string.Empty;
+        var constantMethodText = includeConstant
+            ? "public static int32 ReadConstant() { return 42; }"
             : string.Empty;
         var prefixText = includePrefix
             ? "public class Prefix { public int32 Marker; }"
@@ -5635,6 +5653,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 public int32 Value;
                 {{methodText}}
                 {{methodCallText}}
+                {{constantMethodText}}
             }
             """);
         var compilation = Compilation.CreateLibrary(tree);
@@ -5666,6 +5685,14 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     && node.Children.OfType<SyntaxTokenElement>().Any(
                         token => token.Token.Kind == TokenKind.Identifier
                             && token.Token.Name == "CallRead"))
+            : null;
+        var constantMethodDeclaration = includeConstant
+            ? classDeclaration.Children.OfType<SyntaxNode>()
+                .Single(static node =>
+                    node.Kind == SyntaxKind.FunctionDeclaration
+                    && node.Children.OfType<SyntaxTokenElement>().Any(
+                        token => token.Token.Kind == TokenKind.Identifier
+                            && token.Token.Name == "ReadConstant"))
             : null;
         var boxClassIndex = Enumerable.Range(0, program.Classes.Length)
             .Single(index => program.Classes[index].Name == "Box");
@@ -5700,6 +5727,12 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             boxMemberExports.Add(new TrRmSourceClassMemberExport(
                 boxClassIndex, methodCallDeclaration.Span,
                 "Box.CallRead"));
+        }
+        if (constantMethodDeclaration is not null)
+        {
+            boxMemberExports.Add(new TrRmSourceClassMemberExport(
+                boxClassIndex, constantMethodDeclaration.Span,
+                "Box.ReadConstant"));
         }
 
         classExports.Add(new TrRmSourceClassExport(program, boxClassIndex,
