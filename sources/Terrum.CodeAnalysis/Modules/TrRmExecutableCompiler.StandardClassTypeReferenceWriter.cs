@@ -614,8 +614,49 @@ public static partial class TrRmExecutableCompiler
             => type == PrimitiveType.Void
                 ? 0xF200_0000u : FieldTypeSpecReference(type);
 
+        var noOpMethodReferenceTypeSpecRows
+            = new Dictionary<PrimitiveType, uint>();
+        uint NoOpMethodTypeSpecReference(PrimitiveType type)
+        {
+            if (!CheckedReferenceTypes.IsType(type))
+            {
+                return Construction2ValueTypeSpecReference(type);
+            }
+
+            if (!IsC1M1NoOpReadonlyScalarReferenceType(type,
+                    program.CheckedReferenceTypes))
+            {
+                throw Unsupported(
+                    "A no-op Construction-2 class Method supports only ordinary readonly references to scalar values.");
+            }
+
+            if (noOpMethodReferenceTypeSpecRows.TryGetValue(type,
+                    out var existingReference))
+            {
+                return existingReference;
+            }
+
+            var reference = program.CheckedReferenceTypes[
+                CheckedReferenceTypes.Index(type)];
+            var referentTypeSpecReference
+                = Construction2ValueTypeSpecReference(
+                    reference.ReferentType);
+            if (typeSpecRows.Count >= 0xFF_FFFF)
+            {
+                throw Unsupported(
+                    "Construction-2 class Method TypeSpecs exceed the metadata row limit.");
+            }
+
+            typeSpecRows.Add(TrRmTypeSpecTableWriter.Wrapped(0x07,
+                referentTypeSpecReference));
+            existingReference = checked((uint)typeSpecRows.Count);
+            noOpMethodReferenceTypeSpecRows.Add(type, existingReference);
+            return existingReference;
+        }
+
         int AppendC1M1Construction2Parameters(
-            int signatureRow, BoundFunction function, int firstVariable)
+            int signatureRow, BoundFunction function, int firstVariable,
+            bool allowNoOpReadonlyScalarReferences = false)
         {
             var parameterCount = function.ParameterCount - firstVariable;
             if (parameterCount < 0
@@ -638,8 +679,12 @@ public static partial class TrRmExecutableCompiler
                         "The bounded Construction-2 constructor projection supports only immutable by-value parameters.");
                 }
 
+                var typeSpecReference
+                    = allowNoOpReadonlyScalarReferences
+                        ? NoOpMethodTypeSpecReference(variable.Type)
+                        : ParameterTypeSpecReference(variable.Type);
                 parameterRows.Add(new TrRmParamRow(signatureRow, ordinal,
-                    ParameterTypeSpecReference(variable.Type), 0));
+                    typeSpecReference, 0));
             }
 
             return firstParam;
@@ -1583,16 +1628,22 @@ public static partial class TrRmExecutableCompiler
 
                             if (!isUnitParameter)
                             {
+                                var isNoOpReferenceParameter
+                                    = isSupportedNoOpInstanceMethod
+                                        && IsC1M1NoOpReadonlyScalarReferenceType(
+                                            variable.Type,
+                                            program.CheckedReferenceTypes);
                                 if (!IsC1M1Construction2SourceCopyType(
                                         variable.Type, program,
                                         sourceStructDeclarations)
                                     && !TryGetC1M1ImportedClassFieldType(
                                         variable.Type, program,
                                         standardClassIndexByIdentity,
-                                        out _, out _))
+                                        out _, out _)
+                                    && !isNoOpReferenceParameter)
                                 {
                                     throw Unsupported(
-                                        "The bounded Construction-2 instance method producer supports scalar, Copy-struct or selected imported class-handle value parameters.");
+                                        "The bounded Construction-2 instance method producer supports scalar, Copy-struct, selected imported class-handle or no-op readonly scalar-reference parameters.");
                                 }
                             }
                         }
@@ -1736,7 +1787,9 @@ public static partial class TrRmExecutableCompiler
                     var methodParamFirst
                         = AppendC1M1Construction2Parameters(
                             methodSignatureRow, methodFunction,
-                            methodFunction.IsStatic ? 0 : 1);
+                            methodFunction.IsStatic ? 0 : 1,
+                            allowNoOpReadonlyScalarReferences:
+                                isSupportedNoOpInstanceMethod);
                     var methodResultTypeSpecReference
                         = methodFunction.ReturnType == PrimitiveType.Void
                             ? 0xF200_0000u
@@ -1893,7 +1946,7 @@ public static partial class TrRmExecutableCompiler
                             contractRows.Count, schema)
                         : EncodeC1M1Construction2NoOpInstanceMethodBody(
                             method.Function,
-                            Construction2ValueTypeSpecReference,
+                            NoOpMethodTypeSpecReference,
                             contractRows.Count, schema);
                 }
 
@@ -2282,6 +2335,54 @@ public static partial class TrRmExecutableCompiler
         }
 
         typeSpecReference = 0xF200_0000u | checked((uint)typeCode);
+        return true;
+    }
+
+    private static bool IsC1M1NoOpReadonlyScalarReferenceType(
+        PrimitiveType type,
+        ImmutableArray<CheckedReferenceTypeDefinition> referenceTypes)
+    {
+        if (!CheckedReferenceTypes.IsType(type)
+            || !CheckedReferenceTypeContract.IsValidType(type,
+                referenceTypes))
+        {
+            return false;
+        }
+
+        var reference = referenceTypes[CheckedReferenceTypes.Index(type)];
+        return !reference.IsWritable
+            && !reference.IsGarbageCollected
+            && !reference.IsInitialization
+            && !reference.IsOptional
+            && !reference.IsOptionalValue
+            && !reference.IsReferentWritable
+            && !CheckedReferenceTypes.IsType(reference.ReferentType)
+            && TryGetC1M1SourceScalarTypeSpecReference(
+                reference.ReferentType, out _);
+    }
+
+    private static bool AreC1M1ClassCheckedReferenceTypesSupported(
+        ImmutableArray<CheckedReferenceTypeDefinition> referenceTypes)
+    {
+        if (referenceTypes.IsDefaultOrEmpty)
+        {
+            return true;
+        }
+
+        if (!CheckedReferenceTypeContract.IsValidTable(referenceTypes))
+        {
+            return false;
+        }
+
+        for (var index = 0; index < referenceTypes.Length; index++)
+        {
+            if (!IsC1M1NoOpReadonlyScalarReferenceType(
+                    CheckedReferenceTypes.Type(index), referenceTypes))
+            {
+                return false;
+            }
+        }
+
         return true;
     }
 
@@ -7748,7 +7849,8 @@ public static partial class TrRmExecutableCompiler
             || !program.NativeFunctionPointerSignatures.IsEmpty
             || !program.NativePointerTypes.IsEmpty
             || !program.NativeFixedArrayTypes.IsEmpty
-            || !program.CheckedReferenceTypes.IsEmpty
+            || !AreC1M1ClassCheckedReferenceTypesSupported(
+                program.CheckedReferenceTypes)
             || !program.PrivateNominalTypeOrigins.IsEmpty
             || !program.PrivateClassReferences.IsEmpty
             || !program.StaticFields.IsEmpty

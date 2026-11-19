@@ -972,6 +972,171 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
     }
 
     [Test]
+    public void ReemitsReadonlyReferenceParametersInNoOpClassBodies()
+    {
+        var schemaIdentity
+            = C1M1Construction2ClassParameterDefaultsSchemaIdentity;
+        var tree = SyntaxTree.Parse("""
+            public class Container {
+                public int32 Marker;
+                public void Observe(ref<int32> value) {}
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var members = classDeclaration.Children.OfType<SyntaxNode>();
+        var field = members.Single(static node =>
+            node.Kind == SyntaxKind.FieldDeclaration);
+        var observe = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Observe"));
+        var containerClassIndex = Enumerable.Range(0,
+                program.Classes.Length)
+            .Single(index =>
+                program.Classes[index].Name == "Container");
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "ReferenceMethodConsumer", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, containerClassIndex,
+                    classDeclaration.Span, "ContainerKey", [
+                        new TrRmSourceClassMemberExport(containerClassIndex,
+                            field.Span, "Container.Marker"),
+                        new TrRmSourceClassMemberExport(containerClassIndex,
+                            observe.Span, "Container.Observe"),
+                    ]),
+            ]);
+
+        static void AssertReferenceParameter(
+            TrRmStructuralMetadataValidator.ValidatedExecutionTables tables)
+        {
+            var methodDefinition = tables.Exports
+                .GetExportsForModule(1)
+                .Single(static export =>
+                    export.ExportKey == "Container.Observe").Definition;
+            var methodRow = checked((int)(
+                methodDefinition & 0x00FF_FFFF));
+            var signature = tables.Methods.GetSignature(methodRow);
+            var (parameterFirst, parameterCount)
+                = tables.Signatures.GetParamRange(signature);
+            Assert.That(parameterCount, Is.EqualTo(1));
+            Assert.That(tables.Parameters.GetMode(parameterFirst), Is.Zero);
+            Assert.That(tables.Parameters.GetFlags(parameterFirst), Is.Zero);
+            var parameterType = tables.TypeSpecs.GetTypeSpecRef(
+                tables.Parameters.GetTypeSpec(parameterFirst));
+            Assert.That(parameterType.Form, Is.EqualTo((byte)0x07));
+            Assert.That(parameterType.Qualifiers, Is.Zero);
+
+            var body = tables.Bodies.GetRegisterBody(
+                tables.Methods.GetBodyRow(methodRow),
+                tables.Contracts.Count);
+            Assert.That(Enumerable.Range(0, body.TypeCount).Any(index => {
+                var token = BinaryPrimitives.ReadUInt32LittleEndian(
+                    body.TypeMap.Slice(index * sizeof(uint)));
+                return (byte)(token >> 24) == 0x11
+                    && tables.TypeSpecs.GetTypeSpecRef(
+                        token & 0x00FF_FFFF).Form == 0x07;
+            }), Is.True);
+        }
+
+        var artifactTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                        artifact));
+        AssertReferenceParameter(artifactTables);
+
+        var artifactInput = new TrRmStandardArtifactInput(schemaIdentity,
+            artifact);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            artifactInput, "ReferenceMethodConsumer", [], ["ContainerKey"]);
+        var sourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), reference);
+        Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceFreeCompilation.Diagnostics));
+        var reemitted = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)sourceFreeCompilation.Program!,
+            "ReferenceMethodConsumerReemitted", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var reemittedTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                        reemitted));
+        AssertReferenceParameter(reemittedTables);
+
+        var reloadedReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+                "ReferenceMethodConsumerReemitted", [], ["ContainerKey"]);
+        var reloadedMethod = reloadedReference.StandardClassDeclarations
+            .Single(static declaration =>
+                declaration.Declaration.Name == "Container")
+            .Declaration.Methods.Single(static method =>
+                method.Name == "Observe");
+        Assert.That(reloadedReference.StandardClassDeclarations.Length,
+            Is.EqualTo(1));
+        Assert.That(reloadedMethod.Parameters, Has.Length.EqualTo(1));
+        Assert.That(reloadedMethod.Parameters[0].Mode, Is.Zero);
+        Assert.That(reloadedMethod.Parameters[0].Flags, Is.Zero);
+    }
+
+    [Test]
+    public void RejectsWritableReferenceParametersInNoOpClassBodies()
+    {
+        var schemaIdentity
+            = C1M1Construction2ClassParameterDefaultsSchemaIdentity;
+        var tree = SyntaxTree.Parse("""
+            public class Container {
+                public int32 Marker;
+                public void Observe(write ref<int32> value) {}
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var members = classDeclaration.Children.OfType<SyntaxNode>();
+        var field = members.Single(static node =>
+            node.Kind == SyntaxKind.FieldDeclaration);
+        var observe = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Observe"));
+        var containerClassIndex = Enumerable.Range(0,
+                program.Classes.Length)
+            .Single(index =>
+                program.Classes[index].Name == "Container");
+
+        Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.EmitStandard(program,
+                "WritableReferenceMethodConsumer", schemaIdentity,
+                TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+                [], [], [
+                    new TrRmSourceClassExport(program,
+                        containerClassIndex, classDeclaration.Span,
+                        "ContainerKey", [
+                            new TrRmSourceClassMemberExport(
+                                containerClassIndex, field.Span,
+                                "Container.Marker"),
+                            new TrRmSourceClassMemberExport(
+                                containerClassIndex, observe.Span,
+                                "Container.Observe"),
+                        ]),
+                ]));
+    }
+
+    [Test]
     public void EmitsReadonlyBodiesThroughReadonlyAndWritableClassHandles()
     {
         var schemaIdentity

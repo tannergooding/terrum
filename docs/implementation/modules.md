@@ -234,7 +234,9 @@ ConstantMap-payload regressions are added but unverified under the active hold.
 An imported-struct FieldDef provider/consumer and source-free re-emission
 regression is also added but unverified. A FieldPath Body-map re-emission
 regression checks root TypeSpec and imported FieldDef step remapping, also
-unverified.
+unverified. No-op unit instance Methods also preserve supported Copy-struct
+value parameters and plain readonly scalar `ref<T>` parameters through
+source-free re-emission; those regressions remain unverified.
 Compiler-owned source-class anchors and explicit member-key capture are
 implemented, but complete bodyful
 local class member/MethodDef closure, provider
