@@ -513,7 +513,8 @@ internal sealed class TrRmGenericMethodSourceWriterTests
     {
         const string providerIdentity = "nested-optional.method-provider";
         const string outputIdentity = "nested-optional.reemitted";
-        var typeProviderArtifact = CreateConstructedNominalSourceProvider();
+        var typeProviderArtifact = CreateConstructedNominalSourceProvider(
+            typeFormalNullabilityDomain: 2);
         var typeProviderInput = new TrRmStandardArtifactInput(
             GenericMethodCallsSchemaIdentity, typeProviderArtifact);
         var typeProviderReference
@@ -521,7 +522,7 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                 typeProviderArtifact, "constructed-source.provider");
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
             using Example;
-            public Box<Box<T>?> Nested<T>(Box<Box<T>?> value) {
+            public Box<ref<T>?> Nested<T>(Box<ref<T>?> value) {
                 return move value;
             }
             """), typeProviderReference);
@@ -588,16 +589,30 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         Assert.That(reemittedTables.TypeSpecs
             .GetTypeSpecRef(innerOptionalTypeSpec).Form,
             Is.EqualTo((byte)0x06));
-        var innerConstructedTypeSpec = BinaryPrimitives
+        var innerReferenceTypeSpec = BinaryPrimitives
             .ReadUInt32LittleEndian(reemittedTables.TypeSpecs.GetRow(
                 checked((int)innerOptionalTypeSpec)).Slice(2, 4));
         Assert.That(reemittedTables.TypeSpecs
-            .GetTypeSpecRef(innerConstructedTypeSpec).Form,
-            Is.EqualTo((byte)0x05));
+            .GetTypeSpecRef(innerReferenceTypeSpec).Form,
+            Is.EqualTo((byte)0x07));
+        var formalTypeSpecRef = BinaryPrimitives.ReadUInt32LittleEndian(
+            reemittedTables.TypeSpecs.GetRow(
+                checked((int)innerReferenceTypeSpec)).Slice(2, 4));
+        Assert.That(reemittedTables.TypeSpecs
+            .GetTypeSpecRef(formalTypeSpecRef).Form,
+            Is.EqualTo((byte)0x04));
+        var incompatibleTypeProviderInput = new TrRmStandardArtifactInput(
+            GenericMethodCallsSchemaIdentity,
+            CreateConstructedNominalSourceProvider());
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(GenericMethodCallsSchemaIdentity,
+                    reemitted),
+                outputIdentity, [incompatibleTypeProviderInput]));
 
         var consumer = Compilation.CreateLibrary(SyntaxTree.Parse("""
             using Example;
-            public Box<Box<T>?> Use<T>(Box<Box<T>?> value) {
+            public Box<ref<T>?> Use<T>(Box<ref<T>?> value) {
                 return Nested<T>(move value);
             }
             """), reemittedReference);
@@ -8016,7 +8031,8 @@ internal sealed class TrRmGenericMethodSourceWriterTests
     private static byte[] CreateConstructedNominalSourceProvider(
         bool mixedConstantArguments = false,
         bool includeConstructedField = false,
-        bool includeOwnedHelper = false)
+        bool includeOwnedHelper = false,
+        byte typeFormalNullabilityDomain = 1)
     {
         var source = includeOwnedHelper
             ? """
@@ -8047,7 +8063,8 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         return AddConstructedGenericNominalMethodTypes(artifact,
             mixedConstantArguments: mixedConstantArguments,
             includeDeclaredField: true,
-            includeConstructedField: includeConstructedField);
+            includeConstructedField: includeConstructedField,
+            typeFormalNullabilityDomain: typeFormalNullabilityDomain);
     }
 
     private static byte[] AssignMethodOwner(byte[] artifact,
@@ -11066,7 +11083,8 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         uint nominalTypeDefFlags = 0x0A,
         bool includeDeclaredField = false,
         bool includeConstructedField = false,
-        TrRmArtifactSchema? selectedSchema = null)
+        TrRmArtifactSchema? selectedSchema = null,
+        byte typeFormalNullabilityDomain = 1)
     {
         static byte[] CreateWrapperTypeSpec(byte form, uint innerTypeSpec,
             byte qualifiers)
@@ -11108,6 +11126,11 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         {
             throw new ArgumentException(
                 "The closed Span fixture requires a direct Span<int32> wrapper.");
+        }
+        if (typeFormalNullabilityDomain is not (1 or 2))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(typeFormalNullabilityDomain));
         }
         var providerIdentity = string.Empty;
         var providerTargetRequirement = 0u;
@@ -11203,7 +11226,7 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             checked((uint)typeFormalNameRow));
         rewrittenGenericParams[20] = 1;
         rewrittenGenericParams[21] = 1;
-        rewrittenGenericParams[22] = 1;
+        rewrittenGenericParams[22] = typeFormalNullabilityDomain;
         if (mixedConstantArguments)
         {
             BinaryPrimitives.WriteUInt32LittleEndian(
