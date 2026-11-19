@@ -1159,10 +1159,11 @@ internal sealed partial class CliTests
     }
 
     [Test]
-    [TestCase(false, "Box")]
-    [TestCase(true, "write Box")]
+    [TestCase(false, false, "Box")]
+    [TestCase(true, false, "write Box")]
+    [TestCase(true, true, "write Box")]
     public void EmitsConstruction2OrdinaryClassMethodCallBody(
-        bool mutableReceiver, string receiverType)
+        bool mutableType, bool mutableReceiver, string receiverType)
     {
         const string schemaIdentity
             = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2";
@@ -1170,7 +1171,7 @@ internal sealed partial class CliTests
             = "construction2-ordinary-call-provider";
         var provider = CreateConstructionClassMethodProvider(
             providerIdentity, "Box", "type.box", "Box.Read",
-            schemaIdentity, mutableType: mutableReceiver,
+            schemaIdentity, mutableType: mutableType,
             mutableReceiver: mutableReceiver);
         var reference = TrRmExecutableCompiler.CreateStandardReference(
             new TrRmStandardArtifactInput(schemaIdentity, provider),
@@ -1199,6 +1200,101 @@ internal sealed partial class CliTests
             .ValidateC1AndGetExecutionTables(
                 TrRmArtifactIndex.ForC1M1Construction2Draft(artifact));
         Assert.That(tables.Methods.Count, Is.EqualTo(4));
+    }
+
+    [Test]
+    public void Construction2RejectsWritableReceiverOnImmutableClass()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2";
+        var schema = TrRmArtifactSchema.C1M1Construction2Draft;
+        var provider = CreateConstructionClassMethodProvider(
+            "construction2-invalid-receiver-provider", "Box", "type.box",
+            "Box.Read", schemaIdentity);
+        var providerIndex
+            = TrRmArtifactIndex.ForC1M1Construction2Draft(provider);
+        var tables
+            = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(providerIndex);
+        var methodRow = Enumerable.Range(1, tables.Methods.Count).Single(
+            row => tables.Methods.GetOwnerType(row) != 0
+                && tables.Signatures.GetReceiverTypeSpec(
+                    tables.Methods.GetSignature(row)) != 0
+                && !tables.Contracts.HasConstructionClause(row));
+        var signatureRow = tables.Methods.GetSignature(methodRow);
+        var receiverTypeSpec
+            = tables.Signatures.GetReceiverTypeSpec(signatureRow);
+        var receiver = tables.TypeSpecs.GetTypeSpecRef(receiverTypeSpec);
+        Assert.That(receiver.Form, Is.EqualTo(0x02));
+        Assert.That(receiver.Qualifiers, Is.Zero);
+
+        var typeSpecRows
+            = new ReadOnlyMemory<byte>[tables.TypeSpecs.Count + 1];
+        for (var row = 1; row <= tables.TypeSpecs.Count; row++)
+        {
+            typeSpecRows[row - 1]
+                = tables.TypeSpecs.GetTypeSpecBytes(
+                    checked((uint)row)).ToArray();
+        }
+
+        var writableReceiverTypeSpec = checked((uint)typeSpecRows.Length);
+        typeSpecRows[^1] = TrRmTypeSpecTableWriter.Reference(0x02,
+            checked((uint)tables.Methods.GetOwnerType(methodRow)), 1);
+        var typeSpecBytes = TrRmTypeSpecTableWriter.Encode(typeSpecRows,
+            tables.TypeDefs.Count, tables.Imports.Count,
+            tables.GenericParams.Count,
+            tables.NativeFunctionPointerSignatures.Count, schema,
+            tables.Methods.Count, tables.PredicateCaptures.Count);
+        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes,
+            typeSpecRows.Length, tables.TypeDefs.Count,
+            tables.Imports.Count, tables.GenericParams.Count,
+            tables.NativeFunctionPointerSignatures.Count, schema,
+            tables.Methods.Count, tables.PredicateCaptures.Count);
+
+        var methodSignatures
+            = new TrRmMethodSigRow[tables.Signatures.Count];
+        for (var row = 1; row <= methodSignatures.Length; row++)
+        {
+            var (paramFirst, paramCount)
+                = tables.Signatures.GetParamRange(row);
+            var (genericFirst, genericCount)
+                = tables.Signatures.GetGenericRange(row);
+            methodSignatures[row - 1] = new(
+                tables.Signatures.GetResultTypeSpec(row),
+                row == signatureRow
+                    ? writableReceiverTypeSpec
+                    : tables.Signatures.GetReceiverTypeSpec(row),
+                paramFirst, paramCount, genericFirst, genericCount);
+        }
+
+        var methodSignatureBytes = TrRmMethodSigTableWriter.Encode(
+            methodSignatures, typeSpecs, tables.Parameters.Count,
+            tables.GenericParams.Count);
+        var rewrittenSections
+            = new TrRmSection[providerIndex.SectionCount];
+        for (var section = 0; section < rewrittenSections.Length;
+            section++)
+        {
+            providerIndex.GetSection(section, out var kind, out var flags,
+                out var bytes, out var recordCount);
+            var replacementBytes = kind switch
+            {
+                0x0011 => typeSpecBytes,
+                0x0017 => methodSignatureBytes,
+                _ => bytes.ToArray(),
+            };
+            rewrittenSections[section] = new TrRmSection(kind, flags,
+                checked((uint)(kind == 0x0011
+                    ? typeSpecRows.Length : recordCount)),
+                replacementBytes);
+        }
+
+        var invalidProvider = TrRmArtifactWriter.Encode(rewrittenSections,
+            schema);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator.ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex.ForC1M1Construction2Draft(
+                    invalidProvider)));
     }
 
     private static byte[] CreateC1M1ClassProvider(string moduleIdentity,

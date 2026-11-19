@@ -139,7 +139,9 @@ forms. The exact label-free Construction-2 single-root API path now re-emits
 field-only I/P Construction clauses and supported Body maps and lowers a
 top-level direct scalar-return call to a selected ordinary class MethodDef
 with receiver-first MethodMap inputs (`sourceUse=3/4` for readonly/writable
-access carried by the exact receiver TypeSpec). These paths remain unverified;
+access carried by the exact receiver TypeSpec, with writable access requiring a
+mutable class owner). Structural validation and the class-reference binder
+enforce that owner constraint. These paths remain unverified;
 imported I/P expectations, broader Bodies, field use, multi-provider output,
 source-free re-emission of top-level functions and ordinary EN1 class
 consumers remain open. The label-free Construction-2 source-provider CLI

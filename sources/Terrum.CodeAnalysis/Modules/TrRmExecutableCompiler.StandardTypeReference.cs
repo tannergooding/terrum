@@ -1747,6 +1747,14 @@ public static partial class TrRmExecutableCompiler
                 return false;
             }
 
+            if ((typeSpec.Qualifiers & 1) != 0
+                && (!selectedDeclaration.Declaration
+                        .TryGetDeclaredMutability(out var ownerIsMutable)
+                    || !ownerIsMutable))
+            {
+                return false;
+            }
+
             var identity = selectedDeclaration.Declaration.Identity;
             if (!classTypeInstanceIndexes.ContainsKey(identity))
             {

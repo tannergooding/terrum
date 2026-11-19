@@ -2444,10 +2444,11 @@ public static class TrRmStructuralMetadataValidator
                 associatedConstDefs, staticFields, staticFieldContracts,
                 intrinsicRegistrations, selectedA3LayoutResourceLedger);
         }
-        if (index.Schema.UsesMethodReceiverAccess())
+        if (index.Schema.UsesMethodReceiverAccess()
+            || index.Schema == TrRmArtifactSchema.C1M1Construction2Draft)
         {
             ValidateMethodReceiverAccess(types, typeSpecs, methods,
-                signatures, contracts, imports,
+                signatures, contracts, imports, index.Schema,
                 selectedA3LayoutResourceLedger);
         }
 
@@ -4233,6 +4234,7 @@ public static class TrRmStructuralMetadataValidator
         TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures,
         TrRmContractTableReader contracts, TrRmImportTableReader imports,
+        TrRmArtifactSchema schema,
         TrRmA3LayoutResourceLedger? resourceLedger)
     {
         for (var method = 1; method <= methods.Count; method++)
@@ -4272,6 +4274,28 @@ public static class TrRmStructuralMetadataValidator
             var ownerKind = types.GetKind(ownerType);
             if (ownerKind == 2)
             {
+                if (schema == TrRmArtifactSchema.C1M1Construction2Draft)
+                {
+                    var receiver
+                        = typeSpecs.GetTypeSpecRef(receiverTypeSpec);
+                    var hasOwnerMutability
+                        = types.TryGetDeclaredClassMutability(ownerType,
+                            out var ownerIsMutable);
+                    if (!receiver.IsRow
+                        || receiver.Form is not (0x02 or 0x03)
+                        || (receiver.Qualifiers & ~0x01) != 0
+                        || requiresWritable || !hasOwnerMutability
+                        || ((receiver.Qualifiers & 1) != 0
+                            && !ownerIsMutable)
+                        || typeSpecs.GetNominalTypeDefRow(
+                            receiverTypeSpec, types, imports) != ownerType)
+                    {
+                        throw InvalidMetadata();
+                    }
+
+                    continue;
+                }
+
                 var receiver = typeSpecs.GetTypeSpecBytes(receiverTypeSpec);
                 if (receiver.Length != 7 || receiver[0] != 0x0C
                     || receiver[2] != 0x8A || (receiver[1] & 0x06) != 0
