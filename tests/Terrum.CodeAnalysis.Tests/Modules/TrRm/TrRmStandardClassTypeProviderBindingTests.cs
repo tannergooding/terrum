@@ -551,6 +551,28 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
                 .Select(tables.ModuleRefs.GetProducerIdentity),
             Does.Contain("WrapperProvider").And.Contain("LeafProvider"));
 
+        var relocatedLeafProvider = CreateRelocatedClassProvider(
+            "LeafProvider", schemaIdentity);
+        var originalLeafTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                        leafProvider));
+        var relocatedLeafTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                        relocatedLeafProvider));
+        var originalLeafRow
+            = Enumerable.Range(1, originalLeafTables.TypeDefs.Count)
+                .Single(row =>
+                    originalLeafTables.TypeDefs.GetName(row) == "Leaf");
+        var relocatedLeafRow
+            = Enumerable.Range(1, relocatedLeafTables.TypeDefs.Count)
+                .Single(row =>
+                    relocatedLeafTables.TypeDefs.GetName(row) == "Leaf");
+        Assert.That(relocatedLeafRow, Is.Not.EqualTo(originalLeafRow));
+
         var outputReference
             = TrRmExecutableCompiler.CreateStandardReference(
                 new TrRmStandardArtifactInput(schemaIdentity, artifact),
@@ -558,7 +580,7 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
                     new TrRmStandardArtifactInput(schemaIdentity,
                         wrapperProvider),
                     new TrRmStandardArtifactInput(schemaIdentity,
-                        leafProvider),
+                        relocatedLeafProvider),
                 ], ["ContainerKey"], ["Wrapper.Child"]);
         var consumer = Compilation.CreateLibrary(
             SyntaxTree.Parse("public void Use(Container value) {}"),
@@ -976,6 +998,48 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
         => CreateArtifact(moduleIdentity, typeName, exportKey,
             fieldTypeSpecReference, schemaIdentity, null, null, null,
             layoutKind, pack, fieldExportKey: fieldExportKey);
+
+    private static byte[] CreateRelocatedClassProvider(
+        string moduleIdentity, string schemaIdentity)
+    {
+        var tree = SyntaxTree.Parse("""
+            public class Prefix {}
+            public class Leaf {
+                public int32 Value;
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var declarations = tree.Root.Children.OfType<SyntaxNode>()
+            .Where(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration).ToArray();
+        var prefix = declarations.Single(static declaration =>
+            declaration.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Prefix"));
+        var leaf = declarations.Single(static declaration =>
+            declaration.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Leaf"));
+        var leafField = leaf.Children.OfType<SyntaxNode>().Single(
+            static node => node.Kind == SyntaxKind.FieldDeclaration);
+        var prefixIndex = Enumerable.Range(0, program.Classes.Length)
+            .Single(index => program.Classes[index].Name == "Prefix");
+        var leafIndex = Enumerable.Range(0, program.Classes.Length)
+            .Single(index => program.Classes[index].Name == "Leaf");
+        return TrRmExecutableCompiler.EmitStandard(program, moduleIdentity,
+            schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, prefixIndex,
+                    prefix.Span, "PrefixKey"),
+                new TrRmSourceClassExport(program, leafIndex, leaf.Span,
+                    "LeafKey", [
+                        new TrRmSourceClassMemberExport(leafIndex,
+                            leafField.Span, "Leaf.Value"),
+                    ]),
+            ]);
+    }
 
     private static byte[] CreateArtifact(string moduleIdentity,
         string typeName, string exportKey, uint fieldTypeSpecReference,

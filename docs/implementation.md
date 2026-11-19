@@ -139,8 +139,9 @@ readonly method can also read one selected public field through an imported
 class-handle parameter; source binding, mandatory verification, Body-01 D8/DA
 encoding and exact FieldDef/owner TypeDef Import checks are implemented.
 Direct producer/consumer/provider-replacement and unselected-field rejection,
-plus a Leaf-to-Wrapper-to-Container provider-chain regression, are added but
-remain unverified under the active hold. Compatible TypeDef-row relocation,
+plus a Leaf-to-Wrapper-to-Container provider-chain regression covering
+compatible TypeDef-row relocation and incompatible replacement, are added but
+remain unverified under the active hold. Further provider alias/closure cases,
 optional or writable wrappers, nested imported-class
 dereferences, mutable imported field stores, aggregate stores and source-free
 class member re-emission remain open.
