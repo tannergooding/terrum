@@ -281,4 +281,8 @@ public enum SyntaxKind
     IndexArgumentList,
     /// <summary>The whole-range initialization type argument admitted only by Span.</summary>
     SpanInitializationTypeArgument,
+    /// <summary>An exact associated-type identity constraint on a generic formal.</summary>
+    AssociatedIdentityConstraint,
+    /// <summary>The interface-associated type selected by a constraint.</summary>
+    AssociatedProjection,
 }

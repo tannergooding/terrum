@@ -38,6 +38,10 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-1";
     private const string C1M1Construction2SchemaIdentity
         = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2";
+    private const string CM1AR1SchemaIdentity
+        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-class-parameter-defaults-1-associated-relation-constraints-1";
+    private const string CM1SchemaIdentity
+        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-class-parameter-defaults-1";
 
     [Test]
     public void RejectsSourceGenericConstantFormalsWithoutAssignedCarrier()
@@ -4173,6 +4177,283 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             Assert.That(tables.TypeSpecs.GetRow(
                 checked((int)receiverTypeSpec))[0], Is.EqualTo(0x05));
         }
+    }
+
+    [Test]
+    public void EmitsImportsForwardsAndReemitsAssociatedIdentityRelations()
+    {
+        var providerTree = SyntaxTree.Parse("""
+            namespace Example {
+                public interface ISource<T> { type Item = T; }
+                public class Box {
+                    public static int32 Constrained() {
+                        return 7;
+                    }
+                }
+            }
+            """);
+        var providerCompilation = Compilation.CreateLibrary(
+            providerTree);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+
+        var providerProgram = providerCompilation.Program!;
+        var sourceInterface = providerProgram.Interfaces.Single();
+        var associatedType = sourceInterface.Members.Single();
+        var namespaceDeclaration = providerTree.Root.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.NamespaceDeclaration);
+        var classDeclaration = namespaceDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var methodDeclaration = classDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.FunctionDeclaration);
+        var boxClassIndex = Enumerable.Range(0,
+                providerProgram.Classes.Length)
+            .Single(index => providerProgram.Classes[index].Name == "Box");
+        var providerIdentity = "cm1ar1.associated.provider";
+        var sourceTypeExport = new TrRmSourceTypeExport("Example",
+            "ISource", "example.interface/ISource") {
+            GenericArity = sourceInterface.Formals.Length,
+            InterfaceMethodExports = [],
+            InterfaceAssociatedTypeExports = [
+                new TrRmSourceInterfaceAssociatedTypeExport(
+                    associatedType.SourceInputOrdinal,
+                    associatedType.SourceDeclarationSpan,
+                    "example.interface/ISource.Item"),
+            ],
+        };
+        var classExport = new TrRmSourceClassExport(providerProgram,
+            boxClassIndex, classDeclaration.Span,
+            "example.class/Box", [
+                new TrRmSourceClassMemberExport(boxClassIndex,
+                    methodDeclaration.Span, "Box.Constrained"),
+            ]);
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, providerIdentity, CM1AR1SchemaIdentity, 0,
+            [sourceTypeExport], [], [classExport]);
+        providerArtifact = AddCM1AR1ClassMethodRelation(providerArtifact,
+            "Box.Constrained", "example.class/Box",
+            "example.interface/ISource",
+            "example.interface/ISource.Item");
+        _ = Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.EmitStandard(providerProgram,
+                "cm1ar1.invalid-old-schema", CM1SchemaIdentity, 0,
+                [sourceTypeExport], [], [classExport]));
+        var memberAlias = "example.interface/ISource.Item.alias";
+        providerArtifact = AddExportAlias(providerArtifact,
+            TrRmArtifactSchema
+                .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsDraft,
+            0x2000_0001, memberAlias);
+
+        var providerIndex = new TrRmArtifactIndex(providerArtifact,
+            TrRmArtifactSchema
+                .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsDraft);
+        var providerTables =
+            TrRmStructuralMetadataValidator
+                .ValidateGenericMethodCallsDraftAndGetExecutionTables(
+                    providerIndex);
+        Assert.That(providerTables.AssociatedTypeDefs.Count, Is.EqualTo(1));
+        Assert.That(providerTables.AssociatedRelations.Count, Is.EqualTo(1));
+        Assert.That(providerTables.Features.TryGetFeature(23, out _),
+            Is.True);
+        Assert.That(providerTables.Exports.TryGetDefinitionForKey(1,
+            memberAlias, out var aliasedAssociatedType), Is.True);
+        Assert.That(aliasedAssociatedType, Is.EqualTo(0x2000_0001));
+        var methodDefId = GetExportedMethodDefId(providerArtifact,
+            "Box.Constrained");
+        var methodRow = checked((int)(methodDefId & 0x00FF_FFFF));
+        var signatureRow = providerTables.Methods.GetSignature(methodRow);
+        var (firstFormal, formalCount)
+            = providerTables.Signatures.GetGenericRange(signatureRow);
+        Assert.That(formalCount, Is.EqualTo(2));
+        var (firstConstraint, constraintCount)
+            = providerTables.GenericParams.GetConstraintRange(firstFormal);
+        var relationConstraint = Enumerable.Range(firstConstraint,
+                constraintCount)
+            .Single(row => providerTables.Constraints.GetKind(row) == 3);
+        var relationRow = checked((int)providerTables.Constraints
+            .GetPayload(relationConstraint));
+        Assert.That(providerTables.AssociatedRelations
+            .GetAssociatedTypeDefReference(relationRow),
+            Is.EqualTo(0x2000_0001));
+        Assert.That(providerTables.TypeSpecs.GetTypeSpecRef(
+            providerTables.AssociatedRelations
+                .GetRequiredTypeSpecRef(relationRow)).Form,
+            Is.EqualTo(0x04));
+        var wrongAssociationNamespace = providerArtifact.ToArray();
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            wrongAssociationNamespace.AsSpan(
+                GetSectionOffset(providerArtifact, 0x0036) + sizeof(uint),
+                sizeof(uint)), 0x1300_0001);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator
+                .ValidateGenericMethodCallsDraftAndGetExecutionTables(
+                    new TrRmArtifactIndex(wrongAssociationNamespace,
+                        TrRmArtifactSchema
+                            .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsDraft)));
+
+        var providerReference = TrRmExecutableCompiler
+            .CreateStandardReference(
+                new TrRmStandardArtifactInput(CM1AR1SchemaIdentity,
+                    providerArtifact),
+                providerIdentity,
+                Array.Empty<TrRmStandardArtifactInput>(),
+                ["example.class/Box"]);
+        Assert.That(providerReference.Interfaces.Single().Members.Single()
+            .AdditionalDeclarationKeys, Does.Contain(memberAlias));
+        Assert.That(providerReference.Interfaces.Single().Members.Single()
+            .AssociatedDefaultType!.TypeParameterOrdinal, Is.Zero);
+        var consumerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                namespace Example {
+                    public class Forwarder {
+                        public static int32 Forward<T, U>(T value)
+                            where T : ISource<T>
+                            where T.via<ISource<T>>.Item is U {
+                            return Box.Constrained<T, U>();
+                        }
+                    }
+                }
+                """), providerReference);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+
+        var missingRelationCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                namespace Example {
+                    public class MissingForwarder {
+                        public static int32 Missing<T, U>(T value)
+                            where T : ISource<T> {
+                            return Box.Constrained<T, U>();
+                        }
+                    }
+                }
+                """), providerReference);
+        Assert.That(missingRelationCompilation.HasErrors, Is.True);
+        Assert.That(missingRelationCompilation.Diagnostics
+            .Any(static diagnostic => diagnostic.Message.Contains(
+                "associated-type identity requirement",
+                StringComparison.Ordinal)), Is.True);
+        var mismatchedRelationCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                namespace Example {
+                    public class MismatchedForwarder {
+                        public static int32 Mismatched<T, U, V>(T value)
+                            where T : ISource<T>
+                            where T.via<ISource<T>>.Item is V {
+                            return Box.Constrained<T, U>();
+                        }
+                    }
+                }
+                """), providerReference);
+        Assert.That(mismatchedRelationCompilation.HasErrors, Is.True);
+        var closedActualCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                namespace Example {
+                    public class ClosedForwarder {
+                        public static int32 Closed(int32 value) {
+                            return Box.Constrained<int32, int32>();
+                        }
+                    }
+                }
+                """), providerReference);
+        Assert.That(closedActualCompilation.HasErrors, Is.True);
+
+        var consumerProgram = consumerCompilation.Program!;
+        SemanticVerifier.VerifyLibrary(consumerProgram);
+        var forward = consumerProgram.GenericMethodDefinitions.Single();
+        Assert.That(forward.Formals[0].AssociatedRelations,
+            Has.Length.EqualTo(1));
+        Assert.That(forward.Formals[0].AssociatedRelations[0]
+            .RequiredType.FormalOrdinal, Is.EqualTo(1));
+
+        var sourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), providerReference);
+        Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceFreeCompilation.Diagnostics));
+        var sourceFreeProgram = sourceFreeCompilation.Program!;
+        var reemitted = TrRmExecutableCompiler.EmitStandard(
+            sourceFreeProgram, "cm1ar1.associated.reemitted",
+            CM1AR1SchemaIdentity, 0);
+        var reemittedReference = TrRmExecutableCompiler
+            .CreateStandardReference(
+                new TrRmStandardArtifactInput(CM1AR1SchemaIdentity,
+                    reemitted),
+                "cm1ar1.associated.reemitted", [
+                    new TrRmStandardArtifactInput(CM1AR1SchemaIdentity,
+                        providerArtifact),
+                ], ["example.class/Box"]);
+        var reemittedMethod = reemittedReference.GenericMethodImports
+            .Single(static import => import.Origin.ExportKey
+                == "Box.Constrained");
+        Assert.That(reemittedMethod.Formals[0].AssociatedRelations,
+            Has.Length.EqualTo(1));
+        Assert.That(reemittedMethod.Formals[0].AssociatedRelations[0]
+            .RequiredType.FormalOrdinal, Is.EqualTo(1));
+        Assert.That(reemittedReference.Interfaces.Single().Members.Single()
+            .AdditionalDeclarationKeys, Does.Contain(memberAlias));
+    }
+
+    [Test]
+    public void RejectsCM1AR1ModuleLevelAssociatedRelationConstraints()
+    {
+        var tree = SyntaxTree.Parse("""
+            namespace Example {
+                public interface ISource<T> { type Item = T; }
+                public class Box { }
+                public int32 Constrained<T, U>()
+                    where T : ISource<T>
+                    where T.via<ISource<T>>.Item is U {
+                    return 7;
+                }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var sourceInterface = program.Interfaces.Single();
+        var associatedType = sourceInterface.Members.Single();
+        var classDeclaration = tree.Root.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.NamespaceDeclaration)
+            .Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var classIndex = Enumerable.Range(0, program.Classes.Length)
+            .Single(index => program.Classes[index].Name == "Box");
+        var method = program.GenericMethodDefinitions.Single();
+        var typeExport = new TrRmSourceTypeExport("Example", "ISource",
+            "example.interface/ISource") {
+            GenericArity = sourceInterface.Formals.Length,
+            InterfaceMethodExports = [],
+            InterfaceAssociatedTypeExports = [
+                new TrRmSourceInterfaceAssociatedTypeExport(
+                    associatedType.SourceInputOrdinal,
+                    associatedType.SourceDeclarationSpan,
+                    "example.interface/ISource.Item"),
+            ],
+        };
+        var classExport = new TrRmSourceClassExport(program, classIndex,
+            classDeclaration.Span, "example.class/Box", []);
+        var methodExport = new TrRmSourceGenericMethodExport(program,
+            method.SourceInputOrdinal, method.Span,
+            "example.method/Constrained");
+
+        _ = Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.EmitStandard(program,
+                "cm1ar1.module-level", CM1AR1SchemaIdentity, 0,
+                [typeExport], [methodExport], [classExport]));
     }
 
     [Test]
@@ -8793,6 +9074,302 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         }
         return TrRmArtifactWriter.Encode(sections.Values.ToArray(),
             TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft);
+    }
+
+    private static byte[] AddCM1AR1ClassMethodRelation(byte[] artifact,
+        string methodExportKey, string classExportKey,
+        string interfaceExportKey, string associatedTypeExportKey)
+    {
+        var schema
+            = TrRmArtifactSchema
+                .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsDraft;
+        var index = new TrRmArtifactIndex(artifact, schema);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateGenericMethodCallsDraftAndGetExecutionTables(index);
+        if (!tables.Exports.TryGetDefinitionForKey(1, methodExportKey,
+                out var methodDefId)
+            || !tables.Exports.TryGetDefinitionForKey(1, classExportKey,
+                out var classTypeDefId)
+            || !tables.Exports.TryGetDefinitionForKey(1,
+                interfaceExportKey, out var interfaceTypeDefId)
+            || !tables.Exports.TryGetDefinitionForKey(1,
+                associatedTypeExportKey, out var associatedTypeDefId)
+            || (methodDefId >> 24) != 0x16
+            || (classTypeDefId >> 24) != 0x13
+            || (interfaceTypeDefId >> 24) != 0x13
+            || (associatedTypeDefId >> 24) != 0x20)
+        {
+            throw new AssertionException(
+                "The CM1AR1 class-method fixture has incomplete exported identities.");
+        }
+
+        var methodRow = checked((int)(methodDefId & 0x00FF_FFFF));
+        var classTypeDefRow = checked((int)(
+            classTypeDefId & 0x00FF_FFFF));
+        var interfaceTypeDefRow = checked((int)(
+            interfaceTypeDefId & 0x00FF_FFFF));
+        var associatedTypeDefRow = checked((int)(
+            associatedTypeDefId & 0x00FF_FFFF));
+        var signatureRow = tables.Methods.GetSignature(methodRow);
+        if (tables.Signatures.GetGenericRange(signatureRow).Count != 0)
+        {
+            throw new AssertionException(
+                "The CM1AR1 class-method fixture must begin with a nongeneric MethodDef.");
+        }
+
+        var sections = new SortedDictionary<ushort, TrRmSection>();
+        for (var sectionIndex = 0; sectionIndex < index.SectionCount;
+            sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var count);
+            sections.Add(kind, new TrRmSection(kind, flags,
+                checked((uint)count), bytes.ToArray()));
+        }
+
+        var stringSection = sections[0x0002];
+        var strings = new TrRmStringTableReader(
+            stringSection.Bytes.Span,
+            checked((int)stringSection.RecordCount));
+        var stringRows = new List<(string Text, int Encoding)>(
+            strings.Count + 2);
+        var stringRowByText = new Dictionary<string, int>(
+            StringComparer.Ordinal);
+        for (var row = 1; row <= strings.Count; row++)
+        {
+            var text = strings.DecodeNamespace(row);
+            stringRows.Add((text, 1));
+            _ = stringRowByText.TryAdd(text, row);
+        }
+
+        int GetStringRow(string value)
+        {
+            if (stringRowByText.TryGetValue(value, out var row))
+            {
+                return row;
+            }
+
+            stringRows.Add((value, 1));
+            row = stringRows.Count;
+            stringRowByText.Add(value, row);
+            return row;
+        }
+
+        var typeSpecRows = new List<ReadOnlyMemory<byte>>(
+            tables.TypeSpecs.Count + 4);
+        for (var row = 1; row <= tables.TypeSpecs.Count; row++)
+        {
+            typeSpecRows.Add(tables.TypeSpecs.GetRow(row).ToArray());
+        }
+
+        var genericParamFirst = tables.GenericParams.Count + 1;
+        var formalTypeT = checked((uint)typeSpecRows.Count + 1);
+        typeSpecRows.Add(TrRmTypeSpecTableWriter.Reference(0x04,
+            checked((uint)genericParamFirst)));
+        var formalTypeU = checked((uint)typeSpecRows.Count + 1);
+        typeSpecRows.Add(TrRmTypeSpecTableWriter.Reference(0x04,
+            checked((uint)(genericParamFirst + 1))));
+        var interfaceType = checked((uint)typeSpecRows.Count + 1);
+        typeSpecRows.Add(TrRmTypeSpecTableWriter.Reference(0x02,
+            checked((uint)interfaceTypeDefRow)));
+        var declaringInterface = checked((uint)typeSpecRows.Count + 1);
+        typeSpecRows.Add(TrRmTypeSpecTableWriter.Constructed(
+            interfaceType, [formalTypeT]));
+
+        var hasGenericParamSection = sections.TryGetValue(0x0019,
+            out var genericParamSection);
+        var genericParamBytes = hasGenericParamSection
+            ? genericParamSection.Bytes.ToArray() : [];
+        var genericParamCount = hasGenericParamSection
+            ? checked((int)genericParamSection.RecordCount) : 0;
+        if (genericParamBytes.Length != checked(genericParamCount * 32))
+        {
+            throw new AssertionException(
+                "The CM1AR1 class-method fixture has a malformed GenericParam section.");
+        }
+
+        var genericParamOutput = new byte[
+            checked((genericParamCount + 2) * 32)];
+        genericParamBytes.CopyTo(genericParamOutput, 0);
+
+        var hasConstraintSection = sections.TryGetValue(0x001A,
+            out var constraintSection);
+        var constraintBytes = hasConstraintSection
+            ? constraintSection.Bytes.ToArray() : [];
+        var constraintCount = hasConstraintSection
+            ? checked((int)constraintSection.RecordCount) : 0;
+        if (constraintBytes.Length != checked(constraintCount * 12))
+        {
+            throw new AssertionException(
+                "The CM1AR1 class-method fixture has a malformed Constraint section.");
+        }
+
+        var constraintOutput = new byte[
+            checked((constraintCount + 2) * 12)];
+        constraintBytes.CopyTo(constraintOutput, 0);
+        var firstNewConstraint = constraintCount + 1;
+        var firstConstraintOffset = constraintCount * 12;
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            constraintOutput.AsSpan(firstConstraintOffset),
+            checked((uint)genericParamFirst));
+        BinaryPrimitives.WriteUInt16LittleEndian(
+            constraintOutput.AsSpan(firstConstraintOffset + 4), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            constraintOutput.AsSpan(firstConstraintOffset + 8),
+            declaringInterface);
+        var relationRow = checked((uint)tables.AssociatedRelations.Count + 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            constraintOutput.AsSpan(firstConstraintOffset + 12),
+            checked((uint)genericParamFirst));
+        BinaryPrimitives.WriteUInt16LittleEndian(
+            constraintOutput.AsSpan(firstConstraintOffset + 16), 3);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            constraintOutput.AsSpan(firstConstraintOffset + 20), relationRow);
+
+        var formalNameRows = new[] {
+            GetStringRow("T"),
+            GetStringRow("U"),
+        };
+        for (var ordinal = 0; ordinal < 2; ordinal++)
+        {
+            var offset = (genericParamCount + ordinal) * 32;
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                genericParamOutput.AsSpan(offset),
+                methodDefId);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                genericParamOutput.AsSpan(offset + 4),
+                checked((uint)ordinal));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                genericParamOutput.AsSpan(offset + 8),
+                checked((uint)formalNameRows[ordinal]));
+            if (ordinal == 0)
+            {
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    genericParamOutput.AsSpan(offset + 12),
+                    checked((uint)firstNewConstraint));
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    genericParamOutput.AsSpan(offset + 16), 2);
+            }
+            genericParamOutput[offset + 20] = 1;
+            genericParamOutput[offset + 21] = 1;
+            genericParamOutput[offset + 22] = 1;
+        }
+
+        var methodSignatureBytes
+            = sections[0x0017].Bytes.ToArray();
+        var methodSignatureOffset = (signatureRow - 1) * 24;
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodSignatureBytes.AsSpan(methodSignatureOffset + 16),
+            checked((uint)genericParamFirst));
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodSignatureBytes.AsSpan(methodSignatureOffset + 20), 2);
+
+        var typeSpecBytes = TrRmTypeSpecTableWriter.Encode(typeSpecRows,
+            tables.TypeDefs.Count, tables.Imports.Count,
+            genericParamCount + 2,
+            tables.NativeFunctionPointerSignatures.Count, schema,
+            tables.Methods.Count);
+        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes,
+            typeSpecRows.Count, tables.TypeDefs.Count, tables.Imports.Count,
+            genericParamCount + 2,
+            tables.NativeFunctionPointerSignatures.Count, schema,
+            tables.Methods.Count);
+
+        var relationRows = new List<TrRmAssociatedRelationRow>(
+            tables.AssociatedRelations.Count + 1);
+        for (var row = 1; row <= tables.AssociatedRelations.Count; row++)
+        {
+            relationRows.Add(new TrRmAssociatedRelationRow(
+                tables.AssociatedRelations
+                    .GetDeclaringInterfaceTypeSpecRef(row),
+                tables.AssociatedRelations
+                    .GetAssociatedTypeDefReference(row),
+                tables.AssociatedRelations.GetRequiredTypeSpecRef(row)));
+        }
+        relationRows.Add(new TrRmAssociatedRelationRow(declaringInterface,
+            associatedTypeDefId, formalTypeU));
+        var relationBytes = TrRmAssociatedRelationTableWriter.Encode(
+            relationRows, typeSpecs, tables.AssociatedTypeDefs.Count,
+            tables.Imports);
+
+        var methodBytes = sections[0x0016].Bytes.ToArray();
+        var methodOffset = (methodRow - 1) * 28;
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            methodBytes.AsSpan(methodOffset),
+            checked((uint)classTypeDefRow));
+        var updatedStrings = TrRmStringTableWriter.EncodeTextRows(
+            stringRows);
+
+        sections[0x0002] = new TrRmSection(0x0002, 0,
+            checked((uint)stringRows.Count), updatedStrings);
+        sections[0x0011] = new TrRmSection(0x0011, 0,
+            checked((uint)typeSpecRows.Count), typeSpecBytes);
+        sections[0x0016] = new TrRmSection(0x0016, 0,
+            sections[0x0016].RecordCount, methodBytes);
+        sections[0x0017] = new TrRmSection(0x0017, 0,
+            sections[0x0017].RecordCount, methodSignatureBytes);
+        sections[0x0019] = new TrRmSection(0x0019, 0,
+            checked((uint)(genericParamCount + 2)), genericParamOutput);
+        sections[0x001A] = new TrRmSection(0x001A, 0,
+            checked((uint)(constraintCount + 2)), constraintOutput);
+        sections[0x0036] = new TrRmSection(0x0036, 0,
+            checked((uint)relationRows.Count), relationBytes);
+        return TrRmArtifactWriter.Encode([.. sections.Values], schema);
+    }
+
+    private static byte[] AddExportAlias(byte[] artifact,
+        TrRmArtifactSchema schema, uint localDefinitionId, string exportKey)
+    {
+        var index = new TrRmArtifactIndex(artifact, schema);
+        var sections = new SortedDictionary<ushort, TrRmSection>();
+        ReadOnlyMemory<byte> stringBytes = default;
+        ReadOnlyMemory<byte> exportBytes = default;
+        var stringCount = 0;
+        var exportCount = 0;
+        for (var sectionIndex = 0;
+            sectionIndex < index.SectionCount;
+            sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var count);
+            sections.Add(kind, new TrRmSection(kind, flags,
+                checked((uint)count), bytes.ToArray()));
+            if (kind == 0x0002)
+            {
+                stringBytes = bytes.ToArray();
+                stringCount = count;
+            }
+            else if (kind == 0x001D)
+            {
+                exportBytes = bytes.ToArray();
+                exportCount = count;
+            }
+        }
+
+        var strings = new TrRmStringTableReader(stringBytes.Span,
+            stringCount);
+        var rows = new List<(string Text, int Encoding)>(stringCount + 1);
+        for (var row = 1; row <= stringCount; row++)
+        {
+            rows.Add((strings.DecodeNamespace(row), 1));
+        }
+        rows.Add((exportKey, 1));
+        var rewrittenStrings = TrRmStringTableWriter.EncodeTextRows(rows);
+        var rewrittenExports = new byte[checked((exportCount + 1) * 8)];
+        exportBytes.Span.CopyTo(rewrittenExports);
+        var aliasOffset = checked(exportCount * 8);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            rewrittenExports.AsSpan(aliasOffset, sizeof(uint)),
+            localDefinitionId);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            rewrittenExports.AsSpan(aliasOffset + sizeof(uint),
+                sizeof(uint)),
+            checked((uint)rows.Count));
+        sections[0x0002] = new TrRmSection(0x0002, 0,
+            checked((uint)rows.Count), rewrittenStrings);
+        sections[0x001D] = new TrRmSection(0x001D, 0,
+            checked((uint)(exportCount + 1)), rewrittenExports);
+        return TrRmArtifactWriter.Encode(sections.Values.ToArray(), schema);
     }
 
     private static byte[] RemoveG1InterfaceExports(byte[] artifact)

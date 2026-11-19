@@ -80,9 +80,8 @@ internal sealed record BoundStandardClassTypeView(
         if (Provider is not null
             && (StringComparer.Ordinal.Equals(Provider.SchemaIdentity,
                     "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1")
-                || StringComparer.Ordinal.Equals(Provider.SchemaIdentity,
-                    StandardGenericMethodSchema
-                        .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaults)
+                || StandardGenericMethodSchema.IsCM1ClassParameterDefaults(
+                    Provider.SchemaIdentity)
                 || BoundStandardEnumDeclarationContract
                     .IsSelectedSchemaIdentity(Provider.SchemaIdentity)))
         {
@@ -131,10 +130,6 @@ internal static class BoundStandardClassDeclarationContract
         = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1";
     private const string C1M1SchemaIdentity
         = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1";
-    private const string CM1SchemaIdentity
-        = StandardGenericMethodSchema
-            .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaults;
-
     internal static bool TryGetSelectedConstruction2ClassDeclaration(
         PrimitiveType type,
         IReadOnlyList<BoundGenericNominalTypeInstance> instances,
@@ -167,9 +162,9 @@ internal static class BoundStandardClassDeclarationContract
         {
             var selectedImportedClassView
                 = !candidate.Expectations.IsEmpty
-                    && StringComparer.Ordinal.Equals(
-                        candidate.Declaration.Provider.SchemaIdentity,
-                        CM1SchemaIdentity);
+                    && StandardGenericMethodSchema
+                        .IsCM1ClassParameterDefaults(
+                            candidate.Declaration.Provider.SchemaIdentity);
             if (candidate.Declaration.Identity == instance.Definition
                 && !candidate.SelectedExportKeys.IsEmpty
                 && (candidate.Expectations.IsEmpty
@@ -249,9 +244,9 @@ internal static class BoundStandardClassDeclarationContract
                         StringComparer.Ordinal))
                 || (!declaration.Expectations.IsEmpty
                     && !declaration.SelectedExportKeys.IsEmpty
-                    && !StringComparer.Ordinal.Equals(
-                        declaration.Declaration.Provider.SchemaIdentity,
-                        CM1SchemaIdentity)
+                    && !StandardGenericMethodSchema
+                        .IsCM1ClassParameterDefaults(
+                            declaration.Declaration.Provider.SchemaIdentity)
                     && !BoundStandardEnumDeclarationContract
                         .IsSelectedClassInstanceLayoutSchemaIdentity(
                             declaration.Declaration.Provider
@@ -492,8 +487,9 @@ internal static class BoundStandardClassDeclarationContract
                 C1SchemaIdentity)
                 && !StringComparer.Ordinal.Equals(view.Provider.SchemaIdentity,
                     C1M1SchemaIdentity)
-                && !StringComparer.Ordinal.Equals(view.Provider.SchemaIdentity,
-                    CM1SchemaIdentity)
+                && !StandardGenericMethodSchema
+                    .IsCM1ClassParameterDefaults(
+                        view.Provider.SchemaIdentity)
                 && !BoundStandardEnumDeclarationContract
                     .IsSelectedSchemaIdentity(
                         view.Provider.SchemaIdentity))
@@ -505,8 +501,9 @@ internal static class BoundStandardClassDeclarationContract
         var schemaAllowsMutability
             = StringComparer.Ordinal.Equals(view.Provider.SchemaIdentity,
                 C1M1SchemaIdentity)
-                || StringComparer.Ordinal.Equals(view.Provider.SchemaIdentity,
-                    CM1SchemaIdentity)
+                || StandardGenericMethodSchema
+                    .IsCM1ClassParameterDefaults(
+                        view.Provider.SchemaIdentity)
                 || BoundStandardEnumDeclarationContract
                     .IsSelectedSchemaIdentity(
                         view.Provider.SchemaIdentity);

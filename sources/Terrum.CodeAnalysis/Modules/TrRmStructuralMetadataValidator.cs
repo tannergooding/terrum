@@ -319,6 +319,7 @@ public static class TrRmStructuralMetadataValidator
                     or TrRmArtifactSchema.C1M1Construction2Draft
                     or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessDraft
                     or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft
+                    or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsDraft
                     or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft
                     or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateDraft)
                     or TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft
@@ -455,7 +456,63 @@ public static class TrRmStructuralMetadataValidator
 
             for (var constraint = 1; constraint <= Constraints.Count; constraint++)
             {
-                if (Constraints.GetKind(constraint) != 1)
+                var kind = Constraints.GetKind(constraint);
+                if (kind == 3)
+                {
+                    var formal = Constraints.GetOwnerGenericParam(
+                        constraint);
+                    var ownerModule = GetGenericParamOwnerModule(formal);
+                    var relationRow = checked((int)Constraints
+                        .GetPayload(constraint));
+                    ValidateTypeSpecModuleContext(
+                        AssociatedRelations
+                            .GetDeclaringInterfaceTypeSpecRef(relationRow),
+                        ownerModule, visitedTypeSpecRows);
+                    ValidateTypeSpecModuleContext(
+                        AssociatedRelations.GetRequiredTypeSpecRef(
+                            relationRow),
+                        ownerModule, visitedTypeSpecRows);
+                    var associatedTypeReference = AssociatedRelations
+                        .GetAssociatedTypeDefReference(relationRow);
+                    var associatedTypeRow = checked((int)(
+                        associatedTypeReference & 0x00FF_FFFF));
+                    switch (associatedTypeReference >> 24)
+                    {
+                        case 0x20:
+                        {
+                            var ownerInterface = AssociatedTypeDefs
+                                .GetOwnerInterfaceDef(associatedTypeRow);
+                            var ownerType = Interfaces
+                                .GetOwnerTypeDef(ownerInterface);
+                            if (TypeDefs.GetOwnerModule(ownerType)
+                                != ownerModule)
+                            {
+                                throw InvalidMetadata();
+                            }
+                            break;
+                        }
+
+                        case 0x1C:
+                        {
+                            var moduleRef = Imports
+                                .GetModuleRefForImportRow(
+                                    associatedTypeRow);
+                            if (ModuleRefs.GetOwnerModule(moduleRef)
+                                != ownerModule)
+                            {
+                                throw InvalidMetadata();
+                            }
+                            break;
+                        }
+
+                        default:
+                            throw InvalidMetadata();
+                    }
+
+                    continue;
+                }
+
+                if (kind != 1)
                 {
                     continue;
                 }
@@ -732,6 +789,61 @@ public static class TrRmStructuralMetadataValidator
                             arrayElementDepth);
                         pending.Push((arrayElementRef, arrayElementDepth));
                         break;
+                }
+            }
+        }
+
+        internal void ValidateAssociatedRelationFeatureUsage()
+        {
+            if (!Schema.UsesAssociatedRelationConstraints())
+            {
+                if (AssociatedTypeDefs.Count != 0
+                    || AssociatedRelations.Count != 0
+                    || WitnessAssociatedTypes.Count != 0)
+                {
+                    throw InvalidMetadata();
+                }
+
+                return;
+            }
+
+            if (WitnessAssociatedTypes.Count != 0)
+            {
+                throw new NotSupportedException(
+                    "CM1AR1 does not admit AssociatedType references in witness bindings.");
+            }
+
+            for (var row = 1; row <= AssociatedTypeDefs.Count; row++)
+            {
+                var ownerInterface
+                    = AssociatedTypeDefs.GetOwnerInterfaceDef(row);
+                var ownerType = Interfaces
+                    .GetOwnerTypeDef(ownerInterface);
+                var ownerModule = TypeDefs.GetOwnerModule(ownerType);
+                if (!TrRmFeatureManifestValidator.Requires(Features, Modules,
+                        ownerModule,
+                        TrRmFeatureTableReader.GenericMethodCallsFeatureId,
+                        Schema))
+                {
+                    throw InvalidMetadata();
+                }
+            }
+
+            for (var row = 1; row <= Constraints.Count; row++)
+            {
+                if (Constraints.GetKind(row) != 3)
+                {
+                    continue;
+                }
+
+                var ownerModule = GetGenericParamOwnerModule(
+                    Constraints.GetOwnerGenericParam(row));
+                if (!TrRmFeatureManifestValidator.Requires(Features, Modules,
+                        ownerModule,
+                        TrRmFeatureTableReader.GenericMethodCallsFeatureId,
+                        Schema))
+                {
+                    throw InvalidMetadata();
                 }
             }
         }
@@ -2602,6 +2714,7 @@ public static class TrRmStructuralMetadataValidator
             nativeFunctionPointerSignatures,
             nativeVTables, imports, exports,
             index.Schema, selectedA3LayoutResourceLedger);
+        executionTables.ValidateAssociatedRelationFeatureUsage();
         executionTables.ValidateNonBodyTypeSpecModuleContexts();
         if (index.Schema.UsesRawUnionValueCoverage())
         {

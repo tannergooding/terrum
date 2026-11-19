@@ -7,7 +7,7 @@ using System.IO;
 namespace Terrum.CodeAnalysis.Modules;
 
 /// <summary>Validates Constraint row framing, ownership, flags and assigned payload forms.</summary>
-/// <remarks>Kind-3 payloads select AssociatedRelation rows; relation satisfaction and generic execution remain unsupported. Borrowed sections must remain unchanged.</remarks>
+/// <remarks>Kind-3 payloads select AssociatedRelation rows. Schema admission and relation satisfaction are separate checks. Borrowed sections must remain unchanged.</remarks>
 public readonly ref struct TrRmConstraintTableReader
 {
     private const int RowSize = 12;

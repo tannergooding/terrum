@@ -1310,6 +1310,16 @@ internal static class BoundTreeTraversal
                 rewriteType),
         };
 
+    internal static BoundGenericMethodAssociatedRelation RewriteTypes(
+        BoundGenericMethodAssociatedRelation relation,
+        Func<PrimitiveType, PrimitiveType> rewriteType) =>
+        relation with {
+            AssociatedType = RewriteTypes(relation.AssociatedType,
+                rewriteType),
+            RequiredType = RewriteGenericMethodTypeTerm(
+                relation.RequiredType, rewriteType),
+        };
+
     internal static BoundInterfaceWitnessMember RewriteTypes(
         BoundInterfaceWitnessMember member,
         Func<PrimitiveType, PrimitiveType> rewriteType) =>
@@ -1372,6 +1382,8 @@ internal static class BoundTreeTraversal
             PlaceholderType = rewriteType(formal.PlaceholderType),
             InterfaceConstraints = [.. formal.InterfaceConstraints.Select(
                 constraint => RewriteTypes(constraint, rewriteType))],
+            AssociatedRelations = [.. formal.AssociatedRelations.Select(
+                relation => RewriteTypes(relation, rewriteType))],
         };
 
     internal static BoundGenericMethodFormalSignature RewriteTypes(
@@ -1380,6 +1392,8 @@ internal static class BoundTreeTraversal
         formal with {
             InterfaceConstraints = [.. formal.InterfaceConstraints.Select(
                 constraint => RewriteTypes(constraint, rewriteType))],
+            AssociatedRelations = [.. formal.AssociatedRelations.Select(
+                relation => RewriteTypes(relation, rewriteType))],
         };
 
     internal static BoundProgram RewriteInterfaceWitnesses(

@@ -19,6 +19,12 @@ public static partial class TrRmExecutableCompiler
         => schemaIdentity switch {
             StandardC1M1SchemaIdentity
                 => TrRmArtifactSchema.C1M1Draft,
+            StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsSchemaIdentity
+                => TrRmArtifactSchema
+                    .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft,
+            StandardCM1AR1SchemaIdentity
+                => TrRmArtifactSchema
+                    .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsDraft,
             StandardC1M1Construction2L1R1ClassParameterDefaultsSchemaIdentity
                 => TrRmArtifactSchema
                     .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft,
@@ -37,6 +43,10 @@ public static partial class TrRmExecutableCompiler
         ImmutableArray<BoundStandardClassMethodExpectation> Imports,
         ImmutableArray<string> ExportKeys,
         ReadOnlyMemory<byte> Body);
+
+    private readonly record struct C1M1GenericConstraintPlan(
+        int MethodRow, int FormalOrdinal, int GenericParamRow,
+        int Kind, uint Payload);
 
     private sealed record C1M1Construction2SourceInitializer(
         int ClassIndex, BoundFunction Function, uint ClassTypeSpecReference,
@@ -8122,7 +8132,9 @@ public static partial class TrRmExecutableCompiler
     {
         var schema = GetC1M1ClassMetadataSchema(schemaIdentity);
         if (program.EntryPoint != -1
-            || !program.Classes.IsEmpty || !program.Interfaces.IsEmpty
+            || !program.Classes.IsEmpty
+            || (!program.Interfaces.IsEmpty
+                && !schema.UsesAssociatedRelationConstraints())
             || !program.InterfaceWitnesses.IsEmpty
             || !program.GenericMethodDefinitions.IsEmpty
             || !program.GenericMethodSignatures.IsEmpty
@@ -8911,6 +8923,8 @@ public static partial class TrRmExecutableCompiler
         var genericParamRows = new List<TrRmGenericParamRow>();
         var genericParamNames = new List<string>();
         var genericConstraintRows = new List<TrRmConstraintRow>();
+        var genericConstraintPlans
+            = new List<C1M1GenericConstraintPlan>();
         foreach (var (oldMethodRow, plan) in methodEmissionPlans)
         {
             var formals = plan.Method.GenericParameters;
@@ -9144,6 +9158,21 @@ public static partial class TrRmExecutableCompiler
                     {
                         throw new InvalidDataException(
                             "A retained class MethodDef Constraint has an invalid owner.");
+                    }
+
+                    if (schema.UsesAssociatedRelationConstraints())
+                    {
+                        if (constraint.Kind is < 1 or > 3)
+                        {
+                            throw new InvalidDataException(
+                                "A retained class MethodDef Constraint has an unsupported kind.");
+                        }
+
+                        genericConstraintPlans.Add(
+                            new C1M1GenericConstraintPlan(oldMethodRow,
+                                ordinal, genericParamRow,
+                                constraint.Kind, constraint.Payload));
+                        continue;
                     }
 
                     var payload = constraint.Kind switch {
@@ -9878,10 +9907,654 @@ public static partial class TrRmExecutableCompiler
             left.Kind.CompareTo(right.Kind));
         var artifact = TrRmArtifactWriter.Encode(sections,
             schema);
+        if (schema.UsesAssociatedRelationConstraints()
+            && genericConstraintPlans.Count != 0)
+        {
+            artifact = ReemitC1M1ClassAssociatedRelationConstraints(
+                artifact, program, rootTables, rootModuleRow, rootSnapshot,
+                schema, genericConstraintPlans, genericParamRows.Count,
+                genericParamRowMap, typeDefRowMap, importRowMap);
+        }
+
         _ = TrRmStructuralMetadataValidator
             .ValidateC1AndGetExecutionTables(
                 new TrRmArtifactIndex(artifact, schema));
         return artifact;
+    }
+
+    private static BoundProgram
+        CreateC1M1AssociatedRelationReemissionProgram(
+            BoundProgram program,
+            TrRmStructuralMetadataValidator.ValidatedExecutionTables
+                rootTables,
+            int rootModuleRow,
+            BoundSourceTypeProviderSnapshot rootSnapshot,
+            IReadOnlyList<C1M1GenericConstraintPlan> constraintPlans)
+    {
+        var importsByInterface = new Dictionary<(string Name, int Arity),
+            BoundModuleImport>();
+
+        BoundModuleImport EnsureInterfaceImport(BoundInterfaceType type)
+        {
+            if (type.Kind != BoundInterfaceTypeKind.Nominal
+                || string.IsNullOrEmpty(type.NominalName))
+            {
+                throw Unsupported(
+                    "A retained CM1AR1 interface relation has no nominal declaring interface.");
+            }
+            if (type.ModuleImport is BoundModuleImport existingImport)
+            {
+                return existingImport;
+            }
+
+            var arity = type.TypeArguments.IsDefault
+                ? 0 : type.TypeArguments.Length;
+            if (importsByInterface.TryGetValue(
+                    (type.NominalName, arity), out var cachedImport))
+            {
+                return cachedImport;
+            }
+
+            var typeDefRows = Enumerable.Range(1, rootTables.TypeDefs.Count)
+                .Where(typeDefRow =>
+                    rootTables.TypeDefs.GetOwnerModule(typeDefRow)
+                        == rootModuleRow
+                    && rootTables.TypeDefs.GetKind(typeDefRow) == 3
+                    && StringComparer.Ordinal.Equals(
+                        QualifiedTypeName(typeDefRow),
+                        type.NominalName)
+                    && rootTables.TypeDefs.GetGenericRange(typeDefRow).Count
+                        == arity)
+                .ToArray();
+            if (typeDefRows.Length != 1)
+            {
+                throw Unsupported(
+                    "A retained CM1AR1 local interface has no unique root TypeDef.");
+            }
+
+            var typeDefId = 0x1300_0000u
+                | checked((uint)typeDefRows[0]);
+            var exportKeys = rootTables.Exports.GetExportsForModule(
+                    rootModuleRow)
+                .Where(export => export.DefinitionId == typeDefId)
+                .Select(static export => export.ExportKey)
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+            if (exportKeys.Length != 1)
+            {
+                throw Unsupported(
+                    "A retained CM1AR1 local interface requires one unambiguous owner ExportKey.");
+            }
+
+            var import = new BoundModuleImport(rootSnapshot.ModuleIdentity,
+                exportKeys[0], rootSnapshot.TargetRequirement,
+                rootSnapshot.RuntimePolicy);
+            importsByInterface.Add((type.NominalName, arity), import);
+            return import;
+        }
+
+        string QualifiedTypeName(int typeDefRow)
+        {
+            var typeName = rootTables.TypeDefs.GetName(typeDefRow);
+            var namespaceName
+                = rootTables.TypeDefs.GetNamespace(typeDefRow);
+            return namespaceName.Length == 0 ? typeName
+                : namespaceName + "." + typeName;
+        }
+
+        BoundInterfaceType RewriteInterfaceType(BoundInterfaceType type)
+        {
+            ImmutableArray<BoundInterfaceTypeArgument> typeArguments
+                = type.TypeArguments.IsDefault
+                ? type.TypeArguments
+                : [.. type.TypeArguments.Select(argument =>
+                    argument with {
+                        Type = argument.Type is null ? null
+                            : RewriteInterfaceType(argument.Type),
+                        ConstantType = argument.ConstantType is null ? null
+                            : RewriteInterfaceType(argument.ConstantType),
+                    })];
+            var rewritten = type with { TypeArguments = typeArguments };
+            if (type.Kind == BoundInterfaceTypeKind.Nominal
+                && type.ModuleImport is null)
+            {
+                rewritten = rewritten with {
+                    ModuleImport = EnsureInterfaceImport(rewritten),
+                };
+            }
+
+            return rewritten;
+        }
+
+        var retainedRelations = program.RetainedGenericMethodRoots
+            .SelectMany(root => root.Formals.SelectMany(formal =>
+                formal.AssociatedRelations))
+            .Where(relation => constraintPlans.Any(plan =>
+                plan.Kind == 3
+                && plan.Payload
+                    == checked((uint)relation.AssociatedRelationRow)))
+            .ToArray();
+        foreach (var relation in retainedRelations)
+        {
+            _ = EnsureInterfaceImport(
+                relation.AssociatedType.DeclaringInterface);
+        }
+
+        foreach (var root in program.RetainedGenericMethodRoots)
+        {
+            foreach (var formal in root.Formals)
+            {
+                foreach (var constraint in formal.InterfaceConstraints)
+                {
+                    if (constraint.Kind == BoundInterfaceTypeKind.Nominal
+                        && constraint.ModuleImport is null)
+                    {
+                        _ = EnsureInterfaceImport(constraint);
+                    }
+                }
+            }
+        }
+
+        var roots = program.RetainedGenericMethodRoots.Select(root =>
+        {
+            var formals = root.Formals.Select(formal => formal with {
+                InterfaceConstraints = formal.InterfaceConstraints.IsDefault
+                    ? formal.InterfaceConstraints
+                    : [.. formal.InterfaceConstraints.Select(
+                        RewriteInterfaceType)],
+                AssociatedRelations = formal.AssociatedRelations.IsDefault
+                    ? formal.AssociatedRelations
+                    : [.. formal.AssociatedRelations.Select(relation =>
+                        relation with {
+                            AssociatedType
+                                = relation.AssociatedType with {
+                                    DeclaringInterface
+                                        = RewriteInterfaceType(
+                                            relation.AssociatedType
+                                                .DeclaringInterface),
+                                },
+                        })],
+            }).ToImmutableArray();
+            var rewrittenRoot = new BoundGenericMethodImport(root.Origin,
+                root.Signature, formals, root.ProofFunction,
+                root.FormalTypeOwnerOrdinal, root.SpanTypes,
+                root.OrdinaryParameterDefaults);
+            rewrittenRoot.CompleteProofFunction(root.ProofFunction,
+                root.ProofSupportFunctions,
+                root.FormalTypeOwnerOrdinal);
+            if (root.Binding is BoundGenericMethodImportBinding binding)
+            {
+                rewrittenRoot.CompleteBinding(binding);
+            }
+
+            return rewrittenRoot;
+        }).ToImmutableArray();
+        var interfaces = program.Interfaces.Select(definition =>
+        {
+            var key = (definition.QualifiedName,
+                definition.Formals.Length);
+            return definition.ModuleImport is null
+                && importsByInterface.TryGetValue(key, out var import)
+                ? definition with { ModuleImport = import }
+                : definition;
+        }).ToImmutableArray();
+        return program with {
+            Interfaces = interfaces,
+            RetainedGenericMethodRoots = roots,
+        };
+    }
+
+    private static byte[] ReemitC1M1ClassAssociatedRelationConstraints(
+        byte[] artifact, BoundProgram program,
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables rootTables,
+        int rootModuleRow,
+        BoundSourceTypeProviderSnapshot rootSnapshot,
+        TrRmArtifactSchema schema,
+        IReadOnlyList<C1M1GenericConstraintPlan> constraintPlans,
+        int classGenericParamCount,
+        Dictionary<int, int> genericParamRowMap,
+        Dictionary<int, int> typeDefRowMap,
+        Dictionary<int, int> importRowMap)
+    {
+        var reemissionProgram
+            = CreateC1M1AssociatedRelationReemissionProgram(program,
+                rootTables, rootModuleRow, rootSnapshot,
+                constraintPlans);
+        var importedAssociatedTypeImportRows
+            = new Dictionary<GenericImportedInterfaceAssociatedTypeKey,
+                uint>();
+        artifact = AddImportedGenericInterfaceMetadata(artifact,
+            reemissionProgram, schema, null,
+            out importedAssociatedTypeImportRows);
+
+        var outputIndex = new TrRmArtifactIndex(artifact, schema);
+        var outputTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(outputIndex);
+        var outputSections = new SortedDictionary<ushort, TrRmSection>();
+        for (var sectionIndex = 0;
+            sectionIndex < outputIndex.SectionCount; sectionIndex++)
+        {
+            outputIndex.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var count);
+            outputSections.Add(kind, new TrRmSection(kind, flags,
+                checked((uint)count), bytes.ToArray()));
+        }
+
+        var stringSection = outputSections[0x0002];
+        var strings = new TrRmStringTableReader(stringSection.Bytes.Span,
+            checked((int)stringSection.RecordCount));
+        var importedInterfaceImportRows
+            = ReadImportedInterfaceImportRows(
+                outputSections.Values.ToArray(), strings);
+        var interfaceImportRowsByOwner = new Dictionary<
+            (string ProviderIdentity, string ExportKey, string QualifiedName,
+                int Arity, uint TargetRequirement, uint RuntimePolicy), int>();
+        foreach (var (key, importRow) in importedInterfaceImportRows)
+        {
+            interfaceImportRowsByOwner.Add(key,
+                checked((int)importRow));
+        }
+
+        void MapInterfaceType(BoundInterfaceDefinition definition)
+        {
+            if (definition.ModuleImport is not BoundModuleImport import)
+            {
+                return;
+            }
+
+            var importKey = (import.ProducerIdentity, import.ExportKey,
+                definition.QualifiedName, definition.Formals.Length,
+                import.TargetRequirement, import.RuntimePolicy);
+            if (!interfaceImportRowsByOwner.TryGetValue(importKey,
+                    out var outputImportRow))
+            {
+                return;
+            }
+
+            var outputDefinitionId = outputTables.Imports
+                .GetExpectedDefinitionForImportRow(outputImportRow);
+            if ((outputDefinitionId >> 24) != 0x13)
+            {
+                throw new InvalidDataException(
+                    "A re-emitted interface owner Import does not expect a TypeDef.");
+            }
+
+            var outputTypeDefRow = checked((int)(
+                outputDefinitionId & 0x00FF_FFFF));
+            var oldQualifiedName = definition.QualifiedName;
+            var oldTypeDefRows = Enumerable.Range(1,
+                    rootTables.TypeDefs.Count)
+                .Where(typeDefRow =>
+                    rootTables.TypeDefs.GetKind(typeDefRow) == 3
+                    && StringComparer.Ordinal.Equals(
+                        GetC1M1TypeDefQualifiedName(rootTables.TypeDefs,
+                            typeDefRow), oldQualifiedName)
+                    && rootTables.TypeDefs.GetGenericRange(typeDefRow).Count
+                        == definition.Formals.Length)
+                .ToArray();
+            foreach (var oldTypeDefRow in oldTypeDefRows)
+            {
+                if (rootTables.TypeDefs.GetOwnerModule(oldTypeDefRow)
+                        == rootModuleRow
+                    && !rootTables.Imports.IsExpectedDefinition(
+                        0x1300_0000u
+                            | checked((uint)oldTypeDefRow)))
+                {
+                    if (typeDefRowMap.TryGetValue(oldTypeDefRow,
+                            out var existingTypeDefRow)
+                        && existingTypeDefRow != outputTypeDefRow)
+                    {
+                        throw new InvalidDataException(
+                            "A retained CM1AR1 interface TypeDef has conflicting remapped owners.");
+                    }
+
+                    _ = typeDefRowMap.TryAdd(oldTypeDefRow,
+                        outputTypeDefRow);
+                }
+            }
+
+            for (var oldImportRow = 1;
+                oldImportRow <= rootTables.Imports.Count;
+                oldImportRow++)
+            {
+                var expectedDefinitionId = rootTables.Imports
+                    .GetExpectedDefinitionForImportRow(oldImportRow);
+                if ((expectedDefinitionId >> 24) != 0x13)
+                {
+                    continue;
+                }
+
+                var oldTypeDefRow = checked((int)(
+                    expectedDefinitionId & 0x00FF_FFFF));
+                if (!oldTypeDefRows.Contains(oldTypeDefRow))
+                {
+                    continue;
+                }
+
+                var oldModuleRefRow = rootTables.Imports
+                    .GetModuleRefForImportRow(oldImportRow);
+                var oldProviderIdentity = rootTables.ModuleRefs
+                    .GetProducerIdentity(oldModuleRefRow);
+                var oldExportKey = rootTables.Imports
+                    .GetBindingForImportRow(oldImportRow).ExportKey;
+                if (!StringComparer.Ordinal.Equals(oldProviderIdentity,
+                        import.ProducerIdentity)
+                    || !StringComparer.Ordinal.Equals(oldExportKey,
+                        import.ExportKey))
+                {
+                    continue;
+                }
+
+                if (importRowMap.TryGetValue(oldImportRow,
+                        out var existingImportRow)
+                    && existingImportRow != outputImportRow)
+                {
+                    throw new InvalidDataException(
+                        "A retained CM1AR1 interface Import has conflicting remapped owners.");
+                }
+
+                _ = importRowMap.TryAdd(oldImportRow, outputImportRow);
+                if (typeDefRowMap.TryGetValue(oldTypeDefRow,
+                        out var existingTypeDefRow)
+                    && existingTypeDefRow != outputTypeDefRow)
+                {
+                    throw new InvalidDataException(
+                        "A retained CM1AR1 interface TypeDef has conflicting remapped owners.");
+                }
+
+                _ = typeDefRowMap.TryAdd(oldTypeDefRow,
+                    outputTypeDefRow);
+            }
+        }
+
+        foreach (var definition in reemissionProgram.Interfaces)
+        {
+            MapInterfaceType(definition);
+        }
+
+        var outputTypeSpecRows
+            = new List<ReadOnlyMemory<byte>>(outputTables.TypeSpecs.Count
+                + constraintPlans.Count * 2);
+        for (var row = 1; row <= outputTables.TypeSpecs.Count; row++)
+        {
+            outputTypeSpecRows.Add(
+                outputTables.TypeSpecs.GetRow(row).ToArray());
+        }
+
+        var outputAssociatedRelations
+            = new List<TrRmAssociatedRelationRow>(
+                outputTables.AssociatedRelations.Count
+                    + constraintPlans.Count);
+        for (var row = 1; row <= outputTables.AssociatedRelations.Count;
+            row++)
+        {
+            outputAssociatedRelations.Add(
+                new TrRmAssociatedRelationRow(
+                    outputTables.AssociatedRelations
+                        .GetDeclaringInterfaceTypeSpecRef(row),
+                    outputTables.AssociatedRelations
+                        .GetAssociatedTypeDefReference(row),
+                    outputTables.AssociatedRelations
+                        .GetRequiredTypeSpecRef(row)));
+        }
+
+        BoundGenericMethodAssociatedRelation GetAssociatedRelation(
+            C1M1GenericConstraintPlan plan)
+        {
+            var methodDefId = 0x1600_0000u
+                | checked((uint)plan.MethodRow);
+            var matches = reemissionProgram.RetainedGenericMethodRoots
+                .Where(root => root.Origin.MethodDefId == methodDefId)
+                .SelectMany(root => root.Formals)
+                .Where(formal => formal.Ordinal == plan.FormalOrdinal)
+                .SelectMany(static formal => formal.AssociatedRelations)
+                .Where(relation => relation.AssociatedRelationRow
+                    == checked((int)plan.Payload))
+                .ToArray();
+            if (matches.Length != 1)
+            {
+                throw Unsupported(
+                    "A retained CM1AR1 class Constraint has no unique typed associated relation.");
+            }
+
+            return matches[0];
+        }
+
+        var constraintRows = new List<TrRmConstraintRow>(
+            constraintPlans.Count);
+        var typeSpecMaps = new Dictionary<
+            (int MethodRow, int FormalOrdinal),
+            (Dictionary<int, uint> Rows, HashSet<int> Active)>();
+        foreach (var plan in constraintPlans)
+        {
+            if (!typeSpecMaps.TryGetValue(
+                    (plan.MethodRow, plan.FormalOrdinal),
+                    out var remapState))
+            {
+                remapState = (new Dictionary<int, uint>(),
+                    new HashSet<int>());
+                typeSpecMaps.Add((plan.MethodRow, plan.FormalOrdinal),
+                    remapState);
+            }
+
+            switch (plan.Kind)
+            {
+                case 1:
+                {
+                    var typeSpec = RemapC1M1ClassTypeSpec(rootTables,
+                        plan.Payload, typeDefRowMap, importRowMap,
+                        outputTypeSpecRows, remapState.Rows,
+                        remapState.Active, depth: 0,
+                        genericParamRowMap: genericParamRowMap);
+                    constraintRows.Add(new TrRmConstraintRow(
+                        plan.GenericParamRow, 1, typeSpec));
+                    break;
+                }
+
+                case 2 when plan.Payload is >= 1 and <= 3:
+                    constraintRows.Add(new TrRmConstraintRow(
+                        plan.GenericParamRow, 2, plan.Payload));
+                    break;
+
+                case 3:
+                {
+                    var relation
+                        = GetAssociatedRelation(plan);
+                    var sourceRelationRow
+                        = checked((int)plan.Payload);
+                    if (relation.DeclaringInterfaceTypeSpecReference
+                            != rootTables.AssociatedRelations
+                                .GetDeclaringInterfaceTypeSpecRef(
+                                    sourceRelationRow)
+                        || relation.AssociatedTypeDefReference
+                            != rootTables.AssociatedRelations
+                                .GetAssociatedTypeDefReference(
+                                    sourceRelationRow)
+                        || relation.RequiredTypeSpecReference
+                            != rootTables.AssociatedRelations
+                                .GetRequiredTypeSpecRef(sourceRelationRow))
+                    {
+                        throw new InvalidDataException(
+                            "A retained CM1AR1 typed relation differs from its source AssociatedRelation row.");
+                    }
+
+                    var declaringInterface = RemapC1M1ClassTypeSpec(
+                        rootTables,
+                        rootTables.AssociatedRelations
+                            .GetDeclaringInterfaceTypeSpecRef(
+                                sourceRelationRow),
+                        typeDefRowMap, importRowMap, outputTypeSpecRows,
+                        remapState.Rows, remapState.Active, depth: 0,
+                        genericParamRowMap: genericParamRowMap);
+                    var requiredType = RemapC1M1ClassTypeSpec(rootTables,
+                        rootTables.AssociatedRelations
+                            .GetRequiredTypeSpecRef(sourceRelationRow),
+                        typeDefRowMap, importRowMap, outputTypeSpecRows,
+                        remapState.Rows, remapState.Active, depth: 0,
+                        genericParamRowMap: genericParamRowMap);
+                    var associatedTypeDef
+                        = GenericMethodAssociatedTypeDefReference(
+                            relation, [], importedAssociatedTypeImportRows);
+                    var relationRow
+                        = checked((uint)outputAssociatedRelations.Count + 1);
+                    outputAssociatedRelations.Add(
+                        new TrRmAssociatedRelationRow(declaringInterface,
+                            associatedTypeDef, requiredType));
+                    constraintRows.Add(new TrRmConstraintRow(
+                        plan.GenericParamRow, 3, relationRow));
+                    break;
+                }
+
+                default:
+                    throw new InvalidDataException(
+                        "A retained CM1AR1 class Constraint has an unsupported kind or payload.");
+            }
+        }
+
+        var genericParamSection = outputSections[0x0019];
+        var genericParamBytes = genericParamSection.Bytes.ToArray();
+        var genericParamCount
+            = checked((int)genericParamSection.RecordCount);
+        if (genericParamCount < classGenericParamCount
+            || genericParamBytes.Length
+                != checked(genericParamCount * 32))
+        {
+            throw new InvalidDataException(
+                "The re-emitted CM1AR1 GenericParam table has an invalid extent.");
+        }
+
+        var existingConstraintSection
+            = outputSections.TryGetValue(0x001A, out var foundConstraints)
+                ? foundConstraints : default;
+        var existingConstraintBytes
+            = existingConstraintSection.Bytes.ToArray();
+        var existingConstraintCount
+            = checked((int)existingConstraintSection.RecordCount);
+        if (existingConstraintBytes.Length
+            != checked(existingConstraintCount * 12))
+        {
+            throw new InvalidDataException(
+                "The re-emitted CM1AR1 Constraint table has an invalid extent.");
+        }
+
+        var classConstraintRanges = new Dictionary<int, (int First,
+            int Count)>();
+        var nextConstraintRow = 1;
+        foreach (var group in constraintRows.GroupBy(
+                     static constraint => constraint.OwnerGenericParamRow)
+                 .OrderBy(static group => group.Key))
+        {
+            classConstraintRanges.Add(group.Key,
+                (nextConstraintRow, group.Count()));
+            nextConstraintRow = checked(nextConstraintRow + group.Count());
+        }
+
+        var allConstraintBytes = new byte[checked(
+            (constraintRows.Count + existingConstraintCount) * 12)];
+        for (var index = 0; index < constraintRows.Count; index++)
+        {
+            var constraint = constraintRows[index];
+            var offset = index * 12;
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                allConstraintBytes.AsSpan(offset),
+                checked((uint)constraint.OwnerGenericParamRow));
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                allConstraintBytes.AsSpan(offset + 4), constraint.Kind);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                allConstraintBytes.AsSpan(offset + 8),
+                constraint.Payload);
+        }
+        existingConstraintBytes.CopyTo(allConstraintBytes,
+            constraintRows.Count * 12);
+
+        for (var genericParamRow = 1;
+            genericParamRow <= genericParamCount;
+            genericParamRow++)
+        {
+            var offset = (genericParamRow - 1) * 32;
+            if (genericParamRow <= classGenericParamCount)
+            {
+                var range = classConstraintRanges.TryGetValue(
+                    genericParamRow, out var classRange)
+                    ? classRange : (0, 0);
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    genericParamBytes.AsSpan(offset + 12),
+                    checked((uint)range.Item1));
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    genericParamBytes.AsSpan(offset + 16),
+                    checked((uint)range.Item2));
+            }
+            else
+            {
+                var first = BinaryPrimitives.ReadUInt32LittleEndian(
+                    genericParamBytes.AsSpan(offset + 12));
+                if (first != 0 && constraintRows.Count != 0)
+                {
+                    BinaryPrimitives.WriteUInt32LittleEndian(
+                        genericParamBytes.AsSpan(offset + 12),
+                        checked(first + (uint)constraintRows.Count));
+                }
+            }
+        }
+
+        var typeSpecBytes = outputTypeSpecRows.Count == 0 ? []
+            : TrRmTypeSpecTableWriter.Encode(outputTypeSpecRows,
+                outputTables.TypeDefs.Count, outputTables.Imports.Count,
+                genericParamCount,
+                outputTables.NativeFunctionPointerSignatures.Count, schema,
+                outputTables.Methods.Count);
+        var typeSpecs = outputTypeSpecRows.Count == 0 ? default
+            : new TrRmTypeSpecTableReader(typeSpecBytes,
+                outputTypeSpecRows.Count, outputTables.TypeDefs.Count,
+                outputTables.Imports.Count, genericParamCount,
+                outputTables.NativeFunctionPointerSignatures.Count, schema,
+                outputTables.Methods.Count);
+        var associatedRelationBytes
+            = outputAssociatedRelations.Count == 0 ? []
+                : outputTypeSpecRows.Count == 0
+                    ? throw new InvalidDataException(
+                        "A retained CM1AR1 AssociatedRelation has no TypeSpec table.")
+                : TrRmAssociatedRelationTableWriter.Encode(
+                    outputAssociatedRelations, typeSpecs,
+                    outputTables.AssociatedTypeDefs.Count,
+                    outputTables.Imports);
+
+        if (outputTypeSpecRows.Count != 0
+            || outputSections.ContainsKey(0x0011))
+        {
+            outputSections[0x0011] = new TrRmSection(0x0011, 0,
+                checked((uint)outputTypeSpecRows.Count), typeSpecBytes);
+        }
+        outputSections[0x0019] = new TrRmSection(0x0019, 0,
+            checked((uint)genericParamCount), genericParamBytes);
+        if (allConstraintBytes.Length != 0)
+        {
+            outputSections[0x001A] = new TrRmSection(0x001A, 0,
+                checked((uint)(constraintRows.Count
+                    + existingConstraintCount)), allConstraintBytes);
+        }
+        if (associatedRelationBytes.Length != 0)
+        {
+            outputSections[0x0036] = new TrRmSection(0x0036, 0,
+                checked((uint)outputAssociatedRelations.Count),
+                associatedRelationBytes);
+        }
+
+        var result = TrRmArtifactWriter.Encode(
+            [.. outputSections.Values], schema);
+        _ = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                new TrRmArtifactIndex(result, schema));
+        return result;
+    }
+
+    private static string GetC1M1TypeDefQualifiedName(
+        TrRmTypeDefTableReader typeDefs, int typeDefRow)
+    {
+        var name = typeDefs.GetName(typeDefRow);
+        var namespaceName = typeDefs.GetNamespace(typeDefRow);
+        return namespaceName.Length == 0 ? name
+            : namespaceName + "." + name;
     }
 
     private static void ValidateC1M1ClassCarrierBindings(

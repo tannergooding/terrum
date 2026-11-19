@@ -42,6 +42,8 @@ internal sealed partial class Binder
         internal bool RequiresWritable { get; init; }
         internal ImmutableArray<BoundInterfaceType> InterfaceConstraints
             { get; init; } = [];
+        internal ImmutableArray<BoundGenericMethodAssociatedRelation>
+            AssociatedRelations { get; init; } = [];
         internal ImmutableArray<int> DefaultTypeParameterDependencies
             { get; init; } = [];
     }
@@ -1764,6 +1766,9 @@ internal sealed partial class Binder
             ImmutableDictionary.CreateBuilder<StaticOperatorKey, GenericOperatorConstraint>()).ToArray();
         var interfaceConstraints = typeNames.Select(static _ =>
             ImmutableArray.CreateBuilder<BoundInterfaceType>()).ToArray();
+        var associatedRelationSyntaxes = new List<(
+            int FormalOrdinal, BoundInterfaceMemberIdentity AssociatedType,
+            SyntaxNode RequiredTypeSyntax, TextSpan Span)>();
         var methodConstantParameters = new Dictionary<string,
             InterfaceConstantFormal>(StringComparer.Ordinal);
         foreach (var constantFormal in methodFormals.Where(static formal =>
@@ -2049,8 +2054,28 @@ internal sealed partial class Binder
                 });
             }
         }
-        foreach (var constraint in children.Where(static child => child.Kind == SyntaxKind.ConstraintClause))
+        foreach (var constraint in children.Where(static child =>
+            child.Kind is SyntaxKind.ConstraintClause
+                or SyntaxKind.AssociatedIdentityConstraint))
         {
+            if (constraint.Kind
+                == SyntaxKind.AssociatedIdentityConstraint)
+            {
+                if (!TryBindAssociatedIdentityConstraint(constraint,
+                        out var associatedFormalOrdinal,
+                        out var associatedType,
+                        out var requiredTypeSyntax))
+                {
+                    valid = false;
+                    continue;
+                }
+
+                associatedRelationSyntaxes.Add((
+                    associatedFormalOrdinal, associatedType,
+                    requiredTypeSyntax, constraint.Span));
+                continue;
+            }
+
             if (constraint.Children[1] is not SyntaxTokenElement formal
                 || !constrained.Add(formal.Token.Name))
             {
@@ -2197,6 +2222,36 @@ internal sealed partial class Binder
                 }
             }
         }
+        foreach (var relation in associatedRelationSyntaxes)
+        {
+            if (!interfaceConstraints[relation.FormalOrdinal].Any(
+                    interfaceConstraint =>
+                        BoundInterfaceContract
+                            .AreEquivalentProviderInterfaceViews(
+                                interfaceConstraint,
+                                relation.AssociatedType
+                                    .DeclaringInterface)))
+            {
+                Report("TRM3005",
+                    "An associated identity constraint requires a separate matching interface conformance constraint.",
+                    relation.Span);
+                valid = false;
+            }
+        }
+        if (associatedRelationSyntaxes.Count != 0
+            && (containingType is null
+                || ownerType is not PrimitiveType relationOwner
+                || !ManagedClassTypes.IsClass(relationOwner)
+                || ownerTypeDefinitionIndex >= 0
+                || !ownerTypeArguments.IsEmpty
+                || publicModifierCount != 1
+                || (!isStatic && isMutable)))
+        {
+            Report("TRM3005",
+                "Associated identity constraints are limited to public static or readonly-instance generic MethodDefs on nongeneric classes under CM1AR1.",
+                declaration.Span);
+            valid = false;
+        }
         var outputParameters = templateParameters.Where(
             static parameter => parameter.IsOut || parameter.IsInit).ToArray();
         var hasGenericOutputType = outputParameters.Any(parameter =>
@@ -2283,6 +2338,66 @@ internal sealed partial class Binder
                 .Select(clause =>
                     new SourceDeclarationContractClause(_tree, clause))],
         };
+        if (associatedRelationSyntaxes.Count != 0)
+        {
+            var relationBuilders = Enumerable.Range(0,
+                    candidateTemplate.TypeParameters.Length)
+                .Select(static _ => ImmutableArray.CreateBuilder<
+                    BoundGenericMethodAssociatedRelation>())
+                .ToArray();
+            foreach (var relationSyntax in associatedRelationSyntaxes)
+            {
+                var requiredType = BindGenericMethodTypeTerm(
+                    relationSyntax.RequiredTypeSyntax, candidateTemplate);
+                if (requiredType is not BoundGenericMethodTypeTerm term)
+                {
+                    Report("TRM3005",
+                        "The required associated type is outside the supported generic type-term subset.",
+                        relationSyntax.Span);
+                    valid = false;
+                    continue;
+                }
+
+                var formalRelations
+                    = relationBuilders[relationSyntax.FormalOrdinal];
+                if (formalRelations.Any(existing =>
+                        BoundInterfaceContract
+                            .AreEquivalentAssociatedTypeIdentities(
+                                existing.AssociatedType,
+                                relationSyntax.AssociatedType)
+                            && BoundGenericMethodTypeTerms.AreEquivalent(
+                                existing.RequiredType, term)))
+                {
+                    Report("TRM3005",
+                        "A generic formal cannot repeat an associated identity constraint.",
+                        relationSyntax.Span);
+                    valid = false;
+                    continue;
+                }
+
+                formalRelations.Add(
+                    new BoundGenericMethodAssociatedRelation(
+                        relationSyntax.FormalOrdinal,
+                        relationSyntax.AssociatedType, term,
+                        0, 0, 0, 0));
+            }
+
+            var completedTypeParameters
+                = candidateTemplate.TypeParameters.ToBuilder();
+            for (var ordinal = 0;
+                ordinal < completedTypeParameters.Count; ordinal++)
+            {
+                completedTypeParameters[ordinal]
+                    = completedTypeParameters[ordinal] with {
+                        AssociatedRelations =
+                            relationBuilders[ordinal].ToImmutable(),
+                    };
+            }
+
+            candidateTemplate = candidateTemplate with {
+                TypeParameters = completedTypeParameters.MoveToImmutable(),
+            };
+        }
         var formalOrder = methodFormals.Select(static formal =>
             new BoundGenericMethodFormalSlot(formal.Ordinal,
                 formal.Kind, formal.TypeFormalOrdinal,
@@ -2365,6 +2480,118 @@ internal sealed partial class Binder
                 return typeParameterIndices.TryGetValue(name, out var index) ? index : -1;
             }
             return Array.IndexOf(typeNames, name);
+        }
+
+        bool TryBindAssociatedIdentityConstraint(
+            SyntaxNode constraint,
+            out int formalOrdinal,
+            out BoundInterfaceMemberIdentity associatedType,
+            out SyntaxNode requiredTypeSyntax)
+        {
+            formalOrdinal = -1;
+            associatedType = null!;
+            requiredTypeSyntax = null!;
+            var projection = constraint.Children
+                .OfType<SyntaxNode>()
+                .SingleOrDefault(static child =>
+                    child.Kind == SyntaxKind.AssociatedProjection);
+            var projectionTypes = projection?.Children
+                .OfType<SyntaxNode>().ToArray() ?? [];
+            var requiredTypeSyntaxNode = constraint.Children
+                .OfType<SyntaxNode>()
+                .SingleOrDefault(static child =>
+                    child.Kind is not SyntaxKind.AssociatedProjection);
+            var identityToken = constraint.Children
+                .OfType<SyntaxTokenElement>()
+                .SingleOrDefault(static token =>
+                    token.Token.Text == "is");
+            var projectionTokens = projection?.Children
+                .OfType<SyntaxTokenElement>().ToArray() ?? [];
+            if (projection is null || projectionTypes.Length != 2
+                || projectionTypes[0].Kind != SyntaxKind.TypeName
+                || projectionTokens.Length == 0
+                || requiredTypeSyntaxNode is null
+                || identityToken is null
+                || identityToken.Token.Text != "is")
+            {
+                Report("TRM3005",
+                    "An associated identity constraint must select one direct associated-type projection and a complete required type.",
+                    constraint.Span);
+                return false;
+            }
+
+            var subjectType = projectionTypes[0];
+            var subjectIdentifiers = subjectType.Children
+                .OfType<SyntaxTokenElement>()
+                .Where(static token =>
+                    token.Token.Kind == TokenKind.Identifier)
+                .ToArray();
+            var subjectName = NameText(subjectType);
+            formalOrdinal = FindTypeParameter(subjectName);
+            var memberName = projectionTokens[^1].Token.Name;
+            if (formalOrdinal < 0 || subjectIdentifiers.Length != 1
+                || subjectType.Children.Length != 1
+                || string.IsNullOrEmpty(memberName))
+            {
+                Report("TRM3005",
+                    "An associated identity constraint must name a method type formal and direct associated type.",
+                    constraint.Span);
+                return false;
+            }
+
+            var interfaceDiagnosticCount = DiagnosticCount;
+            var interfaceType = BindInterfaceType(
+                projectionTypes[1], ownerTypeParameterMap,
+                _interfaceDeclarationGroups, ownerTypeParameterMap.Count,
+                methodTypeParameterMap, methodFormals.Length,
+                methodConstantParameters: methodConstantParameters,
+                allowGenericNominalConstantDomain: true);
+            if (DiagnosticCount != interfaceDiagnosticCount
+                || interfaceType is not {
+                    Kind: BoundInterfaceTypeKind.Nominal,
+                    IsWritable: false,
+                    IsOptional: false,
+                    IsGarbageCollected: false,
+                    IsInitialization: false,
+                })
+            {
+                Report("TRM3005",
+                    "An associated identity constraint has an invalid interface instance or required type.",
+                    constraint.Span);
+                return false;
+            }
+
+            var interfaceDefinition = _interfaces.SingleOrDefault(
+                candidate =>
+                    StringComparer.Ordinal.Equals(
+                        candidate.QualifiedName,
+                        interfaceType.NominalName)
+                    && candidate.Formals.Length
+                        == interfaceType.TypeArguments.Length
+                    && candidate.ModuleImport == interfaceType.ModuleImport);
+            var associatedMembers = interfaceDefinition?.Members
+                .Where(candidate =>
+                    candidate.Kind == BoundInterfaceMemberKind.AssociatedType
+                    && StringComparer.Ordinal.Equals(candidate.Name,
+                        memberName)
+                    && candidate.Accessibility
+                        == BoundInterfaceAccessibility.Public)
+                .ToArray() ?? [];
+            if (associatedMembers.Length != 1
+                || string.IsNullOrEmpty(
+                    associatedMembers[0].DeclarationKey))
+            {
+                Report("TRM3005",
+                    "An associated identity constraint must select one public directly declared associated type.",
+                    constraint.Span);
+                return false;
+            }
+
+            var associatedMember = associatedMembers[0];
+            associatedType = new BoundInterfaceMemberIdentity(interfaceType,
+                associatedMember.Ordinal, associatedMember.DeclarationKey);
+            requiredTypeSyntax = requiredTypeSyntaxNode;
+            return true;
         }
     }
 
@@ -2994,6 +3221,159 @@ internal sealed partial class Binder
             }
         }
         return null;
+    }
+
+    private string? GenericMethodAssociatedRelationFailure(
+        GenericTemplate template, ImmutableArray<PrimitiveType> typeArguments,
+        ImmutableArray<BoundGenericMethodConstantArgument> constantArguments,
+        int ordinal, TextSpan useSite)
+    {
+        if ((uint)ordinal >= (uint)template.TypeParameters.Length
+            || typeArguments.Length != template.TypeParameters.Length)
+        {
+            return "associated-type identity requirement";
+        }
+
+        var targetRelations
+            = template.TypeParameters[ordinal].AssociatedRelations;
+        if (targetRelations.IsDefault)
+        {
+            return "associated-type identity requirement";
+        }
+        if (targetRelations.IsEmpty)
+        {
+            return null;
+        }
+
+        if (!TryGetGenericInterfaceFormal(typeArguments[ordinal],
+                out var actualScope, out var actualFormalOrdinal)
+            || actualScope != BoundInterfaceTypeParameterScope.Member
+            || _genericContext is not GenericInstantiation caller)
+        {
+            return "associated-type identity requirement";
+        }
+
+        var callerTypeFormal = caller.Template.FormalOrder.FirstOrDefault(
+            slot => slot.Ordinal == actualFormalOrdinal
+                && slot.Kind == BoundGenericMethodFormalKind.Type);
+        if (callerTypeFormal is null
+            || (uint)callerTypeFormal.TypeFormalOrdinal
+                >= (uint)caller.Template.TypeParameters.Length)
+        {
+            return "associated-type identity requirement";
+        }
+
+        var callerFormal
+            = caller.Template.TypeParameters[
+                callerTypeFormal.TypeFormalOrdinal];
+        if (callerFormal.AssociatedRelations.IsDefaultOrEmpty)
+        {
+            return "associated-type identity requirement";
+        }
+
+        foreach (var targetRelation in targetRelations)
+        {
+            if (targetRelation.FormalOrdinal != ordinal
+                || !TrySubstituteGenericMethodInterfaceType(
+                    targetRelation.AssociatedType.DeclaringInterface,
+                    template, typeArguments, constantArguments,
+                    out var targetInterface)
+                || !TryResolveGenericMethodAssociatedRelationType(
+                    targetRelation.RequiredType, template, typeArguments,
+                    constantArguments, useSite, out var targetRequiredType))
+            {
+                return "associated-type identity requirement";
+            }
+
+            var targetIdentity = new BoundInterfaceMemberIdentity(
+                targetInterface,
+                targetRelation.AssociatedType.MemberOrdinal,
+                targetRelation.AssociatedType.DeclarationKey);
+            var matched = false;
+            foreach (var callerRelation in callerFormal.AssociatedRelations)
+            {
+                if (callerRelation.FormalOrdinal
+                        != callerTypeFormal.TypeFormalOrdinal
+                    || !TrySubstituteGenericMethodInterfaceType(
+                        callerRelation.AssociatedType.DeclaringInterface,
+                        caller.Template, caller.Types,
+                        caller.ConstantArguments,
+                        out var callerInterface)
+                    || !TryResolveGenericMethodAssociatedRelationType(
+                        callerRelation.RequiredType, caller.Template,
+                        caller.Types, caller.ConstantArguments, useSite,
+                        out var callerRequiredType))
+                {
+                    continue;
+                }
+
+                var callerIdentity = new BoundInterfaceMemberIdentity(
+                    callerInterface,
+                    callerRelation.AssociatedType.MemberOrdinal,
+                    callerRelation.AssociatedType.DeclarationKey);
+                if (BoundInterfaceContract
+                        .AreEquivalentAssociatedTypeIdentities(
+                            targetIdentity, callerIdentity)
+                    && targetRequiredType == callerRequiredType)
+                {
+                    matched = true;
+                    break;
+                }
+            }
+
+            if (!matched)
+            {
+                return "associated-type identity requirement";
+            }
+        }
+
+        return null;
+    }
+
+    private bool TryResolveGenericMethodAssociatedRelationType(
+        BoundGenericMethodTypeTerm term, GenericTemplate template,
+        ImmutableArray<PrimitiveType> typeArguments,
+        ImmutableArray<BoundGenericMethodConstantArgument> constantArguments,
+        TextSpan useSite, out PrimitiveType type)
+    {
+        type = default;
+        if (typeArguments.Length != template.TypeParameters.Length)
+        {
+            return false;
+        }
+
+        if (constantArguments.IsDefault)
+        {
+            constantArguments
+                = CreateFormalGenericMethodConstantArguments(template);
+        }
+
+        var previousContext = _genericContext;
+        var previousOwnerContext
+            = _genericMethodTypeTermOwnerContext;
+        var previousOwnerContextSet
+            = _hasGenericMethodTypeTermOwnerContext;
+        try
+        {
+            _genericContext = new GenericInstantiation(template, typeArguments) {
+                ConstantArguments = constantArguments,
+            };
+            if (!previousOwnerContextSet)
+            {
+                _genericMethodTypeTermOwnerContext
+                    = previousContext as GenericInstantiation;
+                _hasGenericMethodTypeTermOwnerContext = true;
+            }
+
+            return TryResolveGenericMethodTypeTerm(term, useSite, out type);
+        }
+        finally
+        {
+            _genericContext = previousContext;
+            _genericMethodTypeTermOwnerContext = previousOwnerContext;
+            _hasGenericMethodTypeTermOwnerContext
+                = previousOwnerContextSet;
+        }
     }
 
     private ImmutableArray<BoundInterfaceDefinition>
@@ -11300,6 +11680,8 @@ internal sealed partial class Binder
                     RequiresWritable = formal.RequiresWritable,
                     InterfaceConstraints =
                         formal.InterfaceConstraints,
+                    AssociatedRelations =
+                        formal.AssociatedRelations,
                     DefaultTypeParameterDependencies =
                         formal.TypeDefault?.FormalDependencies ?? [],
                 });
@@ -11464,6 +11846,7 @@ internal sealed partial class Binder
                 RequiresBlittable = formal.RequiresBlittable,
                 RequiresWritable = formal.RequiresWritable,
                 InterfaceConstraints = formal.InterfaceConstraints,
+                AssociatedRelations = formal.AssociatedRelations,
                 DefaultTypeParameterDependencies =
                     formal.TypeDefault?.FormalDependencies ?? [],
             });
@@ -12067,6 +12450,16 @@ internal sealed partial class Binder
                 var formal = template.TypeParameters[ordinal];
                 Report("TRM3005",
                     $"Type argument for formal '{formal.Name}' does not satisfy its {interfaceFailure}.",
+                    callee.Span);
+                return -1;
+            }
+            if (GenericMethodAssociatedRelationFailure(template, types,
+                    constantArguments, ordinal, callee.Span)
+                is string associatedRelationFailure)
+            {
+                var formal = template.TypeParameters[ordinal];
+                Report("TRM3005",
+                    $"Type argument for formal '{formal.Name}' does not satisfy its {associatedRelationFailure}.",
                     callee.Span);
                 return -1;
             }
@@ -13162,6 +13555,8 @@ internal sealed partial class Binder
                             RequiresWritable = formal.RequiresWritable,
                             InterfaceConstraints =
                                 formal.InterfaceConstraints,
+                            AssociatedRelations =
+                                formal.AssociatedRelations,
                         })]) {
                     IsStatic = template.IsStatic,
                     IsMutable = template.IsMutable,
@@ -14331,6 +14726,7 @@ internal sealed partial class Binder
                     RequiresBlittable = formal.RequiresBlittable,
                     RequiresWritable = formal.RequiresWritable,
                     InterfaceConstraints = formal.InterfaceConstraints,
+                    AssociatedRelations = formal.AssociatedRelations,
                 });
             }
             var constantFormalDefinitions =
@@ -14443,7 +14839,8 @@ internal sealed partial class Binder
             foreach (var formal in signature.Formals)
             {
                 if (formal is null
-                    || formal.InterfaceConstraints.IsDefault)
+                    || formal.InterfaceConstraints.IsDefault
+                    || formal.AssociatedRelations.IsDefault)
                 {
                     proofSignatures = [];
                     return false;
@@ -14475,9 +14872,38 @@ internal sealed partial class Binder
                         return false;
                     }
                 }
+                var associatedRelations = ImmutableArray.CreateBuilder<
+                    BoundGenericMethodAssociatedRelation>(
+                        formal.AssociatedRelations.Length);
+                foreach (var relation in formal.AssociatedRelations)
+                {
+                    var hydrated = true;
+                    associatedRelations.Add(
+                        BoundTreeTraversal.RewriteTypes(relation,
+                            type =>
+                            {
+                                if (proofBinder.HydrateProofType(type,
+                                    allowFloatingScalar: true,
+                                    allowFloatingStructFields: true,
+                                    allowUnique: true)
+                                    is PrimitiveType proofType)
+                                {
+                                    return proofType;
+                                }
+                                hydrated = false;
+                                return type;
+                            }));
+                    if (!hydrated)
+                    {
+                        proofSignatures = [];
+                        return false;
+                    }
+                }
                 formals.Add(formal with {
                     InterfaceConstraints =
                         interfaceConstraints.ToImmutable(),
+                    AssociatedRelations =
+                        associatedRelations.ToImmutable(),
                 });
             }
 
@@ -14784,6 +15210,9 @@ internal sealed partial class Binder
                             InterfaceConstraints =
                                 proof.Formals[formalOrdinal]
                                     .InterfaceConstraints,
+                            AssociatedRelations =
+                                proof.Formals[formalOrdinal]
+                                    .AssociatedRelations,
                         }),
                 ],
                 IsStatic = proof.IsStatic,

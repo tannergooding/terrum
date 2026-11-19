@@ -34,6 +34,10 @@ public sealed record TrRmSourceTypeExport(
     /// <summary>Gets the source-anchored InterfaceMethod ExportKeys.</summary>
     public ImmutableArray<TrRmSourceInterfaceMethodExport>
         InterfaceMethodExports { get; init; }
+
+    /// <summary>Gets the source-anchored associated-type ExportKeys.</summary>
+    public ImmutableArray<TrRmSourceInterfaceAssociatedTypeExport>
+        InterfaceAssociatedTypeExports { get; init; }
 }
 
 /// <summary>Explicitly assigns an ExportKey to one direct source field declaration.</summary>
@@ -46,6 +50,13 @@ public sealed record TrRmSourceFieldExport(string Name, string ExportKey);
 /// <param name="DeclarationSpan">The exact complete requirement declaration span.</param>
 /// <param name="ExportKey">The producer-selected MethodDef ExportKey.</param>
 public sealed record TrRmSourceInterfaceMethodExport(
+    int SourceInputOrdinal, TextSpan DeclarationSpan, string ExportKey);
+
+/// <summary>Explicitly assigns an ExportKey to one direct associated-type declaration.</summary>
+/// <param name="SourceInputOrdinal">The zero-based source input containing the declaration.</param>
+/// <param name="DeclarationSpan">The exact complete associated-type declaration span.</param>
+/// <param name="ExportKey">The producer-selected AssociatedTypeDef ExportKey.</param>
+public sealed record TrRmSourceInterfaceAssociatedTypeExport(
     int SourceInputOrdinal, TextSpan DeclarationSpan, string ExportKey);
 
 /// <summary>Emits and audits root-free fail-fast scalar compact TRRM bodies.</summary>
@@ -131,6 +142,12 @@ public static partial class TrRmExecutableCompiler
         = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1";
     private const string StandardC1M1Construction2L1R1ClassParameterDefaultsSchemaIdentity
         = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-class-parameter-defaults-1";
+    private const string StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsSchemaIdentity
+        = StandardGenericMethodSchema
+            .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaults;
+    private const string StandardCM1AR1SchemaIdentity
+        = StandardGenericMethodSchema
+            .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraints;
     private const string StandardC1M1ConstructionL1R1PropertyInitializedStateSchemaIdentity
         = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-1-parameter-labels-1-receiver-access-1-property-initialized-state-1";
     private const string StandardC1M1Construction2L1R1PropertyInitializedStateSchemaIdentity
@@ -171,6 +188,10 @@ public static partial class TrRmExecutableCompiler
                 StandardC1M1Construction2L1R1SchemaIdentity)
             || StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardC1M1Construction2L1R1ClassParameterDefaultsSchemaIdentity)
+            || StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsSchemaIdentity)
+            || StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardCM1AR1SchemaIdentity)
             || StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardC1M1ConstructionL1R1PropertyInitializedStateSchemaIdentity)
             || StringComparer.Ordinal.Equals(schemaIdentity,
@@ -381,6 +402,9 @@ public static partial class TrRmExecutableCompiler
                     ? default : [.. export.FieldExports],
                 InterfaceMethodExports = export.InterfaceMethodExports.IsDefault
                     ? default : [.. export.InterfaceMethodExports],
+                InterfaceAssociatedTypeExports
+                    = export.InterfaceAssociatedTypeExports.IsDefault
+                        ? default : [.. export.InterfaceAssociatedTypeExports],
             };
         }
 
@@ -544,6 +568,9 @@ public static partial class TrRmExecutableCompiler
                 InterfaceMethodExports = export
                     .InterfaceMethodExports.IsDefault
                     ? default : [.. export.InterfaceMethodExports],
+                InterfaceAssociatedTypeExports = export
+                    .InterfaceAssociatedTypeExports.IsDefault
+                    ? default : [.. export.InterfaceAssociatedTypeExports],
             };
         }
 
@@ -579,7 +606,9 @@ public static partial class TrRmExecutableCompiler
             && !StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardC1M1Construction2SchemaIdentity)
             && !StringComparer.Ordinal.Equals(schemaIdentity,
-                StandardC1M1Construction2L1R1ClassParameterDefaultsSchemaIdentity))
+                StandardC1M1Construction2L1R1ClassParameterDefaultsSchemaIdentity)
+            && !StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardCM1AR1SchemaIdentity))
         {
             throw new ArgumentException(
                 "The seven-argument source class route requires an exact C1M1, Construction-1, Construction-2 or CM1 identity.",
@@ -611,6 +640,9 @@ public static partial class TrRmExecutableCompiler
                     ? default : [.. export.FieldExports],
                 InterfaceMethodExports = export.InterfaceMethodExports.IsDefault
                     ? default : [.. export.InterfaceMethodExports],
+                InterfaceAssociatedTypeExports
+                    = export.InterfaceAssociatedTypeExports.IsDefault
+                        ? default : [.. export.InterfaceAssociatedTypeExports],
             };
         }
 
@@ -702,6 +734,9 @@ public static partial class TrRmExecutableCompiler
                 InterfaceMethodExports =
                     export.InterfaceMethodExports.IsDefault
                         ? default : [.. export.InterfaceMethodExports],
+                InterfaceAssociatedTypeExports =
+                    export.InterfaceAssociatedTypeExports.IsDefault
+                        ? default : [.. export.InterfaceAssociatedTypeExports],
             };
         }
 
@@ -1013,7 +1048,9 @@ public static partial class TrRmExecutableCompiler
         if ((StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardC1M1SchemaIdentity)
                 || StringComparer.Ordinal.Equals(schemaIdentity,
-                    StandardC1M1Construction2L1R1ClassParameterDefaultsSchemaIdentity))
+                    StandardC1M1Construction2L1R1ClassParameterDefaultsSchemaIdentity)
+                || StringComparer.Ordinal.Equals(schemaIdentity,
+                    StandardCM1AR1SchemaIdentity))
             && !program.StandardClassDeclarations.IsEmpty)
         {
             if (sourceClassExports is not null
@@ -1129,6 +1166,20 @@ public static partial class TrRmExecutableCompiler
                     sourceGenericMethodExports,
                     TrRmArtifactSchema
                         .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft,
+                    sourceClassExports),
+            StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsSchemaIdentity
+                => EmitC1M1Construction2(program, moduleIdentity,
+                    moduleTargetRequirement, sourceTypeExports,
+                    sourceGenericMethodExports,
+                    TrRmArtifactSchema
+                        .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft,
+                    sourceClassExports),
+            StandardCM1AR1SchemaIdentity
+                => EmitC1M1Construction2(program, moduleIdentity,
+                    moduleTargetRequirement, sourceTypeExports,
+                    sourceGenericMethodExports,
+                    TrRmArtifactSchema
+                        .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsDraft,
                     sourceClassExports),
             StandardNominalEnumsSchemaIdentity
                 => EmitNominalEnumsDraftSource(program, moduleIdentity,
@@ -1508,6 +1559,7 @@ public static partial class TrRmExecutableCompiler
                 or TrRmArtifactSchema.C1M1Construction2Draft
                 or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessDraft
                 or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft
+                or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsDraft
                 or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft
                 or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateDraft
                 or TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft

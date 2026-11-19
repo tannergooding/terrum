@@ -17751,10 +17751,9 @@ internal sealed partial class Binder
         {
             var selectedImportedClassView
                 = !candidate.Expectations.IsEmpty
-                    && StringComparer.Ordinal.Equals(
-                        candidate.Declaration.Provider.SchemaIdentity,
-                        StandardGenericMethodSchema
-                            .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaults);
+                    && StandardGenericMethodSchema
+                        .IsCM1ClassParameterDefaults(
+                            candidate.Declaration.Provider.SchemaIdentity);
             var matchesTypeSpecOwner = instance.TypeSpecReference == 0
                 ? instance.TypeSpecProviderIdentity is null
                     && instance.TypeSpecForm == 0

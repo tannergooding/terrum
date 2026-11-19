@@ -99,7 +99,8 @@ public static partial class TrRmExecutableCompiler
                 || export.ExportKey.Contains('\0', StringComparison.Ordinal)
                 || !export.EnumMemberDeclarationKeys.IsDefault
                 || export.GenericArity != -1
-                || !export.InterfaceMethodExports.IsDefault)
+                || !export.InterfaceMethodExports.IsDefault
+                || !export.InterfaceAssociatedTypeExports.IsDefault)
             {
                 throw new ArgumentException(
                     "A Standard source TypeDef export mapping contains invalid text or enum data.",

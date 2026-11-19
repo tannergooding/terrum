@@ -51,6 +51,7 @@ internal enum TrRmArtifactSchema
     C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft,
     C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft,
     C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft,
+    C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsDraft,
 }
 
 internal static class TrRmArtifactSchemaFacts
@@ -158,6 +159,7 @@ internal static class TrRmArtifactSchemaFacts
             or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft
             or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft
             or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft
+            or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsDraft
             or TrRmArtifactSchema.GenericConstantMethodsDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft
@@ -199,7 +201,8 @@ internal static class TrRmArtifactSchemaFacts
             or TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft
             or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft
             or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft
-            or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft;
+            or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft
+            or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsDraft;
 
     internal static bool UsesPropertyInitializedState(
         this TrRmArtifactSchema schema)
@@ -223,7 +226,8 @@ internal static class TrRmArtifactSchemaFacts
             or TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft
             or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft
             or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft
-            or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft;
+            or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft
+            or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsDraft;
 
     internal static bool UsesConstructionContracts(
         this TrRmArtifactSchema schema)
@@ -237,13 +241,15 @@ internal static class TrRmArtifactSchemaFacts
             or TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft
             or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft
             or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft
-            or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft;
+            or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft
+            or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsDraft;
 
     internal static bool UsesObjectConstruction(
         this TrRmArtifactSchema schema)
         => schema is TrRmArtifactSchema.C1M1Construction2Draft
             or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessDraft
             or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft
+            or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsDraft
             or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateDraft
             or TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft
             or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft;
@@ -272,6 +278,7 @@ internal static class TrRmArtifactSchemaFacts
             or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft
             or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft
             or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft
+            or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsDraft
             or TrRmArtifactSchema.GenericConstantMethodsDraft;
 
     internal static bool UsesGenericWriteRequirements(
@@ -294,12 +301,19 @@ internal static class TrRmArtifactSchemaFacts
             or TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft
             or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft
             or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft
-            or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft;
+            or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft
+            or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsDraft;
 
     internal static bool UsesClassParameterDefaults(
         this TrRmArtifactSchema schema)
+        => schema is
+            TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft
+            or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsDraft;
+
+    internal static bool UsesAssociatedRelationConstraints(
+        this TrRmArtifactSchema schema)
         => schema
-            == TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft;
+            == TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsDraft;
 
     internal static bool UsesMethodReceiverAccess(
         this TrRmArtifactSchema schema)
@@ -314,7 +328,8 @@ internal static class TrRmArtifactSchemaFacts
             or TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft
             or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft
             or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft
-            or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft;
+            or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft
+            or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsDraft;
 
     internal static bool UsesForeignInvocationContracts(
         this TrRmArtifactSchema schema) =>
@@ -486,6 +501,7 @@ public readonly ref struct TrRmArtifactIndex
             or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft
             or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft
             or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft
+            or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsDraft
             or TrRmArtifactSchema.GenericConstantMethodsDraft))
         {
             throw InvalidArtifact();
@@ -978,6 +994,13 @@ public readonly ref struct TrRmArtifactIndex
         => new(artifact,
             TrRmArtifactSchema
                 .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft);
+
+    internal static TrRmArtifactIndex
+        ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsDraft(
+            ReadOnlySpan<byte> artifact)
+        => new(artifact,
+            TrRmArtifactSchema
+                .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsDraft);
 
     internal static TrRmArtifactIndex
         ForC1M1ConstructionL1R1PropertyInitializedStateDraft(

@@ -161,6 +161,12 @@ public static partial class TrRmExecutableCompiler
                         ? [] : typeExport.InterfaceMethodExports.Select(
                             static method => method.ExportKey),
                     nameof(typeExports));
+                AddKeys(existingKeys,
+                    typeExport.InterfaceAssociatedTypeExports.IsDefault
+                        ? [] : typeExport.InterfaceAssociatedTypeExports
+                            .Select(static associatedType =>
+                                associatedType.ExportKey),
+                    nameof(typeExports));
             }
 
             foreach (var methodExport in genericMethodExports)

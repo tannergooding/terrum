@@ -15,6 +15,11 @@ public static partial class TrRmExecutableCompiler
     private readonly record struct GenericMethodCallSiteResult(
         int ResultHome, PrimitiveType ResultType, BoundExpression Value);
 
+    private readonly record struct GenericInterfaceImportRows(
+        Dictionary<uint, int> DefinitionRows,
+        Dictionary<uint, List<int>> MethodRows,
+        Dictionary<uint, List<int>> AssociatedTypeRows);
+
     /// <summary>Creates a source-free reference to a G1L1 Module's exported generic MethodDefs and exported interfaces.</summary>
     /// <param name="providerArtifact">The exact G1L1 provider artifact.</param>
     /// <param name="moduleIdentity">The exact identity of the provider Module.</param>
@@ -195,13 +200,6 @@ public static partial class TrRmExecutableCompiler
 
             if (tables.Exports.HasExportForTypeDef(typeDef))
             {
-                if (tables.Imports.IsExpectedDefinition(
-                        0x2000_0000u | checked((uint)interfaceDef)))
-                {
-                    throw Invalid(
-                        "A G1L1 exported interface cannot also have an InterfaceDef Import expectation.");
-                }
-
                 continue;
             }
 
@@ -230,7 +228,8 @@ public static partial class TrRmExecutableCompiler
             definitions.Add(definition);
         }
 
-        foreach (var (definitionId, importRow) in importRows)
+        foreach (var (definitionId, importRow)
+            in importRows.DefinitionRows)
         {
             var definitionKind = definitionId >> 24;
             var definitionRow = checked((int)(
@@ -248,6 +247,42 @@ public static partial class TrRmExecutableCompiler
             {
                 throw Invalid(
                     "A G1L1 interface Import expectation is unused by a retained declaration.");
+            }
+        }
+        foreach (var (definitionId, importRowsForAssociatedType)
+            in importRows.AssociatedTypeRows)
+        {
+            if ((definitionId >> 24) != 0x20)
+            {
+                throw Invalid(
+                    "A G1L1 associated-type Import map has an invalid definition kind.");
+            }
+
+            foreach (var importRow in importRowsForAssociatedType)
+            {
+                if (!usedInterfaceImportRows.Contains(importRow))
+                {
+                    throw Invalid(
+                        "A G1L1 associated-type Import expectation is unused by a retained declaration.");
+                }
+            }
+        }
+        foreach (var (definitionId, importRowsForMethod)
+            in importRows.MethodRows)
+        {
+            if ((definitionId >> 24) != 0x16)
+            {
+                throw Invalid(
+                    "A G1L1 InterfaceMethod Import map has an invalid definition kind.");
+            }
+
+            foreach (var importRow in importRowsForMethod)
+            {
+                if (!usedInterfaceImportRows.Contains(importRow))
+                {
+                    throw Invalid(
+                        "A G1L1 InterfaceMethod Import expectation is unused by a retained declaration.");
+                }
             }
         }
 
@@ -300,6 +335,16 @@ public static partial class TrRmExecutableCompiler
 
                 _ = exportedInterfaceDefinitions.Add(
                     0x1300_0000u | checked((uint)typeDef));
+                var (firstAssociatedType, associatedTypeCount)
+                    = tables.Interfaces.GetAssociatedTypeRange(interfaceDef);
+                for (var associatedOrdinal = 0;
+                    associatedOrdinal < associatedTypeCount;
+                    associatedOrdinal++)
+                {
+                    _ = exportedInterfaceDefinitions.Add(
+                        0x2000_0000u | checked((uint)(
+                            firstAssociatedType + associatedOrdinal)));
+                }
             }
 
             var (firstMethod, methodCount)
@@ -319,11 +364,41 @@ public static partial class TrRmExecutableCompiler
 
         var exportKeys = new Dictionary<uint, string>(
             exportedInterfaceDefinitions.Count);
+        var methodExportKeysByDef
+            = new Dictionary<uint, List<string>>();
+        var associatedTypeExportKeysByDef
+            = new Dictionary<uint, List<string>>();
         foreach (var (definition, key)
             in tables.Exports.GetExportsForModule(moduleRow))
         {
-            if (exportedInterfaceDefinitions.Contains(definition)
-                && !exportKeys.TryAdd(definition, key))
+            if (!exportedInterfaceDefinitions.Contains(definition))
+            {
+                continue;
+            }
+
+            if ((definition >> 24) == 0x20)
+            {
+                if (!associatedTypeExportKeysByDef.TryGetValue(definition,
+                        out var keys))
+                {
+                    keys = [];
+                    associatedTypeExportKeysByDef.Add(definition, keys);
+                }
+
+                keys.Add(key);
+            }
+            else if ((definition >> 24) == 0x16)
+            {
+                if (!methodExportKeysByDef.TryGetValue(definition,
+                        out var keys))
+                {
+                    keys = [];
+                    methodExportKeysByDef.Add(definition, keys);
+                }
+
+                keys.Add(key);
+            }
+            else if (!exportKeys.TryAdd(definition, key))
             {
                 throw Invalid(
                     "A G1L1 interface declaration has an ambiguous ExportKey.");
@@ -356,7 +431,8 @@ public static partial class TrRmExecutableCompiler
             var (firstMethod, methodCount)
                 = tables.Interfaces.GetMethodRange(interfaceDef);
             var methodExportKeys
-                = ImmutableArray.CreateBuilder<string>(methodCount);
+                = ImmutableArray.CreateBuilder<ImmutableArray<string>>(
+                    methodCount);
             for (var methodOrdinal = 0;
                 methodOrdinal < methodCount; methodOrdinal++)
             {
@@ -374,18 +450,47 @@ public static partial class TrRmExecutableCompiler
                     interfaceMethodRow);
                 var methodId = 0x1600_0000u
                     | checked((uint)methodRow);
-                if (!exportKeys.TryGetValue(methodId, out var methodExportKey))
+                if (!methodExportKeysByDef.TryGetValue(methodId,
+                        out var methodExportKeysForMember)
+                    || methodExportKeysForMember.Count == 0)
                 {
                     throw Invalid(
-                        "A G1L1 InterfaceMethod has no unique MethodDef ExportKey.");
+                        "A G1L1 InterfaceMethod has no MethodDef ExportKey.");
                 }
 
-                methodExportKeys.Add(methodExportKey);
+                methodExportKeys.Add(
+                    methodExportKeysForMember.ToImmutableArray());
+            }
+
+            var (firstAssociatedType, associatedTypeCount)
+                = tables.Interfaces.GetAssociatedTypeRange(interfaceDef);
+            var associatedTypeExportKeys
+                = ImmutableArray.CreateBuilder<ImmutableArray<string>>(
+                    associatedTypeCount);
+            for (var associatedOrdinal = 0;
+                associatedOrdinal < associatedTypeCount;
+                associatedOrdinal++)
+            {
+                var associatedTypeDefId = 0x2000_0000u
+                    | checked((uint)(firstAssociatedType
+                        + associatedOrdinal));
+                if (!associatedTypeExportKeysByDef.TryGetValue(
+                        associatedTypeDefId, out var associatedTypeExportKeysForMember)
+                    || associatedTypeExportKeysForMember.Count == 0)
+                {
+                    throw Invalid(
+                        "A G1L1 AssociatedTypeDef has no ExportKey.");
+                }
+
+                associatedTypeExportKeys.Add(
+                    associatedTypeExportKeysForMember.ToImmutableArray());
             }
 
             var definition = ReadG1InterfaceDefinition(tables, interfaceDef,
                 moduleIdentity, typeExportKey, targetRequirement,
-                runtimePolicy, methodExportKeys.MoveToImmutable());
+                runtimePolicy, methodExportKeys.MoveToImmutable(),
+                associatedTypeExportKeys.MoveToImmutable(),
+                context.Schema.UsesAssociatedRelationConstraints());
             if (!context.InterfaceDefinitionsByTypeDef.TryAdd(
                     (artifactIndex, moduleRow, typeDef), definition))
             {
@@ -518,11 +623,14 @@ public static partial class TrRmExecutableCompiler
         }
     }
 
-    private static Dictionary<uint, int> CreateGenericInterfaceImportRows(
+    private static GenericInterfaceImportRows
+        CreateGenericInterfaceImportRows(
         TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
         int moduleRow)
     {
         var interfaceImportDefinitions = new HashSet<uint>();
+        var methodImportDefinitions = new HashSet<uint>();
+        var associatedTypeImportDefinitions = new HashSet<uint>();
         var (firstTypeDef, endTypeDef)
             = tables.Modules.GetTypeDefRange(moduleRow);
         for (var typeDef = firstTypeDef; typeDef < endTypeDef; typeDef++)
@@ -535,11 +643,11 @@ public static partial class TrRmExecutableCompiler
             }
 
             var typeDefId = 0x1300_0000u | checked((uint)typeDef);
-            var interfaceDefId = 0x2000_0000u
-                | checked((uint)interfaceDef);
             if (!tables.Exports.HasExportForTypeDef(typeDef)
                 && !tables.Imports.IsExpectedDefinition(typeDefId)
-                && !tables.Imports.IsExpectedDefinition(interfaceDefId))
+                && tables.Interfaces.GetMethodRange(interfaceDef).Count == 0
+                && tables.Interfaces.GetAssociatedTypeRange(interfaceDef)
+                    .Count == 0)
             {
                 continue;
             }
@@ -547,16 +655,6 @@ public static partial class TrRmExecutableCompiler
             if (tables.Imports.IsExpectedDefinition(typeDefId))
             {
                 _ = interfaceImportDefinitions.Add(typeDefId);
-                if (interfaceImportDefinitions.Count
-                    > SemanticVerifier.MaximumAnalysisVisits)
-                {
-                    throw Unsupported(
-                        "The G1L1 interface Import map exceeds the supported analysis limit.");
-                }
-            }
-            if (tables.Imports.IsExpectedDefinition(interfaceDefId))
-            {
-                _ = interfaceImportDefinitions.Add(interfaceDefId);
                 if (interfaceImportDefinitions.Count
                     > SemanticVerifier.MaximumAnalysisVisits)
                 {
@@ -575,8 +673,28 @@ public static partial class TrRmExecutableCompiler
                     | checked((uint)methodRow);
                 if (tables.Imports.IsExpectedDefinition(methodId))
                 {
-                    _ = interfaceImportDefinitions.Add(methodId);
-                    if (interfaceImportDefinitions.Count
+                    _ = methodImportDefinitions.Add(methodId);
+                    if (methodImportDefinitions.Count
+                        > SemanticVerifier.MaximumAnalysisVisits)
+                    {
+                        throw Unsupported(
+                            "The G1L1 interface Import map exceeds the supported analysis limit.");
+                    }
+                }
+            }
+
+            var (firstAssociatedType, associatedTypeCount)
+                = tables.Interfaces.GetAssociatedTypeRange(interfaceDef);
+            for (var ordinal = 0; ordinal < associatedTypeCount; ordinal++)
+            {
+                var associatedTypeDefId = 0x2000_0000u
+                    | checked((uint)(firstAssociatedType + ordinal));
+                if (tables.Imports.IsExpectedDefinition(
+                        associatedTypeDefId))
+                {
+                    _ = associatedTypeImportDefinitions.Add(
+                        associatedTypeDefId);
+                    if (associatedTypeImportDefinitions.Count
                         > SemanticVerifier.MaximumAnalysisVisits)
                     {
                         throw Unsupported(
@@ -586,7 +704,9 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        var importRows = new Dictionary<uint, int>();
+        var definitionRows = new Dictionary<uint, int>();
+        var methodRows = new Dictionary<uint, List<int>>();
+        var associatedTypeRows = new Dictionary<uint, List<int>>();
         for (var importRow = 1; importRow <= tables.Imports.Count;
             importRow++)
         {
@@ -599,9 +719,35 @@ public static partial class TrRmExecutableCompiler
 
             var definitionId = tables.Imports
                 .GetExpectedDefinitionForImportRow(importRow);
+            if (associatedTypeImportDefinitions.Contains(definitionId))
+            {
+                if (!associatedTypeRows.TryGetValue(definitionId,
+                        out var rows))
+                {
+                    rows = [];
+                    associatedTypeRows.Add(definitionId, rows);
+                }
+
+                rows.Add(importRow);
+                continue;
+            }
+
+            if (methodImportDefinitions.Contains(definitionId))
+            {
+                if (!methodRows.TryGetValue(definitionId,
+                        out var rows))
+                {
+                    rows = [];
+                    methodRows.Add(definitionId, rows);
+                }
+
+                rows.Add(importRow);
+                continue;
+            }
+
             if (interfaceImportDefinitions.Contains(definitionId))
             {
-                if (!importRows.TryAdd(definitionId, importRow))
+                if (!definitionRows.TryAdd(definitionId, importRow))
                 {
                     throw Invalid(
                         "A G1L1 interface Import expectation is ambiguous.");
@@ -609,18 +755,21 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        return importRows;
+        return new GenericInterfaceImportRows(definitionRows,
+            methodRows, associatedTypeRows);
     }
 
     private static BoundInterfaceDefinition
         BindExpectedGenericInterfaceDefinition(
             TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
             GenericMethodReadContext context, int moduleRow, int interfaceDef,
-            Dictionary<uint, int> importRows, HashSet<int> usedImportRows)
+            GenericInterfaceImportRows importRows,
+            HashSet<int> usedImportRows)
     {
         var typeDef = tables.Interfaces.GetOwnerTypeDef(interfaceDef);
         var typeDefId = 0x1300_0000u | checked((uint)typeDef);
-        if (!importRows.TryGetValue(typeDefId, out var typeImportRow))
+        if (!importRows.DefinitionRows.TryGetValue(typeDefId,
+                out var typeImportRow))
         {
             throw Invalid(
                 "A G1L1 expected interface has no TypeDef Import row.");
@@ -637,33 +786,6 @@ public static partial class TrRmExecutableCompiler
         {
             throw Invalid(
                 "A G1L1 expected interface has no exact selected TypeDef provider.");
-        }
-
-        var interfaceDefId = 0x2000_0000u
-            | checked((uint)interfaceDef);
-        if (importRows.TryGetValue(interfaceDefId,
-                out var interfaceImportRow))
-        {
-            _ = usedImportRows.Add(interfaceImportRow);
-            var interfaceModuleRef = tables.Imports
-                .GetModuleRefForImportRow(interfaceImportRow);
-            var selectedInterface = tables.Imports
-                .GetBindingForImportRow(interfaceImportRow);
-            if (tables.ModuleRefs.GetOwnerModule(interfaceModuleRef)
-                    != moduleRow
-                || !StringComparer.Ordinal.Equals(
-                    selectedInterface.ProducerIdentity,
-                    selectedType.ProducerIdentity)
-                || !StringComparer.Ordinal.Equals(
-                    selectedInterface.ExportKey, selectedType.ExportKey)
-                || selectedInterface.TargetRequirement
-                    != selectedType.TargetRequirement
-                || selectedInterface.RuntimePolicy
-                    != selectedType.RuntimePolicy)
-            {
-                throw Invalid(
-                    "The G1L1 InterfaceDef Import does not retain the selected TypeDef provider identity.");
-            }
         }
 
         var providerModuleRow = providerSelection.ModuleRow;
@@ -725,12 +847,21 @@ public static partial class TrRmExecutableCompiler
                 throw Invalid(
                     "The selected G1L1 provider interface has duplicate requirement keys.");
             }
+            foreach (var alias in member.AdditionalDeclarationKeys)
+            {
+                if (!providerMembersByKey.TryAdd(alias, member))
+                {
+                    throw Invalid(
+                        "The selected G1L1 provider interface has conflicting member aliases.");
+                }
+            }
         }
 
         var (firstMethod, methodCount)
             = tables.Interfaces.GetMethodRange(interfaceDef);
         var methodExportKeys
-            = ImmutableArray.CreateBuilder<string>(methodCount);
+            = ImmutableArray.CreateBuilder<ImmutableArray<string>>(
+                methodCount);
         var methodKeys = new HashSet<string>(StringComparer.Ordinal);
         for (var methodOrdinal = 0; methodOrdinal < methodCount;
             methodOrdinal++)
@@ -739,41 +870,128 @@ public static partial class TrRmExecutableCompiler
             var methodRow = tables.InterfaceMethods.GetMethodDefRow(
                 interfaceMethodRow);
             var methodId = 0x1600_0000u | checked((uint)methodRow);
-            if (!importRows.TryGetValue(methodId, out var methodImportRow))
+            if (!importRows.MethodRows.TryGetValue(methodId,
+                    out var methodImportRows)
+                || methodImportRows.Count == 0)
             {
                 throw Invalid(
                     "A G1L1 expected InterfaceMethod has no MethodDef Import row.");
             }
-            _ = usedImportRows.Add(methodImportRow);
-
-            var methodModuleRef = tables.Imports.GetModuleRefForImportRow(
-                methodImportRow);
-            var selectedMethod = tables.Imports.GetBindingForImportRow(
-                methodImportRow);
-            if (tables.ModuleRefs.GetOwnerModule(methodModuleRef) != moduleRow
-                || !StringComparer.Ordinal.Equals(
-                    selectedMethod.ProducerIdentity,
-                    selectedType.ProducerIdentity)
-                || selectedMethod.TargetRequirement
-                    != selectedType.TargetRequirement
-                || selectedMethod.RuntimePolicy != selectedType.RuntimePolicy
-                || !methodKeys.Add(selectedMethod.ExportKey)
-                || !providerMembersByKey.ContainsKey(
-                    selectedMethod.ExportKey))
+            var methodMemberExportKeys
+                = ImmutableArray.CreateBuilder<string>(
+                    methodImportRows.Count);
+            BoundInterfaceMemberDefinition? selectedMethodMember = null;
+            foreach (var methodImportRow in methodImportRows)
             {
-                throw Invalid(
-                    "A G1L1 requirement Import selects a different or ambiguous provider.");
+                _ = usedImportRows.Add(methodImportRow);
+                var methodModuleRef = tables.Imports
+                    .GetModuleRefForImportRow(methodImportRow);
+                var selectedMethod = tables.Imports
+                    .GetBindingForImportRow(methodImportRow);
+                if (tables.ModuleRefs.GetOwnerModule(methodModuleRef)
+                        != moduleRow
+                    || !StringComparer.Ordinal.Equals(
+                        selectedMethod.ProducerIdentity,
+                        selectedType.ProducerIdentity)
+                    || selectedMethod.TargetRequirement
+                        != selectedType.TargetRequirement
+                    || selectedMethod.RuntimePolicy
+                        != selectedType.RuntimePolicy
+                    || !methodKeys.Add(selectedMethod.ExportKey)
+                    || !providerMembersByKey.TryGetValue(
+                        selectedMethod.ExportKey, out var providerMember)
+                    || providerMember.Kind
+                        != BoundInterfaceMemberKind.Callable
+                    || providerMember.Ordinal != methodOrdinal
+                    || (selectedMethodMember is not null
+                        && selectedMethodMember.Ordinal
+                            != providerMember.Ordinal))
+                {
+                    throw Invalid(
+                        "A G1L1 requirement Import selects a different or ambiguous provider.");
+                }
+
+                selectedMethodMember = providerMember;
+                methodMemberExportKeys.Add(selectedMethod.ExportKey);
             }
 
-            methodExportKeys.Add(selectedMethod.ExportKey);
+            methodExportKeys.Add(methodMemberExportKeys.MoveToImmutable());
+        }
+
+        var (firstAssociatedType, associatedTypeCount)
+            = tables.Interfaces.GetAssociatedTypeRange(interfaceDef);
+        var associatedTypeExportKeys
+            = ImmutableArray.CreateBuilder<ImmutableArray<string>>(
+                associatedTypeCount);
+        for (var associatedOrdinal = 0;
+            associatedOrdinal < associatedTypeCount; associatedOrdinal++)
+        {
+            var associatedTypeDefRow
+                = firstAssociatedType + associatedOrdinal;
+            var associatedTypeDefId = 0x2000_0000u
+                | checked((uint)associatedTypeDefRow);
+            if (!importRows.AssociatedTypeRows.TryGetValue(
+                    associatedTypeDefId, out var associatedImportRows)
+                || associatedImportRows.Count == 0
+                || tables.AssociatedTypeDefs.GetOwnerInterfaceDef(
+                    associatedTypeDefRow) != interfaceDef)
+            {
+                throw Invalid(
+                    "A G1L1 expected interface associated type has no exact owner-scoped Import.");
+            }
+
+            var associatedExportKeys
+                = ImmutableArray.CreateBuilder<string>(
+                    associatedImportRows.Count);
+            BoundInterfaceMemberDefinition? selectedAssociatedType = null;
+            foreach (var associatedImportRow in associatedImportRows)
+            {
+                _ = usedImportRows.Add(associatedImportRow);
+                var associatedModuleRef = tables.Imports
+                    .GetModuleRefForImportRow(associatedImportRow);
+                var selectedAssociatedExport = tables.Imports
+                    .GetBindingForImportRow(associatedImportRow);
+                if (tables.ModuleRefs.GetOwnerModule(associatedModuleRef)
+                        != moduleRow
+                    || !StringComparer.Ordinal.Equals(
+                        selectedAssociatedExport.ProducerIdentity,
+                        selectedType.ProducerIdentity)
+                    || selectedAssociatedExport.TargetRequirement
+                        != selectedType.TargetRequirement
+                    || selectedAssociatedExport.RuntimePolicy
+                        != selectedType.RuntimePolicy
+                    || !providerMembersByKey.TryGetValue(
+                        selectedAssociatedExport.ExportKey,
+                        out var providerAssociatedType)
+                    || providerAssociatedType.Kind
+                        != BoundInterfaceMemberKind.AssociatedType
+                    || providerAssociatedType.Ordinal
+                        != methodCount + associatedOrdinal
+                    || (selectedAssociatedType is not null
+                        && selectedAssociatedType.Ordinal
+                            != providerAssociatedType.Ordinal))
+                {
+                    throw Invalid(
+                        "A G1L1 associated-type Import does not bind through its selected interface provider.");
+                }
+
+                selectedAssociatedType = providerAssociatedType;
+                associatedExportKeys.Add(
+                    selectedAssociatedExport.ExportKey);
+            }
+
+            associatedTypeExportKeys.Add(
+                associatedExportKeys.MoveToImmutable());
         }
 
         var expected = ReadG1InterfaceDefinition(tables, interfaceDef,
             selectedType.ProducerIdentity, selectedType.ExportKey,
             selectedType.TargetRequirement, selectedType.RuntimePolicy,
-            methodExportKeys.MoveToImmutable());
+            methodExportKeys.MoveToImmutable(),
+            associatedTypeExportKeys.MoveToImmutable(),
+            context.Schema.UsesAssociatedRelationConstraints());
         ValidateG1InterfaceProviderContract(expected, providerInterface,
-            providerMembersByKey);
+            providerMembersByKey, context.Schema);
         return expected;
     }
 
@@ -781,7 +999,9 @@ public static partial class TrRmExecutableCompiler
         TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
         int interfaceDef, string moduleIdentity, string typeExportKey,
         uint targetRequirement, uint runtimePolicy,
-        ImmutableArray<string> methodExportKeys)
+        ImmutableArray<ImmutableArray<string>> methodExportKeys,
+        ImmutableArray<ImmutableArray<string>> associatedTypeExportKeys,
+        bool supportsAssociatedTypes)
     {
         var typeDef = tables.Interfaces.GetOwnerTypeDef(interfaceDef);
         var typeFlags = tables.TypeDefs.GetFlags(typeDef);
@@ -802,7 +1022,8 @@ public static partial class TrRmExecutableCompiler
         }
         if (tables.TypeDefs.GetKind(typeDef) != 3
             || firstField != endField || typeContractCount != 0
-            || baseCount != 0 || associatedTypeCount != 0
+            || baseCount != 0
+            || (associatedTypeCount != 0 && !supportsAssociatedTypes)
             || associatedConstCount != 0 || interfaceConstCount != 0)
         {
             throw Unsupported(
@@ -856,7 +1077,8 @@ public static partial class TrRmExecutableCompiler
             {
                 var constraintRow = firstConstraint + constraintOffset;
                 if (tables.Constraints.GetKind(constraintRow) != 2
-                    || tables.Constraints.GetPayload(constraintRow) != 2)
+                    || tables.Constraints.GetPayload(constraintRow) != 2
+                    || !context.Schema.UsesGenericWriteRequirements())
                 {
                     throw Unsupported(
                         "A G1L1 InterfaceDef has an unsupported generic constraint.");
@@ -881,9 +1103,15 @@ public static partial class TrRmExecutableCompiler
             throw Invalid(
                 "A G1L1 InterfaceDef does not have one selected key per direct requirement.");
         }
+        if (associatedTypeExportKeys.Length != associatedTypeCount)
+        {
+            throw Invalid(
+                "A G1L1 InterfaceDef does not have one selected key per direct associated type.");
+        }
 
         var members = ImmutableArray.CreateBuilder<
-            BoundInterfaceMemberDefinition>(methodCount);
+            BoundInterfaceMemberDefinition>(
+                methodCount + associatedTypeCount);
         for (var methodOrdinal = 0; methodOrdinal < methodCount;
             methodOrdinal++)
         {
@@ -991,15 +1219,62 @@ public static partial class TrRmExecutableCompiler
             var resultType = DecodeG1InterfaceTypeSpec(tables, typeDef,
                 formalCount,
                 tables.Signatures.GetResultTypeSpec(signatureRow));
+            var methodKeys = methodExportKeys[methodOrdinal];
+            if (methodKeys.IsDefaultOrEmpty)
+            {
+                throw Invalid(
+                    "A G1L1 InterfaceMethod has no retained ExportKey.");
+            }
             members.Add(new BoundInterfaceMemberDefinition(methodOrdinal,
                 tables.Methods.GetName(methodRow),
-                methodExportKeys[methodOrdinal],
+                methodKeys[0],
                 BoundInterfaceMemberKind.Callable,
                 BoundInterfaceAccessibility.Public, false, false, false,
                 false, false, false, false, [], [], [], default, resultType,
                 [], [], parameters.MoveToImmutable(), [], [], null, null,
                 null) {
                 RequiresMutableReceiver = (methodFlags & 4) != 0,
+                AdditionalDeclarationKeys = methodKeys.RemoveAt(0),
+            });
+        }
+
+        for (var associatedOrdinal = 0;
+            associatedOrdinal < associatedTypeCount;
+            associatedOrdinal++)
+        {
+            var associatedTypeDefRow
+                = firstAssociatedType + associatedOrdinal;
+            if (tables.AssociatedTypeDefs.GetOwnerInterfaceDef(
+                    associatedTypeDefRow) != interfaceDef)
+            {
+                throw Invalid(
+                    "A G1L1 AssociatedTypeDef range has an invalid owner.");
+            }
+
+            var defaultTypeSpecRef = tables.AssociatedTypeDefs
+                .GetDefaultTypeSpecRef(associatedTypeDefRow);
+            var defaultType = defaultTypeSpecRef == 0 ? null
+                : DecodeG1InterfaceTypeSpec(tables, typeDef,
+                    formalCount, defaultTypeSpecRef);
+            var associatedTypeKeys
+                = associatedTypeExportKeys[associatedOrdinal];
+            if (associatedTypeKeys.IsDefaultOrEmpty)
+            {
+                throw Invalid(
+                    "A G1L1 AssociatedTypeDef has no retained ExportKey.");
+            }
+            members.Add(new BoundInterfaceMemberDefinition(
+                members.Count,
+                tables.Strings.DecodeName(
+                    tables.AssociatedTypeDefs.GetNameStringRow(
+                        associatedTypeDefRow)),
+                associatedTypeKeys[0],
+                BoundInterfaceMemberKind.AssociatedType,
+                BoundInterfaceAccessibility.Public, false, false, false,
+                false, false, false, false, [], [], [], default, null,
+                [], [], [], [], [], defaultType, null, null) {
+                AdditionalDeclarationKeys =
+                    associatedTypeKeys.RemoveAt(0),
             });
         }
 
@@ -1020,7 +1295,7 @@ public static partial class TrRmExecutableCompiler
     private static void ValidateG1InterfaceProviderContract(
         BoundInterfaceDefinition expected, BoundInterfaceDefinition provider,
         Dictionary<string, BoundInterfaceMemberDefinition>
-            providerMembersByKey)
+            providerMembersByKey, TrRmArtifactSchema schema)
     {
         if (expected.ModuleImport != provider.ModuleImport
             || expected.IsPublic != provider.IsPublic
@@ -1069,6 +1344,10 @@ public static partial class TrRmExecutableCompiler
             if (!providerMembersByKey.TryGetValue(
                     expectedMember.DeclarationKey, out var providerMember)
                 || expectedMember.Kind != providerMember.Kind
+                || (expectedMember.Kind
+                        == BoundInterfaceMemberKind.AssociatedType
+                    && !StringComparer.Ordinal.Equals(
+                        expectedMember.Name, providerMember.Name))
                 || expectedMember.Accessibility
                     != providerMember.Accessibility
                 || expectedMember.IsStatic != providerMember.IsStatic
@@ -1101,8 +1380,15 @@ public static partial class TrRmExecutableCompiler
                 || !providerMember.Dependencies.IsEmpty
                 || !expectedMember.Accessors.IsEmpty
                 || !providerMember.Accessors.IsEmpty
-                || expectedMember.AssociatedDefaultType is not null
-                || providerMember.AssociatedDefaultType is not null
+                || (expectedMember.Kind == BoundInterfaceMemberKind.AssociatedType
+                    && (!schema.UsesAssociatedRelationConstraints()
+                        || !AreEquivalentG1InterfaceTypes(
+                            expectedMember.AssociatedDefaultType,
+                            providerMember.AssociatedDefaultType)))
+                || (expectedMember.Kind
+                        != BoundInterfaceMemberKind.AssociatedType
+                    && (expectedMember.AssociatedDefaultType is not null
+                        || providerMember.AssociatedDefaultType is not null))
                 || expectedMember.AssociatedConstantType is not null
                 || providerMember.AssociatedConstantType is not null
                 || expectedMember.AssociatedConstantDefault is not null
@@ -1114,6 +1400,17 @@ public static partial class TrRmExecutableCompiler
             {
                 throw Invalid(
                     "The selected G1L1 interface provider changes a retained requirement.");
+            }
+
+            if (expectedMember.AdditionalDeclarationKeys.Any(
+                    aliasKey =>
+                        !providerMembersByKey.TryGetValue(aliasKey,
+                            out var aliasMember)
+                        || aliasMember.Ordinal != providerMember.Ordinal
+                        || aliasMember.Kind != providerMember.Kind))
+            {
+                throw Invalid(
+                    "The selected G1L1 interface provider retargets a retained member alias.");
             }
 
             for (var ordinal = 0;
@@ -1615,10 +1912,8 @@ public static partial class TrRmExecutableCompiler
         }
         var isSupportedClassMethod
             = ownerTypeDefRow != 0
-                && StringComparer.Ordinal.Equals(
-                    context.SchemaIdentity,
-                    StandardGenericMethodSchema
-                        .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaults)
+                && StandardGenericMethodSchema
+                    .IsCM1ClassParameterDefaults(context.SchemaIdentity)
                 && tables.TypeDefs.GetKind(ownerTypeDefRow) == 2
                 && (tables.TypeDefs.GetFlags(ownerTypeDefRow) & 3) == 2
                 && tables.TypeDefs.GetGenericRange(ownerTypeDefRow).Count == 0
@@ -1654,6 +1949,8 @@ public static partial class TrRmExecutableCompiler
         var placeholderTypes = ImmutableArray.CreateBuilder<PrimitiveType>(
             formalCount);
         var formalRecords = new TrRmGenericMethodFormalImport[formalCount];
+        var pendingAssociatedRelations
+            = new List<(int FormalOrdinal, int ConstraintRow)>();
         var interfaceConstraintsLoaded = false;
         var interfaceConstraintVisits
             = SemanticVerifier.MaximumAnalysisVisits;
@@ -1739,8 +2036,16 @@ public static partial class TrRmExecutableCompiler
                             "The selected generic MethodDef has duplicate or unsupported property constraints.");
 
                     case 3:
-                        throw Unsupported(
-                            "G1 generic MethodDef imports do not support associated-relation constraints.");
+                        if (!context.Schema.UsesAssociatedRelationConstraints()
+                            || !isSupportedClassMethod)
+                        {
+                            throw Unsupported(
+                                "Associated-relation constraints require the exact CM1AR1 class MethodDef profile.");
+                        }
+
+                        pendingAssociatedRelations.Add((ordinal,
+                            constraintRow));
+                        break;
 
                     default:
                         throw Invalid(
@@ -1798,6 +2103,44 @@ public static partial class TrRmExecutableCompiler
         }
 
         var formalTypes = placeholderTypes.MoveToImmutable();
+        if (pendingAssociatedRelations.Count != 0)
+        {
+            var associatedRelations
+                = Enumerable.Range(0, formalCount)
+                    .Select(static _ => ImmutableArray.CreateBuilder<
+                        BoundGenericMethodAssociatedRelation>())
+                    .ToArray();
+            var relationVisits = SemanticVerifier.MaximumAnalysisVisits;
+            foreach (var (formalOrdinal, constraintRow)
+                in pendingAssociatedRelations)
+            {
+                var relation = DecodeG1MethodAssociatedRelation(tables,
+                    context, artifactIndex, moduleRow, methodRow,
+                    formalCount, constraintRow, formalTypes, formalRecords,
+                    formalTypeOwnerOrdinal, ref relationVisits);
+                if (associatedRelations[formalOrdinal].Any(existing =>
+                        BoundInterfaceContract
+                            .AreEquivalentAssociatedTypeIdentities(
+                                existing.AssociatedType,
+                                relation.AssociatedType)
+                        && BoundGenericMethodTypeTerms.AreEquivalent(
+                            existing.RequiredType, relation.RequiredType)))
+                {
+                    throw Invalid(
+                        "A G1 GenericParam repeats an associated identity Constraint.");
+                }
+                associatedRelations[formalOrdinal].Add(relation);
+            }
+
+            for (var ordinal = 0; ordinal < formalCount; ordinal++)
+            {
+                formalRecords[ordinal] = formalRecords[ordinal] with {
+                    AssociatedRelations =
+                        associatedRelations[ordinal].ToImmutable(),
+                };
+            }
+        }
+
         var formalSignatures = ImmutableArray.CreateBuilder<
             BoundGenericMethodFormalSignature>(formalCount);
         var formals = ImmutableArray.CreateBuilder<
@@ -1816,6 +2159,7 @@ public static partial class TrRmExecutableCompiler
                     RequiresWritable = formal.RequiresWritable,
                     RequiresBlittable = formal.RequiresBlittable,
                     InterfaceConstraints = formal.InterfaceConstraints,
+                    AssociatedRelations = formal.AssociatedRelations,
                     DefaultTypeParameterDependencies = dependencies,
                 });
             formals.Add(new BoundGenericMethodFormal(ordinal,
@@ -1825,6 +2169,7 @@ public static partial class TrRmExecutableCompiler
                 RequiresWritable = formal.RequiresWritable,
                 RequiresBlittable = formal.RequiresBlittable,
                 InterfaceConstraints = formal.InterfaceConstraints,
+                AssociatedRelations = formal.AssociatedRelations,
             });
             formalOrder.Add(new BoundGenericMethodFormalSlot(ordinal,
                 BoundGenericMethodFormalKind.Type, ordinal, -1));
@@ -3809,7 +4154,312 @@ public static partial class TrRmExecutableCompiler
         byte OwnershipDomain, byte NullabilityDomain,
         bool RequiresWritable, bool RequiresBlittable,
         ImmutableArray<BoundInterfaceType> InterfaceConstraints,
-        BoundGenericMethodTypeDefault? TypeDefault);
+        BoundGenericMethodTypeDefault? TypeDefault)
+    {
+        internal ImmutableArray<BoundGenericMethodAssociatedRelation>
+            AssociatedRelations { get; init; } = [];
+    }
+
+    private static BoundGenericMethodAssociatedRelation
+        DecodeG1MethodAssociatedRelation(
+            TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+            GenericMethodReadContext context, int artifactIndex, int moduleRow,
+            int methodRow, int formalCount, int constraintRow,
+            ImmutableArray<PrimitiveType> formalTypes,
+            TrRmGenericMethodFormalImport[] formalRecords,
+            int formalTypeOwnerOrdinal, ref int remainingVisits)
+    {
+        if (--remainingVisits < 0)
+        {
+            throw Unsupported(
+                "The G1 associated-relation closure exceeds the supported analysis limit.");
+        }
+
+        var formalRow = tables.Constraints
+            .GetOwnerGenericParam(constraintRow);
+        var formalOrdinal = checked((int)tables.GenericParams
+            .GetOrdinal(formalRow));
+        if (tables.GenericParams.GetFormalKind(formalRow) != 1
+            || tables.GenericParams.GetOwnerDefId(formalRow)
+                != (0x1600_0000u | checked((uint)methodRow))
+            || (uint)formalOrdinal >= (uint)formalCount)
+        {
+            throw Invalid(
+                "A G1 associated-relation Constraint has an invalid method formal owner.");
+        }
+
+        var relationRow = checked((int)tables.Constraints
+            .GetPayload(constraintRow));
+        var declaringInterfaceTypeSpecRef = tables.AssociatedRelations
+            .GetDeclaringInterfaceTypeSpecRef(relationRow);
+        var associatedTypeDefReference = tables.AssociatedRelations
+            .GetAssociatedTypeDefReference(relationRow);
+        var requiredTypeSpecRef = tables.AssociatedRelations
+            .GetRequiredTypeSpecRef(relationRow);
+        _ = CreateGenericInterfaceDefinitions(tables, context,
+            artifactIndex, moduleRow);
+        var interfaceConstraintVisits
+            = Math.Min(remainingVisits,
+                SemanticVerifier.MaximumAnalysisVisits);
+        var declaringInterface = DecodeG1MethodInterfaceConstraint(tables,
+            context, artifactIndex, moduleRow, methodRow, formalCount,
+            declaringInterfaceTypeSpecRef,
+            ref interfaceConstraintVisits);
+        remainingVisits = Math.Min(remainingVisits, interfaceConstraintVisits);
+        if (declaringInterface.Kind != BoundInterfaceTypeKind.Nominal
+            || declaringInterface.IsWritable
+            || declaringInterface.IsOptional
+            || declaringInterface.IsGarbageCollected
+            || declaringInterface.IsInitialization)
+        {
+            throw Unsupported(
+                "A G1 associated relation must name one unqualified interface instance.");
+        }
+
+        var typeDef = tables.TypeSpecs.GetNominalTypeDefRow(
+            declaringInterfaceTypeSpecRef, tables.TypeDefs, tables.Imports);
+        var interfaceDef
+            = tables.Interfaces.GetInterfaceDefForTypeDef(typeDef);
+        if (interfaceDef == 0
+            || !context.InterfaceDefinitionsByTypeDef.TryGetValue(
+                (artifactIndex, moduleRow, typeDef),
+                out var interfaceDefinition))
+        {
+            throw Unsupported(
+                "A G1 associated relation has no retained declaring-interface closure.");
+        }
+
+        if (!TrRmAssociatedTypeReference.TryGetLocalRow(
+                associatedTypeDefReference,
+                tables.AssociatedTypeDefs.Count, tables.Imports,
+                out var associatedTypeDefRow)
+            || tables.AssociatedTypeDefs.GetOwnerInterfaceDef(
+                associatedTypeDefRow) != interfaceDef)
+        {
+            throw Invalid(
+                "A G1 associated-relation reference has the wrong namespace or declaring interface.");
+        }
+
+        var (firstAssociatedType, associatedTypeCount)
+            = tables.Interfaces.GetAssociatedTypeRange(interfaceDef);
+        if (associatedTypeDefRow < firstAssociatedType
+            || associatedTypeDefRow
+                >= firstAssociatedType + associatedTypeCount)
+        {
+            throw Invalid(
+                "A G1 associated-relation reference is outside its interface member range.");
+        }
+
+        var memberOrdinal = tables.Interfaces.GetMethodRange(interfaceDef)
+            .Count + associatedTypeDefRow - firstAssociatedType;
+        if ((uint)memberOrdinal >= (uint)interfaceDefinition.Members.Length
+            || interfaceDefinition.Members[memberOrdinal]
+                is not BoundInterfaceMemberDefinition {
+                    Kind: BoundInterfaceMemberKind.AssociatedType,
+                } associatedMember
+            || !StringComparer.Ordinal.Equals(associatedMember.Name,
+                tables.Strings.DecodeName(
+                    tables.AssociatedTypeDefs.GetNameStringRow(
+                        associatedTypeDefRow))))
+        {
+            throw Invalid(
+                "A G1 associated-relation reference does not select its exact retained member.");
+        }
+
+        var associatedDeclarationKey
+            = ValidateG1AssociatedTypeReferenceBinding(tables, moduleRow,
+            associatedTypeDefReference, associatedTypeDefRow,
+            interfaceDefinition, associatedMember);
+
+        var requiredType = ResolveGenericMethodTypeSpec(context,
+            artifactIndex, tables, moduleRow, tables.TypeSpecs,
+            tables.GenericParams, formalRecords, methodRow,
+            formalTypeOwnerOrdinal, requiredTypeSpecRef, formalTypes,
+            allowFormalForwarding: true, ordinal: formalCount,
+            out var requiredFormalOrdinal);
+        if (!TryCreateG1GenericMethodTypeTerm(requiredType, formalTypes,
+                formalRecords, formalTypeOwnerOrdinal, context.SpanTypes,
+                context.CheckedReferenceTypeDefinitions,
+                context.GenericNominalTypeDefinitions.ToImmutable(),
+                context.GenericNominalTypeInstances, 0,
+                requiredFormalOrdinal, out var requiredTypeTerm))
+        {
+            throw Unsupported(
+                "A G1 associated relation uses an unsupported required type.");
+        }
+
+        if (!formalRecords[formalOrdinal].InterfaceConstraints.Any(
+                constraint =>
+                    BoundInterfaceContract
+                        .AreEquivalentProviderInterfaceViews(
+                            constraint, declaringInterface)))
+        {
+            throw Invalid(
+                "A G1 associated-relation Constraint lacks its separate matching interface conformance Constraint.");
+        }
+
+        var identity = new BoundInterfaceMemberIdentity(
+            declaringInterface, associatedMember.Ordinal,
+            associatedDeclarationKey);
+        return new BoundGenericMethodAssociatedRelation(formalOrdinal,
+            identity, requiredTypeTerm, relationRow,
+            declaringInterfaceTypeSpecRef, associatedTypeDefReference,
+            requiredTypeSpecRef);
+    }
+
+    private static string ValidateG1AssociatedTypeReferenceBinding(
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+        int moduleRow, uint associatedTypeDefReference,
+        int associatedTypeDefRow,
+        BoundInterfaceDefinition interfaceDefinition,
+        BoundInterfaceMemberDefinition associatedMember)
+    {
+        var definitionId = 0x2000_0000u
+            | checked((uint)associatedTypeDefRow);
+        var referenceKind = associatedTypeDefReference >> 24;
+        string? selectedExportKey = null;
+        string? selectedProducer = null;
+        uint selectedTargetRequirement = 0;
+        uint selectedRuntimePolicy = 0;
+        var ownerImport = interfaceDefinition.ModuleImport;
+        if (referenceKind == 0x1C)
+        {
+            var importRow = checked((int)(associatedTypeDefReference
+                & 0x00FF_FFFF));
+            if (importRow == 0)
+            {
+                throw Invalid(
+                    "A G1 AssociatedTypeDef reference has no exact Import binding.");
+            }
+
+            var moduleRefRow = tables.Imports
+                .GetModuleRefForImportRow(importRow);
+            var selected = tables.Imports
+                .GetBindingForImportRow(importRow);
+            if (tables.Imports.GetExpectedDefinitionForImportRow(importRow)
+                    != definitionId
+                || tables.ModuleRefs.GetOwnerModule(moduleRefRow) != moduleRow)
+            {
+                throw Invalid(
+                    "A G1 AssociatedTypeDef Import has an invalid expected owner or ModuleRef.");
+            }
+
+            selectedExportKey = selected.ExportKey;
+            selectedProducer = selected.ProducerIdentity;
+            selectedTargetRequirement = selected.TargetRequirement;
+            selectedRuntimePolicy = selected.RuntimePolicy;
+        }
+        else if (referenceKind == 0x20)
+        {
+            var isExpected = tables.Imports
+                .IsExpectedDefinition(definitionId);
+            var foundPrimaryKey = false;
+            if (isExpected)
+            {
+                for (var importRow = 1;
+                    importRow <= tables.Imports.Count; importRow++)
+                {
+                    if (tables.Imports
+                            .GetExpectedDefinitionForImportRow(importRow)
+                        != definitionId)
+                    {
+                        continue;
+                    }
+
+                    var moduleRefRow = tables.Imports
+                        .GetModuleRefForImportRow(importRow);
+                    var selected = tables.Imports
+                        .GetBindingForImportRow(importRow);
+                    if (tables.ModuleRefs.GetOwnerModule(moduleRefRow)
+                            != moduleRow
+                        || ownerImport is null
+                        || !StringComparer.Ordinal.Equals(
+                            selected.ProducerIdentity,
+                            ownerImport.ProducerIdentity)
+                        || selected.TargetRequirement
+                            != ownerImport.TargetRequirement
+                        || selected.RuntimePolicy
+                            != ownerImport.RuntimePolicy
+                        || !IsAssociatedTypeExportKey(
+                            associatedMember, selected.ExportKey))
+                    {
+                        throw Invalid(
+                            "A direct G1 AssociatedTypeDef expectation has a conflicting Import alias.");
+                    }
+
+                    if (StringComparer.Ordinal.Equals(
+                        associatedMember.DeclarationKey,
+                        selected.ExportKey))
+                    {
+                        foundPrimaryKey = true;
+                    }
+                }
+
+                if (!foundPrimaryKey)
+                {
+                    throw Invalid(
+                        "A direct G1 AssociatedTypeDef expectation does not retain its primary Import key.");
+                }
+                selectedExportKey = associatedMember.DeclarationKey;
+                selectedProducer = ownerImport.ProducerIdentity;
+                selectedTargetRequirement = ownerImport.TargetRequirement;
+                selectedRuntimePolicy = ownerImport.RuntimePolicy;
+            }
+            else
+            {
+                var foundPrimaryKey = false;
+                foreach (var (definition, exportKey)
+                    in tables.Exports.GetExportsForModule(moduleRow))
+                {
+                    if (definition != definitionId)
+                    {
+                        continue;
+                    }
+                    if (!IsAssociatedTypeExportKey(associatedMember,
+                            exportKey))
+                    {
+                        throw Invalid(
+                            "A direct G1 AssociatedTypeDef Export is not retained by its interface member view.");
+                    }
+                    foundPrimaryKey |= StringComparer.Ordinal.Equals(
+                        associatedMember.DeclarationKey, exportKey);
+                }
+
+                if (!foundPrimaryKey || ownerImport is null)
+                {
+                    throw Invalid(
+                        "A direct G1 AssociatedTypeDef has no exact ExportKey.");
+                }
+                selectedExportKey = associatedMember.DeclarationKey;
+                selectedProducer = tables.Modules.GetIdentity(moduleRow);
+                (selectedTargetRequirement, selectedRuntimePolicy)
+                    = tables.Modules.GetRequirements(moduleRow);
+            }
+        }
+
+        if (ownerImport is null
+            || selectedExportKey is null
+            || selectedProducer is null
+            || !StringComparer.Ordinal.Equals(selectedProducer,
+                ownerImport.ProducerIdentity)
+            || selectedTargetRequirement != ownerImport.TargetRequirement
+            || selectedRuntimePolicy != ownerImport.RuntimePolicy
+            || !IsAssociatedTypeExportKey(associatedMember,
+                selectedExportKey))
+        {
+            throw Invalid(
+                "A G1 AssociatedTypeDef reference does not bind through its exact declaring-interface provider.");
+        }
+
+        return selectedExportKey;
+
+        static bool IsAssociatedTypeExportKey(
+            BoundInterfaceMemberDefinition member, string exportKey)
+            => StringComparer.Ordinal.Equals(member.DeclarationKey,
+                    exportKey)
+                || member.AdditionalDeclarationKeys.Contains(exportKey,
+                    StringComparer.Ordinal);
+    }
 
     private static BoundInterfaceType DecodeG1MethodInterfaceConstraint(
         TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,

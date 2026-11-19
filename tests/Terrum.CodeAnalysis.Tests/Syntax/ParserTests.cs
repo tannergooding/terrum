@@ -337,6 +337,28 @@ internal sealed class ParserTests
     }
 
     [Test]
+    public void ParsesAssociatedIdentityConstraintsLosslessly()
+    {
+        const string Source = """
+            interface ISource { type Item; }
+            public int32 Forward<T, U>(T value) where T : ISource
+                where T.via<ISource>.Item is U { return 0; }
+            """;
+        var tree = SyntaxTree.Parse(Source);
+        Assert.That(tree.HasErrors, Is.False,
+            string.Join(Environment.NewLine, tree.Diagnostics));
+        var constraint = tree.Root.DescendantNodes().Single(
+            static node =>
+                node.Kind == SyntaxKind.AssociatedIdentityConstraint);
+        Assert.That(constraint.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.AssociatedProjection)
+            .Children.OfType<SyntaxTokenElement>()
+            .Last().Token.Name, Is.EqualTo("Item"));
+        AssertLossless(tree);
+    }
+
+    [Test]
     public void ParsesConstantArgumentsOnNominalInterfaceTypes()
     {
         const string Source = """

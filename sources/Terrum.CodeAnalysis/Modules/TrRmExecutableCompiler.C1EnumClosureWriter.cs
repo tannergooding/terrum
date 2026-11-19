@@ -1297,7 +1297,9 @@ public static partial class TrRmExecutableCompiler
                     || typeExport.GenericArity < -1
                     || typeExport.GenericArity > 0
                     || !typeExport.EnumMemberDeclarationKeys.IsDefaultOrEmpty
-                    || !typeExport.InterfaceMethodExports.IsDefaultOrEmpty)
+                    || !typeExport.InterfaceMethodExports.IsDefaultOrEmpty
+                    || !typeExport.InterfaceAssociatedTypeExports
+                        .IsDefaultOrEmpty)
                 {
                     throw new ArgumentException(
                         "EN1 source type exports select non-generic structs and cannot assign enum members or interface methods.",

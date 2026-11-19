@@ -642,6 +642,12 @@ public static partial class TrRmExecutableCompiler
                 StandardC1M1Construction2L1R1ClassParameterDefaultsSchemaIdentity
                     => TrRmArtifactSchema
                         .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft,
+                StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsSchemaIdentity
+                    => TrRmArtifactSchema
+                        .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft,
+                StandardCM1AR1SchemaIdentity
+                    => TrRmArtifactSchema
+                        .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsDraft,
                 StandardC1M1ConstructionL1R1PropertyInitializedStateSchemaIdentity
                     => TrRmArtifactSchema
                         .C1M1ConstructionL1R1PropertyInitializedStateDraft,
@@ -1026,7 +1032,9 @@ public static partial class TrRmExecutableCompiler
                 || (providerFormal.RequiresBlittable
                     && !expectedFormal.RequiresBlittable)
                 || expectedFormal.InterfaceConstraints.IsDefault
-                || providerFormal.InterfaceConstraints.IsDefault)
+                || providerFormal.InterfaceConstraints.IsDefault
+                || expectedFormal.AssociatedRelations.IsDefault
+                || providerFormal.AssociatedRelations.IsDefault)
             {
                 throw Invalid(
                     "The selected G1 provider changes a retained generic default or strengthens a caller obligation.");
@@ -1042,6 +1050,24 @@ public static partial class TrRmExecutableCompiler
             {
                 throw Invalid(
                     "The selected G1 provider changes a retained interface constraint identity or strengthens an interface obligation.");
+            }
+            if (providerFormal.AssociatedRelations.Any(
+                    providerRelation =>
+                        !expectedFormal.AssociatedRelations.Any(
+                            expectedRelation =>
+                                expectedRelation.FormalOrdinal
+                                    == providerRelation.FormalOrdinal
+                                && BoundInterfaceContract
+                                    .AreEquivalentAssociatedTypeIdentities(
+                                        expectedRelation.AssociatedType,
+                                        providerRelation.AssociatedType)
+                                && AreEquivalentGenericMethodImportTypeTerms(
+                                    expectedRelation.RequiredType,
+                                    providerRelation.RequiredType,
+                                    expected, provider, context, 0))))
+            {
+                throw Invalid(
+                    "The selected G1 provider adds or changes an associated-relation obligation.");
             }
             if (!PreservesGenericMethodTypeDefault(
                     expectedFormal.TypeDefault,
@@ -1344,7 +1370,9 @@ public static partial class TrRmExecutableCompiler
                 formal.PlaceholderType, formal.Name,
                 formal.OwnershipDomain, formal.NullabilityDomain,
                 formal.RequiresWritable, formal.RequiresBlittable,
-                formal.InterfaceConstraints, formal.TypeDefault);
+                formal.InterfaceConstraints, formal.TypeDefault) {
+                AssociatedRelations = formal.AssociatedRelations,
+            };
         }
 
         return records;

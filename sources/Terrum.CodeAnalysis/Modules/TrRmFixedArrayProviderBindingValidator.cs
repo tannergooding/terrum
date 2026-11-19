@@ -57,6 +57,9 @@ internal static class TrRmFixedArrayProviderBindingValidator
     private const string CM1SchemaIdentity
         = StandardGenericMethodSchema
             .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaults;
+    private const string CM1AR1SchemaIdentity
+        = StandardGenericMethodSchema
+            .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraints;
     private const string FixedArraySchemaIdentity
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
     private const string FixedArrayEmptyInitializationSchemaIdentity
@@ -82,7 +85,9 @@ internal static class TrRmFixedArrayProviderBindingValidator
         => StringComparer.Ordinal.Equals(schemaIdentity,
                 C1M1SchemaIdentity)
             || StringComparer.Ordinal.Equals(schemaIdentity,
-                CM1SchemaIdentity);
+                CM1SchemaIdentity)
+            || StringComparer.Ordinal.Equals(schemaIdentity,
+                CM1AR1SchemaIdentity);
 
     private static bool IsInitializationReferenceLocalFieldLayoutSchemaIdentity(
         string schemaIdentity)
@@ -179,7 +184,9 @@ internal static class TrRmFixedArrayProviderBindingValidator
                 or TrRmArtifactSchema.C1Draft
                 or TrRmArtifactSchema.C1M1Draft
                 or TrRmArtifactSchema
-                    .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft)
+                    .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft
+                or TrRmArtifactSchema
+                    .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsDraft)
             && !(consumer.Schema.UsesC1EnumClosure()
                 && isEN1ProviderSchema)
             || artifacts.Length != schemaIdentities.Length
@@ -254,7 +261,9 @@ internal static class TrRmFixedArrayProviderBindingValidator
         var isC1M1ConsumerSchema = consumer.Schema is
             TrRmArtifactSchema.C1M1Draft
                 or TrRmArtifactSchema
-                    .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft;
+                    .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft
+                or TrRmArtifactSchema
+                    .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsDraft;
         if ((!isC1M1ConsumerSchema
                 && (!consumer.Schema.UsesC1EnumClosure()
                     || !isEN1ProviderSchema))
@@ -3790,13 +3799,21 @@ internal static class TrRmFixedArrayProviderBindingValidator
             if (IsC1M1SchemaIdentity(
                     _schemaIdentities[artifactIndex]))
             {
-                var c1m1Index = StringComparer.Ordinal.Equals(
-                        _schemaIdentities[artifactIndex], CM1SchemaIdentity)
-                    ? TrRmArtifactIndex
-                        .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
-                            _artifacts[artifactIndex])
-                    : TrRmArtifactIndex.ForC1M1Draft(
-                        _artifacts[artifactIndex]);
+                var c1m1Index
+                    = StringComparer.Ordinal.Equals(
+                        _schemaIdentities[artifactIndex],
+                        CM1AR1SchemaIdentity)
+                        ? TrRmArtifactIndex
+                            .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsDraft(
+                                _artifacts[artifactIndex])
+                        : StringComparer.Ordinal.Equals(
+                            _schemaIdentities[artifactIndex],
+                            CM1SchemaIdentity)
+                            ? TrRmArtifactIndex
+                                .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                                    _artifacts[artifactIndex])
+                            : TrRmArtifactIndex.ForC1M1Draft(
+                                _artifacts[artifactIndex]);
                 var c1m1Tables = TrRmStructuralMetadataValidator
                     .ValidateC1AndGetExecutionTables(c1m1Index);
                 _cachedProviderTables = c1m1Tables;

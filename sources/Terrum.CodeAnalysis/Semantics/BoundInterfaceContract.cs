@@ -288,6 +288,7 @@ internal static class BoundInterfaceContract
                 || member.Attributes.IsDefault || member.Attributes.Any(string.IsNullOrWhiteSpace)
                 || member.AttributeTokens.IsDefault || member.AttributeTokens.Any(string.IsNullOrWhiteSpace)
                 || member.ContractTokens.IsDefault
+                || member.AdditionalDeclarationKeys.IsDefault
                 || member.TypeParameters.IsDefault || member.TypeParameters.Length > SemanticVerifier.MaximumArguments
                 || member.Constraints.IsDefault || member.Parameters.IsDefault
                 || member.Parameters.Length > SemanticVerifier.MaximumArguments
@@ -306,6 +307,15 @@ internal static class BoundInterfaceContract
                             or NativeCallingConvention.Vectorcall))))
             {
                 return false;
+            }
+            foreach (var additionalKey in member.AdditionalDeclarationKeys)
+            {
+                if (string.IsNullOrWhiteSpace(additionalKey)
+                    || additionalKey.Contains('\0', StringComparison.Ordinal)
+                    || !memberKeys.Add(additionalKey))
+                {
+                    return false;
+                }
             }
             if (member.Kind is BoundInterfaceMemberKind.Callable or BoundInterfaceMemberKind.Operator
                     or BoundInterfaceMemberKind.Property or BoundInterfaceMemberKind.Indexer
@@ -921,7 +931,9 @@ internal static class BoundInterfaceContract
                 >= (uint)definition.Members.Length
             || definition.Members[identity.MemberOrdinal] is not
                 BoundInterfaceMemberDefinition selected
-            || selected.DeclarationKey != identity.DeclarationKey
+            || (selected.DeclarationKey != identity.DeclarationKey
+                && !selected.AdditionalDeclarationKeys.Contains(
+                    identity.DeclarationKey, StringComparer.Ordinal))
             || selected.Accessibility
                 == BoundInterfaceAccessibility.Private
             || (selected.Kind is BoundInterfaceMemberKind.Property
@@ -2249,6 +2261,15 @@ internal static class BoundInterfaceContract
         }
         return true;
     }
+
+    internal static bool AreEquivalentAssociatedTypeIdentities(
+        BoundInterfaceMemberIdentity left,
+        BoundInterfaceMemberIdentity right)
+        => left is not null && right is not null
+            && StringComparer.Ordinal.Equals(left.DeclarationKey,
+                right.DeclarationKey)
+            && AreEquivalentProviderInterfaceViews(
+                left.DeclaringInterface, right.DeclaringInterface);
 
     private static bool AreEquivalentProviderInterfaceTypeArguments(
         BoundInterfaceTypeArgument expected,

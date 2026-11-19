@@ -105,6 +105,10 @@ public static partial class TrRmExecutableCompiler
             if (!StringComparer.Ordinal.Equals(schemaIdentities[0],
                     StandardC1M1SchemaIdentity)
                 && !StringComparer.Ordinal.Equals(schemaIdentities[0],
+                    StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsSchemaIdentity)
+                && !StringComparer.Ordinal.Equals(schemaIdentities[0],
+                    StandardCM1AR1SchemaIdentity)
+                && !StringComparer.Ordinal.Equals(schemaIdentities[0],
                     StandardC1M1Construction2L1R1ClassParameterDefaultsSchemaIdentity))
             {
                 throw Unsupported(

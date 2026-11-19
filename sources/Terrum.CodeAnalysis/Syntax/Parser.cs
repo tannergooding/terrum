@@ -106,8 +106,19 @@ internal sealed class Parser
 
     private SyntaxNode ParseConstraint()
     {
+        var whereToken = Take();
+        if (LooksLikeAssociatedIdentityConstraint())
+        {
+            var projection = ParseAssociatedProjection();
+            var identityToken = Expect(TokenKind.Identifier);
+            var requiredType = ParseType();
+            return Node(SyntaxKind.AssociatedIdentityConstraint,
+                [whereToken, projection, identityToken, requiredType]);
+        }
+
         var children = new List<SyntaxElement> {
-            Take(), Expect(TokenKind.Identifier), ExpectSeparated(TokenKind.Colon),
+            whereToken, Expect(TokenKind.Identifier),
+            ExpectSeparated(TokenKind.Colon),
         };
         while (true)
         {
@@ -149,6 +160,129 @@ internal sealed class Parser
             children.Add(Take());
         }
         return Node(SyntaxKind.ConstraintClause, children);
+    }
+
+    private bool LooksLikeAssociatedIdentityConstraint()
+    {
+        var offset = 0;
+        if (Peek(offset).Kind == TokenKind.VoidKeyword)
+        {
+            offset++;
+        }
+        else if (Peek(offset).Kind == TokenKind.Identifier)
+        {
+            offset++;
+            while (Peek(offset).Kind == TokenKind.Dot
+                && Peek(offset + 1).Kind == TokenKind.Identifier)
+            {
+                if (Peek(offset + 1).Text == "via"
+                    && Peek(offset + 2).Kind == TokenKind.Less)
+                {
+                    return true;
+                }
+
+                offset += 2;
+            }
+
+            if (Peek(offset).Kind == TokenKind.Less)
+            {
+                var depth = 0;
+                while (Peek(offset).Kind != TokenKind.EndOfFile)
+                {
+                    var kind = Peek(offset++).Kind;
+                    if (kind == TokenKind.Less)
+                    {
+                        depth++;
+                    }
+                    else if (kind == TokenKind.Greater)
+                    {
+                        if (--depth == 0)
+                        {
+                            break;
+                        }
+                    }
+                    else if (kind == TokenKind.ShiftRight)
+                    {
+                        depth -= 2;
+                        if (depth <= 0)
+                        {
+                            break;
+                        }
+                    }
+                    else if (kind == TokenKind.ShiftRightUnsigned)
+                    {
+                        depth -= 3;
+                        if (depth <= 0)
+                        {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        else
+        {
+            return false;
+        }
+
+        return Peek(offset).Kind == TokenKind.Dot
+            && Peek(offset + 1).Kind == TokenKind.Identifier
+            && Peek(offset + 1).Text == "via"
+            && Peek(offset + 2).Kind == TokenKind.Less;
+    }
+
+    private SyntaxNode ParseAssociatedProjection()
+    {
+        var missing = _missingTokens;
+        var prefix = new List<SyntaxElement>();
+        if (Current.Kind == TokenKind.VoidKeyword)
+        {
+            prefix.Add(Take());
+        }
+        else
+        {
+            prefix.Add(Expect(TokenKind.Identifier));
+            while (Current.Kind == TokenKind.Dot
+                && Peek(1).Kind == TokenKind.Identifier
+                && !(Peek(1).Text == "via"
+                    && Peek(2).Kind == TokenKind.Less))
+            {
+                prefix.Add(TakeDot(qualified: true));
+                prefix.Add(Take());
+            }
+
+            if (Current.Kind == TokenKind.Less)
+            {
+                prefix.Add(ExpectAttached(TokenKind.Less));
+                prefix.Add(ParseTypeArgument());
+                while (Current.Kind == TokenKind.Comma)
+                {
+                    prefix.Add(Take());
+                    prefix.Add(ParseTypeArgument());
+                }
+                prefix.Add(ExpectTypeCloser(missing));
+            }
+        }
+
+        var children = new List<SyntaxElement> {
+            Node(SyntaxKind.TypeName, prefix),
+            TakeDot(qualified: true),
+        };
+        if (Current.Kind == TokenKind.Identifier
+            && Current.Text == "via")
+        {
+            children.Add(Take());
+        }
+        else
+        {
+            children.Add(Expect(TokenKind.Identifier));
+        }
+        children.Add(ExpectAttached(TokenKind.Less));
+        children.Add(ParseType());
+        children.Add(ExpectTypeCloser(missing));
+        children.Add(TakeDot(qualified: true));
+        children.Add(Expect(TokenKind.Identifier));
+        return Node(SyntaxKind.AssociatedProjection, children);
     }
 
     private bool IsContextualDeclarationPrefix() =>

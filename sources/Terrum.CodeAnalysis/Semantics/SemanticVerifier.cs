@@ -28159,6 +28159,10 @@ public static partial class SemanticVerifier
                     || formal.InterfaceConstraints.IsDefault
                     || !formal.InterfaceConstraints.SequenceEqual(
                         formalSignature.InterfaceConstraints)
+                    || formal.AssociatedRelations.IsDefault
+                    || formalSignature.AssociatedRelations.IsDefault
+                    || !formal.AssociatedRelations.SequenceEqual(
+                        formalSignature.AssociatedRelations)
                     || (formal.TypeDefault is not null)
                         != formalSignature.HasTypeDefault
                     || (formal.TypeDefault is BoundGenericMethodTypeDefault
@@ -28897,8 +28901,11 @@ public static partial class SemanticVerifier
         ImmutableArray<BoundGenericMethodFormalSlot> formalOrder,
         int formalOrdinal, int definitionOrdinal,
         BoundGenericTypeFormalOwnerKind formalOwnerKind
-            = BoundGenericTypeFormalOwnerKind.GenericMethod)
+            = BoundGenericTypeFormalOwnerKind.GenericMethod,
+        bool allowForwardFormals = false)
     {
+        var formalOrdinalLimit = allowForwardFormals
+            ? formals.Length : formalOrdinal;
         var formalOrderOrdinal = formalOrder.IsDefault
             ? -1
             : formalOrder.FirstOrDefault(slot =>
@@ -28910,24 +28917,30 @@ public static partial class SemanticVerifier
             || constantFormals.IsDefault
             || formalOrder.IsDefault
             || formalOrderOrdinal < 0
-            || !IsGenericMethodTypeTermInOwnershipDomain(
-                typeDefault.Term, formals[formalOrdinal].OwnershipDomain,
-                formals, program, 0)
-            || (formals[formalOrdinal].NullabilityDomain == 1
+            || (!allowForwardFormals
+                && !IsGenericMethodTypeTermInOwnershipDomain(
+                    typeDefault.Term,
+                    formals[formalOrdinal].OwnershipDomain,
+                    formals, program, 0))
+            || (!allowForwardFormals
+                && formals[formalOrdinal].NullabilityDomain == 1
                 && IsNullableGenericMethodTypeTerm(typeDefault.Term,
                     formals, program))
-            || (formals[formalOrdinal].RequiresBlittable
+            || (!allowForwardFormals
+                && formals[formalOrdinal].RequiresBlittable
                 && !IsValidGenericMethodBlittableTypeTerm(
                     typeDefault.Term, formals, program, 0))
-            || (formals[formalOrdinal].RequiresWritable
+            || (!allowForwardFormals
+                && formals[formalOrdinal].RequiresWritable
                 && !IsWritableGenericMethodTypeTerm(
                     typeDefault.Term, formals, program))
-            || (formals[formalOrdinal].RequiresWritable
+            || (!allowForwardFormals
+                && formals[formalOrdinal].RequiresWritable
                 && !IsWritableGenericMethodTypeTerm(
                     typeDefault.Term, formals, program))
             || typeDefault.FormalDependencies.IsDefault
             || !AreOrderedEarlierFormalDependencies(
-                typeDefault.FormalDependencies, formalOrdinal))
+                typeDefault.FormalDependencies, formalOrdinalLimit))
         {
             return false;
         }
@@ -28951,7 +28964,8 @@ public static partial class SemanticVerifier
                 slot.Kind == BoundGenericMethodFormalKind.Constant
                 && slot.ConstantFormalOrdinal == dependency);
             if (dependencySlot is null
-                || dependencySlot.Ordinal >= formalOrderOrdinal)
+                || (!allowForwardFormals
+                    && dependencySlot.Ordinal >= formalOrderOrdinal))
             {
                 return false;
             }
@@ -29007,14 +29021,17 @@ public static partial class SemanticVerifier
                             : IsValidType(term.ConcreteType, false, program));
                 case BoundGenericMethodTypeTermKind.Formal:
                     if (term.FormalOrdinal < 0
-                        || term.FormalOrdinal >= formalOrdinal
+                        || term.FormalOrdinal >= formalOrdinalLimit
                         || term.SourceGenericTypeDefinitionIndex != -1
                         || term.NominalTypeIdentity is not null
                         || !term.TypeArguments.IsEmpty
                         || term.IsGarbageCollected
                         || term.IsInitialization
                         || term.IsOptional
-                        || term.IsWritable
+                        || (term.IsWritable
+                            && (!allowForwardFormals
+                                || !formals[term.FormalOrdinal]
+                                    .RequiresWritable))
                         || term.ConcreteType != PrimitiveType.Void)
                     {
                         return false;
@@ -29424,6 +29441,92 @@ public static partial class SemanticVerifier
                     return false;
             }
         }
+    }
+
+    private static bool IsValidGenericMethodAssociatedRelation(
+        BoundGenericMethodAssociatedRelation? relation,
+        int formalOrdinal,
+        ImmutableArray<BoundGenericMethodFormal> formals,
+        ImmutableArray<BoundGenericMethodConstantFormal> constantFormals,
+        ImmutableArray<BoundGenericMethodFormalSlot> formalOrder,
+        int definitionOrdinal, BoundGenericMethodOwner? owner,
+        ImmutableArray<BoundInterfaceFormal> interfaceMethodFormals,
+        BoundProgram program)
+    {
+        if (relation is null || relation.FormalOrdinal != formalOrdinal
+            || (uint)formalOrdinal >= (uint)formals.Length
+            || relation.AssociatedType is null
+            || relation.AssociatedType.AccessorOrdinal != -1
+            || relation.RequiredType is null
+            || (relation.RequiredType.Kind
+                    == BoundGenericMethodTypeTermKind.Concrete
+                && (relation.RequiredType.ConcreteType == PrimitiveType.Void
+                    || relation.RequiredType.AllowsVoid)))
+        {
+            return false;
+        }
+
+        var sourceAnchored = relation.AssociatedRelationRow == 0
+            && relation.DeclaringInterfaceTypeSpecReference == 0
+            && relation.AssociatedTypeDefReference == 0
+            && relation.RequiredTypeSpecReference == 0;
+        var imported = relation.AssociatedRelationRow is > 0 and <= 0x00FF_FFFF
+            && relation.DeclaringInterfaceTypeSpecReference > 0
+            && relation.RequiredTypeSpecReference > 0
+            && (relation.AssociatedTypeDefReference >> 24) is 0x20 or 0x1C
+            && (relation.AssociatedTypeDefReference & 0x00FF_FFFF) != 0;
+        if (!sourceAnchored && !imported)
+        {
+            return false;
+        }
+
+        var interfaceType = relation.AssociatedType.DeclaringInterface;
+        if (!BoundInterfaceContract.IsValidGenericMethodConstraintTypes(
+                [interfaceType], program.Interfaces,
+                type => ValidType(type, false, program),
+                owner?.TypeArguments.Length ?? 0,
+                interfaceMethodFormals,
+                program.GenericNominalTypeDefinitions,
+                program.SourceGenericTypeDefinitions)
+            || !BoundInterfaceContract.TryGetInterfaceMemberDefinition(
+                relation.AssociatedType, program.Interfaces,
+                type => ValidType(type, false, program), out var member,
+                allowOpenFormals: true,
+                genericNominalTypeDefinitions:
+                    program.GenericNominalTypeDefinitions,
+                sourceGenericTypeDefinitions:
+                    program.SourceGenericTypeDefinitions)
+            || member is not {
+                Kind: BoundInterfaceMemberKind.AssociatedType,
+                Accessibility: BoundInterfaceAccessibility.Public,
+            }
+            || !formals[formalOrdinal].InterfaceConstraints.Any(
+                constraint =>
+                    BoundInterfaceContract
+                        .AreEquivalentProviderInterfaceViews(
+                            constraint, interfaceType))
+            || !BoundGenericMethodTypeTerms.TryGetFormalDependencies(
+                relation.RequiredType, out var formalDependencies)
+            || !BoundGenericMethodTypeTerms
+                .TryGetConstantFormalDependencies(relation.RequiredType,
+                    out var constantFormalDependencies))
+        {
+            return false;
+        }
+
+        var requiredType = new BoundGenericMethodTypeDefault(
+            relation.RequiredType, formalDependencies) {
+            ConstantFormalDependencies = constantFormalDependencies,
+        };
+        if (!IsValidGenericMethodTypeDefault(program, requiredType,
+                formals, constantFormals, formalOrder, formalOrdinal,
+                definitionOrdinal,
+                allowForwardFormals: true))
+        {
+            return false;
+        }
+
+        return true;
     }
 
     private static bool IsNullableGenericMethodTypeTerm(
@@ -29955,6 +30058,11 @@ public static partial class SemanticVerifier
             {
                 return false;
             }
+            var typeFormalProjection =
+                ProjectGenericMethodTypeFormals(signature.Formals);
+            var constantFormalProjection =
+                ProjectGenericMethodConstantFormals(
+                    signature.ConstantFormals);
             var formalNames = new HashSet<string>(StringComparer.Ordinal);
             for (var ordinal = 0; ordinal < signature.Formals.Length;
                 ordinal++)
@@ -29968,6 +30076,9 @@ public static partial class SemanticVerifier
                     || formal.Requirements.IsDefault
                     || formal.InterfaceConstraints.IsDefault
                     || formal.InterfaceConstraints.Length
+                        > MaximumArguments
+                    || formal.AssociatedRelations.IsDefault
+                    || formal.AssociatedRelations.Length
                         > MaximumArguments
                     || (formal.RequiresBlittable
                         && program.LayoutCoreRegistration is null)
@@ -30024,13 +30135,41 @@ public static partial class SemanticVerifier
                 {
                     return false;
                 }
+
+                work += formal.AssociatedRelations.Length;
+                if (work > MaximumAnalysisVisits)
+                {
+                    return false;
+                }
+                for (var relationOrdinal = 0;
+                    relationOrdinal
+                        < formal.AssociatedRelations.Length;
+                    relationOrdinal++)
+                {
+                    var relation
+                        = formal.AssociatedRelations[relationOrdinal];
+                    if (!IsValidGenericMethodAssociatedRelation(relation,
+                            ordinal, typeFormalProjection,
+                            constantFormalProjection,
+                            signature.FormalOrder,
+                            signature.DefinitionOrdinal,
+                            signature.Owner, interfaceMethodFormals,
+                            program)
+                        || formal.AssociatedRelations.Take(
+                            relationOrdinal).Any(previous =>
+                            BoundInterfaceContract
+                                .AreEquivalentAssociatedTypeIdentities(
+                                    previous.AssociatedType,
+                                    relation.AssociatedType)
+                            && AreGenericMethodTypeTermsEqual(
+                                previous.RequiredType,
+                                relation.RequiredType, 0)))
+                    {
+                        return false;
+                    }
+                }
             }
 
-            var typeFormalProjection =
-                ProjectGenericMethodTypeFormals(signature.Formals);
-            var constantFormalProjection =
-                ProjectGenericMethodConstantFormals(
-                    signature.ConstantFormals);
             for (var constantOrdinal = 0;
                 constantOrdinal < signature.ConstantFormals.Length;
                 constantOrdinal++)
@@ -30369,6 +30508,7 @@ public static partial class SemanticVerifier
                 RequiresBlittable = formal.RequiresBlittable,
                 RequiresWritable = formal.RequiresWritable,
                 InterfaceConstraints = formal.InterfaceConstraints,
+                AssociatedRelations = formal.AssociatedRelations,
             });
         }
         return result.MoveToImmutable();
@@ -30850,6 +30990,63 @@ public static partial class SemanticVerifier
         return true;
     }
 
+    private static bool AreGenericMethodAssociatedRelationsEqual(
+        ImmutableArray<BoundGenericMethodAssociatedRelation> source,
+        ImmutableArray<BoundGenericMethodAssociatedRelation> proof,
+        BoundProgram sourceProgram, BoundProgram proofProgram,
+        ref int remainingVisits)
+    {
+        if (source.IsEmpty && proof.IsEmpty)
+        {
+            return true;
+        }
+        if (source.IsDefault || proof.IsDefault
+            || source.Length != proof.Length)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < source.Length; index++)
+        {
+            var sourceRelation = source[index];
+            var proofRelation = proof[index];
+            if (--remainingVisits < 0
+                || sourceRelation is null || proofRelation is null
+                || sourceRelation.FormalOrdinal
+                    != proofRelation.FormalOrdinal
+                || sourceRelation.AssociatedRelationRow
+                    != proofRelation.AssociatedRelationRow
+                || sourceRelation.DeclaringInterfaceTypeSpecReference
+                    != proofRelation.DeclaringInterfaceTypeSpecReference
+                || sourceRelation.AssociatedTypeDefReference
+                    != proofRelation.AssociatedTypeDefReference
+                || sourceRelation.RequiredTypeSpecReference
+                    != proofRelation.RequiredTypeSpecReference
+                || sourceRelation.AssociatedType is null
+                || proofRelation.AssociatedType is null
+                || sourceRelation.AssociatedType.MemberOrdinal
+                    != proofRelation.AssociatedType.MemberOrdinal
+                || sourceRelation.AssociatedType.AccessorOrdinal
+                    != proofRelation.AssociatedType.AccessorOrdinal
+                || sourceRelation.AssociatedType.DeclarationKey
+                    != proofRelation.AssociatedType.DeclarationKey
+                || !AreGenericMethodInterfaceTypesEqual(
+                    sourceRelation.AssociatedType.DeclaringInterface,
+                    proofRelation.AssociatedType.DeclaringInterface,
+                    sourceProgram, proofProgram, 0,
+                    ref remainingVisits)
+                || !AreGenericMethodProofTypeTermsEquivalent(
+                    sourceRelation.RequiredType,
+                    proofRelation.RequiredType, sourceProgram,
+                    proofProgram, 0, ref remainingVisits))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private static bool AreGenericMethodInterfaceTypesEqual(
         BoundInterfaceType? source, BoundInterfaceType? proof,
         BoundProgram sourceProgram, BoundProgram proofProgram, int depth,
@@ -31153,6 +31350,10 @@ public static partial class SemanticVerifier
                     || rightFormal.InterfaceConstraints.IsDefault
                     || leftFormal.InterfaceConstraints.Length
                         != rightFormal.InterfaceConstraints.Length
+                    || leftFormal.AssociatedRelations.IsDefault
+                    || rightFormal.AssociatedRelations.IsDefault
+                    || leftFormal.AssociatedRelations.Length
+                        != rightFormal.AssociatedRelations.Length
                     || leftFormal.HasTypeDefault
                         != rightFormal.HasTypeDefault
                     || leftFormal.DefaultTypeParameterDependencies.IsDefault
@@ -31170,6 +31371,13 @@ public static partial class SemanticVerifier
                 if (!AreGenericMethodInterfaceConstraintsEqual(
                     leftFormal.InterfaceConstraints,
                     rightFormal.InterfaceConstraints, sourceProgram,
+                    proofProgram, ref remainingVisits))
+                {
+                    return false;
+                }
+                if (!AreGenericMethodAssociatedRelationsEqual(
+                    leftFormal.AssociatedRelations,
+                    rightFormal.AssociatedRelations, sourceProgram,
                     proofProgram, ref remainingVisits))
                 {
                     return false;
@@ -31715,9 +31923,8 @@ public static partial class SemanticVerifier
         {
             return false;
         }
-        if (!StringComparer.Ordinal.Equals(import.Origin.SchemaIdentity,
-                StandardGenericMethodSchema
-                    .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaults))
+        if (!StandardGenericMethodSchema.IsCM1ClassParameterDefaults(
+                import.Origin.SchemaIdentity))
         {
             return defaults.IsEmpty
                 || defaults.Length == parameterCount
