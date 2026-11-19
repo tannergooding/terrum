@@ -138,10 +138,15 @@ value parameters, including the exact method-label/CM1 parameter-surface
 forms. The exact label-free Construction-2 full-module reference also selects
 local and imported class roots and exposes exported nongeneric top-level
 function views with the bounded unit, scalar, class-handle and plain
-checked-reference signature forms; a producer/reference/downstream-call
-regression is added but remains unverified under the active hold. Source-free
-re-emission of these top-level functions remains open. The exact label-free
-Construction-2 single-root API path now re-emits
+checked-reference signature forms; producer/reference/downstream-call and
+source-free provider/reload regressions are added but remain unverified
+under the active hold. Exact Construction-2 source-free re-emission now
+preserves bodyful exported nongeneric top-level MethodDefs whose Bodies fit
+the existing C1M1 remapper (kinds 01-05), including TypeSpec, Effects,
+Dependency and ExportKey remapping. Bodyless forwarded top-level Imports,
+unexported helper closure, generic functions, and other profile/provider
+combinations remain open. The exact label-free Construction-2 single-root API
+path now re-emits
 field-only I/P Construction clauses and supported Body maps and lowers a
 top-level direct unit- or scalar-returning call to a selected ordinary class
 MethodDef with receiver-first MethodMap inputs, including zero-payload unit

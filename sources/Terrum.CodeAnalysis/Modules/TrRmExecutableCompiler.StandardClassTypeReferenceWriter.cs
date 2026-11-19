@@ -50,6 +50,10 @@ public static partial class TrRmExecutableCompiler
         ImmutableArray<string> ExportKeys,
         ReadOnlyMemory<byte> Body);
 
+    private sealed record C1M1ModuleFunctionEmissionPlan(
+        int MethodDefRow, BoundFunction Function,
+        ImmutableArray<string> ExportKeys);
+
     private readonly record struct C1M1GenericConstraintPlan(
         int MethodRow, int FormalOrdinal, int GenericParamRow,
         int Kind, uint Payload, int InterfaceConstraintOrdinal);
@@ -9445,6 +9449,90 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
+        var moduleFunctionCandidates
+            = new List<(int FunctionIndex, int MethodDefRow,
+                BoundFunction Function, string ExportKey)>();
+        for (var functionIndex = 0;
+            functionIndex < program.Functions.Length; functionIndex++)
+        {
+            var function = program.Functions[functionIndex];
+            if (function.DeclaringStruct is not null
+                || function.ModuleImport is not BoundModuleImport import
+                || !function.IsExternal || !function.IsModuleReference)
+            {
+                continue;
+            }
+
+            if (!StringComparer.Ordinal.Equals(schemaIdentity,
+                    StandardC1M1Construction2SchemaIdentity)
+                || !StringComparer.Ordinal.Equals(
+                    import.ProducerIdentity, rootSnapshot.ModuleIdentity)
+                || import.TargetRequirement != rootSnapshot.TargetRequirement
+                || import.RuntimePolicy != rootSnapshot.RuntimePolicy
+                || !StringComparer.Ordinal.Equals(function.Name,
+                    import.ExportKey)
+                || !rootTables.Exports.TryGetDefinitionForKey(
+                    rootModuleRow, import.ExportKey, out var definition)
+                || (definition >> 24) != 0x16)
+            {
+                throw Unsupported(
+                    "Top-level class-reference function re-emission requires an exact Construction-2 Export from its root Module.");
+            }
+
+            var methodRow = GetMethodDefRow(definition);
+            var signatureRow = rootTables.Methods.GetSignature(methodRow);
+            if (rootTables.Methods.GetOwnerModule(methodRow) != rootModuleRow
+                || rootTables.Methods.GetOwnerType(methodRow) != 0
+                || rootTables.Methods.GetBodyRow(methodRow) == 0
+                || rootTables.Signatures.GetReceiverTypeSpec(signatureRow)
+                    != 0
+                || rootTables.Signatures.GetGenericRange(signatureRow)
+                    .Count != 0)
+            {
+                throw Unsupported(
+                    "Top-level class-reference functions must target bodyful nongeneric module MethodDefs without receivers.");
+            }
+
+            moduleFunctionCandidates.Add((functionIndex, methodRow,
+                function, import.ExportKey));
+        }
+
+        var moduleFunctionEmissionPlans = new SortedDictionary<int,
+            C1M1ModuleFunctionEmissionPlan>();
+        var moduleFunctionIndexes = new HashSet<int>();
+        foreach (var group in moduleFunctionCandidates
+            .OrderBy(static candidate => candidate.MethodDefRow)
+            .ThenBy(static candidate => candidate.ExportKey,
+                StringComparer.Ordinal)
+            .GroupBy(static candidate => candidate.MethodDefRow))
+        {
+            var aliases = group.ToArray();
+            var representative = aliases[0];
+            var exportKeys = aliases
+                .Select(static alias => alias.Function.Name)
+                .Distinct(StringComparer.Ordinal)
+                .ToImmutableArray();
+            if (exportKeys.Length != aliases.Length
+                || !moduleFunctionEmissionPlans.TryAdd(
+                    representative.MethodDefRow,
+                    new C1M1ModuleFunctionEmissionPlan(
+                        representative.MethodDefRow,
+                        representative.Function, exportKeys)))
+            {
+                throw new InvalidDataException(
+                    "A top-level class-reference MethodDef has conflicting retained ExportKeys.");
+            }
+
+            foreach (var alias in aliases)
+            {
+                if (!moduleFunctionIndexes.Add(alias.FunctionIndex))
+                {
+                    throw new InvalidDataException(
+                        "A top-level class-reference function view was retained more than once.");
+                }
+            }
+        }
+
         var interfaceImportRows = new SortedSet<int>();
 
         var rootImportCount = 0;
@@ -9498,13 +9586,21 @@ public static partial class TrRmExecutableCompiler
 
         var (methodStart, methodEnd)
             = rootTables.Modules.GetMethodDefRange(rootModuleRow);
-        if (methodEnd - methodStart != methodEmissionPlans.Count
+        var retainedMethodDefRows = methodEmissionPlans.Keys.ToHashSet();
+        foreach (var methodRow in moduleFunctionEmissionPlans.Keys)
+        {
+            if (!retainedMethodDefRows.Add(methodRow))
+            {
+                throw new InvalidDataException(
+                    "A top-level module function overlaps a retained class MethodDef.");
+            }
+        }
+        if (methodEnd - methodStart != retainedMethodDefRows.Count
             || Enumerable.Range(methodStart, methodEnd - methodStart)
-                .Any(methodRow =>
-                    !methodEmissionPlans.ContainsKey(methodRow)))
+                .Any(methodRow => !retainedMethodDefRows.Contains(methodRow)))
         {
             throw Unsupported(
-                "C1M1 class re-emission only retains selected bodyless class Imports and supported local root MethodDefs.");
+                "C1M1 class re-emission only retains selected class MethodDefs and exported top-level module functions.");
         }
 
         var moduleRefStartEnd
@@ -9606,6 +9702,10 @@ public static partial class TrRmExecutableCompiler
         var methodDefRowMap = new Dictionary<int, int>();
         var nextMethodDefRow = 0;
         foreach (var oldMethodDefRow in methodEmissionPlans.Keys)
+        {
+            methodDefRowMap.Add(oldMethodDefRow, ++nextMethodDefRow);
+        }
+        foreach (var oldMethodDefRow in moduleFunctionEmissionPlans.Keys)
         {
             methodDefRowMap.Add(oldMethodDefRow, ++nextMethodDefRow);
         }
@@ -10386,8 +10486,123 @@ public static partial class TrRmExecutableCompiler
             return typeSpecRow;
         }
 
-        foreach (var function in program.Functions)
+        bool ModuleFunctionTypeMatches(uint typeSpecReference,
+            PrimitiveType type)
         {
+            var typeSpec = rootTables.TypeSpecs.GetTypeSpecRef(
+                typeSpecReference);
+            if (!typeSpec.IsRow && typeSpec.Form == 1
+                && typeSpec.Qualifiers == 0
+                && typeSpec.TypeCode == 0)
+            {
+                return type == PrimitiveType.Void;
+            }
+
+            if (TryGetC1M1ClassScalarType(rootTables,
+                    typeSpecReference, out var scalarType))
+            {
+                return type == scalarType;
+            }
+
+            if (typeSpec.IsRow && typeSpec.Form == 0x07
+                && typeSpec.Qualifiers == 0
+                && CheckedReferenceTypes.IsType(type))
+            {
+                var referenceIndex = CheckedReferenceTypes.Index(type);
+                if ((uint)referenceIndex
+                        >= (uint)program.CheckedReferenceTypes.Length)
+                {
+                    return false;
+                }
+
+                var referenceType = program.CheckedReferenceTypes[
+                    referenceIndex];
+                var typeSpecRow = rootTables.TypeSpecs.GetRow(
+                    typeSpec.Row).Span;
+                var referentTypeSpecReference
+                    = BinaryPrimitives.ReadUInt32LittleEndian(
+                        typeSpecRow.Slice(2));
+                return !referenceType.IsWritable
+                    && !referenceType.IsGarbageCollected
+                    && !referenceType.IsInitialization
+                    && !referenceType.IsOptional
+                    && !referenceType.IsOptionalValue
+                    && !referenceType.IsReferentWritable
+                    && TryGetC1M1ClassScalarType(rootTables,
+                        referentTypeSpecReference, out var referentType)
+                    && referenceType.ReferentType == referentType;
+            }
+
+            if (!typeSpec.IsRow || typeSpec.Form is not (0x02 or 0x03)
+                || !BoundGenericNominalTypeTypes.IsType(type))
+            {
+                return false;
+            }
+
+            var instanceIndex = BoundGenericNominalTypeTypes.Index(type);
+            if ((uint)instanceIndex
+                    >= (uint)program.GenericNominalTypeInstances.Length)
+            {
+                return false;
+            }
+
+            var instance = program.GenericNominalTypeInstances[
+                instanceIndex];
+            var typeDefRow = rootTables.TypeSpecs.GetNominalTypeDefRow(
+                typeSpecReference, rootTables.TypeDefs, rootTables.Imports);
+            if (typeDefRow <= 0
+                || rootTables.TypeDefs.GetKind(typeDefRow) != 2
+                || !instance.Arguments.IsEmpty
+                || instance.Qualifiers != typeSpec.Qualifiers
+                || (instance.Qualifiers & ~0x01) != 0
+                || !StringComparer.Ordinal.Equals(
+                    instance.TypeSpecProviderIdentity,
+                    rootSnapshot.ModuleIdentity)
+                || instance.TypeSpecReference != typeSpecReference
+                || instance.TypeSpecForm != typeSpec.Form
+                || !outputClassTypeDefRowsByIdentity.ContainsKey(
+                    instance.Definition))
+            {
+                return false;
+            }
+
+            var expectedDefinitionId = 0x1300_0000u
+                | checked((uint)typeDefRow);
+            if (typeSpec.Form == 0x02)
+            {
+                return instance.Definition
+                    == new BoundGenericNominalTypeIdentity(
+                        rootSnapshot.ModuleIdentity,
+                        rootSnapshot.ModuleIdentity,
+                        expectedDefinitionId);
+            }
+
+            var typeBindings = classProviderValidation.TypeBindings
+                .Where(binding => binding.ConsumerArtifactIndex == 0
+                    && binding.ConsumerModuleRow == rootModuleRow
+                    && binding.ImportRow == typeSpec.Row)
+                .ToArray();
+            return typeBindings.Length == 1
+                && typeBindings[0].ExpectedTypeDefRow == typeDefRow
+                && typeBindings[0].ActualDefinitionId
+                    == instance.Definition.DefinitionId
+                && StringComparer.Ordinal.Equals(
+                    typeBindings[0].ProducerIdentity,
+                    instance.Definition.ModuleIdentity)
+                && StringComparer.Ordinal.Equals(
+                    typeBindings[0].ProducerIdentity,
+                    instance.Definition.ProviderIdentity);
+        }
+
+        for (var functionIndex = 0;
+            functionIndex < program.Functions.Length; functionIndex++)
+        {
+            var function = program.Functions[functionIndex];
+            if (moduleFunctionIndexes.Contains(functionIndex))
+            {
+                continue;
+            }
+
             if (function.ModuleImport is null && !function.IsExternal
                 && function.DeclaringStruct is null)
             {
@@ -10764,6 +10979,183 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
+        foreach (var plan in moduleFunctionEmissionPlans.Values)
+        {
+            var oldMethodRow = plan.MethodDefRow;
+            var newMethodRow = methodDefRowMap[oldMethodRow];
+            var function = plan.Function;
+            var signatureRow
+                = rootTables.Methods.GetSignature(oldMethodRow);
+            var (parameterStart, parameterCount)
+                = rootTables.Signatures.GetParamRange(signatureRow);
+            var effectsMask
+                = rootTables.Contracts.GetEffectsMask(oldMethodRow);
+            var dependencyContractRows
+                = rootTables.Contracts.GetDependencyContractRows(
+                    oldMethodRow);
+            var dependencyContracts
+                = DecodeC1M1ClassMethodDependencyContracts(
+                    dependencyContractRows
+                        .Select(static row => row.Contract)
+                        .ToImmutableArray(),
+                    parameterCount, hasReceiver: false);
+            var methodFlags
+                = rootTables.Methods.GetFlags(oldMethodRow);
+            if (rootTables.Methods.GetOwnerType(oldMethodRow) != 0
+                || rootTables.Methods.GetBodyRow(oldMethodRow) == 0
+                || rootTables.Signatures.GetReceiverTypeSpec(signatureRow) != 0
+                || rootTables.Signatures.GetGenericRange(signatureRow).Count
+                    != 0
+                || (methodFlags & 3) != 2
+                || (methodFlags & 4) != 0
+                || (effectsMask & ~6u) != 0
+                || function.ParameterCount != parameterCount
+                || function.Variables.Length != parameterCount
+                || function.IsPrivate || function.IsInternal
+                || !function.IsExternal
+                || !function.IsModuleReference
+                || function.IsConstructor || function.IsClassConstructor
+                || function.ClassConstructor != -1
+                || function.IsStatic || function.IsCleanup
+                || function.Intrinsic != BoundIntrinsic.None
+                || function.NoFailureProof
+                || function.HasPureEvaluationForm
+                || function.HasOrdinaryParameterDefaultSurface
+                || !function.OrdinaryParameterDefaults.IsEmpty
+                || !function.DeclarationContractClauses.IsDefaultOrEmpty
+                || !function.DependencyContracts.AsSpan().SequenceEqual(
+                    dependencyContracts.AsSpan())
+                || function.RequiresUnsafeCaller
+                    != ((effectsMask & 4) != 0)
+                || function.DeclaredRequiresUnsafeCaller
+                    != ((effectsMask & 4) != 0)
+                || function.DoesNotReturn != ((effectsMask & 2) != 0))
+            {
+                throw new InvalidDataException(
+                    "A retained top-level class-reference function differs from its checked MethodDef contract.");
+            }
+
+            var resultTypeSpecReference
+                = rootTables.Signatures.GetResultTypeSpec(signatureRow);
+            if (!ModuleFunctionTypeMatches(resultTypeSpecReference,
+                    function.ReturnType))
+            {
+                throw new InvalidDataException(
+                    "A retained top-level class-reference function result differs from its MethodSig.");
+            }
+
+            var signatureOutputRow = methodSignatureRows.Count + 1;
+            var remappedResultTypeSpec = RemapC1M1ClassTypeSpec(
+                rootTables, resultTypeSpecReference, typeDefRowMap,
+                importRowMap, outputTypeSpecRows, typeSpecRowMap,
+                activeTypeSpecRows, depth: 0,
+                genericParamRowMap: genericParamRowMap);
+            var outputParameterStart = parameterCount == 0
+                ? 0 : parameterRows.Count + 1;
+            for (var ordinal = 0; ordinal < parameterCount; ordinal++)
+            {
+                var parameterRow = parameterStart + ordinal;
+                var typeSpecReference
+                    = rootTables.Parameters.GetTypeSpec(parameterRow);
+                var mode = rootTables.Parameters.GetMode(parameterRow);
+                var flags = rootTables.Parameters.GetFlags(parameterRow);
+                var variable = function.Variables[ordinal];
+                if (mode != 0 || flags > 1
+                    || variable.IsMutable || variable.IsOut
+                    || variable.IsInit || variable.IsInitializationLocal
+                    || variable.IsImplicitRef != (flags == 1)
+                    || !ModuleFunctionTypeMatches(typeSpecReference,
+                        variable.Type))
+                {
+                    throw new InvalidDataException(
+                        "A retained top-level class-reference parameter differs from its checked Param row.");
+                }
+
+                var remappedTypeSpec = RemapC1M1ClassTypeSpec(rootTables,
+                    typeSpecReference, typeDefRowMap, importRowMap,
+                    outputTypeSpecRows, typeSpecRowMap, activeTypeSpecRows,
+                    depth: 0, genericParamRowMap: genericParamRowMap);
+                parameterRows.Add(new TrRmParamRow(signatureOutputRow,
+                    ordinal, remappedTypeSpec, mode, flags));
+            }
+
+            methodSignatureRows.Add(new TrRmMethodSigRow(
+                remappedResultTypeSpec, 0, outputParameterStart,
+                parameterCount, 0, 0));
+
+            var methodContractFirst = 0;
+            var methodContractCount = 0;
+            if (effectsMask != 0)
+            {
+                methodContractFirst = contractRows.Count + 1;
+                contractRows.Add(new TrRmContractRow(
+                    0x1600_0000u | checked((uint)newMethodRow), 1,
+                    s_effectPayloads[effectsMask]));
+                methodContractCount++;
+            }
+
+            var methodDependencyContractRowMap
+                = new Dictionary<int, int>();
+            foreach (var (oldContractRow, dependency)
+                in dependencyContractRows)
+            {
+                if (methodContractFirst == 0)
+                {
+                    methodContractFirst = contractRows.Count + 1;
+                }
+
+                var payload = new byte[12];
+                payload[0] = dependency.DestinationKind;
+                payload[1] = dependency.SourceKind;
+                payload[2] = dependency.Relationship;
+                payload[3] = dependency.Phase;
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    payload.AsSpan(4), dependency.DestinationOrdinal);
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    payload.AsSpan(8), dependency.SourceOrdinal);
+                contractRows.Add(new TrRmContractRow(
+                    0x1600_0000u | checked((uint)newMethodRow), 4, payload));
+                methodDependencyContractRowMap.Add(oldContractRow,
+                    contractRows.Count);
+                methodContractCount++;
+            }
+
+            var sourceBodyRow
+                = rootTables.Methods.GetBodyRow(oldMethodRow);
+            var sourceBody = rootTables.Bodies.GetRow(sourceBodyRow);
+            if (sourceBody.IsEmpty
+                || sourceBody.Span[0] is not
+                    (0x01 or 0x02 or 0x03 or 0x04 or 0x05))
+            {
+                throw Unsupported(
+                    "Top-level Construction-2 function re-emission supports Body kinds 01-05.");
+            }
+
+            var outputBodyRow = bodyRows.Count + 1;
+            bodyRows.Add(RemapC1M1ClassMethodBody(rootTables, sourceBody,
+                typeDefRowMap, methodDefRowMap, fieldRowMap, importRowMap,
+                fieldPathRowMap, fieldPathRows, fieldPathRowsByIdentity,
+                methodDependencyContractRowMap,
+                frozenScalarValueBuilder, outputTypeSpecRows,
+                typeSpecRowMap, activeTypeSpecRows, schema,
+                genericParamRowMap));
+            methodRows.Add(new TrRmMethodDefRow(0, 0,
+                signatureOutputRow, methodFlags, methodContractFirst,
+                methodContractCount, outputBodyRow));
+            methodNames.Add(rootTables.Methods.GetName(oldMethodRow));
+            foreach (var exportKey in plan.ExportKeys)
+            {
+                if (!exportKeys.Add(exportKey))
+                {
+                    throw new InvalidDataException(
+                        "A top-level class-reference function ExportKey conflicts with a retained class declaration.");
+                }
+
+                exportRows.Add((
+                    0x1600_0000u | checked((uint)newMethodRow), exportKey));
+            }
+        }
+
         var methodClosureRowCount = (long)methodRows.Count
             + methodSignatureRows.Count + parameterRows.Count
             + genericParamRows.Count + genericConstraintRows.Count
@@ -11038,14 +11430,14 @@ public static partial class TrRmExecutableCompiler
                 signatures, typeSpecs, schema);
         var methodBytes = methodRows.Count == 0 ? []
             : TrRmMethodDefTableWriter.Encode(methodRows, strings,
-                moduleTables, typeDefs, signatures, contractRows.Count, 0,
-                schema);
+                moduleTables, typeDefs, signatures, contractRows.Count,
+                bodyRows.Count, schema);
         var bodyBytes = bodyRows.Count == 0 ? []
             : TrRmVariableTableWriter.EncodeBodies(bodyRows);
         var methods = methodRows.Count == 0 ? default
             : new TrRmMethodDefTableReader(methodBytes, methodRows.Count,
                 strings, moduleTables, typeDefs, signatures,
-                contractRows.Count, 0, schema);
+                contractRows.Count, bodyRows.Count, schema);
         var classImportRows = CreateC1M1ClassImports(
             bindingsByImportRow, fieldBindingsByImportRow,
             methodBindingsByImportRow, importRowMap, moduleRefRowMap,

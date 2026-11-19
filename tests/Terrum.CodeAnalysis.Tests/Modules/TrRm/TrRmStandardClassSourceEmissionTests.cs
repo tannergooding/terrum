@@ -377,6 +377,51 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             """), reference);
         Assert.That(downstream.HasErrors, Is.False,
             string.Join(Environment.NewLine, downstream.Diagnostics));
+
+        var sourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), reference);
+        Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceFreeCompilation.Diagnostics));
+        const string reemittedModuleIdentity
+            = "C2ClassFunctionProviderReemitted";
+        var reemitted = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)sourceFreeCompilation.Program!,
+            reemittedModuleIdentity, C1M1Construction2SchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var reemittedTables
+            = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(
+                    TrRmArtifactIndex.ForC1M1Construction2Draft(
+                        reemitted));
+        var consumeDefinition = reemittedTables.Exports
+            .GetExportsForModule(1)
+            .Single(static export => export.ExportKey == "Consume")
+            .Definition;
+        var consumeMethodRow = checked((int)(
+            consumeDefinition & 0x00FF_FFFF));
+        var consumeBodyRow = reemittedTables.Methods.GetBodyRow(
+            consumeMethodRow);
+        Assert.That(reemittedTables.Methods.GetOwnerType(consumeMethodRow),
+            Is.Zero);
+        Assert.That(consumeBodyRow, Is.GreaterThan(0));
+        Assert.That(reemittedTables.Bodies.GetRow(consumeBodyRow)[0],
+            Is.EqualTo(0x01));
+
+        var reemittedReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(
+                    C1M1Construction2SchemaIdentity, reemitted),
+                reemittedModuleIdentity, []);
+        var reloadedDownstream = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                public void ForwardAgain(Box value, int32 count) {
+                    Consume(value, count);
+                }
+                """), reemittedReference);
+        Assert.That(reloadedDownstream.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                reloadedDownstream.Diagnostics));
     }
 
     [Test]
