@@ -1654,6 +1654,14 @@ public static partial class TrRmExecutableCompiler
         return result.ToImmutable();
     }
 
+    internal static ImmutableArray<BoundDependencyContract>
+        DecodeC1M1ClassMethodDependencyContracts(
+            ImmutableArray<TrRmDependencyContract> dependencies,
+            int parameterCount, bool hasReceiver)
+        => DecodeC1M1ClassMethodDependencyContracts(
+            CreateC1M1ClassMethodDependencyClauseView(dependencies),
+            parameterCount, hasReceiver);
+
     private static ImmutableArray<
         BoundStandardClassMethodDependencyClause>
         CreateC1M1ClassMethodDependencyClauseView(

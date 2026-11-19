@@ -1394,8 +1394,14 @@ public static partial class TrRmExecutableCompiler
                                 != PrimitiveType.Void
                             && TryGetC1M1Construction2DirectFieldRead(
                                 methodFunction, out directFieldIndex);
+                    var directFieldReferenceIndex = -1;
+                    var isSupportedDirectFieldReference
+                        = TryGetC1M1Construction2DirectFieldReference(
+                            program, methodFunction, classIndex,
+                            out directFieldReferenceIndex);
                     var nestedFieldRead
                         = !isSupportedDirectFieldReadInstanceMethod
+                            && !isSupportedDirectFieldReference
                             ? TryGetC1M1Construction2NestedFieldRead(
                                 program, methodFunction, classIndex,
                                 sourceStructDeclarations,
@@ -1466,6 +1472,7 @@ public static partial class TrRmExecutableCompiler
                             && !isSupportedNoOpInstanceMethod
                             && !isSupportedDirectReturnInstanceMethod
                             && !isSupportedDirectFieldReadInstanceMethod
+                            && !isSupportedDirectFieldReference
                             && nestedFieldRead is null
                             && !isSupportedDirectFieldWriteInstanceMethod
                             && nestedFieldWrite is null
@@ -1487,8 +1494,9 @@ public static partial class TrRmExecutableCompiler
                         || methodFunction.ClassConstructor != -1
                         || methodFunction.DeclaringStruct
                             != classDeclaration.Name
-                        || methodFunction.RequiresUnsafeCaller
-                        || methodFunction.DeclaredRequiresUnsafeCaller
+                        || ((methodFunction.RequiresUnsafeCaller
+                                || methodFunction.DeclaredRequiresUnsafeCaller)
+                            && !isSupportedDirectFieldReference)
                         || methodFunction.DoesNotReturn
                         || methodFunction.NoFailureProof
                         || methodFunction.HasPureEvaluationForm
@@ -1519,7 +1527,8 @@ public static partial class TrRmExecutableCompiler
                         || methodFunction.ReturnsForwardedBacking
                         || methodFunction.NativeOutputRole is not null
                         || !methodFunction.NativeOutputContracts.IsEmpty
-                        || !methodFunction.DependencyContracts.IsEmpty
+                        || (!methodFunction.DependencyContracts.IsEmpty
+                            && !isSupportedDirectFieldReference)
                         || methodFunction.CopyOriginSummary is not null
                         || methodFunction.HasRawUnionReturnCoverage
                         || !methodFunction.RawUnionReturnCoverage.IsEmpty
@@ -1530,7 +1539,7 @@ public static partial class TrRmExecutableCompiler
                             && methodFunction.IsInternal))
                     {
                         throw Unsupported(
-                            "The bounded Construction-2 class method producer supports effect-free scalar static methods, exact identity forwarders, readonly instance int32/Boolean operations and same-class call-binary methods, scalar local-copy/binary returns, empty unit instance methods, readonly instance methods returning one scalar value parameter, direct scalar field reads and direct or nested inline-struct scalar field writes.");
+                            "The bounded Construction-2 class method producer supports scalar static methods, exact identity forwarders, readonly instance int32/Boolean operations and same-class call-binary methods, scalar local-copy/binary returns, empty unit instance methods, readonly instance methods returning one scalar value parameter, direct scalar field reads and normal-result checked-reference returns to direct scalar fields, and direct or nested inline-struct scalar field writes.");
                     }
 
                     if (methodFunction.ReturnType != PrimitiveType.Void)
@@ -1539,6 +1548,7 @@ public static partial class TrRmExecutableCompiler
                         {
                             if (!isSupportedDirectReturnInstanceMethod
                                 && !isSupportedDirectFieldReadInstanceMethod
+                                && !isSupportedDirectFieldReference
                                 && nestedFieldRead is null
                                 && !isSupportedDirectFieldWriteInstanceMethod
                                 && !isSupportedIdentityForwarder
@@ -1552,12 +1562,20 @@ public static partial class TrRmExecutableCompiler
                                 && !localNumericBinaryReturn)
                             {
                                 throw Unsupported(
-                                    "The bounded Construction-2 instance method producer supports only unit, direct scalar-parameter, direct numeric/Boolean operations, same-class fixed-integer call-binary, local-copy/binary returns or direct scalar-field results and direct scalar-field writes.");
+                                    "The bounded Construction-2 instance method producer supports only unit, direct scalar-parameter, direct numeric/Boolean operations, same-class fixed-integer call-binary, local-copy/binary returns, direct scalar-field reads, normal-result checked-reference field returns and direct scalar-field writes.");
                             }
                         }
 
-                        _ = GetC1M1SourceScalarTypeSpecReference(
-                            methodFunction.ReturnType);
+                        if (isSupportedDirectFieldReference)
+                        {
+                            _ = NoOpMethodTypeSpecReference(
+                                methodFunction.ReturnType);
+                        }
+                        else
+                        {
+                            _ = GetC1M1SourceScalarTypeSpecReference(
+                                methodFunction.ReturnType);
+                        }
                     }
 
                     if (methodFunction.IsStatic)
@@ -1800,8 +1818,11 @@ public static partial class TrRmExecutableCompiler
                     var methodResultTypeSpecReference
                         = methodFunction.ReturnType == PrimitiveType.Void
                             ? 0xF200_0000u
-                            : FieldTypeSpecReference(
-                                methodFunction.ReturnType);
+                            : isSupportedDirectFieldReference
+                                ? NoOpMethodTypeSpecReference(
+                                    methodFunction.ReturnType)
+                                : FieldTypeSpecReference(
+                                    methodFunction.ReturnType);
                     var methodReceiverTypeSpecReference
                         = methodFunction.IsStatic ? 0u
                             : FieldTypeSpecReference(
@@ -1816,13 +1837,67 @@ public static partial class TrRmExecutableCompiler
                     var methodEffectsMask
                         = (methodFunction.DoesNotReturn ? 2u : 0u)
                             | (methodFunction.RequiresUnsafeCaller ? 4u : 0u);
-                    var methodContractFirst = methodEffectsMask == 0
-                        ? 0 : contractRows.Count + 1;
+                    var methodContractFirst = 0;
+                    var methodContractCount = 0;
                     if (methodEffectsMask != 0)
                     {
+                        methodContractFirst = contractRows.Count + 1;
                         contractRows.Add(new TrRmContractRow(
                             0x1600_0000u | checked((uint)methodRow), 1,
                             s_effectPayloads[methodEffectsMask]));
+                        methodContractCount++;
+                    }
+
+                    if (isSupportedDirectFieldReference)
+                    {
+                        if (!fieldDefRowByClassAndIndex.TryGetValue((
+                                classIndex, directFieldReferenceIndex),
+                                out var fieldDefRow))
+                        {
+                            throw new InvalidDataException(
+                                "A class field-reference method targets a FieldDef outside its retained owner.");
+                        }
+
+                        if (methodFunction.DependencyContracts.Length != 1
+                            || methodFunction.DependencyContracts[0]
+                                is not {
+                                    Relation:
+                                        BoundDependencyRelation.DependsOn,
+                                    Destination:
+                                        BoundDependencyDestination.Result,
+                                    DestinationOrdinal: null,
+                                } dependency
+                            || dependency.Sources.Length != 1
+                            || dependency.Sources[0]
+                                != new BoundDependencySource(
+                                    BoundDependencySourceKind.Receiver, null))
+                        {
+                            throw Unsupported(
+                                "A compact class field-reference Body requires one normal-result DependsOn receiver source.");
+                        }
+
+                        var dependencyContractRow
+                            = contractRows.Count + 1;
+                        if (methodContractFirst == 0)
+                        {
+                            methodContractFirst
+                                = dependencyContractRow;
+                        }
+
+                        var payload = new byte[12];
+                        payload[0] = 1;
+                        payload[1] = 2;
+                        // An unrefined DependsOn source uses the assigned relationship-3 union.
+                        payload[2] = 3;
+                        payload[3] = 1;
+                        contractRows.Add(new TrRmContractRow(
+                            0x1600_0000u
+                                | checked((uint)methodRow),
+                            4, payload));
+                        methodContractCount++;
+                        encodedBody
+                            = EncodeC1M1Construction2FieldReferenceBody(
+                                fieldDefRow, dependencyContractRow);
                     }
 
                     var methodVisibility = methodFunction.IsPrivate ? 0u
@@ -1843,7 +1918,7 @@ public static partial class TrRmExecutableCompiler
                         typeDefRowByClass[classIndex], 0,
                         methodSignatureRow, methodVisibility,
                         methodContractFirst,
-                        methodEffectsMask == 0 ? 0 : 1, 0));
+                        methodContractCount, 0));
                     methodNames.Add(methodFunction.Name);
                     AppendC1M1Construction2ParameterSurface(methodRow,
                         methodFunction,
@@ -3969,6 +4044,26 @@ public static partial class TrRmExecutableCompiler
         return body;
     }
 
+    private static byte[] EncodeC1M1Construction2FieldReferenceBody(
+        int fieldDefRow, int dependencyContractRow)
+    {
+        if (fieldDefRow <= 0 || fieldDefRow > 0xFF_FFFF
+            || dependencyContractRow <= 0
+            || dependencyContractRow > 0xFF_FFFF)
+        {
+            throw new InvalidDataException(
+                "A class field-reference Body has an invalid FieldDef or Dependency row.");
+        }
+
+        var body = new byte[12];
+        body[0] = 0x04;
+        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(4),
+            0x1400_0000u | checked((uint)fieldDefRow));
+        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(8),
+            checked((uint)dependencyContractRow));
+        return body;
+    }
+
     private static byte[] EncodeC1M1Construction2NestedFieldReadBody(
         BoundFunction function,
         C1M1Construction2NestedFieldRead fieldRead,
@@ -5755,6 +5850,60 @@ public static partial class TrRmExecutableCompiler
                 }
             }
         }
+    }
+
+    private static bool TryGetC1M1Construction2DirectFieldReference(
+        BoundProgram program, BoundFunction function, int classIndex,
+        out int fieldIndex)
+    {
+        fieldIndex = -1;
+        if (function.IsStatic
+            || function.ParameterCount != 1
+            || function.Variables.Length != 1
+            || function.Variables[0].IsMutable
+            || function.Body.RetiredManagedLocals.Length != 0
+            || function.Body.Statements is not [
+                BoundReturn {
+                    Value: BoundReferenceFormation {
+                        Place: BoundFieldRead fieldRead
+                    } formation
+                }
+            ]
+            || fieldRead.Receiver is not BoundRead { Variable: 0 }
+            || formation.Type != function.ReturnType
+            || !IsC1M1NoOpReadonlyScalarReferenceType(function.ReturnType,
+                program.CheckedReferenceTypes)
+            || function.DependencyContracts is not [
+                BoundDependencyContract {
+                    Relation: BoundDependencyRelation.DependsOn,
+                    Destination: BoundDependencyDestination.Result,
+                    DestinationOrdinal: null,
+                    Sources: [
+                        BoundDependencySource {
+                            Kind: BoundDependencySourceKind.Receiver,
+                            FormalOrdinal: null,
+                        },
+                    ],
+                },
+            ])
+        {
+            return false;
+        }
+
+        var reference = program.CheckedReferenceTypes[
+            CheckedReferenceTypes.Index(function.ReturnType)];
+        if (reference.ReferentType != fieldRead.Type
+            || (uint)classIndex >= (uint)program.Classes.Length
+            || (uint)fieldRead.Field
+                >= (uint)program.Classes[classIndex].Fields.Length
+            || program.Classes[classIndex].Fields[fieldRead.Field].Type
+                != reference.ReferentType)
+        {
+            return false;
+        }
+
+        fieldIndex = fieldRead.Field;
+        return true;
     }
 
     private static C1M1Construction2NestedFieldRead?

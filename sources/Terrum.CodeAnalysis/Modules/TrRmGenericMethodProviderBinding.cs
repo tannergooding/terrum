@@ -1034,7 +1034,7 @@ public static partial class TrRmExecutableCompiler
         }
     }
 
-    private static bool GenericMethodDependencyContractsSatisfy(
+    internal static bool GenericMethodDependencyContractsSatisfy(
         ImmutableArray<BoundDependencyContract> expected,
         ImmutableArray<BoundDependencyContract> provider)
     {

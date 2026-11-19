@@ -1217,11 +1217,6 @@ internal static class TrRmFixedArrayProviderBindingValidator
                         expectedMethodRow)
                         != providerTables.Contracts.GetEffectsMask(
                             providerMethodRow)
-                    || !MethodDependenciesMatch(
-                        expectedTables.Contracts.GetDependencyContracts(
-                            expectedMethodRow),
-                        providerTables.Contracts.GetDependencyContracts(
-                            providerMethodRow))
                     || expectedGenericCount != providerGenericCount)
                 {
                     return false;
@@ -1298,6 +1293,27 @@ internal static class TrRmFixedArrayProviderBindingValidator
                     return false;
                 }
 
+                var expectedDependencies
+                    = TrRmExecutableCompiler
+                        .DecodeC1M1ClassMethodDependencyContracts(
+                            expectedTables.Contracts
+                                .GetDependencyContracts(expectedMethodRow),
+                            expectedParameterCount,
+                            expectedReceiver != 0);
+                var providerDependencies
+                    = TrRmExecutableCompiler
+                        .DecodeC1M1ClassMethodDependencyContracts(
+                            providerTables.Contracts
+                                .GetDependencyContracts(providerMethodRow),
+                            providerParameterCount,
+                            providerReceiver != 0);
+                if (!TrRmExecutableCompiler
+                        .GenericMethodDependencyContractsSatisfy(
+                            expectedDependencies, providerDependencies))
+                {
+                    return false;
+                }
+
                 if (expectedGenericCount != 0)
                 {
                     return true;
@@ -1351,60 +1367,6 @@ internal static class TrRmFixedArrayProviderBindingValidator
                 }
 
                 return true;
-
-                static bool MethodDependenciesMatch(
-                    ImmutableArray<TrRmDependencyContract> expected,
-                    ImmutableArray<TrRmDependencyContract> actual)
-                {
-                    if (expected.IsDefault || actual.IsDefault
-                        || expected.Length != actual.Length)
-                    {
-                        return false;
-                    }
-
-                    var expectedRows = expected.ToArray();
-                    var actualRows = actual.ToArray();
-                    Array.Sort(expectedRows, CompareDependencies);
-                    Array.Sort(actualRows, CompareDependencies);
-                    for (var index = 0; index < expectedRows.Length; index++)
-                    {
-                        if (expectedRows[index] != actualRows[index])
-                        {
-                            return false;
-                        }
-                    }
-
-                    return true;
-
-                    static int CompareDependencies(
-                        TrRmDependencyContract left,
-                        TrRmDependencyContract right)
-                    {
-                        var result = left.DestinationKind.CompareTo(
-                            right.DestinationKind);
-                        if (result != 0)
-                        {
-                            return result;
-                        }
-                        result = left.DestinationOrdinal.CompareTo(
-                            right.DestinationOrdinal);
-                        if (result != 0)
-                        {
-                            return result;
-                        }
-                        result = left.Phase.CompareTo(right.Phase);
-                        if (result != 0)
-                        {
-                            return result;
-                        }
-                        result = left.SourceKind.CompareTo(
-                            right.SourceKind);
-                        return result != 0
-                            ? result
-                            : left.SourceOrdinal.CompareTo(
-                                right.SourceOrdinal);
-                    }
-                }
             }
 
             static bool MethodTypesMatch(ref ValidationContext context,

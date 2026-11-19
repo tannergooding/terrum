@@ -253,7 +253,10 @@ ConstantMap forms and Body-01 record contract-row references remain
 unsupported. Compact Body-04 field-reference Bodies remap their local/imported
 FieldDef token and owning MethodDef Dependency row; source-free callable views
 preserve plain scalar checked-reference results with normal-result Dependency
-clauses. Imported MethodDef expectation Bodies remain provider-owned.
+clauses. The exact Construction-2/CM1 class source producer also emits Body-04
+for direct scalar-field reference getters with an explicit receiver
+`DependsOn` relation. Imported MethodDef expectation Bodies remain
+provider-owned.
 Provider/owner-row relocation and compatible/incompatible replacement
 regressions are added but unverified under the hold. Local Body
 provider/consumer, imported-struct FieldDef and FieldPath root/step

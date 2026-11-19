@@ -5549,8 +5549,9 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         var tree = SyntaxTree.Parse("""
             public class Box {
                 public int32 Value;
-                public int32 ReadValue() {
-                    return this.Value;
+                [return: DependsOn(this)]
+                public unsafe ref<int32> ReadValue() {
+                    return ref this.Value;
                 }
             }
             """);
@@ -5582,7 +5583,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                             read.Span, "Box.ReadValue"),
                     ]),
             ]);
-        var artifact = RewriteFieldReadAsReferenceGetter(sourceArtifact);
+        var artifact = ReorderFieldReferenceContractRows(sourceArtifact);
         var artifactTables = TrRmStructuralMetadataValidator
             .ValidateC1AndGetExecutionTables(
                 TrRmArtifactIndex
@@ -5600,7 +5601,9 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         var dependency = artifactTables.Contracts
             .GetDependencyContracts(methodRow).Single();
         Assert.That(dependency, Is.EqualTo(new TrRmDependencyContract(
-            1, 2, 1, 1, 0, 0)));
+            1, 2, 3, 1, 0, 0)));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(body.Slice(8)),
+            Is.EqualTo(1u));
         Assert.That(artifactTables.Contracts.GetEffectsMask(methodRow),
             Is.EqualTo(4u));
 
@@ -5631,6 +5634,9 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         var reemittedBody = reemittedTables.Bodies.GetRow(
             reemittedTables.Methods.GetBodyRow(reemittedMethodRow));
         Assert.That(reemittedBody[0], Is.EqualTo((byte)0x04));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                reemittedBody.Slice(8)),
+            Is.EqualTo(2u));
         var remappedDependency = reemittedTables.Contracts
             .GetDependencyContractRows(reemittedMethodRow).Single();
         Assert.That(remappedDependency.Row, Is.EqualTo(2));
@@ -5652,7 +5658,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             string.Join(Environment.NewLine,
                 callerCompilation.Diagnostics));
 
-        static byte[] RewriteFieldReadAsReferenceGetter(byte[] artifact)
+        static byte[] ReorderFieldReferenceContractRows(byte[] artifact)
         {
             var schema
                 = TrRmArtifactSchema
@@ -5662,122 +5668,56 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     artifact);
             var tables = TrRmStructuralMetadataValidator
                 .ValidateC1AndGetExecutionTables(index);
-            if (tables.Contracts.Count != 0
-                || index.TryGetSection(0x001B, out _, out _))
-            {
-                throw new InvalidDataException(
-                    "The field-reference Body fixture expects no original Contract rows.");
-            }
-
             var methodDefinition = tables.Exports
                 .GetExportsForModule(1)
                 .Single(static export =>
                     export.ExportKey == "Box.ReadValue").Definition;
             var methodRow = checked((int)(
                 methodDefinition & 0x00FF_FFFF));
-            var signatureRow = tables.Methods.GetSignature(methodRow);
-            if (Enumerable.Range(1, tables.Methods.Count)
-                .Any(row => row != methodRow
-                    && tables.Methods.GetSignature(row) == signatureRow))
-            {
-                throw new InvalidDataException(
-                    "The field-reference Body fixture requires a unique MethodSig.");
-            }
-
             var bodyRow = tables.Methods.GetBodyRow(methodRow);
-            var sourceBody = tables.Bodies.GetRow(bodyRow);
-            if (sourceBody.Length != 8 || sourceBody[0] != 0x02)
+            var body = tables.Bodies.GetRow(bodyRow).ToArray();
+            var dependencyRow = tables.Contracts
+                .GetDependencyContractRows(methodRow).Single().Row;
+            var (contractFirst, contractCount)
+                = tables.Methods.GetContractRange(methodRow);
+            if (body.Length != 12 || body[0] != 0x04
+                || contractFirst != 1 || contractCount != 2
+                || dependencyRow != 2
+                || tables.Contracts.GetEffectsMask(methodRow) != 4)
             {
                 throw new InvalidDataException(
-                    "The field-reference Body fixture requires a compact field-read Body.");
+                    "The field-reference fixture requires a Body-04 getter with Effects and Dependency clauses.");
             }
 
-            var oldResultTypeSpec = tables.Signatures
-                .GetResultTypeSpec(signatureRow);
-            var typeSpecRows = new List<ReadOnlyMemory<byte>>(
-                tables.TypeSpecs.Count + 1);
-            for (var row = 1; row <= tables.TypeSpecs.Count; row++)
-            {
-                typeSpecRows.Add(tables.TypeSpecs.GetRow(row).ToArray());
-            }
-            typeSpecRows.Add(TrRmTypeSpecTableWriter.Wrapped(0x07,
-                oldResultTypeSpec));
-            var referenceTypeSpec = checked((uint)typeSpecRows.Count);
-            var typeSpecBytes = TrRmTypeSpecTableWriter.Encode(typeSpecRows,
-                tables.TypeDefs.Count, tables.Imports.Count,
-                tables.GenericParams.Count, 0, schema,
-                tables.Methods.Count);
-
-            if (!index.TryGetSection(0x0016, out var methodSection,
-                    out var methodCount)
-                || !index.TryGetSection(0x0017, out var signatureSection,
-                    out var signatureCount)
-                || !index.TryGetSection(0x0020, out _, out var bodyCount)
-                || methodCount != (uint)tables.Methods.Count
-                || signatureCount != (uint)tables.Signatures.Count
-                || bodyCount != (uint)tables.Bodies.Count)
+            if (!index.TryGetSection(0x001B, out var contractSection,
+                    out var contractRecordCount)
+                || contractRecordCount != 2)
             {
                 throw new InvalidDataException(
-                    "The field-reference Body fixture is missing a declaration section.");
+                    "The field-reference fixture requires two Contract rows.");
             }
 
-            var methodBytes = methodSection.ToArray();
-            var methodOffset = (methodRow - 1) * 28;
-            BinaryPrimitives.WriteUInt32LittleEndian(
-                methodBytes.AsSpan(methodOffset + 16), 1);
-            BinaryPrimitives.WriteUInt32LittleEndian(
-                methodBytes.AsSpan(methodOffset + 20), 2);
-
-            var signatureBytes = signatureSection.ToArray();
-            BinaryPrimitives.WriteUInt32LittleEndian(
-                signatureBytes.AsSpan((signatureRow - 1) * 24),
-                referenceTypeSpec);
-
-            // Put Dependency before Effects so re-emission must remap its Body row.
-            var dependencyRow = new byte[20];
-            BinaryPrimitives.WriteUInt32LittleEndian(dependencyRow,
-                methodDefinition);
-            BinaryPrimitives.WriteUInt16LittleEndian(
-                dependencyRow.AsSpan(4), 4);
-            dependencyRow[8] = 1;
-            dependencyRow[9] = 2;
-            dependencyRow[10] = 1;
-            dependencyRow[11] = 1;
-            var effectsRow = new byte[12];
-            BinaryPrimitives.WriteUInt32LittleEndian(effectsRow,
-                methodDefinition);
-            BinaryPrimitives.WriteUInt16LittleEndian(
-                effectsRow.AsSpan(4), 1);
-            BinaryPrimitives.WriteUInt32LittleEndian(
-                effectsRow.AsSpan(8), 4);
-            var contractBytes = TrRmVariableTableWriter.EncodeBlobs([
-                dependencyRow,
-                effectsRow,
+            var contractIndex = new TrRmVariableTableIndex(
+                contractSection, checked((int)contractRecordCount), 8, 1);
+            var effectRow = Enumerable.Range(1,
+                    checked((int)contractRecordCount))
+                .Single(row => row != dependencyRow);
+            var reorderedContracts = TrRmVariableTableWriter.EncodeBlobs([
+                contractIndex.GetRow(dependencyRow).ToArray(),
+                contractIndex.GetRow(effectRow).ToArray(),
             ]);
+            BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(8), 1);
 
             var bodyRows = new ReadOnlyMemory<byte>[tables.Bodies.Count];
             for (var row = 1; row <= bodyRows.Length; row++)
             {
-                if (row != bodyRow)
-                {
-                    bodyRows[row - 1]
-                        = tables.Bodies.GetRow(row).ToArray();
-                    continue;
-                }
-
-                var referenceBody = new byte[12];
-                referenceBody[0] = 0x04;
-                BinaryPrimitives.WriteUInt32LittleEndian(
-                    referenceBody.AsSpan(4),
-                    BinaryPrimitives.ReadUInt32LittleEndian(
-                        sourceBody.Slice(4)));
-                BinaryPrimitives.WriteUInt32LittleEndian(
-                    referenceBody.AsSpan(8), 1);
-                bodyRows[row - 1] = referenceBody;
+                bodyRows[row - 1] = row == bodyRow
+                    ? body
+                    : tables.Bodies.GetRow(row).ToArray();
             }
             var bodyBytes = TrRmVariableTableWriter.EncodeBodies(bodyRows);
 
-            var sections = new List<TrRmSection>(index.SectionCount + 1);
+            var sections = new List<TrRmSection>(index.SectionCount);
             for (var sectionIndex = 0;
                 sectionIndex < index.SectionCount; sectionIndex++)
             {
@@ -5785,24 +5725,14 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     out var section, out var recordCount);
                 sections.Add(kind switch
                 {
-                    0x0011 => new TrRmSection(kind, flags,
-                        checked((uint)typeSpecRows.Count), typeSpecBytes),
-                    0x0016 => new TrRmSection(kind, flags, recordCount,
-                        methodBytes),
-                    0x0017 => new TrRmSection(kind, flags, recordCount,
-                        signatureBytes),
+                    0x001B => new TrRmSection(kind, flags,
+                        contractRecordCount, reorderedContracts),
                     0x0020 => new TrRmSection(kind, flags, recordCount,
                         bodyBytes),
                     _ => new TrRmSection(kind, flags, recordCount,
                         section.ToArray()),
                 });
             }
-            if (!index.TryGetSection(0x0011, out _, out _))
-            {
-                sections.Add(new TrRmSection(0x0011, 0,
-                    checked((uint)typeSpecRows.Count), typeSpecBytes));
-            }
-            sections.Add(new TrRmSection(0x001B, 0, 2, contractBytes));
             sections.Sort(static (left, right) =>
                 left.Kind.CompareTo(right.Kind));
             return TrRmArtifactWriter.Encode(sections, schema);

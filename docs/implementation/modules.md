@@ -230,6 +230,8 @@ TypeSpecs and ordered FieldDef/Import steps, interning identical remapped
 paths. Body-04 field-reference Bodies remap their local/imported FieldDef
 token and owning MethodDef Dependency row; source-free callable views preserve
 plain scalar checked-reference results with normal-result Dependency clauses.
+The exact Construction-2/CM1 source producer emits Body-04 for direct
+scalar-field reference getters with an explicit receiver `DependsOn` relation.
 Other ConstantMap forms and Body-01 record contract-row references reject
 re-emission,
 while imported MethodDef expectation Bodies remain provider-owned.
