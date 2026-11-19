@@ -1508,7 +1508,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
-    public void EmitsAndReemitsBooleanLocalCopyReturnForReadonlyInstanceMethod()
+    public void EmitsAndReemitsBooleanLocalCopyChainReturnForReadonlyInstanceMethod()
     {
         var tree = SyntaxTree.Parse("""
             public class Box {
@@ -1516,7 +1516,8 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 public Box(int32 value) { Value = value; }
                 public bool Copy(bool value) {
                     bool copy = value;
-                    return copy;
+                    bool secondCopy = copy;
+                    return secondCopy;
                 }
             }
             """);
@@ -1572,7 +1573,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 tables.Contracts.Count);
             var body = tables.Bodies.GetRegisterBody(bodyRow,
                 tables.Contracts.Count);
-            Assert.That(body.HomeCount, Is.EqualTo(3));
+            Assert.That(body.HomeCount, Is.EqualTo(4));
             return body.GetBlockCode(0).ToArray();
         }
 
@@ -1580,7 +1581,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         Assert.That(bodyCode, Is.EqualTo(new byte[] {
             0xD5, 0, 1, 0,
             0xD6, 0x10, 2, 0,
-            0xEB, 0, 2, 0,
+            0xD5, 0, 2, 0,
+            0xD6, 0x10, 3, 0,
+            0xD5, 0, 3, 0,
+            0xEB, 0, 3, 0,
         }));
 
         var reference = TrRmExecutableCompiler.CreateStandardReference(

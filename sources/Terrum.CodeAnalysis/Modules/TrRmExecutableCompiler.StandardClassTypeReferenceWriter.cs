@@ -5137,12 +5137,19 @@ public static partial class TrRmExecutableCompiler
         TrRmArtifactSchema schema)
     {
         var receiverCount = function.IsStatic ? 0 : 1;
-        var localVariable = receiverCount + 1;
+        var localCount = function.Variables.Length - function.ParameterCount;
+        var lastLocalVariable = function.Variables.Length - 1;
         if (function.ParameterCount != receiverCount + 1
-            || function.Variables.Length != receiverCount + 2)
+            || localCount <= 0
+            || function.Variables.Length > ushort.MaxValue + 1
+            || function.Body.RetiredManagedLocals.Length != 0
+            || function.Body.Statements.Length != localCount + 1
+            || function.Body.Statements[localCount] is not BoundReturn {
+                Value: BoundRead returnedRead,
+            })
         {
             throw Unsupported(
-                "A Construction-2 local-copy Body requires one value formal and one local.");
+                "A Construction-2 local-copy Body requires one value formal, one or more locals, and a direct local return.");
         }
 
         var operationType = function.Variables[receiverCount].Type;
@@ -5150,32 +5157,37 @@ public static partial class TrRmExecutableCompiler
                 && operationType != PrimitiveType.Bool)
             || function.ReturnType != operationType
             || (!function.IsStatic && function.Variables[0].IsMutable)
-            || function.Variables[receiverCount].IsMutable
-            || function.Variables[receiverCount].IsOut
-            || function.Variables[receiverCount].IsInit
-            || function.Variables[receiverCount].IsImplicitRef
-            || function.Variables[receiverCount].IsInitializationLocal
-            || function.Variables[localVariable].Type
-                != operationType
-            || function.Variables[localVariable].IsMutable
-            || function.Variables[localVariable].IsOut
-            || function.Variables[localVariable].IsInit
-            || function.Variables[localVariable].IsImplicitRef
-            || function.Variables[localVariable].IsInitializationLocal
-            || function.Body.RetiredManagedLocals.Length != 0
-            || function.Body.Statements is not [
-                BoundLocal local,
-                BoundReturn { Value: BoundRead returnedRead },
-            ]
-            || local.Variable != localVariable
-            || local.Initializer is not BoundRead initialRead
-            || initialRead.Type != operationType
-            || initialRead.Variable != receiverCount
+            || function.Variables.Skip(receiverCount).Any(variable =>
+                variable.Type != operationType || variable.IsMutable
+                || variable.IsOut || variable.IsInit
+                || variable.IsImplicitRef
+                || variable.IsInitializationLocal)
             || returnedRead.Type != operationType
-            || returnedRead.Variable != localVariable)
+            || returnedRead.Variable != lastLocalVariable)
         {
             throw Unsupported(
-                "A Construction-2 local-copy Body requires one initialized scalar local copied from a same-typed value formal and returned directly.");
+                "A Construction-2 local-copy Body requires immutable same-typed scalar values and a direct return of the final local.");
+        }
+
+        var localInitializers = new BoundRead[localCount];
+        for (var localOrdinal = 0; localOrdinal < localCount;
+            localOrdinal++)
+        {
+            var localVariable = function.ParameterCount + localOrdinal;
+            if (function.Body.Statements[localOrdinal] is not BoundLocal local
+                || local.Variable != localVariable
+                || local.Initializer is not BoundRead initialRead
+                || initialRead.Type != operationType
+                || initialRead.Variable < 0
+                || initialRead.Variable >= localVariable
+                || function.Variables[initialRead.Variable].Type
+                    != operationType)
+            {
+                throw Unsupported(
+                    "A Construction-2 local-copy Body requires source-ordered same-typed local copies.");
+            }
+
+            localInitializers[localOrdinal] = initialRead;
         }
 
         var typeTokens = new uint[function.Variables.Length];
@@ -5206,11 +5218,31 @@ public static partial class TrRmExecutableCompiler
                     : (ushort)0);
         }
 
-        var code = new byte[] {
-            0xD5, 0, checked((byte)receiverCount), 0,
-            0xD6, 0x10, checked((byte)localVariable), 0,
-            0xEB, 0, checked((byte)localVariable), 0,
-        };
+        var code = new List<byte>(checked((localCount * 8) + 8));
+        void AppendHomeLoad(int homeIndex)
+        {
+            code.Add(0xD5);
+            code.Add(0);
+            code.Add(checked((byte)homeIndex));
+            code.Add(checked((byte)(homeIndex >> 8)));
+        }
+
+        for (var localOrdinal = 0; localOrdinal < localCount;
+            localOrdinal++)
+        {
+            var localVariable = function.ParameterCount + localOrdinal;
+            AppendHomeLoad(localInitializers[localOrdinal].Variable);
+            code.Add(0xD6);
+            code.Add(0x10);
+            code.Add(checked((byte)localVariable));
+            code.Add(checked((byte)(localVariable >> 8)));
+        }
+
+        AppendHomeLoad(lastLocalVariable);
+        code.Add(0xEB);
+        code.Add(0);
+        code.Add(checked((byte)lastLocalVariable));
+        code.Add(checked((byte)(lastLocalVariable >> 8)));
         ReadOnlyMemory<byte>[] records = [
             new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 },
         ];
@@ -5218,7 +5250,7 @@ public static partial class TrRmExecutableCompiler
             default, default, default,
             [new TrRmRegisterBodyBlock(0,
                 checked((uint)code.Length), 0)],
-            records, code, contractCount: contractCount,
+            records, code.ToArray(), contractCount: contractCount,
             schema: schema,
             generalPredicateGraphsInitializationReferenceBodies
                 : schema.UsesGeneralPredicateGraphs());
@@ -7466,41 +7498,54 @@ public static partial class TrRmExecutableCompiler
     {
         var receiverCount = function.IsStatic ? 0 : 1;
         var formalVariable = receiverCount;
-        var localVariable = receiverCount + 1;
+        var localCount = function.Variables.Length - function.ParameterCount;
+        var lastLocalVariable = function.Variables.Length - 1;
         if (function.ParameterCount != receiverCount + 1
-            || function.Variables.Length != receiverCount + 2
+            || localCount <= 0
+            || function.Variables.Length > ushort.MaxValue + 1
             || function.Body.RetiredManagedLocals.Length != 0
-            || function.Body.Statements is not [
-                BoundLocal local,
-                BoundReturn { Value: BoundRead returnedRead },
-            ])
+            || function.Body.Statements.Length != localCount + 1
+            || function.Body.Statements[localCount] is not BoundReturn {
+                Value: BoundRead returnedRead,
+            })
         {
             return false;
         }
 
         var operationType = function.Variables[formalVariable].Type;
-        return (IsC1M1Construction2BodyNumericType(operationType)
-                || operationType == PrimitiveType.Bool)
-            && function.ReturnType == operationType
-            && (function.IsStatic || !function.Variables[0].IsMutable)
-            && !function.Variables[formalVariable].IsMutable
-            && !function.Variables[formalVariable].IsOut
-            && !function.Variables[formalVariable].IsInit
-            && !function.Variables[formalVariable].IsImplicitRef
-            && !function.Variables[formalVariable].IsInitializationLocal
-            && function.Variables[localVariable].Type
-                == operationType
-            && !function.Variables[localVariable].IsMutable
-            && !function.Variables[localVariable].IsOut
-            && !function.Variables[localVariable].IsInit
-            && !function.Variables[localVariable].IsImplicitRef
-            && !function.Variables[localVariable].IsInitializationLocal
-            && local.Variable == localVariable
-            && local.Initializer is BoundRead initialRead
-            && initialRead.Type == operationType
-            && initialRead.Variable == formalVariable
-            && returnedRead.Type == operationType
-            && returnedRead.Variable == localVariable;
+        if ((!IsC1M1Construction2BodyNumericType(operationType)
+                && operationType != PrimitiveType.Bool)
+            || function.ReturnType != operationType
+            || (!function.IsStatic && function.Variables[0].IsMutable)
+            || function.Variables.Skip(receiverCount).Any(variable =>
+                variable.Type != operationType || variable.IsMutable
+                || variable.IsOut || variable.IsInit
+                || variable.IsImplicitRef
+                || variable.IsInitializationLocal)
+            || returnedRead.Type != operationType
+            || returnedRead.Variable != lastLocalVariable)
+        {
+            return false;
+        }
+
+        for (var localOrdinal = 0; localOrdinal < localCount;
+            localOrdinal++)
+        {
+            var localVariable = function.ParameterCount + localOrdinal;
+            if (function.Body.Statements[localOrdinal] is not BoundLocal local
+                || local.Variable != localVariable
+                || local.Initializer is not BoundRead initialRead
+                || initialRead.Type != operationType
+                || initialRead.Variable < 0
+                || initialRead.Variable >= localVariable
+                || function.Variables[initialRead.Variable].Type
+                    != operationType)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static BoundUnary?
