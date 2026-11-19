@@ -190,8 +190,8 @@ binary/comparison with a direct formal or SF1 ConstantMap operand.
 Static and instance bodies support one-formal numeric or Boolean local-copy
 returns and ordered numeric copy chains feeding numeric binary/comparison
 operations.
-They also emit bounded one-local unary returns after an exact numeric formal
-copy for static and readonly-instance methods. Producer, source-free
+They also emit bounded unary returns after source-ordered numeric local-copy
+chains for static and readonly-instance methods. Producer, source-free
 re-emission and caller-binding regressions remain unverified under the active
 hold.
 Readonly instance bodies also return an explicit scalar parameter through

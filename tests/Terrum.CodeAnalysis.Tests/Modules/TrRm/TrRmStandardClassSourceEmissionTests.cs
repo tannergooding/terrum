@@ -1304,6 +1304,11 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     float32 copy = value;
                     return -copy;
                 }
+                public int32 NegatedTwoCopies(int32 value) {
+                    int32 first = value;
+                    int32 second = first;
+                    return -second;
+                }
                 public static int32 StaticNegatedCopy(int32 value) {
                     int32 copy = value;
                     return -copy;
@@ -1331,6 +1336,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
 
         var negatedCopy = Method("NegatedCopy");
         var negatedFloatCopy = Method("NegatedFloatCopy");
+        var negatedTwoCopies = Method("NegatedTwoCopies");
         var staticNegatedCopy = Method("StaticNegatedCopy");
         var artifact = TrRmExecutableCompiler.EmitStandard(program,
             "LocalUnaryReturns",
@@ -1351,6 +1357,8 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                             negatedFloatCopy.Span,
                             "Box.NegatedFloatCopy"),
                         new TrRmSourceClassMemberExport(0,
+                            negatedTwoCopies.Span, "Box.NegatedTwoCopies"),
+                        new TrRmSourceClassMemberExport(0,
                             staticNegatedCopy.Span, "Box.StaticNegatedCopy"),
                     ]),
             ]);
@@ -1360,7 +1368,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
                         artifact));
 
-        void AssertUnaryBody(string exportKey, string functionName,
+        byte[] AssertUnaryBody(string exportKey, string functionName,
             int expectedHomeCount)
         {
             Assert.That(tables.Exports.TryGetDefinitionForKey(1, exportKey,
@@ -1376,8 +1384,8 @@ internal sealed class TrRmStandardClassSourceEmissionTests
 
             var function = program.Functions.Single(candidate =>
                 candidate.Name == functionName);
-            var unary = (BoundUnary)((BoundReturn)function.Body
-                .Statements[^1]).Value!;
+            var unary = (BoundUnary)((BoundReturn)function.Body.Statements[
+                function.Body.Statements.Length - 1]).Value!;
             var (opcode, control) = unary.Type == PrimitiveType.Float32
                 ? ((byte)0xC0, (byte)0x25)
                 : ((byte)0xC0, unary.OverflowBehavior switch
@@ -1387,22 +1395,48 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     _ => throw new InvalidOperationException(
                         "The local-unary fixture must select checked or wrapping arithmetic."),
                 });
-            var receiverCount = function.IsStatic ? 0 : 1;
-            var localVariable = function.ParameterCount;
-            Assert.That(body.GetBlockCode(0).ToArray(), Is.EqualTo(
-                new byte[] {
-                    0xD5, 0, checked((byte)receiverCount), 0,
-                    0xD6, 0x10, checked((byte)localVariable), 0,
-                    0xD5, 0, checked((byte)localVariable), 0,
-                        opcode, control, 0xF0, 0xF0,
-                    0x17, 0,
-                }));
+            var code = new List<byte>();
+            for (var localOrdinal = 0;
+                localOrdinal < function.Variables.Length
+                        - function.ParameterCount;
+                localOrdinal++)
+            {
+                var local = (BoundLocal)function.Body
+                        .Statements[localOrdinal];
+                var initialRead = (BoundRead)local.Initializer!;
+                var localVariable = local.Variable;
+                code.Add(0xD5);
+                code.Add(0);
+                code.Add(checked((byte)initialRead.Variable));
+                code.Add(checked((byte)(initialRead.Variable >> 8)));
+                code.Add(0xD6);
+                code.Add(0x10);
+                code.Add(checked((byte)localVariable));
+                code.Add(checked((byte)(localVariable >> 8)));
+            }
+
+            var lastLocal = function.Variables.Length - 1;
+            code.Add(0xD5);
+            code.Add(0);
+            code.Add(checked((byte)lastLocal));
+            code.Add(checked((byte)(lastLocal >> 8)));
+            code.Add(opcode);
+            code.Add(control);
+            code.Add(0xF0);
+            code.Add(0xF0);
+            code.Add(0x17);
+            code.Add(0);
+            Assert.That(body.GetBlockCode(0).ToArray(),
+                Is.EqualTo(code.ToArray()));
+            return code.ToArray();
         }
 
         AssertUnaryBody("Box.NegatedCopy", "NegatedCopy",
             expectedHomeCount: 3);
         AssertUnaryBody("Box.NegatedFloatCopy", "NegatedFloatCopy",
             expectedHomeCount: 3);
+        var negatedTwoCopiesCode = AssertUnaryBody("Box.NegatedTwoCopies",
+            "NegatedTwoCopies", expectedHomeCount: 4);
         AssertUnaryBody("Box.StaticNegatedCopy", "StaticNegatedCopy",
             expectedHomeCount: 2);
         Assert.That(tables.Exports.TryGetDefinitionForKey(1,
@@ -1445,6 +1479,19 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             reemittedBodyRow, reemittedTables.Contracts.Count);
         Assert.That(reemittedBody.GetBlockCode(0).ToArray(), Is.EqualTo(
             originalBody.GetBlockCode(0).ToArray()));
+        Assert.That(reemittedTables.Exports.TryGetDefinitionForKey(1,
+            "Box.NegatedTwoCopies", out var reemittedTwoLocalMethod),
+            Is.True);
+        var reemittedTwoLocalMethodRow = checked((int)(
+            reemittedTwoLocalMethod & 0x00FF_FFFF));
+        var reemittedTwoLocalBodyRow
+            = reemittedTables.Methods.GetBodyRow(
+                reemittedTwoLocalMethodRow);
+        Assert.That(reemittedTwoLocalBodyRow, Is.GreaterThan(0));
+        var reemittedTwoLocalBody = reemittedTables.Bodies.GetRegisterBody(
+            reemittedTwoLocalBodyRow, reemittedTables.Contracts.Count);
+        Assert.That(reemittedTwoLocalBody.GetBlockCode(0).ToArray(),
+            Is.EqualTo(negatedTwoCopiesCode));
         var reemittedReference
             = TrRmExecutableCompiler.CreateStandardReference(
                 new TrRmStandardArtifactInput(

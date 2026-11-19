@@ -5227,45 +5227,57 @@ public static partial class TrRmExecutableCompiler
         TrRmArtifactSchema schema)
     {
         var receiverCount = function.IsStatic ? 0 : 1;
-        var formalVariable = receiverCount;
-        var localVariable = function.ParameterCount;
+        var localCount = function.Variables.Length
+            - function.ParameterCount;
+        var lastLocalVariable = function.Variables.Length - 1;
         if (function.ParameterCount != receiverCount + 1
-            || function.Variables.Length != function.ParameterCount + 1
+            || localCount <= 0
+            || function.Variables.Length > ushort.MaxValue + 1
             || function.ReturnType != unary.Type
             || !IsC1M1Construction2BodyNumericType(unary.Type)
             || (!function.IsStatic && function.Variables[0].IsMutable)
-            || function.Variables[formalVariable].Type != unary.Type
-            || function.Variables[formalVariable].IsMutable
-            || function.Variables[formalVariable].IsOut
-            || function.Variables[formalVariable].IsInit
-            || function.Variables[formalVariable].IsImplicitRef
-            || function.Variables[formalVariable].IsInitializationLocal
-            || function.Variables[localVariable].Type != unary.Type
-            || function.Variables[localVariable].IsMutable
-            || function.Variables[localVariable].IsOut
-            || function.Variables[localVariable].IsInit
-            || function.Variables[localVariable].IsImplicitRef
-            || function.Variables[localVariable].IsInitializationLocal
             || !function.Body.RetiredManagedLocals.IsEmpty
-            || function.Body.Statements is not [
-                BoundLocal local,
-                BoundReturn { Value: BoundUnary returnedUnary },
-            ]
+            || function.Body.Statements.Length != localCount + 1
+            || function.Body.Statements[localCount] is not BoundReturn {
+                Value: BoundUnary returnedUnary,
+            }
             || returnedUnary != unary
-            || local.Variable != localVariable
-            || local.Initializer is not BoundRead initialRead
-            || initialRead.Type != unary.Type
-            || initialRead.Variable != formalVariable
+            || function.Variables.Skip(receiverCount).Any(variable =>
+                variable.Type != unary.Type || variable.IsMutable
+                || variable.IsOut || variable.IsInit
+                || variable.IsImplicitRef
+                || variable.IsInitializationLocal)
             || unary.Operand is not BoundRead operand
             || operand.Type != unary.Type
-            || operand.Variable != localVariable
+            || operand.Variable != lastLocalVariable
             || (PrimitiveTypeFacts.IsFloating(unary.Type)
                 ? unary.Operator != TokenKind.Minus
                 : unary.Operator is not (TokenKind.Minus
                     or TokenKind.Tilde)))
         {
             throw Unsupported(
-                "A Construction-2 local-unary Body requires one same-typed numeric formal copy and a supported unary return.");
+                "A Construction-2 local-unary Body requires same-typed numeric local copies and a supported unary return.");
+        }
+
+        var localInitializers = new BoundRead[localCount];
+        for (var localOrdinal = 0; localOrdinal < localCount;
+            localOrdinal++)
+        {
+            var localVariable = function.ParameterCount + localOrdinal;
+            if (function.Body.Statements[localOrdinal] is not BoundLocal local
+                || local.Variable != localVariable
+                || local.Initializer is not BoundRead initialRead
+                || initialRead.Type != unary.Type
+                || initialRead.Variable < 0
+                || initialRead.Variable >= localVariable
+                || function.Variables[initialRead.Variable].Type
+                    != unary.Type)
+            {
+                throw Unsupported(
+                    "A Construction-2 local-unary Body requires source-ordered same-typed local copies.");
+            }
+
+            localInitializers[localOrdinal] = initialRead;
         }
 
         var typeTokens = new uint[function.Variables.Length];
@@ -5309,13 +5321,19 @@ public static partial class TrRmExecutableCompiler
                 _ => throw Unsupported(
                     "The selected local unary Body does not encode this numeric operation."),
             };
-        var code = new List<byte>(18);
-        AppendHomeLoad(formalVariable);
-        code.Add(0xD6);
-        code.Add(0x10);
-        code.Add(checked((byte)localVariable));
-        code.Add(checked((byte)(localVariable >> 8)));
-        AppendHomeLoad(localVariable);
+        var code = new List<byte>(checked((localCount * 8) + 10));
+        for (var localOrdinal = 0; localOrdinal < localCount;
+            localOrdinal++)
+        {
+            var localVariable = function.ParameterCount + localOrdinal;
+            AppendHomeLoad(localInitializers[localOrdinal].Variable);
+            code.Add(0xD6);
+            code.Add(0x10);
+            code.Add(checked((byte)localVariable));
+            code.Add(checked((byte)(localVariable >> 8)));
+        }
+
+        AppendHomeLoad(lastLocalVariable);
         code.Add(opcode);
         code.Add(control);
         code.Add(0xF0);
@@ -7487,48 +7505,56 @@ public static partial class TrRmExecutableCompiler
             BoundFunction function)
     {
         var receiverCount = function.IsStatic ? 0 : 1;
-        var formalVariable = receiverCount;
-        var localVariable = function.ParameterCount;
+        var localCount = function.Variables.Length
+            - function.ParameterCount;
         if (function.ParameterCount != receiverCount + 1
-            || function.Variables.Length != function.ParameterCount + 1
+            || localCount <= 0
+            || function.Variables.Length > ushort.MaxValue + 1
             || !function.Body.RetiredManagedLocals.IsEmpty
-            || function.Body.Statements is not [
-                BoundLocal local,
-                BoundReturn { Value: BoundUnary unary },
-            ])
+            || function.Body.Statements.Length != localCount + 1
+            || function.Body.Statements[localCount] is not BoundReturn {
+                Value: BoundUnary unary,
+            })
         {
             return null;
         }
 
-        var operationType = function.Variables[formalVariable].Type;
+        var operationType = function.Variables[receiverCount].Type;
         if (!IsC1M1Construction2BodyNumericType(operationType)
             || function.ReturnType != operationType
             || (!function.IsStatic && function.Variables[0].IsMutable)
-            || function.Variables[formalVariable].IsMutable
-            || function.Variables[formalVariable].IsOut
-            || function.Variables[formalVariable].IsInit
-            || function.Variables[formalVariable].IsImplicitRef
-            || function.Variables[formalVariable].IsInitializationLocal
-            || function.Variables[localVariable].Type != operationType
-            || function.Variables[localVariable].IsMutable
-            || function.Variables[localVariable].IsOut
-            || function.Variables[localVariable].IsInit
-            || function.Variables[localVariable].IsImplicitRef
-            || function.Variables[localVariable].IsInitializationLocal
-            || local.Variable != localVariable
-            || local.Initializer is not BoundRead initialRead
-            || initialRead.Type != operationType
-            || initialRead.Variable != formalVariable
+            || function.Variables.Skip(receiverCount).Any(variable =>
+                variable.Type != operationType || variable.IsMutable
+                || variable.IsOut || variable.IsInit
+                || variable.IsImplicitRef
+                || variable.IsInitializationLocal)
             || unary.Type != operationType
             || unary.Operand is not BoundRead operand
             || operand.Type != operationType
-            || operand.Variable != localVariable
+            || operand.Variable != function.Variables.Length - 1
             || (PrimitiveTypeFacts.IsFloating(operationType)
                 ? unary.Operator != TokenKind.Minus
                 : unary.Operator is not (TokenKind.Minus
                     or TokenKind.Tilde)))
         {
             return null;
+        }
+
+        for (var localOrdinal = 0; localOrdinal < localCount;
+            localOrdinal++)
+        {
+            var localVariable = function.ParameterCount + localOrdinal;
+            if (function.Body.Statements[localOrdinal] is not BoundLocal local
+                || local.Variable != localVariable
+                || local.Initializer is not BoundRead initialRead
+                || initialRead.Type != operationType
+                || initialRead.Variable < 0
+                || initialRead.Variable >= localVariable
+                || function.Variables[initialRead.Variable].Type
+                    != operationType)
+            {
+                return null;
+            }
         }
 
         return unary;
