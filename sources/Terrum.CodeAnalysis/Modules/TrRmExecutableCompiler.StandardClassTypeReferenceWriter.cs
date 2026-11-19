@@ -9773,7 +9773,8 @@ public static partial class TrRmExecutableCompiler
             var signatureRow = methodSignatureRows.Count + 1;
             var deferredResultType
                 = IsC1M1ImportedGenericNominalMethodTypeSpec(rootTables,
-                    method.ReturnTypeSpecReference, nominalTypeImportRows);
+                    method.ReturnTypeSpecReference, nominalTypeImportRows,
+                    allowOptionalClassHandle: true);
             var resultTypeSpec = deferredResultType
                 ? AppendC1M1MethodTypePlaceholder(outputTypeSpecRows,
                     newOwnerTypeDefRow)

@@ -5078,8 +5078,9 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                     public static int32 Observe<T>(ref<Box<T>> value) {
                         return 1;
                     }
-                    public static int32 ObserveOptional<T>(Box<T>? value) {
-                        return 1;
+                    public static Box<T>? ObserveOptional<T>(
+                        Box<T>? value) {
+                        return move value;
                     }
                     public static int32 ObserveNested<T>(
                         ref<ref<Box<T>>> value) {
@@ -5264,6 +5265,18 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             observeOptionalMethodDefId & 0x00FF_FFFF));
         var observeOptionalSignature = classTables.Methods.GetSignature(
             observeOptionalMethodRow);
+        var observeOptionalResultTypeSpec
+            = classTables.Signatures.GetResultTypeSpec(
+                observeOptionalSignature);
+        Assert.That(classTables.TypeSpecs.GetTypeSpecRef(
+            observeOptionalResultTypeSpec).Form,
+            Is.EqualTo((byte)0x06));
+        var optionalResultTypeSpec = BinaryPrimitives
+            .ReadUInt32LittleEndian(classTables.TypeSpecs.GetRow(
+                checked((int)observeOptionalResultTypeSpec))
+                .Slice(2, sizeof(uint)));
+        Assert.That(classTables.TypeSpecs.GetTypeSpecRef(
+            optionalResultTypeSpec).Form, Is.EqualTo((byte)0x05));
         var (observeOptionalParameterFirst,
             observeOptionalParameterCount)
             = classTables.Signatures.GetParamRange(
@@ -5361,6 +5374,19 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         var reemittedObserveOptionalSignature
             = reemittedClassTables.Methods.GetSignature(
                 reemittedObserveOptionalMethodRow);
+        var reemittedOptionalResultTypeSpec
+            = reemittedClassTables.Signatures.GetResultTypeSpec(
+                reemittedObserveOptionalSignature);
+        Assert.That(reemittedClassTables.TypeSpecs.GetTypeSpecRef(
+            reemittedOptionalResultTypeSpec).Form,
+            Is.EqualTo((byte)0x06));
+        var reemittedOptionalResultInnerTypeSpec = BinaryPrimitives
+            .ReadUInt32LittleEndian(reemittedClassTables.TypeSpecs.GetRow(
+                checked((int)reemittedOptionalResultTypeSpec))
+                .Slice(2, sizeof(uint)));
+        Assert.That(reemittedClassTables.TypeSpecs.GetTypeSpecRef(
+            reemittedOptionalResultInnerTypeSpec).Form,
+            Is.EqualTo((byte)0x05));
         var (reemittedObserveOptionalParameterFirst,
             reemittedObserveOptionalParameterCount)
             = reemittedClassTables.Signatures.GetParamRange(
@@ -5461,9 +5487,10 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                             ref<ref<Box<T>>> value) {
                             return Container.ObserveNested<T>(value);
                         }
-                        public static int32 ForwardOptional<T>(
+                        public static Box<T>? ForwardOptional<T>(
                             Box<T>? value) {
-                            return Container.ObserveOptional<T>(value);
+                            return Container.ObserveOptional<T>(
+                                move value);
                         }
                     }
                 }
@@ -5519,9 +5546,9 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                         ref<ref<Box<T>>> value) {
                         return Container.ObserveNested<T>(value);
                     }
-                    public static int32 ForwardOptional<T>(
+                    public static Box<T>? ForwardOptional<T>(
                         Box<T>? value) {
-                        return Container.ObserveOptional<T>(value);
+                        return Container.ObserveOptional<T>(move value);
                     }
                 }
             }
