@@ -5912,6 +5912,140 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
+    public void RejectsFieldReferenceBodiesWithoutAnOwnedDependency()
+    {
+        var schemaIdentity
+            = C1M1Construction2ClassParameterDefaultsSchemaIdentity;
+        var tree = SyntaxTree.Parse("""
+            public class Box {
+                public int32 First;
+                public int32 Second;
+                [return: DependsOn(this)]
+                public unsafe ref<int32> ReadFirst() {
+                    return ref this.First;
+                }
+                [return: DependsOn(this)]
+                public unsafe ref<int32> ReadSecond() {
+                    return ref this.Second;
+                }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var members = classDeclaration.Children.OfType<SyntaxNode>();
+        var fields = members.Where(static node =>
+            node.Kind == SyntaxKind.FieldDeclaration).ToArray();
+        var methods = members.Where(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration).ToArray();
+        var boxClassIndex = Enumerable.Range(0, program.Classes.Length)
+            .Single(index => program.Classes[index].Name == "Box");
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "FieldReferenceOwnerValidation", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, boxClassIndex,
+                    classDeclaration.Span, "BoxKey", [
+                        new TrRmSourceClassMemberExport(boxClassIndex,
+                            fields[0].Span, "Box.First"),
+                        new TrRmSourceClassMemberExport(boxClassIndex,
+                            fields[1].Span, "Box.Second"),
+                        new TrRmSourceClassMemberExport(boxClassIndex,
+                            methods[0].Span, "Box.ReadFirst"),
+                        new TrRmSourceClassMemberExport(boxClassIndex,
+                            methods[1].Span, "Box.ReadSecond"),
+                    ]),
+            ]);
+        var schema
+            = TrRmArtifactSchema
+                .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft;
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                        artifact));
+        var firstMethodRow = GetMethodRow(tables, "Box.ReadFirst");
+        var secondMethodRow = GetMethodRow(tables, "Box.ReadSecond");
+        var wrongOwnerDependencyRow = tables.Contracts
+            .GetDependencyContractRows(secondMethodRow).Single().Row;
+
+        AssertInvalid(RewriteBodyDependencyRow(artifact,
+            firstMethodRow, 0), firstMethodRow);
+        AssertInvalid(RewriteBodyDependencyRow(artifact,
+            firstMethodRow, checked((uint)wrongOwnerDependencyRow)),
+            firstMethodRow);
+
+        static int GetMethodRow(
+            TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+            string exportKey)
+            => checked((int)(tables.Exports
+                .GetExportsForModule(1)
+                .Single(export => export.ExportKey == exportKey)
+                .Definition & 0x00FF_FFFF));
+
+        byte[] RewriteBodyDependencyRow(
+            byte[] artifact, int methodRow, uint dependencyRow)
+        {
+            var artifactIndex = TrRmArtifactIndex
+                .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                    artifact);
+            var tables = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(artifactIndex);
+            var bodyRow = tables.Methods.GetBodyRow(methodRow);
+            var body = tables.Bodies.GetRow(bodyRow).ToArray();
+            if (body.Length != 12 || body[0] != 0x04)
+            {
+                throw new InvalidDataException(
+                    "The field-reference owner fixture requires a Body-04 method.");
+            }
+
+            BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(8),
+                dependencyRow);
+            var bodyRows = new ReadOnlyMemory<byte>[tables.Bodies.Count];
+            for (var row = 1; row <= bodyRows.Length; row++)
+            {
+                bodyRows[row - 1] = row == bodyRow
+                    ? body
+                    : tables.Bodies.GetRow(row).ToArray();
+            }
+
+            var bodyBytes = TrRmVariableTableWriter.EncodeBodies(bodyRows);
+            var sections = new List<TrRmSection>(artifactIndex.SectionCount);
+            for (var sectionIndex = 0;
+                sectionIndex < artifactIndex.SectionCount; sectionIndex++)
+            {
+                artifactIndex.GetSection(sectionIndex, out var kind,
+                    out var flags, out var section, out var recordCount);
+                sections.Add(kind == 0x0020
+                    ? new TrRmSection(kind, flags, recordCount, bodyBytes)
+                    : new TrRmSection(kind, flags, recordCount,
+                        section.ToArray()));
+            }
+
+            return TrRmArtifactWriter.Encode(sections, schema);
+        }
+
+        static void AssertInvalid(byte[] artifact, int methodRow)
+        {
+            Assert.Throws<InvalidDataException>(() =>
+            {
+                var tables = TrRmStructuralMetadataValidator
+                    .ValidateC1AndGetExecutionTables(
+                        TrRmArtifactIndex
+                            .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                                artifact));
+                tables.Bodies.ValidateSelectedImplementation(
+                    tables.Methods.GetBodyRow(methodRow),
+                    tables.Contracts.Count);
+            });
+        }
+    }
+
+    [Test]
     public void ComposesClassGenericAndInterfaceParameterDefaultSurfaces()
     {
         var tree = SyntaxTree.Parse("""
