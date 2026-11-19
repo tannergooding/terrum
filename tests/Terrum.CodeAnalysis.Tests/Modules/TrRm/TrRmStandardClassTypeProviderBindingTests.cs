@@ -355,13 +355,14 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
     }
 
     [Test]
-    public void EmitsReadonlyBodiesThroughImportedClassHandleParameters()
+    public void EmitsReadonlyBodiesThroughReadonlyAndWritableClassHandles()
     {
         var schemaIdentity
             = C1M1Construction2ClassParameterDefaultsSchemaIdentity;
         var provider = CreateClassArtifact("ClassProvider", "Leaf",
             "LeafKey", 0xF200_0008, schemaIdentity, layoutKind: 0, pack: 0,
             fieldExportKey: "Leaf.Value");
+        SetTypeDefFlags(provider, 0x8A);
         var reference = TrRmExecutableCompiler.CreateStandardReference(
             new TrRmStandardArtifactInput(schemaIdentity, provider),
             "ClassProvider", [], ["LeafKey"], ["Leaf.Value"]);
@@ -371,6 +372,9 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
                 private int32 _seed;
                 public Container(int32 seed) { _seed = seed; }
                 public int32 Read(Leaf leaf) { return leaf.Value; }
+                public int32 ReadWritable(write Leaf leaf) {
+                    return leaf.Value;
+                }
             }
             """);
         var compilation = Compilation.CreateLibrary(tree, reference);
@@ -387,6 +391,10 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name == "Read"));
+        var readWritable = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "ReadWritable"));
         var artifact = TrRmExecutableCompiler.EmitStandard(program,
             "ImportedClassFieldRead", schemaIdentity,
             TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
@@ -400,6 +408,8 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
                         },
                         new TrRmSourceClassMemberExport(0, read.Span,
                             "Container.Read"),
+                        new TrRmSourceClassMemberExport(0,
+                            readWritable.Span, "Container.ReadWritable"),
                     ]),
             ]);
         var tables = TrRmStructuralMetadataValidator
@@ -433,6 +443,33 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
                 0x17, 0,
             }));
 
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Container.ReadWritable", out var writableReadDefinition), Is.True);
+        var writableReadMethodRow = checked((int)(
+            writableReadDefinition & 0x00FF_FFFF));
+        var writableReadBodyRow
+            = tables.Methods.GetBodyRow(writableReadMethodRow);
+        Assert.That(writableReadBodyRow, Is.GreaterThan(0));
+        tables.ValidateRegisterBodyMapsForMethod(writableReadMethodRow);
+        var writableReadBody = tables.Bodies.GetRegisterBody(
+            writableReadBodyRow, tables.Contracts.Count);
+        Assert.That(writableReadBody.HomeCount, Is.EqualTo(2));
+        Assert.That(writableReadBody.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xDA, 0, 1, 0,
+                0x17, 0,
+            }));
+        var writableReadSignature = tables.Methods.GetSignature(
+            writableReadMethodRow);
+        var (writableParamFirst, writableParamCount)
+            = tables.Signatures.GetParamRange(writableReadSignature);
+        Assert.That(writableParamCount, Is.EqualTo(1));
+        var writableParameterType = tables.TypeSpecs.GetTypeSpecRef(
+            tables.Parameters.GetTypeSpec(writableParamFirst));
+        Assert.That(writableParameterType.Form, Is.EqualTo((byte)0x03));
+        Assert.That(writableParameterType.Qualifiers,
+            Is.EqualTo((byte)0x01));
+
         var outputReference
             = TrRmExecutableCompiler.CreateStandardReference(
                 new TrRmStandardArtifactInput(schemaIdentity, artifact),
@@ -448,6 +485,7 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
         var incompatibleProvider = CreateClassArtifact("ClassProvider",
             "Leaf", "LeafKey", 0xF200_000A, schemaIdentity,
             layoutKind: 0, pack: 0, fieldExportKey: "Leaf.Value");
+        SetTypeDefFlags(incompatibleProvider, 0x8A);
         _ = Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.CreateStandardReference(
                 new TrRmStandardArtifactInput(schemaIdentity, artifact),

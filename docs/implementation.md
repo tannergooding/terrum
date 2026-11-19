@@ -134,9 +134,10 @@ silently dropping them; class MethodDefs, Bodies and construction records
 remain unsupported in this type-only route.
 The Construction-2 source-class producer also emits direct selected Standard
 class TypeDef/FieldDef/layout stubs and remaps readonly class-handle TypeSpecs
-in method signatures, including root-owned imported TypeDef expectations. A
-readonly method can also read one selected public field through an imported
-class-handle parameter; source binding, mandatory verification, Body-01 D8/DA
+in method signatures, including root-owned imported TypeDef expectations.
+Readonly methods can read one selected public field through readonly or
+write-qualified imported class-handle formals; source binding, mandatory
+verification, Body-01 D8/DA
 encoding and exact FieldDef/owner TypeDef Import checks are implemented.
 Direct producer/consumer/provider-replacement and unselected-field rejection,
 plus a Leaf-to-Wrapper-to-Container provider-chain regression covering
