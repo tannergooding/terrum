@@ -596,23 +596,8 @@ internal sealed partial class CliTests
             $"source-provider-cli-c1-{Guid.NewGuid():N}.trrm");
         try
         {
-            var tree = SyntaxTree.Parse("public class Box {}");
-            var compilation = Compilation.CreateLibrary(tree);
-            Assert.That(compilation.HasErrors, Is.False,
-                string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = (BoundProgram)compilation.Program!;
-            var declaration = tree.Root.Children.OfType<SyntaxNode>()
-                .Single(static node =>
-                    node.Kind == SyntaxKind.ClassDeclaration);
-            var classIndex = Enumerable.Range(0, program.Classes.Length)
-                .Single(index => program.Classes[index].Name == "Box");
-            var provider = TrRmExecutableCompiler.EmitStandard(program,
-                providerIdentity, schemaIdentity,
-                TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
-                [], [], [
-                    new TrRmSourceClassExport(program, classIndex,
-                        declaration.Span, "type.box", []),
-                ]);
+            var provider = CreateC1M1ClassProvider(providerIdentity, "Box",
+                "type.box", schemaIdentity);
             await File.WriteAllBytesAsync(providerArtifact, provider)
                 .ConfigureAwait(true);
 
@@ -654,5 +639,105 @@ internal sealed partial class CliTests
             await TestFileCleanup.DeleteWithRetryAsync(consumerArtifact)
                 .ConfigureAwait(true);
         }
+    }
+
+    [Test]
+    public async Task CompileTrRmComposesVersionTwoC1ClassSourceProvidersAsync()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1";
+        const string firstProviderIdentity
+            = "source-provider-cli-c1-first-provider";
+        const string secondProviderIdentity
+            = "source-provider-cli-c1-second-provider";
+        var firstProviderArtifact = Path.Combine(
+            TestArtifactPaths.DirectoryPath,
+            $"source-provider-cli-c1-first-{Guid.NewGuid():N}.trrm");
+        var secondProviderArtifact = Path.Combine(
+            TestArtifactPaths.DirectoryPath,
+            $"source-provider-cli-c1-second-{Guid.NewGuid():N}.trrm");
+        var providerSelections = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"source-provider-cli-c1-composed-{Guid.NewGuid():N}.json");
+        var consumerArtifact = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"source-provider-cli-c1-composed-{Guid.NewGuid():N}.trrm");
+        try
+        {
+            await File.WriteAllBytesAsync(firstProviderArtifact,
+                CreateC1M1ClassProvider(firstProviderIdentity, "Box",
+                    "type.box", schemaIdentity)).ConfigureAwait(true);
+            await File.WriteAllBytesAsync(secondProviderArtifact,
+                CreateC1M1ClassProvider(secondProviderIdentity, "Other",
+                    "type.other", schemaIdentity)).ConfigureAwait(true);
+            var configuration = JsonSerializer.Serialize(new {
+                schemaVersion = 2,
+                providers = new[] {
+                    new { schemaIdentity, path = firstProviderArtifact },
+                    new { schemaIdentity, path = secondProviderArtifact },
+                },
+                references = new[] {
+                    new {
+                        providerInputOrdinal = 0,
+                        moduleIdentity = firstProviderIdentity,
+                        typeExportKeys = new[] { "type.box" },
+                        fieldExportKeys = Array.Empty<string>(),
+                    },
+                    new {
+                        providerInputOrdinal = 1,
+                        moduleIdentity = secondProviderIdentity,
+                        typeExportKeys = new[] { "type.other" },
+                        fieldExportKeys = Array.Empty<string>(),
+                    },
+                },
+            });
+            await File.WriteAllTextAsync(providerSelections, configuration,
+                new UTF8Encoding(false)).ConfigureAwait(true);
+
+            var (exit, result, error) = await RunAsync(
+                Encoding.UTF8.GetBytes(
+                    "void Consume(Box box, Other other) {}"),
+                "compile-trrm", "-", "--identity",
+                "source-provider-cli-c1-composed-consumer",
+                "--trrm-schema", schemaIdentity, "--trrm-source-providers",
+                providerSelections, "--library", "-o", consumerArtifact,
+                "--runtime", "fail-fast", "--json")
+                .ConfigureAwait(false);
+            Assert.That(exit, Is.Zero,
+                $"{result}{Environment.NewLine}{error}");
+            Assert.That(error, Is.Empty);
+            Assert.That(new FileInfo(consumerArtifact).Length, Is.GreaterThan(0));
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(firstProviderArtifact)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(secondProviderArtifact)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(providerSelections)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(consumerArtifact)
+                .ConfigureAwait(true);
+        }
+    }
+
+    private static byte[] CreateC1M1ClassProvider(string moduleIdentity,
+        string typeName, string exportKey, string schemaIdentity)
+    {
+        var tree = SyntaxTree.Parse($"public class {typeName} {{}}");
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var declaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var classIndex = Enumerable.Range(0, program.Classes.Length)
+            .Single(index => program.Classes[index].Name == typeName);
+        return TrRmExecutableCompiler.EmitStandard(program, moduleIdentity,
+            schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, classIndex,
+                    declaration.Span, exportKey, []),
+            ]);
     }
 }

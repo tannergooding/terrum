@@ -14,6 +14,11 @@ public static partial class TrRmExecutableCompiler
     private readonly record struct StandardQueryTypeIdentity(
         string ModuleIdentity, uint DefinitionId);
 
+    private readonly record struct StandardC1M1ClassTypeOnlyInstanceKey(
+        BoundGenericNominalTypeIdentity Definition, byte Qualifiers,
+        uint TypeSpecReference, string? TypeSpecProviderIdentity,
+        byte TypeSpecForm);
+
     private sealed class StandardQueryTypeViewGroup(
         BoundSourceTypeProviderSnapshot provider, uint definitionId,
         string name)
@@ -30,8 +35,8 @@ public static partial class TrRmExecutableCompiler
         int ModuleRow, string ModuleIdentity, uint GoverningRuleEdition,
         uint TargetRequirement, uint RuntimePolicy);
 
-    /// <summary>Combines independently selected exact Standard query and nested FieldPath references.</summary>
-    /// <param name="references">Two or more source references created by exact LayoutQueries or nested FieldPath reference APIs.
+    /// <summary>Combines independently selected exact Standard type references.</summary>
+    /// <param name="references">Two or more source references created by supported exact Standard reference APIs.
     /// The caller must not modify the list while it is captured.</param>
     /// <returns>A source reference with reconciled actual identities and retained provider views.</returns>
     /// <exception cref="ArgumentNullException">The reference list or an entry is null.</exception>
@@ -56,6 +61,13 @@ public static partial class TrRmExecutableCompiler
                 ?? throw new ArgumentException(
                     "A Standard reference set cannot contain null entries.",
                     nameof(references));
+        }
+
+        if (selectedReferences.Any(static reference =>
+                !reference.StandardClassDeclarations.IsEmpty))
+        {
+            return CreateC1M1TypeOnlyClassReferenceSet(
+                selectedReferences);
         }
 
         var runtimePolicy = selectedReferences[0].RuntimePolicy;
@@ -531,6 +543,281 @@ public static partial class TrRmExecutableCompiler
                 evaluationFormSelections,
             coreEvaluationFormSchemaProviders:
                 evaluationFormProviders);
+    }
+
+    private static CompilationReference
+        CreateC1M1TypeOnlyClassReferenceSet(
+            CompilationReference[] references)
+    {
+        var runtimePolicy = references[0].RuntimePolicy;
+        var definitions
+            = ImmutableArray.CreateBuilder<
+                BoundGenericNominalTypeDefinition>();
+        var definitionIndexes = new Dictionary<
+            BoundGenericNominalTypeIdentity, int>();
+        var instances
+            = ImmutableArray.CreateBuilder<
+                BoundGenericNominalTypeInstance>();
+        var instanceIndexes = new Dictionary<
+            StandardC1M1ClassTypeOnlyInstanceKey, int>();
+        var declarations
+            = new List<BoundStandardClassDeclaration>();
+        var declarationIndexes = new Dictionary<
+            BoundGenericNominalTypeIdentity, int>();
+        var declarationNames = new HashSet<(string Namespace, string Name)>();
+        var providerSnapshots = new Dictionary<
+            (string SchemaIdentity, string ModuleIdentity),
+            BoundSourceTypeProviderSnapshot>();
+
+        for (var referenceIndex = 0;
+            referenceIndex < references.Length; referenceIndex++)
+        {
+            var reference = references[referenceIndex];
+            if (reference.RuntimePolicy != runtimePolicy)
+            {
+                throw Invalid(
+                    "Selected Standard class references require the same runtime policy.");
+            }
+            if (reference.RequiresSourceGrant
+                || reference.InvocationProfileId is not null
+                || !reference.Structures.IsEmpty
+                || !reference.Functions.IsEmpty
+                || !reference.Classes.IsEmpty
+                || !reference.NativeFunctionPointerSignatures.IsEmpty
+                || !reference.NativePointerTypes.IsEmpty
+                || !reference.NativeFixedArrayTypes.IsEmpty
+                || !reference.EnumDefinitions.IsEmpty
+                || !reference.CheckedReferenceTypes.IsEmpty
+                || !reference.Interfaces.IsEmpty
+                || !reference.PrivateNominalTypeOrigins.IsEmpty
+                || !reference.PrivateClassReferences.IsEmpty
+                || reference.CoreTaskType is not null
+                || !reference.CoreExceptionIdentitySelections.IsEmpty
+                || reference.NativeCoreRegistration is not null
+                || reference.LayoutCoreRegistration is not null
+                || reference.StaticInitializationCoreRegistration is not null
+                || !reference.CoreContractFailureIdentitySelections.IsEmpty
+                || reference.LazyInitializationCoreRegistration is not null
+                || reference.NativeOutputCoreRegistration is not null
+                || !reference.GenericMethodImports.IsEmpty
+                || !reference.RetainedGenericMethodRoots.IsEmpty
+                || reference.StandardQuerySourceAssociation is not null
+                || !reference.CoreEvaluationFormIdentitySelections.IsEmpty
+                || !reference.CoreEvaluationFormSchemaProviders.IsEmpty
+                || !reference.SpanTypes.IsEmpty
+                || reference.StandardClassDeclarations.IsEmpty
+                || reference.GenericNominalTypeDefinitions.IsEmpty
+                || reference.GenericNominalTypeInstances.IsEmpty)
+            {
+                throw Unsupported(
+                    "C1M1 type-only class composition requires only selected class TypeDefs without member, interface, runtime, or other type-family obligations.");
+            }
+
+            var sourceDefinitions = reference.GenericNominalTypeDefinitions;
+            if (!BoundGenericNominalTypeContract.IsValidDefinitionTable(
+                    sourceDefinitions)
+                || !BoundGenericNominalTypeContract.IsValidInstanceTable(
+                    reference.GenericNominalTypeInstances,
+                    sourceDefinitions))
+            {
+                throw Invalid(
+                    "A selected C1M1 class reference has invalid nominal type tables.");
+            }
+
+            foreach (var definition in sourceDefinitions)
+            {
+                if (definition.NominalKind != 2
+                    || !definition.Formals.IsEmpty
+                    || !definition.ProviderExpectations.IsEmpty
+                    || !StringComparer.Ordinal.Equals(
+                        definition.Identity.ProviderIdentity,
+                        definition.Identity.ModuleIdentity))
+                {
+                    throw Unsupported(
+                        "C1M1 class composition currently requires directly selected nongeneric class TypeDefs without imported nominal expectations.");
+                }
+
+                if (definitionIndexes.TryGetValue(definition.Identity,
+                        out var existingIndex))
+                {
+                    var existing = definitions[existingIndex];
+                    if (!BoundGenericNominalTypeContract
+                        .AreEquivalentDefinitions(existing, definition))
+                    {
+                        throw Invalid(
+                            "Views of one C1M1 class TypeDef disagree on the actual provider definition.");
+                    }
+                }
+                else
+                {
+                    if (definitions.Count
+                        >= BoundGenericNominalTypeTypes.MaximumCount)
+                    {
+                        throw new NotSupportedException(
+                            "The composed C1M1 nominal TypeDef closure exceeds the analysis limit.");
+                    }
+
+                    definitionIndexes.Add(definition.Identity,
+                        definitions.Count);
+                    definitions.Add(definition);
+                }
+            }
+
+            var sourceInstances = reference.GenericNominalTypeInstances;
+            for (var instanceIndex = 0;
+                instanceIndex < sourceInstances.Length; instanceIndex++)
+            {
+                var instance = sourceInstances[instanceIndex];
+                if (!instance.Arguments.IsEmpty
+                    || instance.Qualifiers != 0
+                    || instance.TypeSpecReference != 0
+                    || instance.TypeSpecProviderIdentity is not null
+                    || instance.TypeSpecForm != 0
+                    || !definitionIndexes.ContainsKey(instance.Definition))
+                {
+                    throw Unsupported(
+                        "C1M1 type-only class composition requires direct, unqualified class instances.");
+                }
+
+                var key = new StandardC1M1ClassTypeOnlyInstanceKey(
+                    instance.Definition, instance.Qualifiers,
+                    instance.TypeSpecReference,
+                    instance.TypeSpecProviderIdentity,
+                    instance.TypeSpecForm);
+                if (!instanceIndexes.ContainsKey(key))
+                {
+                    if (instances.Count
+                        >= BoundGenericNominalTypeTypes.MaximumCount)
+                    {
+                        throw new NotSupportedException(
+                            "The composed C1M1 class instance table exceeds the analysis limit.");
+                    }
+
+                    var mappedInstanceIndex = instances.Count;
+                    instanceIndexes.Add(key, mappedInstanceIndex);
+                    instances.Add(instance);
+                }
+
+            }
+
+            foreach (var declaration in reference.StandardClassDeclarations)
+            {
+                var view = declaration.Declaration;
+                if (!StringComparer.Ordinal.Equals(view.Provider.SchemaIdentity,
+                        StandardC1M1SchemaIdentity)
+                    || !definitionIndexes.ContainsKey(view.Identity)
+                    || !declaration.Expectations.IsEmpty
+                    || declaration.SelectedExportKeys.IsDefaultOrEmpty
+                    || declaration.ExportKeys.IsDefaultOrEmpty
+                    || !view.Fields.IsEmpty
+                    || !view.Layouts.IsEmpty
+                    || !view.Methods.IsEmpty)
+                {
+                    throw Unsupported(
+                        "C1M1 class composition currently requires selected class roots without fields, layouts, methods, or imported expectations.");
+                }
+
+                AddProviderSnapshot(view.Provider);
+                var nameIdentity = (view.Namespace, view.Name);
+                if (declarationIndexes.TryGetValue(view.Identity,
+                        out var existingIndex))
+                {
+                    var existing = declarations[existingIndex];
+                    var existingView = existing.Declaration;
+                    if (!SameA2SourceTypeProviderSnapshot(
+                            existingView.Provider, view.Provider)
+                        || !StringComparer.Ordinal.Equals(
+                            existingView.Namespace, view.Namespace)
+                        || !StringComparer.Ordinal.Equals(
+                            existingView.Name, view.Name)
+                        || existingView.TypeDefFlags != view.TypeDefFlags
+                        || !existing.ExportKeys.AsSpan().SequenceEqual(
+                            declaration.ExportKeys.AsSpan()))
+                    {
+                        throw Invalid(
+                            "Views of one C1M1 class TypeDef disagree on the checked declaration.");
+                    }
+
+                    var selectedKeys = new List<string>(
+                        existing.SelectedExportKeys);
+                    AddDistinct(selectedKeys,
+                        declaration.SelectedExportKeys);
+                    declarations[existingIndex] = existing with {
+                        SelectedExportKeys = [.. selectedKeys],
+                    };
+                }
+                else
+                {
+                    if (!declarationNames.Add(nameIdentity))
+                    {
+                        throw Invalid(
+                            "Selected C1M1 class references contain ambiguous fully qualified TypeDef names.");
+                    }
+
+                    declarationIndexes.Add(view.Identity,
+                        declarations.Count);
+                    declarations.Add(declaration);
+                }
+            }
+
+            if (sourceDefinitions.Any(definition =>
+                    !declarationIndexes.ContainsKey(definition.Identity)))
+            {
+                throw Unsupported(
+                    "C1M1 class composition requires a retained source declaration for every nominal TypeDef.");
+            }
+        }
+
+        var definitionTable = definitions.ToImmutable();
+        var instanceTable = instances.ToImmutable();
+        var declarationTable = declarations.ToImmutableArray();
+        if (!BoundGenericNominalTypeContract.IsValidDefinitionTable(
+                definitionTable)
+            || !BoundGenericNominalTypeContract.IsValidInstanceTable(
+                instanceTable, definitionTable)
+            || !BoundStandardClassDeclarationContract.IsValidTable(
+                declarationTable, definitionTable))
+        {
+            throw Invalid(
+                "The composed C1M1 class TypeDef closure is invalid.");
+        }
+
+        var mergedProgram = new BoundProgram([], -1) {
+            RuntimePolicy = runtimePolicy,
+            GenericNominalTypeDefinitions = definitionTable,
+            GenericNominalTypeInstances = instanceTable,
+            StandardClassDeclarations = declarationTable,
+        };
+        SemanticVerifier.VerifyLibraryReferences(mergedProgram);
+        return new CompilationReference([], [], runtimePolicy,
+            genericNominalTypeDefinitions: definitionTable,
+            genericNominalTypeInstances: instanceTable,
+            standardClassDeclarations: declarationTable);
+
+        void AddProviderSnapshot(BoundSourceTypeProviderSnapshot provider)
+        {
+            if (!StringComparer.Ordinal.Equals(provider.SchemaIdentity,
+                    StandardC1M1SchemaIdentity)
+                || provider.RuntimePolicy != (uint)runtimePolicy)
+            {
+                throw Invalid(
+                    "C1M1 class references have an incompatible provider schema or runtime policy.");
+            }
+
+            var key = (provider.SchemaIdentity, provider.ModuleIdentity);
+            if (providerSnapshots.TryGetValue(key, out var existing))
+            {
+                if (!SameA2SourceTypeProviderSnapshot(existing, provider))
+                {
+                    throw Invalid(
+                        "C1M1 references contain conflicting snapshots for one provider Module.");
+                }
+            }
+            else
+            {
+                providerSnapshots.Add(key, provider);
+            }
+        }
     }
 
     private static void AddDistinct(List<string> destination,
