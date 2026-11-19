@@ -254,6 +254,105 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
     }
 
     [Test]
+    public void EmitsImportedClassHandleTypeSpecsInClassMethodSignatures()
+    {
+        var schemaIdentity
+            = C1M1Construction2ClassParameterDefaultsSchemaIdentity;
+        var provider = CreateClassArtifact("ClassProvider", "Leaf",
+            "LeafKey", 0xF200_0008, schemaIdentity, layoutKind: 0, pack: 0);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, provider),
+            "ClassProvider", [], ["LeafKey"]);
+
+        var tree = SyntaxTree.Parse("""
+            public class Container {
+                private int32 _value;
+                public Container(int32 value) { _value = value; }
+                public static void Accept(Leaf value) {}
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree, reference);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var members = classDeclaration.Children.OfType<SyntaxNode>();
+        var constructor = members.Single(static node =>
+            node.Kind == SyntaxKind.ConstructorDeclaration);
+        var accept = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Accept"));
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "ClassHandleConsumer", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, 0,
+                    classDeclaration.Span, "ContainerKey", [
+                        new TrRmSourceClassMemberExport(0,
+                            constructor.Span, "Container.Initialize") {
+                            ConstructionProjectionExportKey
+                                = "Container.Create",
+                        },
+                        new TrRmSourceClassMemberExport(0, accept.Span,
+                            "Container.Accept"),
+                    ]),
+            ]);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                        artifact));
+        var importedClassRow = Enumerable.Range(1, tables.TypeDefs.Count)
+            .Single(row => tables.TypeDefs.GetName(row) == "Leaf");
+        Assert.That(tables.TypeDefs.GetKind(importedClassRow),
+            Is.EqualTo(2));
+        var classImportRow = Enumerable.Range(1, tables.Imports.Count)
+            .Single(row => tables.Imports
+                .GetExpectedDefinitionForImportRow(row)
+                == (0x1300_0000u | checked((uint)importedClassRow)));
+        Assert.That(tables.ModuleRefs.GetProducerIdentity(
+            tables.Imports.GetModuleRefForImportRow(classImportRow)),
+            Is.EqualTo("ClassProvider"));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Container.Accept", out var acceptDefinition), Is.True);
+        var signature = tables.Methods.GetSignature(
+            checked((int)(acceptDefinition & 0x00FF_FFFF)));
+        var (parameterFirst, parameterCount)
+            = tables.Signatures.GetParamRange(signature);
+        Assert.That(parameterCount, Is.EqualTo(1));
+        var parameterType = tables.TypeSpecs.GetTypeSpecRef(
+            tables.Parameters.GetTypeSpec(parameterFirst));
+        Assert.That(parameterType.Form, Is.EqualTo((byte)0x03));
+        Assert.That(parameterType.Row, Is.EqualTo(classImportRow));
+
+        var outputReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, artifact),
+                "ClassHandleConsumer", [
+                    new TrRmStandardArtifactInput(schemaIdentity, provider),
+                ], ["ContainerKey"]);
+        var consumer = Compilation.CreateLibrary(
+            SyntaxTree.Parse("public void Use(Container value) {}"),
+            outputReference);
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
+
+        var incompatibleProvider = CreateClassArtifact("ClassProvider",
+            "Leaf", "LeafKey", 0xF200_000A, schemaIdentity,
+            layoutKind: 0, pack: 0);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, artifact),
+                "ClassHandleConsumer", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        incompatibleProvider),
+                ], ["ContainerKey"]));
+    }
+
+    [Test]
     public void BindsMutableC1M1ClassDeclarations()
     {
         var provider = CreateClassArtifact("Provider", "Leaf", "LeafKey",

@@ -132,6 +132,12 @@ regressions remain unverified under the active hold. It rejects mapped
 constructor, method, and property keys rather than
 silently dropping them; class MethodDefs, Bodies and construction records
 remain unsupported in this type-only route.
+The Construction-2 source-class producer also emits direct selected Standard
+class TypeDef/FieldDef/layout stubs and remaps readonly class-handle TypeSpecs
+in method signatures. Producer/consumer/provider-replacement regressions are
+added but remain unverified under the active hold. Imported class expectation
+chains, optional or writable class-handle wrappers and class-field Bodies
+remain open.
 The exact C1M1 construction successor has a
 class-free emission route and a Construction `0003` reader/writer that checks
 I/P signatures, owner/mutability agreement, direct instance FieldDef
@@ -142,8 +148,10 @@ remain unverified under the active hold. The exact C2 source-class route now
 emits local class TypeDef/FieldDef closure and real role-1 initializer I and
 role-2 projection P MethodDefs, MethodSigs, Params, Construction clauses,
 Feature 25 and Bodies for multiple non-partial constructors per class whose
-fields are initialized directly from Copy scalar or recursively safe
-auto-layout struct parameters. Partial-constructor pairs retain the primary
+fields are initialized directly from Copy scalar parameters or recursively
+safe local or selected direct imported non-generic auto-layout struct
+parameters.
+Partial-constructor pairs retain the primary
 I/P export identity and use the implementing secondary Body. It preserves
 explicit I/P ExportKeys and does not substitute `ClassTryCreate`; constructor
 producer regressions are added but unverified under the hold.
@@ -193,8 +201,9 @@ unverified under the active hold. Remaining gaps include non-identity
 instance calls, broader nested field paths and aggregate stores, locals and
 control flow, properties, constructor failure/cleanup behavior, class-backed
 field initialization, source-free class method re-emission and its
-replacement/remapping paths, imported class-handle closure, transitive
-imported-struct closure, CLI transport, independent carrier TypeSpec
+replacement/remapping paths, imported class expectation chains, optional or
+writable class-handle wrappers, nested class-field Bodies, transitive
+imported-struct provider chains, CLI transport, independent carrier TypeSpec
 verification, generic TypeDef dependencies, interfaces/witnesses outside D1,
 and runtime execution.
 The user-authorized provisional
