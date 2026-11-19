@@ -226,7 +226,8 @@ signatures whose TypeSpec forms are supported by the C1M1 remapper, remapping
 owner TypeDefs, MethodSigs, Params, Effects, aliases and class parameter
 surfaces/defaults without copying provider Bodies. Mutable receivers and
 construction-role methods outside the selected R1 route remain unsupported in
-this slice. It also re-emits local public nongeneric MethodDefs whose
+this slice. It also re-emits local nongeneric MethodDefs, including unexported
+private/internal helpers, whose
 Body-01 Body has inline F2/F3 or row-backed TypeMap entries, MethodMap targets
 retained local/imported MethodDefs and FieldMap targets retained local
 FieldDefs or selected class FieldDef Imports under their exact owner TypeDef

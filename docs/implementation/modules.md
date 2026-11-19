@@ -214,7 +214,7 @@ mutable-instance by-value
 class MethodDef Imports whose TypeSpec forms are supported by the remapper,
 including owner/signature/parameter rows, aliases, Effects and class parameter
 surfaces/defaults without copying provider Bodies. It also re-emits local
-public nongeneric MethodDefs with Body-01 Bodies only when every TypeMap entry
+nongeneric MethodDefs, including unexported private/internal helpers, with Body-01 Bodies only when every TypeMap entry
 is inline F2/F3 or row-backed, MethodMap entries target retained local/imported
 MethodDefs, and FieldMap entries target retained local FieldDefs or selected
 class FieldDef Imports under their exact owner TypeDef Imports, and only under

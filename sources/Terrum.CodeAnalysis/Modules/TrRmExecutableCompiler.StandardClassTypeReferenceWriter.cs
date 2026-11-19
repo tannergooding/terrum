@@ -8569,7 +8569,9 @@ public static partial class TrRmExecutableCompiler
                 || method.InitializerMethodDefinitionId != 0
                 || method.ConstructionPropertyDefinitionId != 0
                 || !method.InitializedMemberDefinitionIds.IsEmpty
-                || (method.Flags & 3) != 2
+                || (method.Flags & 3) == 3
+                || (!plan.Imports.IsEmpty
+                    && (method.Flags & 3) != 2)
                 || ((method.Flags & 4) != 0
                     && (method.ReceiverTypeSpecReference == 0
                         || !schema.UsesMethodReceiverAccess()))

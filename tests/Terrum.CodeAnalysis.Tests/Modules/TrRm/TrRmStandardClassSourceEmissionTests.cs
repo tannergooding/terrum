@@ -5059,6 +5059,14 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         var reemittedCallMethodRow = Enumerable.Range(reemittedMethodStart,
                 reemittedMethodEnd - reemittedMethodStart)
             .Single(row => reemittedTables.Methods.GetName(row) == "CallRead");
+        var providerPrivateMethodRow = Enumerable.Range(providerMethodStart,
+                providerMethodEnd - providerMethodStart)
+            .Single(row => providerTables.Methods.GetName(row)
+                == "ReadPrivate");
+        var reemittedPrivateMethodRow = Enumerable.Range(
+                reemittedMethodStart, reemittedMethodEnd - reemittedMethodStart)
+            .Single(row => reemittedTables.Methods.GetName(row)
+                == "ReadPrivate");
         var providerConstantMethodRow = Enumerable.Range(providerMethodStart,
                 providerMethodEnd - providerMethodStart)
             .Single(row => providerTables.Methods.GetName(row)
@@ -5125,6 +5133,17 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             Is.EqualTo(newBoxTypeDefRow));
         Assert.That(reemittedBody.Code.ToArray(),
             Is.EqualTo(providerBody.Code.ToArray()));
+        Assert.That(providerTables.Methods.GetFlags(providerPrivateMethodRow)
+                & 3u,
+            Is.Zero);
+        Assert.That(reemittedTables.Methods.GetFlags(
+                reemittedPrivateMethodRow) & 3u, Is.Zero);
+        Assert.That(providerTables.Methods.GetBodyRow(
+                providerPrivateMethodRow), Is.GreaterThan(0));
+        Assert.That(reemittedTables.Methods.GetBodyRow(
+                reemittedPrivateMethodRow), Is.GreaterThan(0));
+        Assert.That(reemittedTables.Exports.TryGetDefinitionForKey(1,
+            "Box.ReadPrivate", out _), Is.False);
         var providerCallBody = providerTables.Bodies.GetRegisterBody(
             providerTables.Methods.GetBodyRow(providerCallMethodRow),
             providerTables.Contracts.Count);
@@ -5136,11 +5155,11 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
                 providerCallBody.MethodMap),
             Is.EqualTo(0x1600_0000u
-                | checked((uint)providerMethodRow)));
+                | checked((uint)providerPrivateMethodRow)));
         Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
                 reemittedCallBody.MethodMap),
             Is.EqualTo(0x1600_0000u
-                | checked((uint)reemittedMethodRow)));
+                | checked((uint)reemittedPrivateMethodRow)));
         var providerConstantBody = providerTables.Bodies.GetRegisterBody(
             providerTables.Methods.GetBodyRow(providerConstantMethodRow),
             providerTables.Contracts.Count);
@@ -5639,7 +5658,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             ? "public int32 Read() { return Value; }"
             : "public int32 Read(int32 value) { return value; }";
         var methodCallText = includeMethodCall
-            ? "public int32 CallRead() { return Read(); }"
+            ? "private int32 ReadPrivate(int32 left, int32 right) { return Value; } public int32 CallRead(int32 left, int32 right) { return ReadPrivate(left, right) + right; }"
             : string.Empty;
         var constantMethodText = includeConstant
             ? "public static int32 ReadConstant() { return 42; }"
