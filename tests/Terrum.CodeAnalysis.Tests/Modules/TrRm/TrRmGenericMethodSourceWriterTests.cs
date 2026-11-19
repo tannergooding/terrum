@@ -4565,6 +4565,130 @@ internal sealed class TrRmGenericMethodSourceWriterTests
     }
 
     [Test]
+    public void ReemitsCM1AR1RequiredImportedNominalType()
+    {
+        var markerTree = SyntaxTree.Parse("""
+            namespace Example {
+                public class Marker { }
+            }
+            """);
+        var markerProgram = Compilation.CreateLibrary(markerTree).Program!;
+        var markerDeclaration = markerTree.Root.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.NamespaceDeclaration)
+            .Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var markerClassIndex = Enumerable.Range(0,
+                markerProgram.Classes.Length)
+            .Single(index => markerProgram.Classes[index].Name == "Marker");
+        var markerArtifact = TrRmExecutableCompiler.EmitStandard(
+            markerProgram, "cm1ar1.marker.provider",
+            CM1AR1SchemaIdentity, 0,
+            [], [], [
+                new TrRmSourceClassExport(markerProgram,
+                    markerClassIndex, markerDeclaration.Span,
+                    "example.class/Marker", []),
+            ]);
+        var markerReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(CM1AR1SchemaIdentity,
+                markerArtifact),
+            "cm1ar1.marker.provider",
+            Array.Empty<TrRmStandardArtifactInput>(),
+            ["example.class/Marker"]);
+
+        var tree = SyntaxTree.Parse("""
+            namespace Example {
+                public interface ISource<T> { type Item = T; }
+                public class Box {
+                    public Marker Value;
+                    public static int32 Constrained() { return 7; }
+                }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree, markerReference);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var sourceInterface = program.Interfaces.Single();
+        var associatedType = sourceInterface.Members.Single();
+        var namespaceDeclaration = tree.Root.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.NamespaceDeclaration);
+        var boxDeclaration = namespaceDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var fieldDeclaration = boxDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.FieldDeclaration);
+        var methodDeclaration = boxDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.FunctionDeclaration);
+        var boxClassIndex = Enumerable.Range(0, program.Classes.Length)
+            .Single(index => program.Classes[index].Name == "Box");
+        var typeExport = new TrRmSourceTypeExport("Example", "ISource",
+            "example.interface/ISource") {
+            GenericArity = sourceInterface.Formals.Length,
+            InterfaceMethodExports = [],
+            InterfaceAssociatedTypeExports = [
+                new TrRmSourceInterfaceAssociatedTypeExport(
+                    associatedType.SourceInputOrdinal,
+                    associatedType.SourceDeclarationSpan,
+                    "example.interface/ISource.Item"),
+            ],
+        };
+        var classExport = new TrRmSourceClassExport(program,
+            boxClassIndex, boxDeclaration.Span, "example.class/Box", [
+                new TrRmSourceClassMemberExport(boxClassIndex,
+                    fieldDeclaration.Span, "Box.Value"),
+                new TrRmSourceClassMemberExport(boxClassIndex,
+                    methodDeclaration.Span, "Box.Constrained"),
+            ]);
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(program,
+            "cm1ar1.class.provider", CM1AR1SchemaIdentity, 0,
+            [typeExport], [], [classExport]);
+        providerArtifact = AddCM1AR1ClassMethodRelation(providerArtifact,
+            "Box.Constrained", "example.class/Box",
+            "example.interface/ISource",
+            "example.interface/ISource.Item",
+            "example.class/Marker");
+        var providerInput = new TrRmStandardArtifactInput(
+            CM1AR1SchemaIdentity, providerArtifact);
+        var markerInput = new TrRmStandardArtifactInput(
+            CM1AR1SchemaIdentity, markerArtifact);
+        var providerReference = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, "cm1ar1.class.provider", [markerInput],
+            ["example.class/Box"]);
+        var sourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), providerReference);
+        Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceFreeCompilation.Diagnostics));
+        var reemitted = TrRmExecutableCompiler.EmitStandard(
+            sourceFreeCompilation.Program!,
+            "cm1ar1.class.reemitted", CM1AR1SchemaIdentity, 0);
+        var reemittedReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(CM1AR1SchemaIdentity,
+                reemitted),
+            "cm1ar1.class.reemitted", [providerInput, markerInput],
+            ["example.class/Box"]);
+        var method = reemittedReference.GenericMethodImports.Single(
+            static import => import.Origin.ExportKey
+                == "Box.Constrained");
+        Assert.That(method.Formals[0].AssociatedRelations,
+            Has.Length.EqualTo(1));
+        Assert.That(method.Formals[0].AssociatedRelations[0]
+            .RequiredType.NominalTypeIdentity!.Value.ProviderIdentity,
+            Is.EqualTo("cm1ar1.marker.provider"));
+    }
+
+    [Test]
     public void RejectsMissingDuplicateAndCrossOwnerInterfaceMappings()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
@@ -9287,17 +9411,37 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         var requiredType = formalTypeU;
         if (requiredTypeExportKey is not null)
         {
-            if (!tables.Exports.TryGetDefinitionForKey(1,
+            if (tables.Exports.TryGetDefinitionForKey(1,
                     requiredTypeExportKey, out var requiredTypeDefId)
-                || (requiredTypeDefId >> 24) != 0x13)
+                && (requiredTypeDefId >> 24) == 0x13)
             {
-                throw new AssertionException(
-                    "The CM1AR1 class-method fixture has no required nominal TypeDef.");
+                requiredType = checked((uint)typeSpecRows.Count + 1);
+                typeSpecRows.Add(TrRmTypeSpecTableWriter.Reference(0x02,
+                    requiredTypeDefId & 0x00FF_FFFF));
             }
+            else
+            {
+                var matchingImports = Enumerable.Range(1,
+                        tables.Imports.Count)
+                    .Where(importRow =>
+                        (tables.Imports
+                            .GetExpectedDefinitionForImportRow(importRow)
+                            >> 24) == 0x13
+                        && StringComparer.Ordinal.Equals(
+                            tables.Imports
+                                .GetBindingForImportRow(importRow).ExportKey,
+                            requiredTypeExportKey))
+                    .ToArray();
+                if (matchingImports.Length != 1)
+                {
+                    throw new AssertionException(
+                        "The CM1AR1 class-method fixture has no unique required nominal TypeDef or Import.");
+                }
 
-            requiredType = checked((uint)typeSpecRows.Count + 1);
-            typeSpecRows.Add(TrRmTypeSpecTableWriter.Reference(0x02,
-                requiredTypeDefId & 0x00FF_FFFF));
+                requiredType = checked((uint)typeSpecRows.Count + 1);
+                typeSpecRows.Add(TrRmTypeSpecTableWriter.Reference(0x03,
+                    checked((uint)matchingImports[0])));
+            }
         }
 
         var hasGenericParamSection = sections.TryGetValue(0x0019,
