@@ -709,12 +709,13 @@ public static partial class TrRmExecutableCompiler
                     || !declaration.Expectations.IsEmpty
                     || declaration.SelectedExportKeys.IsDefaultOrEmpty
                     || declaration.ExportKeys.IsDefaultOrEmpty
-                    || !view.Fields.IsEmpty
+                    || view.Fields.Any(field =>
+                        !IsC1M1TypeOnlyComposedFieldType(field.Type))
                     || !view.Layouts.IsEmpty
                     || !view.Methods.IsEmpty)
                 {
                     throw Unsupported(
-                        "C1M1 class composition currently requires selected class roots without fields, layouts, methods, or imported expectations.");
+                        "C1M1 class composition currently requires selected class roots with only primitive fields and without layouts, methods, or imported expectations.");
                 }
 
                 AddProviderSnapshot(view.Provider);
@@ -731,6 +732,8 @@ public static partial class TrRmExecutableCompiler
                         || !StringComparer.Ordinal.Equals(
                             existingView.Name, view.Name)
                         || existingView.TypeDefFlags != view.TypeDefFlags
+                        || existingView.Fields.Length
+                            != view.Fields.Length
                         || !existing.ExportKeys.AsSpan().SequenceEqual(
                             declaration.ExportKeys.AsSpan()))
                     {
@@ -738,11 +741,47 @@ public static partial class TrRmExecutableCompiler
                             "Views of one C1M1 class TypeDef disagree on the checked declaration.");
                     }
 
+                    var mergedFields = ImmutableArray.CreateBuilder<
+                        BoundStandardClassFieldDeclaration>(
+                            existingView.Fields.Length);
+                    for (var fieldIndex = 0;
+                        fieldIndex < existingView.Fields.Length; fieldIndex++)
+                    {
+                        var existingField = existingView.Fields[fieldIndex];
+                        var field = view.Fields[fieldIndex];
+                        if (existingField.DefinitionId != field.DefinitionId
+                            || existingField.OwnerDefinitionId
+                                != field.OwnerDefinitionId
+                            || !StringComparer.Ordinal.Equals(
+                                existingField.Name, field.Name)
+                            || existingField.Flags != field.Flags
+                            || existingField.TypeSpecReference
+                                != field.TypeSpecReference
+                            || existingField.Type != field.Type
+                            || !existingField.ExportKeys.AsSpan().SequenceEqual(
+                                field.ExportKeys.AsSpan()))
+                        {
+                            throw Invalid(
+                                "Views of one C1M1 class TypeDef disagree on a FieldDef declaration.");
+                        }
+
+                        var selectedFieldKeys = new List<string>(
+                            existingField.SelectedExportKeys);
+                        AddDistinct(selectedFieldKeys,
+                            field.SelectedExportKeys);
+                        mergedFields.Add(existingField with {
+                            SelectedExportKeys = [.. selectedFieldKeys],
+                        });
+                    }
+
                     var selectedKeys = new List<string>(
                         existing.SelectedExportKeys);
                     AddDistinct(selectedKeys,
                         declaration.SelectedExportKeys);
                     declarations[existingIndex] = existing with {
+                        Declaration = existingView with {
+                            Fields = mergedFields.MoveToImmutable(),
+                        },
                         SelectedExportKeys = [.. selectedKeys],
                     };
                 }
@@ -819,6 +858,17 @@ public static partial class TrRmExecutableCompiler
             }
         }
     }
+
+    private static bool IsC1M1TypeOnlyComposedFieldType(PrimitiveType type)
+        => type != PrimitiveType.Void
+            && !BoundGenericNominalTypeTypes.IsType(type)
+            && !BoundSpanTypeTypes.IsType(type)
+            && !BoundEnumTypes.IsType(type)
+            && !ManagedClassTypes.IsClass(type)
+            && !NativePointerTypes.IsType(type)
+            && !NativeFixedArrayTypes.IsType(type)
+            && !NativeFunctionPointerTypes.IsType(type)
+            && !CheckedReferenceTypes.IsType(type);
 
     private static void AddDistinct(List<string> destination,
         ImmutableArray<string> values)

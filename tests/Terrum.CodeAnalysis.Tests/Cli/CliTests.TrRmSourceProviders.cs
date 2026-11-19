@@ -763,11 +763,13 @@ internal sealed partial class CliTests
         try
         {
             await File.WriteAllBytesAsync(firstProviderArtifact,
-                CreateC1M1ClassProvider(firstProviderIdentity, "Box",
-                    "type.box", schemaIdentity)).ConfigureAwait(true);
+                CreateC1M1ClassProviderWithField(firstProviderIdentity,
+                    "Box", "type.box", "field.box.value", schemaIdentity))
+                .ConfigureAwait(true);
             await File.WriteAllBytesAsync(secondProviderArtifact,
-                CreateC1M1ClassProvider(secondProviderIdentity, "Other",
-                    "type.other", schemaIdentity)).ConfigureAwait(true);
+                CreateC1M1ClassProviderWithField(secondProviderIdentity,
+                    "Other", "type.other", "field.other.value",
+                    schemaIdentity)).ConfigureAwait(true);
             var configuration = JsonSerializer.Serialize(new {
                 schemaVersion = 2,
                 providers = new[] {
@@ -779,13 +781,13 @@ internal sealed partial class CliTests
                         providerInputOrdinal = 0,
                         moduleIdentity = firstProviderIdentity,
                         typeExportKeys = new[] { "type.box" },
-                        fieldExportKeys = Array.Empty<string>(),
+                        fieldExportKeys = new[] { "field.box.value" },
                     },
                     new {
                         providerInputOrdinal = 1,
                         moduleIdentity = secondProviderIdentity,
                         typeExportKeys = new[] { "type.other" },
-                        fieldExportKeys = Array.Empty<string>(),
+                        fieldExportKeys = new[] { "field.other.value" },
                     },
                 },
             });
