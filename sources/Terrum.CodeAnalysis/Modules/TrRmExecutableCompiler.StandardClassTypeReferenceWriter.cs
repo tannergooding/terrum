@@ -19,6 +19,10 @@ public static partial class TrRmExecutableCompiler
         => schemaIdentity switch {
             StandardC1M1SchemaIdentity
                 => TrRmArtifactSchema.C1M1Draft,
+            StandardC1M1ConstructionL1R1SchemaIdentity
+                => TrRmArtifactSchema.C1M1ConstructionParameterLabelsReceiverAccessDraft,
+            StandardC1M1Construction2L1R1SchemaIdentity
+                => TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessDraft,
             StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsSchemaIdentity
                 => TrRmArtifactSchema
                     .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft,
