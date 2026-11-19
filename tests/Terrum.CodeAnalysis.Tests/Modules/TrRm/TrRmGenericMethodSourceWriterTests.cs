@@ -4572,7 +4572,11 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                 public class Marker { }
             }
             """);
-        var markerProgram = Compilation.CreateLibrary(markerTree).Program!;
+        var markerCompilation = Compilation.CreateLibrary(markerTree);
+        Assert.That(markerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                markerCompilation.Diagnostics));
+        var markerProgram = markerCompilation.Program!;
         var markerDeclaration = markerTree.Root.Children
             .OfType<SyntaxNode>()
             .Single(static node =>
@@ -4686,6 +4690,92 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         Assert.That(method.Formals[0].AssociatedRelations[0]
             .RequiredType.NominalTypeIdentity!.Value.ProviderIdentity,
             Is.EqualTo("cm1ar1.marker.provider"));
+    }
+
+    [Test]
+    public void RejectsCM1AR1RelationWithForeignAssociatedOwner()
+    {
+        var tree = SyntaxTree.Parse("""
+            namespace Example {
+                public interface ISource<T> { type Item = T; }
+                public interface IOther<T> { type Item = T; }
+                public class Box {
+                    public static int32 Constrained() { return 7; }
+                }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        TrRmSourceTypeExport CreateInterfaceExport(string name)
+        {
+            var definition = program.Interfaces.Single(candidate =>
+                candidate.QualifiedName == $"Example.{name}");
+            var member = definition.Members.Single();
+            return new TrRmSourceTypeExport("Example", name,
+                $"example.interface/{name}") {
+                GenericArity = definition.Formals.Length,
+                InterfaceMethodExports = [],
+                InterfaceAssociatedTypeExports = [
+                    new TrRmSourceInterfaceAssociatedTypeExport(
+                        member.SourceInputOrdinal,
+                        member.SourceDeclarationSpan,
+                        $"example.interface/{name}.Item"),
+                ],
+            };
+        }
+
+        var namespaceDeclaration = tree.Root.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.NamespaceDeclaration);
+        var classDeclaration = namespaceDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var methodDeclaration = classDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.FunctionDeclaration);
+        var boxClassIndex = Enumerable.Range(0, program.Classes.Length)
+            .Single(index => program.Classes[index].Name == "Box");
+        var classExport = new TrRmSourceClassExport(program, boxClassIndex,
+            classDeclaration.Span, "example.class/Box", [
+                new TrRmSourceClassMemberExport(boxClassIndex,
+                    methodDeclaration.Span, "Box.Constrained"),
+            ]);
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(program,
+            "cm1ar1.owner.provider", CM1AR1SchemaIdentity, 0,
+            [CreateInterfaceExport("ISource"),
+                CreateInterfaceExport("IOther")], [], [classExport]);
+        providerArtifact = AddCM1AR1ClassMethodRelation(providerArtifact,
+            "Box.Constrained", "example.class/Box",
+            "example.interface/ISource",
+            "example.interface/ISource.Item");
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateGenericMethodCallsDraftAndGetExecutionTables(
+                new TrRmArtifactIndex(providerArtifact,
+                    TrRmArtifactSchema
+                        .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsDraft));
+        var otherAssociatedType = tables.Exports.GetExportsForModule(1)
+            .Single(export => export.ExportKey
+                == "example.interface/IOther.Item");
+        Assert.That(otherAssociatedType.DefinitionId >> 24,
+            Is.EqualTo(0x20));
+        var tampered = providerArtifact.ToArray();
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            tampered.AsSpan(GetSectionOffset(providerArtifact, 0x0036)
+                + sizeof(uint), sizeof(uint)),
+            otherAssociatedType.DefinitionId);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(CM1AR1SchemaIdentity,
+                    tampered),
+                "cm1ar1.owner.provider",
+                Array.Empty<TrRmStandardArtifactInput>(),
+                ["example.class/Box"]));
     }
 
     [Test]
