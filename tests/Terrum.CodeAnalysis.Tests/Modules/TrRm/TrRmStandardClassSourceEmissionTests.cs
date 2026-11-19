@@ -348,6 +348,11 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     if (condition) { return left + right; }
                     else { return left - right; }
                 }
+                public static int32 SelectArithmeticConstant(
+                    bool condition, int32 value) {
+                    if (condition) { return value + 5; }
+                    else { return 7 - value; }
+                }
                 public static int32 SelectUnary(bool condition,
                     int32 value) {
                     if (condition) { return -value; }
@@ -415,6 +420,11 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name == "SelectUnary"));
+        var selectArithmeticConstant = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name
+                    == "SelectArithmeticConstant"));
 
         var artifact = TrRmExecutableCompiler.EmitStandard(program,
             "ConditionalClassMethod", C1M1Construction2SchemaIdentity,
@@ -439,6 +449,9 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                         new TrRmSourceClassMemberExport(0,
                             selectArithmetic.Span,
                             "Box.SelectArithmetic"),
+                        new TrRmSourceClassMemberExport(0,
+                            selectArithmeticConstant.Span,
+                            "Box.SelectArithmeticConstant"),
                         new TrRmSourceClassMemberExport(0,
                             selectNested.Span, "Box.SelectNested"),
                         new TrRmSourceClassMemberExport(0,
@@ -552,6 +565,38 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             Is.EqualTo(new byte[] {
                 0xD5, 0, 1, 0,
                 0xD5, 1, 2, 0,
+                0xC0, 0x02, 0xF0, 0x10,
+                0x17, 0,
+            }));
+
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.SelectArithmeticConstant", out var constantArithmeticDefinition),
+            Is.True);
+        var constantArithmeticMethodRow = checked((int)(
+            constantArithmeticDefinition & 0x00FF_FFFF));
+        var constantArithmeticBodyRow
+            = tables.Methods.GetBodyRow(constantArithmeticMethodRow);
+        Assert.That(constantArithmeticBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(
+            constantArithmeticBodyRow, tables.Contracts.Count);
+        tables.ValidateRegisterBodyMapsForMethod(
+            constantArithmeticMethodRow);
+        var constantArithmeticBody = tables.Bodies.GetRegisterBody(
+            constantArithmeticBodyRow, tables.Contracts.Count);
+        Assert.That(constantArithmeticBody.ConstantCount, Is.EqualTo(2));
+        Assert.That(constantArithmeticBody.ConstantMap.Length,
+            Is.EqualTo(16));
+        Assert.That(constantArithmeticBody.GetBlockCode(1).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD5, 0, 1, 0,
+                0xD4, 1, 0, 0,
+                0xC0, 0x01, 0xF0, 0x10,
+                0x17, 0,
+            }));
+        Assert.That(constantArithmeticBody.GetBlockCode(2).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD4, 0, 1, 0,
+                0xD5, 1, 1, 0,
                 0xC0, 0x02, 0xF0, 0x10,
                 0x17, 0,
             }));
@@ -927,6 +972,105 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         Assert.That(((BoundConstant)arguments[1]).Type,
             Is.EqualTo(PrimitiveType.Void));
         Assert.That(((BoundConstant)arguments[2]).Value, Is.EqualTo(13));
+    }
+
+    [Test]
+    public void EmitsNestedInlineStructFieldReadThroughPlaceSelections()
+    {
+        var tree = SyntaxTree.Parse("""
+            public struct Point {
+                public int32 X;
+            }
+            public struct Position {
+                public Point Location;
+            }
+            public class Box {
+                private Position _position;
+                public Box(Position position) { _position = position; }
+                public int32 ReadX() { return _position.Location.X; }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var members = classDeclaration.Children.OfType<SyntaxNode>();
+        var constructor = members.Single(static node =>
+            node.Kind == SyntaxKind.ConstructorDeclaration);
+        var read = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "ReadX"));
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "NestedClassFieldRead",
+            C1M1Construction2ClassParameterDefaultsSchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, 0,
+                    classDeclaration.Span, "BoxKey", [
+                        new TrRmSourceClassMemberExport(0,
+                            constructor.Span, "Box.Initialize") {
+                            ConstructionProjectionExportKey = "Box.Create",
+                        },
+                        new TrRmSourceClassMemberExport(0, read.Span,
+                            "Box.ReadX"),
+                    ]),
+            ]);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                        artifact));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.ReadX", out var readDefinition), Is.True);
+        var methodRow = checked((int)(readDefinition & 0x00FF_FFFF));
+        var bodyRow = tables.Methods.GetBodyRow(methodRow);
+        Assert.That(bodyRow, Is.GreaterThan(0));
+        Assert.That(tables.Bodies.GetRow(bodyRow)[0], Is.EqualTo(0x01));
+        tables.Bodies.ValidateSelectedImplementation(bodyRow,
+            tables.Contracts.Count);
+        tables.ValidateRegisterBodyMapsForMethod(methodRow);
+
+        var body = tables.Bodies.GetRegisterBody(bodyRow,
+            tables.Contracts.Count);
+        Assert.That(body.RecordCount, Is.EqualTo(4));
+        Assert.That(body.GetRecord(1)[0], Is.EqualTo(0x04));
+        Assert.That(body.GetRecord(1)[7], Is.EqualTo(2));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+            body.GetRecord(1).Slice(8, 2)), Is.EqualTo(1));
+        Assert.That(body.GetRecord(1)[13], Is.EqualTo(1));
+        Assert.That(body.GetRecord(2)[7], Is.EqualTo(1));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+            body.GetRecord(2).Slice(8, 2)), Is.Zero);
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+            body.GetRecord(2).Slice(10, 2)), Is.EqualTo(1));
+        Assert.That(body.GetRecord(3)[7], Is.EqualTo(1));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+            body.GetRecord(3).Slice(8, 2)), Is.Zero);
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+            body.GetRecord(3).Slice(10, 2)), Is.EqualTo(1));
+        Assert.That(body.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD8, 1, 1, 0,
+                0xD8, 1, 2, 0,
+                0xDA, 0, 3, 0,
+                0x17, 0,
+            }));
+
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(
+                C1M1Construction2ClassParameterDefaultsSchemaIdentity,
+                artifact),
+            "NestedClassFieldRead", [], ["BoxKey"]);
+        var consumer = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            int32 Read(Box value) { return value.ReadX(); }
+            """), reference);
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
     }
 
     [Test]

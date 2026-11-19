@@ -7171,8 +7171,10 @@ internal static class TrRmRegisterBodyMapValidator
                 && !body.Schema.UsesPropertyInitializedState())
             || payload.Length != 20 || accessKind is not (1 or 3)
             || destinationKind != 1 || destinationIndex != destination
-            || destination >= 14 || baseKind != 2
-            || contextHomeIndex >= body.HomeCount || indexKind != 0
+            || destination >= 14 || baseKind is not (1 or 2)
+            || (baseKind == 1 ? contextHomeIndex >= 14
+                : contextHomeIndex >= body.HomeCount)
+            || indexKind != 0
             || targetRefKind != 1 || indexIndex != 0
             || fieldRow is 0 or > 0x00FF_FFFF
             || fieldRow > (uint)fields.Count
@@ -7188,10 +7190,116 @@ internal static class TrRmRegisterBodyMapValidator
         var fieldDefRow = checked((int)fieldRow);
         var fieldOwnerType = fields.GetOwnerTypeDef(fieldDefRow);
         var fieldFlags = fields.GetFlags(fieldDefRow);
+        var fieldTypeSpecRef = fields.GetTypeSpecRef(fieldDefRow);
         var contextTypeSpecRef = GetTypeMapTypeSpecRef(body,
-            ReadUInt16(body, contextHome, 2));
+            baseKind == 2
+                ? ReadUInt16(body, GetHomeMapEntry(body,
+                    contextHomeIndex), 2)
+                : referentTypeMapIndex);
+        if (!typeSpecs.AreEquivalentTypeSpecRefs(fieldTypeSpecRef,
+                GetTypeMapTypeSpecRef(body, referentTypeMapIndex)))
+        {
+            throw InvalidMap();
+        }
+
+        if (baseKind == 1)
+        {
+            var baseState = GetRegisterTypeState(body, registerTypes,
+                contextHomeIndex);
+            var baseTypeSpecRef = GetRegisterTypeSpecRef(body, baseState);
+            var baseType = typeSpecs.GetTypeSpecRef(baseTypeSpecRef);
+            if (construction.RoleTag != 0 || accessKind != 1
+                || !baseState.IsPlaceHandle
+                || baseState.AccessKind != 1
+                || baseState.PlaceOrigins.IsDefaultOrEmpty
+                || !baseType.IsRow || baseType.Form != 0x02
+                || baseType.Qualifiers != 0
+                || types.GetKind(fieldOwnerType) != 1
+                || types.GetOwnerModule(fieldOwnerType) != ownerModule
+                || typeSpecs.GetNominalTypeDefRow(baseTypeSpecRef,
+                    types, imports) != fieldOwnerType
+                || (fieldFlags & 0x08) != 0
+                || (fieldFlags & 3) > 2
+                || ((fieldFlags & 3) == 0
+                    && methods.GetOwnerType(methodDefRow)
+                        != fieldOwnerType)
+                || ((fieldFlags & 3) == 1
+                    && types.GetOwnerModule(fieldOwnerType)
+                        != ownerModule))
+            {
+                throw InvalidMap();
+            }
+
+            var placeOrigins
+                = ImmutableArray.CreateBuilder<PlaceHandleOrigin>(
+                    baseState.PlaceOrigins.Length);
+            foreach (var origin in baseState.PlaceOrigins)
+            {
+                ConsumeWork(body);
+                if ((uint)origin.RootHomeIndex
+                    >= (uint)body.HomeCount)
+                {
+                    throw InvalidMap();
+                }
+
+                placeOrigins.Add(new PlaceHandleOrigin(recordIndex,
+                    origin.RootHomeIndex, codeOffset));
+            }
+
+            ConsumeWork(body,
+                checked((ulong)placeOrigins.Count + 1UL));
+            SetRegisterTypeState(body, registerTypes, destination,
+                RegisterTypeState.FromPlace(fieldTypeSpecRef, recordIndex,
+                    accessKind, placeOrigins.MoveToImmutable()));
+            return;
+        }
+
+        var contextHome = GetHomeMapEntry(body, contextHomeIndex);
+        var contextRole = ReadByte(body, contextHome, 0);
+        var ownerType = methods.GetOwnerType(methodDefRow);
         var contextTypeSpec = typeSpecs.GetTypeSpecBytes(
             contextTypeSpecRef);
+        if (contextRole == 1 && construction.RoleTag == 0
+            && accessKind == 1)
+        {
+            var contextReceiverType
+                = typeSpecs.GetTypeSpecRef(contextTypeSpecRef);
+            if (ReadByte(body, contextHome, 1) != 0
+                || ReadUInt16(body, contextHome, 4) != 0
+                || ReadUInt16(body, contextHome, 6) != 0
+                || (methods.GetFlags(methodDefRow) & 4) != 0
+                || methods.GetOwnerModule(methodDefRow) != ownerModule
+                || types.GetKind(ownerType) != 2
+                || ownerType != fieldOwnerType
+                || types.GetOwnerModule(fieldOwnerType) != ownerModule
+                || (fieldFlags & 0x08) != 0
+                || (fieldFlags & 3) > 2
+                || ((fieldFlags & 3) == 0
+                    && ownerType != fieldOwnerType)
+                || ((fieldFlags & 3) == 1
+                    && types.GetOwnerModule(fieldOwnerType)
+                        != ownerModule)
+                || !TryGetNormalClassHandleTypeSpec(contextTypeSpecRef,
+                    types, typeSpecs, imports, out var contextClassType,
+                    out var contextQualifiers)
+                || contextClassType != ownerType
+                || !contextReceiverType.IsRow
+                || contextReceiverType.Form != 0x02
+                || contextQualifiers != 0)
+            {
+                throw InvalidMap();
+            }
+
+            ConsumeWork(body);
+            SetRegisterTypeState(body, registerTypes, destination,
+                RegisterTypeState.FromPlace(fieldTypeSpecRef, recordIndex,
+                    accessKind, [
+                        new PlaceHandleOrigin(recordIndex,
+                            contextHomeIndex, codeOffset),
+                    ]));
+            return;
+        }
+
         if (contextRole is not (1 or 4)
             || (contextRole == 4
                 && (!body.Schema.UsesObjectConstruction()
@@ -7294,13 +7402,6 @@ internal static class TrRmRegisterBodyMapValidator
             {
                 throw InvalidMap();
             }
-        }
-
-        var fieldTypeSpecRef = fields.GetTypeSpecRef(fieldDefRow);
-        if (!typeSpecs.AreEquivalentTypeSpecRefs(fieldTypeSpecRef,
-                GetTypeMapTypeSpecRef(body, referentTypeMapIndex)))
-        {
-            throw InvalidMap();
         }
 
         ConsumeWork(body);
