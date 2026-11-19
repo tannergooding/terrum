@@ -34,6 +34,10 @@ public static partial class TrRmExecutableCompiler
     private sealed record C1M1SourceImport(
         int ModuleRefRow, string ExportKey, uint ExpectedDefinitionId);
 
+    private sealed record C1M1ImportedStructImportPlan(
+        BoundSourceTypeProviderSnapshot Provider,
+        ImmutableArray<string> ExportKeys);
+
     private readonly record struct C1M1Construction2ConditionalReturn(
         BoundIf Root);
 
@@ -297,6 +301,8 @@ public static partial class TrRmExecutableCompiler
             .ToDictionary(static item => item.structureIndex,
                 item => item.typeDefRow + exportKeysByClass.Count);
         var typeImportRowByStructure = new Dictionary<int, int>();
+        var typeImportPlanByStructure
+            = new Dictionary<int, C1M1ImportedStructImportPlan>();
         var moduleReferences = new List<(
             string ProducerIdentity, uint TargetRequirement,
             uint RuntimePolicy)>();
@@ -344,17 +350,18 @@ public static partial class TrRmExecutableCompiler
             }
 
             var typeDefRow = typeDefRowByStructure[structureIndex];
-            var importKeys = GetC1M1ImportedStructExportKeys(origin);
-            foreach (var exportKey in importKeys)
+            var importPlan = GetC1M1ImportedStructImportPlan(origin);
+            typeImportPlanByStructure.Add(structureIndex, importPlan);
+            foreach (var exportKey in importPlan.ExportKeys)
             {
-                AddImport(origin.Provider.ModuleIdentity,
-                    origin.Provider.TargetRequirement,
-                    origin.Provider.RuntimePolicy, exportKey,
+                AddImport(importPlan.Provider.ModuleIdentity,
+                    importPlan.Provider.TargetRequirement,
+                    importPlan.Provider.RuntimePolicy, exportKey,
                     0x1300_0000u | checked((uint)typeDefRow));
             }
 
             typeImportRowByStructure.Add(structureIndex,
-                imports.Count - importKeys.Length + 1);
+                imports.Count - importPlan.ExportKeys.Length + 1);
         }
 
         var typeDefOrder = exportKeysByClass.Keys
@@ -682,8 +689,10 @@ public static partial class TrRmExecutableCompiler
 
                 if (!fieldOrigin.ExportKeys.IsDefaultOrEmpty)
                 {
-                    if (!IsC1M1ImportedStructFieldImportable(structure,
-                            field))
+                    if (!typeImportPlanByStructure.TryGetValue(
+                            structureIndex, out var importPlan)
+                        || !IsC1M1ImportedStructFieldImportable(structure,
+                            field, importPlan))
                     {
                         throw Unsupported(
                             "C1M1 class source emission requires selected public FieldDef exports from the exact imported struct provider.");
@@ -1065,6 +1074,7 @@ public static partial class TrRmExecutableCompiler
                             ? TryGetC1M1Construction2NestedFieldRead(
                                 program, methodFunction, classIndex,
                                 sourceStructDeclarations,
+                                typeImportPlanByStructure,
                                 fieldDefRowByClassAndIndex,
                                 fieldDefRowByStructureAndIndex)
                             : null;
@@ -1081,6 +1091,7 @@ public static partial class TrRmExecutableCompiler
                             ? TryGetC1M1Construction2NestedFieldWrite(
                                 program, methodFunction, classIndex,
                                 sourceStructDeclarations,
+                                typeImportPlanByStructure,
                                 fieldDefRowByClassAndIndex,
                                 fieldDefRowByStructureAndIndex)
                             : null;
@@ -5108,6 +5119,8 @@ public static partial class TrRmExecutableCompiler
             BoundProgram program, BoundFunction function, int classIndex,
             IReadOnlyDictionary<int, BoundSourceTypeDeclaration>
                 sourceStructDeclarations,
+            IReadOnlyDictionary<int, C1M1ImportedStructImportPlan>
+                typeImportPlanByStructure,
             IReadOnlyDictionary<(int ClassIndex, int FieldIndex), int>
                 fieldDefRowByClassAndIndex,
             IReadOnlyDictionary<(int StructureIndex, int FieldIndex), int>
@@ -5235,10 +5248,15 @@ public static partial class TrRmExecutableCompiler
                         structureIndex, out var declaration)
                     || !IsC1M1SourceStructLayoutSupported(
                         program.Structures[structureIndex], declaration)
-                    || !IsC1M1ImportedStructFieldImportable(
-                        program.Structures[structureIndex],
-                        program.Structures[structureIndex]
-                            .Fields[fieldRead.Field])
+                    || (program.Structures[structureIndex]
+                            .StandardTypeOrigin is not null
+                        && (!typeImportPlanByStructure.TryGetValue(
+                                structureIndex, out var importPlan)
+                            || !IsC1M1ImportedStructFieldImportable(
+                                program.Structures[structureIndex],
+                                program.Structures[structureIndex]
+                                    .Fields[fieldRead.Field],
+                                importPlan)))
                     || !fieldDefRowByStructureAndIndex.TryGetValue((
                         structureIndex, fieldRead.Field),
                         out fieldDefRow))
@@ -5353,6 +5371,8 @@ public static partial class TrRmExecutableCompiler
             BoundProgram program, BoundFunction function, int classIndex,
             IReadOnlyDictionary<int, BoundSourceTypeDeclaration>
                 sourceStructDeclarations,
+            IReadOnlyDictionary<int, C1M1ImportedStructImportPlan>
+                typeImportPlanByStructure,
             IReadOnlyDictionary<(int ClassIndex, int FieldIndex), int>
                 fieldDefRowByClassAndIndex,
             IReadOnlyDictionary<(int StructureIndex, int FieldIndex), int>
@@ -5429,10 +5449,15 @@ public static partial class TrRmExecutableCompiler
                         structureIndex, out var declaration)
                     || !IsC1M1SourceStructLayoutSupported(
                         program.Structures[structureIndex], declaration)
-                    || !IsC1M1ImportedStructFieldImportable(
-                        program.Structures[structureIndex],
-                        program.Structures[structureIndex]
-                            .Fields[fieldIndex])
+                    || (program.Structures[structureIndex]
+                            .StandardTypeOrigin is not null
+                        && (!typeImportPlanByStructure.TryGetValue(
+                                structureIndex, out var importPlan)
+                            || !IsC1M1ImportedStructFieldImportable(
+                                program.Structures[structureIndex],
+                                program.Structures[structureIndex]
+                                    .Fields[fieldIndex],
+                                importPlan)))
                     || !fieldDefRowByStructureAndIndex.TryGetValue((
                         structureIndex, fieldIndex), out fieldDefRow))
                 {
@@ -6456,7 +6481,6 @@ public static partial class TrRmExecutableCompiler
             || (origin.DefinitionId & 0x00FF_FFFF) == 0
             || origin.Provider is null
             || origin.ExportKeys.IsDefaultOrEmpty
-            || origin.SelectedExportKeys.IsDefault
             || !IsC1M1SourceStructLayoutSupported(
                 declaration.DeclarationSnapshot))
         {
@@ -6477,10 +6501,10 @@ public static partial class TrRmExecutableCompiler
     }
 
     private static bool IsC1M1ImportedStructFieldImportable(
-        BoundStruct owner, BoundStructField field)
+        BoundStruct owner, BoundStructField field,
+        C1M1ImportedStructImportPlan importPlan)
     {
-        if (owner.StandardTypeOrigin is not
-            BoundStandardTypeOrigin ownerOrigin)
+        if (owner.StandardTypeOrigin is not BoundStandardTypeOrigin)
         {
             return true;
         }
@@ -6489,7 +6513,7 @@ public static partial class TrRmExecutableCompiler
             BoundStandardFieldOrigin fieldOrigin
             || fieldOrigin.Provider is null
             || !SameA2SourceTypeProviderSnapshot(fieldOrigin.Provider,
-                ownerOrigin.Provider)
+                importPlan.Provider)
             || fieldOrigin.DefinitionId >> 24 != 0x14
             || (fieldOrigin.DefinitionId & 0x00FF_FFFF) == 0
             || field.IsPrivate || field.IsInternal
@@ -6528,33 +6552,117 @@ public static partial class TrRmExecutableCompiler
             || actualField == fieldOrigin.ExpectedDeclaration;
     }
 
-    private static ImmutableArray<string>
-        GetC1M1ImportedStructExportKeys(
+    private static C1M1ImportedStructImportPlan
+        GetC1M1ImportedStructImportPlan(
             BoundStandardTypeOrigin origin)
     {
-        if (!origin.IsLookupRoot
-            || !origin.Expectations.IsDefaultOrEmpty
-            || origin.SelectedExportKeys.IsDefaultOrEmpty
+        if (origin.Provider is null
             || origin.ExportKeys.IsDefaultOrEmpty)
         {
             throw Unsupported(
-                "C1M1 class source emission requires an explicitly selected direct Standard struct TypeDef Export.");
+                "C1M1 class source emission requires an exact Standard struct TypeDef provider and ExportKey.");
         }
 
         var exportKeys = origin.ExportKeys.ToHashSet(StringComparer.Ordinal);
         var selectedKeys = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var exportKey in origin.SelectedExportKeys)
+        if (origin.Expectations.IsDefaultOrEmpty)
         {
-            if (!BoundEnumTypes.IsValidModuleDeclarationKey(exportKey)
-                || !exportKeys.Contains(exportKey)
-                || !selectedKeys.Add(exportKey))
+            if (!origin.IsLookupRoot
+                || origin.SelectedExportKeys.IsDefaultOrEmpty)
             {
                 throw Unsupported(
-                    "C1M1 class source emission requires exact selected Standard struct TypeDef ExportKeys.");
+                    "C1M1 class source emission requires an explicitly selected Standard struct TypeDef Export.");
+            }
+
+            foreach (var exportKey in origin.SelectedExportKeys)
+            {
+                if (!BoundEnumTypes.IsValidModuleDeclarationKey(exportKey)
+                    || !exportKeys.Contains(exportKey)
+                    || !selectedKeys.Add(exportKey))
+                {
+                    throw Unsupported(
+                        "C1M1 class source emission requires exact selected Standard struct TypeDef ExportKeys.");
+                }
+            }
+
+            return new C1M1ImportedStructImportPlan(origin.Provider,
+                origin.SelectedExportKeys);
+        }
+
+        if (origin.IsLookupRoot
+            || !origin.SelectedExportKeys.IsDefaultOrEmpty)
+        {
+            throw Unsupported(
+                "C1M1 imported struct TypeDef expectations cannot be mixed with selected lookup-root exports.");
+        }
+
+        var rootSnapshot = origin.ReferenceRoot ?? origin.Provider;
+        BoundSourceTypeProviderSnapshot? provider = null;
+        uint providerDefinitionId = 0;
+        uint expectedDefinitionId = 0;
+        var exportKeyBuilder = ImmutableArray.CreateBuilder<string>();
+        foreach (var expectation in origin.Expectations)
+        {
+            if (!SameA2SourceTypeProviderSnapshot(expectation.UsingModule,
+                    rootSnapshot))
+            {
+                continue;
+            }
+
+            if (expectation.ImportRow <= 0
+                || expectation.ExpectedDefinitionId >> 24 != 0x13
+                || (expectation.ExpectedDefinitionId & 0x00FF_FFFF) == 0
+                || expectation.ProviderDefinitionId >> 24 != 0x13
+                || (expectation.ProviderDefinitionId & 0x00FF_FFFF) == 0
+                || !StringComparer.Ordinal.Equals(
+                    expectation.ProducerIdentity,
+                    expectation.Provider.ModuleIdentity)
+                || expectation.TargetRequirement
+                    != expectation.Provider.TargetRequirement
+                || expectation.RuntimePolicy
+                    != expectation.Provider.RuntimePolicy
+                || !BoundEnumTypes.IsValidModuleDeclarationKey(
+                    expectation.ExportKey)
+                || !exportKeys.Contains(expectation.ExportKey))
+            {
+                throw new InvalidDataException(
+                    "An imported struct TypeDef has an invalid root-owned provider expectation.");
+            }
+
+            if (provider is null)
+            {
+                provider = expectation.Provider;
+                providerDefinitionId = expectation.ProviderDefinitionId;
+                expectedDefinitionId = expectation.ExpectedDefinitionId;
+            }
+            else if (!SameA2SourceTypeProviderSnapshot(provider,
+                         expectation.Provider)
+                || providerDefinitionId
+                    != expectation.ProviderDefinitionId
+                || expectedDefinitionId
+                    != expectation.ExpectedDefinitionId)
+            {
+                throw Invalid(
+                    "One imported struct TypeDef has conflicting root-owned provider expectations.");
+            }
+
+            if (selectedKeys.Add(expectation.ExportKey))
+            {
+                exportKeyBuilder.Add(expectation.ExportKey);
             }
         }
 
-        return origin.SelectedExportKeys;
+        if (provider is null
+            || providerDefinitionId != origin.DefinitionId
+            || !SameA2SourceTypeProviderSnapshot(provider, origin.Provider)
+            || exportKeyBuilder.Count == 0)
+        {
+            throw Unsupported(
+                "C1M1 imported struct closure requires one exact root-owned TypeDef provider binding.");
+        }
+
+        return new C1M1ImportedStructImportPlan(provider,
+            exportKeyBuilder.MoveToImmutable());
     }
 
     private static Dictionary<int, BoundSourceTypeDeclaration>
@@ -6619,6 +6727,19 @@ public static partial class TrRmExecutableCompiler
                         origin.Provider.ModuleIdentity,
                         origin.Provider.ModuleIdentity,
                         origin.DefinitionId));
+                foreach (var expectation in origin.Expectations)
+                {
+                    importedStructIdentities.Add(
+                        new BoundGenericNominalTypeIdentity(
+                            expectation.UsingModule.ModuleIdentity,
+                            expectation.UsingModule.ModuleIdentity,
+                            expectation.ExpectedDefinitionId));
+                    importedStructIdentities.Add(
+                        new BoundGenericNominalTypeIdentity(
+                            expectation.Provider.ModuleIdentity,
+                            expectation.Provider.ModuleIdentity,
+                            expectation.ProviderDefinitionId));
+                }
             }
         }
 

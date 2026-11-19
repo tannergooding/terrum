@@ -124,7 +124,8 @@ emitter includes every local source class TypeDef, but exports only explicitly
 selected class roots and mapped fields. It publishes captured class TypeDefs,
 fields, and explicitly mapped public FieldDef
 ExportKeys with scalar, local normal class-handle, local plain auto-layout
-struct and selected direct imported non-generic auto-layout struct closure.
+struct and selected imported non-generic auto-layout struct stubs, including
+root-owned TypeDef Import expectations.
 Class field TypeSpecs preserve source write/optional
 qualifications without synthesizing GC backing; focused C1M1 and EN1
 regressions remain unverified under the active hold. It rejects mapped

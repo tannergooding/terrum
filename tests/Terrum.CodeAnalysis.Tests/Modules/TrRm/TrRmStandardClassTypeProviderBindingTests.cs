@@ -20,6 +20,8 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
         = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1";
     private const string C1M1SchemaIdentity
         = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1";
+    private const string C1M1Construction2ClassParameterDefaultsSchemaIdentity
+        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-class-parameter-defaults-1";
 
     [Test]
     public void BindsImportedClassDeclarationsWithoutExecutableClassLayout()
@@ -132,6 +134,123 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
                 [new TrRmStandardArtifactInput(C1M1SchemaIdentity,
                     changedProvider)],
                 ["BoxKey"]));
+    }
+
+    [Test]
+    public void EmitsClassStubsForImportedStructProviderExpectations()
+    {
+        var schemaIdentity
+            = C1M1Construction2ClassParameterDefaultsSchemaIdentity;
+        var provider = CreateClassArtifact("Provider", "Leaf", "LeafKey",
+            0xF200_0008, schemaIdentity, layoutKind: 0, pack: 0);
+        SetTypeDefFlags(provider, 0x06);
+        var root = CreateRootArtifact("Root", "Box", "BoxKey",
+            0xF200_0008, schemaIdentity, layoutKind: 0, pack: 0);
+        SetTypeDefFlags(root, 0x06);
+        SetTypeDefFlags(root, 0x06, typeDefRow: 2);
+
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, root), "Root",
+            [new TrRmStandardArtifactInput(schemaIdentity, provider)],
+            ["BoxKey"]);
+        var importedLeaf = reference.Structures.Single(
+            static structure => structure.Name == "Leaf");
+        Assert.That(importedLeaf.StandardTypeOrigin!.Expectations,
+            Is.Not.Empty);
+
+        var tree = SyntaxTree.Parse("""
+            public class Container {
+                private Box _box;
+                public Container(Box box) { _box = box; }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree, reference);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var constructor = classDeclaration.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ConstructorDeclaration);
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "ImportedStructProviderExpectation",
+            schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, 0,
+                    classDeclaration.Span, "ContainerKey", [
+                        new TrRmSourceClassMemberExport(0,
+                            constructor.Span, "Container.Initialize") {
+                            ConstructionProjectionExportKey
+                                = "Container.Create",
+                        },
+                    ]),
+            ]);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                        artifact));
+        Assert.That(tables.Imports.Count, Is.EqualTo(2));
+        Assert.That(tables.ModuleRefs.Count, Is.EqualTo(2));
+        var boxTypeDefRow = Enumerable.Range(1, tables.TypeDefs.Count)
+            .Single(row => tables.TypeDefs.GetName(row) == "Box");
+        var leafTypeDefRow = Enumerable.Range(1, tables.TypeDefs.Count)
+            .Single(row => tables.TypeDefs.GetName(row) == "Leaf");
+        var boxImportRow = Enumerable.Range(1, tables.Imports.Count)
+            .Single(row => tables.Imports
+                .GetExpectedDefinitionForImportRow(row)
+                == (0x1300_0000u | checked((uint)boxTypeDefRow)));
+        var leafImportRow = Enumerable.Range(1, tables.Imports.Count)
+            .Single(row => tables.Imports
+                .GetExpectedDefinitionForImportRow(row)
+                == (0x1300_0000u | checked((uint)leafTypeDefRow)));
+        Assert.That(tables.ModuleRefs.GetProducerIdentity(
+            tables.Imports.GetModuleRefForImportRow(boxImportRow)),
+            Is.EqualTo("Root"));
+        Assert.That(tables.ModuleRefs.GetProducerIdentity(
+            tables.Imports.GetModuleRefForImportRow(leafImportRow)),
+            Is.EqualTo("Provider"));
+        var (boxFieldStart, _) = tables.TypeDefs.GetFieldRange(boxTypeDefRow);
+        var boxFieldType = tables.TypeSpecs.GetTypeSpecRef(
+            tables.Fields.GetTypeSpecRef(boxFieldStart));
+        Assert.That(boxFieldType.Form, Is.EqualTo((byte)0x03));
+        Assert.That(boxFieldType.Row, Is.EqualTo(leafImportRow));
+        var containerTypeDefRow = Enumerable.Range(1, tables.TypeDefs.Count)
+            .Single(row => tables.TypeDefs.GetName(row) == "Container");
+        var (containerFieldStart, _) = tables.TypeDefs.GetFieldRange(
+            containerTypeDefRow);
+        var containerFieldType = tables.TypeSpecs.GetTypeSpecRef(
+            tables.Fields.GetTypeSpecRef(containerFieldStart));
+        Assert.That(containerFieldType.Form, Is.EqualTo((byte)0x03));
+        Assert.That(containerFieldType.Row, Is.EqualTo(boxImportRow));
+
+        var outputReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, artifact),
+                "ImportedStructProviderExpectation", [
+                    new TrRmStandardArtifactInput(schemaIdentity, root),
+                    new TrRmStandardArtifactInput(schemaIdentity, provider),
+                ], ["ContainerKey"]);
+        var consumer = Compilation.CreateLibrary(
+            SyntaxTree.Parse("public void Use(Container value) {}"),
+            outputReference);
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
+
+        var incompatibleProvider = CreateClassArtifact("Provider", "Leaf",
+            "LeafKey", 0xF200_000A, schemaIdentity, layoutKind: 0, pack: 0);
+        SetTypeDefFlags(incompatibleProvider, 0x06);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, artifact),
+                "ImportedStructProviderExpectation", [
+                    new TrRmStandardArtifactInput(schemaIdentity, root),
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        incompatibleProvider),
+                ], ["ContainerKey"]));
     }
 
     [Test]
@@ -386,14 +505,15 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
     private static byte[] CreateRootArtifact(string moduleIdentity,
         string typeName, string exportKey, uint expectedLeafFieldType,
         string schemaIdentity = C1M1SchemaIdentity,
-        bool useDirectExpectedStub = false)
+        bool useDirectExpectedStub = false, byte layoutKind = 1,
+        uint pack = 1)
     {
         var importTypeSpec = TrRmTypeSpecTableWriter.Reference(
             useDirectExpectedStub ? (byte)0x02 : (byte)0x03,
             useDirectExpectedStub ? 2u : 1u);
         return CreateArtifact(moduleIdentity, typeName, exportKey,
             expectedLeafFieldType, schemaIdentity, "Provider", "LeafKey",
-            importTypeSpec);
+            importTypeSpec, layoutKind, pack);
     }
 
     private static byte[] CreateClassArtifact(string moduleIdentity,
