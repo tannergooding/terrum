@@ -132,6 +132,12 @@ regressions remain unverified under the active hold. It rejects mapped
 constructor, method, and property keys rather than
 silently dropping them; class MethodDefs, Bodies and construction records
 remain unsupported in this type-only route.
+On the consumer side, class-reference re-emission now carries local no-op
+unit module functions with immutable scalar or selected nongeneric class
+value parameters, including the exact method-label/CM1 parameter-surface
+forms. This single-root Body-01 subset remains unverified; calls, field use,
+multi-provider output, source-free re-emission of these module functions and
+ordinary EN1 class consumers remain open.
 The Construction-2 source-class producer also emits direct selected Standard
 class TypeDef/FieldDef/layout stubs and remaps readonly class-handle TypeSpecs
 in method signatures, including root-owned imported TypeDef expectations.

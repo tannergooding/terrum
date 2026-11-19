@@ -8630,7 +8630,6 @@ public static partial class TrRmExecutableCompiler
             || !program.GenericMethodSignatures.IsEmpty
             || !program.SourceTypeDeclarations.IsEmpty
             || !program.SourceGenericTypeDefinitions.IsEmpty
-            || !program.GenericNominalTypeInstances.IsEmpty
             || !program.EnumDefinitions.IsEmpty
             || !program.SourceGenericTypeInstances.IsEmpty
             || !program.NativeFunctionPointerSignatures.IsEmpty
@@ -8671,7 +8670,15 @@ public static partial class TrRmExecutableCompiler
                 program.GenericNominalTypeDefinitions))
         {
             throw Unsupported(
-                "C1M1 metadata-only class re-emission requires a type-only class reference with complete checked carriers.");
+                "C1M1 class reference re-emission requires complete checked carriers.");
+        }
+
+        if (!BoundGenericNominalTypeContract.IsValidInstanceTable(
+                program.GenericNominalTypeInstances,
+                program.GenericNominalTypeDefinitions))
+        {
+            throw new InvalidDataException(
+                "The retained C1M1 class reference has an invalid nominal type instance table.");
         }
 
         SemanticVerifier.VerifyLibraryReferences(program);
@@ -9553,6 +9560,8 @@ public static partial class TrRmExecutableCompiler
             = new List<C1M1GenericMethodTypeSpecPlan>();
         var genericMethodDefaultTypeSpecPlans
             = new List<C1M1GenericMethodDefaultTypeSpecPlan>();
+        var methodParameterLabelRows
+            = new List<(int MethodDefRow, int Ordinal, string Name)>();
         foreach (var (oldMethodRow, plan) in methodEmissionPlans)
         {
             var formals = plan.Method.GenericParameters;
@@ -9925,6 +9934,14 @@ public static partial class TrRmExecutableCompiler
                         genericParamRowMap: genericParamRowMap);
                 parameterRows.Add(new TrRmParamRow(signatureRow, ordinal,
                     remappedTypeSpec, parameter.Mode, parameter.Flags));
+                if (!schema.UsesClassParameterDefaults()
+                    && schema.UsesMethodParameterLabels())
+                {
+                    methodParameterLabelRows.Add((
+                        methodDefRowMap[oldMethodRow], ordinal,
+                        parameter.Name));
+                }
+
                 if (deferredParameterType)
                 {
                     genericMethodTypeSpecPlans.Add(
@@ -10061,8 +10078,241 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
+        var outputClassTypeDefRowsByIdentity
+            = new Dictionary<BoundGenericNominalTypeIdentity, int>();
+        foreach (var (oldTypeDefRow, view) in typeViewsByOldRow)
+        {
+            if (!typeDefRowMap.TryGetValue(oldTypeDefRow,
+                    out var outputTypeDefRow)
+                || !outputClassTypeDefRowsByIdentity.TryAdd(view.Identity,
+                    outputTypeDefRow))
+            {
+                throw new InvalidDataException(
+                    "A retained class TypeDef has no unique output row.");
+            }
+        }
+
+        var sourceFunctionClassTypeSpecRows
+            = new Dictionary<(BoundGenericNominalTypeIdentity Identity,
+                byte Qualifiers), uint>();
+        uint SourceFunctionTypeSpecReference(PrimitiveType type)
+        {
+            if (TryGetC1M1SourceScalarTypeSpecReference(type,
+                    out var scalarTypeSpecReference))
+            {
+                return scalarTypeSpecReference;
+            }
+
+            if (!BoundGenericNominalTypeTypes.IsType(type))
+            {
+                throw Unsupported(
+                    "A local class-reference function parameter must use a supported scalar or direct class TypeSpec.");
+            }
+
+            var instanceIndex = BoundGenericNominalTypeTypes.Index(type);
+            if ((uint)instanceIndex
+                    >= (uint)program.GenericNominalTypeInstances.Length)
+            {
+                throw new InvalidDataException(
+                    "A local class-reference function has an invalid nominal type instance.");
+            }
+
+            var instance = program.GenericNominalTypeInstances[
+                instanceIndex];
+            if (!instance.Arguments.IsEmpty
+                || (instance.Qualifiers & ~0x01) != 0
+                || !outputClassTypeDefRowsByIdentity.TryGetValue(
+                    instance.Definition, out var outputTypeDefRow))
+            {
+                throw Unsupported(
+                    "A local class-reference function parameter must use a selected nongeneric class TypeDef.");
+            }
+
+            if (instance.TypeSpecReference != 0)
+            {
+                if (!StringComparer.Ordinal.Equals(
+                        instance.TypeSpecProviderIdentity,
+                        rootSnapshot.ModuleIdentity)
+                    || instance.TypeSpecForm != 0x02
+                    || instance.TypeSpecReference
+                        > checked((uint)rootTables.TypeSpecs.Count))
+                {
+                    throw Unsupported(
+                        "A local class-reference function TypeSpec must retain its exact root Module view.");
+                }
+
+                var typeSpec = rootTables.TypeSpecs.GetTypeSpecRef(
+                    instance.TypeSpecReference);
+                var nominalTypeDefRow
+                    = rootTables.TypeSpecs.GetNominalTypeDefRow(
+                        instance.TypeSpecReference, rootTables.TypeDefs,
+                        rootTables.Imports);
+                if (!typeSpec.IsRow
+                    || typeSpec.Form != 0x02
+                    || typeSpec.Qualifiers != instance.Qualifiers
+                    || !StringComparer.Ordinal.Equals(
+                        instance.Definition.ModuleIdentity,
+                        rootSnapshot.ModuleIdentity)
+                    || !StringComparer.Ordinal.Equals(
+                        instance.Definition.ProviderIdentity,
+                        rootSnapshot.ModuleIdentity)
+                    || rootTables.TypeDefs.GetKind(nominalTypeDefRow) != 2
+                    || nominalTypeDefRow
+                        != GetTypeDefRow(instance.Definition.DefinitionId))
+                {
+                    throw new InvalidDataException(
+                        "A local class-reference function TypeSpec changed its checked nominal identity.");
+                }
+
+                return RemapC1M1ClassTypeSpec(rootTables,
+                    instance.TypeSpecReference, typeDefRowMap,
+                    importRowMap, outputTypeSpecRows, typeSpecRowMap,
+                    activeTypeSpecRows, depth: 0,
+                    genericParamRowMap: genericParamRowMap);
+            }
+
+            if (instance.TypeSpecProviderIdentity is not null
+                || instance.TypeSpecForm != 0)
+            {
+                throw new InvalidDataException(
+                    "A local class-reference function has an incomplete bare nominal TypeSpec.");
+            }
+
+            var key = (instance.Definition, instance.Qualifiers);
+            if (!sourceFunctionClassTypeSpecRows.TryGetValue(key,
+                    out var typeSpecRow))
+            {
+                if (outputTypeSpecRows.Count >= 0xFF_FFFF)
+                {
+                    throw Unsupported(
+                        "Local class-reference function TypeSpecs exceed the metadata row limit.");
+                }
+
+                typeSpecRow = checked((uint)outputTypeSpecRows.Count + 1);
+                outputTypeSpecRows.Add(TrRmTypeSpecTableWriter.Reference(
+                    0x02, checked((uint)outputTypeDefRow),
+                    instance.Qualifiers));
+                sourceFunctionClassTypeSpecRows.Add(key, typeSpecRow);
+            }
+
+            return typeSpecRow;
+        }
+
         foreach (var function in program.Functions)
         {
+            if (function.ModuleImport is null && !function.IsExternal
+                && function.DeclaringStruct is null)
+            {
+                if (function.IsStatic || function.IsConstructor
+                    || function.IsClassConstructor
+                    || function.ClassConstructor != -1
+                    || function.IsOperator
+                    || function.Intrinsic != BoundIntrinsic.None
+                    || function.PropertyName is not null
+                    || function.IsCleanup
+                    || function.NoFailureProof
+                    || function.HasPureEvaluationForm
+                    || function.RequiresUnsafeCaller
+                    || function.DoesNotReturn
+                    || function.HasNativeExport
+                    || function.NativeExportEntryName is not null
+                    || function.NativeCallableEntryName is not null
+                    || function.DirectNativeImport is not null
+                    || function.NativeOutputRole is not null
+                    || !function.NativeOutputContracts.IsDefaultOrEmpty
+                    || function.NativeVTableMethod is not null
+                    || function.NativeFunctionPointerType is not null
+                    || function.NativeCallableConvention is not null
+                    || function.IndexedBody is not null
+                    || function.HasOrdinaryParameterDefaultSurface
+                    || !function.OrdinaryParameterDefaults.IsDefaultOrEmpty
+                    || !function.DependencyContracts.IsEmpty
+                    || !function.DeclarationContractClauses.IsDefaultOrEmpty
+                    || !function.FriendTargets.IsDefaultOrEmpty
+                    || function.ParameterCount
+                        != function.Variables.Length
+                    || function.ParameterCount
+                        > SemanticVerifier.MaximumArguments
+                    || function.ReturnType != PrimitiveType.Void
+                    || !function.Body.Statements.IsEmpty
+                    || !function.Body.RetiredManagedLocals.IsEmpty
+                    || (function.IsPrivate && function.IsInternal))
+                {
+                    throw Unsupported(
+                        "A local class-reference function must be an ordinary, no-op unit function with value-formal parameters.");
+                }
+
+                var signatureRow = methodSignatureRows.Count + 1;
+                var parameterFirst = function.ParameterCount == 0
+                    ? 0 : parameterRows.Count + 1;
+                for (var ordinal = 0;
+                    ordinal < function.ParameterCount; ordinal++)
+                {
+                    var parameter = function.Variables[ordinal];
+                    if (parameter.IsMutable || parameter.IsOut
+                        || parameter.IsInit || parameter.IsImplicitRef
+                        || parameter.IsInitializationLocal
+                        || parameter.Type == PrimitiveType.Void)
+                    {
+                        throw Unsupported(
+                            "A local class-reference function parameter must be an immutable value formal.");
+                    }
+
+                    var typeSpecReference
+                        = SourceFunctionTypeSpecReference(parameter.Type);
+                    parameterRows.Add(new TrRmParamRow(signatureRow,
+                        ordinal, typeSpecReference, 0, 0));
+                    if (schema.UsesClassParameterDefaults())
+                    {
+                        parameterSurfaceRows.Add(
+                            new C1M1ParameterSurfaceRow(
+                                methodRows.Count + 1, ordinal,
+                                parameter.Name, 0));
+                    }
+                    else if (schema.UsesMethodParameterLabels())
+                    {
+                        methodParameterLabelRows.Add((
+                            methodRows.Count + 1, ordinal,
+                            parameter.Name));
+                    }
+                }
+
+                methodSignatureRows.Add(new TrRmMethodSigRow(
+                    0xF200_0000u, 0, parameterFirst,
+                    function.ParameterCount, 0, 0));
+                if (methodRows.Count >= 0xFF_FFFF
+                    || bodyRows.Count >= 0xFF_FFFF)
+                {
+                    throw Unsupported(
+                        "Local class-reference functions exceed the MethodDef or Body row limit.");
+                }
+
+                var newMethodDefRow = methodRows.Count + 1;
+                var bodyRow = bodyRows.Count + 1;
+                bodyRows.Add(
+                    EncodeC1M1MetadataClassNoOpUnitBody(schema));
+                methodRows.Add(new TrRmMethodDefRow(0, 0, signatureRow,
+                    function.IsPrivate ? 0u
+                        : function.IsInternal ? 1u : 2u,
+                    0, 0, bodyRow));
+                methodNames.Add(function.Name);
+                if (!function.IsPrivate && !function.IsInternal)
+                {
+                    if (!exportKeys.Add(function.Name))
+                    {
+                        throw new InvalidDataException(
+                            "A local class-reference function ExportKey conflicts with a retained class member.");
+                    }
+
+                    exportRows.Add((
+                        0x1600_0000u
+                            | checked((uint)newMethodDefRow),
+                        function.Name));
+                }
+
+                continue;
+            }
+
             var matches = methodEmissionPlans.Values.Where(plan =>
                     StringComparer.Ordinal.Equals(function.Name,
                         (string.IsNullOrEmpty(plan.Owner.Namespace)
@@ -10259,6 +10509,17 @@ public static partial class TrRmExecutableCompiler
                 TrRmFeatureRow.GenericMethodCallsCandidate,
             ];
         }
+        if ((parameterSurfaceRows.Count != 0
+                || methodParameterLabelRows.Count != 0)
+            && !featureRows.Any(static feature =>
+                feature.FeatureId
+                    == TrRmFeatureTableReader.MethodParameterLabelsFeatureId))
+        {
+            featureRows = [
+                .. featureRows,
+                TrRmFeatureRow.MethodParameterLabelsCandidate,
+            ];
+        }
 
         var textRows = new List<(string Text, int Encoding)>();
         var stringRows = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -10297,6 +10558,10 @@ public static partial class TrRmExecutableCompiler
         foreach (var parameterSurface in parameterSurfaceRows)
         {
             AddString(parameterSurface.Name);
+        }
+        foreach (var parameterLabel in methodParameterLabelRows)
+        {
+            AddString(parameterLabel.Name);
         }
         foreach (var moduleRefRow in moduleRefRowsByOldRow)
         {
@@ -10617,6 +10882,27 @@ public static partial class TrRmExecutableCompiler
                 checked((uint)parameterSurfaceRows.Count),
                 parameterSurfaceBytes));
         }
+        else if (methodParameterLabelRows.Count != 0)
+        {
+            var methodParameterLabelBytes = new byte[
+                checked(methodParameterLabelRows.Count * 12)];
+            for (var index = 0;
+                index < methodParameterLabelRows.Count; index++)
+            {
+                var label = methodParameterLabelRows[index];
+                var offset = index * 12;
+                Write(methodParameterLabelBytes, offset,
+                    checked((uint)label.MethodDefRow));
+                Write(methodParameterLabelBytes, offset + 4,
+                    checked((uint)label.Ordinal));
+                Write(methodParameterLabelBytes, offset + 8,
+                    checked((uint)stringRows[label.Name]));
+            }
+
+            sections.Add(new TrRmSection(0x0066, 0,
+                checked((uint)methodParameterLabelRows.Count),
+                methodParameterLabelBytes));
+        }
         if (fieldPathRows.Count != 0)
         {
             sections.Add(new TrRmSection(0x004B, 0,
@@ -10643,6 +10929,25 @@ public static partial class TrRmExecutableCompiler
             .ValidateC1AndGetExecutionTables(
                 new TrRmArtifactIndex(artifact, schema));
         return artifact;
+    }
+
+    private static byte[] EncodeC1M1MetadataClassNoOpUnitBody(
+        TrRmArtifactSchema schema)
+    {
+        var maps = TrRmRegisterBodyMapBuilder.Create(
+            Array.Empty<uint>(), []);
+        var homeMap = Array.Empty<byte>();
+        var records = new ReadOnlyMemory<byte>[] {
+            new(new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 }),
+        };
+        var code = new byte[] { 0x18, 0 };
+        return TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
+            default, default, default,
+            [new TrRmRegisterBodyBlock(0,
+                checked((uint)code.Length), 0)],
+            records, code, contractCount: 0, schema: schema,
+            generalPredicateGraphsInitializationReferenceBodies
+                : schema.UsesGeneralPredicateGraphs());
     }
 
     private static BoundProgram

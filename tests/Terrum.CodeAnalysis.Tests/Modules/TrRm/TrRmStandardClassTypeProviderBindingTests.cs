@@ -80,8 +80,8 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
             .Single(static definition => definition.Name == "Leaf");
         Assert.That(importedStruct.NominalKind, Is.EqualTo(1));
 
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(""),
-            reference);
+        var compilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("public void Use(Box value) {}"), reference);
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         var reemitted = TrRmExecutableCompiler.EmitStandard(
@@ -94,8 +94,10 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
         Assert.That(tables.Imports.Count, Is.EqualTo(1));
         Assert.That(tables.Imports.GetExpectedDefinitionForImportRow(1),
             Is.EqualTo(0x1300_0002u));
-        Assert.That(tables.Exports.GetExportsForModule(1),
-            Has.Length.EqualTo(1));
+        Assert.That(tables.Methods.Count, Is.EqualTo(1));
+        Assert.That(tables.Exports.GetExportsForModule(1)
+                .Select(static export => export.Key),
+            Is.EquivalentTo(["BoxKey", "Use"]));
 
         var reemittedReference
             = TrRmExecutableCompiler.CreateStandardReference(
