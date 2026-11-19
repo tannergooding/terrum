@@ -12779,7 +12779,40 @@ public static partial class TrRmExecutableCompiler
                     "CM1 local class MethodDef Bodies with contract-row references are not supported.");
             }
 
-            records[recordIndex] = record.ToArray();
+            var remappedRecord = record.ToArray();
+            if (record[0] == 0x04)
+            {
+                if (record.Length != 24)
+                {
+                    throw new InvalidDataException(
+                        "A retained class MethodDef PlaceSelection has an invalid extent.");
+                }
+
+                if (record[13] == 1)
+                {
+                    if (record[4] is not (2 or 4))
+                    {
+                        throw new InvalidDataException(
+                            "A retained class MethodDef PlaceSelection has an invalid FieldDef reference shape.");
+                    }
+
+                    var oldFieldRow = checked((int)
+                        BinaryPrimitives.ReadUInt32LittleEndian(
+                            record.Slice(16, sizeof(uint))));
+                    if (!fieldRowMap.TryGetValue(oldFieldRow,
+                            out var remappedFieldRow))
+                    {
+                        throw Unsupported(
+                            "A retained class MethodDef PlaceSelection must target a retained FieldDef.");
+                    }
+
+                    BinaryPrimitives.WriteUInt32LittleEndian(
+                        remappedRecord.AsSpan(16),
+                        checked((uint)remappedFieldRow));
+                }
+            }
+
+            records[recordIndex] = remappedRecord;
         }
 
         return TrRmRegisterBodyWriter.Encode(body.HomeMap.ToArray(),

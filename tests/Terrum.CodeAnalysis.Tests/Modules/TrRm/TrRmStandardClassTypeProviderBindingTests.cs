@@ -1515,6 +1515,61 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
         Assert.That(consumer.HasErrors, Is.False,
             string.Join(Environment.NewLine, consumer.Diagnostics));
 
+        var sourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), outputReference);
+        Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceFreeCompilation.Diagnostics));
+        var reemitted = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)sourceFreeCompilation.Program!,
+            "ImportedClassFieldWriteReemitted", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var reemittedTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                        reemitted));
+        Assert.That(reemittedTables.Exports.TryGetDefinitionForKey(1,
+            "Container.Write", out var reemittedWriteDefinition), Is.True);
+        var reemittedWriteMethodRow = checked((int)(
+            reemittedWriteDefinition & 0x00FF_FFFF));
+        var reemittedWriteBodyRow
+            = reemittedTables.Methods.GetBodyRow(
+                reemittedWriteMethodRow);
+        Assert.That(reemittedWriteBodyRow, Is.GreaterThan(0));
+        reemittedTables.Bodies.ValidateSelectedImplementation(
+            reemittedWriteBodyRow, reemittedTables.Contracts.Count);
+        var reemittedWriteBody = reemittedTables.Bodies.GetRegisterBody(
+            reemittedWriteBodyRow, reemittedTables.Contracts.Count);
+        Assert.That(reemittedWriteBody.GetBlockCode(0).ToArray(),
+            Is.EqualTo(writeBody.GetBlockCode(0).ToArray()));
+        var reemittedPlaceSelection = reemittedWriteBody.GetRecord(1);
+        var reemittedFieldRow = checked((int)
+            BinaryPrimitives.ReadUInt32LittleEndian(
+                reemittedPlaceSelection.Slice(16, sizeof(uint))));
+        Assert.That(reemittedTables.Fields.GetName(reemittedFieldRow),
+            Is.EqualTo("Value"));
+        Assert.That(reemittedTables.TypeDefs.GetName(
+            reemittedTables.Fields.GetOwnerTypeDef(reemittedFieldRow)),
+            Is.EqualTo("Leaf"));
+        var reemittedReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+                "ImportedClassFieldWriteReemitted", [
+                    new TrRmStandardArtifactInput(schemaIdentity, provider),
+                ], ["ContainerKey"], ["Leaf.Value"]);
+        var reemittedConsumer = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                public void Use(write Leaf leaf, int32 value) {
+                    Container.Write(leaf, value);
+                    Container.WriteConstant(leaf);
+                    return;
+                }
+                """), reemittedReference);
+        Assert.That(reemittedConsumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                reemittedConsumer.Diagnostics));
+
         var incompatibleProvider = CreateClassArtifact("ClassProvider",
             "Leaf", "LeafKey", 0xF200_000A, schemaIdentity,
             layoutKind: 0, pack: 0, fieldExportKey: "Leaf.Value",

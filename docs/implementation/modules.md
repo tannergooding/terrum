@@ -227,7 +227,10 @@ ConstantMap is limited to inline scalar TypeSpecs with frozen scalar
 ConstantSources; its scalar values are rebuilt into the output
 Blob/FrozenValueNode/ConstantSource tables. FieldPath Body maps remap root
 TypeSpecs and ordered FieldDef/Import steps, interning identical remapped
-paths. Body-04 field-reference Bodies remap their local/imported FieldDef
+paths. Body-01 PlaceSelection records remap target FieldDef rows through the
+retained FieldDef map, including imported class-field writes; producer/
+re-emission/caller-binding coverage remains unverified under the active hold.
+Body-04 field-reference Bodies remap their local/imported FieldDef
 token and owning MethodDef Dependency row; source-free callable views preserve
 plain scalar checked-reference results with normal-result Dependency clauses.
 CM1 class method views also reconstruct direct nominal class-handle

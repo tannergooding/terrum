@@ -253,7 +253,10 @@ scalar
 ConstantSource/Blob/FrozenValueNode dependencies are rebuilt. Imported-struct
 FieldDef Imports now retain their owner TypeDef Imports and remap Body
 FieldMap targets. FieldPath Body maps remap root TypeSpecs and ordered
-FieldDef/Import steps, interning identical remapped paths. Non-scalar
+FieldDef/Import steps, interning identical remapped paths. Body-01
+PlaceSelection records now remap target FieldDef rows through the retained
+FieldDef map, including imported class-field writes; producer/re-emission/
+caller-binding coverage remains unverified under the active hold. Non-scalar
 ConstantMap forms and Body-01 record contract-row references remain
 unsupported. Compact Body-04 field-reference Bodies remap their local/imported
 FieldDef token and owning MethodDef Dependency row; source-free callable views
