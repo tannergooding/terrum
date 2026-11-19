@@ -1628,8 +1628,13 @@ internal static class TrRmFixedArrayProviderBindingValidator
             var fieldBindingsByImport
                 = new Dictionary<(int ArtifactIndex, int ImportRow),
                     TrRmStandardFieldProviderBinding>(fieldBindings.Count);
+            var fieldBindingsByExpectedField
+                = new Dictionary<(int ArtifactIndex, int ModuleRow,
+                    int FieldRow), TrRmStandardFieldProviderBinding>(
+                    fieldBindings.Count);
             foreach (var binding in fieldBindings)
             {
+                ConsumeWork();
                 _ = importedFieldRows.Add((binding.ConsumerArtifactIndex,
                     binding.ConsumerModuleRow, binding.ExpectedFieldDefRow));
                 _ = boundImportRows.Add((binding.ConsumerArtifactIndex,
@@ -1637,6 +1642,13 @@ internal static class TrRmFixedArrayProviderBindingValidator
                 if (!fieldBindingsByImport.TryAdd(
                     (binding.ConsumerArtifactIndex, binding.ImportRow),
                     binding))
+                {
+                    throw InvalidFieldBinding();
+                }
+                if (!fieldBindingsByExpectedField.TryAdd((
+                        binding.ConsumerArtifactIndex,
+                        binding.ConsumerModuleRow,
+                        binding.ExpectedFieldDefRow), binding))
                 {
                     throw InvalidFieldBinding();
                 }
@@ -1693,6 +1705,27 @@ internal static class TrRmFixedArrayProviderBindingValidator
                                     module.ArtifactIndex, tables, token,
                                     ownerImports, importedFieldRows,
                                     boundImportRows);
+                            }
+                            for (var recordIndex = 0;
+                                recordIndex < body.RecordCount;
+                                recordIndex++)
+                            {
+                                ConsumeWork();
+                                var record = body.GetRecord(recordIndex);
+                                if (record[0] != 0x04
+                                    || record[4] != 2 || record[13] != 1)
+                                {
+                                    continue;
+                                }
+
+                                var fieldRow = checked((int)
+                                    BinaryPrimitives.ReadUInt32LittleEndian(
+                                        record.Slice(16, sizeof(uint))));
+                                ValidatePlaceSelectionFieldStubReference(
+                                    module.ArtifactIndex, module.ModuleRow,
+                                    tables, fieldRow, ownerImports,
+                                    importedFieldRows, boundImportRows,
+                                    fieldBindingsByExpectedField);
                             }
                             break;
                         }
@@ -2156,6 +2189,50 @@ internal static class TrRmFixedArrayProviderBindingValidator
 
                 default:
                     throw InvalidFieldBinding();
+            }
+        }
+
+        private static void ValidatePlaceSelectionFieldStubReference(
+            int artifactIndex, int moduleRow,
+            TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+            int fieldRow,
+            Dictionary<(int ArtifactIndex, int ModuleRow, int TypeDefRow),
+                int> ownerImports,
+            HashSet<(int ArtifactIndex, int ModuleRow, int FieldRow)>
+                importedFieldRows,
+            HashSet<(int ArtifactIndex, int ImportRow)> boundImportRows,
+            Dictionary<(int ArtifactIndex, int ModuleRow, int FieldRow),
+                TrRmStandardFieldProviderBinding>
+                fieldBindingsByExpectedField)
+        {
+            if (fieldRow <= 0 || fieldRow > tables.Fields.Count)
+            {
+                throw InvalidFieldBinding();
+            }
+
+            var ownerTypeDefRow
+                = tables.Fields.GetOwnerTypeDef(fieldRow);
+            if (tables.TypeDefs.GetOwnerModule(ownerTypeDefRow)
+                != moduleRow)
+            {
+                throw InvalidFieldBinding();
+            }
+
+            if (!ownerImports.TryGetValue((artifactIndex, moduleRow,
+                    ownerTypeDefRow), out var ownerImportRow))
+            {
+                return;
+            }
+
+            var fieldKey = (artifactIndex, moduleRow, fieldRow);
+            if (!importedFieldRows.Contains(fieldKey)
+                || !fieldBindingsByExpectedField.TryGetValue(fieldKey,
+                    out var fieldBinding)
+                || fieldBinding.OwnerImportRow != ownerImportRow
+                || !boundImportRows.Contains((artifactIndex,
+                    fieldBinding.ImportRow)))
+            {
+                throw InvalidFieldBinding();
             }
         }
 

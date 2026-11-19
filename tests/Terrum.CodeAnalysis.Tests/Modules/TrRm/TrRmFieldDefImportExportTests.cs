@@ -261,6 +261,24 @@ internal sealed class TrRmFieldDefImportExportTests
     }
 
     [Test]
+    public void ValidatesPlaceSelectionBodiesAgainstImportedFieldStubs()
+    {
+        var importedFieldUse = CreatePlaceSelectionFieldBodyFixture(
+            includeFieldImport: true);
+        TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
+                new TrRmArtifactIndex(importedFieldUse.ConsumerArtifact,
+                    TrRmArtifactSchema.Standard))
+            .ValidateRegisterBodyMapsForMethod(1);
+        Assert.That(BindFieldImports(importedFieldUse).FieldBindings,
+            Has.Length.EqualTo(1));
+
+        var unboundStubUse = CreatePlaceSelectionFieldBodyFixture(
+            includeFieldImport: false);
+        _ = Assert.Throws<InvalidDataException>(
+            () => BindFieldImports(unboundStubUse));
+    }
+
+    [Test]
     public void RetainsFieldImportInTargetLayoutDependencyRange()
     {
         var fixture = CreateProviderBindingFixture(
@@ -539,6 +557,194 @@ internal sealed class TrRmFieldDefImportExportTests
         }
         sections.Add(new TrRmSection(0x0017, 0, 1, signatureBytes));
         sections.Add(new TrRmSection(0x0020, 0, 1, bodyBytes));
+        sections.Sort(static (left, right)
+            => left.Kind.CompareTo(right.Kind));
+        return fixture with {
+            ConsumerArtifact = TrRmArtifactWriter.Encode(sections,
+                TrRmArtifactSchema.Standard),
+        };
+    }
+
+    private static ProviderBindingFixture CreatePlaceSelectionFieldBodyFixture(
+        bool includeFieldImport)
+    {
+        var fixture = CreateProviderBindingFixture(
+            includeFieldImport: includeFieldImport);
+        var artifactIndex = new TrRmArtifactIndex(
+            fixture.ConsumerArtifact, TrRmArtifactSchema.Standard);
+        var tables
+            = TrRmStructuralMetadataValidator
+                .ValidateAndGetExecutionTables(artifactIndex);
+        if (!artifactIndex.TryGetSection(0x0002, out var stringBytes,
+                out var stringCount))
+        {
+            throw new InvalidDataException(
+                "The PlaceSelection FieldDef fixture is missing Strings.");
+        }
+
+        var strings = new TrRmStringTableReader(stringBytes, stringCount);
+        var featureRows = new[] {
+            TrRmFeatureRow.NativeBoundaryContracts,
+            TrRmFeatureRow.LayoutQueries,
+        };
+        var featureBytes = TrRmFeatureTableWriter.Encode(featureRows);
+        var moduleBytes = TrRmModuleTableWriter.Encode([
+            new TrRmModuleRow(1, 1, 0, 0, 1, 1, 1, 1, 1, 2),
+        ], strings, tables.ModuleRefs.Count, tables.TypeDefs.Count, 1,
+            0, featureRows.Length);
+        var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
+            tables.ModuleRefs.Count, tables.TypeDefs.Count, 1, 0,
+            featureRows.Length);
+
+        ReadOnlyMemory<byte>[] typeSpecRows = [
+            TrRmTypeSpecTableWriter.Reference(0x03, 1),
+            TrRmTypeSpecTableWriter.Builtin(8),
+            TrRmTypeSpecTableWriter.Reference(0x02, 1),
+        ];
+        var typeSpecBytes = TrRmTypeSpecTableWriter.Encode(typeSpecRows,
+            tables.TypeDefs.Count, tables.Imports.Count, 0);
+        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes,
+            typeSpecRows.Length, tables.TypeDefs.Count,
+            tables.Imports.Count, 0);
+        var typeDefBytes = TrRmTypeDefTableWriter.Encode([
+            new TrRmTypeDefRow(3, 4, tables.TypeDefs.GetFlags(1),
+                1, 1, 0, 0, 1, 1, 0, 0),
+        ], strings, modules, tables.Fields.Count, 1, 1, 0);
+        var types = new TrRmTypeDefTableReader(typeDefBytes, 1, strings,
+            modules, tables.Fields.Count, 1, 1, 0);
+        var fieldBytes = TrRmFieldDefTableWriter.Encode([
+            new TrRmFieldDefRow(1, 5, 2, tables.Fields.GetFlags(1)),
+        ], strings, types, typeSpecs);
+        var fields = new TrRmFieldDefTableReader(fieldBytes, 1, strings,
+            types, typeSpecs);
+        var targetProfiles = new TrRmTargetProfileTableReader([], 0);
+        var layoutBytes = TrRmLayoutTableWriter.Encode([
+            new TrRmLayoutRow(1, 0, 0, 0, 0, 0, 1, 1),
+        ], types, targetProfiles, 1);
+        var layouts = new TrRmLayoutTableReader(layoutBytes, 1, types,
+            targetProfiles, 1);
+        var layoutFieldBytes = TrRmLayoutFieldTableWriter.Encode([
+            new TrRmLayoutFieldRow(1, 0, 1),
+        ], layouts, types, fields);
+
+        var leafTypeToken = 0x1100_0003u;
+        var scalarTypeToken = 0xF200_0008u;
+        var maps = TrRmRegisterBodyMapBuilder.Create([
+            leafTypeToken,
+            scalarTypeToken,
+        ], []);
+        var homeMap = new byte[16];
+        homeMap[0] = 2;
+        BinaryPrimitives.WriteUInt16LittleEndian(homeMap.AsSpan(2),
+            maps.GetTypeMapIndex(leafTypeToken));
+        BinaryPrimitives.WriteUInt16LittleEndian(homeMap.AsSpan(4), 0);
+        homeMap[8] = 3;
+        BinaryPrimitives.WriteUInt16LittleEndian(
+            homeMap.AsSpan(10), maps.GetTypeMapIndex(leafTypeToken));
+        var records = new ReadOnlyMemory<byte>[] {
+            new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 },
+            TrRmRegisterBodyRecordWriter.EncodePlaceSelection(
+                targetKind: 2, accessKind: 1, destinationKind: 1,
+                baseKind: 2, destinationIndex: 0, baseIndex: 1,
+                indexKind: 0, targetRefKind: 1, indexIndex: 0,
+                targetRef: 1,
+                referentTypeMapIndex: maps.GetTypeMapIndex(
+                    scalarTypeToken),
+                schema: TrRmArtifactSchema.Standard),
+        };
+        var code = new byte[] {
+            0xD5, 0, 0, 0,
+            0xD6, 0x10, 1, 0,
+            0xDA, 0, 1, 0,
+            0x17, 0,
+        };
+        var body = TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
+            default, default, default,
+            [new TrRmRegisterBodyBlock(0,
+                checked((uint)code.Length), 0)],
+            records, code, schema: TrRmArtifactSchema.Standard);
+        var signatureBytes = TrRmMethodSigTableWriter.Encode([
+            new TrRmMethodSigRow(2, 0, 1, 1, 0, 0),
+        ], typeSpecs, 1, 0);
+        var signatures = new TrRmMethodSigTableReader(signatureBytes, 1,
+            typeSpecs, 1, 0);
+        var parameterBytes = TrRmParamTableWriter.Encode([
+            new TrRmParamRow(1, 0, 3, 0),
+        ], signatures, typeSpecs, TrRmArtifactSchema.Standard);
+        var methodBytes = TrRmMethodDefTableWriter.Encode([
+            new TrRmMethodDefRow(0, 5, 1, 2, 0, 0, 1),
+        ], strings, modules, types, signatures, 0, 1,
+            TrRmArtifactSchema.Standard);
+
+        var sections = new List<TrRmSection>(
+            artifactIndex.SectionCount + 4);
+        var replacedModule = false;
+        var replacedFeature = false;
+        var replacedTypeSpec = false;
+        var replacedTypeDef = false;
+        var replacedField = false;
+        var replacedLayout = false;
+        var replacedLayoutField = false;
+        for (var sectionIndex = 0;
+            sectionIndex < artifactIndex.SectionCount; sectionIndex++)
+        {
+            artifactIndex.GetSection(sectionIndex, out var kind,
+                out var flags, out var sectionBytes, out var recordCount);
+            switch (kind)
+            {
+                case 0x0001:
+                    sections.Add(new TrRmSection(kind, flags, 1,
+                        moduleBytes));
+                    replacedModule = true;
+                    break;
+                case 0x0004:
+                    sections.Add(new TrRmSection(kind, flags,
+                        checked((uint)featureRows.Length), featureBytes));
+                    replacedFeature = true;
+                    break;
+                case 0x0011:
+                    sections.Add(new TrRmSection(kind, flags,
+                        checked((uint)typeSpecRows.Length), typeSpecBytes));
+                    replacedTypeSpec = true;
+                    break;
+                case 0x0013:
+                    sections.Add(new TrRmSection(kind, flags, 1,
+                        typeDefBytes));
+                    replacedTypeDef = true;
+                    break;
+                case 0x0014:
+                    sections.Add(new TrRmSection(kind, flags, 1,
+                        fieldBytes));
+                    replacedField = true;
+                    break;
+                case 0x0015:
+                    sections.Add(new TrRmSection(kind, flags, 1,
+                        layoutBytes));
+                    replacedLayout = true;
+                    break;
+                case 0x0023:
+                    sections.Add(new TrRmSection(kind, flags, 1,
+                        layoutFieldBytes));
+                    replacedLayoutField = true;
+                    break;
+                default:
+                    sections.Add(new TrRmSection(kind, flags,
+                        recordCount, sectionBytes.ToArray()));
+                    break;
+            }
+        }
+        if (!replacedModule || !replacedFeature || !replacedTypeSpec
+            || !replacedTypeDef || !replacedField || !replacedLayout
+            || !replacedLayoutField)
+        {
+            throw new InvalidDataException(
+                "The PlaceSelection FieldDef fixture is missing required tables.");
+        }
+        sections.Add(new TrRmSection(0x0016, 0, 1, methodBytes));
+        sections.Add(new TrRmSection(0x0017, 0, 1, signatureBytes));
+        sections.Add(new TrRmSection(0x0018, 0, 1, parameterBytes));
+        sections.Add(new TrRmSection(0x0020, 0, 1,
+            TrRmVariableTableWriter.EncodeBodies([body])));
         sections.Sort(static (left, right)
             => left.Kind.CompareTo(right.Kind));
         return fixture with {
