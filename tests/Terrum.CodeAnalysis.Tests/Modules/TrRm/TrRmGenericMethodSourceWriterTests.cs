@@ -4790,7 +4790,7 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                 public class Container {
                     public static int32 Constrained<T>()
                         where T : ISource<T>
-                        where T.via<ISource<T>>.Item is Box<int32> {
+                        where T.via<ISource<T>>.Item is Box<Box<int32>> {
                         return 7;
                     }
                 }
@@ -4887,8 +4887,15 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             .GetPayload(relationConstraint));
         var requiredTypeSpec = reemittedTables.AssociatedRelations
             .GetRequiredTypeSpecRef(relationRow);
-        Assert.That(reemittedTables.TypeSpecs.GetTypeSpecRef(requiredTypeSpec)
-            .Form, Is.EqualTo(0x05));
+        var requiredTypeSpecView = reemittedTables.TypeSpecs
+            .GetTypeSpecRef(requiredTypeSpec);
+        Assert.That(requiredTypeSpecView.Form, Is.EqualTo(0x05));
+        var nestedRequiredTypeSpec = BinaryPrimitives.ReadUInt32LittleEndian(
+            reemittedTables.TypeSpecs.GetRow(
+                checked((int)requiredTypeSpec)).Slice(6, 4));
+        Assert.That(reemittedTables.TypeSpecs
+            .GetTypeSpecRef(nestedRequiredTypeSpec).Form,
+            Is.EqualTo(0x05));
 
         var relocatedNominalInput = new TrRmStandardArtifactInput(
             CM1AR1SchemaIdentity,
