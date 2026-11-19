@@ -12,6 +12,7 @@ using System.Text.Json;
 namespace Terrum.Tools;
 
 internal sealed record TrRmSourceProvidersFile(
+    int SchemaVersion,
     ImmutableArray<TrRmSourceProviderArtifact> Providers,
     ImmutableArray<TrRmSourceProviderReference> References);
 
@@ -65,11 +66,6 @@ internal static class TrRmSourceProvidersReader
                 "schemaVersion", "providers", "references");
             var version = ReadVersion(Property(root, "schemaVersion",
                 path, "$"), path, "$.schemaVersion");
-            if (version != 1)
-            {
-                throw Invalid(path, "$.schemaVersion",
-                    "only schema version 1 is supported");
-            }
 
             var providerArray = Property(root, "providers", path, "$");
             if (providerArray.ValueKind != JsonValueKind.Array
@@ -156,8 +152,8 @@ internal static class TrRmSourceProvidersReader
                 referenceIndex++;
             }
 
-            return new TrRmSourceProvidersFile(providers.MoveToImmutable(),
-                references.MoveToImmutable());
+            return new TrRmSourceProvidersFile(version,
+                providers.MoveToImmutable(), references.MoveToImmutable());
         }
         catch (JsonException exception)
         {
@@ -284,12 +280,12 @@ internal static class TrRmSourceProvidersReader
     {
         var token = element.ValueKind == JsonValueKind.Number
             ? element.GetRawText() : "";
-        if (!StringComparer.Ordinal.Equals(token, "1"))
+        if (token is not ("1" or "2"))
         {
             throw Invalid(path, jsonPath,
-                "only exact version token 1 is supported");
+                "only exact version tokens 1 and 2 are supported");
         }
-        return 1;
+        return token == "1" ? 1 : 2;
     }
 
     private static void ValidateJsonText(JsonElement element, string path,

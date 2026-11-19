@@ -42,6 +42,35 @@ internal static partial class Program
     private const string NestedFieldDestinationsSchemaIdentity
         = "trrm/1-draft-init-reference-bodies-local-field-layout-2";
 
+    private static bool IsC1SourceProviderSchemaIdentity(
+        string schemaIdentity)
+        => schemaIdentity is
+            "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1"
+            or "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-1-parameter-labels-1-receiver-access-1"
+            or "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1"
+            or "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-1-parameter-labels-1-receiver-access-1-property-initialized-state-1"
+            or "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-property-initialized-state-1"
+            or "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-1-parameter-labels-1-receiver-access-1-enum-closure-1"
+            or "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-enum-closure-1"
+            or "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-1-parameter-labels-1-receiver-access-1-property-initialized-state-1-enum-closure-1"
+            or "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-property-initialized-state-1-enum-closure-1"
+            or "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-1-parameter-labels-1-receiver-access-1-enum-closure-1-class-instance-layout-1"
+            or "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-enum-closure-1-class-instance-layout-1"
+            or "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-1-parameter-labels-1-receiver-access-1-property-initialized-state-1-enum-closure-1-class-instance-layout-1"
+            or "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-property-initialized-state-1-enum-closure-1-class-instance-layout-1"
+            or "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-class-parameter-defaults-1"
+            or "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-class-parameter-defaults-1-associated-relation-constraints-1";
+
+    private static bool IsSourceProviderSchemaIdentity(int schemaVersion,
+        string schemaIdentity)
+        => schemaVersion switch
+        {
+            1 => StringComparer.Ordinal.Equals(schemaIdentity,
+                NestedFieldDestinationsSchemaIdentity),
+            2 => IsC1SourceProviderSchemaIdentity(schemaIdentity),
+            _ => false,
+        };
+
     private static int RunTrRmExecutionCommand(string[] args, bool json)
     {
         var command = args[0];
@@ -356,8 +385,10 @@ internal static partial class Program
                 return 2;
             }
             if (sourceProvidersPath is not null
-                && (!StringComparer.Ordinal.Equals(schemaIdentity,
-                        NestedFieldDestinationsSchemaIdentity)
+                && (schemaIdentity is null
+                    || (!StringComparer.Ordinal.Equals(schemaIdentity,
+                            NestedFieldDestinationsSchemaIdentity)
+                        && !IsC1SourceProviderSchemaIdentity(schemaIdentity))
                     || sourceEnumExportsPath is not null
                     || sourceGenericMethodExportsPath is not null))
             {
@@ -690,21 +721,18 @@ internal static partial class Program
                         sourceProvidersFile
                             = TrRmSourceProvidersReader.Read(
                                 configurationFile.Path);
-                        for (var providerIndex = 0;
-                            providerIndex
-                                < sourceProvidersFile.Providers.Length;
-                            providerIndex++)
+                        if (schemaIdentity is null
+                            || !IsSourceProviderSchemaIdentity(
+                                sourceProvidersFile.SchemaVersion,
+                                schemaIdentity)
+                            || sourceProvidersFile.Providers.Any(provider =>
+                                !StringComparer.Ordinal.Equals(
+                                    provider.SchemaIdentity,
+                                    schemaIdentity)))
                         {
-                            if (!StringComparer.Ordinal.Equals(
-                                    sourceProvidersFile
-                                        .Providers[providerIndex]
-                                        .SchemaIdentity,
-                                    NestedFieldDestinationsSchemaIdentity))
-                            {
-                                WriteInputError(json, "TRM2000",
-                                    $"Source provider {providerIndex} must explicitly select the exact nested FieldPath schema.");
-                                return 2;
-                            }
+                            WriteInputError(json, "TRM2000",
+                                "The source-provider schema version must explicitly pair the exact consumer and provider schemas.");
+                            return 2;
                         }
                         continue;
                     }

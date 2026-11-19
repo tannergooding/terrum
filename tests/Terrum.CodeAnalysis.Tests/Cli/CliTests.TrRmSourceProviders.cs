@@ -437,4 +437,142 @@ internal sealed partial class CliTests
                 .ConfigureAwait(true);
         }
     }
+
+    [Test]
+    public async Task CompileTrRmReadsVersionTwoClassProviderPairingBeforeProviderReadAsync()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1";
+        const string nestedSchemaIdentity
+            = "trrm/1-draft-init-reference-bodies-local-field-layout-2";
+        const string providerPath = "missing-class-provider.trrm";
+        const string moduleIdentity = "source-provider-cli-class-provider";
+        var providerSelections = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"source-provider-cli-v2-{Guid.NewGuid():N}.json");
+        var output = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"source-provider-cli-v2-{Guid.NewGuid():N}.trrm");
+        byte[] retained = [0xA5, 0x5A];
+        try
+        {
+            await File.WriteAllBytesAsync(output, retained)
+                .ConfigureAwait(true);
+
+            var configuration = JsonSerializer.Serialize(new {
+                schemaVersion = 2,
+                providers = new[] {
+                    new { schemaIdentity, path = providerPath },
+                },
+                references = new[] {
+                    new {
+                        providerInputOrdinal = 0,
+                        moduleIdentity,
+                        typeExportKeys = new[] { "type.box" },
+                        fieldExportKeys = Array.Empty<string>(),
+                    },
+                },
+            });
+            await File.WriteAllTextAsync(providerSelections, configuration,
+                new UTF8Encoding(false)).ConfigureAwait(true);
+            var (exit, result, error) = await RunAsync(
+                Encoding.UTF8.GetBytes("this is not valid Terrum"),
+                "compile-trrm", "-", "--identity", "source-provider-cli-v2",
+                "--trrm-schema", schemaIdentity,
+                "--trrm-source-providers", providerSelections,
+                "-o", output, "--runtime", "fail-fast", "--json")
+                .ConfigureAwait(false);
+            Assert.That(exit, Is.EqualTo(2),
+                $"{result}{Environment.NewLine}{error}");
+            Assert.That(error, Is.Empty);
+            using (var document = JsonDocument.Parse(result))
+            {
+                var diagnostic
+                    = document.RootElement.GetProperty("diagnostics")[0];
+                Assert.That(diagnostic.GetProperty("code").GetString(),
+                    Is.EqualTo("TRM2001"));
+                Assert.That(diagnostic.GetProperty("message").GetString(),
+                    Does.Contain("not a regular file"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(output)
+                    .ConfigureAwait(true),
+                Is.EqualTo(retained));
+
+            var mismatchedConfiguration = JsonSerializer.Serialize(new {
+                schemaVersion = 2,
+                providers = new[] {
+                    new { schemaIdentity, path = providerPath },
+                },
+                references = new[] {
+                    new {
+                        providerInputOrdinal = 0,
+                        moduleIdentity,
+                        typeExportKeys = new[] { "type.box" },
+                        fieldExportKeys = Array.Empty<string>(),
+                    },
+                },
+            });
+            await File.WriteAllTextAsync(providerSelections,
+                mismatchedConfiguration, new UTF8Encoding(false))
+                .ConfigureAwait(true);
+            var (mismatchExit, mismatchResult, mismatchError)
+                = await RunAsync(
+                    Encoding.UTF8.GetBytes("this is not valid Terrum"),
+                    "compile-trrm", "-", "--identity",
+                    "source-provider-cli-v2", "--trrm-schema",
+                    nestedSchemaIdentity, "--trrm-source-providers",
+                    providerSelections, "-o", output, "--runtime",
+                    "fail-fast", "--json").ConfigureAwait(false);
+            Assert.That(mismatchExit, Is.EqualTo(2),
+                $"{mismatchResult}{Environment.NewLine}{mismatchError}");
+            Assert.That(mismatchError, Is.Empty);
+            using (var document = JsonDocument.Parse(mismatchResult))
+            {
+                var diagnostic
+                    = document.RootElement.GetProperty("diagnostics")[0];
+                Assert.That(diagnostic.GetProperty("code").GetString(),
+                    Is.EqualTo("TRM2000"));
+                Assert.That(diagnostic.GetProperty("message").GetString(),
+                    Does.Contain("schema version"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(output)
+                    .ConfigureAwait(true),
+                Is.EqualTo(retained));
+
+            var noncanonicalVersion = $$"""
+                {"schemaVersion":2.0,"providers":[{"schemaIdentity":"{{schemaIdentity}}","path":"{{providerPath}}"}],"references":[{"providerInputOrdinal":0,"moduleIdentity":"{{moduleIdentity}}","typeExportKeys":["type.box"],"fieldExportKeys":[]}]}
+                """;
+            await File.WriteAllTextAsync(providerSelections,
+                noncanonicalVersion, new UTF8Encoding(false))
+                .ConfigureAwait(true);
+            var (versionExit, versionResult, versionError)
+                = await RunAsync(
+                    Encoding.UTF8.GetBytes("this is not valid Terrum"),
+                    "compile-trrm", "-", "--identity",
+                    "source-provider-cli-v2", "--trrm-schema",
+                    schemaIdentity, "--trrm-source-providers",
+                    providerSelections, "-o", output, "--runtime",
+                    "fail-fast", "--json").ConfigureAwait(false);
+            Assert.That(versionExit, Is.EqualTo(2),
+                $"{versionResult}{Environment.NewLine}{versionError}");
+            Assert.That(versionError, Is.Empty);
+            using (var document = JsonDocument.Parse(versionResult))
+            {
+                var diagnostic
+                    = document.RootElement.GetProperty("diagnostics")[0];
+                Assert.That(diagnostic.GetProperty("code").GetString(),
+                    Is.EqualTo("TRM2001"));
+                Assert.That(diagnostic.GetProperty("message").GetString(),
+                    Does.Contain("exact version tokens"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(output)
+                    .ConfigureAwait(true),
+                Is.EqualTo(retained));
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(providerSelections)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(output)
+                .ConfigureAwait(true);
+        }
+    }
 }
