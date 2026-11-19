@@ -5086,6 +5086,10 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                         ref<ref<Box<T>>> value) {
                         return 1;
                     }
+                    public static int32 WithDefault<T, U = Box<T>>(
+                        int32 value) {
+                        return value;
+                    }
                 }
             }
             """);
@@ -5126,6 +5130,12 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                 node.Kind == SyntaxKind.FunctionDeclaration
                 && node.Children.OfType<SyntaxTokenElement>().Any(
                         static token => token.Token.Name == "ObserveNested"));
+        var withDefaultDeclaration = classDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.FunctionDeclaration
+                && node.Children.OfType<SyntaxTokenElement>().Any(
+                        static token => token.Token.Name == "WithDefault"));
         var method = classProgram.GenericMethodDefinitions.Single(
             definition => definition.Span == acceptDeclaration.Span);
         var referenceMethod = classProgram.GenericMethodDefinitions.Single(
@@ -5137,6 +5147,10 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             = classProgram.GenericMethodDefinitions.Single(
                 definition => definition.Span
                     == observeNestedDeclaration.Span);
+        var withDefaultMethod
+            = classProgram.GenericMethodDefinitions.Single(
+                definition => definition.Span
+                    == withDefaultDeclaration.Span);
         var classIndex = Enumerable.Range(0, classProgram.Classes.Length)
             .Single(index => classProgram.Classes[index].Name == "Container");
         var classArtifact = TrRmExecutableCompiler.EmitStandard(
@@ -5154,6 +5168,9 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                 new TrRmSourceGenericMethodExport(classProgram,
                     nestedReferenceMethod.SourceInputOrdinal,
                     nestedReferenceMethod.Span, "Container.ObserveNested"),
+                new TrRmSourceGenericMethodExport(classProgram,
+                    withDefaultMethod.SourceInputOrdinal,
+                    withDefaultMethod.Span, "Container.WithDefault"),
             ], [
                 new TrRmSourceClassExport(classProgram, classIndex,
                     classDeclaration.Span, "container-key", []),
@@ -5292,6 +5309,40 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                 .Slice(2, sizeof(uint)));
         Assert.That(classTables.TypeSpecs.GetTypeSpecRef(
             optionalReferentTypeSpec).Form, Is.EqualTo((byte)0x05));
+        Assert.That(classTables.Exports.TryGetDefinitionForKey(1,
+            "Container.WithDefault", out var withDefaultMethodDefId),
+            Is.True);
+        var withDefaultMethodRow = checked((int)(
+            withDefaultMethodDefId & 0x00FF_FFFF));
+        var withDefaultSignature = classTables.Methods.GetSignature(
+            withDefaultMethodRow);
+        var (withDefaultFormalFirst, withDefaultFormalCount)
+            = classTables.Signatures.GetGenericRange(withDefaultSignature);
+        Assert.That(withDefaultFormalCount, Is.EqualTo(2));
+        var defaultTypeSpec = classTables.GenericParams
+            .GetDefaultArgumentRef(withDefaultFormalFirst + 1);
+        Assert.That(classTables.TypeSpecs.GetTypeSpecRef(defaultTypeSpec)
+            .Form, Is.EqualTo((byte)0x05));
+        var defaultGenericTypeSpec = BinaryPrimitives
+            .ReadUInt32LittleEndian(classTables.TypeSpecs.GetRow(
+                checked((int)defaultTypeSpec)).Slice(2, sizeof(uint)));
+        var defaultGenericType = classTables.TypeSpecs
+            .GetTypeSpecRef(defaultGenericTypeSpec);
+        Assert.That(defaultGenericType.Form, Is.EqualTo((byte)0x03));
+        var defaultGenericImportRow
+            = checked((int)defaultGenericType.Row);
+        Assert.That(classTables.ModuleRefs.GetProducerIdentity(
+            classTables.Imports.GetModuleRefForImportRow(
+                defaultGenericImportRow)),
+            Is.EqualTo(typeProviderIdentity));
+        var defaultTypeArgumentSpec = BinaryPrimitives
+            .ReadUInt32LittleEndian(classTables.TypeSpecs.GetRow(
+                checked((int)defaultTypeSpec)).Slice(6, sizeof(uint)));
+        var defaultTypeArgument = classTables.TypeSpecs.GetTypeSpecRef(
+            defaultTypeArgumentSpec);
+        Assert.That(defaultTypeArgument.Form, Is.EqualTo((byte)0x04));
+        Assert.That(defaultTypeArgument.Row,
+            Is.EqualTo((uint)withDefaultFormalFirst));
 
         var classReference = TrRmExecutableCompiler.CreateStandardReference(
             new TrRmStandardArtifactInput(CM1SchemaIdentity, classArtifact),
@@ -5466,6 +5517,50 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             reemittedClassTables.Imports.GetModuleRefForImportRow(
                 reemittedNestedGenericImportRow)),
             Is.EqualTo(typeProviderIdentity));
+        Assert.That(reemittedClassTables.Exports.TryGetDefinitionForKey(1,
+            "Container.WithDefault", out var reemittedWithDefaultMethodDefId),
+            Is.True);
+        var reemittedWithDefaultMethodRow = checked((int)(
+            reemittedWithDefaultMethodDefId & 0x00FF_FFFF));
+        var reemittedWithDefaultSignature
+            = reemittedClassTables.Methods.GetSignature(
+                reemittedWithDefaultMethodRow);
+        var (reemittedDefaultFormalFirst, reemittedDefaultFormalCount)
+            = reemittedClassTables.Signatures.GetGenericRange(
+                reemittedWithDefaultSignature);
+        Assert.That(reemittedDefaultFormalCount, Is.EqualTo(2));
+        var reemittedDefaultTypeSpec
+            = reemittedClassTables.GenericParams.GetDefaultArgumentRef(
+                reemittedDefaultFormalFirst + 1);
+        Assert.That(reemittedClassTables.TypeSpecs
+            .GetTypeSpecRef(reemittedDefaultTypeSpec).Form,
+            Is.EqualTo((byte)0x05));
+        var reemittedDefaultGenericTypeSpec = BinaryPrimitives
+            .ReadUInt32LittleEndian(reemittedClassTables.TypeSpecs.GetRow(
+                checked((int)reemittedDefaultTypeSpec))
+                .Slice(2, sizeof(uint)));
+        var reemittedDefaultGenericType
+            = reemittedClassTables.TypeSpecs.GetTypeSpecRef(
+                reemittedDefaultGenericTypeSpec);
+        Assert.That(reemittedDefaultGenericType.Form,
+            Is.EqualTo((byte)0x03));
+        var reemittedDefaultGenericImportRow
+            = checked((int)reemittedDefaultGenericType.Row);
+        Assert.That(reemittedClassTables.ModuleRefs.GetProducerIdentity(
+            reemittedClassTables.Imports.GetModuleRefForImportRow(
+                reemittedDefaultGenericImportRow)),
+            Is.EqualTo(typeProviderIdentity));
+        var reemittedDefaultTypeArgumentSpec = BinaryPrimitives
+            .ReadUInt32LittleEndian(reemittedClassTables.TypeSpecs.GetRow(
+                checked((int)reemittedDefaultTypeSpec))
+                .Slice(6, sizeof(uint)));
+        var reemittedDefaultTypeArgument
+            = reemittedClassTables.TypeSpecs.GetTypeSpecRef(
+                reemittedDefaultTypeArgumentSpec);
+        Assert.That(reemittedDefaultTypeArgument.Form,
+            Is.EqualTo((byte)0x04));
+        Assert.That(reemittedDefaultTypeArgument.Row,
+            Is.EqualTo((uint)reemittedDefaultFormalFirst));
         var reemittedClassReference
             = TrRmExecutableCompiler.CreateStandardReference(
                 new TrRmStandardArtifactInput(CM1SchemaIdentity,
@@ -5491,6 +5586,10 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                             Box<T>? value) {
                             return Container.ObserveOptional<T>(
                                 move value);
+                        }
+                        public static int32 ForwardDefault<T>(
+                            int32 value) {
+                            return Container.WithDefault<T>(value);
                         }
                     }
                 }
@@ -5549,6 +5648,10 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                     public static Box<T>? ForwardOptional<T>(
                         Box<T>? value) {
                         return Container.ObserveOptional<T>(move value);
+                    }
+                    public static int32 ForwardDefault<T>(
+                        int32 value) {
+                        return Container.WithDefault<T>(value);
                     }
                 }
             }

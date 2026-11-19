@@ -52,6 +52,9 @@ public static partial class TrRmExecutableCompiler
         int MethodRow, int MethodSigRow, int ParameterRow,
         int ParameterOrdinal, bool IsResult);
 
+    private readonly record struct C1M1GenericMethodDefaultTypeSpecPlan(
+        int MethodRow, int GenericParamRow, int FormalOrdinal);
+
     private sealed record C1M1GenericMethodTypeEmissionContext(
         BoundGenericMethodImport Root,
         BoundGenericMethodDefinition Definition,
@@ -9499,6 +9502,8 @@ public static partial class TrRmExecutableCompiler
             = new List<C1M1GenericConstraintPlan>();
         var genericMethodTypeSpecPlans
             = new List<C1M1GenericMethodTypeSpecPlan>();
+        var genericMethodDefaultTypeSpecPlans
+            = new List<C1M1GenericMethodDefaultTypeSpecPlan>();
         foreach (var (oldMethodRow, plan) in methodEmissionPlans)
         {
             var formals = plan.Method.GenericParameters;
@@ -9781,14 +9786,29 @@ public static partial class TrRmExecutableCompiler
                     constraintFirst = 0;
                 }
 
+                var deferredDefaultType
+                    = formal.DefaultArgumentReference != 0
+                        && IsC1M1ImportedGenericNominalMethodTypeSpec(
+                            rootTables, formal.DefaultArgumentReference,
+                            nominalTypeImportRows,
+                            allowOptionalClassHandle: true);
                 var defaultArgumentReference
                     = formal.DefaultArgumentReference == 0 ? 0
-                        : RemapC1M1ClassTypeSpec(rootTables,
-                            formal.DefaultArgumentReference,
-                            typeDefRowMap, importRowMap,
-                            outputTypeSpecRows, typeSpecRowMap,
-                            activeTypeSpecRows, depth: 0,
-                            genericParamRowMap: genericParamRowMap);
+                        : deferredDefaultType
+                            ? AppendC1M1MethodTypePlaceholder(
+                                outputTypeSpecRows, newOwnerTypeDefRow)
+                            : RemapC1M1ClassTypeSpec(rootTables,
+                                formal.DefaultArgumentReference,
+                                typeDefRowMap, importRowMap,
+                                outputTypeSpecRows, typeSpecRowMap,
+                                activeTypeSpecRows, depth: 0,
+                                genericParamRowMap: genericParamRowMap);
+                if (deferredDefaultType)
+                {
+                    genericMethodDefaultTypeSpecPlans.Add(
+                        new C1M1GenericMethodDefaultTypeSpecPlan(
+                            oldMethodRow, genericParamRow, ordinal));
+                }
                 genericParamRows[genericParamRow - 1]
                     = new TrRmGenericParamRow(
                         0x1600_0000u | checked((uint)newMethodDefRow),
@@ -10559,13 +10579,15 @@ public static partial class TrRmExecutableCompiler
         var artifact = TrRmArtifactWriter.Encode(sections,
             schema);
         if (genericConstraintPlans.Count != 0
-            || genericMethodTypeSpecPlans.Count != 0)
+            || genericMethodTypeSpecPlans.Count != 0
+            || genericMethodDefaultTypeSpecPlans.Count != 0)
         {
             artifact = ReemitC1M1ClassAssociatedRelationConstraints(
                 artifact, program, rootTables, rootModuleRow, rootSnapshot,
                 schema, genericConstraintPlans, genericParamRows.Count,
                 genericParamRowMap, typeDefRowMap, importRowMap,
-                genericMethodTypeSpecPlans);
+                genericMethodTypeSpecPlans,
+                genericMethodDefaultTypeSpecPlans);
         }
 
         _ = TrRmStructuralMetadataValidator
@@ -11312,7 +11334,9 @@ public static partial class TrRmExecutableCompiler
         Dictionary<int, int> typeDefRowMap,
         Dictionary<int, int> importRowMap,
         IReadOnlyList<C1M1GenericMethodTypeSpecPlan>
-            genericMethodTypeSpecPlans)
+            genericMethodTypeSpecPlans,
+        IReadOnlyList<C1M1GenericMethodDefaultTypeSpecPlan>
+            genericMethodDefaultTypeSpecPlans)
     {
         var reemissionProgram = constraintPlans.Count == 0 ? program
             : CreateC1M1AssociatedRelationReemissionProgram(program,
@@ -11368,7 +11392,8 @@ public static partial class TrRmExecutableCompiler
         var outputTypeSpecRows
             = new List<ReadOnlyMemory<byte>>(outputTables.TypeSpecs.Count
                 + constraintPlans.Count * 2
-                + genericMethodTypeSpecPlans.Count);
+                + genericMethodTypeSpecPlans.Count
+                + genericMethodDefaultTypeSpecPlans.Count);
         for (var row = 1; row <= outputTables.TypeSpecs.Count; row++)
         {
             outputTypeSpecRows.Add(
@@ -11592,6 +11617,45 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
+        var emittedDefaultTypeSpecReferences
+            = new Dictionary<int, uint>();
+        foreach (var plan in genericMethodDefaultTypeSpecPlans)
+        {
+            if (!typeEmissionContexts.TryGetValue(plan.MethodRow,
+                    out var typeContext))
+            {
+                var methodRoot = FindC1M1ClassMethodImport(
+                    reemissionProgram.RetainedGenericMethodRoots,
+                    plan.MethodRow);
+                typeContext
+                    = CreateC1M1GenericMethodTypeEmissionContext(
+                        reemissionProgram, methodRoot, plan.MethodRow,
+                        rootTables, genericParamRowMap,
+                        outputTypeSpecRows);
+                typeEmissionContexts.Add(plan.MethodRow, typeContext);
+            }
+
+            if ((uint)plan.FormalOrdinal
+                    >= (uint)typeContext.Root.Formals.Length
+                || typeContext.Root.Formals[plan.FormalOrdinal]
+                    .TypeDefault is not { } typeDefault)
+            {
+                throw new InvalidDataException(
+                    "A retained class MethodDef type default has no checked formal term.");
+            }
+
+            var typeSpecReference = nominalTypeWriter.TypeTermRef(
+                typeDefault.Term, typeContext.Definition,
+                typeContext.FormalTypeSpecRows,
+                typeContext.BuiltInTypeSpecRows, depth: 0);
+            if (!emittedDefaultTypeSpecReferences.TryAdd(
+                    plan.GenericParamRow, typeSpecReference))
+            {
+                throw new InvalidDataException(
+                    "A retained class GenericParam default is emitted more than once.");
+            }
+        }
+
         foreach (var plan in constraintPlans)
         {
             if (!typeEmissionContexts.TryGetValue(plan.MethodRow,
@@ -11707,6 +11771,27 @@ public static partial class TrRmExecutableCompiler
                     throw new InvalidDataException(
                         "A retained CM1AR1 class Constraint has an unsupported kind or payload.");
             }
+        }
+
+        foreach (var (genericParamRow, typeSpecReference)
+            in emittedDefaultTypeSpecReferences)
+        {
+            if (genericParamRow <= 0
+                || genericParamRow > nominalFormals.Count
+                || nominalFormals[genericParamRow - 1].FormalKind != 1
+                || nominalFormals[genericParamRow - 1]
+                    .DefaultArgumentRef == 0
+                || typeSpecReference == 0
+                || typeSpecReference > outputTypeSpecRows.Count)
+            {
+                throw new InvalidDataException(
+                    "A retained class GenericParam default cannot be remapped.");
+            }
+
+            nominalFormals[genericParamRow - 1]
+                = nominalFormals[genericParamRow - 1] with {
+                    DefaultArgumentRef = typeSpecReference,
+                };
         }
 
         artifact = CompleteC1M1NominalTypeEmission(nominalSections,

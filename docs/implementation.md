@@ -267,7 +267,8 @@ including provider-owned references. Current CM1 GenericMethodCalls support
 remains type-formal-only; constant-formal support is separate under CG1.
 Exact-CM1 source-free re-emission now carries imported generic nominal TypeSpec
 dependencies for bodyless generic class MethodDef parameter/result signatures
-through their TypeDef/Import and formal-row closure, including ordinary
+and formal type defaults such as `U = Box<T>` through their TypeDef/Import and
+formal-row closure, including ordinary
 checked-reference wrappers such as `ref<Box<T>>` and nested
 `ref<ref<Box<T>>>`, plus optional class-handle parameters and results such as
 `Box<T>?`.
