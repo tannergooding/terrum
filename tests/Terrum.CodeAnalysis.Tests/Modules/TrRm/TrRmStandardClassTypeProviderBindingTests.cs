@@ -808,6 +808,170 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
     }
 
     [Test]
+    public void ReemitsCopyStructParametersInNoOpClassBodies()
+    {
+        var schemaIdentity
+            = C1M1Construction2ClassParameterDefaultsSchemaIdentity;
+        var provider = CreateClassArtifact("StructProvider", "Wrapper",
+            "WrapperKey", 0xF200_0008, schemaIdentity, layoutKind: 0,
+            pack: 0, fieldExportKey: "Wrapper.Value");
+        SetTypeDefFlags(provider, 0x06);
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            provider);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, "StructProvider", [], ["WrapperKey"],
+            ["Wrapper.Value"]);
+        var tree = SyntaxTree.Parse("""
+            public struct LocalWrapper { public int32 Value; }
+            public class Container {
+                public int32 Marker;
+                public void Accept(Wrapper value) {}
+                public void AcceptLocal(LocalWrapper value) {}
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree, reference);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var members = classDeclaration.Children.OfType<SyntaxNode>();
+        var field = members.Single(static node =>
+            node.Kind == SyntaxKind.FieldDeclaration);
+        var accept = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Accept"));
+        var acceptLocal = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "AcceptLocal"));
+        var containerClassIndex = Enumerable.Range(0,
+                program.Classes.Length)
+            .Single(index =>
+                program.Classes[index].Name == "Container");
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "StructMethodConsumer", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, containerClassIndex,
+                    classDeclaration.Span, "ContainerKey", [
+                        new TrRmSourceClassMemberExport(containerClassIndex,
+                            field.Span, "Container.Marker"),
+                        new TrRmSourceClassMemberExport(containerClassIndex,
+                            accept.Span, "Container.Accept"),
+                        new TrRmSourceClassMemberExport(containerClassIndex,
+                            acceptLocal.Span, "Container.AcceptLocal"),
+                    ]),
+            ]);
+
+        static void AssertStructParameterAndBody(
+            TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+            string methodExportKey, string structName, bool isImported)
+        {
+            var structTypeDefRow = Enumerable.Range(1,
+                    tables.TypeDefs.Count)
+                .Single(row => tables.TypeDefs.GetName(row) == structName);
+            var expectedTypeSpecForm = isImported ? (byte)0x03 : (byte)0x02;
+            var expectedTypeSpecRow = isImported
+                ? Enumerable.Range(1, tables.Imports.Count)
+                    .Single(row => tables.Imports
+                        .GetExpectedDefinitionForImportRow(row)
+                        == (0x1300_0000u
+                            | checked((uint)structTypeDefRow)))
+                : structTypeDefRow;
+            var methodDefinition = tables.Exports
+                .GetExportsForModule(1)
+                .Single(export =>
+                    export.ExportKey == methodExportKey).Definition;
+            var methodRow = checked((int)(
+                methodDefinition & 0x00FF_FFFF));
+            var signature = tables.Methods.GetSignature(methodRow);
+            var (parameterFirst, parameterCount)
+                = tables.Signatures.GetParamRange(signature);
+            Assert.That(parameterCount, Is.EqualTo(1));
+            Assert.That(tables.Parameters.GetMode(parameterFirst), Is.Zero);
+            Assert.That(tables.Parameters.GetFlags(parameterFirst), Is.Zero);
+            var parameterTypeSpec = tables.TypeSpecs.GetTypeSpecRef(
+                tables.Parameters.GetTypeSpec(parameterFirst));
+            Assert.That(parameterTypeSpec.Form,
+                Is.EqualTo(expectedTypeSpecForm));
+            Assert.That(checked((int)parameterTypeSpec.Row),
+                Is.EqualTo(expectedTypeSpecRow));
+
+            var body = tables.Bodies.GetRegisterBody(
+                tables.Methods.GetBodyRow(methodRow),
+                tables.Contracts.Count);
+            Assert.That(body.FieldCount, Is.Zero);
+            Assert.That(Enumerable.Range(0, body.TypeCount).Any(index => {
+                var token = BinaryPrimitives.ReadUInt32LittleEndian(
+                    body.TypeMap.Slice(index * sizeof(uint)));
+                return (byte)(token >> 24) == 0x11
+                    && tables.TypeSpecs.GetNominalTypeDefRow(
+                        token & 0x00FF_FFFF, tables.TypeDefs,
+                        tables.Imports) == structTypeDefRow;
+            }), Is.True);
+        }
+
+        var artifactTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                        artifact));
+        AssertStructParameterAndBody(artifactTables, "Container.Accept",
+            "Wrapper", isImported: true);
+        AssertStructParameterAndBody(artifactTables,
+            "Container.AcceptLocal", "LocalWrapper", isImported: false);
+
+        var artifactInput = new TrRmStandardArtifactInput(schemaIdentity,
+            artifact);
+        var sourceFreeReference
+            = TrRmExecutableCompiler.CreateStandardReference(artifactInput,
+                "StructMethodConsumer", [providerInput], ["ContainerKey"]);
+        var sourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), sourceFreeReference);
+        Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceFreeCompilation.Diagnostics));
+        var reemitted = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)sourceFreeCompilation.Program!,
+            "StructMethodConsumerReemitted", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var reemittedTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                        reemitted));
+        AssertStructParameterAndBody(reemittedTables,
+            "Container.Accept", "Wrapper", isImported: true);
+        AssertStructParameterAndBody(reemittedTables,
+            "Container.AcceptLocal", "LocalWrapper", isImported: false);
+
+        var reloadedReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+                "StructMethodConsumerReemitted", [providerInput],
+                ["ContainerKey"]);
+        Assert.That(reloadedReference.GenericNominalTypeDefinitions
+                .Single(static definition => definition.Name == "Wrapper")
+                .ProviderExpectations,
+            Is.Not.Empty);
+
+        var incompatibleProvider = CreateClassArtifact("StructProvider",
+            "Wrapper", "WrapperKey", 0xF200_000A, schemaIdentity,
+            layoutKind: 0, pack: 0, fieldExportKey: "Wrapper.Value");
+        SetTypeDefFlags(incompatibleProvider, 0x06);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+                "StructMethodConsumerReemitted", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        incompatibleProvider),
+                ], ["ContainerKey"]));
+    }
+
+    [Test]
     public void EmitsReadonlyBodiesThroughReadonlyAndWritableClassHandles()
     {
         var schemaIdentity

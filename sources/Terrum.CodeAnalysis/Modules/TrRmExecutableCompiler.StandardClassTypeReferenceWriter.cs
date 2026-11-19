@@ -1583,15 +1583,16 @@ public static partial class TrRmExecutableCompiler
 
                             if (!isUnitParameter)
                             {
-                                if (!TryGetC1M1SourceScalarTypeSpecReference(
-                                        variable.Type, out _)
+                                if (!IsC1M1Construction2SourceCopyType(
+                                        variable.Type, program,
+                                        sourceStructDeclarations)
                                     && !TryGetC1M1ImportedClassFieldType(
                                         variable.Type, program,
                                         standardClassIndexByIdentity,
                                         out _, out _))
                                 {
                                     throw Unsupported(
-                                        "The bounded Construction-2 instance method producer supports scalar or selected imported class-handle value parameters.");
+                                        "The bounded Construction-2 instance method producer supports scalar, Copy-struct or selected imported class-handle value parameters.");
                                 }
                             }
                         }

@@ -193,9 +193,9 @@ Readonly instance bodies also return an explicit scalar parameter through
 ReturnHome, emit direct scalar FieldRead/FieldWrite descriptors, and use
 receiver/formal Homes in declaration order. Exact same-class static and
 readonly-instance scalar/unit identity forwarders use assigned Body kind `05`;
-empty unit instance bodies
-are emitted. These producer and imported-caller regressions remain unverified
-under the hold.
+empty unit instance bodies are emitted, including no-op instance methods with
+supported Copy-struct value parameters. These producer and imported-caller
+regressions remain unverified under the hold.
 
 Other static and instance operations, local expression forms and control flow
 remain open.
