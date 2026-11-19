@@ -443,6 +443,124 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
     }
 
     [Test]
+    public void ReemitsOptionalImportedClassHandleFieldTypeSpecs()
+    {
+        var schemaIdentity
+            = C1M1Construction2ClassParameterDefaultsSchemaIdentity;
+        var provider = CreateClassArtifact("OptionalFieldProvider", "Leaf",
+            "LeafKey", 0xF200_0008, schemaIdentity, layoutKind: 0, pack: 0,
+            fieldExportKey: "Leaf.Value");
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            provider);
+        var providerReference = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, "OptionalFieldProvider", [], ["LeafKey"],
+            ["Leaf.Value"]);
+        var tree = SyntaxTree.Parse("""
+            public class Container {
+                public Leaf? Value;
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree, providerReference);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var fieldDeclaration = classDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node => node.Kind == SyntaxKind.FieldDeclaration);
+        var classIndex = Enumerable.Range(0, program.Classes.Length)
+            .Single(index => program.Classes[index].Name == "Container");
+        var classExport = new TrRmSourceClassExport(program, classIndex,
+            classDeclaration.Span, "ContainerKey", [
+                new TrRmSourceClassMemberExport(classIndex,
+                    fieldDeclaration.Span, "Container.Optional"),
+            ]);
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "OptionalFieldConsumer", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [classExport]);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "OptionalFieldConsumer", [providerInput], ["ContainerKey"],
+            ["Container.Optional"]);
+
+        static uint GetOptionalFieldInnerTypeSpec(
+            TrRmStructuralMetadataValidator.ValidatedExecutionTables tables)
+        {
+            Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+                "Container.Optional", out var fieldDefId), Is.True);
+            var fieldRow = checked((int)(fieldDefId & 0x00FF_FFFF));
+            var typeSpecReference = tables.Fields.GetTypeSpec(fieldRow);
+            var optionalType = tables.TypeSpecs
+                .GetTypeSpecRef(typeSpecReference);
+            Assert.That(optionalType.Form, Is.EqualTo((byte)0x06));
+            return BinaryPrimitives.ReadUInt32LittleEndian(
+                tables.TypeSpecs.GetRow(
+                    checked((int)typeSpecReference)).Slice(2, 4));
+        }
+
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                        artifact));
+        var optionalInnerTypeSpec = GetOptionalFieldInnerTypeSpec(tables);
+        var optionalInnerType = tables.TypeSpecs
+            .GetTypeSpecRef(optionalInnerTypeSpec);
+        Assert.That(optionalInnerType.Form, Is.EqualTo((byte)0x03));
+        Assert.That(tables.ModuleRefs.GetProducerIdentity(
+            tables.Imports.GetModuleRefForImportRow(
+                checked((int)optionalInnerType.Row))),
+            Is.EqualTo("OptionalFieldProvider"));
+
+        var sourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), reference);
+        Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceFreeCompilation.Diagnostics));
+        var reemitted = TrRmExecutableCompiler.EmitStandard(
+            sourceFreeCompilation.Program!, "OptionalFieldReemitted",
+            schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var reemittedIndex = TrRmArtifactIndex
+            .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                reemitted);
+        var reemittedTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(reemittedIndex);
+        var reemittedOptionalInnerTypeSpec
+            = GetOptionalFieldInnerTypeSpec(reemittedTables);
+        var reemittedOptionalInnerType = reemittedTables.TypeSpecs
+            .GetTypeSpecRef(reemittedOptionalInnerTypeSpec);
+        Assert.That(reemittedOptionalInnerType.Form,
+            Is.EqualTo((byte)0x03));
+        var reemittedClassImportRow = Enumerable.Range(1,
+                reemittedTables.Imports.Count)
+            .Single(row =>
+            {
+                var expected = reemittedTables.Imports
+                    .GetExpectedDefinitionForImportRow(row);
+                return (expected >> 24) == 0x13
+                    && reemittedTables.TypeDefs.GetName(
+                        checked((int)(expected & 0x00FF_FFFF)))
+                        == "Leaf";
+            });
+        Assert.That(reemittedOptionalInnerType.Row,
+            Is.EqualTo(reemittedClassImportRow));
+        var reemittedReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+                "OptionalFieldReemitted", [providerInput], ["ContainerKey"],
+                ["Container.Optional"]);
+        var consumer = Compilation.CreateLibrary(
+            SyntaxTree.Parse("public void Use(Container value) {}"),
+            reemittedReference);
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
+    }
+
+    [Test]
     public void ReemitsImportedFieldMapBodiesWithoutSource()
     {
         var schemaIdentity

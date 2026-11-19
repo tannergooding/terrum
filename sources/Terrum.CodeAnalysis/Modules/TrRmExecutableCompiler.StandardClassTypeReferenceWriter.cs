@@ -268,7 +268,8 @@ public static partial class TrRmExecutableCompiler
             foreach (var field in declaration.Declaration.Fields)
             {
                 if (TryGetC1M1ImportedClassFieldType(field.Type, program,
-                        standardClassIndexByIdentity, out _, out _))
+                        standardClassIndexByIdentity, out _, out _,
+                        allowOptionalWrapper: true))
                 {
                     continue;
                 }
@@ -348,7 +349,8 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 if (TryGetC1M1ImportedClassFieldType(field.Type, program,
-                        standardClassIndexByIdentity, out _, out _))
+                        standardClassIndexByIdentity, out _, out _,
+                        allowOptionalWrapper: true))
                 {
                     continue;
                 }
@@ -584,7 +586,8 @@ public static partial class TrRmExecutableCompiler
         {
             if (TryGetC1M1ImportedClassFieldType(type, program,
                     standardClassIndexByIdentity,
-                    out var standardClassIndex, out var instanceIndex))
+                    out var standardClassIndex, out var instanceIndex,
+                    allowOptionalWrapper: true))
             {
                 return ImportedClassTypeSpecReference(
                     standardClassIndex, instanceIndex);
