@@ -233,7 +233,10 @@ plain scalar checked-reference results with normal-result Dependency clauses.
 CM1 class method views also reconstruct direct nominal class-handle
 parameters from local TypeDefs or exact selected TypeDef Imports, preserving
 TypeSpec/provider identity and access qualifiers; referenced imported type keys
-are retained in the view closure.
+are retained in the view closure. The views also retain assigned
+MethodDef-owned GenericParam and Constraint rows, including type/constant
+formal facts and provider-owned references; generic provider compatibility,
+callable imports and source-free generic-row re-emission remain open.
 The exact Construction-2/CM1 source producer emits Body-04 for direct
 scalar-field reference getters backed by one receiver or class-handle formal,
 using the exact normal-result `DependsOn` relation and a selected FieldDef

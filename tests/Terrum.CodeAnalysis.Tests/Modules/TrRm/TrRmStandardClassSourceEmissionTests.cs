@@ -6175,6 +6175,182 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
+    public void RetainsGenericMethodFormalRowsInClassViews()
+    {
+        var schemaIdentity
+            = C1M1Construction2ClassParameterDefaultsSchemaIdentity;
+        var tree = SyntaxTree.Parse("""
+            public class Box {
+                public int32 Echo(int32 value) {
+                    return value;
+                }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var methodDeclaration = classDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.FunctionDeclaration);
+        var classIndex = Enumerable.Range(0, program.Classes.Length)
+            .Single(index => program.Classes[index].Name == "Box");
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "GenericClassMethodProvider", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, classIndex,
+                    classDeclaration.Span, "BoxKey", [
+                        new TrRmSourceClassMemberExport(classIndex,
+                            methodDeclaration.Span, "Box.Echo"),
+                    ]),
+            ]);
+        var genericArtifact = AddGenericTypeFormal(artifact);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, genericArtifact),
+            "GenericClassMethodProvider", [], ["BoxKey"]);
+        var method = reference.StandardClassDeclarations
+            .Single(static declaration =>
+                declaration.Declaration.Name == "Box")
+            .Declaration.Methods
+            .Single(static method => method.Name == "Echo");
+        Assert.That(method.GenericParameterCount, Is.EqualTo(1));
+        Assert.That(method.GenericParameters, Has.Length.EqualTo(1));
+        var formal = method.GenericParameters[0];
+        Assert.That(formal.Row, Is.EqualTo(1));
+        Assert.That(formal.OwnerDefinitionId, Is.EqualTo(method.DefinitionId));
+        Assert.That(formal.Ordinal, Is.Zero);
+        Assert.That(formal.Name, Is.EqualTo("Echo"));
+        Assert.That(formal.FormalKind, Is.EqualTo((byte)1));
+        Assert.That(formal.OwnershipDomain, Is.EqualTo((byte)1));
+        Assert.That(formal.NullabilityDomain, Is.EqualTo((byte)1));
+        Assert.That(formal.ConstantTypeSpecReference, Is.Zero);
+        Assert.That(formal.DefaultArgumentReference, Is.Zero);
+        Assert.That(formal.Constraints, Is.Empty);
+
+        static byte[] AddGenericTypeFormal(byte[] artifact)
+        {
+            var schema
+                = TrRmArtifactSchema
+                    .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft;
+            var artifactIndex = TrRmArtifactIndex
+                .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                    artifact);
+            var tables = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(artifactIndex);
+            var methodDefinition = tables.Exports
+                .GetExportsForModule(1)
+                .Single(static export =>
+                    export.ExportKey == "Box.Echo").Definition;
+            var methodRow = checked((int)(
+                methodDefinition & 0x00FF_FFFF));
+            var signatureRow = tables.Methods.GetSignature(methodRow);
+            if (tables.Signatures.GetGenericCount(signatureRow) != 0
+                || artifactIndex.TryGetSection(0x0019, out _, out _)
+                || !artifactIndex.TryGetSection(0x0017, out var signatureSection,
+                    out var signatureCount)
+                || signatureCount != (uint)tables.Signatures.Count)
+            {
+                throw new InvalidDataException(
+                    "The generic class MethodDef fixture requires one nongeneric MethodSig.");
+            }
+
+            var formalNameRow = Enumerable.Range(1, tables.Strings.Count)
+                .Single(row => tables.Strings.DecodeName(row) == "Echo");
+            var genericParam = new byte[32];
+            BinaryPrimitives.WriteUInt32LittleEndian(genericParam,
+                methodDefinition);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                genericParam.AsSpan(8), checked((uint)formalNameRow));
+            genericParam[20] = 1;
+            genericParam[21] = 1;
+            genericParam[22] = 1;
+
+            var signatureBytes = signatureSection.ToArray();
+            var signatureOffset = checked((signatureRow - 1) * 24);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                signatureBytes.AsSpan(signatureOffset + 16), 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                signatureBytes.AsSpan(signatureOffset + 20), 1);
+            var featureRows = new List<TrRmFeatureRow>();
+            var hasFeatureSection = artifactIndex.TryGetSection(0x0004,
+                out var featureSection, out var featureRecordCount);
+            if (hasFeatureSection)
+            {
+                var existingFeatureCount
+                    = checked((int)featureRecordCount);
+                for (var row = 0; row < existingFeatureCount; row++)
+                {
+                    var feature = featureSection.Span.Slice(
+                        row * 8, 8);
+                    featureRows.Add(new TrRmFeatureRow(
+                        BinaryPrimitives.ReadUInt32LittleEndian(feature),
+                        BinaryPrimitives.ReadUInt32LittleEndian(
+                            feature[4..])));
+                }
+            }
+            if (!featureRows.Any(static feature =>
+                    feature.FeatureId
+                        == TrRmFeatureTableReader
+                            .GenericMethodCallsFeatureId))
+            {
+                featureRows.Add(
+                    TrRmFeatureRow.GenericMethodCallsCandidate);
+            }
+
+            var featureBytes
+                = TrRmFeatureTableWriter.Encode(featureRows, schema);
+            var outputFeatureCount = checked((uint)(featureBytes.Length / 8));
+            if (!artifactIndex.TryGetSection(0x0001, out var moduleSection,
+                    out var moduleRecordCount)
+                || moduleRecordCount != 1)
+            {
+                throw new InvalidDataException(
+                    "The generic class MethodDef fixture requires one Module row.");
+            }
+            var moduleBytes = moduleSection.ToArray();
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                moduleBytes.AsSpan(24),
+                outputFeatureCount == 0 ? 0u : 1u);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                moduleBytes.AsSpan(28), outputFeatureCount);
+            var sections = new List<TrRmSection>(
+                artifactIndex.SectionCount + (hasFeatureSection ? 0 : 1));
+            for (var sectionIndex = 0;
+                sectionIndex < artifactIndex.SectionCount; sectionIndex++)
+            {
+                artifactIndex.GetSection(sectionIndex, out var kind,
+                    out var flags, out var section, out var recordCount);
+                sections.Add(kind == 0x0017
+                    ? new TrRmSection(kind, flags, recordCount,
+                        signatureBytes)
+                    : kind == 0x0001
+                        ? new TrRmSection(kind, flags, recordCount,
+                            moduleBytes)
+                        : kind == 0x0004
+                            ? new TrRmSection(kind, flags,
+                                outputFeatureCount,
+                                featureBytes)
+                            : new TrRmSection(kind, flags, recordCount,
+                                section.ToArray()));
+            }
+            sections.Add(new TrRmSection(0x0019, 0, 1, genericParam));
+            if (!hasFeatureSection)
+            {
+                sections.Add(new TrRmSection(0x0004, 0,
+                    outputFeatureCount, featureBytes));
+            }
+            sections.Sort(static (left, right) =>
+                left.Kind.CompareTo(right.Kind));
+            return TrRmArtifactWriter.Encode(sections, schema);
+        }
+    }
+
+    [Test]
     public void ComposesClassGenericAndInterfaceParameterDefaultSurfaces()
     {
         var tree = SyntaxTree.Parse("""

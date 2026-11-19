@@ -30,6 +30,15 @@ internal readonly record struct BoundStandardClassMethodDependencyClause(
     byte DestinationKind, byte SourceKind, byte Relationship, byte Phase,
     uint DestinationOrdinal, uint SourceOrdinal);
 
+internal readonly record struct BoundStandardClassMethodGenericConstraint(
+    int Row, int OwnerGenericParamRow, ushort Kind, uint Payload);
+
+internal sealed record BoundStandardClassMethodGenericParameter(
+    int Row, uint OwnerDefinitionId, uint Ordinal, string Name,
+    byte FormalKind, byte OwnershipDomain, byte NullabilityDomain,
+    uint ConstantTypeSpecReference, uint DefaultArgumentReference,
+    ImmutableArray<BoundStandardClassMethodGenericConstraint> Constraints);
+
 internal sealed record BoundStandardClassMethodDeclaration(
     uint DefinitionId, string Name, uint Flags,
     uint EffectsMask, uint ReturnTypeSpecReference,
@@ -43,6 +52,12 @@ internal sealed record BoundStandardClassMethodDeclaration(
 {
     internal ImmutableArray<BoundStandardClassMethodDependencyClause>
         DependencyClauses
+    {
+        get; init;
+    } = [];
+
+    internal ImmutableArray<BoundStandardClassMethodGenericParameter>
+        GenericParameters
     {
         get; init;
     } = [];
@@ -558,6 +573,9 @@ internal static class BoundStandardClassDeclarationContract
                     !method.ExportKeys.Contains(key,
                         StringComparer.Ordinal))
                 || method.GenericParameterCount < 0
+                || method.GenericParameters.IsDefault
+                || method.GenericParameters.Length
+                    != method.GenericParameterCount
                 || method.BodyRow > 0x00FF_FFFF
                 || method.ConstructionRole > 3
                 || (method.ConstructionRole == 2
@@ -575,6 +593,60 @@ internal static class BoundStandardClassDeclarationContract
                 || !methods.TryAdd(method.DefinitionId, method))
             {
                 return false;
+            }
+
+            var genericNames = new HashSet<string>(StringComparer.Ordinal);
+            for (var ordinal = 0;
+                ordinal < method.GenericParameters.Length; ordinal++)
+            {
+                var formal = method.GenericParameters[ordinal];
+                if (formal is null || formal.Row <= 0
+                    || formal.Row > 0x00FF_FFFF
+                    || formal.OwnerDefinitionId != method.DefinitionId
+                    || formal.Ordinal != (uint)ordinal
+                    || !IsValidText(formal.Name)
+                    || !genericNames.Add(formal.Name)
+                    || formal.Constraints.IsDefault
+                    || formal.FormalKind is not (1 or 2))
+                {
+                    return false;
+                }
+
+                if (formal.FormalKind == 1
+                    ? formal.OwnershipDomain is < 1 or > 3
+                        || formal.NullabilityDomain is < 1 or > 2
+                        || formal.ConstantTypeSpecReference != 0
+                        || (formal.DefaultArgumentReference != 0
+                            && !BoundGenericNominalTypeContract
+                                .IsTypeSpecReference(
+                                    formal.DefaultArgumentReference))
+                    : formal.OwnershipDomain != 0
+                        || formal.NullabilityDomain != 0
+                        || !BoundGenericNominalTypeContract
+                            .IsTypeSpecReference(
+                                formal.ConstantTypeSpecReference)
+                        || !formal.Constraints.IsEmpty)
+                {
+                    return false;
+                }
+
+                foreach (var constraint in formal.Constraints)
+                {
+                    if (constraint.Row <= 0
+                        || constraint.Row > 0x00FF_FFFF
+                        || constraint.OwnerGenericParamRow
+                            != formal.Row
+                        || constraint.Kind is not (1 or 2 or 3)
+                        || constraint.Payload == 0
+                        || (constraint.Kind == 1
+                            && !BoundGenericNominalTypeContract
+                                .IsTypeSpecReference(constraint.Payload))
+                        || (constraint.Kind == 2
+                            && constraint.Payload > 3))
+                    {
+                        return false;
+                    }
+                }
             }
 
             var parameterNames = new HashSet<string>(StringComparer.Ordinal);

@@ -1213,8 +1213,12 @@ public static partial class TrRmExecutableCompiler
                     continue;
                 }
 
-                if (method.GenericParameterCount != 0
-                    || method.BodyRow == 0
+                if (method.GenericParameterCount != 0)
+                {
+                    continue;
+                }
+
+                if (method.BodyRow == 0
                     || !TryGetClassMethodResultType(
                         method.ReturnTypeSpecReference, out var returnType))
                 {
@@ -1954,6 +1958,74 @@ public static partial class TrRmExecutableCompiler
                 = tables.Signatures.GetParamRange(signature);
             var genericParameterCount
                 = tables.Signatures.GetGenericCount(signature);
+            var (genericParameterStart, _) =
+                tables.Signatures.GetGenericRange(signature);
+            var genericParameters
+                = ImmutableArray.CreateBuilder<
+                    BoundStandardClassMethodGenericParameter>(
+                        genericParameterCount);
+            for (var ordinal = 0;
+                ordinal < genericParameterCount; ordinal++)
+            {
+                var genericParameterRow
+                    = genericParameterStart + ordinal;
+                if (tables.GenericParams.GetOwnerDefId(
+                        genericParameterRow) != definitionId
+                    || tables.GenericParams.GetOrdinal(
+                        genericParameterRow) != (uint)ordinal)
+                {
+                    throw Invalid(
+                        "A CM1 class MethodDef GenericParam has an invalid owner or ordinal.");
+                }
+
+                var (constraintFirst, constraintCount)
+                    = tables.GenericParams.GetConstraintRange(
+                        genericParameterRow);
+                var constraints
+                    = ImmutableArray.CreateBuilder<
+                        BoundStandardClassMethodGenericConstraint>(
+                            constraintCount);
+                for (var constraintOffset = 0;
+                    constraintOffset < constraintCount;
+                    constraintOffset++)
+                {
+                    var constraintRow = constraintFirst
+                        + constraintOffset;
+                    var ownerGenericParamRow
+                        = tables.Constraints.GetOwnerGenericParam(
+                            constraintRow);
+                    if (ownerGenericParamRow != genericParameterRow)
+                    {
+                        throw Invalid(
+                            "A CM1 class MethodDef Constraint has an invalid GenericParam owner.");
+                    }
+
+                    constraints.Add(
+                        new BoundStandardClassMethodGenericConstraint(
+                            constraintRow, ownerGenericParamRow,
+                            tables.Constraints.GetKind(constraintRow),
+                            tables.Constraints.GetPayload(constraintRow)));
+                }
+
+                genericParameters.Add(
+                    new BoundStandardClassMethodGenericParameter(
+                        genericParameterRow, definitionId,
+                        checked((uint)ordinal),
+                        tables.Strings.DecodeName(
+                            tables.GenericParams.GetNameStringRow(
+                                genericParameterRow)),
+                        tables.GenericParams.GetFormalKind(
+                            genericParameterRow),
+                        tables.GenericParams.GetOwnershipDomain(
+                            genericParameterRow),
+                        tables.GenericParams.GetNullabilityDomain(
+                            genericParameterRow),
+                        tables.GenericParams.GetConstantTypeSpecRef(
+                            genericParameterRow),
+                        tables.GenericParams.GetDefaultArgumentRef(
+                            genericParameterRow),
+                        constraints.MoveToImmutable()));
+            }
             var hasClassParameterSurface
                 = tables.Schema.UsesClassParameterDefaults()
                     && genericParameterCount == 0;
@@ -2046,6 +2118,7 @@ public static partial class TrRmExecutableCompiler
                 DependencyClauses =
                     CreateC1M1ClassMethodDependencyClauseView(
                         tables.Contracts.GetDependencyContracts(methodRow)),
+                GenericParameters = genericParameters.MoveToImmutable(),
             });
         }
 
