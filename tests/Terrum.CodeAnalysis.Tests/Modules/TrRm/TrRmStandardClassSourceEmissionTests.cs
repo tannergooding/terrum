@@ -4782,6 +4782,126 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
+    public void ReemitsIdentityForwardersAndTheirMethodTargets()
+    {
+        var schemaIdentity
+            = C1M1Construction2ClassParameterDefaultsSchemaIdentity;
+        var tree = SyntaxTree.Parse("""
+            public class Box {
+                public int32 Marker;
+                public static int32 Identity(int32 value) {
+                    return value;
+                }
+                public static int32 Forward(int32 value) {
+                    return Identity(value);
+                }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var boxDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var boxMembers = boxDeclaration.Children.OfType<SyntaxNode>();
+        var boxField = boxMembers.Single(static node =>
+            node.Kind == SyntaxKind.FieldDeclaration);
+        var identity = boxMembers.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Identity"));
+        var forward = boxMembers.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Forward"));
+        var boxClassIndex = Enumerable.Range(0, program.Classes.Length)
+            .Single(index => program.Classes[index].Name == "Box");
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "IdentityForwarderReemission", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, boxClassIndex,
+                    boxDeclaration.Span, "BoxKey", [
+                        new TrRmSourceClassMemberExport(boxClassIndex,
+                            boxField.Span, "Box.Marker"),
+                        new TrRmSourceClassMemberExport(boxClassIndex,
+                            identity.Span, "Box.Identity"),
+                        new TrRmSourceClassMemberExport(boxClassIndex,
+                            forward.Span, "Box.Forward"),
+                    ]),
+            ]);
+
+        static (int MethodRow, uint TargetToken) ReadForwarderTarget(
+            TrRmStructuralMetadataValidator.ValidatedExecutionTables tables)
+        {
+            var forwardDefinition = tables.Exports
+                .GetExportsForModule(1)
+                .Single(static export =>
+                    export.ExportKey == "Box.Forward").Definition;
+            var identityDefinition = tables.Exports
+                .GetExportsForModule(1)
+                .Single(static export =>
+                    export.ExportKey == "Box.Identity").Definition;
+            var methodRow = checked((int)(
+                forwardDefinition & 0x00FF_FFFF));
+            var bodyRow = tables.Methods.GetBodyRow(methodRow);
+            var body = tables.Bodies.GetRow(bodyRow);
+            Assert.That(body.Length, Is.EqualTo(8));
+            Assert.That(body[0], Is.EqualTo((byte)0x05));
+            return (checked((int)(identityDefinition & 0x00FF_FFFF)),
+                BinaryPrimitives.ReadUInt32LittleEndian(body.Slice(4)));
+        }
+
+        var artifactInput = new TrRmStandardArtifactInput(schemaIdentity,
+            artifact);
+        var artifactTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                        artifact));
+        var (oldIdentityRow, oldForwardTarget)
+            = ReadForwarderTarget(artifactTables);
+        Assert.That(oldForwardTarget,
+            Is.EqualTo(0x1600_0000u | checked((uint)oldIdentityRow)));
+
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            artifactInput, "IdentityForwarderReemission", [], ["BoxKey"]);
+        var sourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), reference);
+        Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceFreeCompilation.Diagnostics));
+        var reemitted = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)sourceFreeCompilation.Program!,
+            "IdentityForwarderReemitted", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var reemittedTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                        reemitted));
+        var (newIdentityRow, newForwardTarget)
+            = ReadForwarderTarget(reemittedTables);
+        Assert.That(newForwardTarget,
+            Is.EqualTo(0x1600_0000u | checked((uint)newIdentityRow)));
+
+        var reloadedReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+                "IdentityForwarderReemitted", [], ["BoxKey"]);
+        var callerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                public int32 Use(int32 value) {
+                    return Box.Forward(value);
+                }
+                """), reloadedReference);
+        Assert.That(callerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                callerCompilation.Diagnostics));
+    }
+
+    [Test]
     public void ReemitsBodylessClassMethodImportsWithClassParameterSurfaces()
     {
         var expectedArtifact = EmitClassMethodReemissionArtifact(
@@ -5280,6 +5400,143 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             .Declaration.Methods.Single(static method =>
                 method.Name == "Read");
         Assert.That(reemittedMethod.BodyRow, Is.GreaterThan(0));
+    }
+
+    [Test]
+    public void ReemitsCompactClassFieldAccessBodiesWithoutSource()
+    {
+        var schemaIdentity
+            = C1M1Construction2ClassParameterDefaultsSchemaIdentity;
+        var tree = SyntaxTree.Parse("""
+            public mut class Box {
+                public mut int32 Value;
+                public int32 ReadValue() {
+                    return this.Value;
+                }
+                private mut void SetValue(int32 value) {
+                    this.Value = value;
+                }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var members = classDeclaration.Children.OfType<SyntaxNode>();
+        var field = members.Single(static node =>
+            node.Kind == SyntaxKind.FieldDeclaration);
+        var read = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "ReadValue"));
+        var boxClassIndex = Enumerable.Range(0, program.Classes.Length)
+            .Single(index => program.Classes[index].Name == "Box");
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "CompactFieldAccess", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, boxClassIndex,
+                    classDeclaration.Span, "BoxKey", [
+                        new TrRmSourceClassMemberExport(boxClassIndex,
+                            field.Span, "Box.Value"),
+                        new TrRmSourceClassMemberExport(boxClassIndex,
+                            read.Span, "Box.ReadValue"),
+                    ]),
+            ]);
+        var artifactInput = new TrRmStandardArtifactInput(schemaIdentity,
+            artifact);
+        var artifactTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                        artifact));
+        var artifactFieldDefinition = artifactTables.Exports
+            .GetExportsForModule(1)
+            .Single(static export =>
+                export.ExportKey == "Box.Value").Definition;
+        var artifactReadDefinition = artifactTables.Exports
+            .GetExportsForModule(1)
+            .Single(static export =>
+                export.ExportKey == "Box.ReadValue").Definition;
+        var artifactReadBody = artifactTables.Bodies.GetRow(
+            artifactTables.Methods.GetBodyRow(checked((int)(
+                artifactReadDefinition & 0x00FF_FFFF))));
+        Assert.That(artifactReadBody[0], Is.EqualTo((byte)0x02));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                artifactReadBody[4..]),
+            Is.EqualTo(artifactFieldDefinition));
+        var artifactSetMethodRow = Enumerable.Range(1,
+                artifactTables.Methods.Count)
+            .Single(row => artifactTables.Methods.GetName(row)
+                == "SetValue");
+        var artifactSetBody = artifactTables.Bodies.GetRow(
+            artifactTables.Methods.GetBodyRow(artifactSetMethodRow));
+        Assert.That(artifactSetBody[0], Is.EqualTo((byte)0x03));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                artifactSetBody[4..]),
+            Is.EqualTo(artifactFieldDefinition));
+
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            artifactInput, "CompactFieldAccess", [], ["BoxKey"]);
+        var sourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), reference);
+        Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceFreeCompilation.Diagnostics));
+        var reemitted = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)sourceFreeCompilation.Program!,
+            "CompactFieldAccessReemitted", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var reemittedTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                        reemitted));
+        var reemittedFieldDefinition = reemittedTables.Exports
+            .GetExportsForModule(1)
+            .Single(static export =>
+                export.ExportKey == "Box.Value").Definition;
+        var reemittedReadDefinition = reemittedTables.Exports
+            .GetExportsForModule(1)
+            .Single(static export =>
+                export.ExportKey == "Box.ReadValue").Definition;
+        var reemittedReadBody = reemittedTables.Bodies.GetRow(
+            reemittedTables.Methods.GetBodyRow(checked((int)(
+                reemittedReadDefinition & 0x00FF_FFFF))));
+        Assert.That(reemittedReadBody[0], Is.EqualTo((byte)0x02));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                reemittedReadBody[4..]),
+            Is.EqualTo(reemittedFieldDefinition));
+        var reemittedSetMethodRow = Enumerable.Range(1,
+                reemittedTables.Methods.Count)
+            .Single(row => reemittedTables.Methods.GetName(row)
+                == "SetValue");
+        var reemittedSetBody = reemittedTables.Bodies.GetRow(
+            reemittedTables.Methods.GetBodyRow(reemittedSetMethodRow));
+        Assert.That(reemittedSetBody[0], Is.EqualTo((byte)0x03));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                reemittedSetBody[4..]),
+            Is.EqualTo(reemittedFieldDefinition));
+        Assert.That(reemittedSetBody[8], Is.Zero);
+        Assert.That(reemittedSetBody[10], Is.EqualTo((byte)1));
+        Assert.That(reemittedSetBody[11], Is.Zero);
+
+        var reloadedReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+                "CompactFieldAccessReemitted", [], ["BoxKey"]);
+        var callerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                public int32 Read(Box value) {
+                    return value.ReadValue();
+                }
+                """), reloadedReference);
+        Assert.That(callerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                callerCompilation.Diagnostics));
     }
 
     [Test]

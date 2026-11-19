@@ -221,6 +221,8 @@ class or struct FieldDef Imports under their exact owner TypeDef Imports, and
 only under the exact Construction-2/CM1 profile. TypeMap TypeSpecs,
 FieldDef/Import tokens, MethodDef/Body rows and method ExportKeys follow the
 retained maps.
+Compact Body kinds `02`/`03` remap direct local/imported FieldDef tokens;
+Body kind `05` remaps retained local/imported MethodDef targets.
 ConstantMap is limited to inline scalar TypeSpecs with frozen scalar
 ConstantSources; its scalar values are rebuilt into the output
 Blob/FrozenValueNode/ConstantSource tables. FieldPath Body maps remap root
@@ -241,6 +243,8 @@ adaptation coverage is added but remains unverified. Source-free class
 reference views reconstruct plain scalar checked-reference parameter
 identities for callable local and imported MethodDef proxies and preserve the
 implicit-reference flag for caller adaptation.
+Body-05 and compact field-access re-emission regressions are added but remain
+unverified under the validation hold.
 Compiler-owned source-class anchors and explicit member-key capture are
 implemented, but complete bodyful
 local class member/MethodDef closure, provider

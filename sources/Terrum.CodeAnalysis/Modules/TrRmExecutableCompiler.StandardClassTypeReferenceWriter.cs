@@ -8463,31 +8463,47 @@ public static partial class TrRmExecutableCompiler
                         "CM1 local class MethodDef Bodies require the exact Construction-2 profile and root-owned Body rows.");
                 }
 
-                var body = rootTables.Bodies.GetRegisterBody(bodyRow,
-                    rootTables.Contracts.Count);
-                for (var typeMapIndex = 0;
-                    typeMapIndex < body.TypeCount; typeMapIndex++)
+                var bodyBytes = rootTables.Bodies.GetRow(bodyRow);
+                if (bodyBytes.IsEmpty)
                 {
-                    var typeMapToken = BinaryPrimitives
-                        .ReadUInt32LittleEndian(body.TypeMap.Slice(
-                            typeMapIndex * sizeof(uint), sizeof(uint)));
-                    var encoding = (byte)(typeMapToken >> 24);
-                    if (encoding == 0x11)
+                    throw new InvalidDataException(
+                        "A retained local class MethodDef Body is empty.");
+                }
+
+                if (bodyBytes[0] == 0x01)
+                {
+                    var body = rootTables.Bodies.GetRegisterBody(bodyRow,
+                        rootTables.Contracts.Count);
+                    for (var typeMapIndex = 0;
+                        typeMapIndex < body.TypeCount; typeMapIndex++)
                     {
-                        _ = rootTables.TypeSpecs.GetTypeSpecRef(
-                            typeMapToken & 0x00FF_FFFF);
+                        var typeMapToken = BinaryPrimitives
+                            .ReadUInt32LittleEndian(body.TypeMap.Slice(
+                                typeMapIndex * sizeof(uint),
+                                sizeof(uint)));
+                        var encoding = (byte)(typeMapToken >> 24);
+                        if (encoding == 0x11)
+                        {
+                            _ = rootTables.TypeSpecs.GetTypeSpecRef(
+                                typeMapToken & 0x00FF_FFFF);
+                        }
+                        else if (encoding is not (0xF2 or 0xF3))
+                        {
+                            throw Unsupported(
+                                "CM1 local class MethodDef Bodies require inline or TypeSpec-backed TypeMap entries.");
+                        }
                     }
-                    else if (encoding is not (0xF2 or 0xF3))
-                    {
-                        throw Unsupported(
-                            "CM1 local class MethodDef Bodies require inline or TypeSpec-backed TypeMap entries.");
-                    }
+                }
+                else if (bodyBytes[0] is not (0x02 or 0x03 or 0x05))
+                {
+                    throw Unsupported(
+                        "CM1 local class MethodDef re-emission supports Body kind 01 streams, kinds 02-03 field accessors and kind 05 identity forwarders.");
                 }
 
                 methodEmissionPlans.Add(methodRow,
                     new C1M1MethodEmissionPlan(owner, method, [],
                         method.ExportKeys,
-                        rootTables.Bodies.GetRow(bodyRow).ToArray()));
+                        bodyBytes.ToArray()));
             }
         }
 
@@ -9929,6 +9945,18 @@ public static partial class TrRmExecutableCompiler
         Dictionary<int, uint> typeSpecRowMap,
         HashSet<int> activeTypeSpecRows, TrRmArtifactSchema schema)
     {
+        if (!bodyBytes.IsEmpty && bodyBytes.Span[0] is (0x02 or 0x03))
+        {
+            return RemapC1M1ClassFieldAccessBody(bodyBytes,
+                fieldRowMap, importRowMap);
+        }
+
+        if (!bodyBytes.IsEmpty && bodyBytes.Span[0] == 0x05)
+        {
+            return RemapC1M1ClassIdentityForwarderBody(bodyBytes,
+                methodDefRowMap, importRowMap);
+        }
+
         var body = new TrRmRegisterBodyReader(bodyBytes.Span,
             sourceTables.Contracts.Count, schema);
 
@@ -10148,6 +10176,72 @@ public static partial class TrRmExecutableCompiler
             typeMap, methodMap, fieldMap,
             constantMap, blocks, records,
             body.Code.ToArray(), contractCount: 0, schema: schema);
+    }
+
+    private static byte[] RemapC1M1ClassFieldAccessBody(
+        ReadOnlyMemory<byte> bodyBytes, Dictionary<int, int> fieldRowMap,
+        Dictionary<int, int> importRowMap)
+    {
+        var body = bodyBytes.Span;
+        var kind = body[0];
+        var expectedLength = kind == 0x02 ? 8 : 12;
+        if (body.Length != expectedLength || body[1] != 0
+            || BinaryPrimitives.ReadUInt16LittleEndian(body.Slice(2)) != 0
+            || (kind == 0x03
+                && (body[10] is < 1 or > 3 || body[11] != 0)))
+        {
+            throw Invalid(
+                "A retained CM1 compact field Body has invalid flags, reserved bytes or length.");
+        }
+
+        var fieldToken = BinaryPrimitives.ReadUInt32LittleEndian(
+            body.Slice(4));
+        var fieldRow = checked((int)(fieldToken & 0x00FF_FFFF));
+        var remappedRow = (byte)(fieldToken >> 24) switch
+        {
+            0x14 when fieldRowMap.TryGetValue(fieldRow,
+                out var localFieldRow) => localFieldRow,
+            0x1C when importRowMap.TryGetValue(fieldRow,
+                out var fieldImportRow) => fieldImportRow,
+            _ => throw Unsupported(
+                "A CM1 compact field Body must target a retained local or imported FieldDef."),
+        };
+
+        var remappedBody = bodyBytes.ToArray();
+        BinaryPrimitives.WriteUInt32LittleEndian(remappedBody.AsSpan(4),
+            (fieldToken & 0xFF00_0000u) | checked((uint)remappedRow));
+        return remappedBody;
+    }
+
+    private static byte[] RemapC1M1ClassIdentityForwarderBody(
+        ReadOnlyMemory<byte> bodyBytes, Dictionary<int, int> methodDefRowMap,
+        Dictionary<int, int> importRowMap)
+    {
+        var body = bodyBytes.Span;
+        if (body.Length != 8 || body[1] != 0
+            || BinaryPrimitives.ReadUInt16LittleEndian(body.Slice(2)) != 0)
+        {
+            throw Invalid(
+                "A retained CM1 identity-forwarder Body has invalid flags, reserved bytes or length.");
+        }
+
+        var methodToken = BinaryPrimitives.ReadUInt32LittleEndian(
+            body.Slice(4));
+        var methodRow = checked((int)(methodToken & 0x00FF_FFFF));
+        var remappedRow = (byte)(methodToken >> 24) switch
+        {
+            0x16 when methodDefRowMap.TryGetValue(methodRow,
+                out var localMethodRow) => localMethodRow,
+            0x1C when importRowMap.TryGetValue(methodRow,
+                out var importRow) => importRow,
+            _ => throw Unsupported(
+                "A CM1 identity-forwarder Body must target a retained local or imported MethodDef."),
+        };
+
+        var remappedBody = bodyBytes.ToArray();
+        BinaryPrimitives.WriteUInt32LittleEndian(remappedBody.AsSpan(4),
+            (methodToken & 0xFF00_0000u) | checked((uint)remappedRow));
+        return remappedBody;
     }
 
     private static uint RemapC1M1ClassTypeSpec(

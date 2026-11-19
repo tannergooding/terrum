@@ -242,6 +242,8 @@ TypeDef Imports, with ConstantMap entries restricted to inline scalar TypeSpecs
 and frozen-scalar ConstantSource rows, but only under the exact
 Construction-2/CM1 profile. Row-backed TypeMap entries, local/imported
 MethodDef and FieldDef tokens, Body rows and method ExportKeys are remapped;
+compact Body kinds `02`/`03` remap direct local/imported FieldDef tokens,
+and Body kind `05` remaps retained local/imported MethodDef targets.
 scalar
 ConstantSource/Blob/FrozenValueNode dependencies are rebuilt. Imported-struct
 FieldDef Imports now retain their owner TypeDef Imports and remap Body
@@ -253,7 +255,8 @@ Provider/owner-row relocation and compatible/incompatible replacement
 regressions are added but unverified under the hold. Local Body
 provider/consumer, imported-struct FieldDef and FieldPath root/step
 re-emission, and scalar ConstantMap payload-preservation regressions are also
-added but unverified.
+added but unverified. Body-05 and compact field-access re-emission regressions
+are also added but remain unverified under the hold.
 Remaining
 gaps include non-identity
 instance calls, broader nested field paths and aggregate stores, locals and
