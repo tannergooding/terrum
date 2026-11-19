@@ -7258,6 +7258,34 @@ internal static class TrRmRegisterBodyMapValidator
         var ownerType = methods.GetOwnerType(methodDefRow);
         var contextTypeSpec = typeSpecs.GetTypeSpecBytes(
             contextTypeSpecRef);
+        if (contextRole == 2 && construction.RoleTag == 0
+            && accessKind == 1)
+        {
+            if (ReadByte(body, contextHome, 1) != 0
+                || ReadUInt16(body, contextHome, 6) != 0
+                || methods.GetOwnerModule(methodDefRow) != ownerModule
+                || types.GetKind(fieldOwnerType) != 2
+                || types.GetOwnerModule(fieldOwnerType) != ownerModule
+                || (fieldFlags & 0x08) != 0
+                || (fieldFlags & 3) != 2
+                || !TryGetNormalClassHandleTypeSpec(contextTypeSpecRef,
+                    types, typeSpecs, imports, out var contextClassType,
+                    out _)
+                || contextClassType != fieldOwnerType)
+            {
+                throw InvalidMap();
+            }
+
+            ConsumeWork(body);
+            SetRegisterTypeState(body, registerTypes, destination,
+                RegisterTypeState.FromPlace(fieldTypeSpecRef, recordIndex,
+                    accessKind, [
+                        new PlaceHandleOrigin(recordIndex,
+                            contextHomeIndex, codeOffset),
+                    ]));
+            return;
+        }
+
         if (contextRole == 1 && construction.RoleTag == 0
             && accessKind is 1 or 2)
         {

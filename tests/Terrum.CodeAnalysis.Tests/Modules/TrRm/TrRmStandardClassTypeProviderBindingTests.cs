@@ -260,10 +260,11 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
         var schemaIdentity
             = C1M1Construction2ClassParameterDefaultsSchemaIdentity;
         var provider = CreateClassArtifact("ClassProvider", "Leaf",
-            "LeafKey", 0xF200_0008, schemaIdentity, layoutKind: 0, pack: 0);
+            "LeafKey", 0xF200_0008, schemaIdentity, layoutKind: 0, pack: 0,
+            fieldExportKey: "Leaf.Value");
         var reference = TrRmExecutableCompiler.CreateStandardReference(
             new TrRmStandardArtifactInput(schemaIdentity, provider),
-            "ClassProvider", [], ["LeafKey"]);
+            "ClassProvider", [], ["LeafKey"], ["Leaf.Value"]);
 
         var tree = SyntaxTree.Parse("""
             public class Container {
@@ -343,7 +344,7 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
 
         var incompatibleProvider = CreateClassArtifact("ClassProvider",
             "Leaf", "LeafKey", 0xF200_000A, schemaIdentity,
-            layoutKind: 0, pack: 0);
+            layoutKind: 0, pack: 0, fieldExportKey: "Leaf.Value");
         _ = Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.CreateStandardReference(
                 new TrRmStandardArtifactInput(schemaIdentity, artifact),
@@ -351,6 +352,132 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
                     new TrRmStandardArtifactInput(schemaIdentity,
                         incompatibleProvider),
                 ], ["ContainerKey"]));
+    }
+
+    [Test]
+    public void EmitsReadonlyBodiesThroughImportedClassHandleParameters()
+    {
+        var schemaIdentity
+            = C1M1Construction2ClassParameterDefaultsSchemaIdentity;
+        var provider = CreateClassArtifact("ClassProvider", "Leaf",
+            "LeafKey", 0xF200_0008, schemaIdentity, layoutKind: 0, pack: 0,
+            fieldExportKey: "Leaf.Value");
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, provider),
+            "ClassProvider", [], ["LeafKey"], ["Leaf.Value"]);
+
+        var tree = SyntaxTree.Parse("""
+            public class Container {
+                private int32 _seed;
+                public Container(int32 seed) { _seed = seed; }
+                public int32 Read(Leaf leaf) { return leaf.Value; }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree, reference);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var members = classDeclaration.Children.OfType<SyntaxNode>();
+        var constructor = members.Single(static node =>
+            node.Kind == SyntaxKind.ConstructorDeclaration);
+        var read = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Read"));
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "ImportedClassFieldRead", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, 0,
+                    classDeclaration.Span, "ContainerKey", [
+                        new TrRmSourceClassMemberExport(0,
+                            constructor.Span, "Container.Initialize") {
+                            ConstructionProjectionExportKey
+                                = "Container.Create",
+                        },
+                        new TrRmSourceClassMemberExport(0, read.Span,
+                            "Container.Read"),
+                    ]),
+            ]);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                        artifact));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Container.Read", out var readDefinition), Is.True);
+        var readMethodRow
+            = checked((int)(readDefinition & 0x00FF_FFFF));
+        var readBodyRow = tables.Methods.GetBodyRow(readMethodRow);
+        Assert.That(readBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(readBodyRow,
+            tables.Contracts.Count);
+        tables.ValidateRegisterBodyMapsForMethod(readMethodRow);
+        var readBody = tables.Bodies.GetRegisterBody(readBodyRow,
+            tables.Contracts.Count);
+        Assert.That(readBody.HomeCount, Is.EqualTo(2));
+        Assert.That(readBody.GetRecord(1)[0], Is.EqualTo(0x04));
+        Assert.That(readBody.GetRecord(1)[7], Is.EqualTo(2));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+            readBody.GetRecord(1).Slice(8, 2)), Is.Zero);
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+            readBody.GetRecord(1).Slice(10, 2)), Is.EqualTo(1));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+            readBody.GetRecord(1).Slice(16, 4)), Is.EqualTo(2u));
+        Assert.That(readBody.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xDA, 0, 1, 0,
+                0x17, 0,
+            }));
+
+        var outputReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, artifact),
+                "ImportedClassFieldRead", [
+                    new TrRmStandardArtifactInput(schemaIdentity, provider),
+                ], ["ContainerKey"]);
+        var consumer = Compilation.CreateLibrary(
+            SyntaxTree.Parse("public void Use(Container value) {}"),
+            outputReference);
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
+
+        var incompatibleProvider = CreateClassArtifact("ClassProvider",
+            "Leaf", "LeafKey", 0xF200_000A, schemaIdentity,
+            layoutKind: 0, pack: 0, fieldExportKey: "Leaf.Value");
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, artifact),
+                "ImportedClassFieldRead", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        incompatibleProvider),
+                ], ["ContainerKey"]));
+    }
+
+    [Test]
+    public void RejectsReadsThroughUnselectedImportedClassFields()
+    {
+        var schemaIdentity
+            = C1M1Construction2ClassParameterDefaultsSchemaIdentity;
+        var provider = CreateClassArtifact("ClassProvider", "Leaf",
+            "LeafKey", 0xF200_0008, schemaIdentity, layoutKind: 0, pack: 0);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, provider),
+            "ClassFieldConsumer", [], ["LeafKey"]);
+
+        var compilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(
+                "public int32 Read(Leaf leaf) { return leaf.Value; }"),
+            reference);
+
+        Assert.That(compilation.HasErrors, Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Diagnostics.Any(
+            static diagnostic => diagnostic.Code == "TRM3006"), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
     }
 
     [Test]
@@ -721,17 +848,19 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
     private static byte[] CreateClassArtifact(string moduleIdentity,
         string typeName, string exportKey, uint fieldTypeSpecReference,
         string schemaIdentity = C1M1SchemaIdentity,
-        byte layoutKind = 1, uint pack = 1)
+        byte layoutKind = 1, uint pack = 1,
+        string? fieldExportKey = null)
         => CreateArtifact(moduleIdentity, typeName, exportKey,
             fieldTypeSpecReference, schemaIdentity, null, null, null,
-            layoutKind, pack);
+            layoutKind, pack, fieldExportKey: fieldExportKey);
 
     private static byte[] CreateArtifact(string moduleIdentity,
         string typeName, string exportKey, uint fieldTypeSpecReference,
         string schemaIdentity, string? importIdentity, string? importKey,
         byte[]? importedFieldTypeSpec, byte layoutKind = 1, uint pack = 1,
         string? localDependencyTypeName = null,
-        bool useRequestedLayoutForImports = false)
+        bool useRequestedLayoutForImports = false,
+        string? fieldExportKey = null)
     {
         var seedCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
@@ -784,6 +913,12 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
         }
         names.Add((exportKey, 1));
         var exportKeyRow = names.Count;
+        var fieldExportKeyRow = 0;
+        if (fieldExportKey is not null)
+        {
+            names.Add((fieldExportKey, 1));
+            fieldExportKeyRow = names.Count;
+        }
         var stringBytes = TrRmStringTableWriter.EncodeTextRows(names);
         var strings = new TrRmStringTableReader(stringBytes, names.Count);
 
@@ -933,10 +1068,17 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
             sections.Add(new TrRmSection(0x001C, 0, 1, importBytes));
         }
 
-        var exportBytes = new byte[8];
+        var exportCount = fieldExportKey is null ? 1 : 2;
+        var exportBytes = new byte[checked(exportCount * 8)];
         Write(exportBytes, 0, 0x1300_0001);
         Write(exportBytes, 4, checked((uint)exportKeyRow));
-        sections.Add(new TrRmSection(0x001D, 0, 1, exportBytes));
+        if (fieldExportKey is not null)
+        {
+            Write(exportBytes, 8, 0x1400_0001);
+            Write(exportBytes, 12, checked((uint)fieldExportKeyRow));
+        }
+        sections.Add(new TrRmSection(0x001D, 0,
+            checked((uint)exportCount), exportBytes));
         sections.Sort(static (left, right) =>
             left.Kind.CompareTo(right.Kind));
         var artifactSchema = StringComparer.Ordinal.Equals(schemaIdentity,

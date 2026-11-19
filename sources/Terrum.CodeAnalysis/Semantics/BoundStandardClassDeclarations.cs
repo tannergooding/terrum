@@ -109,6 +109,68 @@ internal static class BoundStandardClassDeclarationContract
         = StandardGenericMethodSchema
             .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaults;
 
+    internal static bool TryGetSelectedConstruction2ClassDeclaration(
+        PrimitiveType type,
+        IReadOnlyList<BoundGenericNominalTypeInstance> instances,
+        IReadOnlyList<BoundGenericNominalTypeDefinition> definitions,
+        IReadOnlyList<BoundStandardClassDeclaration> declarations,
+        out BoundStandardClassDeclaration declaration)
+    {
+        declaration = null!;
+        if (!BoundGenericNominalTypeContract.IsNominalClassType(type,
+                instances, definitions))
+        {
+            return false;
+        }
+
+        var instanceIndex = BoundGenericNominalTypeTypes.Index(type);
+        if ((uint)instanceIndex >= (uint)instances.Count)
+        {
+            return false;
+        }
+
+        var instance = instances[instanceIndex];
+        if (!instance.Arguments.IsEmpty
+            || (instance.Qualifiers & ~0x01) != 0
+            || instance.TypeSpecForm is not (0 or 0x02 or 0x03))
+        {
+            return false;
+        }
+
+        foreach (var candidate in declarations)
+        {
+            var selectedImportedClassView
+                = !candidate.Expectations.IsEmpty
+                    && StringComparer.Ordinal.Equals(
+                        candidate.Declaration.Provider.SchemaIdentity,
+                        CM1SchemaIdentity);
+            if (candidate.Declaration.Identity == instance.Definition
+                && !candidate.SelectedExportKeys.IsEmpty
+                && (candidate.Expectations.IsEmpty
+                    || selectedImportedClassView)
+                && (instance.TypeSpecReference == 0
+                    ? instance.TypeSpecProviderIdentity is null
+                        && instance.TypeSpecForm == 0
+                    : instance.TypeSpecProviderIdentity
+                            is string providerIdentity
+                        && (instance.TypeSpecForm is 0x02 or 0x03)
+                        && (StringComparer.Ordinal.Equals(
+                                candidate.Declaration.Provider
+                                    .ModuleIdentity, providerIdentity)
+                            || candidate.Expectations.Any(expectation =>
+                                StringComparer.Ordinal.Equals(
+                                    expectation.Binding.UsingModule
+                                        .ModuleIdentity,
+                                    providerIdentity))))
+            {
+                declaration = candidate;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     internal static bool IsValidTable(
         ImmutableArray<BoundStandardClassDeclaration> declarations,
         ImmutableArray<BoundGenericNominalTypeDefinition> nominalTypes)

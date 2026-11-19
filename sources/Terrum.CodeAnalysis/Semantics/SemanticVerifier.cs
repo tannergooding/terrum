@@ -19583,14 +19583,40 @@ public static partial class SemanticVerifier
                     throw Invalid(fieldRead.Span);
                 }
                 var readType = fieldRead.Receiver.Type;
-                if (!HasFields(program, readType)
-                    || fieldRead.Field < 0 || fieldRead.Field >= Fields(program, readType).Length
-                    || !CanAccessField(function, program, readType, fieldRead.Field)
-                    || fieldRead.Type != Fields(program, readType)[fieldRead.Field].Type)
+                if (BoundStandardClassDeclarationContract
+                    .TryGetSelectedConstruction2ClassDeclaration(readType,
+                        program.GenericNominalTypeInstances,
+                        program.GenericNominalTypeDefinitions,
+                        program.StandardClassDeclarations,
+                        out var standardClass))
                 {
-                    throw Invalid();
+                    if ((uint)fieldRead.Field
+                            >= (uint)standardClass.Declaration.Fields.Length)
+                    {
+                        throw Invalid(fieldRead.Span);
+                    }
+
+                    var standardClassField
+                        = standardClass.Declaration.Fields[fieldRead.Field];
+                    if ((standardClassField.Flags & 3) != 2
+                        || (standardClassField.Flags & 8) != 0
+                        || standardClassField.SelectedExportKeys.IsEmpty
+                        || fieldRead.Type != standardClassField.Type)
+                    {
+                        throw Invalid(fieldRead.Span);
+                    }
                 }
-                if (RequiresUnsafeFieldAccess(program, readType,
+                else if (!HasFields(program, readType)
+                    || fieldRead.Field < 0
+                    || fieldRead.Field >= Fields(program, readType).Length
+                    || !CanAccessField(function, program, readType,
+                        fieldRead.Field)
+                    || fieldRead.Type
+                        != Fields(program, readType)[fieldRead.Field].Type)
+                {
+                    throw Invalid(fieldRead.Span);
+                }
+                else if (RequiresUnsafeFieldAccess(program, readType,
                         Fields(program, readType)[fieldRead.Field])
                     && !fieldRead.IsUnsafeAuthorized)
                 {

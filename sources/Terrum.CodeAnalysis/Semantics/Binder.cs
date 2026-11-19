@@ -18825,6 +18825,44 @@ internal sealed partial class Binder
                     };
                     break;
                 }
+                if (receiverType is PrimitiveType standardClassType
+                    && BoundStandardClassDeclarationContract
+                        .TryGetSelectedConstruction2ClassDeclaration(
+                            standardClassType,
+                            _genericNominalTypeInstances,
+                            _genericNominalTypeDefinitions,
+                            _standardClassDeclarations,
+                            out var standardClassDeclaration)
+                    && TryFindStandardClassField(standardClassDeclaration,
+                        member, out var standardClassFieldIndex,
+                        out var standardClassField))
+                {
+                    if ((standardClassField.Flags & 3) != 2
+                        || (standardClassField.Flags & 8) != 0
+                        || standardClassField.SelectedExportKeys.IsEmpty)
+                    {
+                        Report("TRM3006",
+                            $"Field '{member}' is not an accessible public instance field with a selected Standard FieldDef ExportKey.",
+                            node.Span);
+                        expression = ErrorExpression(node.Span);
+                        break;
+                    }
+                    if (standardClassField.Type == PrimitiveType.Void)
+                    {
+                        Report("TRM3005",
+                            $"Field '{member}' has an unsupported TypeSpec for class member access.",
+                            node.Span);
+                        expression = ErrorExpression(node.Span);
+                        break;
+                    }
+
+                    expression = new BoundFieldRead(
+                        boundReceiver
+                            ?? BindExpression(receiverNode, standardClassType),
+                        standardClassFieldIndex, standardClassField.Type,
+                        node.Span);
+                    break;
+                }
                 if (receiverType is PrimitiveType propertyType
                     && TryFindGetter(propertyType, member, out var getter))
                 {

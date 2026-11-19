@@ -47,7 +47,8 @@ public static partial class TrRmExecutableCompiler
 
     private readonly record struct C1M1Construction2NestedFieldRead(
         ImmutableArray<int> FieldDefRows,
-        ImmutableArray<PrimitiveType> FieldTypes);
+        ImmutableArray<PrimitiveType> FieldTypes,
+        int BaseVariableIndex);
 
     private readonly record struct C1M1Construction2NestedFieldWrite(
         ImmutableArray<int> FieldDefRows,
@@ -478,7 +479,9 @@ public static partial class TrRmExecutableCompiler
                 {
                     typeSpecRow = checked((uint)typeSpecRows.Count + 1);
                     typeSpecRows.Add(TrRmTypeSpecTableWriter.Reference(
-                        0x03, checked((uint)importRow)));
+                        0x03, checked((uint)importRow),
+                        program.GenericNominalTypeInstances[
+                            instanceIndex].Qualifiers));
                     typeSpecRowByStandardClassType.Add(instanceIndex,
                         typeSpecRow);
                 }
@@ -921,32 +924,13 @@ public static partial class TrRmExecutableCompiler
                     continue;
                 }
 
-                if (field.ExportKeys.IsDefaultOrEmpty)
-                {
-                    throw new InvalidDataException(
-                        "A selected imported class FieldDef has no provider ExportKey.");
-                }
-
-                var fieldExportKeys = field.ExportKeys.ToHashSet(
-                    StringComparer.Ordinal);
-                var selectedFieldKeys = field.SelectedExportKeys.ToHashSet(
-                    StringComparer.Ordinal);
-                if (field.DefinitionId >> 24 != 0x14
-                    || field.OwnerDefinitionId
-                        != classView.Identity.DefinitionId
-                    || (field.Flags & 3) != 2
-                    || (field.Flags & 0x08) != 0
-                    || fieldExportKeys.Count != field.ExportKeys.Length
-                    || selectedFieldKeys.Count
-                        != field.SelectedExportKeys.Length
-                    || field.SelectedExportKeys.Any(key =>
-                        !BoundEnumTypes.IsValidModuleDeclarationKey(key)
-                        || !fieldExportKeys.Contains(key))
+                if (!IsC1M1ImportedClassFieldImportable(classView, field,
+                        importPlan)
                     || !fieldDefRowByStandardClassAndIndex.TryGetValue((
                         standardClassIndex, fieldIndex), out var fieldDefRow))
                 {
                     throw Unsupported(
-                        "A selected imported class FieldDef must be a public instance field with an exact owner and provider.");
+                        "C1M1 class source emission requires public instance FieldDef exports from the exact imported class provider.");
                 }
 
                 foreach (var exportKey in field.SelectedExportKeys)
@@ -1313,7 +1297,10 @@ public static partial class TrRmExecutableCompiler
                                 program, methodFunction, classIndex,
                                 sourceStructDeclarations,
                                 typeImportPlanByStructure,
+                                standardClassIndexByIdentity,
+                                typeImportPlanByStandardClass,
                                 fieldDefRowByClassAndIndex,
+                                fieldDefRowByStandardClassAndIndex,
                                 fieldDefRowByStructureAndIndex)
                             : null;
                     var directFieldWriteIndex = -1;
@@ -3677,9 +3664,13 @@ public static partial class TrRmExecutableCompiler
         Func<PrimitiveType, uint> typeSpecReferenceFor,
         int contractCount, TrRmArtifactSchema schema)
     {
-        if (function.IsStatic || function.ParameterCount != 1
-            || function.Variables.Length != 1
-            || fieldRead.FieldDefRows.Length < 2
+        if (function.IsStatic
+            || function.ParameterCount != function.Variables.Length
+            || function.ParameterCount is < 1 or > 2
+            || (uint)fieldRead.BaseVariableIndex
+                >= (uint)function.ParameterCount
+            || (fieldRead.BaseVariableIndex == 0
+                && fieldRead.FieldDefRows.Length < 2)
             || fieldRead.FieldDefRows.Length
                 != fieldRead.FieldTypes.Length)
         {
@@ -3687,10 +3678,30 @@ public static partial class TrRmExecutableCompiler
                 "A nested class FieldRead Body has an invalid receiver or path.");
         }
 
-        var typeTokens = new uint[checked(
-            function.ParameterCount + fieldRead.FieldTypes.Length)];
-        typeTokens[0] = CreateStandardBodyTypeMapToken(
-            typeSpecReferenceFor(function.Variables[0].Type));
+        var typeTokens = new uint[checked(function.ParameterCount
+            + fieldRead.FieldTypes.Length)];
+        var homeMap = new byte[checked(function.ParameterCount * 8)];
+        for (var variableIndex = 0;
+            variableIndex < function.ParameterCount; variableIndex++)
+        {
+            var typeToken = CreateStandardBodyTypeMapToken(
+                typeSpecReferenceFor(
+                    function.Variables[variableIndex].Type));
+            typeTokens[variableIndex] = typeToken;
+            var homeOffset = variableIndex * 8;
+            homeMap[homeOffset] = variableIndex == 0
+                ? (byte)1 : (byte)2;
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                homeMap.AsSpan(homeOffset + 2, 2),
+                checked((ushort)variableIndex));
+            if (variableIndex != 0)
+            {
+                BinaryPrimitives.WriteUInt16LittleEndian(
+                    homeMap.AsSpan(homeOffset + 4, 2),
+                    checked((ushort)(variableIndex - 1)));
+            }
+        }
+
         for (var index = 0; index < fieldRead.FieldTypes.Length; index++)
         {
             typeTokens[function.ParameterCount + index]
@@ -3699,10 +3710,15 @@ public static partial class TrRmExecutableCompiler
         }
 
         var maps = TrRmRegisterBodyMapBuilder.Create(typeTokens, []);
-        var homeMap = new byte[8];
-        homeMap[0] = 1;
-        BinaryPrimitives.WriteUInt16LittleEndian(homeMap.AsSpan(2, 2),
-            checked((ushort)maps.GetTypeMapIndex(typeTokens[0])));
+        for (var variableIndex = 0;
+            variableIndex < function.ParameterCount; variableIndex++)
+        {
+            var homeOffset = variableIndex * 8;
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                homeMap.AsSpan(homeOffset + 2, 2),
+                checked((ushort)maps.GetTypeMapIndex(
+                    typeTokens[variableIndex])));
+        }
 
         var records = new List<ReadOnlyMemory<byte>> {
             new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 },
@@ -3715,7 +3731,9 @@ public static partial class TrRmExecutableCompiler
             var isTerminal = index == fieldRead.FieldDefRows.Length - 1;
             var destinationRegister = isTerminal ? (byte)0 : (byte)1;
             var baseKind = index == 0 ? (byte)2 : (byte)1;
-            var baseIndex = index == 0 ? (ushort)0 : (ushort)1;
+            var baseIndex = index == 0
+                ? checked((ushort)fieldRead.BaseVariableIndex)
+                : (ushort)1;
             var fieldTypeToken = typeTokens[
                 function.ParameterCount + index];
             if (records.Count > ushort.MaxValue)
@@ -5359,13 +5377,20 @@ public static partial class TrRmExecutableCompiler
                 sourceStructDeclarations,
             IReadOnlyDictionary<int, C1M1ImportedStructImportPlan>
                 typeImportPlanByStructure,
+            IReadOnlyDictionary<BoundGenericNominalTypeIdentity, int>
+                standardClassIndexByIdentity,
+            IReadOnlyDictionary<int, C1M1ImportedClassImportPlan>
+                typeImportPlanByStandardClass,
             IReadOnlyDictionary<(int ClassIndex, int FieldIndex), int>
                 fieldDefRowByClassAndIndex,
+            IReadOnlyDictionary<(int StandardClassIndex, int FieldIndex),
+                int> fieldDefRowByStandardClassAndIndex,
             IReadOnlyDictionary<(int StructureIndex, int FieldIndex), int>
                 fieldDefRowByStructureAndIndex)
     {
-        if (function.IsStatic || function.ParameterCount != 1
-            || function.Variables.Length != 1
+        if (function.IsStatic
+            || function.ParameterCount != function.Variables.Length
+            || function.ParameterCount is < 1 or > 2
             || function.Variables[0].IsMutable
             || function.ReturnType == PrimitiveType.Void
             || !function.Body.RetiredManagedLocals.IsEmpty)
@@ -5433,12 +5458,38 @@ public static partial class TrRmExecutableCompiler
             root = fieldRead.Receiver;
         }
 
-        if (fieldPath.Count < 2
-            || root is not BoundRead { Variable: 0 } receiver
-            || receiver.Type != function.Variables[0].Type
-            || ManagedClassTypes.IsOptional(receiver.Type)
-            || !ManagedClassTypes.IsClass(receiver.Type)
-            || ManagedClassTypes.ClassIndex(receiver.Type) != classIndex)
+        if (root is not BoundRead receiver
+            || (uint)receiver.Variable
+                >= (uint)function.ParameterCount
+            || receiver.Type != function.Variables[receiver.Variable].Type)
+        {
+            return null;
+        }
+
+        var baseVariableIndex = receiver.Variable;
+        var standardClassIndex = -1;
+        if (baseVariableIndex == 0)
+        {
+            if (function.ParameterCount != 1 || fieldPath.Count < 2
+                || ManagedClassTypes.IsOptional(receiver.Type)
+                || !ManagedClassTypes.IsClass(receiver.Type)
+                || ManagedClassTypes.ClassIndex(receiver.Type) != classIndex)
+            {
+                return null;
+            }
+        }
+        else if (baseVariableIndex == 1
+            && function.ParameterCount == 2
+            && TryGetC1M1ImportedClassFieldType(receiver.Type, program,
+                standardClassIndexByIdentity, out standardClassIndex,
+                out _))
+        {
+            if (fieldPath.Count == 0)
+            {
+                return null;
+            }
+        }
+        else
         {
             return null;
         }
@@ -5454,7 +5505,7 @@ public static partial class TrRmExecutableCompiler
             var ownerType = fieldRead.Receiver.Type;
             int fieldDefRow;
             PrimitiveType fieldType;
-            if (index == 0)
+            if (index == 0 && baseVariableIndex == 0)
             {
                 if (!ManagedClassTypes.IsClass(ownerType)
                     || ManagedClassTypes.IsOptional(ownerType)
@@ -5471,6 +5522,31 @@ public static partial class TrRmExecutableCompiler
                 fieldType
                     = program.Classes[classIndex].Fields[fieldRead.Field]
                         .Type;
+            }
+            else if (index == 0)
+            {
+                var classFields
+                    = program.StandardClassDeclarations[standardClassIndex]
+                        .Declaration.Fields;
+                if (!TryGetC1M1ImportedClassFieldType(ownerType, program,
+                        standardClassIndexByIdentity,
+                        out var fieldOwnerStandardClassIndex, out _)
+                    || fieldOwnerStandardClassIndex != standardClassIndex
+                    || (uint)fieldRead.Field >= (uint)classFields.Length
+                    || !typeImportPlanByStandardClass.TryGetValue(
+                        standardClassIndex, out var importPlan)
+                    || !IsC1M1ImportedClassFieldImportable(
+                        program.StandardClassDeclarations[standardClassIndex]
+                            .Declaration,
+                        classFields[fieldRead.Field], importPlan)
+                    || !fieldDefRowByStandardClassAndIndex.TryGetValue((
+                        standardClassIndex, fieldRead.Field),
+                        out fieldDefRow))
+                {
+                    return null;
+                }
+
+                fieldType = classFields[fieldRead.Field].Type;
             }
             else
             {
@@ -5533,7 +5609,7 @@ public static partial class TrRmExecutableCompiler
 
         return new C1M1Construction2NestedFieldRead(
             fieldDefRows.MoveToImmutable(),
-            fieldTypes.MoveToImmutable());
+            fieldTypes.MoveToImmutable(), baseVariableIndex);
     }
 
     private static bool TryGetC1M1Construction2DirectFieldWrite(
@@ -6699,7 +6775,8 @@ public static partial class TrRmExecutableCompiler
         }
 
         var instance = program.GenericNominalTypeInstances[instanceIndex];
-        if (!instance.Arguments.IsEmpty || instance.Qualifiers != 0
+        if (!instance.Arguments.IsEmpty
+            || (instance.Qualifiers & ~0x01) != 0
             || instance.TypeSpecForm is not (0 or 0x02 or 0x03)
             || !standardClassIndexByIdentity.TryGetValue(
                 instance.Definition, out classIndex))
@@ -6855,6 +6932,48 @@ public static partial class TrRmExecutableCompiler
         };
         return fieldOrigin.ExpectedDeclaration is null
             || actualField == fieldOrigin.ExpectedDeclaration;
+    }
+
+    private static bool IsC1M1ImportedClassFieldImportable(
+        BoundStandardClassTypeView owner,
+        BoundStandardClassFieldDeclaration field,
+        C1M1ImportedClassImportPlan importPlan)
+    {
+        if (!SameA2SourceTypeProviderSnapshot(owner.Provider,
+                importPlan.Provider)
+            || field.DefinitionId >> 24 != 0x14
+            || (field.DefinitionId & 0x00FF_FFFF) == 0
+            || field.OwnerDefinitionId != owner.Identity.DefinitionId
+            || (field.Flags & 3) != 2
+            || (field.Flags & 0x08) != 0
+            || field.ExportKeys.IsDefaultOrEmpty)
+        {
+            return false;
+        }
+
+        var exportKeys = field.ExportKeys.ToHashSet(StringComparer.Ordinal);
+        if (exportKeys.Count != field.ExportKeys.Length
+            || exportKeys.Any(static key =>
+                !BoundEnumTypes.IsValidModuleDeclarationKey(key)))
+        {
+            return false;
+        }
+
+        if (!field.SelectedExportKeys.IsDefaultOrEmpty)
+        {
+            var selectedKeys = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var exportKey in field.SelectedExportKeys)
+            {
+                if (!BoundEnumTypes.IsValidModuleDeclarationKey(exportKey)
+                    || !exportKeys.Contains(exportKey)
+                    || !selectedKeys.Add(exportKey))
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
     }
 
     private static C1M1ImportedStructImportPlan
@@ -7085,7 +7204,8 @@ public static partial class TrRmExecutableCompiler
 
         foreach (var instance in program.GenericNominalTypeInstances)
         {
-            if (!instance.Arguments.IsEmpty || instance.Qualifiers != 0
+            if (!instance.Arguments.IsEmpty
+                || (instance.Qualifiers & ~0x01) != 0
                 || instance.TypeSpecForm is not (0 or 0x02 or 0x03)
                 || !IsImportedNominalIdentity(instance.Definition))
             {
