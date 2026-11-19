@@ -135,7 +135,13 @@ remain unsupported in this type-only route.
 On the consumer side, class-reference re-emission now carries local no-op
 unit module functions with immutable scalar or selected nongeneric class
 value parameters, including the exact method-label/CM1 parameter-surface
-forms. The exact label-free Construction-2 single-root API path now re-emits
+forms. The exact label-free Construction-2 full-module reference also selects
+local and imported class roots and exposes exported nongeneric top-level
+function views with the bounded unit, scalar, class-handle and plain
+checked-reference signature forms; a producer/reference/downstream-call
+regression is added but remains unverified under the active hold. Source-free
+re-emission of these top-level functions remains open. The exact label-free
+Construction-2 single-root API path now re-emits
 field-only I/P Construction clauses and supported Body maps and lowers a
 top-level direct unit- or scalar-returning call to a selected ordinary class
 MethodDef with receiver-first MethodMap inputs, including zero-payload unit

@@ -284,7 +284,8 @@ public static partial class TrRmExecutableCompiler
         ImmutableArray<(string ProviderIdentity, string ExportKey)>
             selectedImportedClassTypeKeys = default,
         bool allowClassLayoutQueryBody = false,
-        bool resolveAllClassFieldTypes = false)
+        bool resolveAllClassFieldTypes = false,
+        bool includeModuleFunctions = false)
     {
         var isEN1 = IsSelectedC1EnumClosureSchemaIdentity(
             schemaIdentities[0]);
@@ -1679,6 +1680,109 @@ public static partial class TrRmExecutableCompiler
                             defaults.ToImmutable(),
                     });
                 }
+            }
+        }
+
+        if (includeModuleFunctions)
+        {
+            if (!StringComparer.Ordinal.Equals(schemaIdentities[0],
+                    StandardC1M1Construction2SchemaIdentity))
+            {
+                throw Unsupported(
+                    "The bounded full-module class reference retains top-level functions only for exact Construction-2.");
+            }
+
+            foreach (var (definitionId, exportKey) in
+                rootTables.Exports.GetExportsForModule(rootModuleRow))
+            {
+                if ((definitionId >> 24) != 0x16)
+                {
+                    continue;
+                }
+
+                var methodRow = GetMethodDefRow(definitionId);
+                var signatureRow
+                    = rootTables.Methods.GetSignature(methodRow);
+                if (rootTables.Methods.GetOwnerType(methodRow) != 0
+                    || rootTables.Signatures.GetReceiverTypeSpec(
+                        signatureRow) != 0
+                    || rootTables.Signatures.GetGenericRange(
+                        signatureRow).Count != 0
+                    || !TryGetClassMethodResultType(
+                        rootTables.Signatures.GetResultTypeSpec(
+                            signatureRow), out var returnType))
+                {
+                    throw Unsupported(
+                        "A selected C2 module function requires a bounded non-generic signature without a receiver.");
+                }
+
+                var (parameterStart, parameterCount)
+                    = rootTables.Signatures.GetParamRange(signatureRow);
+                if (parameterCount > SemanticVerifier.MaximumArguments)
+                {
+                    throw Unsupported(
+                        "A selected C2 module function exceeds the checked logical parameter limit.");
+                }
+
+                var variables
+                    = ImmutableArray.CreateBuilder<BoundVariable>(
+                        parameterCount);
+                for (var ordinal = 0; ordinal < parameterCount; ordinal++)
+                {
+                    var parameterRow = parameterStart + ordinal;
+                    if (rootTables.Parameters.GetMode(parameterRow) != 0
+                        || !TryGetClassMethodParameterType(
+                            rootTables.Parameters.GetTypeSpec(parameterRow),
+                            rootTables.Parameters.GetFlags(parameterRow),
+                            out var parameterType,
+                            out var isImplicitRef))
+                    {
+                        throw Unsupported(
+                            "A selected C2 module function has an unsupported parameter mode or type.");
+                    }
+
+                    variables.Add(new BoundVariable(
+                        "arg" + ordinal.ToString(
+                            System.Globalization.CultureInfo.InvariantCulture),
+                        parameterType, false, default) {
+                        IsImplicitRef = isImplicitRef,
+                    });
+                }
+
+                var dependencyClauses
+                    = rootTables.Contracts.GetDependencyContractRows(
+                            methodRow)
+                        .Select(static row => row.Contract)
+                        .ToImmutableArray();
+                var effectsMask
+                    = rootTables.Contracts.GetEffectsMask(methodRow);
+                if ((effectsMask & ~6u) != 0
+                    || !importedFunctionNames.Add(exportKey))
+                {
+                    throw Invalid(
+                        "A selected C2 module function has conflicting effects or an ExportKey collision.");
+                }
+
+                functions.Add(new BoundFunction(exportKey, returnType,
+                    variables.MoveToImmutable(), parameterCount,
+                    new BoundBlock([], default), default) {
+                    IsExternal = true,
+                    IsModuleReference = true,
+                    RequiresUnsafeCaller = (effectsMask & 4) != 0,
+                    DeclaredRequiresUnsafeCaller =
+                        (effectsMask & 4) != 0,
+                    DoesNotReturn = (effectsMask & 2) != 0,
+                    DependencyContracts =
+                        DecodeC1M1ClassMethodDependencyContracts(
+                            dependencyClauses, parameterCount,
+                            hasReceiver: false),
+                    ModuleImport = new BoundModuleImport(
+                        moduleIdentity, exportKey,
+                        rootSnapshot.TargetRequirement,
+                        rootSnapshot.RuntimePolicy),
+                    OrdinaryParameterDefaults =
+                        ImmutableArray<BoundOrdinaryParameterDefault>.Empty,
+                });
             }
         }
 

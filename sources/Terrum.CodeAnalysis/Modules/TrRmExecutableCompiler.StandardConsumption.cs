@@ -232,6 +232,116 @@ public static partial class TrRmExecutableCompiler
         var (artifacts, schemaIdentities, selectedA3LayoutResourceLedger)
             = SnapshotStandardInputsForOperation(input, moduleIdentity,
                 providers);
+        if (coreExceptionIdentitySelections.IsDefaultOrEmpty
+            && coreContractFailureIdentitySelections.IsDefaultOrEmpty
+            && schemaIdentities.All(static schemaIdentity =>
+                StringComparer.Ordinal.Equals(schemaIdentity,
+                    StandardC1M1Construction2SchemaIdentity)))
+        {
+            var classModuleIndex = CreateForeignInvocationIndex(
+                artifacts[0], schemaIdentities[0],
+                selectedA3LayoutResourceLedger);
+            var classModuleTables = ValidateForeignInvocationArtifact(
+                classModuleIndex, schemaIdentities[0],
+                selectedA3LayoutResourceLedger,
+                createA3ResourceLedger: false);
+            var classModuleRow = FindModuleRow(classModuleTables.Modules,
+                moduleIdentity);
+            var selectedTypeRows = new HashSet<int>();
+            var selectedTypeKeys = new List<string>();
+            var uniqueTypeKeys = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var (definitionId, exportKey) in
+                classModuleTables.Exports.GetExportsForModule(
+                    classModuleRow))
+            {
+                if ((definitionId >> 24) == 0x13)
+                {
+                    var typeDefRow = GetTypeDefRow(definitionId);
+                    if (classModuleTables.TypeDefs.GetKind(typeDefRow) == 2)
+                    {
+                        selectedTypeRows.Add(typeDefRow);
+                        if (uniqueTypeKeys.Add(exportKey))
+                        {
+                            selectedTypeKeys.Add(exportKey);
+                        }
+                    }
+                }
+            }
+
+            var selectedImportedTypeKeys
+                = ImmutableArray.CreateBuilder<
+                    (string ProviderIdentity, string ExportKey)>();
+            var uniqueImportedTypeKeys
+                = new HashSet<(string ProviderIdentity, string ExportKey)>();
+            for (var importRow = 1;
+                importRow <= classModuleTables.Imports.Count; importRow++)
+            {
+                var moduleRefRow = classModuleTables.Imports
+                    .GetModuleRefForImportRow(importRow);
+                if (classModuleTables.ModuleRefs.GetOwnerModule(
+                        moduleRefRow) != classModuleRow)
+                {
+                    continue;
+                }
+
+                var expectedDefinition = classModuleTables.Imports
+                    .GetExpectedDefinitionForImportRow(importRow);
+                if ((expectedDefinition >> 24) != 0x13)
+                {
+                    continue;
+                }
+
+                var typeDefRow = GetTypeDefRow(expectedDefinition);
+                if (classModuleTables.TypeDefs.GetKind(typeDefRow) != 2)
+                {
+                    continue;
+                }
+
+                selectedTypeRows.Add(typeDefRow);
+                var binding = classModuleTables.Imports
+                    .GetBindingForImportRow(importRow);
+                var key = (binding.ProducerIdentity, binding.ExportKey);
+                if (uniqueImportedTypeKeys.Add(key))
+                {
+                    selectedImportedTypeKeys.Add(key);
+                }
+            }
+
+            var selectedFieldKeys = new List<string>();
+            var uniqueFieldKeys = new HashSet<string>(
+                StringComparer.Ordinal);
+            foreach (var (definitionId, exportKey) in
+                classModuleTables.Exports.GetExportsForModule(
+                    classModuleRow))
+            {
+                if ((definitionId >> 24) != 0x14)
+                {
+                    continue;
+                }
+
+                var fieldRow = GetFieldDefRow(definitionId);
+                var ownerTypeDefRow = classModuleTables.Fields
+                    .GetOwnerTypeDef(fieldRow);
+                if (selectedTypeRows.Contains(ownerTypeDefRow)
+                    && classModuleTables.TypeDefs.GetKind(
+                        ownerTypeDefRow) == 2
+                    && uniqueFieldKeys.Add(exportKey))
+                {
+                    selectedFieldKeys.Add(exportKey);
+                }
+            }
+
+            if (selectedTypeRows.Count != 0)
+            {
+                return CreateC1M1ClassSourceTypeReference(artifacts,
+                    schemaIdentities, moduleIdentity,
+                    selectedTypeKeys.ToArray(),
+                    selectedFieldKeys.ToArray(),
+                    selectedImportedTypeKeys.ToImmutable(),
+                    includeModuleFunctions: true);
+            }
+        }
+
         if (StringComparer.Ordinal.Equals(schemaIdentities[0],
                 StandardC1M1Construction2L1R1ClassParameterDefaultsSchemaIdentity))
         {

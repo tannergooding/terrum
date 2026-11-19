@@ -322,6 +322,64 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
+    public void BindsC2ModuleFunctionWithClassParameterFromFullReference()
+    {
+        const string moduleIdentity = "C2ClassFunctionProvider";
+        var tree = SyntaxTree.Parse("""
+            public class Box {
+                public int32 Value;
+                public Box(int32 value) { Value = value; }
+            }
+            public void Consume(Box value, int32 count) {}
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var classMembers = classDeclaration.Children.OfType<SyntaxNode>();
+        var fieldDeclaration = classMembers.Single(static node =>
+            node.Kind == SyntaxKind.FieldDeclaration);
+        var constructorDeclaration = classMembers.Single(static node =>
+            node.Kind == SyntaxKind.ConstructorDeclaration);
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            program, moduleIdentity,
+            C1M1Construction2SchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, 0,
+                    classDeclaration.Span, "BoxKey", [
+                        new TrRmSourceClassMemberExport(0,
+                            fieldDeclaration.Span, "Box.Value"),
+                        new TrRmSourceClassMemberExport(0,
+                            constructorDeclaration.Span, "Box.Initialize") {
+                            ConstructionProjectionExportKey = "Box.Create",
+                        },
+                    ]),
+            ]);
+
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(
+                C1M1Construction2SchemaIdentity, artifact),
+            moduleIdentity, []);
+        Assert.That(reference.StandardClassDeclarations.Select(
+                static declaration => declaration.Declaration.Name),
+            Does.Contain("Box"));
+        Assert.That(reference.Functions.Select(static function => function.Name),
+            Does.Contain("Consume"));
+
+        var downstream = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public void Forward(Box value, int32 count) {
+                Consume(value, count);
+            }
+            """), reference);
+        Assert.That(downstream.HasErrors, Is.False,
+            string.Join(Environment.NewLine, downstream.Diagnostics));
+    }
+
+    [Test]
     public void EmitsMixedParameterAndConstantConstructorFieldStores()
     {
         var tree = SyntaxTree.Parse("""
