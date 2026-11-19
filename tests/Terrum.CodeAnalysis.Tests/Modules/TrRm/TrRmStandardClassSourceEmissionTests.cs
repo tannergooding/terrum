@@ -348,6 +348,11 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     if (condition) { return left + right; }
                     else { return left - right; }
                 }
+                public static int32 SelectUnary(bool condition,
+                    int32 value) {
+                    if (condition) { return -value; }
+                    else { return ~value; }
+                }
                 public static int32 SelectNested(bool first, bool second,
                     int32 innerTrue, int32 innerFalse, int32 outerFalse) {
                     if (first) {
@@ -406,6 +411,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name == "SelectNested"));
+        var selectUnary = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "SelectUnary"));
 
         var artifact = TrRmExecutableCompiler.EmitStandard(program,
             "ConditionalClassMethod", C1M1Construction2SchemaIdentity,
@@ -432,6 +441,8 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                             "Box.SelectArithmetic"),
                         new TrRmSourceClassMemberExport(0,
                             selectNested.Span, "Box.SelectNested"),
+                        new TrRmSourceClassMemberExport(0,
+                            selectUnary.Span, "Box.SelectUnary"),
                         new TrRmSourceClassMemberExport(0,
                             selectInstance.Span, "Box.SelectInstance"),
                     ]),
@@ -542,6 +553,30 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 0xD5, 0, 1, 0,
                 0xD5, 1, 2, 0,
                 0xC0, 0x02, 0xF0, 0x10,
+                0x17, 0,
+            }));
+
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.SelectUnary", out var unaryDefinition), Is.True);
+        var unaryMethodRow
+            = checked((int)(unaryDefinition & 0x00FF_FFFF));
+        var unaryBodyRow = tables.Methods.GetBodyRow(unaryMethodRow);
+        Assert.That(unaryBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(unaryBodyRow,
+            tables.Contracts.Count);
+        tables.ValidateRegisterBodyMapsForMethod(unaryMethodRow);
+        var unaryBody = tables.Bodies.GetRegisterBody(unaryBodyRow,
+            tables.Contracts.Count);
+        Assert.That(unaryBody.GetBlockCode(1).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD5, 0, 1, 0,
+                0xC0, 0x04, 0xF0, 0xF0,
+                0x17, 0,
+            }));
+        Assert.That(unaryBody.GetBlockCode(2).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD5, 0, 1, 0,
+                0xC1, 0x04, 0xF0, 0xF0,
                 0x17, 0,
             }));
 

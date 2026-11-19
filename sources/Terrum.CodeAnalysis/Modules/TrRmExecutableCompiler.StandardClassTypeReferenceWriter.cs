@@ -2267,6 +2267,54 @@ public static partial class TrRmExecutableCompiler
                 ];
             }
 
+            if (value is BoundUnary unary
+                && unary.Operand is BoundRead operand
+                && unary.Type == function.ReturnType
+                && IsC1M1Construction2BodyNumericType(unary.Type)
+                && operand.Type == unary.Type)
+            {
+                var instructions = new List<byte>(10);
+                AppendHomeLoad(instructions, 0, operand.Variable);
+                byte opcode;
+                byte control;
+                if (PrimitiveTypeFacts.IsFloating(unary.Type))
+                {
+                    if (unary.Operator != TokenKind.Minus)
+                    {
+                        throw new InvalidDataException(
+                            "A Construction-2 conditional Body has an unsupported floating unary operation.");
+                    }
+
+                    opcode = 0xC0;
+                    control = 0x25;
+                }
+                else
+                {
+                    (opcode, control)
+                        = (unary.Operator, unary.OverflowBehavior) switch
+                        {
+                            (TokenKind.Tilde, _)
+                                => ((byte)0xC1, (byte)0x04),
+                            (TokenKind.Minus,
+                                BoundIntegerOverflowBehavior.Checked)
+                                => ((byte)0xC0, (byte)0x04),
+                            (TokenKind.Minus,
+                                BoundIntegerOverflowBehavior.Wrapping)
+                                => ((byte)0xC0, (byte)0x08),
+                            _ => throw new InvalidDataException(
+                                "A Construction-2 conditional Body has an unsupported integer unary operation."),
+                        };
+                }
+
+                instructions.Add(opcode);
+                instructions.Add(control);
+                instructions.Add(0xF0);
+                instructions.Add(0xF0);
+                instructions.Add(0x17);
+                instructions.Add(0);
+                return instructions.ToArray();
+            }
+
             if (value is BoundBinary binary
                 && binary.Left is BoundRead left
                 && binary.Right is BoundRead right
@@ -4297,7 +4345,38 @@ public static partial class TrRmExecutableCompiler
                 return IsScalarBinaryReturn(binary);
             }
 
+            if (value is BoundUnary unary)
+            {
+                return IsScalarUnaryReturn(unary);
+            }
+
             return false;
+        }
+
+        bool IsScalarUnaryReturn(BoundUnary unary)
+        {
+            if (unary.Type != function.ReturnType
+                || !IsC1M1Construction2BodyNumericType(unary.Type)
+                || unary.Operand is not BoundRead operand
+                || operand.Type != unary.Type
+                || !IsScalarRead(operand))
+            {
+                return false;
+            }
+
+            if (PrimitiveTypeFacts.IsFloating(unary.Type))
+            {
+                return unary.Operator == TokenKind.Minus;
+            }
+
+            return unary.Operator switch
+            {
+                TokenKind.Tilde => true,
+                TokenKind.Minus => unary.OverflowBehavior is
+                    BoundIntegerOverflowBehavior.Checked
+                    or BoundIntegerOverflowBehavior.Wrapping,
+                _ => false,
+            };
         }
 
         bool IsScalarBinaryReturn(BoundBinary binary)
@@ -4359,6 +4438,7 @@ public static partial class TrRmExecutableCompiler
                 BoundReturn { Value: BoundRead read } => read,
                 BoundReturn { Value: BoundConstant constant } => constant,
                 BoundReturn { Value: BoundBinary binary } => binary,
+                BoundReturn { Value: BoundUnary unary } => unary,
                 _ => null,
             };
         }
