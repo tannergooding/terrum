@@ -198,8 +198,9 @@ supported Copy-struct value parameters and plain readonly scalar `ref<T>`
 parameters; `implicit ref<T>` retains Param flag `0x01`. Writable, GC,
 optional, initialization and nested-reference forms remain outside this
 subset. Source-free class reference views reconstruct plain scalar
-checked-reference parameter identities for callable MethodDef proxies and
-preserve the implicit-reference flag, so caller adaptation survives reload.
+checked-reference parameter identities for callable local and imported
+MethodDef proxies and preserve the implicit-reference flag, so caller
+adaptation survives reload.
 A caller-source implicit-reference adaptation regression is added, but it
 and the other producer regressions remain unverified under the hold.
 

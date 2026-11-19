@@ -5011,6 +5011,78 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
+    public void BindsImportedImplicitReferenceMethodsAfterReemission()
+    {
+        var schemaIdentity
+            = C1M1Construction2ClassParameterDefaultsSchemaIdentity;
+        var expectedArtifact = EmitClassMethodReemissionArtifact(
+            "MethodExpected", 7, includeImplicitRefMethod: true);
+        var providerArtifact = EmitClassMethodReemissionArtifact(
+            "MethodProvider", 9, includeImplicitRefMethod: true);
+        var consumerArtifact = CreateExpectedClassMethodImportArtifact(
+            expectedArtifact, providerArtifact, "MethodConsumer",
+            "MethodProvider", ["Box.ObserveImplicit"],
+            rootClassExportKey: "ContainerKey");
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
+            "MethodConsumer", [providerInput], ["ContainerKey"]);
+        var sourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), reference);
+        Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceFreeCompilation.Diagnostics));
+
+        var reemitted = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)sourceFreeCompilation.Program!,
+            "MethodConsumerReemitted", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var reemittedTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                        reemitted));
+        var importedMethodRow = Enumerable.Range(1,
+                reemittedTables.Imports.Count)
+            .Single(row => reemittedTables.Imports
+                .GetBindingForImportRow(row).ExportKey
+                == "Box.ObserveImplicit");
+        var expectedMethodDefinition = reemittedTables.Imports
+            .GetExpectedDefinitionForImportRow(importedMethodRow);
+        var expectedMethodRow = checked((int)(
+            expectedMethodDefinition & 0x00FF_FFFF));
+        var expectedSignature = reemittedTables.Methods
+            .GetSignature(expectedMethodRow);
+        var (parameterStart, parameterCount)
+            = reemittedTables.Signatures.GetParamRange(expectedSignature);
+        Assert.That(parameterCount, Is.EqualTo(1));
+        Assert.That(reemittedTables.Parameters.GetMode(parameterStart),
+            Is.Zero);
+        Assert.That(reemittedTables.Parameters.GetFlags(parameterStart),
+            Is.EqualTo(1));
+        var parameterType = reemittedTables.TypeSpecs.GetTypeSpecRef(
+            reemittedTables.Parameters.GetTypeSpec(parameterStart));
+        Assert.That(parameterType.Form, Is.EqualTo((byte)0x07));
+        Assert.That(parameterType.Qualifiers, Is.Zero);
+
+        var reloadedReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+                "MethodConsumerReemitted", [providerInput],
+                ["ContainerKey"]);
+        var callerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                public void Forward(Box target, int32 value) {
+                    target.ObserveImplicit(value);
+                }
+                """), reloadedReference);
+        Assert.That(callerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                callerCompilation.Diagnostics));
+    }
+
+    [Test]
     public void ReemitsLocalClassFieldReadBodiesWithoutSource()
     {
         var schemaIdentity
@@ -5546,7 +5618,8 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         string moduleIdentity, int defaultValue,
         bool includePrefix = false, string parameterType = "int32",
         bool readIsUnsafe = false,
-        bool includePrefixType = false, bool mutableReceiver = false)
+        bool includePrefixType = false, bool mutableReceiver = false,
+        bool includeImplicitRefMethod = false)
     {
         var prefix = includePrefix
             ? "public class Prefix { public static int32 Before() { return 1; } }"
@@ -5561,6 +5634,9 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             ? "public mut int32 Value;" : "public int32 Value;";
         var mutableMethod = mutableReceiver
             ? "public mut void ReadMutable() {}" : string.Empty;
+        var implicitRefMethod = includeImplicitRefMethod
+            ? "public void ObserveImplicit(implicit ref<int32> value) {}"
+            : string.Empty;
         var tree = SyntaxTree.Parse($$"""
             {{prefix}}
             {{boxDeclaration}}
@@ -5573,6 +5649,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     return value;
                 }
                 {{mutableMethod}}
+                {{implicitRefMethod}}
             }
             public class Container {
                 public int32 Marker;
@@ -5617,6 +5694,14 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     && member.Children.OfType<SyntaxTokenElement>().Any(
                         static token => token.Token.Name == "ReadMutable"))
             : null;
+        var observeImplicitDeclaration = includeImplicitRefMethod
+            ? boxDeclaration.Children.OfType<SyntaxNode>()
+                .Single(static member =>
+                    member.Kind == SyntaxKind.FunctionDeclaration
+                    && member.Children.OfType<SyntaxTokenElement>().Any(
+                        static token =>
+                            token.Token.Name == "ObserveImplicit"))
+            : null;
         var boxClassIndex = Enumerable.Range(0, program.Classes.Length)
             .Single(index => StringComparer.Ordinal.Equals(
                 program.Classes[index].Name, "Box"));
@@ -5636,6 +5721,12 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             boxMemberExports.Add(new TrRmSourceClassMemberExport(
                 boxClassIndex, readMutableDeclaration.Span,
                 "Box.ReadMutable"));
+        }
+        if (observeImplicitDeclaration is not null)
+        {
+            boxMemberExports.Add(new TrRmSourceClassMemberExport(
+                boxClassIndex, observeImplicitDeclaration.Span,
+                "Box.ObserveImplicit"));
         }
 
         return TrRmExecutableCompiler.EmitStandard(program, moduleIdentity,
