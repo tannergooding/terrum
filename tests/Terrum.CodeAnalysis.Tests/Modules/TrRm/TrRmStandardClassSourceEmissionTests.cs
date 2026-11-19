@@ -2145,6 +2145,13 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 public mut int32 Combine(int32 left, int32 right) {
                     return Step(left, right) + right;
                 }
+                public int32 Observe(int32 left, int32 right) {
+                    return left;
+                }
+                public mut int32 CombineReadOnly(
+                    int32 left, int32 right) {
+                    return Observe(left, right) + right;
+                }
             }
             """);
         var compilation = Compilation.CreateLibrary(tree);
@@ -2166,6 +2173,14 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name == "Combine"));
+        var observe = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Observe"));
+        var combineReadOnly = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "CombineReadOnly"));
         var artifact = TrRmExecutableCompiler.EmitStandard(program,
             "Construction2WritableReceiverCall",
             C1M1Construction2SchemaIdentity,
@@ -2184,6 +2199,11 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                             "member.crate.step"),
                         new TrRmSourceClassMemberExport(0, combine.Span,
                             "member.crate.combine"),
+                        new TrRmSourceClassMemberExport(0, observe.Span,
+                            "member.crate.observe"),
+                        new TrRmSourceClassMemberExport(0,
+                            combineReadOnly.Span,
+                            "member.crate.combine-readonly"),
                     ]),
             ]);
         var tables = TrRmStructuralMetadataValidator
@@ -2208,6 +2228,21 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         Assert.That(callSite[0], Is.EqualTo(0x02));
         Assert.That(callSite[20], Is.EqualTo(2));
         Assert.That(callSite[21], Is.EqualTo(4));
+
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "member.crate.combine-readonly",
+            out var readOnlyDefinition), Is.True);
+        var combineReadOnlyMethodRow = checked((int)(
+            readOnlyDefinition & 0x00FF_FFFF));
+        var combineReadOnlyBodyRow
+            = tables.Methods.GetBodyRow(combineReadOnlyMethodRow);
+        Assert.That(combineReadOnlyBodyRow, Is.GreaterThan(0));
+        var combineReadOnlyBody = tables.Bodies.GetRegisterBody(
+            combineReadOnlyBodyRow, tables.Contracts.Count);
+        var readOnlyCallSite = combineReadOnlyBody.GetRecord(1);
+        Assert.That(readOnlyCallSite[0], Is.EqualTo(0x02));
+        Assert.That(readOnlyCallSite[20], Is.EqualTo(2));
+        Assert.That(readOnlyCallSite[21], Is.EqualTo(3));
     }
 
     [Test]
