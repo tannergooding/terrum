@@ -467,18 +467,25 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     [Test]
     public void EmitsPartialConstructorUsingItsPrimaryIdentityAndSecondaryBody()
     {
-        var tree = SyntaxTree.Parse("""
-            public class Box {
+        var primaryTree = SyntaxTree.Parse("""
+            public partial class Box {
                 public int32 Value;
                 public partial Box(int32 value);
+            }
+            """);
+        var secondaryTree = SyntaxTree.Parse("""
+            public partial class Box {
                 partial Box(int32 value) { Value = value; }
             }
             """);
-        var compilation = Compilation.CreateLibrary(tree);
+        var compilation = Compilation.CreateLibrary([
+            primaryTree,
+            secondaryTree,
+        ]);
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = (BoundProgram)compilation.Program!;
-        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+        var classDeclaration = primaryTree.Root.Children.OfType<SyntaxNode>()
             .Single(static node =>
                 node.Kind == SyntaxKind.ClassDeclaration);
         var members = classDeclaration.Children.OfType<SyntaxNode>();
@@ -488,6 +495,18 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             node.Kind == SyntaxKind.ConstructorDeclaration
             && node.Children.OfType<SyntaxNode>().Any(
                 static child => child.Kind == SyntaxKind.ExternalBody));
+        var secondary = secondaryTree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration)
+            .Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ConstructorDeclaration);
+        var function = program.Functions.Single(static candidate =>
+            candidate.IsClassConstructor);
+        Assert.That(function.SourceDeclarationInputOrdinal, Is.EqualTo(0));
+        Assert.That(function.SourceInputOrdinal, Is.EqualTo(1));
+        Assert.That(function.SourceDeclarationSpan, Is.EqualTo(primary.Span));
+        Assert.That(function.Span, Is.EqualTo(secondary.Span));
 
         var artifact = TrRmExecutableCompiler.EmitStandard(program,
             "Construction2PartialBox",
