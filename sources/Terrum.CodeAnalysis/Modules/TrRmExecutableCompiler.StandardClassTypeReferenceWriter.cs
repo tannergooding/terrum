@@ -8007,13 +8007,21 @@ public static partial class TrRmExecutableCompiler
                 }
             }
         }
+        var methodSignatureNominalIdentities
+            = new HashSet<BoundGenericNominalTypeIdentity>();
+        if (!AddC1M1GenericMethodNominalIdentities(program,
+                methodSignatureNominalIdentities))
+        {
+            return false;
+        }
 
         bool IsImportedNominalIdentity(
             BoundGenericNominalTypeIdentity identity)
             => identity.IsValid
                 && (importedStructIdentities.Contains(identity)
                     || standardClassIdentities.Contains(identity)
-                    || relationNominalIdentities.Contains(identity));
+                    || relationNominalIdentities.Contains(identity)
+                    || methodSignatureNominalIdentities.Contains(identity));
 
         if ((!program.StandardClassDeclarations.IsEmpty
                 && !BoundStandardClassDeclarationContract.IsValidTable(
@@ -8033,11 +8041,15 @@ public static partial class TrRmExecutableCompiler
                 = importedStructIdentities.Contains(definition.Identity);
             var isRelationNominal
                 = relationNominalIdentities.Contains(definition.Identity);
-            if ((!definition.Formals.IsEmpty && !isRelationNominal)
+            var isMethodSignatureNominal
+                = methodSignatureNominalIdentities.Contains(
+                    definition.Identity);
+            if ((!definition.Formals.IsEmpty && !isRelationNominal
+                    && !isMethodSignatureNominal)
                 || !IsImportedNominalIdentity(definition.Identity)
                 || definition.NominalKind is not (1 or 2)
                 || (definition.NominalKind == 1 && !isImportedStruct
-                    && !isRelationNominal)
+                    && !isRelationNominal && !isMethodSignatureNominal)
                 || (definition.NominalKind == 2 && isImportedStruct))
             {
                 return false;
@@ -8048,16 +8060,120 @@ public static partial class TrRmExecutableCompiler
         {
             var isRelationNominal
                 = relationNominalIdentities.Contains(instance.Definition);
-            if ((!instance.Arguments.IsEmpty && !isRelationNominal)
+            var isMethodSignatureNominal
+                = methodSignatureNominalIdentities.Contains(
+                    instance.Definition);
+            if ((!instance.Arguments.IsEmpty && !isRelationNominal
+                    && !isMethodSignatureNominal)
                 || (instance.Qualifiers
                     & (isRelationNominal ? ~0x03 : ~0x01)) != 0
                 || (isRelationNominal
-                    ? instance.TypeSpecForm is not (0 or 0x02 or 0x03 or 0x05 or 0x06)
-                    : instance.TypeSpecForm is not (0 or 0x02 or 0x03)
-                        && !(instance.TypeSpecForm == 0x06
-                            && standardClassIdentities.Contains(
-                                instance.Definition)))
+                    ? instance.TypeSpecForm
+                        is not (0 or 0x02 or 0x03 or 0x05 or 0x06)
+                    : isMethodSignatureNominal
+                        ? instance.TypeSpecForm
+                            is not (0 or 0x02 or 0x03 or 0x05 or 0x06)
+                        : instance.TypeSpecForm is not (0 or 0x02 or 0x03)
+                            && !(instance.TypeSpecForm == 0x06
+                                && standardClassIdentities.Contains(
+                                    instance.Definition)))
                 || !IsImportedNominalIdentity(instance.Definition))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool AddC1M1GenericMethodNominalIdentities(
+        BoundProgram program,
+        HashSet<BoundGenericNominalTypeIdentity> identities)
+    {
+        var remaining = SemanticVerifier.MaximumAnalysisVisits;
+        foreach (var definition in program.GenericMethodDefinitions)
+        {
+            var proofProgram = definition.ProofProgram;
+            if ((uint)definition.FunctionIndex
+                >= (uint)proofProgram.Functions.Length)
+            {
+                return false;
+            }
+
+            var function = proofProgram.Functions[definition.FunctionIndex];
+            bool AddType(PrimitiveType type)
+            {
+                if (--remaining < 0
+                    || !SemanticVerifier.TryGetGenericMethodActualTypeTerm(
+                        type, function, proofProgram, 0, out var term))
+                {
+                    return false;
+                }
+
+                AddC1M1RelationNominalIdentities(term, identities);
+                return true;
+            }
+
+            if (!AddType(function.ReturnType))
+            {
+                return false;
+            }
+            foreach (var variable in function.Variables)
+            {
+                if (!AddType(variable.Type))
+                {
+                    return false;
+                }
+            }
+
+            foreach (var formal in definition.Formals)
+            {
+                if (formal.TypeDefault is { } typeDefault)
+                {
+                    AddC1M1RelationNominalIdentities(typeDefault.Term,
+                        identities);
+                }
+            }
+
+            var valid = true;
+            if (!BoundTreeTraversal.VisitExpressions(function.Body,
+                    expression =>
+                    {
+                        if (--remaining < 0
+                            || !AddType(expression.Type))
+                        {
+                            valid = false;
+                            return;
+                        }
+
+                        if (expression is not BoundCall call)
+                        {
+                            return;
+                        }
+
+                        if (call.GenericMethodCall is { } genericCall)
+                        {
+                            foreach (var argument in genericCall.TypeArguments)
+                            {
+                                if (!AddType(argument))
+                                {
+                                    valid = false;
+                                    return;
+                                }
+                            }
+                        }
+
+                        foreach (var argument
+                            in call.ImportedGenericMethodTypeArguments)
+                        {
+                            if (!AddType(argument))
+                            {
+                                valid = false;
+                                return;
+                            }
+                        }
+                    })
+                || !valid)
             {
                 return false;
             }

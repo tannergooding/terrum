@@ -5035,6 +5035,156 @@ internal sealed class TrRmGenericMethodSourceWriterTests
     }
 
     [Test]
+    public void EmitsImportedGenericNominalClassMethodSignature()
+    {
+        var typeTree = SyntaxTree.Parse("""
+            namespace Example {
+                public T Identity<T>(T value) { return move value; }
+                public T Forward<T>(T value) {
+                    return Identity<T>(move value);
+                }
+            }
+            """);
+        var typeCompilation = Compilation.CreateLibrary(typeTree);
+        Assert.That(typeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                typeCompilation.Diagnostics));
+        var typeProgram = typeCompilation.Program!;
+        var typeProviderIdentity = "cm1.generic-type.provider";
+        var typeProviderSchema
+            = TrRmArtifactSchema
+                .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft;
+        var typeBaseArtifact = TrRmExecutableCompiler.EmitStandard(
+            typeProgram, typeProviderIdentity, CM1SchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(),
+            typeProgram.GenericMethodDefinitions.Select(definition =>
+                new TrRmSourceGenericMethodExport(typeProgram,
+                    definition.SourceInputOrdinal, definition.Span,
+                    definition.Name)).ToArray());
+        var typeArtifact = AddConstructedGenericNominalMethodTypes(
+            typeBaseArtifact, includeDeclaredField: true,
+            selectedSchema: typeProviderSchema);
+        var typeInput = new TrRmStandardArtifactInput(CM1SchemaIdentity,
+            typeArtifact);
+        var typeReference = TrRmExecutableCompiler.CreateStandardReference(
+            typeInput, typeProviderIdentity);
+
+        var classTree = SyntaxTree.Parse("""
+            namespace Example {
+                public class Container {
+                    public static Box<T> Accept<T>(Box<T> value) {
+                        return move value;
+                    }
+                }
+            }
+            """);
+        var classCompilation = Compilation.CreateLibrary(classTree,
+            typeReference);
+        Assert.That(classCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                classCompilation.Diagnostics));
+        var classProgram = classCompilation.Program!;
+        var method = classProgram.GenericMethodDefinitions.Single();
+        var classDeclaration = classTree.Root.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.NamespaceDeclaration)
+            .Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var classIndex = Enumerable.Range(0, classProgram.Classes.Length)
+            .Single(index => classProgram.Classes[index].Name == "Container");
+        var classArtifact = TrRmExecutableCompiler.EmitStandard(
+            classProgram, "cm1.generic-type.class-provider",
+            CM1SchemaIdentity, 0, [], [
+                new TrRmSourceGenericMethodExport(classProgram,
+                    method.SourceInputOrdinal, method.Span,
+                    "Container.Accept"),
+            ], [
+                new TrRmSourceClassExport(classProgram, classIndex,
+                    classDeclaration.Span, "container-key", []),
+            ]);
+        var classTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                new TrRmArtifactIndex(classArtifact, typeProviderSchema));
+        Assert.That(classTables.Exports.TryGetDefinitionForKey(1,
+            "Container.Accept", out var methodDefId), Is.True);
+        var methodRow = checked((int)(methodDefId & 0x00FF_FFFF));
+        var signature = classTables.Methods.GetSignature(methodRow);
+        var resultTypeSpec = classTables.Signatures
+            .GetResultTypeSpec(signature);
+        Assert.That(classTables.TypeSpecs.GetTypeSpecRef(resultTypeSpec)
+            .Form, Is.EqualTo((byte)0x05));
+        var (formalFirst, formalCount)
+            = classTables.Signatures.GetGenericRange(signature);
+        Assert.That(formalCount, Is.EqualTo(1));
+        var (parameterFirst, parameterCount)
+            = classTables.Signatures.GetParamRange(signature);
+        Assert.That(parameterCount, Is.EqualTo(1));
+        var parameterTypeSpec = classTables.Parameters
+            .GetTypeSpec(parameterFirst);
+        Assert.That(classTables.TypeSpecs.GetTypeSpecRef(parameterTypeSpec)
+            .Form, Is.EqualTo((byte)0x05));
+        var genericDefinitionTypeSpec = BinaryPrimitives
+            .ReadUInt32LittleEndian(classTables.TypeSpecs.GetRow(
+                checked((int)parameterTypeSpec)).Slice(2, 4));
+        var genericDefinition
+            = classTables.TypeSpecs.GetTypeSpecRef(
+                genericDefinitionTypeSpec);
+        Assert.That(genericDefinition.Form, Is.EqualTo((byte)0x03));
+        var genericTypeImportRow = checked((int)genericDefinition.Row);
+        Assert.That(classTables.Imports
+            .GetExpectedDefinitionForImportRow(genericTypeImportRow) >> 24,
+            Is.EqualTo(0x13));
+        Assert.That(classTables.ModuleRefs.GetProducerIdentity(
+            classTables.Imports
+                .GetModuleRefForImportRow(genericTypeImportRow)),
+            Is.EqualTo(typeProviderIdentity));
+        var actualTypeSpec = BinaryPrimitives.ReadUInt32LittleEndian(
+            classTables.TypeSpecs.GetRow(
+                checked((int)parameterTypeSpec)).Slice(6, 4));
+        var actualType = classTables.TypeSpecs.GetTypeSpecRef(actualTypeSpec);
+        Assert.That(actualType.Form, Is.EqualTo((byte)0x04));
+        Assert.That(actualType.Row, Is.EqualTo(formalFirst));
+
+        var classReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(CM1SchemaIdentity, classArtifact),
+            "cm1.generic-type.class-provider", [typeInput],
+            ["container-key"]);
+        var relocatedTypeInput = new TrRmStandardArtifactInput(
+            CM1SchemaIdentity,
+            RelocateConstructedNominalProviderTypeDef(typeArtifact,
+                typeProviderSchema));
+        _ = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(CM1SchemaIdentity, classArtifact),
+            "cm1.generic-type.class-provider", [relocatedTypeInput],
+            ["container-key"]);
+        var incompatibleTypeArtifact
+            = AddConstructedGenericNominalMethodTypes(typeBaseArtifact,
+                includeDeclaredField: true, includeConstructedField: true,
+                selectedSchema: typeProviderSchema);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(CM1SchemaIdentity,
+                    classArtifact),
+                "cm1.generic-type.class-provider", [
+                    new TrRmStandardArtifactInput(CM1SchemaIdentity,
+                        incompatibleTypeArtifact),
+                ], ["container-key"]));
+        var consumer = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            namespace Example {
+                public class Consumer {
+                    public static Box<T> Forward<T>(Box<T> value) {
+                        return Container.Accept<T>(move value);
+                    }
+                }
+            }
+            """), classReference);
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
+    }
+
+    [Test]
     public void EmitsReadonlyInstanceCM1AR1ClassMethodRelations()
     {
         var tree = SyntaxTree.Parse("""
