@@ -1546,6 +1546,9 @@ public static partial class TrRmExecutableCompiler
                     var localCopyReturn
                         = TryGetC1M1Construction2LocalCopyReturn(
                             methodFunction);
+                    var localNumericUnaryReturn
+                        = TryGetC1M1Construction2LocalNumericUnaryReturn(
+                            methodFunction);
                     var localNumericBinaryReturn
                         = TryGetC1M1Construction2LocalNumericBinaryReturn(
                             methodFunction);
@@ -1565,6 +1568,7 @@ public static partial class TrRmExecutableCompiler
                             && conditionalReturn is null
                             && callNumericBinary is null
                             && !localCopyReturn
+                            && localNumericUnaryReturn is null
                             && !localNumericBinaryReturn)
                         || methodFunction.IsClassConstructor
                         || methodFunction.IsConstructor
@@ -1620,7 +1624,7 @@ public static partial class TrRmExecutableCompiler
                             && methodFunction.IsInternal))
                     {
                         throw Unsupported(
-                            "The bounded Construction-2 class method producer supports scalar static methods, exact identity forwarders, readonly instance int32/Boolean operations and same-class call-binary methods, scalar local-copy/binary returns, empty unit instance methods, readonly instance methods returning one scalar value parameter, direct scalar field reads and normal-result checked-reference returns to direct local or imported scalar fields, and direct or nested inline-struct scalar field writes.");
+                            "The bounded Construction-2 class method producer supports scalar static methods, exact identity forwarders, readonly instance int32/Boolean operations and same-class call-binary methods, scalar local-copy/unary/binary returns, empty unit instance methods, readonly instance methods returning one scalar value parameter, direct scalar field reads and normal-result checked-reference returns to direct local or imported scalar fields, and direct or nested inline-struct scalar field writes.");
                     }
 
                     if (methodFunction.ReturnType != PrimitiveType.Void)
@@ -1640,10 +1644,11 @@ public static partial class TrRmExecutableCompiler
                                 && conditionalReturn is null
                                 && callNumericBinary is null
                                 && !localCopyReturn
+                                && localNumericUnaryReturn is null
                                 && !localNumericBinaryReturn)
                             {
                                 throw Unsupported(
-                                    "The bounded Construction-2 instance method producer supports only unit, direct scalar-parameter, direct numeric/Boolean operations, same-class fixed-integer call-binary, local-copy/binary returns, direct scalar-field reads, normal-result checked-reference field returns and direct scalar-field writes.");
+                                    "The bounded Construction-2 instance method producer supports only unit, direct scalar-parameter, direct numeric/Boolean operations, same-class fixed-integer call-binary, local-copy/unary/binary returns, direct scalar-field reads, normal-result checked-reference field returns and direct scalar-field writes.");
                             }
                         }
 
@@ -1860,6 +1865,14 @@ public static partial class TrRmExecutableCompiler
                         encodedBody
                             = EncodeC1M1Construction2DirectNumericUnaryBody(
                                 methodFunction, directNumericUnary,
+                                Construction2ValueTypeSpecReference,
+                                contractRows.Count, schema);
+                    }
+                    else if (localNumericUnaryReturn is not null)
+                    {
+                        encodedBody
+                            = EncodeC1M1Construction2LocalNumericUnaryReturnBody(
+                                methodFunction, localNumericUnaryReturn,
                                 Construction2ValueTypeSpecReference,
                                 contractRows.Count, schema);
                     }
@@ -5207,6 +5220,129 @@ public static partial class TrRmExecutableCompiler
                 : schema.UsesGeneralPredicateGraphs());
     }
 
+    private static byte[] EncodeC1M1Construction2LocalNumericUnaryReturnBody(
+        BoundFunction function, BoundUnary unary,
+        Func<PrimitiveType, uint> typeSpecReferenceFor, int contractCount,
+        TrRmArtifactSchema schema)
+    {
+        var receiverCount = function.IsStatic ? 0 : 1;
+        var formalVariable = receiverCount;
+        var localVariable = function.ParameterCount;
+        if (function.ParameterCount != receiverCount + 1
+            || function.Variables.Length != function.ParameterCount + 1
+            || function.ReturnType != unary.Type
+            || !IsC1M1Construction2BodyNumericType(unary.Type)
+            || (!function.IsStatic && function.Variables[0].IsMutable)
+            || function.Variables[formalVariable].Type != unary.Type
+            || function.Variables[formalVariable].IsMutable
+            || function.Variables[formalVariable].IsOut
+            || function.Variables[formalVariable].IsInit
+            || function.Variables[formalVariable].IsImplicitRef
+            || function.Variables[formalVariable].IsInitializationLocal
+            || function.Variables[localVariable].Type != unary.Type
+            || function.Variables[localVariable].IsMutable
+            || function.Variables[localVariable].IsOut
+            || function.Variables[localVariable].IsInit
+            || function.Variables[localVariable].IsImplicitRef
+            || function.Variables[localVariable].IsInitializationLocal
+            || !function.Body.RetiredManagedLocals.IsEmpty
+            || function.Body.Statements is not [
+                BoundLocal local,
+                BoundReturn { Value: BoundUnary returnedUnary },
+            ]
+            || returnedUnary != unary
+            || local.Variable != localVariable
+            || local.Initializer is not BoundRead initialRead
+            || initialRead.Type != unary.Type
+            || initialRead.Variable != formalVariable
+            || unary.Operand is not BoundRead operand
+            || operand.Type != unary.Type
+            || operand.Variable != localVariable
+            || (PrimitiveTypeFacts.IsFloating(unary.Type)
+                ? unary.Operator != TokenKind.Minus
+                : unary.Operator is not (TokenKind.Minus
+                    or TokenKind.Tilde)))
+        {
+            throw Unsupported(
+                "A Construction-2 local-unary Body requires one same-typed numeric formal copy and a supported unary return.");
+        }
+
+        var typeTokens = new uint[function.Variables.Length];
+        var homeMap = new byte[checked(function.Variables.Length * 8)];
+        for (var variable = 0; variable < function.Variables.Length;
+            variable++)
+        {
+            typeTokens[variable] = CreateStandardBodyTypeMapToken(
+                typeSpecReferenceFor(function.Variables[variable].Type));
+        }
+
+        var maps = TrRmRegisterBodyMapBuilder.Create(typeTokens, []);
+        for (var variable = 0; variable < function.Variables.Length;
+            variable++)
+        {
+            var offset = variable * 8;
+            var role = !function.IsStatic && variable == 0 ? (byte)1
+                : variable < function.ParameterCount ? (byte)2 : (byte)3;
+            homeMap[offset] = role;
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                homeMap.AsSpan(offset + 2, 2),
+                maps.GetTypeMapIndex(typeTokens[variable]));
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                homeMap.AsSpan(offset + 4, 2),
+                role == 2
+                    ? checked((ushort)(variable - receiverCount))
+                    : (ushort)0);
+        }
+
+        var (opcode, control) = PrimitiveTypeFacts.IsFloating(unary.Type)
+            ? ((byte)0xC0, (byte)0x25)
+            : (unary.Operator, unary.OverflowBehavior) switch
+            {
+                (TokenKind.Tilde, _) => ((byte)0xC1, (byte)0x04),
+                (TokenKind.Minus,
+                    BoundIntegerOverflowBehavior.Checked)
+                    => ((byte)0xC0, (byte)0x04),
+                (TokenKind.Minus,
+                    BoundIntegerOverflowBehavior.Wrapping)
+                    => ((byte)0xC0, (byte)0x08),
+                _ => throw Unsupported(
+                    "The selected local unary Body does not encode this numeric operation."),
+            };
+        var code = new List<byte>(18);
+        AppendHomeLoad(formalVariable);
+        code.Add(0xD6);
+        code.Add(0x10);
+        code.Add(checked((byte)localVariable));
+        code.Add(checked((byte)(localVariable >> 8)));
+        AppendHomeLoad(localVariable);
+        code.Add(opcode);
+        code.Add(control);
+        code.Add(0xF0);
+        code.Add(0xF0);
+        code.Add(0x17);
+        code.Add(0);
+
+        ReadOnlyMemory<byte>[] records = [
+            new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 },
+        ];
+        return TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
+            default, default, default,
+            [new TrRmRegisterBodyBlock(0,
+                checked((uint)code.Count), 0)],
+            records, code.ToArray(), contractCount: contractCount,
+            schema: schema,
+            generalPredicateGraphsInitializationReferenceBodies
+                : schema.UsesGeneralPredicateGraphs());
+
+        void AppendHomeLoad(int homeIndex)
+        {
+            code.Add(0xD5);
+            code.Add(0);
+            code.Add(checked((byte)homeIndex));
+            code.Add(checked((byte)(homeIndex >> 8)));
+        }
+    }
+
     private static byte[] EncodeC1M1Construction2LocalNumericBinaryReturnBody(
         BoundFunction function,
         TrRmFrozenScalarValueBuilder frozenScalarValueBuilder,
@@ -7342,6 +7478,58 @@ public static partial class TrRmExecutableCompiler
             && initialRead.Variable == formalVariable
             && returnedRead.Type == operationType
             && returnedRead.Variable == localVariable;
+    }
+
+    private static BoundUnary?
+        TryGetC1M1Construction2LocalNumericUnaryReturn(
+            BoundFunction function)
+    {
+        var receiverCount = function.IsStatic ? 0 : 1;
+        var formalVariable = receiverCount;
+        var localVariable = function.ParameterCount;
+        if (function.ParameterCount != receiverCount + 1
+            || function.Variables.Length != function.ParameterCount + 1
+            || !function.Body.RetiredManagedLocals.IsEmpty
+            || function.Body.Statements is not [
+                BoundLocal local,
+                BoundReturn { Value: BoundUnary unary },
+            ])
+        {
+            return null;
+        }
+
+        var operationType = function.Variables[formalVariable].Type;
+        if (!IsC1M1Construction2BodyNumericType(operationType)
+            || function.ReturnType != operationType
+            || (!function.IsStatic && function.Variables[0].IsMutable)
+            || function.Variables[formalVariable].IsMutable
+            || function.Variables[formalVariable].IsOut
+            || function.Variables[formalVariable].IsInit
+            || function.Variables[formalVariable].IsImplicitRef
+            || function.Variables[formalVariable].IsInitializationLocal
+            || function.Variables[localVariable].Type != operationType
+            || function.Variables[localVariable].IsMutable
+            || function.Variables[localVariable].IsOut
+            || function.Variables[localVariable].IsInit
+            || function.Variables[localVariable].IsImplicitRef
+            || function.Variables[localVariable].IsInitializationLocal
+            || local.Variable != localVariable
+            || local.Initializer is not BoundRead initialRead
+            || initialRead.Type != operationType
+            || initialRead.Variable != formalVariable
+            || unary.Type != operationType
+            || unary.Operand is not BoundRead operand
+            || operand.Type != operationType
+            || operand.Variable != localVariable
+            || (PrimitiveTypeFacts.IsFloating(operationType)
+                ? unary.Operator != TokenKind.Minus
+                : unary.Operator is not (TokenKind.Minus
+                    or TokenKind.Tilde)))
+        {
+            return null;
+        }
+
+        return unary;
     }
 
     private static bool TryGetC1M1Construction2LocalNumericBinaryReturn(

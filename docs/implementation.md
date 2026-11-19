@@ -189,6 +189,9 @@ fixed-integer or floating CallSite bodies can feed a following same-typed
 binary/comparison with a direct formal or SF1 ConstantMap operand.
 Static and instance bodies support one-formal numeric local-copy returns and
 ordered numeric copy chains feeding numeric binary/comparison operations.
+They also emit bounded one-local unary returns after an exact numeric formal
+copy for static and readonly-instance methods; the new structural regression
+remains unverified under the active hold.
 Readonly instance bodies also return an explicit scalar parameter through
 ReturnHome, emit direct scalar FieldRead/FieldWrite descriptors, and use
 receiver/formal Homes in declaration order. Exact same-class static and

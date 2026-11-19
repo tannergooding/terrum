@@ -1290,6 +1290,124 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
+    public void EmitsLocalUnaryReturnsForStaticAndReadonlyInstanceMethods()
+    {
+        var tree = SyntaxTree.Parse("""
+            public class Box {
+                public int32 Value;
+                public Box(int32 value) { Value = value; }
+                public int32 NegatedCopy(int32 value) {
+                    int32 copy = value;
+                    return -copy;
+                }
+                public float32 NegatedFloatCopy(float32 value) {
+                    float32 copy = value;
+                    return -copy;
+                }
+                public static int32 StaticNegatedCopy(int32 value) {
+                    int32 copy = value;
+                    return -copy;
+                }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node => node.Kind == SyntaxKind.ClassDeclaration);
+        var members = classDeclaration.Children.OfType<SyntaxNode>().ToArray();
+        var classIndex = Enumerable.Range(0, program.Classes.Length)
+            .Single(index => program.Classes[index].Name == "Box");
+        var field = members.Single(static node =>
+            node.Kind == SyntaxKind.FieldDeclaration);
+        var constructor = members.Single(static node =>
+            node.Kind == SyntaxKind.ConstructorDeclaration);
+        SyntaxNode Method(string name)
+            => members.Single(node =>
+                node.Kind == SyntaxKind.FunctionDeclaration
+                && node.Children.OfType<SyntaxTokenElement>().Any(token =>
+                    StringComparer.Ordinal.Equals(token.Token.Name, name)));
+
+        var negatedCopy = Method("NegatedCopy");
+        var negatedFloatCopy = Method("NegatedFloatCopy");
+        var staticNegatedCopy = Method("StaticNegatedCopy");
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "LocalUnaryReturns",
+            C1M1Construction2ClassParameterDefaultsSchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, classIndex,
+                    classDeclaration.Span, "BoxKey", [
+                        new TrRmSourceClassMemberExport(0,
+                            field.Span, "Box.Value"),
+                        new TrRmSourceClassMemberExport(0,
+                            constructor.Span, "Box.Initialize") {
+                            ConstructionProjectionExportKey = "Box.Create",
+                        },
+                        new TrRmSourceClassMemberExport(0,
+                            negatedCopy.Span, "Box.NegatedCopy"),
+                        new TrRmSourceClassMemberExport(0,
+                            negatedFloatCopy.Span,
+                            "Box.NegatedFloatCopy"),
+                        new TrRmSourceClassMemberExport(0,
+                            staticNegatedCopy.Span, "Box.StaticNegatedCopy"),
+                    ]),
+            ]);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                        artifact));
+
+        void AssertUnaryBody(string exportKey, string functionName,
+            int expectedHomeCount)
+        {
+            Assert.That(tables.Exports.TryGetDefinitionForKey(1, exportKey,
+                out var definition), Is.True);
+            var methodRow = checked((int)(definition & 0x00FF_FFFF));
+            var bodyRow = tables.Methods.GetBodyRow(methodRow);
+            Assert.That(bodyRow, Is.GreaterThan(0));
+            tables.Bodies.ValidateSelectedImplementation(bodyRow,
+                tables.Contracts.Count);
+            var body = tables.Bodies.GetRegisterBody(bodyRow,
+                tables.Contracts.Count);
+            Assert.That(body.HomeCount, Is.EqualTo(expectedHomeCount));
+
+            var function = program.Functions.Single(candidate =>
+                candidate.Name == functionName);
+            var unary = (BoundUnary)((BoundReturn)function.Body
+                .Statements[^1]).Value!;
+            var (opcode, control) = unary.Type == PrimitiveType.Float32
+                ? ((byte)0xC0, (byte)0x25)
+                : ((byte)0xC0, unary.OverflowBehavior switch
+                {
+                    BoundIntegerOverflowBehavior.Checked => (byte)0x04,
+                    BoundIntegerOverflowBehavior.Wrapping => (byte)0x08,
+                    _ => throw new InvalidOperationException(
+                        "The local-unary fixture must select checked or wrapping arithmetic."),
+                });
+            var receiverCount = function.IsStatic ? 0 : 1;
+            var localVariable = function.ParameterCount;
+            Assert.That(body.GetBlockCode(0).ToArray(), Is.EqualTo(
+                new byte[] {
+                    0xD5, 0, checked((byte)receiverCount), 0,
+                    0xD6, 0x10, checked((byte)localVariable), 0,
+                    0xD5, 0, checked((byte)localVariable), 0,
+                        opcode, control, 0xF0, 0xF0,
+                    0x17, 0,
+                }));
+        }
+
+        AssertUnaryBody("Box.NegatedCopy", "NegatedCopy",
+            expectedHomeCount: 3);
+        AssertUnaryBody("Box.NegatedFloatCopy", "NegatedFloatCopy",
+            expectedHomeCount: 3);
+        AssertUnaryBody("Box.StaticNegatedCopy", "StaticNegatedCopy",
+            expectedHomeCount: 2);
+    }
+
+    [Test]
     public void EmitsNestedInlineStructFieldReadThroughPlaceSelections()
     {
         var tree = SyntaxTree.Parse("""
