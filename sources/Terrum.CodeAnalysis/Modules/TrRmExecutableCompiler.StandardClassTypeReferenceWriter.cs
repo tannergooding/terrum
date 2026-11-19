@@ -8555,7 +8555,7 @@ public static partial class TrRmExecutableCompiler
         }
         foreach (var definition in program.GenericNominalTypeDefinitions)
         {
-            if (definition.NominalKind != 1)
+            if (definition.NominalKind is not (1 or 2))
             {
                 continue;
             }
@@ -8572,32 +8572,49 @@ public static partial class TrRmExecutableCompiler
                     expectation.ExpectedDefinitionId);
                 if (rootTables.TypeDefs.GetOwnerModule(expectedTypeDefRow)
                         != rootModuleRow
-                    || rootTables.TypeDefs.GetKind(expectedTypeDefRow) != 1
+                    || rootTables.TypeDefs.GetKind(expectedTypeDefRow)
+                        != definition.NominalKind
                     || rootTables.TypeDefs.GetGenericRange(
                         expectedTypeDefRow).Count != 0
                     || rootTables.TypeDefs.GetContractRange(
                         expectedTypeDefRow).Count != 0
-                    || !bindingsByImportRow.TryAdd(expectation.ImportRow,
-                        expectation))
+                    || (bindingsByImportRow.TryGetValue(
+                            expectation.ImportRow, out var existingBinding)
+                        ? existingBinding != expectation
+                        : !bindingsByImportRow.TryAdd(
+                            expectation.ImportRow, expectation)))
                 {
                     throw new InvalidDataException(
-                        "A retained C1M1 struct Import expectation does not match its root snapshot.");
+                        "A retained C1M1 nominal Import expectation does not match its root snapshot.");
                 }
 
                 var typeDefView = CreateC1M1TypeDefEmissionView(
                     rootTables, rootSnapshot, expectedTypeDefRow);
-                if (typeDefView.Kind != 1
-                    || !typeDefViewsByOldRow.TryAdd(expectedTypeDefRow,
-                        typeDefView)
-                    || !exportsByOldRow.TryAdd(expectedTypeDefRow, []))
+                if (typeDefView.Kind != definition.NominalKind)
                 {
                     throw new InvalidDataException(
-                        "A retained C1M1 struct Import TypeDef is duplicated.");
+                        "A retained C1M1 nominal Import TypeDef has an invalid kind.");
+                }
+
+                if (!typeDefViewsByOldRow.ContainsKey(expectedTypeDefRow))
+                {
+                    if (!typeDefViewsByOldRow.TryAdd(expectedTypeDefRow,
+                            typeDefView)
+                        || !exportsByOldRow.TryAdd(expectedTypeDefRow, []))
+                    {
+                        throw new InvalidDataException(
+                            "A retained C1M1 nominal Import TypeDef is duplicated.");
+                    }
                 }
             }
         }
+        var methodConstraintTypeSpecSeeds
+            = GetC1M1ClassMethodConstraintTypeSpecSeeds(rootTables,
+                rootModuleRow, typeDefViewsByOldRow.Keys,
+                schema.UsesAssociatedRelationConstraints());
         AddC1M1LocalNonGenericTypeClosure(rootTables, rootModuleRow,
-            rootSnapshot, typeDefViewsByOldRow, exportsByOldRow);
+            rootSnapshot, typeDefViewsByOldRow, exportsByOldRow,
+            methodConstraintTypeSpecSeeds);
 
         var methodBindingsByImportRow = new SortedDictionary<int,
             BoundStandardClassMethodExpectation>();
@@ -11610,12 +11627,146 @@ public static partial class TrRmExecutableCompiler
         int rootModuleRow, BoundSourceTypeProviderSnapshot rootSnapshot,
         SortedDictionary<int, C1M1TypeDefEmissionView>
             typeDefViewsByOldRow,
-        Dictionary<int, ImmutableArray<string>> exportsByOldRow)
+        Dictionary<int, ImmutableArray<string>> exportsByOldRow,
+        ImmutableArray<uint> typeSpecSeeds)
     {
         var pendingTypeDefRows = new Queue<int>(typeDefViewsByOldRow.Keys);
         var pendingTypeSpecs = new Stack<(uint Reference, int Depth)>();
         var visitedTypeSpecs = new HashSet<int>();
         var remaining = SemanticVerifier.MaximumAnalysisVisits;
+        foreach (var typeSpecReference in typeSpecSeeds)
+        {
+            pendingTypeSpecs.Push((typeSpecReference, 0));
+        }
+
+        void DrainTypeSpecs()
+        {
+            while (pendingTypeSpecs.TryPop(out var pendingTypeSpec))
+            {
+                if (--remaining < 0
+                    || pendingTypeSpec.Depth
+                        > SemanticVerifier.MaximumDepth)
+                {
+                    throw Unsupported(
+                        "C1M1 class TypeSpec dependency closure exceeds its traversal limit.");
+                }
+
+                var reference = rootTables.TypeSpecs.GetTypeSpecRef(
+                    pendingTypeSpec.Reference);
+                if (!reference.IsRow
+                    || !visitedTypeSpecs.Add(reference.Row))
+                {
+                    continue;
+                }
+
+                var row = rootTables.TypeSpecs.GetRow(reference.Row);
+                switch (reference.Form)
+                {
+                    case 0x01:
+                    case 0x03:
+                    case 0x04:
+                        break;
+
+                    case 0x02:
+                    {
+                        var referencedTypeDefRow = checked((int)
+                            BinaryPrimitives.ReadUInt32LittleEndian(
+                                row[2..]));
+                        if (rootTables.TypeDefs.GetOwnerModule(
+                                referencedTypeDefRow)
+                            != rootModuleRow)
+                        {
+                            throw new InvalidDataException(
+                                "A C1M1 class TypeSpec directly references a TypeDef owned by another Module.");
+                        }
+
+                        var kind = rootTables.TypeDefs.GetKind(
+                            referencedTypeDefRow);
+                        if (kind == 3)
+                        {
+                            break;
+                        }
+                        if (kind is not (1 or 2))
+                        {
+                            throw Unsupported(
+                                "C1M1 class re-emission does not retain this local TypeDef dependency kind.");
+                        }
+
+                        if (rootTables.TypeDefs.GetGenericRange(
+                                referencedTypeDefRow).Count != 0
+                            || rootTables.TypeDefs.GetContractRange(
+                                referencedTypeDefRow).Count != 0)
+                        {
+                            throw Unsupported(
+                                "C1M1 class re-emission does not yet retain generic or contracted local TypeDef dependencies.");
+                        }
+
+                        if (!typeDefViewsByOldRow.ContainsKey(
+                                referencedTypeDefRow))
+                        {
+                            var dependencyView
+                                = CreateC1M1TypeDefEmissionView(rootTables,
+                                    rootSnapshot, referencedTypeDefRow);
+                            if (dependencyView.Kind != kind
+                                || !typeDefViewsByOldRow.TryAdd(
+                                    referencedTypeDefRow, dependencyView)
+                                || !exportsByOldRow.TryAdd(
+                                    referencedTypeDefRow, []))
+                            {
+                                throw new InvalidDataException(
+                                    "A C1M1 local TypeDef dependency was retained more than once.");
+                            }
+
+                            pendingTypeDefRows.Enqueue(
+                                referencedTypeDefRow);
+                        }
+
+                        break;
+                    }
+
+                    case 0x05:
+                    {
+                        if (row.Length < 10 || (row.Length - 6) % 4 != 0)
+                        {
+                            throw new InvalidDataException(
+                                "A retained constructed TypeSpec has an invalid extent.");
+                        }
+
+                        pendingTypeSpecs.Push((
+                            BinaryPrimitives.ReadUInt32LittleEndian(
+                                row[2..]),
+                            checked(pendingTypeSpec.Depth + 1)));
+                        for (var offset = 6; offset < row.Length; offset += 4)
+                        {
+                            pendingTypeSpecs.Push((
+                                BinaryPrimitives.ReadUInt32LittleEndian(
+                                    row[offset..]),
+                                checked(pendingTypeSpec.Depth + 1)));
+                        }
+
+                        break;
+                    }
+
+                    case >= 0x06 and <= 0x0B:
+                    case 0x0C:
+                    case 0x0E:
+                    {
+                        var childOffset = reference.Form == 0x0C ? 3 : 2;
+                        var child = BinaryPrimitives
+                            .ReadUInt32LittleEndian(row[childOffset..]);
+                        pendingTypeSpecs.Push((child,
+                            checked(pendingTypeSpec.Depth + 1)));
+                        break;
+                    }
+
+                    default:
+                        throw Unsupported(
+                            "C1M1 class TypeSpec dependency closure does not support this TypeSpec form.");
+                }
+            }
+        }
+
+        DrainTypeSpecs();
         while (pendingTypeDefRows.TryDequeue(out var typeDefRow))
         {
             if (--remaining < 0)
@@ -11634,106 +11785,70 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 pendingTypeSpecs.Push((field.TypeSpecReference, 1));
-                while (pendingTypeSpecs.TryPop(out var pendingTypeSpec))
+                DrainTypeSpecs();
+            }
+        }
+    }
+
+    private static ImmutableArray<uint>
+        GetC1M1ClassMethodConstraintTypeSpecSeeds(
+            TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+            int moduleRow, IEnumerable<int> selectedTypeDefRows,
+            bool usesAssociatedRelationConstraints)
+    {
+        var selectedTypes = selectedTypeDefRows.ToHashSet();
+        var seeds = ImmutableArray.CreateBuilder<uint>();
+        var (methodFirst, methodEnd)
+            = tables.Modules.GetMethodDefRange(moduleRow);
+        for (var methodRow = methodFirst; methodRow < methodEnd;
+            methodRow++)
+        {
+            if (!selectedTypes.Contains(
+                    tables.Methods.GetOwnerType(methodRow)))
+            {
+                continue;
+            }
+
+            var signature = tables.Methods.GetSignature(methodRow);
+            var (formalFirst, formalCount)
+                = tables.Signatures.GetGenericRange(signature);
+            for (var formalOffset = 0; formalOffset < formalCount;
+                formalOffset++)
+            {
+                var (constraintFirst, constraintCount)
+                    = tables.GenericParams.GetConstraintRange(
+                        formalFirst + formalOffset);
+                for (var constraintOffset = 0;
+                    constraintOffset < constraintCount;
+                    constraintOffset++)
                 {
-                    if (--remaining < 0
-                        || pendingTypeSpec.Depth
-                            > SemanticVerifier.MaximumDepth)
+                    var constraintRow
+                        = constraintFirst + constraintOffset;
+                    switch (tables.Constraints.GetKind(constraintRow))
                     {
-                        throw Unsupported(
-                            "C1M1 class TypeSpec dependency closure exceeds its traversal limit.");
-                    }
-
-                    var reference = rootTables.TypeSpecs.GetTypeSpecRef(
-                        pendingTypeSpec.Reference);
-                    if (!reference.IsRow
-                        || !visitedTypeSpecs.Add(reference.Row))
-                    {
-                        continue;
-                    }
-
-                    var row = rootTables.TypeSpecs.GetRow(reference.Row);
-                    switch (reference.Form)
-                    {
-                        case 0x01:
-                        case 0x03:
+                        case 1:
+                            seeds.Add(tables.Constraints.GetPayload(
+                                constraintRow));
                             break;
 
-                        case 0x02:
+                        case 3 when usesAssociatedRelationConstraints:
                         {
-                            var referencedTypeDefRow = checked((int)
-                                BinaryPrimitives.ReadUInt32LittleEndian(
-                                    row[2..]));
-                            if (rootTables.TypeDefs.GetOwnerModule(
-                                    referencedTypeDefRow)
-                                != rootModuleRow)
-                            {
-                                throw new InvalidDataException(
-                                    "A C1M1 class TypeSpec directly references a TypeDef owned by another Module.");
-                            }
-                            var kind = rootTables.TypeDefs.GetKind(
-                                referencedTypeDefRow);
-                            if (kind is not (1 or 2))
-                            {
-                                throw Unsupported(
-                                    "C1M1 class re-emission does not yet retain local interface TypeDef dependencies.");
-                            }
-
-                            if (rootTables.TypeDefs.GetGenericRange(
-                                    referencedTypeDefRow).Count != 0
-                                || rootTables.TypeDefs.GetContractRange(
-                                    referencedTypeDefRow).Count != 0)
-                            {
-                                throw Unsupported(
-                                    "C1M1 class re-emission does not yet retain generic or contracted local TypeDef dependencies.");
-                            }
-
-                            if (!typeDefViewsByOldRow.ContainsKey(
-                                    referencedTypeDefRow))
-                            {
-                                var dependencyView
-                                    = CreateC1M1TypeDefEmissionView(
-                                        rootTables, rootSnapshot,
-                                        referencedTypeDefRow);
-                                if (dependencyView.Kind != kind
-                                    || !typeDefViewsByOldRow.TryAdd(
-                                        referencedTypeDefRow,
-                                        dependencyView)
-                                    || !exportsByOldRow.TryAdd(
-                                        referencedTypeDefRow, []))
-                                {
-                                    throw new InvalidDataException(
-                                        "A C1M1 local TypeDef dependency was retained more than once.");
-                                }
-
-                                pendingTypeDefRows.Enqueue(
-                                    referencedTypeDefRow);
-                            }
-
+                            var relationRow = checked((int)
+                                tables.Constraints.GetPayload(
+                                    constraintRow));
+                            seeds.Add(tables.AssociatedRelations
+                                .GetDeclaringInterfaceTypeSpecRef(
+                                    relationRow));
+                            seeds.Add(tables.AssociatedRelations
+                                .GetRequiredTypeSpecRef(relationRow));
                             break;
                         }
-
-                        case >= 0x06 and <= 0x0B:
-                        case 0x0C:
-                        case 0x0E:
-                        {
-                            var childOffset = reference.Form == 0x0C
-                                ? 3 : 2;
-                            var child = BinaryPrimitives
-                                .ReadUInt32LittleEndian(
-                                    row[childOffset..]);
-                            pendingTypeSpecs.Push((child,
-                                checked(pendingTypeSpec.Depth + 1)));
-                            break;
-                        }
-
-                        default:
-                            throw Unsupported(
-                                "C1M1 class TypeSpec dependency closure does not support this TypeSpec form.");
                     }
                 }
             }
         }
+
+        return seeds.ToImmutable();
     }
 
     private static TrRmImportRow[] CreateC1M1ClassImports(
