@@ -14,7 +14,7 @@ public static partial class TrRmExecutableCompiler
     private readonly record struct StandardQueryTypeIdentity(
         string ModuleIdentity, uint DefinitionId);
 
-    private readonly record struct StandardC1M1ClassTypeOnlyInstanceKey(
+    private readonly record struct StandardClassTypeOnlyInstanceKey(
         BoundGenericNominalTypeIdentity Definition, byte Qualifiers,
         uint TypeSpecReference, string? TypeSpecProviderIdentity,
         byte TypeSpecForm);
@@ -66,7 +66,7 @@ public static partial class TrRmExecutableCompiler
         if (selectedReferences.Any(static reference =>
                 !reference.StandardClassDeclarations.IsEmpty))
         {
-            return CreateC1M1TypeOnlyClassReferenceSet(
+            return CreateTypeOnlyClassReferenceSet(
                 selectedReferences);
         }
 
@@ -546,10 +546,23 @@ public static partial class TrRmExecutableCompiler
     }
 
     private static CompilationReference
-        CreateC1M1TypeOnlyClassReferenceSet(
+        CreateTypeOnlyClassReferenceSet(
             CompilationReference[] references)
     {
         var runtimePolicy = references[0].RuntimePolicy;
+        if (references[0].StandardClassDeclarations.IsEmpty)
+        {
+            throw Unsupported(
+                "A class reference set cannot mix Standard class and non-class references.");
+        }
+        var classSchemaIdentity = references[0]
+            .StandardClassDeclarations[0].Declaration.Provider.SchemaIdentity;
+        if (!IsSupportedClassTypeOnlySchema(classSchemaIdentity))
+        {
+            throw Unsupported(
+                "The selected Standard class schema is not supported by the bounded type-only composer.");
+        }
+
         var definitions
             = ImmutableArray.CreateBuilder<
                 BoundGenericNominalTypeDefinition>();
@@ -559,7 +572,7 @@ public static partial class TrRmExecutableCompiler
             = ImmutableArray.CreateBuilder<
                 BoundGenericNominalTypeInstance>();
         var instanceIndexes = new Dictionary<
-            StandardC1M1ClassTypeOnlyInstanceKey, int>();
+            StandardClassTypeOnlyInstanceKey, int>();
         var declarations
             = new List<BoundStandardClassDeclaration>();
         var declarationIndexes = new Dictionary<
@@ -607,10 +620,14 @@ public static partial class TrRmExecutableCompiler
                 || !reference.SpanTypes.IsEmpty
                 || reference.StandardClassDeclarations.IsEmpty
                 || reference.GenericNominalTypeDefinitions.IsEmpty
-                || reference.GenericNominalTypeInstances.IsEmpty)
+                || reference.GenericNominalTypeInstances.IsEmpty
+                || reference.StandardClassDeclarations.Any(declaration =>
+                    !StringComparer.Ordinal.Equals(
+                        declaration.Declaration.Provider.SchemaIdentity,
+                        classSchemaIdentity)))
             {
                 throw Unsupported(
-                    "C1M1 type-only class composition requires only selected class TypeDefs without member, interface, runtime, or other type-family obligations.");
+                    "Type-only class composition requires selected class TypeDefs without member, interface, runtime, or other type-family obligations.");
             }
 
             var sourceDefinitions = reference.GenericNominalTypeDefinitions;
@@ -621,7 +638,7 @@ public static partial class TrRmExecutableCompiler
                     sourceDefinitions))
             {
                 throw Invalid(
-                    "A selected C1M1 class reference has invalid nominal type tables.");
+                    "A selected class reference has invalid nominal type tables.");
             }
 
             foreach (var definition in sourceDefinitions)
@@ -634,7 +651,7 @@ public static partial class TrRmExecutableCompiler
                         definition.Identity.ModuleIdentity))
                 {
                     throw Unsupported(
-                        "C1M1 class composition currently requires directly selected nongeneric class TypeDefs without imported nominal expectations.");
+                        "Type-only class composition currently requires directly selected nongeneric class TypeDefs without imported nominal expectations.");
                 }
 
                 if (definitionIndexes.TryGetValue(definition.Identity,
@@ -645,7 +662,7 @@ public static partial class TrRmExecutableCompiler
                         .AreEquivalentDefinitions(existing, definition))
                     {
                         throw Invalid(
-                            "Views of one C1M1 class TypeDef disagree on the actual provider definition.");
+                            "Views of one Standard class TypeDef disagree on the actual provider definition.");
                     }
                 }
                 else
@@ -676,10 +693,10 @@ public static partial class TrRmExecutableCompiler
                     || !definitionIndexes.ContainsKey(instance.Definition))
                 {
                     throw Unsupported(
-                        "C1M1 type-only class composition requires direct, unqualified class instances.");
+                        "Type-only class composition requires direct, unqualified class instances.");
                 }
 
-                var key = new StandardC1M1ClassTypeOnlyInstanceKey(
+                var key = new StandardClassTypeOnlyInstanceKey(
                     instance.Definition, instance.Qualifiers,
                     instance.TypeSpecReference,
                     instance.TypeSpecProviderIdentity,
@@ -704,18 +721,18 @@ public static partial class TrRmExecutableCompiler
             {
                 var view = declaration.Declaration;
                 if (!StringComparer.Ordinal.Equals(view.Provider.SchemaIdentity,
-                        StandardC1M1SchemaIdentity)
+                        classSchemaIdentity)
                     || !definitionIndexes.ContainsKey(view.Identity)
                     || !declaration.Expectations.IsEmpty
                     || declaration.SelectedExportKeys.IsDefaultOrEmpty
                     || declaration.ExportKeys.IsDefaultOrEmpty
                     || view.Fields.Any(field =>
-                        !IsC1M1TypeOnlyComposedFieldType(field.Type))
+                        !IsStandardClassTypeOnlyComposedFieldType(field.Type))
                     || !view.Layouts.IsEmpty
                     || !view.Methods.IsEmpty)
                 {
                     throw Unsupported(
-                        "C1M1 class composition currently requires selected class roots with only primitive fields and without layouts, methods, or imported expectations.");
+                        "Type-only class composition currently requires selected class roots with primitive fields and without layouts, methods, or imported expectations.");
                 }
 
                 AddProviderSnapshot(view.Provider);
@@ -738,7 +755,7 @@ public static partial class TrRmExecutableCompiler
                             declaration.ExportKeys.AsSpan()))
                     {
                         throw Invalid(
-                            "Views of one C1M1 class TypeDef disagree on the checked declaration.");
+                            "Views of one Standard class TypeDef disagree on the checked declaration.");
                     }
 
                     var mergedFields = ImmutableArray.CreateBuilder<
@@ -762,7 +779,7 @@ public static partial class TrRmExecutableCompiler
                                 field.ExportKeys.AsSpan()))
                         {
                             throw Invalid(
-                                "Views of one C1M1 class TypeDef disagree on a FieldDef declaration.");
+                                "Views of one Standard class TypeDef disagree on a FieldDef declaration.");
                         }
 
                         var selectedFieldKeys = new List<string>(
@@ -790,7 +807,7 @@ public static partial class TrRmExecutableCompiler
                     if (!declarationNames.Add(nameIdentity))
                     {
                         throw Invalid(
-                            "Selected C1M1 class references contain ambiguous fully qualified TypeDef names.");
+                            "Selected Standard class references contain ambiguous fully qualified TypeDef names.");
                     }
 
                     declarationIndexes.Add(view.Identity,
@@ -803,7 +820,7 @@ public static partial class TrRmExecutableCompiler
                     !declarationIndexes.ContainsKey(definition.Identity)))
             {
                 throw Unsupported(
-                    "C1M1 class composition requires a retained source declaration for every nominal TypeDef.");
+                    "Class composition requires a retained source declaration for every nominal TypeDef.");
             }
         }
 
@@ -818,7 +835,7 @@ public static partial class TrRmExecutableCompiler
                 declarationTable, definitionTable))
         {
             throw Invalid(
-                "The composed C1M1 class TypeDef closure is invalid.");
+                "The composed Standard class TypeDef closure is invalid.");
         }
 
         var mergedProgram = new BoundProgram([], -1) {
@@ -836,11 +853,11 @@ public static partial class TrRmExecutableCompiler
         void AddProviderSnapshot(BoundSourceTypeProviderSnapshot provider)
         {
             if (!StringComparer.Ordinal.Equals(provider.SchemaIdentity,
-                    StandardC1M1SchemaIdentity)
+                    classSchemaIdentity)
                 || provider.RuntimePolicy != (uint)runtimePolicy)
             {
                 throw Invalid(
-                    "C1M1 class references have an incompatible provider schema or runtime policy.");
+                    "Selected class references have an incompatible provider schema or runtime policy.");
             }
 
             var key = (provider.SchemaIdentity, provider.ModuleIdentity);
@@ -849,7 +866,7 @@ public static partial class TrRmExecutableCompiler
                 if (!SameA2SourceTypeProviderSnapshot(existing, provider))
                 {
                     throw Invalid(
-                        "C1M1 references contain conflicting snapshots for one provider Module.");
+                        "Class references contain conflicting snapshots for one provider Module.");
                 }
             }
             else
@@ -857,9 +874,16 @@ public static partial class TrRmExecutableCompiler
                 providerSnapshots.Add(key, provider);
             }
         }
+
+        static bool IsSupportedClassTypeOnlySchema(string schemaIdentity)
+            => StringComparer.Ordinal.Equals(schemaIdentity,
+                    StandardC1M1SchemaIdentity)
+                || StandardGenericMethodSchema.IsCM1ClassParameterDefaults(
+                    schemaIdentity);
     }
 
-    private static bool IsC1M1TypeOnlyComposedFieldType(PrimitiveType type)
+    private static bool IsStandardClassTypeOnlyComposedFieldType(
+        PrimitiveType type)
         => type != PrimitiveType.Void
             && !BoundGenericNominalTypeTypes.IsType(type)
             && !BoundSpanTypeTypes.IsType(type)
