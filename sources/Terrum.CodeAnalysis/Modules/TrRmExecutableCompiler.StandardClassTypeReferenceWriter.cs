@@ -8198,16 +8198,78 @@ public static partial class TrRmExecutableCompiler
         var classIdentities = program.StandardClassDeclarations
             .Select(static declaration => declaration.Declaration.Identity)
             .ToHashSet();
+        var relationNominalIdentities
+            = new HashSet<BoundGenericNominalTypeIdentity>();
+        foreach (var root in program.RetainedGenericMethodRoots)
+        {
+            foreach (var formal in root.Formals)
+            {
+                foreach (var relation in formal.AssociatedRelations)
+                {
+                    var pendingTerms
+                        = new Stack<BoundGenericMethodTypeTerm>();
+                    pendingTerms.Push(relation.RequiredType);
+                    while (pendingTerms.TryPop(out var term))
+                    {
+                        if (term.NominalTypeIdentity
+                            is BoundGenericNominalTypeIdentity identity)
+                        {
+                            _ = relationNominalIdentities.Add(identity);
+                        }
+
+                        foreach (var argument in term.TypeArguments)
+                        {
+                            pendingTerms.Push(argument);
+                        }
+                    }
+
+                    var pendingInterfaceTypes
+                        = new Stack<BoundInterfaceType>();
+                    pendingInterfaceTypes.Push(
+                        relation.AssociatedType.DeclaringInterface);
+                    while (pendingInterfaceTypes.TryPop(out var type))
+                    {
+                        if (type.GenericNominalTypeIdentity
+                            is BoundGenericNominalTypeIdentity identity)
+                        {
+                            _ = relationNominalIdentities.Add(identity);
+                        }
+
+                        foreach (var argument in type.TypeArguments)
+                        {
+                            if (argument.Type is not null)
+                            {
+                                pendingInterfaceTypes.Push(argument.Type);
+                            }
+                            if (argument.ConstantType is not null)
+                            {
+                                pendingInterfaceTypes.Push(
+                                    argument.ConstantType);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         if (program.StandardClassDeclarations.Any(declaration =>
                 !program.GenericNominalTypeDefinitions.Any(definition =>
                     definition.Identity
                         == declaration.Declaration.Identity
-                    && definition.NominalKind == 2))
+                    && definition.NominalKind == 2)
+                && !relationNominalIdentities.Contains(
+                    declaration.Declaration.Identity))
             || program.GenericNominalTypeDefinitions.Any(definition =>
-                definition.NominalKind == 1
-                    ? definition.ProviderExpectations.IsEmpty
-                    : definition.NominalKind != 2
-                        || !classIdentities.Contains(definition.Identity)))
+                !definition.Formals.IsEmpty
+                    || (definition.NominalKind == 1
+                        ? definition.ProviderExpectations.IsEmpty
+                            && !relationNominalIdentities.Contains(
+                                definition.Identity)
+                        : definition.NominalKind != 2
+                            || (!classIdentities.Contains(
+                                    definition.Identity)
+                                && !relationNominalIdentities.Contains(
+                                    definition.Identity))))
         {
             throw Unsupported(
                 "C1M1 class re-emission cannot discard or invent a nominal definition.");
