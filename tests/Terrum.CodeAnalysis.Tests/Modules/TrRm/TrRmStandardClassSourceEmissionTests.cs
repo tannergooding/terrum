@@ -322,6 +322,86 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
+    public void EmitsStaticConditionalReturnBody()
+    {
+        var tree = SyntaxTree.Parse("""
+            public class Box {
+                public int32 Value;
+                public Box(int32 value) { Value = value; }
+                public static int32 Select(bool condition, int32 whenTrue,
+                    int32 whenFalse) {
+                    if (condition) { return whenTrue; }
+                    else { return whenFalse; }
+                }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var members = classDeclaration.Children.OfType<SyntaxNode>();
+        var field = members.Single(static node =>
+            node.Kind == SyntaxKind.FieldDeclaration);
+        var constructor = members.Single(static node =>
+            node.Kind == SyntaxKind.ConstructorDeclaration);
+        var select = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Select"));
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "ConditionalClassMethod", C1M1Construction2SchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, 0,
+                    classDeclaration.Span, "BoxKey", [
+                        new TrRmSourceClassMemberExport(0, field.Span,
+                            "Box.Value"),
+                        new TrRmSourceClassMemberExport(0,
+                            constructor.Span, "Box.Initialize") {
+                            ConstructionProjectionExportKey = "Box.Create",
+                        },
+                        new TrRmSourceClassMemberExport(0, select.Span,
+                            "Box.Select"),
+                    ]),
+            ]);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex.ForC1M1Construction2Draft(artifact));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Box.Select", out var selectDefinition), Is.True);
+        var methodRow = checked((int)(selectDefinition & 0x00FF_FFFF));
+        var bodyRow = tables.Methods.GetBodyRow(methodRow);
+        Assert.That(bodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(bodyRow,
+            tables.Contracts.Count);
+        tables.ValidateRegisterBodyMapsForMethod(methodRow);
+
+        var body = tables.Bodies.GetRegisterBody(bodyRow,
+            tables.Contracts.Count);
+        Assert.That(body.BlockCount, Is.EqualTo(3));
+        Assert.That(body.RecordCount, Is.EqualTo(2));
+        Assert.That(body.HomeCount, Is.EqualTo(3));
+        Assert.That(body.GetRecord(1).ToArray(),
+            Is.EqualTo(new byte[] { 0x06, 0, 0, 0, 1, 0, 2, 0 }));
+        Assert.That(body.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD5, 0, 0, 0, 0xE4, 0, 1, 0,
+            }));
+        Assert.That(body.GetBlockCode(1).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD5, 0, 1, 0, 0x17, 0,
+            }));
+        Assert.That(body.GetBlockCode(2).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD5, 0, 2, 0, 0x17, 0,
+            }));
+    }
+
+    [Test]
     public void EmitsClassConstructorDefaultForInitializerAndProjection()
     {
         var tree = SyntaxTree.Parse("""

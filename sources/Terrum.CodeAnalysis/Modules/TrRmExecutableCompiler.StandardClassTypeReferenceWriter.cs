@@ -31,6 +31,10 @@ public static partial class TrRmExecutableCompiler
         byte[]? EncodedBody = null,
         BoundBinary? CallBinaryExpression = null);
 
+    private readonly record struct C1M1Construction2ConditionalReturn(
+        int ConditionVariable, int TrueValueVariable,
+        int FalseValueVariable);
+
     private readonly record struct C1M1ParameterSurfaceRow(
         int MethodDefRow, int Ordinal, string Name,
         uint DefaultConstantSourceRow);
@@ -906,6 +910,9 @@ public static partial class TrRmExecutableCompiler
                             && TryGetC1M1Construction2DirectFieldWrite(
                                 methodFunction,
                                 out directFieldWriteIndex);
+                    var conditionalReturn
+                        = TryGetC1M1Construction2ConditionalReturn(
+                            methodFunction);
                     var identityForwarderTargetFunctionIndex = -1;
                     var isSupportedIdentityForwarder
                         = TryGetC1M1Construction2IdentityForwarder(
@@ -1182,6 +1189,14 @@ public static partial class TrRmExecutableCompiler
                         encodedBody
                             = EncodeC1M1Construction2DirectNumericUnaryBody(
                                 methodFunction, directNumericUnary,
+                                Construction2ValueTypeSpecReference,
+                                contractRows.Count, schema);
+                    }
+                    else if (conditionalReturn is not null)
+                    {
+                        encodedBody
+                            = EncodeC1M1Construction2ConditionalReturnBody(
+                                methodFunction, conditionalReturn.Value,
                                 Construction2ValueTypeSpecReference,
                                 contractRows.Count, schema);
                     }
@@ -1985,6 +2000,79 @@ public static partial class TrRmExecutableCompiler
             schema: schema,
             generalPredicateGraphsInitializationReferenceBodies
                 : schema.UsesGeneralPredicateGraphs());
+    }
+
+    private static byte[] EncodeC1M1Construction2ConditionalReturnBody(
+        BoundFunction function,
+        C1M1Construction2ConditionalReturn conditionalReturn,
+        Func<PrimitiveType, uint> typeSpecReferenceFor,
+        int contractCount, TrRmArtifactSchema schema)
+    {
+        var typeTokens = new uint[function.ParameterCount];
+        var homeMap = new byte[checked(function.ParameterCount * 8)];
+        for (var parameter = 0;
+            parameter < function.ParameterCount; parameter++)
+        {
+            var typeToken = CreateStandardBodyTypeMapToken(
+                typeSpecReferenceFor(function.Variables[parameter].Type));
+            typeTokens[parameter] = typeToken;
+        }
+
+        var maps = TrRmRegisterBodyMapBuilder.Create(typeTokens, []);
+        for (var parameter = 0;
+            parameter < function.ParameterCount; parameter++)
+        {
+            var offset = parameter * 8;
+            homeMap[offset] = 2;
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                homeMap.AsSpan(offset + 2, 2),
+                checked((ushort)maps.GetTypeMapIndex(
+                    typeTokens[parameter])));
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                homeMap.AsSpan(offset + 4, 2),
+                checked((ushort)parameter));
+        }
+
+        var conditionHome
+            = checked((ushort)conditionalReturn.ConditionVariable);
+        var edgeRecordIndex = checked((ushort)1);
+        var conditionCode = new byte[] {
+            0xD5, 0, (byte)conditionHome, (byte)(conditionHome >> 8),
+            0xE4, 0, (byte)edgeRecordIndex,
+            (byte)(edgeRecordIndex >> 8),
+        };
+        var codeBlocks = new[] {
+            conditionCode,
+            EncodeReturnBlock(conditionalReturn.TrueValueVariable),
+            EncodeReturnBlock(conditionalReturn.FalseValueVariable),
+        };
+        var blocks = new List<TrRmRegisterBodyBlock>(codeBlocks.Length);
+        var code = new List<byte>();
+        foreach (var blockCode in codeBlocks)
+        {
+            blocks.Add(new TrRmRegisterBodyBlock(
+                checked((uint)code.Count),
+                checked((uint)blockCode.Length), 0));
+            code.AddRange(blockCode);
+        }
+
+        ReadOnlyMemory<byte>[] records = [
+            new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 },
+            new(TrRmRegisterBodyRecordWriter.EncodeConditionalEdge(1, 2)),
+        ];
+        return TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
+            default, default, default, blocks, records, code.ToArray(),
+            contractCount: contractCount, schema: schema,
+            generalPredicateGraphsInitializationReferenceBodies
+                : schema.UsesGeneralPredicateGraphs());
+
+        static byte[] EncodeReturnBlock(int homeIndex)
+        {
+            var home = checked((ushort)homeIndex);
+            return [
+                0xD5, 0, (byte)home, (byte)(home >> 8), 0x17, 0,
+            ];
+        }
     }
 
     private static byte[] EncodeC1M1Construction2StaticMethodBody(
@@ -3809,6 +3897,92 @@ public static partial class TrRmExecutableCompiler
             schema: schema,
             generalPredicateGraphsInitializationReferenceBodies
                 : schema.UsesGeneralPredicateGraphs());
+    }
+
+    private static C1M1Construction2ConditionalReturn?
+        TryGetC1M1Construction2ConditionalReturn(BoundFunction function)
+    {
+        if (!function.IsStatic
+            || function.ParameterCount != function.Variables.Length
+            || function.Body.Statements.Length != 1
+            || function.Body.Statements[0] is not BoundIf conditional
+            || conditional.Condition is not BoundRead condition
+            || conditional.Else is null
+            || !function.Body.RetiredManagedLocals.IsEmpty
+            || !conditional.GenericUniquePropertyWhenTrue.IsEmpty
+            || !conditional.GenericUniquePropertyWhenFalse.IsEmpty
+            || conditional.GenericUniquePropertyKnownResult is not null)
+        {
+            return null;
+        }
+
+        for (var parameter = 0; parameter < function.ParameterCount;
+            parameter++)
+        {
+            if (!IsScalarParameter(parameter))
+            {
+                return null;
+            }
+        }
+
+        var trueReturn = GetSingleReadReturn(conditional.Then);
+        var falseReturn = GetSingleReadReturn(conditional.Else);
+        if (trueReturn is null || falseReturn is null
+            || condition.Type != PrimitiveType.Bool
+            || !IsScalarRead(condition)
+            || trueReturn.Type != function.ReturnType
+            || falseReturn.Type != function.ReturnType
+            || (function.ReturnType != PrimitiveType.Bool
+                && !IsC1M1Construction2BodyNumericType(
+                    function.ReturnType))
+            || !IsScalarRead(trueReturn)
+            || !IsScalarRead(falseReturn))
+        {
+            return null;
+        }
+
+        return new C1M1Construction2ConditionalReturn(
+            condition.Variable, trueReturn.Variable,
+            falseReturn.Variable);
+
+        bool IsScalarParameter(int variableIndex)
+        {
+            if ((uint)variableIndex >= (uint)function.ParameterCount)
+            {
+                return false;
+            }
+
+            var variable = function.Variables[variableIndex];
+            return (variable.Type == PrimitiveType.Bool
+                    || IsC1M1Construction2BodyNumericType(variable.Type))
+                && !variable.IsMutable
+                && !variable.IsOut
+                && !variable.IsInit
+                && !variable.IsImplicitRef
+                && !variable.IsInitializationLocal;
+        }
+
+        bool IsScalarRead(BoundRead read)
+            => IsScalarParameter(read.Variable)
+                && function.Variables[read.Variable].Type == read.Type;
+
+        static BoundRead? GetSingleReadReturn(BoundStatement statement)
+        {
+            if (statement is BoundBlock block)
+            {
+                if (!block.RetiredManagedLocals.IsEmpty
+                    || block.Statements.Length != 1)
+                {
+                    return null;
+                }
+
+                statement = block.Statements[0];
+            }
+
+            return statement is BoundReturn {
+                Value: BoundRead read
+            } ? read : null;
+        }
     }
 
     private static bool TryGetC1M1Construction2DirectFieldRead(
