@@ -516,6 +516,10 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
                     leaf.Value = value;
                     return;
                 }
+                public static void WriteConstant(write Leaf leaf) {
+                    leaf.Value = 42;
+                    return;
+                }
             }
             """);
         var compilation = Compilation.CreateLibrary(tree, reference);
@@ -532,6 +536,10 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
             node.Kind == SyntaxKind.FunctionDeclaration
             && node.Children.OfType<SyntaxTokenElement>().Any(
                 static token => token.Token.Name == "Write"));
+        var writeConstant = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "WriteConstant"));
         var artifact = TrRmExecutableCompiler.EmitStandard(program,
             "ImportedClassFieldWrite", schemaIdentity,
             TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
@@ -545,6 +553,8 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
                         },
                         new TrRmSourceClassMemberExport(0, write.Span,
                             "Container.Write"),
+                        new TrRmSourceClassMemberExport(0,
+                            writeConstant.Span, "Container.WriteConstant"),
                     ]),
             ]);
         var tables = TrRmStructuralMetadataValidator
@@ -579,6 +589,30 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
             tables.Parameters.GetTypeSpec(parameterStart));
         Assert.That(receiverTypeSpec.Form, Is.EqualTo((byte)0x03));
         Assert.That(receiverTypeSpec.Qualifiers, Is.EqualTo((byte)0x01));
+
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "Container.WriteConstant", out var writeConstantDefinition),
+            Is.True);
+        var writeConstantMethodRow = checked((int)(
+            writeConstantDefinition & 0x00FF_FFFF));
+        var writeConstantBodyRow
+            = tables.Methods.GetBodyRow(writeConstantMethodRow);
+        Assert.That(writeConstantBodyRow, Is.GreaterThan(0));
+        tables.Bodies.ValidateSelectedImplementation(
+            writeConstantBodyRow, tables.Contracts.Count);
+        tables.ValidateRegisterBodyMapsForMethod(writeConstantMethodRow);
+        var writeConstantBody = tables.Bodies.GetRegisterBody(
+            writeConstantBodyRow, tables.Contracts.Count);
+        Assert.That(writeConstantBody.HomeCount, Is.EqualTo(1));
+        Assert.That(writeConstantBody.ConstantCount, Is.EqualTo(1));
+        Assert.That(tables.Features.TryGetFeature(11, out _), Is.True);
+        Assert.That(writeConstantBody.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD8, 1, 1, 0,
+                0xD4, 0, 0, 0,
+                0xD9, 0, 2, 0,
+                0x18, 0,
+            }));
 
         var outputReference
             = TrRmExecutableCompiler.CreateStandardReference(

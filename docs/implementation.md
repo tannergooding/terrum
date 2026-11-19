@@ -139,9 +139,9 @@ Readonly methods can read one selected public field through readonly or
 write-qualified imported class-handle formals; source binding, mandatory
 verification, Body-01 D8/DA
 encoding and exact FieldDef/owner TypeDef Import checks are implemented. A
-static method can also Copy-store one scalar formal to a selected public
-mutable imported FieldDef through a write-qualified class-handle formal using
-Body-01 D8 and SemanticStore.
+static method can also Copy-store a scalar formal or canonical scalar
+ConstantMap/SF1 value to one selected public mutable imported FieldDef through
+a write-qualified class-handle formal using Body-01 D8 and SemanticStore.
 Direct producer/consumer/provider-replacement and unselected-field rejection,
 plus a Leaf-to-Wrapper-to-Container provider-chain regression covering
 compatible TypeDef-row relocation and incompatible replacement, plus
