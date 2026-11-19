@@ -210,7 +210,10 @@ owner TypeDef Import to the same selected provider, comparing signatures,
 effects, modes and construction roles after TypeSpec remapping while retaining
 separate expected/provider defaults and Import aliases. Provider-source-free
 caller and compatible/incompatible provider regressions are added but remain
-unverified under the active hold. A separate exact-CM1 source-free metadata
+unverified under the active hold. Construction-2 source-class MethodDefs now
+persist their assigned Effects mask; unsafe provider-mismatch and
+source-free-import regressions are added but remain unverified. A separate
+exact-CM1 source-free metadata
 emitter now preserves bodyless public nongeneric scalar MethodDef Import
 expectations, remapping owner TypeDefs, MethodSigs, Params, Effects, aliases
 and class parameter surfaces/defaults without copying provider Bodies.

@@ -1716,6 +1716,18 @@ public static partial class TrRmExecutableCompiler
                         methodFunction.ParameterCount
                             - (methodFunction.IsStatic ? 0 : 1),
                         0, 0));
+                    var methodEffectsMask
+                        = (methodFunction.DoesNotReturn ? 2u : 0u)
+                            | (methodFunction.RequiresUnsafeCaller ? 4u : 0u);
+                    var methodContractFirst = methodEffectsMask == 0
+                        ? 0 : contractRows.Count + 1;
+                    if (methodEffectsMask != 0)
+                    {
+                        contractRows.Add(new TrRmContractRow(
+                            0x1600_0000u | checked((uint)methodRow), 1,
+                            s_effectPayloads[methodEffectsMask]));
+                    }
+
                     var methodVisibility = methodFunction.IsPrivate ? 0u
                         : methodFunction.IsInternal ? 1u : 2u;
                     if (!methodFunction.IsStatic
@@ -1732,7 +1744,9 @@ public static partial class TrRmExecutableCompiler
 
                     methodRows.Add(new TrRmMethodDefRow(
                         typeDefRowByClass[classIndex], 0,
-                        methodSignatureRow, methodVisibility, 0, 0, 0));
+                        methodSignatureRow, methodVisibility,
+                        methodContractFirst,
+                        methodEffectsMask == 0 ? 0 : 1, 0));
                     methodNames.Add(methodFunction.Name);
                     AppendC1M1Construction2ParameterSurface(methodRow,
                         methodFunction,

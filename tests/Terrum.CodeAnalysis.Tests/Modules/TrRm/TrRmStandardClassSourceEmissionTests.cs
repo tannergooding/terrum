@@ -4785,15 +4785,16 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     public void ReemitsBodylessClassMethodImportsWithClassParameterSurfaces()
     {
         var expectedArtifact = EmitClassMethodReemissionArtifact(
-            "MethodExpected", 7, includePrefixType: true);
+            "MethodExpected", 7, includePrefixType: true,
+            readIsUnsafe: true);
         var providerArtifact = AddMethodExportAlias(
             EmitClassMethodReemissionArtifact("MethodProvider", 9,
-                includePrefix: true),
+                includePrefix: true, readIsUnsafe: true),
             "Box.Read", "Box.ReadAlias");
         var consumerArtifact = CreateExpectedClassMethodImportArtifact(
             expectedArtifact, providerArtifact, "MethodConsumer",
-            "MethodProvider", ["Box.Read"], "Box.Read", "Box.ReadAlias",
-            "ContainerKey");
+            "MethodProvider", ["Box.Read", "Box.ReadInstance"], "Box.Read",
+            "Box.ReadAlias", "ContainerKey");
         var schemaIdentity
             = C1M1Construction2ClassParameterDefaultsSchemaIdentity;
         var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
@@ -4842,7 +4843,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             .Where(row => reemittedTables.Imports
                 .GetExpectedDefinitionForImportRow(row) >> 24 == 0x16)
             .ToArray();
-        Assert.That(methodImportRows, Has.Length.EqualTo(2));
+        Assert.That(methodImportRows, Has.Length.EqualTo(3));
         Assert.That(methodImportRows.Select(row => reemittedTables.Imports
                 .GetBindingForImportRow(row).ExportKey),
             Is.EquivalentTo(["Box.Read", "Box.ReadAlias"]));
@@ -4850,7 +4851,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 reemittedTables.Imports
                     .GetExpectedDefinitionForImportRow(row))
             .Distinct().ToArray();
-        Assert.That(expectedMethodDefinitions, Has.Length.EqualTo(1));
+        Assert.That(expectedMethodDefinitions, Has.Length.EqualTo(2));
         var expectedMethodRow = checked((int)(
             expectedMethodDefinitions[0] & 0x00FF_FFFF));
         var newBoxTypeImport = Enumerable.Range(1,
@@ -4865,6 +4866,8 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             Is.EqualTo(newBoxTypeDefRow));
         Assert.That(reemittedTables.Methods.GetBodyRow(expectedMethodRow),
             Is.Zero);
+        Assert.That(reemittedTables.Contracts.GetEffectsMask(
+            expectedMethodRow), Is.EqualTo(4));
         var expectedMethodSignature = reemittedTables.Methods
             .GetSignature(expectedMethodRow);
         Assert.That(reemittedTables.Signatures.GetParamRange(
@@ -4878,6 +4881,21 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             .TryGetDefaultConstantSourceRow(expectedMethodRow, 0,
                 out var defaultConstantSourceRow), Is.True);
         Assert.That(defaultConstantSourceRow, Is.GreaterThan(0));
+        var (methodStart, methodEnd)
+            = reemittedTables.Modules.GetMethodDefRange(1);
+        var instanceMethodRow = Enumerable.Range(methodStart,
+                methodEnd - methodStart)
+            .Single(row => reemittedTables.Methods.GetName(row)
+                == "ReadInstance");
+        var instanceSignature = reemittedTables.Methods
+            .GetSignature(instanceMethodRow);
+        var receiverTypeSpec = reemittedTables.Signatures
+            .GetReceiverTypeSpec(instanceSignature);
+        Assert.That(receiverTypeSpec, Is.Not.Zero);
+        Assert.That(reemittedTables.TypeSpecs.GetNominalTypeDefRow(
+                receiverTypeSpec, reemittedTables.TypeDefs,
+                reemittedTables.Imports),
+            Is.EqualTo(newBoxTypeDefRow));
 
         var reemittedReference
             = TrRmExecutableCompiler.CreateStandardReference(
@@ -4900,11 +4918,13 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             Is.EqualTo(9));
         Assert.That(expectation.MethodExpectations.Select(
                 static method => method.ExportKey),
-            Is.EquivalentTo(["Box.Read", "Box.ReadAlias"]));
+            Is.EquivalentTo([
+                "Box.Read", "Box.ReadAlias", "Box.ReadInstance",
+            ]));
 
         var relocatedProvider = AddMethodExportAlias(
             EmitClassMethodReemissionArtifact("MethodProvider", 11,
-                includePrefix: true),
+                includePrefix: true, readIsUnsafe: true),
             "Box.Read", "Box.ReadAlias");
         var relocatedReference
             = TrRmExecutableCompiler.CreateStandardReference(
@@ -4925,7 +4945,8 @@ internal sealed class TrRmStandardClassSourceEmissionTests
 
         var incompatibleProvider = AddMethodExportAlias(
             EmitClassMethodReemissionArtifact("MethodProvider", 11,
-                includePrefix: true, parameterType: "int64"),
+                includePrefix: true, parameterType: "int64",
+                readIsUnsafe: true),
             "Box.Read", "Box.ReadAlias");
         Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.CreateStandardReference(
@@ -5271,6 +5292,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     private static byte[] EmitClassMethodReemissionArtifact(
         string moduleIdentity, int defaultValue,
         bool includePrefix = false, string parameterType = "int32",
+        bool readIsUnsafe = false,
         bool includePrefixType = false)
     {
         var prefix = includePrefix
@@ -5278,11 +5300,16 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             : includePrefixType ? "public class Prefix {}" : string.Empty;
         var readBody = parameterType == "int32"
             ? "return value;" : "return 17;";
+        var readModifiers = readIsUnsafe
+            ? "public static unsafe" : "public static";
         var tree = SyntaxTree.Parse($$"""
             {{prefix}}
             public class Box {
-                public static int32 Read({{parameterType}} value = {{defaultValue}}) {
+                {{readModifiers}} int32 Read({{parameterType}} value = {{defaultValue}}) {
                     {{readBody}}
+                }
+                public int32 ReadInstance(int32 value = {{defaultValue}}) {
+                    return value;
                 }
             }
             public class Container {
@@ -5305,7 +5332,15 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 && token.Token.Name == "Container"));
         var readDeclaration = boxDeclaration.Children.OfType<SyntaxNode>()
             .Single(static member =>
-                member.Kind == SyntaxKind.FunctionDeclaration);
+                member.Kind == SyntaxKind.FunctionDeclaration
+                && member.Children.OfType<SyntaxTokenElement>().Any(
+                    static token => token.Token.Name == "Read"));
+        var readInstanceDeclaration = boxDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static member =>
+                member.Kind == SyntaxKind.FunctionDeclaration
+                && member.Children.OfType<SyntaxTokenElement>().Any(
+                    static token => token.Token.Name == "ReadInstance"));
         var boxClassIndex = Enumerable.Range(0, program.Classes.Length)
             .Single(index => StringComparer.Ordinal.Equals(
                 program.Classes[index].Name, "Box"));
@@ -5322,6 +5357,9 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     boxDeclaration.Span, "BoxKey", [
                         new TrRmSourceClassMemberExport(boxClassIndex,
                             readDeclaration.Span, "Box.Read"),
+                        new TrRmSourceClassMemberExport(boxClassIndex,
+                            readInstanceDeclaration.Span,
+                            "Box.ReadInstance"),
                     ]),
                 new TrRmSourceClassExport(program, containerClassIndex,
                     containerDeclaration.Span, "ContainerKey", []),
