@@ -154,15 +154,16 @@ arithmetic remains outside the register validator's current type matrix.
 
 Static and readonly-instance numeric arithmetic Bodies can load SF1 scalar
 operands through ConstantMap; fixed scalar returns use the provisional Feature
-`11/1` path and Blob section `0003`. Same-class static or readonly-instance
-fixed-integer calls can feed a following fixed-integer binary/comparison
-through a general CallSite, with a direct formal or SF1 ConstantMap operand.
+`11/1` path and Blob section `0003`. Same-class static and readonly-instance
+fixed-integer or floating CallSite bodies can feed a following same-typed
+binary/comparison with a direct formal or SF1 ConstantMap operand.
 Static and instance bodies support one-formal numeric local-copy returns and
 ordered numeric copy chains feeding numeric binary/comparison operations.
 Readonly instance bodies also return an explicit scalar parameter through
 ReturnHome, emit direct scalar FieldRead/FieldWrite descriptors, and use
-receiver/formal Homes in declaration order. Exact same-class static and readonly-instance scalar/unit
-identity forwarders use assigned Body kind `05`; empty unit instance bodies
+receiver/formal Homes in declaration order. Exact same-class static and
+readonly-instance scalar/unit identity forwarders use assigned Body kind `05`;
+empty unit instance bodies
 are emitted. These producer and imported-caller regressions remain unverified
 under the hold.
 

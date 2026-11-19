@@ -126,8 +126,9 @@ prerequisite has already been met.
    binary operations. It also
    emits empty unit instance methods,
    direct scalar FieldRead/FieldWrite descriptors, exact same-class identity
-   forwarders and same-class static/readonly fixed-integer CallSites followed
-   by a fixed-integer binary/comparison with a formal or ConstantMap operand.
+   forwarders and same-class static/readonly integer or floating CallSites
+   followed by a same-typed binary/comparison with a formal or ConstantMap
+   operand.
    Unit-before-value, field,
    operation, call-forwarding,
    local and identity-forwarder regressions remain unverified under the active

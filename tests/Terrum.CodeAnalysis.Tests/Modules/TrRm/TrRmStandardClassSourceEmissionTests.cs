@@ -491,6 +491,23 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             return new TrRmSourceClassMemberExport(0, member.Span,
                 "Box." + item.Name);
         }).ToArray();
+        var floatingCallBodyNames = new[] {
+            "StaticAddFloat64AfterCall",
+            "StaticAddFloat64AfterCallConstant",
+            "InstanceStaticAddFloat64AfterCall",
+            "LessFloat64AfterCall",
+            "LessFloat64AfterInstanceCall",
+        };
+        var floatingCallBodyExports = floatingCallBodyNames.Select(name =>
+        {
+            var member = members.Single(node =>
+                node.Kind == SyntaxKind.FunctionDeclaration
+                && node.Children.OfType<SyntaxTokenElement>().Any(token =>
+                    StringComparer.Ordinal.Equals(
+                        token.Token.Name, name)));
+            return new TrRmSourceClassMemberExport(0, member.Span,
+                "Box." + name);
+        }).ToArray();
         var field = members.Single(static node =>
             node.Kind == SyntaxKind.FieldDeclaration);
         var constructor = members.Single(static node =>
@@ -893,6 +910,14 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     int64 left, int64 right) {
                     return Add64(left, right) + 7;
                 }
+                public static float64 StaticAddFloat64AfterCall(
+                    float64 left, float64 right) {
+                    return AddFloat64(left, right) + right;
+                }
+                public static float64 StaticAddFloat64AfterCallConstant(
+                    float64 left, float64 right) {
+                    return AddFloat64(left, right) + 0.5;
+                }
                 public int32 InstanceStaticAddAfterCall(
                     int32 left, int32 right) {
                     return Add(left, right) + right;
@@ -901,6 +926,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     int64 left, int64 right) {
                     return Add64(left, right) + right;
                 }
+                public float64 InstanceStaticAddFloat64AfterCall(
+                    float64 left, float64 right) {
+                    return AddFloat64(left, right) + right;
+                }
                 public static bool Greater64AfterCall(
                     int64 left, int64 right) {
                     return Add64(left, right) > right;
@@ -908,6 +937,14 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 public bool Greater64AfterInstanceCall(
                     int64 left, int64 right) {
                     return Sum64(left, right) > right;
+                }
+                public bool LessFloat64AfterCall(
+                    float64 left, float64 right) {
+                    return AddFloat64(left, right) < right;
+                }
+                public bool LessFloat64AfterInstanceCall(
+                    float64 left, float64 right) {
+                    return AddFloat64Instance(left, right) < right;
                 }
                 public static int32 Subtract(int32 left, int32 right) {
                     return right - left;
@@ -1337,6 +1374,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                             "Box.Add64"),
                         ..floatingAddExports,
                         ..floatingControlExports,
+                        ..floatingCallBodyExports,
                         new TrRmSourceClassMemberExport(0,
                             addFloat64Constant.Span,
                             "Box.AddFloat64Constant"),
@@ -1782,6 +1820,43 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     0x17, 0,
                 }));
         }
+        void AssertFloatCallBody(string exportKey, string targetKey,
+            int expectedHomeCount, bool hasConstant, byte[] expectedCode)
+        {
+            Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+                exportKey, out var definition), Is.True);
+            var methodRow = checked((int)(definition & 0x00FF_FFFF));
+            var bodyRow = tables.Methods.GetBodyRow(methodRow);
+            Assert.That(bodyRow, Is.GreaterThan(0));
+            tables.Bodies.ValidateSelectedImplementation(bodyRow,
+                tables.Contracts.Count);
+            tables.ValidateRegisterBodyMapsForMethod(methodRow);
+            var body = tables.Bodies.GetRegisterBody(bodyRow,
+                tables.Contracts.Count);
+            Assert.That(body.HomeCount, Is.EqualTo(expectedHomeCount));
+            Assert.That(body.MethodCount, Is.EqualTo(1));
+            Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+                targetKey, out var targetDefinition), Is.True);
+            Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                    body.MethodMap), Is.EqualTo(targetDefinition));
+            Assert.That(body.ConstantCount, Is.EqualTo(
+                hasConstant ? 1 : 0));
+            if (hasConstant)
+            {
+                Assert.That(body.ConstantMap.Length, Is.EqualTo(8));
+                Assert.That(tables.TypeSpecs.AreEquivalentTypeSpecRefs(
+                        BinaryPrimitives.ReadUInt32LittleEndian(
+                            body.ConstantMap),
+                        tables.Signatures.GetResultTypeSpec(
+                            tables.Methods.GetSignature(methodRow))),
+                    Is.True);
+                Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                        body.ConstantMap.Slice(4)),
+                    Is.GreaterThan(0u));
+            }
+            Assert.That(body.GetBlockCode(0).ToArray(),
+                Is.EqualTo(expectedCode));
+        }
         var addControl = GetArithmeticControl(addBinary);
         Assert.That(addBody.GetBlockCode(0).ToArray(), Is.EqualTo(
             new byte[] {
@@ -1981,6 +2056,43 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 0xC3, 1, 0, 0xFF,
                 0x17, 0,
             }));
+        AssertFloatCallBody("Box.StaticAddFloat64AfterCall",
+            "Box.AddFloat64", 2, false, [
+                0xE0, 0, 1, 0,
+                0xD5, 1, 1, 0,
+                0xC0, 0x20, 0xF0, 0x10,
+                0x17, 0,
+            ]);
+        AssertFloatCallBody("Box.StaticAddFloat64AfterCallConstant",
+            "Box.AddFloat64", 2, true, [
+                0xE0, 0, 1, 0,
+                0xD4, 1, 0, 0,
+                0xC0, 0x20, 0xF0, 0x10,
+                0x17, 0,
+            ]);
+        AssertFloatCallBody("Box.InstanceStaticAddFloat64AfterCall",
+            "Box.AddFloat64", 3, false, [
+                0xE0, 0, 1, 0,
+                0xD5, 1, 2, 0,
+                0xC0, 0x20, 0xF0, 0x10,
+                0x17, 0,
+            ]);
+        AssertFloatCallBody("Box.LessFloat64AfterCall",
+            "Box.AddFloat64", 2, false, [
+                0xE0, 0, 1, 0,
+                0xD5, 1, 1, 0,
+                0xC2, 0, 0xF0, 0x10,
+                0xC3, 1, 0, 0xFF,
+                0x17, 0,
+            ]);
+        AssertFloatCallBody("Box.LessFloat64AfterInstanceCall",
+            "Box.AddFloat64Instance", 3, false, [
+                0xE0, 0, 1, 0,
+                0xD5, 1, 2, 0,
+                0xC2, 0, 0xF0, 0x10,
+                0xC3, 1, 0, 0xFF,
+                0x17, 0,
+            ]);
         Assert.That(tables.Exports.TryGetDefinitionForKey(1,
             "Box.Sum64ThroughTwoLocals",
             out var sum64ThroughTwoLocalsDefinition), Is.True);
@@ -2974,16 +3086,35 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             float64 UseAddFloat64Constant(float64 left, float64 right) {
                 return Box.AddFloat64Constant(left, right);
             }
+            float64 UseStaticAddFloat64AfterCall(
+                float64 left, float64 right) {
+                return Box.StaticAddFloat64AfterCall(left, right);
+            }
+            float64 UseStaticAddFloat64AfterCallConstant(
+                float64 left, float64 right) {
+                return Box.StaticAddFloat64AfterCallConstant(left, right);
+            }
             float64 UseAddFloat64Instance(
                 Box value, float64 left, float64 right) {
                 return value.AddFloat64Instance(left, right);
             }
+            float64 UseInstanceStaticAddFloat64AfterCall(
+                Box value, float64 left, float64 right) {
+                return value.InstanceStaticAddFloat64AfterCall(left, right);
+            }
             bool UseLessFloat64(float64 left, float64 right) {
                 return Box.LessFloat64(left, right);
+            }
+            bool UseLessFloat64AfterCall(float64 left, float64 right) {
+                return Box.LessFloat64AfterCall(left, right);
             }
             bool UseLessFloat64Instance(
                 Box value, float64 left, float64 right) {
                 return value.LessFloat64Instance(left, right);
+            }
+            bool UseLessFloat64AfterInstanceCall(
+                Box value, float64 left, float64 right) {
+                return value.LessFloat64AfterInstanceCall(left, right);
             }
             int64 UseSum64(Box value, int64 left, int64 right) {
                 return value.Sum64(left, right);

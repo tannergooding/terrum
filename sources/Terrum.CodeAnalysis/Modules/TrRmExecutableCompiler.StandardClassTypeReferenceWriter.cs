@@ -925,8 +925,8 @@ public static partial class TrRmExecutableCompiler
                     var directBooleanComparison
                         = TryGetC1M1Construction2DirectBooleanComparison(
                             methodFunction);
-                    var callIntegerBinary
-                        = TryGetC1M1Construction2DirectCallIntegerBinary(
+                    var callNumericBinary
+                        = TryGetC1M1Construction2DirectCallNumericBinary(
                             methodFunction, program.Functions);
                     var localCopyReturn
                         = TryGetC1M1Construction2LocalCopyReturn(
@@ -944,7 +944,7 @@ public static partial class TrRmExecutableCompiler
                             && directNumericBinary is null
                             && directNumericUnary is null
                             && directBooleanComparison is null
-                            && callIntegerBinary is null
+                            && callNumericBinary is null
                             && !localCopyReturn
                             && !localNumericBinaryReturn)
                         || methodFunction.IsClassConstructor
@@ -1014,7 +1014,7 @@ public static partial class TrRmExecutableCompiler
                                 && directNumericBinary is null
                                 && directNumericUnary is null
                                 && directBooleanComparison is null
-                                && callIntegerBinary is null
+                                && callNumericBinary is null
                                 && !localCopyReturn
                                 && !localNumericBinaryReturn)
                             {
@@ -1261,7 +1261,7 @@ public static partial class TrRmExecutableCompiler
                             isSupportedIdentityForwarder
                                 || isSupportedUnitIdentityForwarder
                                 ? identityForwarderTargetFunctionIndex : -1,
-                            encodedBody, callIntegerBinary));
+                            encodedBody, callNumericBinary));
                 }
             }
 
@@ -1322,7 +1322,7 @@ public static partial class TrRmExecutableCompiler
                                 "A class call Body targets a MethodDef outside its retained class closure.");
                         }
 
-                        body = EncodeC1M1Construction2CallIntegerBinaryBody(
+                        body = EncodeC1M1Construction2CallNumericBinaryBody(
                             method.Function, callBinaryExpression,
                             targetMethodDefRow,
                             program.Functions[targetCall.Function],
@@ -3040,7 +3040,7 @@ public static partial class TrRmExecutableCompiler
                 : schema.UsesGeneralPredicateGraphs());
     }
 
-    private static byte[] EncodeC1M1Construction2CallIntegerBinaryBody(
+    private static byte[] EncodeC1M1Construction2CallNumericBinaryBody(
         BoundFunction function, BoundBinary binary, int targetMethodDefRow,
         BoundFunction targetFunction,
         TrRmFrozenScalarValueBuilder frozenScalarValueBuilder,
@@ -3060,7 +3060,7 @@ public static partial class TrRmExecutableCompiler
         var rightRead = binary.Right as BoundRead;
         var rightConstant = binary.Right as BoundConstant;
         if (targetMethodDefRow <= 0 || targetMethodDefRow > 0xFF_FFFF
-            || !IsC1M1Construction2BodyIntegerType(operationType)
+            || !IsC1M1Construction2BodyNumericType(operationType)
             || (!function.IsStatic && function.Variables[0].IsMutable)
             || function.Variables.Skip(callerReceiverCount).Any(
                 variable => variable.Type != operationType
@@ -3103,7 +3103,7 @@ public static partial class TrRmExecutableCompiler
                     || variable.IsInitializationLocal))
         {
             throw Unsupported(
-                "A Construction-2 call-binary Body requires a same-class direct fixed-integer call and one direct fixed-integer read or canonical constant.");
+                "A Construction-2 call-binary Body requires a same-class direct numeric call and one direct same-typed read or canonical constant.");
         }
 
         for (var parameter = 0;
@@ -3141,14 +3141,22 @@ public static partial class TrRmExecutableCompiler
         var isIntegerValueOperation
             = function.ReturnType == operationType
                 && binary.Type == operationType
+                && IsC1M1Construction2BodyIntegerType(operationType)
                 && (binary.Operator is TokenKind.Ampersand
                     or TokenKind.Pipe or TokenKind.Caret or TokenKind.Plus
                     or TokenKind.Minus or TokenKind.Star
                     or TokenKind.Slash or TokenKind.Percent);
-        if (!isComparison && !isIntegerValueOperation)
+        var isFloatingValueOperation
+            = function.ReturnType == operationType
+                && binary.Type == operationType
+                && PrimitiveTypeFacts.IsFloating(operationType)
+                && (binary.Operator is TokenKind.Plus or TokenKind.Minus
+                    or TokenKind.Star or TokenKind.Slash or TokenKind.Percent);
+        if (!isComparison && !isIntegerValueOperation
+            && !isFloatingValueOperation)
         {
             throw Unsupported(
-                "A Construction-2 call-binary Body requires an assigned fixed-integer operation or Boolean comparison.");
+                "A Construction-2 call-binary Body requires an assigned numeric operation or Boolean comparison.");
         }
 
         byte[] constantMap = [];
@@ -3260,6 +3268,14 @@ public static partial class TrRmExecutableCompiler
             code.Add((byte)predicatePayload);
             code.Add((byte)(predicatePayload >> 8));
         }
+        else if (isFloatingValueOperation)
+        {
+            code.Add(0xC0);
+            code.Add(GetC1M1Construction2FloatingBinaryControl(
+                binary.Operator));
+            code.Add((byte)payload);
+            code.Add((byte)(payload >> 8));
+        }
         else
         {
             var (opcode, control)
@@ -3291,7 +3307,7 @@ public static partial class TrRmExecutableCompiler
 
         static bool IsValidConstant(BoundConstant? constant)
             => constant is not null
-                && IsC1M1Construction2BodyIntegerType(constant.Type)
+                && IsC1M1Construction2BodyNumericType(constant.Type)
                 && constant.Type == constant.RepresentationType
                 && constant.Bits.IsCanonicalFor(constant.Type);
     }
@@ -4380,7 +4396,7 @@ public static partial class TrRmExecutableCompiler
     }
 
     private static BoundBinary?
-        TryGetC1M1Construction2DirectCallIntegerBinary(
+        TryGetC1M1Construction2DirectCallNumericBinary(
         BoundFunction function, ImmutableArray<BoundFunction> functions)
     {
         var callerReceiverCount = function.IsStatic ? 0 : 1;
@@ -4392,7 +4408,7 @@ public static partial class TrRmExecutableCompiler
         }
 
         var operationType = function.Variables[callerReceiverCount].Type;
-        if (!IsC1M1Construction2BodyIntegerType(operationType)
+        if (!IsC1M1Construction2BodyNumericType(operationType)
             || function.Variables.Skip(callerReceiverCount).Any(
                 variable => variable.Type != operationType
                 || variable.IsMutable
@@ -4435,11 +4451,20 @@ public static partial class TrRmExecutableCompiler
         var isIntegerValueOperation
             = function.ReturnType == operationType
                 && returnedBinary.Type == operationType
+                && IsC1M1Construction2BodyIntegerType(operationType)
                 && (returnedBinary.Operator is TokenKind.Ampersand
                     or TokenKind.Pipe or TokenKind.Caret
                     or TokenKind.Plus or TokenKind.Minus or TokenKind.Star
                     or TokenKind.Slash or TokenKind.Percent);
-        if (!isComparison && !isIntegerValueOperation)
+        var isFloatingValueOperation
+            = function.ReturnType == operationType
+                && returnedBinary.Type == operationType
+                && PrimitiveTypeFacts.IsFloating(operationType)
+                && (returnedBinary.Operator is TokenKind.Plus
+                    or TokenKind.Minus or TokenKind.Star or TokenKind.Slash
+                    or TokenKind.Percent);
+        if (!isComparison && !isIntegerValueOperation
+            && !isFloatingValueOperation)
         {
             return null;
         }
@@ -4497,7 +4522,7 @@ public static partial class TrRmExecutableCompiler
         static bool IsValidConstant(BoundConstant? constant)
             => constant is not null
                 && constant.Type == constant.RepresentationType
-                && IsC1M1Construction2BodyIntegerType(constant.Type)
+                && IsC1M1Construction2BodyNumericType(constant.Type)
                 && constant.Bits.IsCanonicalFor(constant.Type);
 
         void Visit(BoundBlock block)
