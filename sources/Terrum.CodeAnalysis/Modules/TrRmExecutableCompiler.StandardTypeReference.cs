@@ -1021,6 +1021,39 @@ public static partial class TrRmExecutableCompiler
                 declaration, [], []));
         }
 
+        var retainedImportedClassTypeKeys
+            = selectedImportedClassTypeKeys.IsDefault
+                ? new HashSet<(string ProviderIdentity, string ExportKey)>()
+                : selectedImportedClassTypeKeys.ToHashSet();
+        foreach (var declaration in classDeclarations)
+        {
+            if (!StringComparer.Ordinal.Equals(
+                    declaration.Declaration.Identity.ModuleIdentity,
+                    moduleIdentity)
+                || declaration.SelectedExportKeys.IsEmpty)
+            {
+                continue;
+            }
+
+            foreach (var method in declaration.Declaration.Methods)
+            {
+                if (method.SelectedExportKeys.IsEmpty
+                    || method.GenericParameterCount != 0)
+                {
+                    continue;
+                }
+
+                IncludeImportedClassType(method.ReturnTypeSpecReference);
+                IncludeImportedClassType(
+                    method.ReceiverTypeSpecReference);
+                foreach (var parameter in method.Parameters)
+                {
+                    IncludeImportedClassType(
+                        parameter.TypeSpecReference);
+                }
+            }
+        }
+
         foreach (var binding in typeProviderBindings)
         {
             var providerTables = GetC1M1Tables(artifacts, schemaIdentities,
@@ -1063,9 +1096,7 @@ public static partial class TrRmExecutableCompiler
                 Fields = selectedFields.MoveToImmutable(),
             };
             var selectedTypeKeys
-                = selectedImportedClassTypeKeys.IsDefault
-                    ? ImmutableArray<string>.Empty
-                    : selectedImportedClassTypeKeys.Where(selection =>
+                = retainedImportedClassTypeKeys.Where(selection =>
                             StringComparer.Ordinal.Equals(
                                 selection.ProviderIdentity,
                                 providerModule.Identity))
@@ -1082,6 +1113,33 @@ public static partial class TrRmExecutableCompiler
                     out var expectations) ? [.. expectations] : []) {
                 SelectedExportKeys = selectedTypeKeys,
             });
+        }
+
+        void IncludeImportedClassType(uint typeSpecReference)
+        {
+            if (typeSpecReference == 0)
+            {
+                return;
+            }
+
+            var typeSpec = rootTables.TypeSpecs.GetTypeSpecRef(
+                typeSpecReference);
+            if (!typeSpec.IsRow || typeSpec.Form != 0x03)
+            {
+                return;
+            }
+
+            var typeDefRow = rootTables.TypeSpecs.GetNominalTypeDefRow(
+                typeSpecReference, rootTables.TypeDefs, rootTables.Imports);
+            if (rootTables.TypeDefs.GetKind(typeDefRow) != 2)
+            {
+                return;
+            }
+
+            var importBinding = rootTables.Imports.GetBindingForImportRow(
+                checked((int)typeSpec.Row));
+            retainedImportedClassTypeKeys.Add((
+                importBinding.ProducerIdentity, importBinding.ExportKey));
         }
 
         if (isEN1)
@@ -1123,6 +1181,9 @@ public static partial class TrRmExecutableCompiler
                     declaration.Declaration.Identity, [], 0));
         }
 
+        var classMethodTypeSpecInstanceIndexes = new Dictionary<(
+            BoundGenericNominalTypeIdentity Identity,
+            uint TypeSpecReference), int>();
         var checkedReferenceTypes
             = ImmutableArray.CreateBuilder<CheckedReferenceTypeDefinition>();
         var checkedReferenceTypeIndexes
@@ -1158,7 +1219,7 @@ public static partial class TrRmExecutableCompiler
                         method.ReturnTypeSpecReference, out var returnType))
                 {
                     throw Unsupported(
-                        "The bounded CM1 class source reference supports only bodyful nongeneric scalar or plain checked-reference member results.");
+                        "The bounded CM1 class source reference supports only bodyful nongeneric scalar, selected class-handle or plain checked-reference member results.");
                 }
 
                 var variables = ImmutableArray.CreateBuilder<BoundVariable>(
@@ -1218,7 +1279,7 @@ public static partial class TrRmExecutableCompiler
                             out var isImplicitRef))
                     {
                         throw Unsupported(
-                            "The bounded CM1 class source reference supports scalar or plain checked-reference member parameters.");
+                            "The bounded CM1 class source reference supports scalar, selected class-handle or plain checked-reference member parameters.");
                     }
 
                     variables.Add(new BoundVariable(parameter.Name,
@@ -1341,7 +1402,7 @@ public static partial class TrRmExecutableCompiler
                             out var returnType))
                     {
                         throw Unsupported(
-                            "The bounded CM1 class source reference supports only bodyless expected Methods with bodyful nongeneric scalar or plain checked-reference providers.");
+                            "The bounded CM1 class source reference supports only bodyless expected Methods with bodyful nongeneric scalar, selected class-handle or plain checked-reference providers.");
                     }
 
                     var isStatic = method.ReceiverTypeSpecReference == 0;
@@ -1396,7 +1457,7 @@ public static partial class TrRmExecutableCompiler
                                 out var isImplicitRef))
                         {
                             throw Unsupported(
-                                "The bounded CM1 class source reference supports scalar or plain checked-reference imported member parameters.");
+                                "The bounded CM1 class source reference supports scalar, selected class-handle or plain checked-reference imported member parameters.");
                         }
 
                         variables.Add(new BoundVariable(parameter.Name,
@@ -1459,6 +1520,89 @@ public static partial class TrRmExecutableCompiler
                     .TryGetBoundScalarType(typeSpec.TypeCode, out type);
         }
 
+        bool TryGetClassMethodNominalType(uint typeSpecReference,
+            out PrimitiveType type)
+        {
+            type = PrimitiveType.Void;
+            var typeSpec = rootTables.TypeSpecs.GetTypeSpecRef(
+                typeSpecReference);
+            if (!typeSpec.IsRow
+                || typeSpec.Form is not (0x02 or 0x03)
+                || typeSpec.Qualifiers > 1)
+            {
+                return false;
+            }
+
+            var typeDefRow = rootTables.TypeSpecs.GetNominalTypeDefRow(
+                typeSpecReference, rootTables.TypeDefs, rootTables.Imports);
+            if (rootTables.TypeDefs.GetKind(typeDefRow) != 2)
+            {
+                return false;
+            }
+
+            var expectedIdentity = new BoundGenericNominalTypeIdentity(
+                moduleIdentity, moduleIdentity,
+                0x1300_0000u | checked((uint)typeDefRow));
+            BoundStandardClassDeclaration? selectedDeclaration = null;
+            foreach (var candidate in classDeclarations)
+            {
+                var matchesExpected = candidate.Declaration.Identity
+                        == expectedIdentity
+                    || candidate.Expectations.Any(expectation =>
+                        expectation.ExpectedDeclaration.Identity
+                            == expectedIdentity);
+                if (!matchesExpected)
+                {
+                    continue;
+                }
+
+                if (selectedDeclaration is not null
+                    && selectedDeclaration.Declaration.Identity
+                        != candidate.Declaration.Identity)
+                {
+                    throw Invalid(
+                        "A CM1 class method TypeSpec resolves through conflicting class provider views.");
+                }
+
+                selectedDeclaration = candidate;
+            }
+
+            if (selectedDeclaration is null
+                || selectedDeclaration.SelectedExportKeys.IsEmpty)
+            {
+                return false;
+            }
+
+            var identity = selectedDeclaration.Declaration.Identity;
+            if (!classTypeInstanceIndexes.ContainsKey(identity))
+            {
+                throw Invalid(
+                    "A selected CM1 class method TypeSpec has no nominal class instance.");
+            }
+
+            var key = (identity, typeSpecReference);
+            if (!classMethodTypeSpecInstanceIndexes.TryGetValue(key,
+                    out var instanceIndex))
+            {
+                if (genericNominalTypeInstances.Count
+                    >= BoundGenericNominalTypeTypes.MaximumCount)
+                {
+                    throw Unsupported(
+                        "CM1 class method nominal parameter types exceed the analysis limit.");
+                }
+
+                instanceIndex = genericNominalTypeInstances.Count;
+                genericNominalTypeInstances.Add(
+                    new BoundGenericNominalTypeInstance(identity, [],
+                        typeSpec.Qualifiers, typeSpecReference,
+                        moduleIdentity, typeSpec.Form));
+                classMethodTypeSpecInstanceIndexes.Add(key, instanceIndex);
+            }
+
+            type = BoundGenericNominalTypeTypes.Type(instanceIndex);
+            return true;
+        }
+
         bool TryGetClassMethodResultType(uint typeSpecReference,
             out PrimitiveType type)
         {
@@ -1485,6 +1629,11 @@ public static partial class TrRmExecutableCompiler
             if (TryGetScalarType(typeSpecReference, out type))
             {
                 return flags == 0 && type != PrimitiveType.Void;
+            }
+
+            if (TryGetClassMethodNominalType(typeSpecReference, out type))
+            {
+                return flags == 0;
             }
 
             var reference = rootTables.TypeSpecs.GetTypeSpecRef(

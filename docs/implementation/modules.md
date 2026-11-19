@@ -230,6 +230,10 @@ TypeSpecs and ordered FieldDef/Import steps, interning identical remapped
 paths. Body-04 field-reference Bodies remap their local/imported FieldDef
 token and owning MethodDef Dependency row; source-free callable views preserve
 plain scalar checked-reference results with normal-result Dependency clauses.
+CM1 class method views also reconstruct direct nominal class-handle
+parameters from local TypeDefs or exact selected TypeDef Imports, preserving
+TypeSpec/provider identity and access qualifiers; referenced imported type keys
+are retained in the view closure.
 The exact Construction-2/CM1 source producer emits Body-04 for direct
 scalar-field reference getters backed by one receiver or class-handle formal,
 using the exact normal-result `DependsOn` relation and a selected FieldDef
