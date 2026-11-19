@@ -4750,6 +4750,172 @@ internal sealed class TrRmGenericMethodSourceWriterTests
     }
 
     [Test]
+    public void ReemitsCM1AR1RequiredConstructedGenericNominalType()
+    {
+        var nominalTree = SyntaxTree.Parse("""
+            namespace Example {
+                public T Identity<T>(T value) { return move value; }
+                public T Forward<T>(T value) {
+                    return Identity<T>(move value);
+                }
+            }
+            """);
+        var nominalCompilation = Compilation.CreateLibrary(nominalTree);
+        Assert.That(nominalCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                nominalCompilation.Diagnostics));
+        var nominalProgram = nominalCompilation.Program!;
+        var nominalBaseArtifact = TrRmExecutableCompiler.EmitStandard(
+            nominalProgram, "cm1ar1.generic-nominal.provider",
+            CM1AR1SchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(),
+            nominalProgram.GenericMethodDefinitions.Select(definition =>
+                new TrRmSourceGenericMethodExport(nominalProgram,
+                    definition.SourceInputOrdinal, definition.Span,
+                    definition.Name)).ToArray());
+        var nominalSchema
+            = TrRmArtifactSchema
+                .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsDraft;
+        var nominalArtifact = AddConstructedGenericNominalMethodTypes(
+            nominalBaseArtifact, includeDeclaredField: true,
+            selectedSchema: nominalSchema);
+        var nominalInput = new TrRmStandardArtifactInput(
+            CM1AR1SchemaIdentity, nominalArtifact);
+        var nominalReference = TrRmExecutableCompiler.CreateStandardReference(
+            nominalInput, "cm1ar1.generic-nominal.provider");
+
+        var classTree = SyntaxTree.Parse("""
+            namespace Example {
+                public interface ISource<T> { type Item = T; }
+                public class Container {
+                    public static int32 Constrained<T>()
+                        where T : ISource<T>
+                        where T.via<ISource<T>>.Item is Box<int32> {
+                        return 7;
+                    }
+                }
+            }
+            """);
+        var classCompilation = Compilation.CreateLibrary(classTree,
+            nominalReference);
+        Assert.That(classCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                classCompilation.Diagnostics));
+        var classProgram = classCompilation.Program!;
+        var sourceInterface = classProgram.Interfaces.Single();
+        var associatedType = sourceInterface.Members.Single();
+        var namespaceDeclaration = classTree.Root.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.NamespaceDeclaration);
+        var classDeclaration = namespaceDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var methodDeclaration = classDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.FunctionDeclaration);
+        var classIndex = Enumerable.Range(0, classProgram.Classes.Length)
+            .Single(index => classProgram.Classes[index].Name == "Container");
+        var classArtifact = TrRmExecutableCompiler.EmitStandard(
+            classProgram, "cm1ar1.generic-nominal.class-provider",
+            CM1AR1SchemaIdentity, 0, [
+                new TrRmSourceTypeExport("Example", "ISource",
+                    "example.interface/ISource") {
+                    GenericArity = sourceInterface.Formals.Length,
+                    InterfaceMethodExports = [],
+                    InterfaceAssociatedTypeExports = [
+                        new TrRmSourceInterfaceAssociatedTypeExport(
+                            associatedType.SourceInputOrdinal,
+                            associatedType.SourceDeclarationSpan,
+                            "example.interface/ISource.Item"),
+                    ],
+                },
+            ], [], [
+                new TrRmSourceClassExport(classProgram, classIndex,
+                    classDeclaration.Span, "example.class/Container", [
+                        new TrRmSourceClassMemberExport(classIndex,
+                            methodDeclaration.Span, "Container.Constrained"),
+                    ]),
+            ]);
+        var classInput = new TrRmStandardArtifactInput(CM1AR1SchemaIdentity,
+            classArtifact);
+        var classReference = TrRmExecutableCompiler.CreateStandardReference(
+            classInput, "cm1ar1.generic-nominal.class-provider",
+            [nominalInput], ["example.class/Container"]);
+        var classMethod = classReference.GenericMethodImports.Single(
+            static method => method.Origin.ExportKey
+                == "Container.Constrained");
+        Assert.That(classMethod.Formals[0].AssociatedRelations[0]
+            .RequiredType.TypeArguments, Has.Length.EqualTo(1));
+
+        var sourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), classReference);
+        Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceFreeCompilation.Diagnostics));
+        var reemitted = TrRmExecutableCompiler.EmitStandard(
+            sourceFreeCompilation.Program!,
+            "cm1ar1.generic-nominal.reemitted", CM1AR1SchemaIdentity, 0);
+        var reemittedTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                new TrRmArtifactIndex(reemitted, nominalSchema));
+        var reemittedMethod = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(CM1AR1SchemaIdentity,
+                    reemitted),
+                "cm1ar1.generic-nominal.reemitted",
+                [classInput, nominalInput], ["example.class/Container"])
+            .GenericMethodImports.Single(static method =>
+                method.Origin.ExportKey == "Container.Constrained");
+        var requiredType
+            = reemittedMethod.Formals[0].AssociatedRelations[0].RequiredType;
+        Assert.That(requiredType.NominalTypeIdentity!.Value.ProviderIdentity,
+            Is.EqualTo("cm1ar1.generic-nominal.provider"));
+        var methodDefId = GetExportedMethodDefId(reemitted,
+            "Container.Constrained");
+        var methodRow = checked((int)(methodDefId & 0x00FF_FFFF));
+        var signature = reemittedTables.Methods.GetSignature(methodRow);
+        var (formalFirst, _) = reemittedTables.Signatures
+            .GetGenericRange(signature);
+        var (constraintFirst, constraintCount)
+            = reemittedTables.GenericParams.GetConstraintRange(formalFirst);
+        var relationConstraint = Enumerable.Range(constraintFirst,
+                constraintCount)
+            .Single(row => reemittedTables.Constraints.GetKind(row) == 3);
+        var relationRow = checked((int)reemittedTables.Constraints
+            .GetPayload(relationConstraint));
+        var requiredTypeSpec = reemittedTables.AssociatedRelations
+            .GetRequiredTypeSpecRef(relationRow);
+        Assert.That(reemittedTables.TypeSpecs.GetTypeSpecRef(requiredTypeSpec)
+            .Form, Is.EqualTo(0x05));
+
+        var relocatedNominalInput = new TrRmStandardArtifactInput(
+            CM1AR1SchemaIdentity,
+            RelocateConstructedNominalProviderTypeDef(nominalArtifact,
+                nominalSchema));
+        _ = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(CM1AR1SchemaIdentity, reemitted),
+            "cm1ar1.generic-nominal.reemitted",
+            [classInput, relocatedNominalInput],
+            ["example.class/Container"]);
+
+        var incompatibleNominalArtifact
+            = AddConstructedGenericNominalMethodTypes(nominalBaseArtifact,
+                includeDeclaredField: true, includeConstructedField: true,
+                selectedSchema: nominalSchema);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(CM1AR1SchemaIdentity,
+                    reemitted),
+                "cm1ar1.generic-nominal.reemitted", [
+                    classInput,
+                    new TrRmStandardArtifactInput(CM1AR1SchemaIdentity,
+                        incompatibleNominalArtifact),
+                ], ["example.class/Container"]));
+    }
+
+    [Test]
     public void EmitsReadonlyInstanceCM1AR1ClassMethodRelations()
     {
         var tree = SyntaxTree.Parse("""
@@ -7835,10 +8001,11 @@ internal sealed class TrRmGenericMethodSourceWriterTests
     }
 
     private static byte[] RelocateConstructedNominalProviderTypeDef(
-        byte[] artifact)
+        byte[] artifact, TrRmArtifactSchema? selectedSchema = null)
     {
-        var index = TrRmArtifactIndex
-            .ForGenericMethodCallsParameterLabelsDraft(artifact);
+        var schema = selectedSchema
+            ?? TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft;
+        var index = new TrRmArtifactIndex(artifact, schema);
         var sections = new SortedDictionary<ushort, TrRmSection>();
         var (stringCount, stringBytes) = GetSection(artifact, 0x0002);
         var strings = new TrRmStringTableReader(stringBytes,
@@ -7914,7 +8081,7 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                 checked((uint)count), rewritten));
         }
         return TrRmArtifactWriter.Encode(sections.Values.ToArray(),
-            TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft);
+            schema);
     }
 
     [Test]
@@ -10794,7 +10961,8 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         bool optionalConstructedNominal = false,
         uint nominalTypeDefFlags = 0x0A,
         bool includeDeclaredField = false,
-        bool includeConstructedField = false)
+        bool includeConstructedField = false,
+        TrRmArtifactSchema? selectedSchema = null)
     {
         static byte[] CreateWrapperTypeSpec(byte form, uint innerTypeSpec,
             byte qualifiers)
@@ -10807,10 +10975,9 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                     qualifiers),
             };
 
-        var schema
-            = TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft;
-        var index = TrRmArtifactIndex.ForGenericMethodCallsParameterLabelsDraft(
-            artifact);
+        var schema = selectedSchema
+            ?? TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft;
+        var index = new TrRmArtifactIndex(artifact, schema);
         var tables
             = TrRmStructuralMetadataValidator
                 .ValidateGenericMethodCallsDraftAndGetExecutionTables(index);
@@ -11432,7 +11599,6 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             BinaryPrimitives.WriteUInt32LittleEndian(source.AsSpan(4, 4), 1);
             sections[0x0030] = new TrRmSection(0x0030, 0, 1, source);
         }
-
         return TrRmArtifactWriter.Encode(sections.Values.ToArray(), schema);
     }
 
