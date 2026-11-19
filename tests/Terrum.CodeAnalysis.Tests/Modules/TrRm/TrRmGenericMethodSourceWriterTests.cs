@@ -5078,6 +5078,9 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                     public static int32 Observe<T>(ref<Box<T>> value) {
                         return 1;
                     }
+                    public static int32 ObserveOptional<T>(Box<T>? value) {
+                        return 1;
+                    }
                     public static int32 ObserveNested<T>(
                         ref<ref<Box<T>>> value) {
                         return 1;
@@ -5091,7 +5094,6 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             string.Join(Environment.NewLine,
                 classCompilation.Diagnostics));
         var classProgram = classCompilation.Program!;
-        var method = classProgram.GenericMethodDefinitions.Single();
         var classDeclaration = classTree.Root.Children
             .OfType<SyntaxNode>()
             .Single(static node =>
@@ -5102,29 +5104,38 @@ internal sealed class TrRmGenericMethodSourceWriterTests
         var acceptDeclaration = classDeclaration.Children
             .OfType<SyntaxNode>()
             .Single(static node =>
-            node.Kind == SyntaxKind.FunctionDeclaration
-            && node.Children.OfType<SyntaxTokenElement>().Any(
-                static token => token.Token.Name == "Accept"));
+                node.Kind == SyntaxKind.FunctionDeclaration
+                && node.Children.OfType<SyntaxTokenElement>().Any(
+                    static token => token.Token.Name == "Accept"));
         var observeDeclaration = classDeclaration.Children
             .OfType<SyntaxNode>()
             .Single(static node =>
-            node.Kind == SyntaxKind.FunctionDeclaration
-            && node.Children.OfType<SyntaxTokenElement>().Any(
-                static token => token.Token.Name == "Observe"));
+                node.Kind == SyntaxKind.FunctionDeclaration
+                && node.Children.OfType<SyntaxTokenElement>().Any(
+                    static token => token.Token.Name == "Observe"));
+        var observeOptionalDeclaration = classDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.FunctionDeclaration
+                && node.Children.OfType<SyntaxTokenElement>().Any(
+                        static token => token.Token.Name == "ObserveOptional"));
         var observeNestedDeclaration = classDeclaration.Children
             .OfType<SyntaxNode>()
             .Single(static node =>
-            node.Kind == SyntaxKind.FunctionDeclaration
-            && node.Children.OfType<SyntaxTokenElement>().Any(
-                static token => token.Token.Name == "ObserveNested"));
+                node.Kind == SyntaxKind.FunctionDeclaration
+                && node.Children.OfType<SyntaxTokenElement>().Any(
+                        static token => token.Token.Name == "ObserveNested"));
         var method = classProgram.GenericMethodDefinitions.Single(
             definition => definition.Span == acceptDeclaration.Span);
         var referenceMethod = classProgram.GenericMethodDefinitions.Single(
             definition => definition.Span == observeDeclaration.Span);
+        var optionalMethod = classProgram.GenericMethodDefinitions.Single(
+            definition => definition.Span
+                == observeOptionalDeclaration.Span);
         var nestedReferenceMethod
             = classProgram.GenericMethodDefinitions.Single(
-            definition => definition.Span
-                == observeNestedDeclaration.Span);
+                definition => definition.Span
+                    == observeNestedDeclaration.Span);
         var classIndex = Enumerable.Range(0, classProgram.Classes.Length)
             .Single(index => classProgram.Classes[index].Name == "Container");
         var classArtifact = TrRmExecutableCompiler.EmitStandard(
@@ -5133,12 +5144,15 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                 new TrRmSourceGenericMethodExport(classProgram,
                     method.SourceInputOrdinal, method.Span,
                     "Container.Accept"),
-            new TrRmSourceGenericMethodExport(classProgram,
-                referenceMethod.SourceInputOrdinal,
-                referenceMethod.Span, "Container.Observe"),
-            new TrRmSourceGenericMethodExport(classProgram,
-                nestedReferenceMethod.SourceInputOrdinal,
-                nestedReferenceMethod.Span, "Container.ObserveNested"),
+                new TrRmSourceGenericMethodExport(classProgram,
+                    referenceMethod.SourceInputOrdinal,
+                    referenceMethod.Span, "Container.Observe"),
+                new TrRmSourceGenericMethodExport(classProgram,
+                    optionalMethod.SourceInputOrdinal,
+                    optionalMethod.Span, "Container.ObserveOptional"),
+                new TrRmSourceGenericMethodExport(classProgram,
+                    nestedReferenceMethod.SourceInputOrdinal,
+                    nestedReferenceMethod.Span, "Container.ObserveNested"),
             ], [
                 new TrRmSourceClassExport(classProgram, classIndex,
                     classDeclaration.Span, "container-key", []),
@@ -5243,6 +5257,28 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                 .Slice(2, sizeof(uint)));
         Assert.That(classTables.TypeSpecs.GetTypeSpecRef(
             observeNestedReferent).Form, Is.EqualTo((byte)0x05));
+        Assert.That(classTables.Exports.TryGetDefinitionForKey(1,
+            "Container.ObserveOptional",
+            out var observeOptionalMethodDefId), Is.True);
+        var observeOptionalMethodRow = checked((int)(
+            observeOptionalMethodDefId & 0x00FF_FFFF));
+        var observeOptionalSignature = classTables.Methods.GetSignature(
+            observeOptionalMethodRow);
+        var (observeOptionalParameterFirst,
+            observeOptionalParameterCount)
+            = classTables.Signatures.GetParamRange(
+                observeOptionalSignature);
+        Assert.That(observeOptionalParameterCount, Is.EqualTo(1));
+        var observeOptionalTypeSpec = classTables.Parameters.GetTypeSpec(
+            observeOptionalParameterFirst);
+        Assert.That(classTables.TypeSpecs.GetTypeSpecRef(
+            observeOptionalTypeSpec).Form, Is.EqualTo((byte)0x06));
+        var optionalReferentTypeSpec = BinaryPrimitives
+            .ReadUInt32LittleEndian(classTables.TypeSpecs.GetRow(
+                checked((int)observeOptionalTypeSpec))
+                .Slice(2, sizeof(uint)));
+        Assert.That(classTables.TypeSpecs.GetTypeSpecRef(
+            optionalReferentTypeSpec).Form, Is.EqualTo((byte)0x05));
 
         var classReference = TrRmExecutableCompiler.CreateStandardReference(
             new TrRmStandardArtifactInput(CM1SchemaIdentity, classArtifact),
@@ -5318,6 +5354,48 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                 reemittedGenericImportRow)),
             Is.EqualTo(typeProviderIdentity));
         Assert.That(reemittedClassTables.Exports.TryGetDefinitionForKey(1,
+            "Container.ObserveOptional",
+            out var reemittedObserveOptionalMethodDefId), Is.True);
+        var reemittedObserveOptionalMethodRow = checked((int)(
+            reemittedObserveOptionalMethodDefId & 0x00FF_FFFF));
+        var reemittedObserveOptionalSignature
+            = reemittedClassTables.Methods.GetSignature(
+                reemittedObserveOptionalMethodRow);
+        var (reemittedObserveOptionalParameterFirst,
+            reemittedObserveOptionalParameterCount)
+            = reemittedClassTables.Signatures.GetParamRange(
+                reemittedObserveOptionalSignature);
+        Assert.That(reemittedObserveOptionalParameterCount,
+            Is.EqualTo(1));
+        var reemittedObserveOptionalTypeSpec
+            = reemittedClassTables.Parameters.GetTypeSpec(
+                reemittedObserveOptionalParameterFirst);
+        Assert.That(reemittedClassTables.TypeSpecs.GetTypeSpecRef(
+            reemittedObserveOptionalTypeSpec).Form,
+            Is.EqualTo((byte)0x06));
+        var reemittedOptionalReferentTypeSpec = BinaryPrimitives
+            .ReadUInt32LittleEndian(reemittedClassTables.TypeSpecs.GetRow(
+                checked((int)reemittedObserveOptionalTypeSpec))
+                .Slice(2, sizeof(uint)));
+        Assert.That(reemittedClassTables.TypeSpecs.GetTypeSpecRef(
+            reemittedOptionalReferentTypeSpec).Form,
+            Is.EqualTo((byte)0x05));
+        var reemittedOptionalGenericTypeSpec = BinaryPrimitives
+            .ReadUInt32LittleEndian(reemittedClassTables.TypeSpecs.GetRow(
+                checked((int)reemittedOptionalReferentTypeSpec))
+                .Slice(2, sizeof(uint)));
+        var reemittedOptionalGenericType
+            = reemittedClassTables.TypeSpecs.GetTypeSpecRef(
+                reemittedOptionalGenericTypeSpec);
+        Assert.That(reemittedOptionalGenericType.Form,
+            Is.EqualTo((byte)0x03));
+        var reemittedOptionalGenericImportRow
+            = checked((int)reemittedOptionalGenericType.Row);
+        Assert.That(reemittedClassTables.ModuleRefs.GetProducerIdentity(
+            reemittedClassTables.Imports.GetModuleRefForImportRow(
+                reemittedOptionalGenericImportRow)),
+            Is.EqualTo(typeProviderIdentity));
+        Assert.That(reemittedClassTables.Exports.TryGetDefinitionForKey(1,
             "Container.ObserveNested",
             out var reemittedNestedObserveMethodDefId), Is.True);
         var reemittedNestedObserveMethodRow = checked((int)(
@@ -5383,6 +5461,10 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                             ref<ref<Box<T>>> value) {
                             return Container.ObserveNested<T>(value);
                         }
+                        public static int32 ForwardOptional<T>(
+                            Box<T>? value) {
+                            return Container.ObserveOptional<T>(value);
+                        }
                     }
                 }
                 """), reemittedClassReference);
@@ -5436,6 +5518,10 @@ internal sealed class TrRmGenericMethodSourceWriterTests
                     public static int32 ForwardNested<T>(
                         ref<ref<Box<T>>> value) {
                         return Container.ObserveNested<T>(value);
+                    }
+                    public static int32 ForwardOptional<T>(
+                        Box<T>? value) {
+                        return Container.ObserveOptional<T>(value);
                     }
                 }
             }

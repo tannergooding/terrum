@@ -9815,7 +9815,8 @@ public static partial class TrRmExecutableCompiler
                 var deferredParameterType
                     = IsC1M1ImportedGenericNominalMethodTypeSpec(
                         rootTables, parameter.TypeSpecReference,
-                        nominalTypeImportRows);
+                        nominalTypeImportRows,
+                        allowOptionalClassHandle: true);
                 var remappedTypeSpec = deferredParameterType
                     ? AppendC1M1MethodTypePlaceholder(outputTypeSpecRows,
                         newOwnerTypeDefRow)
@@ -12785,11 +12786,38 @@ public static partial class TrRmExecutableCompiler
     private static bool IsC1M1ImportedGenericNominalMethodTypeSpec(
         TrRmStructuralMetadataValidator.ValidatedExecutionTables
             sourceTables,
-        uint typeSpecReference, HashSet<int> nominalTypeImportRows)
+        uint typeSpecReference, HashSet<int> nominalTypeImportRows,
+        bool allowOptionalClassHandle = false)
     {
         var activeRows = new HashSet<int>();
         var remainingVisits = SemanticVerifier.MaximumAnalysisVisits;
         return Visit(typeSpecReference, depth: 0);
+
+        bool IsImportedConstructedNominal(uint referenceValue)
+        {
+            var reference = sourceTables.TypeSpecs.GetTypeSpecRef(
+                referenceValue);
+            if (!reference.IsRow || reference.Form != 0x05)
+            {
+                return false;
+            }
+
+            var row = sourceTables.TypeSpecs.GetRow(reference.Row).Span;
+            if (row.Length < 10
+                || (row.Length - 6) % sizeof(uint) != 0)
+            {
+                throw new InvalidDataException(
+                    "A retained constructed class MethodDef TypeSpec has an invalid extent.");
+            }
+
+            var genericTypeSpec = BinaryPrimitives
+                .ReadUInt32LittleEndian(row.Slice(2, sizeof(uint)));
+            var genericType = sourceTables.TypeSpecs.GetTypeSpecRef(
+                genericTypeSpec);
+            return genericType.IsRow && genericType.Form == 0x03
+                && nominalTypeImportRows.Contains(
+                    checked((int)genericType.Row));
+        }
 
         bool Visit(uint referenceValue, int depth)
         {
@@ -12820,21 +12848,16 @@ public static partial class TrRmExecutableCompiler
                     reference.Row).Span;
                 if (reference.Form == 0x05)
                 {
-                    if (row.Length < 10
-                        || (row.Length - 6) % sizeof(uint) != 0)
-                    {
-                        throw new InvalidDataException(
-                            "A retained constructed class MethodDef TypeSpec has an invalid extent.");
-                    }
+                    return IsImportedConstructedNominal(referenceValue);
+                }
 
-                    var genericTypeSpec = BinaryPrimitives
-                        .ReadUInt32LittleEndian(row.Slice(2,
-                            sizeof(uint)));
-                    var genericType = sourceTables.TypeSpecs
-                        .GetTypeSpecRef(genericTypeSpec);
-                    return genericType.IsRow && genericType.Form == 0x03
-                        && nominalTypeImportRows.Contains(
-                            checked((int)genericType.Row));
+                if (allowOptionalClassHandle
+                    && reference.Form == 0x06
+                    && reference.Qualifiers == 0 && row.Length == 6)
+                {
+                    var innerTypeSpec = BinaryPrimitives
+                        .ReadUInt32LittleEndian(row.Slice(2, sizeof(uint)));
+                    return IsImportedConstructedNominal(innerTypeSpec);
                 }
 
                 if (reference.Form != 0x07 || reference.Qualifiers != 0
