@@ -31644,9 +31644,19 @@ public static partial class SemanticVerifier
             && origin.RuntimePolicy <= 1
             && !origin.ProviderArtifactDigest.IsDefault
             && origin.ProviderArtifactDigest.Length == SHA256.HashSizeInBytes
+            && IsValidGenericMethodClassOwner(origin.ClassOwner, origin)
             && signature is not null
             && signature.Owner is null
-            && signature.IsStatic
+            && (origin.ClassOwner is not null || signature.IsStatic)
+            && (!signature.IsStatic || !signature.IsMutable)
+            && (signature.IsStatic
+                || (origin.ClassOwner is not null
+                    && import.ProofFunction is not null
+                    && import.ProofFunction.ParameterCount > 0
+                    && !import.ProofFunction.Variables.IsDefaultOrEmpty
+                    && import.ProofFunction.Variables[0].Name == "this"
+                    && import.ProofFunction.Variables[0].IsMutable
+                        == signature.IsMutable))
             && signature.ConstantFormals.IsEmpty
             && !signature.Formals.IsDefault
             && signature.Formals.Length == import.Formals.Length
@@ -31667,6 +31677,8 @@ public static partial class SemanticVerifier
                     && supportFunction.ParameterCount
                         <= supportFunction.Variables.Length)
             && import.ProofFunction is not null
+            && import.ProofFunction.IsStatic == signature.IsStatic
+            && import.ProofFunction.IsMutable == signature.IsMutable
             && !import.ProofFunction.IsExternal
             && import.ProofFunction.ParameterCount
                 <= import.ProofFunction.Variables.Length
@@ -31675,6 +31687,17 @@ public static partial class SemanticVerifier
             && IsValidGenericMethodImportParameterDefaults(import)
             && IsValidGenericMethodImportBinding(import);
     }
+
+    private static bool IsValidGenericMethodClassOwner(
+        BoundGenericMethodClassOwner? owner,
+        BoundGenericMethodImportOrigin origin)
+        => owner is null
+            || owner.Identity.IsValid
+                && !string.IsNullOrWhiteSpace(owner.ExportKey)
+                && (owner.ExpectedDefinitionId >> 24) == 0x13
+                && (owner.ExpectedDefinitionId & 0x00FF_FFFF) != 0
+                && owner.TargetRequirement == origin.TargetRequirement
+                && owner.RuntimePolicy == origin.RuntimePolicy;
 
     private static bool IsValidGenericMethodImportParameterDefaults(
         BoundGenericMethodImport import)
@@ -31685,7 +31708,13 @@ public static partial class SemanticVerifier
             return false;
         }
 
-        var parameterCount = import.ProofFunction.ParameterCount;
+        var receiverCount = import.Signature.IsStatic ? 0 : 1;
+        var parameterCount = import.ProofFunction.ParameterCount
+            - receiverCount;
+        if (parameterCount < 0)
+        {
+            return false;
+        }
         if (!StringComparer.Ordinal.Equals(import.Origin.SchemaIdentity,
                 StandardGenericMethodSchema
                     .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaults))
@@ -31708,7 +31737,8 @@ public static partial class SemanticVerifier
                 continue;
             }
 
-            var parameter = import.ProofFunction.Variables[ordinal];
+            var parameter = import.ProofFunction.Variables[
+                receiverCount + ordinal];
             if (parameterDefault.ParameterIndex != ordinal
                 || !StringComparer.Ordinal.Equals(
                     parameterDefault.ParameterName, parameter.Name)
@@ -31933,6 +31963,7 @@ public static partial class SemanticVerifier
             || !expected.ProofFunction.IsExternal
             || !IsValidGenericMethodImport(provider)
             || provider.Origin.IsMethodDefTarget
+            || provider.Origin.ClassOwner != import.Origin.ClassOwner
             || !StringComparer.Ordinal.Equals(binding.ProviderIdentity,
                 provider.Origin.ProviderIdentity)
             || !StringComparer.Ordinal.Equals(binding.ExportKey,

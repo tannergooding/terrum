@@ -17741,10 +17741,7 @@ internal sealed partial class Binder
         }
 
         var instance = _genericNominalTypeInstances[instanceIndex];
-        if (!instance.Arguments.IsEmpty || instance.Qualifiers != 0
-            || instance.TypeSpecReference != 0
-            || instance.TypeSpecProviderIdentity is not null
-            || instance.TypeSpecForm != 0)
+        if (!instance.Arguments.IsEmpty || instance.Qualifiers != 0)
         {
             return false;
         }
@@ -17758,8 +17755,23 @@ internal sealed partial class Binder
                         candidate.Declaration.Provider.SchemaIdentity,
                         StandardGenericMethodSchema
                             .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaults);
+            var matchesTypeSpecOwner = instance.TypeSpecReference == 0
+                ? instance.TypeSpecProviderIdentity is null
+                    && instance.TypeSpecForm == 0
+                : instance.TypeSpecForm is (0x02 or 0x03)
+                    && instance.TypeSpecProviderIdentity is not null
+                    && (candidate.Expectations.IsEmpty
+                        ? StringComparer.Ordinal.Equals(
+                            instance.TypeSpecProviderIdentity,
+                            candidate.Declaration.Provider.ModuleIdentity)
+                        : candidate.Expectations.Any(expectation =>
+                            StringComparer.Ordinal.Equals(
+                                instance.TypeSpecProviderIdentity,
+                                expectation.Binding.UsingModule
+                                    .ModuleIdentity)));
             if (candidate.Declaration.Identity == identity
                 && !candidate.SelectedExportKeys.IsEmpty
+                && matchesTypeSpecOwner
                 && (candidate.Expectations.IsEmpty
                     || selectedImportedClassView))
             {
@@ -20076,9 +20088,25 @@ internal sealed partial class Binder
                             ? selectedGenericMethod : null;
                 if (genericMethodTemplate is not null)
                 {
+                    if (genericMethodTemplate.IsStatic != isTypeReceiver)
+                    {
+                        Report("TRM3011",
+                            genericMethodTemplate.IsStatic
+                                ? "A static generic class method requires a type receiver."
+                                : "An instance generic class method requires a value receiver.",
+                            callee.Span);
+                        return ErrorExpression(node.Span);
+                    }
+
                     if (isTypeReceiver)
                     {
                         receiver = null;
+                    }
+                    else if (type is PrimitiveType ownerType)
+                    {
+                        genericMethodTemplate = genericMethodTemplate with {
+                            OwnerType = ownerType,
+                        };
                     }
                     function = InstantiateGeneric(callee,
                         (SyntaxNode)node.Children[1], expected,

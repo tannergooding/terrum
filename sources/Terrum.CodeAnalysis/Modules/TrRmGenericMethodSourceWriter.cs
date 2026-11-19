@@ -1092,6 +1092,13 @@ public static partial class TrRmExecutableCompiler
     {
         var expectedTarget = importedTarget.Binding?.Expected
             ?? importedTarget;
+        var hasClassOwner
+            = importedTarget.Origin.ClassOwner is not null;
+        var targetReceiverCount
+            = expectedTarget.Signature.IsStatic ? 0 : 1;
+        var targetMethodParameterCount
+            = expectedTarget.ProofFunction.ParameterCount
+                - targetReceiverCount;
         var typeArguments
             = genericCall.ImportedGenericMethodTypeArguments;
         if (genericCall.GenericMethodCall is not null
@@ -1104,10 +1111,11 @@ public static partial class TrRmExecutableCompiler
             || function.Body.Statements.Any(
                 static statement => statement is BoundTryFinally)
             || importedTarget.Signature.Owner is not null
-            || !importedTarget.Signature.IsStatic
-            || importedTarget.Signature.IsMutable
+            || (!importedTarget.Signature.IsStatic && !hasClassOwner)
+            || (importedTarget.Signature.IsStatic
+                && importedTarget.Signature.IsMutable)
             || !importedTarget.Signature.ConstantFormals.IsDefaultOrEmpty
-            || expectedTarget.ProofFunction.ParameterCount > 8
+            || targetMethodParameterCount is < 0 or > 8
             || expectedTarget.ProofFunction.Variables.Length
                 < expectedTarget.ProofFunction.ParameterCount
             || expectedTarget.ProofFunction.DoesNotReturn
@@ -1133,12 +1141,14 @@ public static partial class TrRmExecutableCompiler
             || target.ImportedGenericMethodTypeArguments.IsDefault
             || !target.ImportedGenericMethodTypeArguments
                 .SequenceEqual(typeArguments)
-            || !target.IsStatic || target.DeclaringStruct is not null
+            || target.IsStatic != importedTarget.Signature.IsStatic
+            || target.IsMutable != importedTarget.Signature.IsMutable
+            || (!hasClassOwner && target.DeclaringStruct is not null)
+            || (hasClassOwner && target.DeclaringStruct is null)
             || target.ParameterCount != genericCall.Arguments.Length
             || target.ParameterCount
                 != expectedTarget.ProofFunction.ParameterCount
             || target.Variables.Length < target.ParameterCount
-            || target.ParameterCount > 8
             || target.DoesNotReturn
             || genericCall.Type != target.ReturnType
             || function.ReturnType != target.ReturnType
@@ -3342,24 +3352,49 @@ public static partial class TrRmExecutableCompiler
 
         var importedMethodRows = new int[importedMethods.Count];
         var importedMethodNameStringRows = new int[importedMethods.Count];
+        var importedOwnerTypeTokens = new uint[importedMethods.Count];
         for (var importedOrdinal = 0;
             importedOrdinal < importedMethods.Count; importedOrdinal++)
         {
             var imported = importedMethods[importedOrdinal];
             var signature = imported.Expected.Signature;
             var proofFunction = imported.Expected.ProofFunction;
-            if (!signature.IsPublic || !signature.IsStatic
-                || signature.IsMutable || signature.Owner is not null
+            var hasClassOwner
+                = imported.Source.Origin.ClassOwner is not null;
+            var receiverCount = signature.IsStatic ? 0 : 1;
+            var methodParameterCount
+                = proofFunction.ParameterCount - receiverCount;
+            if (!signature.IsPublic
+                || (!signature.IsStatic && !hasClassOwner)
+                || (signature.IsStatic && signature.IsMutable)
+                || signature.Owner is not null
                 || !signature.ConstantFormals.IsDefaultOrEmpty
                 || signature.FormalOrder.IsDefault
                 || signature.FormalOrder.Length
                     != imported.Expected.Formals.Length
-                || !proofFunction.IsStatic
-                || proofFunction.DeclaringStruct is not null
+                || proofFunction.IsStatic != signature.IsStatic
+                || proofFunction.IsMutable != signature.IsMutable
+                || (!hasClassOwner
+                    && proofFunction.DeclaringStruct is not null)
+                || (hasClassOwner
+                    && proofFunction.DeclaringStruct is null)
                 || string.IsNullOrEmpty(proofFunction.Name)
-                || proofFunction.ParameterCount > 8
+                || methodParameterCount is < 0 or > 8
                 || proofFunction.Variables.Length
                     < proofFunction.ParameterCount
+                || (receiverCount != 0
+                    && (proofFunction.Variables[0].Name != "this"
+                        || !BoundGenericNominalTypeContract
+                            .IsNominalClassType(
+                                proofFunction.Variables[0].Type,
+                                program.GenericNominalTypeInstances,
+                                program.GenericNominalTypeDefinitions)
+                        || program.GenericNominalTypeInstances[
+                            BoundGenericNominalTypeTypes.Index(
+                                proofFunction.Variables[0].Type)]
+                            .Definition
+                            != imported.Source.Origin.ClassOwner!
+                                .Identity))
                 || proofFunction.DoesNotReturn
                 || proofFunction.RequiresUnsafeCaller
                     != signature.RequiresUnsafeCaller
@@ -3373,6 +3408,9 @@ public static partial class TrRmExecutableCompiler
             }
 
             var moduleRefRow = GetModuleRefRow(imported.Import);
+            importedOwnerTypeTokens[importedOrdinal]
+                = GetImportedGenericMethodOwnerTypeToken(
+                    imported.Source, imported.Import, moduleRefRow);
             var exportKeyStringRow = names.Count + 1;
             names.Add((imported.Import.ExportKey, 1));
             importedMethodNameStringRows[importedOrdinal]
@@ -3393,6 +3431,60 @@ public static partial class TrRmExecutableCompiler
                 exportKeyStringRow, methodDefId));
             importedGenericMethodTargetTokens.Add(imported.Source,
                 0x1C00_0000u | checked((uint)importRow));
+        }
+
+        uint GetImportedGenericMethodOwnerTypeToken(
+            BoundGenericMethodImport imported,
+            BoundModuleImport methodImport, int methodModuleRefRow)
+        {
+            if (imported.Origin.ClassOwner
+                is not BoundGenericMethodClassOwner owner)
+            {
+                return 0;
+            }
+
+            if (!StringComparer.Ordinal.Equals(
+                    owner.Identity.ModuleIdentity,
+                    methodImport.ProducerIdentity)
+                || owner.TargetRequirement
+                    != methodImport.TargetRequirement
+                || owner.RuntimePolicy != methodImport.RuntimePolicy)
+            {
+                throw Invalid(
+                    "A generic class MethodDef Import changed its selected owner provider.");
+            }
+
+            var ownerTypeDefToken = 0u;
+            foreach (var import in importRows)
+            {
+                if (import.ModuleRefRow != methodModuleRefRow
+                    || (import.ExpectedLocalDefId >> 24) != 0x13
+                    || (import.ExpectedLocalDefId & 0x00FF_FFFF) == 0
+                    || import.ExportKeyStringRow <= 0
+                    || import.ExportKeyStringRow > names.Count
+                    || !StringComparer.Ordinal.Equals(
+                        names[import.ExportKeyStringRow - 1].Text,
+                        owner.ExportKey))
+                {
+                    continue;
+                }
+
+                if (ownerTypeDefToken != 0
+                    && ownerTypeDefToken != import.ExpectedLocalDefId)
+                {
+                    throw Invalid(
+                        "A generic class MethodDef Import owner key resolves to conflicting TypeDefs.");
+                }
+                ownerTypeDefToken = import.ExpectedLocalDefId;
+            }
+
+            if (ownerTypeDefToken == 0)
+            {
+                throw Unsupported(
+                    "A generic class MethodDef Import requires its exact owner TypeDef Import to be retained.");
+            }
+
+            return ownerTypeDefToken;
         }
 
         foreach (var directTarget in directMethodDefTargets)
@@ -3475,6 +3567,7 @@ public static partial class TrRmExecutableCompiler
                 expected.Formals, importedTypeProgram) {
                 FormalTypeOwnerOrdinal = expected.FormalTypeOwnerOrdinal,
                 IsStatic = signature.IsStatic,
+                IsMutable = signature.IsMutable,
                 FormalOrder = signature.FormalOrder,
                 RuntimeParameterCount = proofFunction.ParameterCount,
             };
@@ -3628,14 +3721,15 @@ public static partial class TrRmExecutableCompiler
                     0, defaultArgumentRef));
             }
 
-            var firstParameter = proofFunction.ParameterCount == 0 ? 0
+            var firstParameter = methodParameterCount == 0 ? 0
                 : checked(parameterCount + 1);
             for (var parameterOrdinal = 0;
-                parameterOrdinal < proofFunction.ParameterCount;
+                parameterOrdinal < methodParameterCount;
                 parameterOrdinal++)
             {
                 var parameter
-                    = proofFunction.Variables[parameterOrdinal];
+                    = proofFunction.Variables[
+                        receiverCount + parameterOrdinal];
                 if (parameter.IsMutable || parameter.IsOut || parameter.IsInit
                     || parameter.IsImplicitRef)
                 {
@@ -3651,7 +3745,7 @@ public static partial class TrRmExecutableCompiler
                     var defaults
                         = imported.Expected.OrdinaryParameterDefaults;
                     if (defaults.IsDefault
-                        || defaults.Length != proofFunction.ParameterCount)
+                        || defaults.Length != methodParameterCount)
                     {
                         throw Unsupported(
                             $"CM1 imported MethodDef '{proofFunction.Name}' has no complete default vector.");
@@ -3708,15 +3802,17 @@ public static partial class TrRmExecutableCompiler
                 }
             }
             parameterCount = checked(parameterCount
-                + proofFunction.ParameterCount);
+                + methodParameterCount);
 
+            var receiverTypeSpecRef = receiverCount == 0 ? 0
+                : GetExpectedTypeSpecRef(proofFunction.Variables[0].Type);
             var resultTypeSpecRef
                 = GetExpectedTypeSpecRef(proofFunction.ReturnType);
             AppendUInt32(signatureBytes, resultTypeSpecRef);
-            AppendUInt32(signatureBytes, 0);
+            AppendUInt32(signatureBytes, receiverTypeSpecRef);
             AppendUInt32(signatureBytes, checked((uint)firstParameter));
             AppendUInt32(signatureBytes,
-                checked((uint)proofFunction.ParameterCount));
+                checked((uint)methodParameterCount));
             AppendUInt32(signatureBytes, checked((uint)genericFirst));
             AppendUInt32(signatureBytes,
                 checked((uint)expected.Formals.Length));
@@ -3742,12 +3838,14 @@ public static partial class TrRmExecutableCompiler
                 contractCount++;
             }
 
-            AppendUInt32(methodBytes, 0);
+            AppendUInt32(methodBytes,
+                importedOwnerTypeTokens[importedOrdinal]);
             AppendUInt32(methodBytes,
                 checked((uint)methodNameStringRow));
             AppendUInt32(methodBytes,
                 checked((uint)(signatureCount + importedOrdinal + 1)));
-            AppendUInt32(methodBytes, 2);
+            AppendUInt32(methodBytes,
+                2u | (signature.IsMutable ? 4u : 0u));
             AppendUInt32(methodBytes, checked((uint)contractFirst));
             AppendUInt32(methodBytes, checked((uint)contractCount));
             AppendUInt32(methodBytes, 0);

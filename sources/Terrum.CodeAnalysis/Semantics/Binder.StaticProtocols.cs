@@ -11206,6 +11206,87 @@ internal sealed partial class Binder
                 continue;
             }
 
+            var proofFunction = imported.ProofFunction;
+            var hasClassMethod = TryGetStandardClassGenericMethodOwner(
+                reference, imported, out var ownerClass,
+                out var classMethod);
+            PrimitiveType? ownerType = null;
+            var ownerName = string.Empty;
+            if (hasClassMethod)
+            {
+                if (classMethod.GenericParameterCount
+                        != imported.Formals.Length
+                    || (classMethod.ReceiverTypeSpecReference == 0)
+                        != imported.Signature.IsStatic
+                    || !TryGetStandardClassGenericMethodOwnerType(reference,
+                        ownerClass, out var selectedOwnerType))
+                {
+                    Report("TRM3005",
+                        "A selected generic class MethodDef has an incomplete owner or receiver view.",
+                        _trees[0].Root.Span);
+                    continue;
+                }
+
+                ownerType = selectedOwnerType;
+                if (!imported.Signature.IsStatic)
+                {
+                    if (proofFunction.ParameterCount == 0
+                        || proofFunction.Variables.IsDefaultOrEmpty)
+                    {
+                        Report("TRM3005",
+                            "A selected generic instance MethodDef has no receiver variable.",
+                            _trees[0].Root.Span);
+                        continue;
+                    }
+
+                    var receiverType
+                        = proofFunction.Variables[0].Type;
+                    if (!BoundGenericNominalTypeContract
+                            .IsNominalClassType(receiverType,
+                                reference.GenericNominalTypeInstances,
+                                reference.GenericNominalTypeDefinitions))
+                    {
+                        Report("TRM3005",
+                            "A selected generic instance MethodDef has no nominal class receiver.",
+                            _trees[0].Root.Span);
+                        continue;
+                    }
+
+                    var receiverInstance = reference
+                        .GenericNominalTypeInstances[
+                            BoundGenericNominalTypeTypes.Index(
+                                receiverType)];
+                    if (receiverInstance.Definition != ownerClass.Identity
+                        || !receiverInstance.Arguments.IsEmpty
+                        || receiverInstance.Qualifiers != 0)
+                    {
+                        Report("TRM3005",
+                            "A selected generic instance MethodDef receiver does not match its owner TypeDef.",
+                            _trees[0].Root.Span);
+                        continue;
+                    }
+                }
+
+                ownerName = string.IsNullOrEmpty(ownerClass.Namespace)
+                    ? ownerClass.Name
+                    : ownerClass.Namespace + "." + ownerClass.Name;
+            }
+
+            var receiverCount = imported.Signature.IsStatic ? 0 : 1;
+            var parameterCount = proofFunction.ParameterCount
+                - receiverCount;
+            if (parameterCount < 0
+                || proofFunction.Variables.Length
+                    < proofFunction.ParameterCount
+                || (receiverCount != 0
+                    && proofFunction.Variables[0].Name != "this"))
+            {
+                Report("TRM3005",
+                    "A selected generic class MethodDef has an invalid receiver or parameter view.",
+                    _trees[0].Root.Span);
+                continue;
+            }
+
             var typeParameters = ImmutableArray.CreateBuilder<
                 GenericTypeParameter>(imported.Formals.Length);
             foreach (var formal in imported.Formals)
@@ -11224,19 +11305,18 @@ internal sealed partial class Binder
                 });
             }
 
-            var proofFunction = imported.ProofFunction;
             var parameters = ImmutableArray.CreateBuilder<GenericParameter>(
-                proofFunction.ParameterCount);
-            for (var parameter = 0;
-                parameter < proofFunction.ParameterCount; parameter++)
+                parameterCount);
+            for (var parameter = 0; parameter < parameterCount; parameter++)
             {
-                var variable = proofFunction.Variables[parameter];
+                var variable = proofFunction.Variables[
+                    receiverCount + parameter];
                 var defaults = imported.OrdinaryParameterDefaults;
                 var parameterDefault
-                    = defaults.Length == proofFunction.ParameterCount
+                    = defaults.Length == parameterCount
                         ? defaults[parameter] : null;
                 if (!defaults.IsDefaultOrEmpty
-                    && defaults.Length != proofFunction.ParameterCount)
+                    && defaults.Length != parameterCount)
                 {
                     Report("TRM3005",
                         "The imported generic method has an incomplete ordinary default vector.",
@@ -11476,7 +11556,9 @@ internal sealed partial class Binder
             returnTypeTerm = candidateReturnTypeTerm;
         }
 
-        var name = imported.Origin.IsMethodDefTarget
+        var name = hasClassMethod
+            ? ownerName + "." + classMethod.Name
+            : imported.Origin.IsMethodDefTarget
             ? "<MethodDef:"
                 + imported.Origin.MethodDefId.ToString("X8",
                     System.Globalization.CultureInfo.InvariantCulture)
@@ -11487,18 +11569,104 @@ internal sealed partial class Binder
             returnFormalOrdinal, parameters.ToImmutable(), tree.Root,
             tree.Root, tree) {
             DefinitionOrdinal = -1,
-            IsPublic = !imported.Origin.IsMethodDefTarget,
+            IsPublic = hasClassMethod
+                ? (classMethod.Flags & 3) == 2
+                : !imported.Origin.IsMethodDefTarget,
             FormalTypeOwnerOrdinal =
                 imported.FormalTypeOwnerOrdinal,
             RequiresUnsafeCaller = imported.Signature.RequiresUnsafeCaller,
             DoesNotReturn = proofFunction.DoesNotReturn,
-            IsStatic = true,
+            IsStatic = hasClassMethod
+                ? imported.Signature.IsStatic : true,
+            IsMutable = hasClassMethod
+                && (classMethod.Flags & 4) != 0,
+            MemberName = hasClassMethod ? classMethod.Name : null,
+            ContainingType = hasClassMethod ? ownerName : null,
+            OwnerName = hasClassMethod ? ownerName : null,
+            OwnerType = ownerType,
             FormalOrder = imported.Signature.FormalOrder,
             ImportedMethod = imported,
             ReturnTypeTerm = returnTypeTerm,
             BoundDeclarationContractClauses =
                 imported.ProofFunction.DeclarationContractClauses,
         };
+    }
+
+    private static bool TryGetStandardClassGenericMethodOwner(
+        CompilationReference reference, BoundGenericMethodImport imported,
+        out BoundStandardClassTypeView owner,
+        out BoundStandardClassMethodDeclaration method)
+    {
+        var origin = imported.Origin;
+        foreach (var declaration in reference.StandardClassDeclarations)
+        {
+            if (StringComparer.Ordinal.Equals(
+                    declaration.Declaration.Identity.ModuleIdentity,
+                    origin.ProviderIdentity))
+            {
+                foreach (var candidate
+                    in declaration.Declaration.Methods)
+                {
+                    if (candidate.DefinitionId == origin.MethodDefId
+                        && candidate.GenericParameterCount != 0)
+                    {
+                        owner = declaration.Declaration;
+                        method = candidate;
+                        return true;
+                    }
+                }
+            }
+
+            foreach (var expectation in declaration.Expectations)
+            {
+                if (!StringComparer.Ordinal.Equals(
+                        expectation.ExpectedDeclaration.Identity
+                            .ModuleIdentity, origin.ProviderIdentity))
+                {
+                    continue;
+                }
+
+                foreach (var candidate
+                    in expectation.ExpectedDeclaration.Methods)
+                {
+                    if (candidate.DefinitionId == origin.MethodDefId
+                        && candidate.GenericParameterCount != 0)
+                    {
+                        owner = declaration.Declaration;
+                        method = candidate;
+                        return true;
+                    }
+                }
+            }
+        }
+
+        owner = null!;
+        method = null!;
+        return false;
+    }
+
+    private static bool TryGetStandardClassGenericMethodOwnerType(
+        CompilationReference reference, BoundStandardClassTypeView owner,
+        out PrimitiveType type)
+    {
+        for (var index = 0;
+            index < reference.GenericNominalTypeInstances.Length; index++)
+        {
+            var instance = reference.GenericNominalTypeInstances[index];
+            if (instance.Definition == owner.Identity
+                && instance.Arguments.IsEmpty
+                && instance.Qualifiers == 0
+                && instance.TypeSpecReference == 0
+                && instance.TypeSpecProviderIdentity is null
+                && instance.TypeSpecForm == 0)
+            {
+                type = BoundGenericNominalTypeTypes.Type(index);
+                return true;
+            }
+        }
+
+        type = PrimitiveType.Void;
+        return false;
     }
 
     private static bool TryCreateImportedGenericMethodTypeTerm(

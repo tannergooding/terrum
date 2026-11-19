@@ -1374,7 +1374,7 @@ public static partial class TrRmExecutableCompiler
     private static ImmutableArray<BoundDependencyContract>
         DecodeG1GenericMethodDependencyContracts(
             ImmutableArray<TrRmDependencyContract> dependencies,
-            int parameterCount)
+            int parameterCount, bool hasReceiver)
     {
         if (dependencies.IsDefault)
         {
@@ -1422,17 +1422,23 @@ public static partial class TrRmExecutableCompiler
             if (dependency.DestinationKind != 1
                 || dependency.DestinationOrdinal != 0
                 || dependency.Phase != 1
-                || dependency.SourceKind != 1
-                || dependency.SourceOrdinal >= (uint)parameterCount
                 || dependency.Relationship is not (1 or 2 or 3))
             {
                 throw Unsupported(
                     "G1 generic MethodDefs support only ordinary-result formal dependency sources.");
             }
 
-            var source = new BoundDependencySource(
-                BoundDependencySourceKind.Formal,
-                checked((int)dependency.SourceOrdinal));
+            var source = dependency.SourceKind switch {
+                1 when dependency.SourceOrdinal < (uint)parameterCount
+                    => new BoundDependencySource(
+                        BoundDependencySourceKind.Formal,
+                        checked((int)dependency.SourceOrdinal)),
+                2 when hasReceiver && dependency.SourceOrdinal == 0
+                    => new BoundDependencySource(
+                        BoundDependencySourceKind.Receiver, null),
+                _ => throw Invalid(
+                    "A G1 generic MethodDef has an invalid result Dependency source."),
+            };
             sources.Add(source);
             if (dependency.Relationship == 2)
             {
@@ -1590,21 +1596,54 @@ public static partial class TrRmExecutableCompiler
         bool isMethodDefTarget, bool decodeBody)
     {
         var methodRow = checked((int)(definitionId & 0x00FF_FFFF));
+        var ownerTypeDefRow = tables.Methods.GetOwnerType(methodRow);
+        var signatureRow = tables.Methods.GetSignature(methodRow);
+        var receiverTypeSpec
+            = tables.Signatures.GetReceiverTypeSpec(signatureRow);
+        var methodFlags = tables.Methods.GetFlags(methodRow);
+        var isSupportedClassReceiver = receiverTypeSpec == 0;
+        if (ownerTypeDefRow != 0 && receiverTypeSpec != 0)
+        {
+            var receiver = tables.TypeSpecs.GetTypeSpecRef(
+                receiverTypeSpec);
+            isSupportedClassReceiver = receiver.IsRow
+                && receiver.Form is (0x02 or 0x03)
+                && receiver.Qualifiers == 0
+                && tables.TypeSpecs.GetNominalTypeDefRow(
+                    receiverTypeSpec, tables.TypeDefs, tables.Imports)
+                    == ownerTypeDefRow;
+        }
+        var isSupportedClassMethod
+            = ownerTypeDefRow != 0
+                && StringComparer.Ordinal.Equals(
+                    context.SchemaIdentity,
+                    StandardGenericMethodSchema
+                        .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaults)
+                && tables.TypeDefs.GetKind(ownerTypeDefRow) == 2
+                && (tables.TypeDefs.GetFlags(ownerTypeDefRow) & 3) == 2
+                && tables.TypeDefs.GetGenericRange(ownerTypeDefRow).Count == 0
+                && tables.TypeDefs.GetContractRange(ownerTypeDefRow).Count
+                    == 0
+                && (methodFlags & 3) == 2
+                && (methodFlags & 4) == 0
+                && isSupportedClassReceiver;
         var formalTypeOwnerOrdinal
             = context.GetFormalTypeOwnerOrdinal(artifactIndex, methodRow);
+        var supportedMethodVisibility
+            = ownerTypeDefRow != 0
+                ? isSupportedClassMethod
+                : isMethodDefTarget
+                    ? methodFlags is 0 or 2
+                    : methodFlags == 2;
         if (tables.Methods.GetOwnerModule(methodRow) != moduleRow
-            || tables.Methods.GetOwnerType(methodRow) != 0
-            || (isMethodDefTarget
-                ? tables.Methods.GetFlags(methodRow) is not (0 or 2)
-                : tables.Methods.GetFlags(methodRow) != 2))
+            || !supportedMethodVisibility)
         {
             throw Unsupported(
                 isMethodDefTarget
-                    ? "G1 GenericCall targets currently require module-level MethodDefs."
-                    : "G1 generic MethodDef imports currently require a public module-level declaration.");
+                    ? "GenericCall targets currently require module-level or supported readonly class MethodDefs."
+                    : "Generic MethodDef imports currently require a public module-level or supported readonly class declaration.");
         }
 
-        var signatureRow = tables.Methods.GetSignature(methodRow);
         var (formalFirst, formalCount)
             = tables.Signatures.GetGenericRange(signatureRow);
         if (formalCount is < 1 or > 8)
@@ -1638,6 +1677,7 @@ public static partial class TrRmExecutableCompiler
                 .GetOwnershipDomain(genericParamRow);
             var nullabilityDomain = tables.GenericParams
                 .GetNullabilityDomain(genericParamRow);
+            var requiresUnique = false;
             var requiresWritable = false;
             var requiresBlittable = false;
             var interfaceConstraints
@@ -1690,6 +1730,11 @@ public static partial class TrRmExecutableCompiler
                         break;
 
                     case 2:
+                        if (constraintPayload == 1 && !requiresUnique)
+                        {
+                            requiresUnique = true;
+                            break;
+                        }
                         throw Invalid(
                             "The selected generic MethodDef has duplicate or unsupported property constraints.");
 
@@ -1701,6 +1746,17 @@ public static partial class TrRmExecutableCompiler
                         throw Invalid(
                             "The selected generic MethodDef has an unsupported Constraint kind.");
                 }
+            }
+
+            if (requiresUnique)
+            {
+                if (ownershipDomain == 1)
+                {
+                    throw Invalid(
+                        "A Unique constraint conflicts with the formal's non-unique-only domain.");
+                }
+
+                ownershipDomain = 2;
             }
 
             BoundGenericMethodTypeDefault? typeDefault = null;
@@ -1776,14 +1832,26 @@ public static partial class TrRmExecutableCompiler
 
         var (parameterFirst, parameterCount)
             = tables.Signatures.GetParamRange(signatureRow);
-        if (parameterCount > 8
-            || tables.Signatures.GetReceiverTypeSpec(signatureRow) != 0)
+        if (parameterCount > 8)
         {
             throw Unsupported(
-                "G1 generic MethodDef imports currently require supported module-level value parameters.");
+                "G1 generic MethodDef imports currently support at most eight value parameters.");
         }
+        var hasReceiver = receiverTypeSpec != 0;
+        var receiverCount = hasReceiver ? 1 : 0;
         var variables = ImmutableArray.CreateBuilder<BoundVariable>(
-            parameterCount);
+            parameterCount + receiverCount);
+        if (hasReceiver)
+        {
+            var receiverType = ResolveGenericMethodTypeSpec(
+                context, artifactIndex, tables, moduleRow,
+                tables.TypeSpecs, tables.GenericParams,
+                formalRecords, methodRow, formalTypeOwnerOrdinal,
+                receiverTypeSpec, formalTypes,
+                allowFormalForwarding: false, ordinal: formalCount, out _);
+            variables.Add(new BoundVariable("this", receiverType, false,
+                default));
+        }
         var ordinaryParameterDefaults = ImmutableArray.CreateBuilder<
             BoundGenericMethodParameterDefault?>(parameterCount);
         for (var ordinal = 0; ordinal < parameterCount; ordinal++)
@@ -1899,10 +1967,16 @@ public static partial class TrRmExecutableCompiler
         var dependencyContracts
             = DecodeG1GenericMethodDependencyContracts(
                 tables.Contracts.GetDependencyContracts(methodRow),
-                parameterCount);
+                parameterCount, hasReceiver);
 
         var proofVariables = variables.ToImmutable().ToBuilder();
         var bodyBytes = bodyRow == 0 ? default : tables.Bodies.GetRow(bodyRow);
+        if (hasReceiver && decodeBody
+            && bodyBytes[0] != 0x01)
+        {
+            throw Unsupported(
+                "The bounded class generic MethodDef reader requires a register Body.");
+        }
         var proofSupportFunctions = ImmutableArray<BoundFunction>.Empty;
         var functionIndexByMethodRow = decodeBody && bodyBytes[0] != 0x01
             ? new int[tables.Methods.Count + 1] : [];
@@ -1926,11 +2000,20 @@ public static partial class TrRmExecutableCompiler
         }
         var methodName = tables.Methods.GetName(methodRow);
         var isPublic = (tables.Methods.GetFlags(methodRow) & 3) == 2;
+        var typeNamespace = ownerTypeDefRow == 0 ? string.Empty
+            : tables.TypeDefs.GetNamespace(ownerTypeDefRow);
+        var declaringTypeName = ownerTypeDefRow == 0 ? string.Empty
+            : tables.TypeDefs.GetName(ownerTypeDefRow);
+        var declaringStruct = ownerTypeDefRow == 0 ? null
+            : typeNamespace.Length == 0 ? declaringTypeName
+                : typeNamespace + "." + declaringTypeName;
         var proofFunction = new BoundFunction(methodName, returnType,
-            proofVariables.ToImmutable(), parameterCount,
+            proofVariables.ToImmutable(), parameterCount + receiverCount,
             new BoundBlock(statements, default), default) {
             IsExternal = !decodeBody,
-            IsStatic = true,
+            IsStatic = !hasReceiver,
+            IsMutable = (methodFlags & 4) != 0,
+            DeclaringStruct = declaringStruct,
             RequiresUnsafeCaller = (effects & 4) != 0,
             DoesNotReturn = (effects & 2) != 0,
             DependencyContracts = dependencyContracts,
@@ -1938,14 +2021,16 @@ public static partial class TrRmExecutableCompiler
         var methodSignature = new BoundGenericMethodSignature(0,
             methodName, isPublic, proofFunction.RequiresUnsafeCaller,
             formalSignatures.MoveToImmutable()) {
-            IsStatic = true,
+            IsStatic = !hasReceiver,
+            IsMutable = (methodFlags & 4) != 0,
             FormalOrder = formalOrder.MoveToImmutable(),
         };
         var signature = new BoundGenericMethodSignature(0,
             isMethodDefTarget ? methodName : exportKey, isPublic,
             proofFunction.RequiresUnsafeCaller,
             methodSignature.Formals) {
-            IsStatic = true,
+            IsStatic = !hasReceiver,
+            IsMutable = (methodFlags & 4) != 0,
             FormalOrder = methodSignature.FormalOrder,
         };
         var (targetRequirement, runtimePolicy)
@@ -1975,6 +2060,12 @@ public static partial class TrRmExecutableCompiler
         int bodyRow, out ImmutableArray<BoundFunction> proofSupportFunctions)
     {
         proofSupportFunctions = [];
+        var callerSignature = tables.Methods.GetSignature(callerMethodRow);
+        var receiverOffset
+            = tables.Signatures.GetReceiverTypeSpec(callerSignature) == 0
+                ? 0 : 1;
+        var (firstParameter, callerParameterCount)
+            = tables.Signatures.GetParamRange(callerSignature);
         var body = tables.Bodies.GetRegisterBody(bodyRow,
             tables.Contracts.Count);
         var code = body.GetBlockCode(0);
@@ -1991,22 +2082,16 @@ public static partial class TrRmExecutableCompiler
             var home = body.HomeMap.Slice(homeIndex * 8, 8);
             var parameterOrdinal = BinaryPrimitives
                 .ReadUInt16LittleEndian(home.Slice(4, 2));
+            var variableOrdinal = checked(parameterOrdinal
+                + receiverOffset);
             if (home[0] != 2
-                || parameterOrdinal >= callerVariables.Count
-                || callerVariables[parameterOrdinal].Type
+                || parameterOrdinal >= callerParameterCount
+                || (uint)variableOrdinal >= (uint)callerVariables.Count
+                || callerVariables[variableOrdinal].Type
                     != callerReturnType)
             {
                 throw Invalid(
                     "The open move-return Body does not select its exact result parameter.");
-            }
-
-            var signature = tables.Methods.GetSignature(callerMethodRow);
-            var (firstParameter, callerParameterCount)
-                = tables.Signatures.GetParamRange(signature);
-            if (parameterOrdinal >= callerParameterCount)
-            {
-                throw Invalid(
-                    "The open ReturnHome does not select a MethodSig parameter.");
             }
 
             var parameterTypeSpec = tables.Parameters.GetTypeSpec(
@@ -2029,8 +2114,8 @@ public static partial class TrRmExecutableCompiler
             }
 
             BoundExpression returned = sourceUse == 2
-                ? new BoundMove(parameterOrdinal, callerReturnType, default)
-                : new BoundRead(parameterOrdinal, callerReturnType, default);
+                ? new BoundMove(variableOrdinal, callerReturnType, default)
+                : new BoundRead(variableOrdinal, callerReturnType, default);
             return [new BoundReturn(returned, default)];
         }
 
@@ -2204,20 +2289,25 @@ public static partial class TrRmExecutableCompiler
             = context.GetFormalTypeOwnerOrdinal(artifactIndex,
                 callerMethodRow);
 
-        var (_, parameterCount)
+        var (_, methodParameterCount)
             = tables.Signatures.GetParamRange(targetSignature);
+        var targetReceiverCount
+            = targetImport.Signature.IsStatic ? 0 : 1;
+        var targetParameterCount
+            = methodParameterCount + targetReceiverCount;
         var inputCount = checked((int)BinaryPrimitives
             .ReadUInt32LittleEndian(callSitePayload.Slice(8, 4)));
-        if (parameterCount != inputCount
-            || targetImport.ProofFunction.ParameterCount != parameterCount)
+        if (targetParameterCount != inputCount
+            || targetImport.ProofFunction.ParameterCount
+                != targetParameterCount)
         {
             throw Invalid(
                 "The GenericCall input count differs from its selected MethodSig.");
         }
 
         var arguments = ImmutableArray.CreateBuilder<BoundExpression>(
-            parameterCount);
-        for (var ordinal = 0; ordinal < parameterCount; ordinal++)
+            targetParameterCount);
+        for (var ordinal = 0; ordinal < targetParameterCount; ordinal++)
         {
             var inputOffset = 16 + (ordinal * 4);
             var selectorKind = callSitePayload[inputOffset];
@@ -2266,14 +2356,20 @@ public static partial class TrRmExecutableCompiler
             var home = body.HomeMap.Slice(homeIndex * 8, 8);
             var parameterOrdinal = BinaryPrimitives
                 .ReadUInt16LittleEndian(home.Slice(4, 2));
-            if (home[0] != 2 || parameterOrdinal >= callerVariables.Count)
+            var variableOrdinal = checked(parameterOrdinal
+                + receiverOffset);
+            if (home[0] != 2
+                || parameterOrdinal >= callerParameterCount
+                || (uint)variableOrdinal >= (uint)callerVariables.Count
+                || (ordinal == 0 && targetReceiverCount != 0
+                    && sourceUse != 1))
             {
                 throw Invalid(
                     "A GenericCall input does not select a caller parameter Home.");
             }
 
-            var descriptorRead = new BoundRead(parameterOrdinal,
-                callerVariables[parameterOrdinal].Type, default);
+            var descriptorRead = new BoundRead(variableOrdinal,
+                callerVariables[variableOrdinal].Type, default);
             if (sourceUse == 5
                 && descriptorRead.Type != targetParameterType)
             {
@@ -2282,8 +2378,8 @@ public static partial class TrRmExecutableCompiler
             }
             BoundExpression argument = sourceUse switch {
                 1 => descriptorRead,
-                2 => new BoundMove(parameterOrdinal,
-                    callerVariables[parameterOrdinal].Type, default),
+                2 => new BoundMove(variableOrdinal,
+                    callerVariables[variableOrdinal].Type, default),
                 5 => new BoundReferenceReborrow(descriptorRead,
                     targetParameterType, default),
                 _ => throw Invalid(
@@ -2312,7 +2408,8 @@ public static partial class TrRmExecutableCompiler
             }
             if (sourceUse == 2
                 && !IsDirectGenericMethodMoveReturn(
-                    targetImport.ProofFunction, ordinal))
+                    targetImport.ProofFunction,
+                    ordinal - targetReceiverCount))
             {
                 throw new NotSupportedException(
                     "The G1 consumer requires a direct move-return target for ownership-transfer GenericCall inputs.");
@@ -3687,7 +3784,8 @@ public static partial class TrRmExecutableCompiler
             && function.Body.Statements[0] is BoundReturn {
                 Value: BoundMove move,
             }
-            && move.Variable == parameterOrdinal
+            && move.Variable
+                == parameterOrdinal + (function.IsStatic ? 0 : 1)
             && move.Type == function.ReturnType;
 
     private static int FindGenericMethodModule(

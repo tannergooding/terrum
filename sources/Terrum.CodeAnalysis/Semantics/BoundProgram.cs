@@ -1059,7 +1059,14 @@ internal sealed record BoundGenericMethodImportOrigin(
     string ProviderIdentity, string ExportKey, string SchemaIdentity,
     uint TargetRequirement, uint RuntimePolicy,
     ImmutableArray<byte> ProviderArtifactDigest, uint MethodDefId = 0,
-    bool IsMethodDefTarget = false);
+    bool IsMethodDefTarget = false)
+{
+    internal BoundGenericMethodClassOwner? ClassOwner { get; init; }
+}
+
+internal sealed record BoundGenericMethodClassOwner(
+    BoundGenericNominalTypeIdentity Identity, string ExportKey,
+    uint ExpectedDefinitionId, uint TargetRequirement, uint RuntimePolicy);
 
 internal sealed record BoundGenericMethodImportBinding(
     int ImportRow, int ModuleRefRow, string ProviderIdentity,
@@ -1069,7 +1076,7 @@ internal sealed record BoundGenericMethodImportBinding(
 
 internal sealed class BoundGenericMethodImport
 {
-    internal BoundGenericMethodImportOrigin Origin { get; }
+    internal BoundGenericMethodImportOrigin Origin { get; private set; }
     internal BoundGenericMethodSignature Signature { get; }
     internal ImmutableArray<BoundGenericMethodFormal> Formals { get; }
     internal ImmutableArray<BoundGenericMethodParameterDefault?>
@@ -1117,6 +1124,20 @@ internal sealed class BoundGenericMethodImport
 
     internal void CompleteBinding(BoundGenericMethodImportBinding binding)
         => Binding = binding;
+
+    internal void CompleteClassOwner(
+        BoundGenericMethodClassOwner classOwner)
+    {
+        ArgumentNullException.ThrowIfNull(classOwner);
+        if (Origin.ClassOwner is not null
+            && Origin.ClassOwner != classOwner)
+        {
+            throw new InvalidOperationException(
+                "A generic class MethodDef cannot change its owner.");
+        }
+
+        Origin = Origin with { ClassOwner = classOwner };
+    }
 }
 
 internal enum BoundDeclarationContractPhase : byte

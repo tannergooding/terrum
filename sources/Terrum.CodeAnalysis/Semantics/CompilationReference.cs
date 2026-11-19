@@ -91,7 +91,10 @@ public sealed class CompilationReference
                 import is null
                 || import.Origin is null
                 || string.IsNullOrEmpty(import.Origin.ProviderIdentity)
-                || string.IsNullOrEmpty(import.Origin.ExportKey)
+                || (import.Origin.IsMethodDefTarget
+                    ? !string.IsNullOrEmpty(import.Origin.ExportKey)
+                        || import.Origin.ClassOwner is null
+                    : string.IsNullOrEmpty(import.Origin.ExportKey))
                 || !StandardGenericMethodSchema.IsGenericMethodCalls(
                     import.Origin.SchemaIdentity)
                 || import.Origin.ProviderArtifactDigest.IsDefault

@@ -892,6 +892,10 @@ internal static class TrRmFixedArrayProviderBindingValidator
             }
 
             var bindings = new List<TrRmStandardMethodProviderBinding>();
+            var supportsGenericClassMethods
+                = _schemaIdentities.Length != 0
+                    && _schemaIdentities.All(
+                        StandardGenericMethodSchema.IsGenericMethodCalls);
             var pendingTypes = new Queue<TypeOriginPair>();
             var methodRows = new Dictionary<(
                 int ArtifactIndex, int OwnerImportRow,
@@ -989,12 +993,18 @@ internal static class TrRmFixedArrayProviderBindingValidator
                             expectedMethodRow);
                     if (expectedOwnerTypeDefRow == 0
                         || consumer.TypeDefs.GetKind(
-                            expectedOwnerTypeDefRow) != 2
-                        || consumer.Signatures.GetGenericCount(
-                            consumer.Methods.GetSignature(
-                                expectedMethodRow)) != 0)
+                            expectedOwnerTypeDefRow) != 2)
                     {
                         continue;
+                    }
+                    var expectedGenericCount = consumer.Signatures
+                        .GetGenericCount(consumer.Methods.GetSignature(
+                            expectedMethodRow));
+                    if (expectedGenericCount != 0
+                        && !supportsGenericClassMethods)
+                    {
+                        throw new NotSupportedException(
+                            "Generic class MethodDef Imports require the exact CM1 GenericMethodCalls profile.");
                     }
 
                     var importBinding = consumer.Imports

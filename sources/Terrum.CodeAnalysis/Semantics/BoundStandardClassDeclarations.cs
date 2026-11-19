@@ -447,8 +447,6 @@ internal static class BoundStandardClassDeclarationContract
                             StringComparer.Ordinal)
                         || !SnapshotsMatch(methodExpectation.Provider,
                             declaration.Declaration.Provider)
-                        || expectedMethod.GenericParameterCount != 0
-                        || actualMethod.GenericParameterCount != 0
                         || expectedMethod.ConstructionRole
                             != actualMethod.ConstructionRole
                         || expectedMethod.Parameters.Length

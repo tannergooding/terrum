@@ -6226,7 +6226,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         Assert.That(formal.Ordinal, Is.Zero);
         Assert.That(formal.Name, Is.EqualTo("Echo"));
         Assert.That(formal.FormalKind, Is.EqualTo((byte)1));
-        Assert.That(formal.OwnershipDomain, Is.EqualTo((byte)1));
+        Assert.That(formal.OwnershipDomain, Is.EqualTo((byte)2));
         Assert.That(formal.NullabilityDomain, Is.EqualTo((byte)1));
         Assert.That(formal.ConstantTypeSpecReference, Is.Zero);
         Assert.That(formal.DefaultArgumentReference, Is.EqualTo(0xF200_0008u));
@@ -6238,74 +6238,667 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         Assert.That(formal.Constraints[0].Payload, Is.EqualTo(1u));
 
         static byte[] AddGenericTypeFormal(byte[] artifact)
-        {
-            var schema
-                = TrRmArtifactSchema
-                    .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft;
-            var artifactIndex = TrRmArtifactIndex
-                .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
-                    artifact);
-            var tables = TrRmStructuralMetadataValidator
-                .ValidateC1AndGetExecutionTables(artifactIndex);
-            var methodDefinition = tables.Exports
-                .GetExportsForModule(1)
-                .Single(static export =>
-                    export.ExportKey == "Box.Echo").Definition;
-            var methodRow = checked((int)(
-                methodDefinition & 0x00FF_FFFF));
-            var signatureRow = tables.Methods.GetSignature(methodRow);
-            if (tables.Signatures.GetGenericCount(signatureRow) != 0
-                || artifactIndex.TryGetSection(0x0019, out _, out _)
-                || artifactIndex.TryGetSection(0x001A, out _, out _)
-                || !artifactIndex.TryGetSection(0x0017, out var signatureSection,
-                    out var signatureCount)
-                || signatureCount != (uint)tables.Signatures.Count)
-            {
-                throw new InvalidDataException(
-                    "The generic class MethodDef fixture requires one nongeneric MethodSig.");
-            }
+            => RewriteGenericMethodTypeFormal(artifact, 2,
+                0xF200_0008u, includeUniqueConstraint: true);
+    }
 
-            var formalNameRow = Enumerable.Range(1, tables.Strings.Count)
-                .Single(row => tables.Strings.DecodeName(row) == "Echo");
-            var genericParam = new byte[32];
-            BinaryPrimitives.WriteUInt32LittleEndian(genericParam,
-                methodDefinition);
-            BinaryPrimitives.WriteUInt32LittleEndian(
-                genericParam.AsSpan(8), checked((uint)formalNameRow));
+    private static byte[] RewriteGenericMethodTypeFormal(byte[] artifact,
+        byte ownershipDomain, uint defaultArgumentReference,
+        bool includeUniqueConstraint)
+    {
+        var schema
+            = TrRmArtifactSchema
+                .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft;
+        var artifactIndex = TrRmArtifactIndex
+            .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                artifact);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(artifactIndex);
+        var methodDefinition = tables.Exports
+            .GetExportsForModule(1)
+            .Single(static export =>
+                export.ExportKey == "Box.Echo").Definition;
+        var methodRow = checked((int)(
+            methodDefinition & 0x00FF_FFFF));
+        var signatureRow = tables.Methods.GetSignature(methodRow);
+        if (tables.Signatures.GetGenericCount(signatureRow) != 0
+            || artifactIndex.TryGetSection(0x0019, out _, out _)
+            || artifactIndex.TryGetSection(0x001A, out _, out _)
+            || !artifactIndex.TryGetSection(0x0017, out var signatureSection,
+                out var signatureCount)
+            || signatureCount != (uint)tables.Signatures.Count)
+        {
+            throw new InvalidDataException(
+                "The generic class MethodDef fixture requires one nongeneric MethodSig.");
+        }
+
+        var formalNameRow = Enumerable.Range(1, tables.Strings.Count)
+            .Single(row => tables.Strings.DecodeName(row) == "Echo");
+        var genericParam = new byte[32];
+        BinaryPrimitives.WriteUInt32LittleEndian(genericParam,
+            methodDefinition);
+        BinaryPrimitives.WriteUInt32LittleEndian(genericParam.AsSpan(8),
+            checked((uint)formalNameRow));
+        if (includeUniqueConstraint)
+        {
             BinaryPrimitives.WriteUInt32LittleEndian(
                 genericParam.AsSpan(12), 1);
             BinaryPrimitives.WriteUInt32LittleEndian(
                 genericParam.AsSpan(16), 1);
-            BinaryPrimitives.WriteUInt32LittleEndian(
-                genericParam.AsSpan(28), 0xF200_0008u);
-            genericParam[20] = 1;
-            genericParam[21] = 1;
-            genericParam[22] = 1;
+        }
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            genericParam.AsSpan(28), defaultArgumentReference);
+        genericParam[20] = 1;
+        genericParam[21] = ownershipDomain;
+        genericParam[22] = 1;
 
-            var constraint = new byte[12];
+        byte[]? constraint = null;
+        if (includeUniqueConstraint)
+        {
+            constraint = new byte[12];
             BinaryPrimitives.WriteUInt32LittleEndian(constraint, 1);
             BinaryPrimitives.WriteUInt16LittleEndian(
                 constraint.AsSpan(4), 2);
             BinaryPrimitives.WriteUInt32LittleEndian(
                 constraint.AsSpan(8), 1);
+        }
+
+        var signatureBytes = signatureSection.ToArray();
+        var signatureOffset = checked((signatureRow - 1) * 24);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            signatureBytes.AsSpan(signatureOffset + 16), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            signatureBytes.AsSpan(signatureOffset + 20), 1);
+
+        var featureRows = new List<TrRmFeatureRow>();
+        var hasFeatureSection = artifactIndex.TryGetSection(0x0004,
+            out var featureSection, out var featureRecordCount);
+        if (hasFeatureSection)
+        {
+            var existingFeatureCount = checked((int)featureRecordCount);
+            for (var row = 0; row < existingFeatureCount; row++)
+            {
+                var feature = featureSection.Span.Slice(row * 8, 8);
+                featureRows.Add(new TrRmFeatureRow(
+                    BinaryPrimitives.ReadUInt32LittleEndian(feature),
+                    BinaryPrimitives.ReadUInt32LittleEndian(feature[4..])));
+            }
+        }
+        if (!featureRows.Any(static feature =>
+                feature.FeatureId
+                    == TrRmFeatureTableReader.GenericMethodCallsFeatureId))
+        {
+            featureRows.Add(TrRmFeatureRow.GenericMethodCallsCandidate);
+        }
+
+        var featureBytes = TrRmFeatureTableWriter.Encode(featureRows, schema);
+        var outputFeatureCount = checked((uint)(featureBytes.Length / 8));
+        if (!artifactIndex.TryGetSection(0x0001, out var moduleSection,
+                out var moduleRecordCount)
+            || moduleRecordCount != 1)
+        {
+            throw new InvalidDataException(
+                "The generic class MethodDef fixture requires one Module row.");
+        }
+        var moduleBytes = moduleSection.ToArray();
+        BinaryPrimitives.WriteUInt32LittleEndian(moduleBytes.AsSpan(24),
+            outputFeatureCount == 0 ? 0u : 1u);
+        BinaryPrimitives.WriteUInt32LittleEndian(moduleBytes.AsSpan(28),
+            outputFeatureCount);
+        var sections = new List<TrRmSection>(
+            artifactIndex.SectionCount + (hasFeatureSection ? 0 : 1)
+                + (includeUniqueConstraint ? 2 : 1));
+        for (var sectionIndex = 0;
+            sectionIndex < artifactIndex.SectionCount; sectionIndex++)
+        {
+            artifactIndex.GetSection(sectionIndex, out var kind,
+                out var flags, out var section, out var recordCount);
+            sections.Add(kind switch
+            {
+                0x0001 => new TrRmSection(kind, flags, recordCount,
+                    moduleBytes),
+                0x0004 => new TrRmSection(kind, flags, outputFeatureCount,
+                    featureBytes),
+                0x0017 => new TrRmSection(kind, flags, recordCount,
+                    signatureBytes),
+                _ => new TrRmSection(kind, flags, recordCount,
+                    section.ToArray()),
+            });
+        }
+        sections.Add(new TrRmSection(0x0019, 0, 1, genericParam));
+        if (constraint is not null)
+        {
+            sections.Add(new TrRmSection(0x001A, 0, 1, constraint));
+        }
+        if (!hasFeatureSection)
+        {
+            sections.Add(new TrRmSection(0x0004, 0, outputFeatureCount,
+                featureBytes));
+        }
+        sections.Sort(static (left, right) =>
+            left.Kind.CompareTo(right.Kind));
+        return TrRmArtifactWriter.Encode(sections, schema);
+    }
+
+    [Test]
+    public void ValidatesStaticAndInstanceGenericClassMethodImportsAgainstProviderFormals()
+    {
+        var schemaIdentity
+            = C1M1Construction2ClassParameterDefaultsSchemaIdentity;
+        var providerArtifact = CreateGenericClassProvider(true, 1,
+            0xF200_0008u);
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var providerReference = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, "GenericClassMethodProvider", [], ["BoxKey"]);
+        var consumerTree = SyntaxTree.Parse("""
+            public class Container {
+                public static int32 Use(Box value) {
+                    return 42;
+                }
+            }
+            """);
+        var consumerCompilation
+            = Compilation.CreateLibrary(consumerTree, providerReference);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerProgram = (BoundProgram)consumerCompilation.Program!;
+        var containerDeclaration = consumerTree.Root.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var useMethod = containerDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.FunctionDeclaration);
+        var containerClassIndex = Enumerable.Range(0,
+                consumerProgram.Classes.Length)
+            .Single(index => consumerProgram.Classes[index].Name
+                == "Container");
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            consumerProgram, "GenericClassMethodConsumer", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(consumerProgram,
+                    containerClassIndex, containerDeclaration.Span,
+                    "ContainerKey", [
+                        new TrRmSourceClassMemberExport(
+                            containerClassIndex, useMethod.Span,
+                            "Container.Use"),
+                    ]),
+            ]);
+        var consumerWithMethodImport
+            = AddGenericClassMethodImport(consumerArtifact,
+                0xF200_0008u);
+        var consumerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            consumerWithMethodImport);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            consumerInput, "GenericClassMethodConsumer", [providerInput],
+            ["ContainerKey"]);
+        var importedBox = reference.StandardClassDeclarations
+            .Single(static declaration =>
+                declaration.Declaration.Name == "Box"
+                && !declaration.Expectations.IsEmpty);
+        var importedMethod = importedBox.Expectations
+            .SelectMany(static expectation =>
+                expectation.MethodExpectations)
+            .Single(static expectation =>
+                expectation.ExportKey == "Box.Echo");
+        Assert.That(importedMethod.ProviderDefinitionId >> 24,
+            Is.EqualTo(0x16u));
+
+        var callerTree = SyntaxTree.Parse("""
+            public class Caller {
+                public static int32 Run(Box box, int32 value) {
+                    return Box.Echo<int32>(value);
+                }
+            }
+            """);
+        var callerCompilation = Compilation.CreateLibrary(callerTree,
+            providerReference);
+        Assert.That(callerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                callerCompilation.Diagnostics));
+        var instanceProviderModuleIdentity
+            = "GenericInstanceClassMethodProvider";
+        var instanceProviderInput = new TrRmStandardArtifactInput(
+            schemaIdentity, CreateGenericClassProvider(false, 1,
+                0xF200_0008u));
+        var instanceProviderReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                instanceProviderInput, instanceProviderModuleIdentity, [],
+                ["BoxKey"]);
+        var instanceConsumerArtifact
+            = AddGenericClassMethodImport(consumerArtifact,
+                0xF200_0008u, hasReceiver: true);
+        var instanceConsumerInput = new TrRmStandardArtifactInput(
+            schemaIdentity, instanceConsumerArtifact);
+        var instanceConsumerReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                instanceConsumerInput, "GenericClassMethodConsumer",
+                [instanceProviderInput], ["ContainerKey"]);
+        var importedInstanceMethod = instanceConsumerReference
+            .StandardClassDeclarations
+            .Single(static declaration =>
+                declaration.Declaration.Name == "Box"
+                && !declaration.Expectations.IsEmpty)
+            .Expectations.SelectMany(static expectation =>
+                expectation.MethodExpectations)
+            .Single(static expectation =>
+                expectation.ExportKey == "Box.Echo");
+        Assert.That(importedInstanceMethod.ProviderDefinitionId >> 24,
+            Is.EqualTo(0x16u));
+
+        var instanceCallerTree = SyntaxTree.Parse("""
+            public class InstanceCaller {
+                public static int32 Run(Box box, int32 value) {
+                    return box.Echo<int32>(value);
+                }
+            }
+            """);
+        var instanceCallerCompilation
+            = Compilation.CreateLibrary(instanceCallerTree,
+                instanceProviderReference);
+        Assert.That(instanceCallerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                instanceCallerCompilation.Diagnostics));
+
+        var forwardingTree = SyntaxTree.Parse("""
+            public class Forwarder {
+                public static int32 Use(Box value) { return 42; }
+            }
+            public int32 Forward<T>(Box box, int32 value) {
+                return Box.Echo<T>(value);
+            }
+            """);
+        var forwardingCompilation = Compilation.CreateLibrary(
+            forwardingTree, providerReference);
+        Assert.That(forwardingCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                forwardingCompilation.Diagnostics));
+        var forwardingProgram = (BoundProgram)forwardingCompilation.Program!;
+        var forwardingDeclaration = forwardingTree.Root.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var useDeclaration = forwardingDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.FunctionDeclaration);
+        var forwardingClassIndex = Enumerable.Range(0,
+                forwardingProgram.Classes.Length)
+            .Single(index => forwardingProgram.Classes[index].Name
+                == "Forwarder");
+        var forwardingGenericMethod
+            = forwardingProgram.GenericMethodDefinitions.Single();
+        var forwardingArtifact = TrRmExecutableCompiler.EmitStandard(
+            forwardingProgram, "GenericClassMethodForwarder",
+            schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [
+                new TrRmSourceGenericMethodExport(forwardingProgram,
+                    forwardingGenericMethod.SourceInputOrdinal,
+                    forwardingGenericMethod.Span, "Forward"),
+            ], [
+                new TrRmSourceClassExport(forwardingProgram,
+                    forwardingClassIndex, forwardingDeclaration.Span,
+                    "ForwarderKey", [
+                        new TrRmSourceClassMemberExport(
+                            forwardingClassIndex, useDeclaration.Span,
+                            "Forwarder.Use"),
+                    ]),
+            ]);
+        var forwardingInput = new TrRmStandardArtifactInput(schemaIdentity,
+            forwardingArtifact);
+        var forwardingReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                forwardingInput, "GenericClassMethodForwarder",
+                [providerInput], ["ForwarderKey"]);
+        var forwardedImportedMethod = forwardingReference
+            .StandardClassDeclarations
+            .Single(static declaration =>
+                declaration.Declaration.Name == "Box"
+                && !declaration.Expectations.IsEmpty)
+            .Expectations.SelectMany(static expectation =>
+                expectation.MethodExpectations)
+            .Single(static expectation =>
+                expectation.ExportKey == "Box.Echo");
+        Assert.That(forwardedImportedMethod.ProviderDefinitionId >> 24,
+            Is.EqualTo(0x16u));
+
+        var instanceForwardingTree = SyntaxTree.Parse("""
+            public class InstanceForwarder {
+                public static int32 Use(Box value) { return 42; }
+            }
+            public int32 Forward<T>(Box box, int32 value) {
+                return box.Echo<T>(value);
+            }
+            """);
+        var instanceForwardingCompilation = Compilation.CreateLibrary(
+            instanceForwardingTree, instanceProviderReference);
+        Assert.That(instanceForwardingCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                instanceForwardingCompilation.Diagnostics));
+        var instanceForwardingProgram
+            = (BoundProgram)instanceForwardingCompilation.Program!;
+        var instanceForwardingDeclaration
+            = instanceForwardingTree.Root.Children
+                .OfType<SyntaxNode>()
+                .Single(static node =>
+                    node.Kind == SyntaxKind.ClassDeclaration);
+        var instanceUseDeclaration
+            = instanceForwardingDeclaration.Children
+                .OfType<SyntaxNode>()
+                .Single(static node =>
+                    node.Kind == SyntaxKind.FunctionDeclaration);
+        var instanceForwardingClassIndex = Enumerable.Range(0,
+                instanceForwardingProgram.Classes.Length)
+            .Single(index =>
+                instanceForwardingProgram.Classes[index].Name
+                    == "InstanceForwarder");
+        var instanceForwardingGenericMethod
+            = instanceForwardingProgram.GenericMethodDefinitions.Single();
+        var instanceForwardingArtifact
+            = TrRmExecutableCompiler.EmitStandard(
+                instanceForwardingProgram,
+                "GenericInstanceClassMethodForwarder", schemaIdentity,
+                TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+                [], [
+                    new TrRmSourceGenericMethodExport(
+                        instanceForwardingProgram,
+                        instanceForwardingGenericMethod.SourceInputOrdinal,
+                        instanceForwardingGenericMethod.Span, "Forward"),
+                ], [
+                    new TrRmSourceClassExport(
+                        instanceForwardingProgram,
+                        instanceForwardingClassIndex,
+                        instanceForwardingDeclaration.Span,
+                        "InstanceForwarderKey", [
+                            new TrRmSourceClassMemberExport(
+                                instanceForwardingClassIndex,
+                                instanceUseDeclaration.Span,
+                                "InstanceForwarder.Use"),
+                        ]),
+                ]);
+        var instanceForwardingInput
+            = new TrRmStandardArtifactInput(schemaIdentity,
+                instanceForwardingArtifact);
+        var instanceForwardingReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                instanceForwardingInput,
+                "GenericInstanceClassMethodForwarder",
+                [instanceProviderInput], ["InstanceForwarderKey"]);
+        var forwardedInstanceMethod = instanceForwardingReference
+            .StandardClassDeclarations
+            .Single(static declaration =>
+                declaration.Declaration.Name == "Box"
+                && !declaration.Expectations.IsEmpty)
+            .Expectations.SelectMany(static expectation =>
+                expectation.MethodExpectations)
+            .Single(static expectation =>
+                expectation.ExportKey == "Box.Echo");
+        Assert.That(forwardedInstanceMethod.ProviderDefinitionId >> 24,
+            Is.EqualTo(0x16u));
+
+        var incompatibleProvider = new TrRmStandardArtifactInput(
+            schemaIdentity, CreateGenericClassProvider(true, 2,
+                0xF200_0008u));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                consumerInput, "GenericClassMethodConsumer",
+                [incompatibleProvider], ["ContainerKey"]));
+        var incompatibleDefaultProvider = new TrRmStandardArtifactInput(
+            schemaIdentity, CreateGenericClassProvider(true, 1,
+                0xF200_0009u));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                consumerInput, "GenericClassMethodConsumer",
+                [incompatibleDefaultProvider], ["ContainerKey"]));
+
+        byte[] CreateGenericClassProvider(bool isStatic,
+            byte ownershipDomain, uint defaultArgumentReference)
+        {
+            var providerTree = SyntaxTree.Parse(isStatic
+                ? """
+                    public class Box {
+                        public static int32 Echo(int32 value) { return value; }
+                    }
+                    """
+                : """
+                    public class Box {
+                        public int32 Echo(int32 value) { return value; }
+                    }
+                    """);
+            var providerCompilation
+                = Compilation.CreateLibrary(providerTree);
+            Assert.That(providerCompilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    providerCompilation.Diagnostics));
+            var providerProgram = (BoundProgram)providerCompilation.Program!;
+            var boxDeclaration = providerTree.Root.Children
+                .OfType<SyntaxNode>()
+                .Single(static node =>
+                    node.Kind == SyntaxKind.ClassDeclaration);
+            var echo = boxDeclaration.Children.OfType<SyntaxNode>()
+                .Single(static node =>
+                    node.Kind == SyntaxKind.FunctionDeclaration);
+            var boxClassIndex = Enumerable.Range(0,
+                    providerProgram.Classes.Length)
+                .Single(index => providerProgram.Classes[index].Name
+                    == "Box");
+            var providerModuleIdentity = isStatic
+                ? "GenericClassMethodProvider"
+                : "GenericInstanceClassMethodProvider";
+            var provider = TrRmExecutableCompiler.EmitStandard(
+                providerProgram, providerModuleIdentity,
+                schemaIdentity,
+                TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+                [], [], [
+                    new TrRmSourceClassExport(providerProgram,
+                        boxClassIndex, boxDeclaration.Span, "BoxKey", [
+                            new TrRmSourceClassMemberExport(boxClassIndex,
+                                echo.Span, "Box.Echo"),
+                        ]),
+                ]);
+            var formalProvider = RewriteGenericMethodTypeFormal(provider,
+                    ownershipDomain, defaultArgumentReference,
+                    includeUniqueConstraint: false);
+            return formalProvider;
+        }
+
+        static byte[] AddGenericClassMethodImport(byte[] artifact,
+            uint defaultArgumentReference, bool hasReceiver = false)
+        {
+            var schema
+                = TrRmArtifactSchema
+                    .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft;
+            var index = TrRmArtifactIndex
+                .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                    artifact);
+            var tables = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(index);
+            var useDefinition = tables.Exports
+                .GetExportsForModule(1)
+                .Single(static export =>
+                    export.ExportKey == "Container.Use").Definition;
+            var useMethodRow = checked((int)(
+                useDefinition & 0x00FF_FFFF));
+            var useSignature = tables.Methods.GetSignature(useMethodRow);
+            var (parameterFirst, parameterCount)
+                = tables.Signatures.GetParamRange(useSignature);
+            if (parameterCount != 1 || tables.Methods.Count == 0
+                || tables.Signatures.GetGenericCount(useSignature) != 0
+                || tables.GenericParams.Count != 0
+                || index.TryGetSection(0x0019, out _, out _)
+                || index.TryGetSection(0x001A, out _, out _)
+                || !index.TryGetSection(0x0016, out var methodSection,
+                    out var methodCount)
+                || methodCount != (uint)tables.Methods.Count
+                || !index.TryGetSection(0x0017, out var signatureSection,
+                    out var signatureCount)
+                || signatureCount != (uint)tables.Signatures.Count
+                || !index.TryGetSection(0x001C, out var importSection,
+                    out var importCount)
+                || importCount != (uint)tables.Imports.Count
+                || !index.TryGetSection(0x0018, out var parameterSection,
+                    out var parameterTableCount)
+                || parameterTableCount != (uint)tables.Parameters.Count
+                || !index.TryGetSection(0x0066, out var labelSection,
+                    out var labelCount)
+                || labelCount != (uint)tables.MethodParameterLabels.Count)
+            {
+                throw new InvalidDataException(
+                    "The generic class MethodDef import fixture has an unexpected source shape.");
+            }
+
+            var boxTypeSpecReference
+                = tables.Parameters.GetTypeSpec(parameterFirst);
+            var boxTypeSpec
+                = tables.TypeSpecs.GetTypeSpecRef(boxTypeSpecReference);
+            var boxTypeSpecBytes
+                = tables.TypeSpecs.GetTypeSpecBytes(boxTypeSpecReference);
+            if (!boxTypeSpec.IsRow || boxTypeSpec.Form != 0x03
+                || boxTypeSpecBytes.Length != 6)
+            {
+                throw new InvalidDataException(
+                    "The generic class MethodDef import fixture requires an imported Box parameter.");
+            }
+            var ownerImportRow = checked((int)
+                BinaryPrimitives.ReadUInt32LittleEndian(
+                    boxTypeSpecBytes[2..]));
+            var ownerDefinitionId = tables.Imports
+                .GetExpectedDefinitionForImportRow(ownerImportRow);
+            if ((ownerDefinitionId >> 24) != 0x13)
+            {
+                throw new InvalidDataException(
+                    "The generic class MethodDef import fixture has no TypeDef owner Import.");
+            }
+
+            var moduleRefRow = tables.Imports
+                .GetModuleRefForImportRow(ownerImportRow);
+            var stringRows = new List<(string Text, int Encoding)>(
+                tables.Strings.Count + 3);
+            for (var row = 1; row <= tables.Strings.Count; row++)
+            {
+                stringRows.Add((tables.Strings.DecodeNamespace(row), 1));
+            }
+
+            int GetStringRow(string text)
+            {
+                var existing = stringRows.FindIndex(candidate =>
+                    StringComparer.Ordinal.Equals(candidate.Text, text));
+                if (existing >= 0)
+                {
+                    return existing + 1;
+                }
+
+                stringRows.Add((text, 1));
+                return stringRows.Count;
+            }
+
+            var methodNameStringRow = GetStringRow("Echo");
+            var exportKeyStringRow = GetStringRow("Box.Echo");
+            var formalNameStringRow = GetStringRow("T");
+            var parameterNameStringRow = GetStringRow("value");
+            var stringBytes = TrRmStringTableWriter.EncodeTextRows(
+                stringRows);
+
+            var methodRow = checked(tables.Methods.Count + 1);
+            var signatureRow = checked(tables.Signatures.Count + 1);
+            var formalRow = checked(tables.GenericParams.Count + 1);
+            var methodBytes = methodSection.ToArray();
+            Array.Resize(ref methodBytes, methodBytes.Length + 28);
+            var methodOffset = methodBytes.Length - 28;
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                methodBytes.AsSpan(methodOffset),
+                0x1300_0000u
+                    | (ownerDefinitionId & 0x00FF_FFFF));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                methodBytes.AsSpan(methodOffset + 4),
+                checked((uint)methodNameStringRow));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                methodBytes.AsSpan(methodOffset + 8),
+                checked((uint)signatureRow));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                methodBytes.AsSpan(methodOffset + 12), 2);
 
             var signatureBytes = signatureSection.ToArray();
-            var signatureOffset = checked((signatureRow - 1) * 24);
+            Array.Resize(ref signatureBytes, signatureBytes.Length + 24);
+            var signatureOffset = signatureBytes.Length - 24;
             BinaryPrimitives.WriteUInt32LittleEndian(
-                signatureBytes.AsSpan(signatureOffset + 16), 1);
+                signatureBytes.AsSpan(signatureOffset), 0xF200_0008u);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                signatureBytes.AsSpan(signatureOffset + 4),
+                hasReceiver ? boxTypeSpecReference : 0);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                signatureBytes.AsSpan(signatureOffset + 8),
+                checked((uint)tables.Parameters.Count + 1));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                signatureBytes.AsSpan(signatureOffset + 12), 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                signatureBytes.AsSpan(signatureOffset + 16),
+                checked((uint)formalRow));
             BinaryPrimitives.WriteUInt32LittleEndian(
                 signatureBytes.AsSpan(signatureOffset + 20), 1);
+
+            var parameterBytes = parameterSection.ToArray();
+            Array.Resize(ref parameterBytes, parameterBytes.Length + 16);
+            var parameterOffset = parameterBytes.Length - 16;
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                parameterBytes.AsSpan(parameterOffset),
+                checked((uint)signatureRow));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                parameterBytes.AsSpan(parameterOffset + 4), 0);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                parameterBytes.AsSpan(parameterOffset + 8), 0xF200_0008u);
+
+            var labelBytes = labelSection.ToArray();
+            Array.Resize(ref labelBytes, labelBytes.Length + 16);
+            var labelOffset = labelBytes.Length - 16;
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                labelBytes.AsSpan(labelOffset),
+                checked((uint)methodRow));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                labelBytes.AsSpan(labelOffset + 4), 0);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                labelBytes.AsSpan(labelOffset + 8),
+                checked((uint)parameterNameStringRow));
+
+            var genericParam = new byte[32];
+            BinaryPrimitives.WriteUInt32LittleEndian(genericParam,
+                0x1600_0000u | checked((uint)methodRow));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                genericParam.AsSpan(8),
+                checked((uint)formalNameStringRow));
+            genericParam[20] = 1;
+            genericParam[21] = 1;
+            genericParam[22] = 1;
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                genericParam.AsSpan(28), defaultArgumentReference);
+
+            var importBytes = importSection.ToArray();
+            Array.Resize(ref importBytes, importBytes.Length + 12);
+            var importOffset = importBytes.Length - 12;
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                importBytes.AsSpan(importOffset),
+                checked((uint)moduleRefRow));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                importBytes.AsSpan(importOffset + 4),
+                checked((uint)exportKeyStringRow));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                importBytes.AsSpan(importOffset + 8),
+                0x1600_0000u | checked((uint)methodRow));
+
             var featureRows = new List<TrRmFeatureRow>();
-            var hasFeatureSection = artifactIndex.TryGetSection(0x0004,
+            var hasFeatureSection = index.TryGetSection(0x0004,
                 out var featureSection, out var featureRecordCount);
             if (hasFeatureSection)
             {
-                var existingFeatureCount
-                    = checked((int)featureRecordCount);
-                for (var row = 0; row < existingFeatureCount; row++)
+                for (var row = 0;
+                    row < checked((int)featureRecordCount); row++)
                 {
-                    var feature = featureSection.Span.Slice(
-                        row * 8, 8);
+                    var feature = featureSection.Span.Slice(row * 8, 8);
                     featureRows.Add(new TrRmFeatureRow(
                         BinaryPrimitives.ReadUInt32LittleEndian(feature),
                         BinaryPrimitives.ReadUInt32LittleEndian(
@@ -6317,49 +6910,67 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                         == TrRmFeatureTableReader
                             .GenericMethodCallsFeatureId))
             {
+                featureRows.Add(TrRmFeatureRow.GenericMethodCallsCandidate);
+            }
+            if (!featureRows.Any(static feature =>
+                    feature.FeatureId
+                        == TrRmFeatureTableReader
+                            .MethodParameterLabelsFeatureId))
+            {
                 featureRows.Add(
-                    TrRmFeatureRow.GenericMethodCallsCandidate);
+                    TrRmFeatureRow.MethodParameterLabelsCandidate);
             }
 
             var featureBytes
                 = TrRmFeatureTableWriter.Encode(featureRows, schema);
-            var outputFeatureCount = checked((uint)(featureBytes.Length / 8));
-            if (!artifactIndex.TryGetSection(0x0001, out var moduleSection,
-                    out var moduleRecordCount)
-                || moduleRecordCount != 1)
+            var outputFeatureCount
+                = checked((uint)(featureBytes.Length / 8));
+            if (!index.TryGetSection(0x0001, out var moduleSection,
+                    out var moduleCount)
+                || moduleCount != 1)
             {
                 throw new InvalidDataException(
-                    "The generic class MethodDef fixture requires one Module row.");
+                    "The generic class MethodDef import fixture requires one Module row.");
             }
             var moduleBytes = moduleSection.ToArray();
             BinaryPrimitives.WriteUInt32LittleEndian(
-                moduleBytes.AsSpan(24),
-                outputFeatureCount == 0 ? 0u : 1u);
+                moduleBytes.AsSpan(24), 1);
             BinaryPrimitives.WriteUInt32LittleEndian(
                 moduleBytes.AsSpan(28), outputFeatureCount);
-            var sections = new List<TrRmSection>(
-                artifactIndex.SectionCount + (hasFeatureSection ? 0 : 1)
-                    + 2);
+
+            var sections = new List<TrRmSection>(index.SectionCount + 3);
             for (var sectionIndex = 0;
-                sectionIndex < artifactIndex.SectionCount; sectionIndex++)
+                sectionIndex < index.SectionCount; sectionIndex++)
             {
-                artifactIndex.GetSection(sectionIndex, out var kind,
-                    out var flags, out var section, out var recordCount);
-                sections.Add(kind == 0x0017
-                    ? new TrRmSection(kind, flags, recordCount,
-                        signatureBytes)
-                    : kind == 0x0001
-                        ? new TrRmSection(kind, flags, recordCount,
-                            moduleBytes)
-                        : kind == 0x0004
-                            ? new TrRmSection(kind, flags,
-                                outputFeatureCount,
-                                featureBytes)
-                            : new TrRmSection(kind, flags, recordCount,
-                                section.ToArray()));
+                index.GetSection(sectionIndex, out var kind, out var flags,
+                    out var section, out var recordCount);
+                sections.Add(kind switch
+                {
+                    0x0001 => new TrRmSection(kind, flags, recordCount,
+                        moduleBytes),
+                    0x0002 => new TrRmSection(kind, flags,
+                        checked((uint)stringRows.Count), stringBytes),
+                    0x0004 => new TrRmSection(kind, flags,
+                        outputFeatureCount, featureBytes),
+                    0x0016 => new TrRmSection(kind, flags,
+                        checked((uint)tables.Methods.Count + 1),
+                        methodBytes),
+                    0x0017 => new TrRmSection(kind, flags,
+                        checked((uint)tables.Signatures.Count + 1),
+                        signatureBytes),
+                    0x0018 => new TrRmSection(kind, flags,
+                        checked((uint)tables.Parameters.Count + 1),
+                        parameterBytes),
+                    0x001C => new TrRmSection(kind, flags,
+                        checked((uint)tables.Imports.Count + 1), importBytes),
+                    0x0066 => new TrRmSection(kind, flags,
+                        checked((uint)tables.MethodParameterLabels.Count
+                            + 1), labelBytes),
+                    _ => new TrRmSection(kind, flags, recordCount,
+                        section.ToArray()),
+                });
             }
             sections.Add(new TrRmSection(0x0019, 0, 1, genericParam));
-            sections.Add(new TrRmSection(0x001A, 0, 1, constraint));
             if (!hasFeatureSection)
             {
                 sections.Add(new TrRmSection(0x0004, 0,

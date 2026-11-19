@@ -235,6 +235,22 @@ public static partial class TrRmExecutableCompiler
             "The explicit type/field source reference cannot mix schema identities.");
     }
 
+    private readonly record struct GenericClassMethodImportReadResult(
+        ImmutableArray<BoundGenericMethodImport> Imports,
+        ImmutableArray<BoundGenericNominalTypeDefinition>
+            NominalTypeDefinitions,
+        ImmutableArray<BoundGenericNominalTypeInstance>
+            NominalTypeInstances,
+        ImmutableArray<BoundSpanTypeDefinition> SpanTypes,
+        ImmutableArray<CheckedReferenceTypeDefinition>
+            CheckedReferenceTypes,
+        ImmutableArray<NativePointerTypeDefinition> NativePointerTypes,
+        ImmutableArray<BoundInterfaceDefinition> Interfaces)
+    {
+        internal static GenericClassMethodImportReadResult Empty
+            => new([], [], [], [], [], [], []);
+    }
+
     private static CompilationReference CreateC1M1ClassSourceTypeReference(
         byte[][] artifacts, string[] schemaIdentities, string moduleIdentity,
         string[] exportKeys, string[] selectedFieldExportKeys,
@@ -379,6 +395,13 @@ public static partial class TrRmExecutableCompiler
             methodProviderBindings
                 = classProviderValidation.MethodBindings;
         }
+        var genericClassMethodRead = isCM1
+            ? CreateCM1GenericClassMethodImports(artifacts,
+                schemaIdentities, moduleIdentity, rootModuleRow,
+                rootTables, typeProviderBindings, methodProviderBindings,
+                selectedTypeDefs)
+            : GenericClassMethodImportReadResult.Empty;
+
         var rootSnapshot = CreateA2SourceTypeProviderSnapshot(rootTables,
             artifacts[0], schemaIdentities[0], rootModuleRow);
 
@@ -1160,10 +1183,66 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
+        foreach (var typeDefinition
+            in genericClassMethodRead.NominalTypeDefinitions)
+        {
+            if (definitionsByIdentity.TryGetValue(typeDefinition.Identity,
+                    out var existingIndex))
+            {
+                var existing = typeDefinitions[existingIndex];
+                if (!BoundGenericNominalTypeContract
+                        .AreEquivalentDefinitions(existing, typeDefinition))
+                {
+                    throw Invalid(
+                        "A generic class MethodDef changed a retained nominal TypeDef view.");
+                }
+
+                var expectations
+                    = existing.ProviderExpectations.ToBuilder();
+                foreach (var expectation
+                    in typeDefinition.ProviderExpectations)
+                {
+                    if (!expectations.Any(candidate =>
+                            BoundGenericNominalTypeContract
+                                .AreEquivalentProviderExpectations(
+                                    candidate, expectation)))
+                    {
+                        expectations.Add(expectation);
+                    }
+                }
+                typeDefinitions[existingIndex] = existing with {
+                    ProviderExpectations = expectations.ToImmutable(),
+                };
+            }
+            else
+            {
+                definitionsByIdentity.Add(typeDefinition.Identity,
+                    typeDefinitions.Count);
+                typeDefinitions.Add(typeDefinition);
+            }
+        }
+
         var genericNominalTypeInstances
-            = ImmutableArray.CreateBuilder<BoundGenericNominalTypeInstance>();
+            = ImmutableArray.CreateBuilder<BoundGenericNominalTypeInstance>(
+                genericClassMethodRead.NominalTypeInstances.Length
+                    + classDeclarations.Count);
+        genericNominalTypeInstances.AddRange(
+            genericClassMethodRead.NominalTypeInstances);
         var classTypeInstanceIndexes
             = new Dictionary<BoundGenericNominalTypeIdentity, int>();
+        for (var index = 0;
+            index < genericNominalTypeInstances.Count; index++)
+        {
+            var instance = genericNominalTypeInstances[index];
+            if (instance.Arguments.IsEmpty && instance.Qualifiers == 0
+                && instance.TypeSpecReference == 0
+                && instance.TypeSpecProviderIdentity is null
+                && instance.TypeSpecForm == 0)
+            {
+                _ = classTypeInstanceIndexes.TryAdd(
+                    instance.Definition, index);
+            }
+        }
         foreach (var declaration in classDeclarations)
         {
             if (declaration.SelectedExportKeys.IsEmpty
@@ -1185,9 +1264,17 @@ public static partial class TrRmExecutableCompiler
             BoundGenericNominalTypeIdentity Identity,
             uint TypeSpecReference), int>();
         var checkedReferenceTypes
-            = ImmutableArray.CreateBuilder<CheckedReferenceTypeDefinition>();
+            = ImmutableArray.CreateBuilder<CheckedReferenceTypeDefinition>(
+                genericClassMethodRead.CheckedReferenceTypes.Length + 4);
+        checkedReferenceTypes.AddRange(
+            genericClassMethodRead.CheckedReferenceTypes);
         var checkedReferenceTypeIndexes
             = new Dictionary<CheckedReferenceTypeDefinition, int>();
+        for (var index = 0; index < checkedReferenceTypes.Count; index++)
+        {
+            _ = checkedReferenceTypeIndexes.TryAdd(
+                checkedReferenceTypes[index], index);
+        }
         var functions = ImmutableArray.CreateBuilder<BoundFunction>();
         var importedFunctionNames = new HashSet<string>(
             StringComparer.Ordinal);
@@ -1699,7 +1786,173 @@ public static partial class TrRmExecutableCompiler
             genericNominalTypeInstances:
                 genericNominalTypeInstances.ToImmutable(),
             standardClassDeclarations: classDeclarations.ToImmutable(),
-            checkedReferenceTypes: checkedReferenceTypeTable);
+            genericMethodImports: genericClassMethodRead.Imports,
+            retainedGenericMethodRoots:
+                [.. genericClassMethodRead.Imports.Where(static import =>
+                    !import.Origin.IsMethodDefTarget)],
+            spanTypes: genericClassMethodRead.SpanTypes,
+            checkedReferenceTypes: checkedReferenceTypeTable,
+            nativePointerTypes:
+                genericClassMethodRead.NativePointerTypes,
+            interfaces: genericClassMethodRead.Interfaces);
+    }
+
+    private static GenericClassMethodImportReadResult
+        CreateCM1GenericClassMethodImports(
+        byte[][] artifacts, string[] schemaIdentities,
+        string moduleIdentity, int rootModuleRow,
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables rootTables,
+        ImmutableArray<TrRmStandardTypeProviderBinding>
+            typeProviderBindings,
+        ImmutableArray<TrRmStandardMethodProviderBinding>
+            methodProviderBindings,
+        Dictionary<int, List<string>> selectedTypeDefs)
+    {
+        var importRows = methodProviderBindings
+            .Where(binding =>
+                binding.ConsumerArtifactIndex == 0
+                && binding.ConsumerModuleRow == rootModuleRow
+                && rootTables.Methods.GetOwnerType(
+                    binding.ExpectedMethodDefRow) != 0
+                && rootTables.Signatures.GetGenericCount(
+                    rootTables.Methods.GetSignature(
+                        binding.ExpectedMethodDefRow)) != 0)
+            .Select(static binding => binding.ImportRow)
+            .Distinct()
+            .Order()
+            .ToArray();
+        var selectedClassMethodExports
+            = rootTables.Exports.GetExportsForModule(rootModuleRow)
+                .Where(export =>
+                    (export.Definition >> 24) == 0x16)
+                .Where(export =>
+                {
+                    var methodRow = checked((int)(
+                        export.Definition & 0x00FF_FFFF));
+                    var ownerTypeDefRow = rootTables.Methods
+                        .GetOwnerType(methodRow);
+                    return ownerTypeDefRow != 0
+                        && selectedTypeDefs.ContainsKey(ownerTypeDefRow)
+                        && rootTables.Signatures.GetGenericCount(
+                            rootTables.Methods.GetSignature(methodRow)) != 0;
+                })
+                .GroupBy(static export => export.Definition)
+                .Select(static group => group
+                    .OrderBy(static export => export.ExportKey,
+                        StringComparer.Ordinal).First())
+                .ToArray();
+        if (importRows.Length == 0
+            && selectedClassMethodExports.Length == 0)
+        {
+            return GenericClassMethodImportReadResult.Empty;
+        }
+
+        var providers = new TrRmStandardArtifactInput[
+            artifacts.Length - 1];
+        for (var index = 1; index < artifacts.Length; index++)
+        {
+            providers[index - 1] = new TrRmStandardArtifactInput(
+                schemaIdentities[index], artifacts[index]);
+        }
+
+        var context = new GenericMethodReadContext(
+            new TrRmStandardArtifactInput(schemaIdentities[0],
+                artifacts[0]), providers);
+        var tables
+            = TrRmStructuralMetadataValidator
+                .ValidateGenericMethodCallsDraftAndGetExecutionTables(
+                    new TrRmArtifactIndex(context.Artifacts[0],
+                        context.Schema));
+        var moduleRow = FindGenericMethodModule(tables.Modules,
+            moduleIdentity);
+        if (moduleRow != rootModuleRow)
+        {
+            throw Invalid(
+                "The generic class MethodDef validation selected a different root Module.");
+        }
+
+        var imports = ImmutableArray.CreateBuilder<
+            BoundGenericMethodImport>(importRows.Length
+                + selectedClassMethodExports.Length);
+        foreach (var importRow in importRows)
+        {
+            var methodBinding = methodProviderBindings.Single(binding =>
+                binding.ConsumerArtifactIndex == 0
+                && binding.ConsumerModuleRow == moduleRow
+                && binding.ImportRow == importRow);
+            var ownerTypeBinding = typeProviderBindings.Single(binding =>
+                binding.ConsumerArtifactIndex == 0
+                && binding.ConsumerModuleRow == moduleRow
+                && binding.ImportRow == methodBinding.OwnerImportRow);
+            var classOwner = new BoundGenericMethodClassOwner(
+                new BoundGenericNominalTypeIdentity(
+                    ownerTypeBinding.ProducerIdentity,
+                    ownerTypeBinding.ProducerIdentity,
+                    ownerTypeBinding.ActualDefinitionId),
+                ownerTypeBinding.ExportKey,
+                0x1300_0000u | checked((uint)
+                    ownerTypeBinding.ExpectedTypeDefRow),
+                ownerTypeBinding.TargetRequirement,
+                ownerTypeBinding.RuntimePolicy);
+            var imported = CreateExpectedGenericMethodImport(tables,
+                context, 0, moduleRow, importRow);
+            CompleteGenericClassMethodOwner(imported, classOwner);
+            if (imported.Binding is not BoundGenericMethodImportBinding
+                    binding)
+            {
+                throw Invalid(
+                    "A selected generic class MethodDef Import has no validated provider binding.");
+            }
+            imports.Add(binding.Provider);
+        }
+        foreach (var export in selectedClassMethodExports)
+        {
+            var methodRow = checked((int)(
+                export.Definition & 0x00FF_FFFF));
+            var ownerTypeDefRow
+                = tables.Methods.GetOwnerType(methodRow);
+            var ownerDefinitionId = 0x1300_0000u
+                | checked((uint)ownerTypeDefRow);
+            var classOwner = new BoundGenericMethodClassOwner(
+                new BoundGenericNominalTypeIdentity(moduleIdentity,
+                    moduleIdentity, ownerDefinitionId),
+                selectedTypeDefs[ownerTypeDefRow]
+                    .OrderBy(static key => key, StringComparer.Ordinal)
+                    .First(),
+                ownerDefinitionId,
+                tables.Modules.GetRequirements(moduleRow)
+                    .TargetRequirement,
+                tables.Modules.GetRequirements(moduleRow).RuntimePolicy);
+            var imported = CreateGenericMethodImport(tables, context, 0,
+                moduleRow, export.Definition, export.ExportKey,
+                isMethodDefTarget: false);
+            imported.CompleteClassOwner(classOwner);
+            imports.Add(imported);
+        }
+
+        context.CompleteBindings();
+        return new GenericClassMethodImportReadResult(
+            imports.ToImmutable(),
+            context.GenericNominalTypeDefinitions.ToImmutable(),
+            context.GenericNominalTypeInstances.ToImmutable(),
+            [.. context.SpanTypes],
+            [.. context.CheckedReferenceTypeDefinitions],
+            context.GenericNominalPointerTypes.ToImmutable(),
+            [.. context.InterfaceDefinitions.Values
+                .SelectMany(static definitions => definitions)
+                .Distinct()]);
+    }
+
+    private static void CompleteGenericClassMethodOwner(
+        BoundGenericMethodImport imported,
+        BoundGenericMethodClassOwner classOwner)
+    {
+        imported.CompleteClassOwner(classOwner);
+        if (imported.Binding is BoundGenericMethodImportBinding binding)
+        {
+            binding.Expected.CompleteClassOwner(classOwner);
+            binding.Provider.CompleteClassOwner(classOwner);
+        }
     }
 
     private static ImmutableArray<BoundDependencyContract>

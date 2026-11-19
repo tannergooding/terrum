@@ -961,9 +961,30 @@ public static partial class TrRmExecutableCompiler
     {
         var expectedFunction = expected.ProofFunction;
         var providerFunction = provider.ProofFunction;
+        var expectedReceiverCount = expected.Signature.IsStatic ? 0 : 1;
+        var providerReceiverCount = provider.Signature.IsStatic ? 0 : 1;
+        var expectedParameterCount
+            = expectedFunction.ParameterCount - expectedReceiverCount;
+        var providerParameterCount
+            = providerFunction.ParameterCount - providerReceiverCount;
         if (expected.Formals.Length != provider.Formals.Length
-            || expectedFunction.ParameterCount
-                != providerFunction.ParameterCount
+            || expected.Signature.IsStatic != provider.Signature.IsStatic
+            || expected.Signature.IsMutable
+                != provider.Signature.IsMutable
+            || expectedFunction.IsStatic != expected.Signature.IsStatic
+            || providerFunction.IsStatic != provider.Signature.IsStatic
+            || expectedFunction.IsMutable != expected.Signature.IsMutable
+            || providerFunction.IsMutable != provider.Signature.IsMutable
+            || (expected.Signature.IsStatic
+                && expected.Signature.IsMutable)
+            || expectedFunction.ParameterCount < expectedReceiverCount
+            || providerFunction.ParameterCount < providerReceiverCount
+            || expectedFunction.Variables.Length
+                < expectedFunction.ParameterCount
+            || providerFunction.Variables.Length
+                < providerFunction.ParameterCount
+            || expectedParameterCount < 0 || providerParameterCount < 0
+            || expectedParameterCount != providerParameterCount
             || !AreEquivalentGenericMethodImportTypes(
                 expectedFunction.ReturnType, providerFunction.ReturnType,
                 expected, provider, context)
@@ -977,6 +998,18 @@ public static partial class TrRmExecutableCompiler
         {
             throw Invalid(
                 "The selected G1 provider has an incompatible generic signature or Effects contract.");
+        }
+
+        if (expectedReceiverCount != 0
+            && (!AreEquivalentGenericMethodImportTypes(
+                    expectedFunction.Variables[0].Type,
+                    providerFunction.Variables[0].Type,
+                    expected, provider, context)
+                || expectedFunction.Variables[0].IsMutable
+                    != providerFunction.Variables[0].IsMutable))
+        {
+            throw Invalid(
+                "The selected G1 provider has an incompatible class receiver.");
         }
 
         for (var ordinal = 0; ordinal < expected.Formals.Length; ordinal++)
@@ -1020,12 +1053,13 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        for (var ordinal = 0; ordinal < expectedFunction.ParameterCount;
-            ordinal++)
+        for (var ordinal = 0; ordinal < expectedParameterCount; ordinal++)
         {
             if (!AreEquivalentGenericMethodImportTypes(
-                    expectedFunction.Variables[ordinal].Type,
-                    providerFunction.Variables[ordinal].Type,
+                    expectedFunction.Variables[
+                        expectedReceiverCount + ordinal].Type,
+                    providerFunction.Variables[
+                        providerReceiverCount + ordinal].Type,
                     expected, provider, context))
             {
                 throw Invalid(
