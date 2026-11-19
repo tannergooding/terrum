@@ -7184,9 +7184,6 @@ internal static class TrRmRegisterBodyMapValidator
             throw InvalidMap();
         }
 
-        var contextHome = GetHomeMapEntry(body, contextHomeIndex);
-        var contextRole = ReadByte(body, contextHome, 0);
-        var ownerType = methods.GetOwnerType(methodDefRow);
         var fieldDefRow = checked((int)fieldRow);
         var fieldOwnerType = fields.GetOwnerTypeDef(fieldDefRow);
         var fieldFlags = fields.GetFlags(fieldDefRow);
