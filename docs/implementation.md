@@ -230,19 +230,22 @@ this slice. It also re-emits local nongeneric MethodDefs, including unexported
 private/internal helpers, whose
 Body-01 Body has inline F2/F3 or row-backed TypeMap entries, MethodMap targets
 retained local/imported MethodDefs and FieldMap targets retained local
-FieldDefs or selected class FieldDef Imports under their exact owner TypeDef
-Imports, with ConstantMap entries restricted to inline scalar TypeSpecs and
-frozen-scalar ConstantSource rows, but only under the exact Construction-2/CM1
-profile. Row-backed TypeMap entries, local/imported MethodDef and FieldDef
-tokens, Body rows and method ExportKeys are remapped; scalar
+FieldDefs or selected class or struct FieldDef Imports under their exact owner
+TypeDef Imports, with ConstantMap entries restricted to inline scalar TypeSpecs
+and frozen-scalar ConstantSource rows, but only under the exact
+Construction-2/CM1 profile. Row-backed TypeMap entries, local/imported
+MethodDef and FieldDef tokens, Body rows and method ExportKeys are remapped;
+scalar
 ConstantSource/Blob/FrozenValueNode dependencies are rebuilt. Imported-struct
-FieldDefs, FieldPath targets, non-scalar ConstantMap forms and contract-row
-Body references reject re-emission;
+FieldDef Imports now retain their owner TypeDef Imports and remap Body
+FieldMap targets. FieldPath targets, non-scalar ConstantMap forms and
+contract-row Body references reject re-emission;
 imported MethodDef expectation Bodies remain provider-owned.
 Provider/owner-row relocation and compatible/incompatible replacement
 regressions are added but unverified under the hold. Local Body
-provider/consumer and scalar ConstantMap payload-preservation regressions are
-also added but unverified. Remaining
+provider/consumer, imported-struct FieldDef provider/re-emission and scalar
+ConstantMap payload-preservation regressions are also added but unverified.
+Remaining
 gaps include non-identity
 instance calls, broader nested field paths and aggregate stores, locals and
 control flow, properties, constructor failure/cleanup behavior, class-backed

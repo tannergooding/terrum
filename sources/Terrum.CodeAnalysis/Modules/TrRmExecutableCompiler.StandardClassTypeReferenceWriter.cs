@@ -7949,7 +7949,23 @@ public static partial class TrRmExecutableCompiler
         var bindingsByImportRow = new SortedDictionary<int,
             BoundSourceTypeExpectation>();
         var fieldBindingsByImportRow = new SortedDictionary<int,
-            BoundStandardClassFieldExpectation>();
+            TrRmStandardFieldProviderBinding>();
+        foreach (var fieldBinding in classProviderValidation.FieldBindings)
+        {
+            if (fieldBinding.ConsumerArtifactIndex != 0
+                || fieldBinding.ConsumerModuleRow != rootModuleRow)
+            {
+                continue;
+            }
+
+            if (!fieldBindingsByImportRow.TryAdd(fieldBinding.ImportRow,
+                    fieldBinding))
+            {
+                throw new InvalidDataException(
+                    "A retained C1M1 FieldDef Import has conflicting provider bindings.");
+            }
+        }
+
         foreach (var declaration in program.StandardClassDeclarations)
         {
             foreach (var expectation in declaration.Expectations)
@@ -8043,6 +8059,33 @@ public static partial class TrRmExecutableCompiler
                             != expectedOwnerTypeDefRow
                         || !rootTables.Imports.IsExpectedDefinition(
                             fieldExpectation.ExpectedDefinitionId)
+                        || !fieldBindingsByImportRow.TryGetValue(
+                            fieldExpectation.ImportRow,
+                            out var resolvedFieldBinding)
+                        || resolvedFieldBinding.ExpectedFieldDefRow
+                            != fieldRow
+                        || resolvedFieldBinding.ExpectedOwnerTypeDefRow
+                            != expectedOwnerTypeDefRow
+                        || resolvedFieldBinding.OwnerImportRow
+                            != fieldExpectation.OwnerImportRow
+                        || resolvedFieldBinding.ProviderFieldDefRow
+                            != GetFieldDefRow(
+                                fieldExpectation.ProviderDefinitionId)
+                        || resolvedFieldBinding.ProviderTypeDefRow
+                            != GetTypeDefRow(
+                                fieldExpectation.ProviderOwnerDefinitionId)
+                        || resolvedFieldBinding.ProviderModuleRow
+                            != fieldExpectation.Provider.ModuleRow
+                        || !StringComparer.Ordinal.Equals(
+                            resolvedFieldBinding.ProducerIdentity,
+                            fieldExpectation.Provider.ModuleIdentity)
+                        || !StringComparer.Ordinal.Equals(
+                            resolvedFieldBinding.ExportKey,
+                            fieldExpectation.ExportKey)
+                        || resolvedFieldBinding.TargetRequirement
+                            != fieldExpectation.Provider.TargetRequirement
+                        || resolvedFieldBinding.RuntimePolicy
+                            != fieldExpectation.Provider.RuntimePolicy
                         || rootTables.Imports
                             .GetExpectedDefinitionForImportRow(
                                 fieldExpectation.ImportRow)
@@ -8060,10 +8103,7 @@ public static partial class TrRmExecutableCompiler
                             fieldExpectation.Provider.ModuleIdentity)
                         || fieldRequirements
                             != (fieldExpectation.Provider.TargetRequirement,
-                                fieldExpectation.Provider.RuntimePolicy)
-                        || !fieldBindingsByImportRow.TryAdd(
-                            fieldExpectation.ImportRow,
-                            fieldExpectation))
+                                fieldExpectation.Provider.RuntimePolicy))
                     {
                         throw new InvalidDataException(
                             "A retained class FieldDef Import no longer matches its owner and selected provider.");
@@ -8351,11 +8391,13 @@ public static partial class TrRmExecutableCompiler
                 : bindingsByImportRow[importRow];
             var expectedDefinitionId = isMethodImport
                 ? methodBinding!.ExpectedDefinitionId
-                : isFieldImport ? fieldBinding!.ExpectedDefinitionId
+                : isFieldImport
+                    ? 0x1400_0000u
+                        | checked((uint)fieldBinding!.ExpectedFieldDefRow)
                     : binding!.ExpectedDefinitionId;
             var producerIdentity = isMethodImport
                 ? methodBinding!.Provider.ModuleIdentity
-                : isFieldImport ? fieldBinding!.Provider.ModuleIdentity
+                : isFieldImport ? fieldBinding!.ProducerIdentity
                     : binding!.ProducerIdentity;
             var exportKey = isMethodImport
                 ? methodBinding!.ExportKey
@@ -8363,11 +8405,11 @@ public static partial class TrRmExecutableCompiler
                     : binding!.ExportKey;
             var targetRequirement = isMethodImport
                 ? methodBinding!.Provider.TargetRequirement
-                : isFieldImport ? fieldBinding!.Provider.TargetRequirement
+                : isFieldImport ? fieldBinding!.TargetRequirement
                     : binding!.TargetRequirement;
             var runtimePolicy = isMethodImport
                 ? methodBinding!.Provider.RuntimePolicy
-                : isFieldImport ? fieldBinding!.Provider.RuntimePolicy
+                : isFieldImport ? fieldBinding!.RuntimePolicy
                     : binding!.RuntimePolicy;
             if (importRow <= 0 || importRow > rootTables.Imports.Count
                 || (rootTables.Imports
@@ -10118,7 +10160,7 @@ public static partial class TrRmExecutableCompiler
 
     private static TrRmImportRow[] CreateC1M1ClassImports(
         SortedDictionary<int, BoundSourceTypeExpectation> bindingsByImportRow,
-        SortedDictionary<int, BoundStandardClassFieldExpectation>
+        SortedDictionary<int, TrRmStandardFieldProviderBinding>
             fieldBindingsByImportRow,
         SortedDictionary<int, BoundStandardClassMethodExpectation>
             methodBindingsByImportRow,
@@ -10158,13 +10200,11 @@ public static partial class TrRmExecutableCompiler
             if (fieldBindingsByImportRow.TryGetValue(oldImportRow,
                     out var fieldBinding))
             {
-                var expectedOldFieldDefRow
-                    = GetFieldDefRow(fieldBinding.ExpectedDefinitionId);
                 rows[newImportRow - 1] = new TrRmImportRow(
                     newModuleRefRow,
                     stringRows[fieldBinding.ExportKey],
                     0x1400_0000u | checked((uint)fieldRowMap[
-                        expectedOldFieldDefRow]));
+                        fieldBinding.ExpectedFieldDefRow]));
                 continue;
             }
 

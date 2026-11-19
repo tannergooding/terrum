@@ -515,6 +515,208 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
     }
 
     [Test]
+    public void ReemitsImportedStructFieldMapBodiesWithoutSource()
+    {
+        var schemaIdentity
+            = C1M1Construction2ClassParameterDefaultsSchemaIdentity;
+        var provider = CreateClassArtifact("StructProvider", "Leaf",
+            "LeafKey", 0xF200_0008, schemaIdentity, layoutKind: 0, pack: 0,
+            fieldExportKey: "Leaf.Value");
+        SetTypeDefFlags(provider, 0x06);
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            provider);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, "StructProvider", [], ["LeafKey"],
+            ["Leaf.Value"]);
+        var tree = SyntaxTree.Parse("""
+            public class Container {
+                public int32 Marker;
+                public int32 Read(Leaf leaf) { return leaf.Value; }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree, reference);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var members = classDeclaration.Children.OfType<SyntaxNode>();
+        var field = members.Single(static node =>
+            node.Kind == SyntaxKind.FieldDeclaration);
+        var read = members.Single(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration
+            && node.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Read"));
+        var containerClassIndex = Enumerable.Range(0,
+                program.Classes.Length)
+            .Single(index =>
+                program.Classes[index].Name == "Container");
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "StructFieldConsumer", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], [
+                new TrRmSourceClassExport(program, containerClassIndex,
+                    classDeclaration.Span, "ContainerKey", [
+                        new TrRmSourceClassMemberExport(containerClassIndex,
+                            field.Span, "Container.Marker"),
+                        new TrRmSourceClassMemberExport(containerClassIndex,
+                            read.Span, "Container.Read"),
+                    ]),
+            ]);
+        var artifactInput = new TrRmStandardArtifactInput(schemaIdentity,
+            artifact);
+        var artifactTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                        artifact));
+        var artifactStructRow = Enumerable.Range(1,
+                artifactTables.TypeDefs.Count)
+            .Single(row => artifactTables.TypeDefs.GetName(row) == "Leaf");
+        var artifactTypeImportRow = Enumerable.Range(1,
+                artifactTables.Imports.Count)
+            .Single(row => artifactTables.Imports
+                .GetExpectedDefinitionForImportRow(row)
+                == (0x1300_0000u | checked((uint)artifactStructRow)));
+        var artifactFieldImportRow = Enumerable.Range(1,
+                artifactTables.Imports.Count)
+            .Single(row => artifactTables.Imports
+                .GetExpectedDefinitionForImportRow(row) >> 24 == 0x14);
+        var artifactFieldDefinition = artifactTables.Imports
+            .GetExpectedDefinitionForImportRow(artifactFieldImportRow);
+        Assert.That(artifactTables.Fields.GetOwnerTypeDef(
+                checked((int)(artifactFieldDefinition & 0x00FF_FFFF))),
+            Is.EqualTo(artifactStructRow));
+        Assert.That(artifactTables.Imports.GetBindingForImportRow(
+                artifactFieldImportRow).ExportKey,
+            Is.EqualTo("Leaf.Value"));
+        Assert.That(artifactTables.Imports
+                .GetBindingForImportRow(artifactTypeImportRow).ExportKey,
+            Is.EqualTo("LeafKey"));
+        Assert.That(artifactTables.ModuleRefs.GetProducerIdentity(
+                artifactTables.Imports.GetModuleRefForImportRow(
+                    artifactFieldImportRow)),
+            Is.EqualTo("StructProvider"));
+        Assert.That(artifactTables.ModuleRefs.GetProducerIdentity(
+                artifactTables.Imports.GetModuleRefForImportRow(
+                    artifactTypeImportRow)),
+            Is.EqualTo("StructProvider"));
+
+        var artifactReadDefinition = artifactTables.Exports
+            .GetExportsForModule(1)
+            .Single(static export =>
+                export.ExportKey == "Container.Read").Definition;
+        var artifactReadBody = artifactTables.Bodies.GetRegisterBody(
+            artifactTables.Methods.GetBodyRow(checked((int)(
+                artifactReadDefinition & 0x00FF_FFFF))),
+            artifactTables.Contracts.Count);
+        Assert.That(artifactReadBody.FieldCount, Is.EqualTo(1));
+        var artifactFieldMapToken
+            = BinaryPrimitives.ReadUInt32LittleEndian(
+                artifactReadBody.FieldMap);
+        Assert.That(artifactFieldMapToken,
+            Is.EqualTo(0x1C00_0000u
+                | checked((uint)artifactFieldImportRow)));
+
+        var sourceFreeReference
+            = TrRmExecutableCompiler.CreateStandardReference(artifactInput,
+                "StructFieldConsumer", [providerInput], ["ContainerKey"]);
+        var sourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), sourceFreeReference);
+        Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceFreeCompilation.Diagnostics));
+        var reemitted = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)sourceFreeCompilation.Program!,
+            "StructFieldConsumerReemitted", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var reemittedTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                        reemitted));
+        var reemittedStructRow = Enumerable.Range(1,
+                reemittedTables.TypeDefs.Count)
+            .Single(row => reemittedTables.TypeDefs.GetName(row) == "Leaf");
+        var reemittedTypeImportRow = Enumerable.Range(1,
+                reemittedTables.Imports.Count)
+            .Single(row => reemittedTables.Imports
+                .GetExpectedDefinitionForImportRow(row)
+                == (0x1300_0000u | checked((uint)reemittedStructRow)));
+        var reemittedFieldImportRow = Enumerable.Range(1,
+                reemittedTables.Imports.Count)
+            .Single(row => reemittedTables.Imports
+                .GetExpectedDefinitionForImportRow(row) >> 24 == 0x14);
+        Assert.That(reemittedTables.Fields.GetOwnerTypeDef(checked((int)(
+                reemittedTables.Imports.GetExpectedDefinitionForImportRow(
+                    reemittedFieldImportRow) & 0x00FF_FFFF))),
+            Is.EqualTo(reemittedStructRow));
+        Assert.That(reemittedTables.Imports.GetBindingForImportRow(
+                reemittedFieldImportRow).ExportKey,
+            Is.EqualTo("Leaf.Value"));
+        Assert.That(reemittedTables.Imports
+                .GetBindingForImportRow(reemittedTypeImportRow).ExportKey,
+            Is.EqualTo("LeafKey"));
+        Assert.That(reemittedTables.ModuleRefs.GetProducerIdentity(
+                reemittedTables.Imports.GetModuleRefForImportRow(
+                    reemittedFieldImportRow)),
+            Is.EqualTo("StructProvider"));
+
+        var reemittedReadDefinition = reemittedTables.Exports
+            .GetExportsForModule(1)
+            .Single(static export =>
+                export.ExportKey == "Container.Read").Definition;
+        var reemittedReadBody = reemittedTables.Bodies.GetRegisterBody(
+            reemittedTables.Methods.GetBodyRow(checked((int)(
+                reemittedReadDefinition & 0x00FF_FFFF))),
+            reemittedTables.Contracts.Count);
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                reemittedReadBody.FieldMap),
+            Is.EqualTo(0x1C00_0000u
+                | checked((uint)reemittedFieldImportRow)));
+        Assert.That(reemittedReadBody.Code.ToArray(),
+            Is.EqualTo(artifactReadBody.Code.ToArray()));
+
+        var relocatedProvider = CreateRelocatedClassProvider(
+            "StructProvider", schemaIdentity);
+        SetTypeDefFlags(relocatedProvider, 0x06, typeDefRow: 2);
+        var relocatedProviderTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
+                        relocatedProvider));
+        var relocatedLeafRow = Enumerable.Range(1,
+                relocatedProviderTables.TypeDefs.Count)
+            .Single(row =>
+                relocatedProviderTables.TypeDefs.GetName(row) == "Leaf");
+        Assert.That(relocatedLeafRow, Is.Not.EqualTo(1));
+        var reloadedReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+                "StructFieldConsumerReemitted", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        relocatedProvider),
+                ], ["ContainerKey"]);
+        Assert.That(reloadedReference.GenericNominalTypeDefinitions
+                .Single(static definition => definition.Name == "Leaf")
+                .ProviderExpectations,
+            Is.Not.Empty);
+
+        var incompatibleProvider = CreateClassArtifact("StructProvider",
+            "Leaf", "LeafKey", 0xF200_000A, schemaIdentity,
+            layoutKind: 0, pack: 0, fieldExportKey: "Leaf.Value");
+        SetTypeDefFlags(incompatibleProvider, 0x06);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+                "StructFieldConsumerReemitted", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        incompatibleProvider),
+                ], ["ContainerKey"]));
+    }
+
+    [Test]
     public void EmitsReadonlyBodiesThroughReadonlyAndWritableClassHandles()
     {
         var schemaIdentity

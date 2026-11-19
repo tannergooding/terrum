@@ -217,17 +217,20 @@ surfaces/defaults without copying provider Bodies. It also re-emits local
 nongeneric MethodDefs, including unexported private/internal helpers, with Body-01 Bodies only when every TypeMap entry
 is inline F2/F3 or row-backed, MethodMap entries target retained local/imported
 MethodDefs, and FieldMap entries target retained local FieldDefs or selected
-class FieldDef Imports under their exact owner TypeDef Imports, and only under
-the exact Construction-2/CM1 profile. TypeMap TypeSpecs, FieldDef/Import
-tokens, MethodDef/Body rows and method ExportKeys follow the retained maps.
+class or struct FieldDef Imports under their exact owner TypeDef Imports, and
+only under the exact Construction-2/CM1 profile. TypeMap TypeSpecs,
+FieldDef/Import tokens, MethodDef/Body rows and method ExportKeys follow the
+retained maps.
 ConstantMap is limited to inline scalar TypeSpecs with frozen scalar
 ConstantSources; its scalar values are rebuilt into the output
-Blob/FrozenValueNode/ConstantSource tables. Imported-struct FieldDefs,
-FieldPath targets, other ConstantMap forms and contract-row Body references reject re-emission,
+Blob/FrozenValueNode/ConstantSource tables. FieldPath targets, other
+ConstantMap forms and contract-row Body references reject re-emission,
 while imported MethodDef expectation Bodies remain provider-owned.
 Provider/owner-row relocation and
 compatible/incompatible replacement, local Body producer/consumer and scalar
 ConstantMap-payload regressions are added but unverified under the active hold.
+An imported-struct FieldDef provider/consumer and source-free re-emission
+regression is also added but unverified.
 Compiler-owned source-class anchors and explicit member-key capture are
 implemented, but complete bodyful
 local class member/MethodDef closure, provider
