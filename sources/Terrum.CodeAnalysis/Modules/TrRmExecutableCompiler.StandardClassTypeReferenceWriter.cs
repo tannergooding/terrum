@@ -46,7 +46,7 @@ public static partial class TrRmExecutableCompiler
 
     private readonly record struct C1M1GenericConstraintPlan(
         int MethodRow, int FormalOrdinal, int GenericParamRow,
-        int Kind, uint Payload);
+        int Kind, uint Payload, int InterfaceConstraintOrdinal);
 
     private sealed record C1M1Construction2SourceInitializer(
         int ClassIndex, BoundFunction Function, uint ClassTypeSpecReference,
@@ -8902,99 +8902,6 @@ public static partial class TrRmExecutableCompiler
 
         var interfaceImportRows = new SortedSet<int>();
 
-        bool IsRetainedCM1AR1InterfaceImport(int importRow)
-        {
-            if (!schema.UsesAssociatedRelationConstraints())
-            {
-                return false;
-            }
-
-            var expectedDefinitionId = rootTables.Imports
-                .GetExpectedDefinitionForImportRow(importRow);
-            var expectedKind = expectedDefinitionId >> 24;
-            var expectedRow = checked((int)(
-                expectedDefinitionId & 0x00FF_FFFF));
-            var moduleRefRow = rootTables.Imports
-                .GetModuleRefForImportRow(importRow);
-            var providerIdentity = rootTables.ModuleRefs
-                .GetProducerIdentity(moduleRefRow);
-            var requirements = rootTables.ModuleRefs
-                .GetRequirements(moduleRefRow);
-            var exportKey = rootTables.Imports
-                .GetBindingForImportRow(importRow).ExportKey;
-
-            if (expectedKind == 0x13)
-            {
-                if (rootTables.TypeDefs.GetKind(expectedRow) != 3)
-                {
-                    return false;
-                }
-
-                var qualifiedName = GetC1M1TypeDefQualifiedName(
-                    rootTables.TypeDefs, expectedRow);
-                var arity = rootTables.TypeDefs.GetGenericRange(
-                    expectedRow).Count;
-                return program.Interfaces.Any(definition =>
-                    definition.ModuleImport is BoundModuleImport ownerImport
-                    && StringComparer.Ordinal.Equals(
-                        ownerImport.ProducerIdentity, providerIdentity)
-                    && StringComparer.Ordinal.Equals(ownerImport.ExportKey,
-                        exportKey)
-                    && ownerImport.TargetRequirement
-                        == requirements.TargetRequirement
-                    && ownerImport.RuntimePolicy == requirements.RuntimePolicy
-                    && StringComparer.Ordinal.Equals(
-                        definition.QualifiedName, qualifiedName)
-                    && definition.Formals.Length == arity);
-            }
-
-            var associatedTypeImport = expectedKind == 0x20;
-            var interfaceMethodImport = expectedKind == 0x16;
-            if (!associatedTypeImport && !interfaceMethodImport)
-            {
-                return false;
-            }
-
-            var ownerTypeDefRow = associatedTypeImport
-                ? rootTables.Interfaces.GetOwnerTypeDef(
-                    rootTables.AssociatedTypeDefs.GetOwnerInterfaceDef(
-                        expectedRow))
-                : rootTables.Methods.GetOwnerType(expectedRow);
-            if (rootTables.TypeDefs.GetKind(ownerTypeDefRow) != 3)
-            {
-                return false;
-            }
-
-            var qualifiedOwnerName = GetC1M1TypeDefQualifiedName(
-                rootTables.TypeDefs, ownerTypeDefRow);
-            var ownerArity = rootTables.TypeDefs
-                .GetGenericRange(ownerTypeDefRow).Count;
-            var memberName = associatedTypeImport
-                ? rootTables.Strings.DecodeName(
-                    rootTables.AssociatedTypeDefs
-                        .GetNameStringRow(expectedRow))
-                : rootTables.Methods.GetName(expectedRow);
-            return program.Interfaces.Any(definition =>
-                definition.ModuleImport is BoundModuleImport ownerImport
-                && StringComparer.Ordinal.Equals(
-                    ownerImport.ProducerIdentity, providerIdentity)
-                && ownerImport.TargetRequirement
-                    == requirements.TargetRequirement
-                && ownerImport.RuntimePolicy == requirements.RuntimePolicy
-                && StringComparer.Ordinal.Equals(
-                    definition.QualifiedName, qualifiedOwnerName)
-                && definition.Formals.Length == ownerArity
-                && definition.Members.Any(member =>
-                    member.Kind == (associatedTypeImport
-                        ? BoundInterfaceMemberKind.AssociatedType
-                        : BoundInterfaceMemberKind.Callable)
-                    && StringComparer.Ordinal.Equals(member.Name, memberName)
-                    && (StringComparer.Ordinal.Equals(
-                            member.DeclarationKey, exportKey)
-                        || member.AdditionalDeclarationKeys.Contains(
-                            exportKey, StringComparer.Ordinal))));
-        }
-
         var rootImportCount = 0;
         for (var importRow = 1; importRow <= rootTables.Imports.Count;
             importRow++)
@@ -9010,7 +8917,9 @@ public static partial class TrRmExecutableCompiler
             rootImportCount++;
             var definitionKind = rootTables.Imports
                 .GetExpectedDefinitionForImportRow(importRow) >> 24;
-            if (IsRetainedCM1AR1InterfaceImport(importRow))
+            if (schema.UsesAssociatedRelationConstraints()
+                && IsC1M1RetainedInterfaceImport(program, rootTables,
+                    importRow))
             {
                 _ = interfaceImportRows.Add(importRow);
                 continue;
@@ -9377,6 +9286,7 @@ public static partial class TrRmExecutableCompiler
                 var formal = method.GenericParameters[ordinal];
                 var genericParamRow = genericFirst + ordinal;
                 var constraintFirst = genericConstraintRows.Count + 1;
+                var interfaceConstraintOrdinal = -1;
                 foreach (var constraint in formal.Constraints)
                 {
                     if (constraint.OwnerGenericParamRow != formal.Row)
@@ -9393,10 +9303,17 @@ public static partial class TrRmExecutableCompiler
                                 "A retained class MethodDef Constraint has an unsupported kind.");
                         }
 
+                        if (constraint.Kind == 1)
+                        {
+                            interfaceConstraintOrdinal++;
+                        }
+
                         genericConstraintPlans.Add(
                             new C1M1GenericConstraintPlan(oldMethodRow,
                                 ordinal, genericParamRow,
-                                constraint.Kind, constraint.Payload));
+                                constraint.Kind, constraint.Payload,
+                                constraint.Kind == 1
+                                    ? interfaceConstraintOrdinal : -1));
                         continue;
                     }
 
@@ -10158,115 +10075,29 @@ public static partial class TrRmExecutableCompiler
     {
         var importsByInterface = new Dictionary<(string Name, int Arity),
             BoundModuleImport>();
-
-        BoundModuleImport EnsureInterfaceImport(BoundInterfaceType type)
-        {
-            if (type.Kind != BoundInterfaceTypeKind.Nominal
-                || string.IsNullOrEmpty(type.NominalName))
-            {
-                throw Unsupported(
-                    "A retained CM1AR1 interface relation has no nominal declaring interface.");
-            }
-            if (type.ModuleImport is BoundModuleImport existingImport)
-            {
-                return existingImport;
-            }
-
-            var arity = type.TypeArguments.IsDefault
-                ? 0 : type.TypeArguments.Length;
-            if (importsByInterface.TryGetValue(
-                    (type.NominalName, arity), out var cachedImport))
-            {
-                return cachedImport;
-            }
-
-            var typeDefRows = Enumerable.Range(1, rootTables.TypeDefs.Count)
-                .Where(typeDefRow =>
-                    rootTables.TypeDefs.GetOwnerModule(typeDefRow)
-                        == rootModuleRow
-                    && rootTables.TypeDefs.GetKind(typeDefRow) == 3
-                    && StringComparer.Ordinal.Equals(
-                        QualifiedTypeName(typeDefRow),
-                        type.NominalName)
-                    && rootTables.TypeDefs.GetGenericRange(typeDefRow).Count
-                        == arity)
-                .ToArray();
-            if (typeDefRows.Length != 1)
-            {
-                throw Unsupported(
-                    "A retained CM1AR1 local interface has no unique root TypeDef.");
-            }
-
-            var typeDefId = 0x1300_0000u
-                | checked((uint)typeDefRows[0]);
-            var exportKeys = rootTables.Exports.GetExportsForModule(
-                    rootModuleRow)
-                .Where(export => export.DefinitionId == typeDefId)
-                .Select(static export => export.ExportKey)
-                .Distinct(StringComparer.Ordinal)
-                .ToArray();
-            if (exportKeys.Length != 1)
-            {
-                throw Unsupported(
-                    "A retained CM1AR1 local interface requires one unambiguous owner ExportKey.");
-            }
-
-            var import = new BoundModuleImport(rootSnapshot.ModuleIdentity,
-                exportKeys[0], rootSnapshot.TargetRequirement,
-                rootSnapshot.RuntimePolicy);
-            importsByInterface.Add((type.NominalName, arity), import);
-            return import;
-        }
-
-        string QualifiedTypeName(int typeDefRow)
-        {
-            var typeName = rootTables.TypeDefs.GetName(typeDefRow);
-            var namespaceName
-                = rootTables.TypeDefs.GetNamespace(typeDefRow);
-            return namespaceName.Length == 0 ? typeName
-                : namespaceName + "." + typeName;
-        }
-
-        BoundInterfaceType RewriteInterfaceType(BoundInterfaceType type)
-        {
-            ImmutableArray<BoundInterfaceTypeArgument> typeArguments
-                = type.TypeArguments.IsDefault
-                ? type.TypeArguments
-                : [.. type.TypeArguments.Select(argument =>
-                    argument with {
-                        Type = argument.Type is null ? null
-                            : RewriteInterfaceType(argument.Type),
-                        ConstantType = argument.ConstantType is null ? null
-                            : RewriteInterfaceType(argument.ConstantType),
-                    })];
-            var rewritten = type with { TypeArguments = typeArguments };
-            if (type.Kind == BoundInterfaceTypeKind.Nominal
-                && type.ModuleImport is null)
-            {
-                rewritten = rewritten with {
-                    ModuleImport = EnsureInterfaceImport(rewritten),
-                };
-            }
-
-            return rewritten;
-        }
-
         var sourceRoots = program.RetainedGenericMethodRoots
             .Select(static root => root.Binding?.Expected ?? root)
             .ToArray();
 
-        var retainedRelations = sourceRoots
-            .SelectMany(static root => root.Formals)
-            .SelectMany(static formal => formal.AssociatedRelations)
-            .Where(relation => constraintPlans.Any(plan =>
-                plan.Kind == 3
-                && plan.Payload
-                    == checked((uint)relation.AssociatedRelationRow)))
-            .ToArray();
-        foreach (var relation in retainedRelations)
+        foreach (var plan in constraintPlans)
         {
-            _ = EnsureInterfaceImport(
-                relation.AssociatedType.DeclaringInterface);
+            if (plan.Kind != 3)
+            {
+                continue;
+            }
+
+            var root = FindC1M1ClassMethodImport(sourceRoots,
+                plan.MethodRow);
+            var relations = root.Formals[plan.FormalOrdinal]
+                .AssociatedRelations;
+            var relation = relations.SingleOrDefault(candidate =>
+                candidate.AssociatedRelationRow
+                    == checked((int)plan.Payload))
+                ?? throw Unsupported(
+                    "A retained CM1AR1 class Constraint has no typed associated relation.");
+            _ = GetC1M1AssociatedInterfaceModuleImport(
+                relation.AssociatedType.DeclaringInterface, rootTables,
+                rootModuleRow, rootSnapshot, importsByInterface);
         }
 
         foreach (var root in sourceRoots)
@@ -10278,61 +10109,496 @@ public static partial class TrRmExecutableCompiler
                     if (constraint.Kind == BoundInterfaceTypeKind.Nominal
                         && constraint.ModuleImport is null)
                     {
-                        _ = EnsureInterfaceImport(constraint);
+                        _ = GetC1M1AssociatedInterfaceModuleImport(
+                            constraint, rootTables, rootModuleRow,
+                            rootSnapshot, importsByInterface);
                     }
                 }
             }
         }
 
-        ImmutableArray<BoundGenericMethodFormal> RewriteFormals(
-            ImmutableArray<BoundGenericMethodFormal> formals)
-            => [.. formals.Select(formal => formal with {
-                InterfaceConstraints = formal.InterfaceConstraints.IsDefault
-                    ? formal.InterfaceConstraints
-                    : [.. formal.InterfaceConstraints.Select(
-                        RewriteInterfaceType)],
-                AssociatedRelations = formal.AssociatedRelations.IsDefault
-                    ? formal.AssociatedRelations
-                    : [.. formal.AssociatedRelations.Select(relation =>
-                        relation with {
-                            AssociatedType
-                                = relation.AssociatedType with {
-                                    DeclaringInterface
-                                        = RewriteInterfaceType(
-                                            relation.AssociatedType
-                                                .DeclaringInterface),
-                                },
-                        })],
-            })];
-
-        BoundGenericMethodImport RewriteImport(
-            BoundGenericMethodImport source)
+        var roots
+            = ImmutableArray.CreateBuilder<BoundGenericMethodImport>(
+                sourceRoots.Length);
+        foreach (var root in sourceRoots)
         {
-            var rewritten = new BoundGenericMethodImport(source.Origin,
-                source.Signature, RewriteFormals(source.Formals),
-                source.ProofFunction,
-                source.FormalTypeOwnerOrdinal, source.SpanTypes,
-                source.OrdinaryParameterDefaults);
-            rewritten.CompleteProofFunction(source.ProofFunction,
-                source.ProofSupportFunctions,
-                source.FormalTypeOwnerOrdinal);
-            return rewritten;
+            roots.Add(RewriteC1M1AssociatedMethodImport(root, rootTables,
+                rootModuleRow, rootSnapshot, importsByInterface));
         }
 
-        var roots = sourceRoots.Select(RewriteImport).ToImmutableArray();
-        var interfaces = program.Interfaces.Select(definition =>
+        var interfaces
+            = ImmutableArray.CreateBuilder<BoundInterfaceDefinition>(
+                program.Interfaces.Length);
+        foreach (var definition in program.Interfaces)
         {
             var key = (definition.QualifiedName,
                 definition.Formals.Length);
-            return definition.ModuleImport is null
+            interfaces.Add(definition.ModuleImport is null
                 && importsByInterface.TryGetValue(key, out var import)
                 ? definition with { ModuleImport = import }
-                : definition;
-        }).ToImmutableArray();
+                : definition);
+        }
         return program with {
-            Interfaces = interfaces,
-            RetainedGenericMethodRoots = roots,
+            Interfaces = interfaces.MoveToImmutable(),
+            RetainedGenericMethodRoots = roots.MoveToImmutable(),
         };
+    }
+
+    private static BoundGenericMethodImport FindC1M1ClassMethodImport(
+        IReadOnlyList<BoundGenericMethodImport> roots, int methodRow)
+    {
+        var methodDefId = 0x1600_0000u | checked((uint)methodRow);
+        BoundGenericMethodImport? match = null;
+        foreach (var root in roots)
+        {
+            if (root.Origin.MethodDefId != methodDefId)
+            {
+                continue;
+            }
+
+            if (match is not null)
+            {
+                throw Unsupported(
+                    "A retained CM1AR1 MethodDef has multiple typed import roots.");
+            }
+
+            match = root;
+        }
+
+        return match ?? throw Unsupported(
+            "A retained CM1AR1 MethodDef has no typed import root.");
+    }
+
+    private static BoundModuleImport GetC1M1AssociatedInterfaceModuleImport(
+        BoundInterfaceType type,
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables rootTables,
+        int rootModuleRow,
+        BoundSourceTypeProviderSnapshot rootSnapshot,
+        Dictionary<(string Name, int Arity), BoundModuleImport>
+            importsByInterface)
+    {
+        if (type.Kind != BoundInterfaceTypeKind.Nominal
+            || string.IsNullOrEmpty(type.NominalName))
+        {
+            throw Unsupported(
+                "A retained CM1AR1 interface relation has no nominal declaring interface.");
+        }
+        if (type.ModuleImport is BoundModuleImport existingImport)
+        {
+            return existingImport;
+        }
+
+        var arity = type.TypeArguments.IsDefault
+            ? 0 : type.TypeArguments.Length;
+        if (importsByInterface.TryGetValue((type.NominalName, arity),
+                out var cachedImport))
+        {
+            return cachedImport;
+        }
+
+        var typeDefRow = 0;
+        for (var candidate = 1; candidate <= rootTables.TypeDefs.Count;
+            candidate++)
+        {
+            if (rootTables.TypeDefs.GetOwnerModule(candidate)
+                    != rootModuleRow
+                || rootTables.TypeDefs.GetKind(candidate) != 3
+                || !StringComparer.Ordinal.Equals(
+                    GetC1M1TypeDefQualifiedName(rootTables.TypeDefs,
+                        candidate), type.NominalName)
+                || rootTables.TypeDefs.GetGenericRange(candidate).Count
+                    != arity)
+            {
+                continue;
+            }
+
+            if (typeDefRow != 0)
+            {
+                throw Unsupported(
+                    "A retained CM1AR1 local interface has multiple root TypeDefs.");
+            }
+
+            typeDefRow = candidate;
+        }
+
+        if (typeDefRow == 0)
+        {
+            throw Unsupported(
+                "A retained CM1AR1 local interface has no root TypeDef.");
+        }
+
+        var typeDefId = 0x1300_0000u | checked((uint)typeDefRow);
+        var exportKeys = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var export in rootTables.Exports.GetExportsForModule(
+                     rootModuleRow))
+        {
+            if (export.DefinitionId == typeDefId)
+            {
+                _ = exportKeys.Add(export.ExportKey);
+            }
+        }
+        if (exportKeys.Count != 1)
+        {
+            throw Unsupported(
+                "A retained CM1AR1 local interface requires one unambiguous owner ExportKey.");
+        }
+
+        var import = new BoundModuleImport(rootSnapshot.ModuleIdentity,
+            exportKeys.Single(), rootSnapshot.TargetRequirement,
+            rootSnapshot.RuntimePolicy);
+        importsByInterface.Add((type.NominalName, arity), import);
+        return import;
+    }
+
+    private static BoundInterfaceType RewriteC1M1AssociatedInterfaceType(
+        BoundInterfaceType type,
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables rootTables,
+        int rootModuleRow,
+        BoundSourceTypeProviderSnapshot rootSnapshot,
+        Dictionary<(string Name, int Arity), BoundModuleImport>
+            importsByInterface)
+    {
+        var arguments
+            = ImmutableArray.CreateBuilder<BoundInterfaceTypeArgument>(
+                type.TypeArguments.IsDefault ? 0 : type.TypeArguments.Length);
+        if (!type.TypeArguments.IsDefault)
+        {
+            foreach (var argument in type.TypeArguments)
+            {
+                arguments.Add(argument with {
+                    Type = argument.Type is null ? null
+                        : RewriteC1M1AssociatedInterfaceType(argument.Type,
+                            rootTables, rootModuleRow, rootSnapshot,
+                            importsByInterface),
+                    ConstantType = argument.ConstantType is null ? null
+                        : RewriteC1M1AssociatedInterfaceType(
+                            argument.ConstantType, rootTables,
+                            rootModuleRow, rootSnapshot,
+                            importsByInterface),
+                });
+            }
+        }
+
+        var rewritten = type with {
+            TypeArguments = type.TypeArguments.IsDefault
+                ? type.TypeArguments : arguments.MoveToImmutable(),
+        };
+        if (type.Kind == BoundInterfaceTypeKind.Nominal
+            && type.ModuleImport is null)
+        {
+            rewritten = rewritten with {
+                ModuleImport =
+                    GetC1M1AssociatedInterfaceModuleImport(rewritten,
+                        rootTables, rootModuleRow, rootSnapshot,
+                        importsByInterface),
+            };
+        }
+
+        return rewritten;
+    }
+
+    private static ImmutableArray<BoundGenericMethodFormal>
+        RewriteC1M1AssociatedFormals(
+            ImmutableArray<BoundGenericMethodFormal> formals,
+            TrRmStructuralMetadataValidator.ValidatedExecutionTables
+                rootTables,
+            int rootModuleRow,
+            BoundSourceTypeProviderSnapshot rootSnapshot,
+            Dictionary<(string Name, int Arity), BoundModuleImport>
+                importsByInterface)
+    {
+        if (formals.IsDefault)
+        {
+            return formals;
+        }
+
+        var result
+            = ImmutableArray.CreateBuilder<BoundGenericMethodFormal>(
+                formals.Length);
+        foreach (var formal in formals)
+        {
+            var constraints = formal.InterfaceConstraints;
+            if (!constraints.IsDefault)
+            {
+                var rewrittenConstraints
+                    = ImmutableArray.CreateBuilder<BoundInterfaceType>(
+                        constraints.Length);
+                foreach (var constraint in constraints)
+                {
+                    rewrittenConstraints.Add(
+                        RewriteC1M1AssociatedInterfaceType(constraint,
+                            rootTables, rootModuleRow, rootSnapshot,
+                            importsByInterface));
+                }
+
+                constraints = rewrittenConstraints.MoveToImmutable();
+            }
+
+            var relations = formal.AssociatedRelations;
+            if (!relations.IsDefault)
+            {
+                var rewrittenRelations
+                    = ImmutableArray.CreateBuilder<
+                        BoundGenericMethodAssociatedRelation>(
+                            relations.Length);
+                foreach (var relation in relations)
+                {
+                    rewrittenRelations.Add(relation with {
+                        AssociatedType
+                            = relation.AssociatedType with {
+                                DeclaringInterface
+                                    = RewriteC1M1AssociatedInterfaceType(
+                                        relation.AssociatedType
+                                            .DeclaringInterface, rootTables,
+                                        rootModuleRow, rootSnapshot,
+                                        importsByInterface),
+                            },
+                    });
+                }
+
+                relations = rewrittenRelations.MoveToImmutable();
+            }
+
+            result.Add(formal with {
+                InterfaceConstraints = constraints,
+                AssociatedRelations = relations,
+            });
+        }
+
+        return result.MoveToImmutable();
+    }
+
+    private static BoundGenericMethodImport
+        RewriteC1M1AssociatedMethodImport(
+            BoundGenericMethodImport source,
+            TrRmStructuralMetadataValidator.ValidatedExecutionTables
+                rootTables,
+            int rootModuleRow,
+            BoundSourceTypeProviderSnapshot rootSnapshot,
+            Dictionary<(string Name, int Arity), BoundModuleImport>
+                importsByInterface)
+    {
+        var rewritten = new BoundGenericMethodImport(source.Origin,
+            source.Signature,
+            RewriteC1M1AssociatedFormals(source.Formals, rootTables,
+                rootModuleRow, rootSnapshot, importsByInterface),
+            source.ProofFunction, source.FormalTypeOwnerOrdinal,
+            source.SpanTypes, source.OrdinaryParameterDefaults);
+        rewritten.CompleteProofFunction(source.ProofFunction,
+            source.ProofSupportFunctions,
+            source.FormalTypeOwnerOrdinal);
+        return rewritten;
+    }
+
+    private static void MapC1M1ReemittedInterfaceType(
+        BoundInterfaceDefinition definition,
+        IReadOnlyDictionary<
+            (string ProviderIdentity, string ExportKey, string QualifiedName,
+                int Arity, uint TargetRequirement, uint RuntimePolicy), int>
+            interfaceImportRowsByOwner,
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables rootTables,
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables outputTables,
+        int rootModuleRow, Dictionary<int, int> typeDefRowMap,
+        Dictionary<int, int> importRowMap)
+    {
+        if (definition.ModuleImport is not BoundModuleImport import)
+        {
+            return;
+        }
+
+        var importKey = (import.ProducerIdentity, import.ExportKey,
+            definition.QualifiedName, definition.Formals.Length,
+            import.TargetRequirement, import.RuntimePolicy);
+        if (!interfaceImportRowsByOwner.TryGetValue(importKey,
+                out var outputImportRow))
+        {
+            return;
+        }
+
+        var outputDefinitionId = outputTables.Imports
+            .GetExpectedDefinitionForImportRow(outputImportRow);
+        if ((outputDefinitionId >> 24) != 0x13)
+        {
+            throw new InvalidDataException(
+                "A re-emitted interface owner Import does not expect a TypeDef.");
+        }
+
+        var outputTypeDefRow = checked((int)(
+            outputDefinitionId & 0x00FF_FFFF));
+        var oldTypeDefRows = new List<int>();
+        for (var typeDefRow = 1; typeDefRow <= rootTables.TypeDefs.Count;
+            typeDefRow++)
+        {
+            if (rootTables.TypeDefs.GetKind(typeDefRow) == 3
+                && StringComparer.Ordinal.Equals(
+                    GetC1M1TypeDefQualifiedName(rootTables.TypeDefs,
+                        typeDefRow), definition.QualifiedName)
+                && rootTables.TypeDefs.GetGenericRange(typeDefRow).Count
+                    == definition.Formals.Length)
+            {
+                oldTypeDefRows.Add(typeDefRow);
+            }
+        }
+
+        foreach (var oldTypeDefRow in oldTypeDefRows)
+        {
+            if (rootTables.TypeDefs.GetOwnerModule(oldTypeDefRow)
+                    == rootModuleRow
+                && !rootTables.Imports.IsExpectedDefinition(
+                    0x1300_0000u | checked((uint)oldTypeDefRow)))
+            {
+                if (typeDefRowMap.TryGetValue(oldTypeDefRow,
+                        out var existingTypeDefRow)
+                    && existingTypeDefRow != outputTypeDefRow)
+                {
+                    throw new InvalidDataException(
+                        "A retained CM1AR1 interface TypeDef has conflicting remapped owners.");
+                }
+
+                _ = typeDefRowMap.TryAdd(oldTypeDefRow,
+                    outputTypeDefRow);
+            }
+        }
+
+        for (var oldImportRow = 1;
+            oldImportRow <= rootTables.Imports.Count;
+            oldImportRow++)
+        {
+            var expectedDefinitionId = rootTables.Imports
+                .GetExpectedDefinitionForImportRow(oldImportRow);
+            if ((expectedDefinitionId >> 24) != 0x13)
+            {
+                continue;
+            }
+
+            var oldTypeDefRow = checked((int)(
+                expectedDefinitionId & 0x00FF_FFFF));
+            if (!oldTypeDefRows.Contains(oldTypeDefRow))
+            {
+                continue;
+            }
+
+            var oldModuleRefRow = rootTables.Imports
+                .GetModuleRefForImportRow(oldImportRow);
+            var oldProviderIdentity = rootTables.ModuleRefs
+                .GetProducerIdentity(oldModuleRefRow);
+            var oldExportKey = rootTables.Imports
+                .GetBindingForImportRow(oldImportRow).ExportKey;
+            if (!StringComparer.Ordinal.Equals(oldProviderIdentity,
+                    import.ProducerIdentity)
+                || !StringComparer.Ordinal.Equals(oldExportKey,
+                    import.ExportKey))
+            {
+                continue;
+            }
+
+            if (importRowMap.TryGetValue(oldImportRow,
+                    out var existingImportRow)
+                && existingImportRow != outputImportRow)
+            {
+                throw new InvalidDataException(
+                    "A retained CM1AR1 interface Import has conflicting remapped owners.");
+            }
+
+            _ = importRowMap.TryAdd(oldImportRow, outputImportRow);
+            if (typeDefRowMap.TryGetValue(oldTypeDefRow,
+                    out var priorTypeDefRow)
+                && priorTypeDefRow != outputTypeDefRow)
+            {
+                throw new InvalidDataException(
+                    "A retained CM1AR1 interface TypeDef has conflicting remapped owners.");
+            }
+
+            _ = typeDefRowMap.TryAdd(oldTypeDefRow, outputTypeDefRow);
+        }
+    }
+
+    private static bool IsC1M1RetainedInterfaceImport(
+        BoundProgram program,
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+        int importRow)
+    {
+        var expectedDefinitionId = tables.Imports
+            .GetExpectedDefinitionForImportRow(importRow);
+        var expectedKind = expectedDefinitionId >> 24;
+        var expectedRow = checked((int)(
+            expectedDefinitionId & 0x00FF_FFFF));
+        var moduleRefRow = tables.Imports
+            .GetModuleRefForImportRow(importRow);
+        var providerIdentity = tables.ModuleRefs
+            .GetProducerIdentity(moduleRefRow);
+        var requirements = tables.ModuleRefs
+            .GetRequirements(moduleRefRow);
+        var exportKey = tables.Imports
+            .GetBindingForImportRow(importRow).ExportKey;
+
+        if (expectedKind == 0x13)
+        {
+            if (tables.TypeDefs.GetKind(expectedRow) != 3)
+            {
+                return false;
+            }
+
+            var qualifiedName = GetC1M1TypeDefQualifiedName(
+                tables.TypeDefs, expectedRow);
+            var arity = tables.TypeDefs.GetGenericRange(expectedRow).Count;
+            return program.Interfaces.Any(definition =>
+                definition.ModuleImport is BoundModuleImport ownerImport
+                && StringComparer.Ordinal.Equals(
+                    ownerImport.ProducerIdentity, providerIdentity)
+                && StringComparer.Ordinal.Equals(ownerImport.ExportKey,
+                    exportKey)
+                && ownerImport.TargetRequirement
+                    == requirements.TargetRequirement
+                && ownerImport.RuntimePolicy == requirements.RuntimePolicy
+                && StringComparer.Ordinal.Equals(definition.QualifiedName,
+                    qualifiedName)
+                && definition.Formals.Length == arity);
+        }
+
+        var associatedTypeImport = expectedKind == 0x20;
+        var interfaceMethodImport = expectedKind == 0x16;
+        if (!associatedTypeImport && !interfaceMethodImport)
+        {
+            return false;
+        }
+
+        var ownerTypeDefRow = associatedTypeImport
+            ? tables.Interfaces.GetOwnerTypeDef(
+                tables.AssociatedTypeDefs.GetOwnerInterfaceDef(expectedRow))
+            : tables.Methods.GetOwnerType(expectedRow);
+        if (tables.TypeDefs.GetKind(ownerTypeDefRow) != 3)
+        {
+            return false;
+        }
+
+        var qualifiedOwnerName = GetC1M1TypeDefQualifiedName(
+            tables.TypeDefs, ownerTypeDefRow);
+        var ownerArity
+            = tables.TypeDefs.GetGenericRange(ownerTypeDefRow).Count;
+        var memberName = associatedTypeImport
+            ? tables.Strings.DecodeName(
+                tables.AssociatedTypeDefs.GetNameStringRow(expectedRow))
+            : tables.Methods.GetName(expectedRow);
+        return program.Interfaces.Any(definition =>
+            definition.ModuleImport is BoundModuleImport ownerImport
+            && StringComparer.Ordinal.Equals(
+                ownerImport.ProducerIdentity, providerIdentity)
+            && ownerImport.TargetRequirement
+                == requirements.TargetRequirement
+            && ownerImport.RuntimePolicy == requirements.RuntimePolicy
+            && StringComparer.Ordinal.Equals(definition.QualifiedName,
+                qualifiedOwnerName)
+            && definition.Formals.Length == ownerArity
+            && definition.Members.Any(member =>
+                member.Kind == (associatedTypeImport
+                    ? BoundInterfaceMemberKind.AssociatedType
+                    : BoundInterfaceMemberKind.Callable)
+                && StringComparer.Ordinal.Equals(member.Name, memberName)
+                && (StringComparer.Ordinal.Equals(
+                        member.DeclarationKey, exportKey)
+                    || member.AdditionalDeclarationKeys.Contains(
+                        exportKey, StringComparer.Ordinal))));
     }
 
     private static byte[] ReemitC1M1ClassAssociatedRelationConstraints(
@@ -10386,121 +10652,11 @@ public static partial class TrRmExecutableCompiler
                 checked((int)importRow));
         }
 
-        void MapInterfaceType(BoundInterfaceDefinition definition)
-        {
-            if (definition.ModuleImport is not BoundModuleImport import)
-            {
-                return;
-            }
-
-            var importKey = (import.ProducerIdentity, import.ExportKey,
-                definition.QualifiedName, definition.Formals.Length,
-                import.TargetRequirement, import.RuntimePolicy);
-            if (!interfaceImportRowsByOwner.TryGetValue(importKey,
-                    out var outputImportRow))
-            {
-                return;
-            }
-
-            var outputDefinitionId = outputTables.Imports
-                .GetExpectedDefinitionForImportRow(outputImportRow);
-            if ((outputDefinitionId >> 24) != 0x13)
-            {
-                throw new InvalidDataException(
-                    "A re-emitted interface owner Import does not expect a TypeDef.");
-            }
-
-            var outputTypeDefRow = checked((int)(
-                outputDefinitionId & 0x00FF_FFFF));
-            var oldQualifiedName = definition.QualifiedName;
-            var oldTypeDefRows = Enumerable.Range(1,
-                    rootTables.TypeDefs.Count)
-                .Where(typeDefRow =>
-                    rootTables.TypeDefs.GetKind(typeDefRow) == 3
-                    && StringComparer.Ordinal.Equals(
-                        GetC1M1TypeDefQualifiedName(rootTables.TypeDefs,
-                            typeDefRow), oldQualifiedName)
-                    && rootTables.TypeDefs.GetGenericRange(typeDefRow).Count
-                        == definition.Formals.Length)
-                .ToArray();
-            foreach (var oldTypeDefRow in oldTypeDefRows)
-            {
-                if (rootTables.TypeDefs.GetOwnerModule(oldTypeDefRow)
-                        == rootModuleRow
-                    && !rootTables.Imports.IsExpectedDefinition(
-                        0x1300_0000u
-                            | checked((uint)oldTypeDefRow)))
-                {
-                    if (typeDefRowMap.TryGetValue(oldTypeDefRow,
-                            out var existingTypeDefRow)
-                        && existingTypeDefRow != outputTypeDefRow)
-                    {
-                        throw new InvalidDataException(
-                            "A retained CM1AR1 interface TypeDef has conflicting remapped owners.");
-                    }
-
-                    _ = typeDefRowMap.TryAdd(oldTypeDefRow,
-                        outputTypeDefRow);
-                }
-            }
-
-            for (var oldImportRow = 1;
-                oldImportRow <= rootTables.Imports.Count;
-                oldImportRow++)
-            {
-                var expectedDefinitionId = rootTables.Imports
-                    .GetExpectedDefinitionForImportRow(oldImportRow);
-                if ((expectedDefinitionId >> 24) != 0x13)
-                {
-                    continue;
-                }
-
-                var oldTypeDefRow = checked((int)(
-                    expectedDefinitionId & 0x00FF_FFFF));
-                if (!oldTypeDefRows.Contains(oldTypeDefRow))
-                {
-                    continue;
-                }
-
-                var oldModuleRefRow = rootTables.Imports
-                    .GetModuleRefForImportRow(oldImportRow);
-                var oldProviderIdentity = rootTables.ModuleRefs
-                    .GetProducerIdentity(oldModuleRefRow);
-                var oldExportKey = rootTables.Imports
-                    .GetBindingForImportRow(oldImportRow).ExportKey;
-                if (!StringComparer.Ordinal.Equals(oldProviderIdentity,
-                        import.ProducerIdentity)
-                    || !StringComparer.Ordinal.Equals(oldExportKey,
-                        import.ExportKey))
-                {
-                    continue;
-                }
-
-                if (importRowMap.TryGetValue(oldImportRow,
-                        out var existingImportRow)
-                    && existingImportRow != outputImportRow)
-                {
-                    throw new InvalidDataException(
-                        "A retained CM1AR1 interface Import has conflicting remapped owners.");
-                }
-
-                _ = importRowMap.TryAdd(oldImportRow, outputImportRow);
-                if (typeDefRowMap.TryGetValue(oldTypeDefRow,
-                        out var existingTypeDefRow)
-                    && existingTypeDefRow != outputTypeDefRow)
-                {
-                    throw new InvalidDataException(
-                        "A retained CM1AR1 interface TypeDef has conflicting remapped owners.");
-                }
-
-                _ = typeDefRowMap.TryAdd(oldTypeDefRow,
-                    outputTypeDefRow);
-            }
-        }
-
         foreach (var definition in reemissionProgram.Interfaces)
         {
-            MapInterfaceType(definition);
+            MapC1M1ReemittedInterfaceType(definition,
+                interfaceImportRowsByOwner, rootTables, outputTables,
+                rootModuleRow, typeDefRowMap, importRowMap);
         }
 
         var outputTypeSpecRows
