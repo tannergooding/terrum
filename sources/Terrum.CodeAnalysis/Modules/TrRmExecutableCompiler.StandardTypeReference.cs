@@ -1123,6 +1123,10 @@ public static partial class TrRmExecutableCompiler
                     declaration.Declaration.Identity, [], 0));
         }
 
+        var checkedReferenceTypes
+            = ImmutableArray.CreateBuilder<CheckedReferenceTypeDefinition>();
+        var checkedReferenceTypeIndexes
+            = new Dictionary<CheckedReferenceTypeDefinition, int>();
         var functions = ImmutableArray.CreateBuilder<BoundFunction>();
         var importedFunctionNames = new HashSet<string>(
             StringComparer.Ordinal);
@@ -1207,16 +1211,20 @@ public static partial class TrRmExecutableCompiler
                     ordinal < method.Parameters.Length; ordinal++)
                 {
                     var parameter = method.Parameters[ordinal];
-                    if (parameter.Mode != 0 || parameter.Flags != 0
-                        || !TryGetScalarType(parameter.TypeSpecReference,
-                            out var parameterType))
+                    if (parameter.Mode != 0
+                        || !TryGetClassMethodParameterType(
+                            parameter.TypeSpecReference, parameter.Flags,
+                            out var parameterType,
+                            out var isImplicitRef))
                     {
                         throw Unsupported(
-                            "The bounded CM1 class source reference supports only by-value scalar static member parameters.");
+                            "The bounded CM1 class source reference supports scalar or plain checked-reference member parameters.");
                     }
 
                     variables.Add(new BoundVariable(parameter.Name,
-                        parameterType, false, default));
+                        parameterType, false, default) {
+                        IsImplicitRef = isImplicitRef,
+                    });
                     if (parameter.DefaultValue is BoundConstant value)
                     {
                         defaults.Add(new BoundOrdinaryParameterDefault(
@@ -1376,17 +1384,20 @@ public static partial class TrRmExecutableCompiler
                         ordinal < method.Parameters.Length; ordinal++)
                     {
                         var parameter = method.Parameters[ordinal];
-                        if (parameter.Mode != 0 || parameter.Flags != 0
-                            || !TryGetScalarType(
+                        if (parameter.Mode != 0
+                            || !TryGetClassMethodParameterType(
                                 parameter.TypeSpecReference,
-                                out var parameterType))
+                                parameter.Flags, out var parameterType,
+                                out var isImplicitRef))
                         {
                             throw Unsupported(
-                                "The bounded CM1 class source reference supports only by-value scalar imported member parameters.");
+                                "The bounded CM1 class source reference supports scalar or plain checked-reference imported member parameters.");
                         }
 
                         variables.Add(new BoundVariable(parameter.Name,
-                            parameterType, false, default));
+                            parameterType, false, default) {
+                            IsImplicitRef = isImplicitRef,
+                        });
                         if (parameter.DefaultValue is BoundConstant value)
                         {
                             defaults.Add(new BoundOrdinaryParameterDefault(
@@ -1438,13 +1449,81 @@ public static partial class TrRmExecutableCompiler
                     .TryGetBoundScalarType(typeSpec.TypeCode, out type);
         }
 
+        bool TryGetClassMethodParameterType(uint typeSpecReference,
+            byte flags, out PrimitiveType type, out bool isImplicitRef)
+        {
+            type = PrimitiveType.Void;
+            isImplicitRef = false;
+            if (flags > 1)
+            {
+                return false;
+            }
+
+            if (TryGetScalarType(typeSpecReference, out type))
+            {
+                return flags == 0 && type != PrimitiveType.Void;
+            }
+
+            var reference = rootTables.TypeSpecs.GetTypeSpecRef(
+                typeSpecReference);
+            if (!reference.IsRow || reference.Form != 0x07
+                || reference.Qualifiers != 0)
+            {
+                return false;
+            }
+
+            var row = rootTables.TypeSpecs.GetRow(reference.Row);
+            var referentTypeSpecReference
+                = BinaryPrimitives.ReadUInt32LittleEndian(row.Slice(2));
+            if (!TryGetScalarType(referentTypeSpecReference,
+                    out var referentType)
+                || referentType == PrimitiveType.Void)
+            {
+                return false;
+            }
+
+            var definition = new CheckedReferenceTypeDefinition(
+                referentType, IsWritable: false,
+                IsGarbageCollected: false, IsInitialization: false,
+                IsOptional: false);
+            if (!checkedReferenceTypeIndexes.TryGetValue(definition,
+                    out var referenceIndex))
+            {
+                if (checkedReferenceTypes.Count
+                    >= SemanticVerifier.MaximumAnalysisVisits)
+                {
+                    throw Unsupported(
+                        "CM1 class method checked-reference signatures exceed the analysis limit.");
+                }
+
+                referenceIndex = checkedReferenceTypes.Count;
+                checkedReferenceTypes.Add(definition);
+                checkedReferenceTypeIndexes.Add(definition,
+                    referenceIndex);
+            }
+
+            type = CheckedReferenceTypes.Type(referenceIndex);
+            isImplicitRef = flags == 1;
+            return true;
+        }
+
+        var checkedReferenceTypeTable
+            = checkedReferenceTypes.ToImmutable();
+        if (!CheckedReferenceTypeContract.IsValidTable(
+                checkedReferenceTypeTable))
+        {
+            throw Invalid(
+                "The retained CM1 class method checked-reference table is invalid.");
+        }
+
         return new CompilationReference([], functions.ToImmutable(),
             (BoundRuntimePolicy)rootTables.Modules
                 .GetRequirements(rootModuleRow).RuntimePolicy,
             genericNominalTypeDefinitions: typeDefinitions.ToImmutable(),
             genericNominalTypeInstances:
                 genericNominalTypeInstances.ToImmutable(),
-            standardClassDeclarations: classDeclarations.ToImmutable());
+            standardClassDeclarations: classDeclarations.ToImmutable(),
+            checkedReferenceTypes: checkedReferenceTypeTable);
     }
 
     private static BoundStandardClassTypeView CreateStandardClassTypeView(
