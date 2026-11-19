@@ -197,8 +197,9 @@ empty unit instance bodies are emitted, including no-op instance methods with
 supported Copy-struct value parameters and plain readonly scalar `ref<T>`
 parameters; `implicit ref<T>` retains Param flag `0x01`. Writable, GC,
 optional, initialization and nested-reference forms remain outside this
-subset. Actual caller adaptation through the re-emitted class-method view and
-these regressions remain unverified under the hold.
+subset. An explicit caller-source adaptation regression is added, but class
+method call/adaptation and the other producer regressions remain unverified
+under the hold.
 
 Other static and instance operations, local expression forms and control flow
 remain open.

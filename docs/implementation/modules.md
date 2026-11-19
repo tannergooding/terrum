@@ -237,7 +237,7 @@ regression checks root TypeSpec and imported FieldDef step remapping, also
 unverified. No-op unit instance Methods also preserve supported Copy-struct
 value parameters and plain readonly scalar `ref<T>` parameters through
 source-free re-emission; `implicit ref<T>` retains Param flag `0x01`. Caller
-adaptation through the re-emitted class-method view remains unverified.
+adaptation coverage is added but remains unverified.
 Compiler-owned source-class anchors and explicit member-key capture are
 implemented, but complete bodyful
 local class member/MethodDef closure, provider

@@ -1109,6 +1109,15 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
             Has.Length.EqualTo(1));
         Assert.That(reloadedImplicitMethod.Parameters[0].Mode, Is.Zero);
         Assert.That(reloadedImplicitMethod.Parameters[0].Flags, Is.EqualTo(1));
+        var callerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                public void Forward(Container target, int32 value) {
+                    target.ObserveImplicit(value);
+                }
+                """), reloadedReference);
+        Assert.That(callerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                callerCompilation.Diagnostics));
     }
 
     [Test]
