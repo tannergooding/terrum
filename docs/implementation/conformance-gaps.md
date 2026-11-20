@@ -103,11 +103,13 @@ class TypeSpec and TypeDef Import rows by root-provider identity. It admits
 selected enum providers and imported enum/struct closures owned by multiple
 selected class roots in a multi-provider query. It retains typed enum and
 struct TypeDef Imports and each root's provider FieldDef imports. Compatible
-and conflicting cross-provider class-handle query/reload regressions are
-added but remain unverified under the active hold. Enum views merge by exact
+and conflicting cross-provider class-handle query/reload regressions, including
+a transitive Parent-to-Beta-to-Gamma provider chain, are added but remain
+unverified under the active hold. Enum views merge by exact
 provider site and retain selected aliases. Pointer/other non-scalar struct
-dependencies, unselected class-handle dependencies and broader
-multi-function/provider dependency closure remain open.
+dependencies, unselected direct class-handle dependencies requiring packed
+provider closure, class handles nested through inline-struct fields, and
+broader multi-function/provider dependency closure remain open.
 
 Other proposals remain unapproved unless their owner and approval status say
 otherwise; see the [proposal index](../proposals/README.md).

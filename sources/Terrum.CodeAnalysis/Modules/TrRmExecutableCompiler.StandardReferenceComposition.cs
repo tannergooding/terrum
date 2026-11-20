@@ -989,7 +989,9 @@ public static partial class TrRmExecutableCompiler
                             declaration.Declaration.Provider, provider))
                     || declaration.Expectations.Any(expectation =>
                         BoundStandardEnumDeclarationContract.SnapshotsMatch(
-                            expectation.Binding.UsingModule, provider)));
+                            expectation.Binding.UsingModule, provider)
+                        || BoundStandardEnumDeclarationContract.SnapshotsMatch(
+                            expectation.Binding.Provider, provider)));
 
         static bool SameEnumSite(BoundStandardEnumTypeSite left,
             BoundStandardEnumTypeSite right)
@@ -1452,13 +1454,30 @@ public static partial class TrRmExecutableCompiler
             referenceIndex < references.Length; referenceIndex++)
         {
             var reference = references[referenceIndex];
-            foreach (var declaration in reference.StandardClassDeclarations)
+            var pendingClassIdentities
+                = new Queue<BoundGenericNominalTypeIdentity>(
+                    reference.StandardClassDeclarations
+                        .Where(static declaration =>
+                            !declaration.SelectedExportKeys
+                                .IsDefaultOrEmpty)
+                        .Select(static declaration =>
+                            declaration.Declaration.Identity));
+            var visitedClassIdentities
+                = new HashSet<BoundGenericNominalTypeIdentity>();
+            while (pendingClassIdentities.TryDequeue(
+                out var classIdentity))
             {
-                if (declaration.SelectedExportKeys.IsDefaultOrEmpty)
+                if (!visitedClassIdentities.Add(classIdentity))
                 {
                     continue;
                 }
 
+                var declaration
+                    = reference.StandardClassDeclarations.SingleOrDefault(
+                        candidate =>
+                            candidate.Declaration.Identity == classIdentity)
+                        ?? throw Invalid(
+                            "A selected class handle dependency has no provider declaration view.");
                 foreach (var field in declaration.Declaration.Fields)
                 {
                     if (!BoundGenericNominalTypeTypes.IsType(field.Type))
@@ -1490,6 +1509,8 @@ public static partial class TrRmExecutableCompiler
                     if (definition.NominalKind == 2)
                     {
                         _ = classHandleTypeDependencies.Add(
+                            definition.Identity);
+                        pendingClassIdentities.Enqueue(
                             definition.Identity);
                     }
                 }

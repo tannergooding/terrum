@@ -395,15 +395,30 @@ public static partial class TrRmExecutableCompiler
         }
         var selectedClassHandleTypeIdentities
             = new HashSet<BoundGenericNominalTypeIdentity>();
-        foreach (var declaration in standardClassDeclarations)
+        var pendingClassIdentities
+            = new Queue<BoundGenericNominalTypeIdentity>(
+                standardClassDeclarations
+                    .Where(declaration =>
+                        !declaration.SelectedExportKeys.IsDefaultOrEmpty
+                        || classQueryRootIdentities.Contains(
+                            declaration.Declaration.Identity))
+                    .Select(static declaration =>
+                        declaration.Declaration.Identity));
+        var visitedClassIdentities
+            = new HashSet<BoundGenericNominalTypeIdentity>();
+        while (pendingClassIdentities.TryDequeue(
+            out var classIdentity))
         {
-            if (declaration.SelectedExportKeys.IsDefaultOrEmpty
-                && !classQueryRootIdentities.Contains(
-                    declaration.Declaration.Identity))
+            if (!visitedClassIdentities.Add(classIdentity))
             {
                 continue;
             }
 
+            var declaration
+                = standardClassDeclarations.SingleOrDefault(candidate =>
+                    candidate.Declaration.Identity == classIdentity)
+                    ?? throw Invalid(
+                        "A selected class handle dependency has no provider declaration view.");
             foreach (var field in declaration.Declaration.Fields)
             {
                 if (!BoundGenericNominalTypeTypes.IsType(field.Type))
@@ -436,6 +451,8 @@ public static partial class TrRmExecutableCompiler
                 {
                     _ = selectedClassHandleTypeIdentities.Add(
                         definition.Identity);
+                    pendingClassIdentities.Enqueue(
+                        definition.Identity);
                 }
             }
         }
@@ -444,16 +461,22 @@ public static partial class TrRmExecutableCompiler
             => standardClassDeclarations.Any(declaration =>
                 (classQueryFunction is null
                     || classQueryRootIdentities.Contains(
-                            declaration.Declaration.Identity))
+                            declaration.Declaration.Identity)
+                    || selectedClassHandleTypeIdentities.Contains(
+                        declaration.Declaration.Identity))
                 && ((!declaration.SelectedExportKeys.IsDefaultOrEmpty
                             && BoundStandardEnumDeclarationContract
                                 .SnapshotsMatch(
                                     declaration.Declaration.Provider, provider))
                         || declaration.Expectations.Any(expectation =>
-                            BoundStandardEnumDeclarationContract
-                                .SnapshotsMatch(
-                                    expectation.Binding.UsingModule,
-                                    provider))));
+                            BoundStandardEnumDeclarationContract.SnapshotsMatch(
+                                expectation.Binding.UsingModule, provider)
+                            || (selectedClassHandleTypeIdentities.Contains(
+                                    declaration.Declaration.Identity)
+                                && BoundStandardEnumDeclarationContract
+                                    .SnapshotsMatch(
+                                        expectation.Binding.Provider,
+                                        provider))));
 
         bool HasStandardClassTypeSpecProvider(
             BoundGenericNominalTypeInstance instance)
@@ -1039,7 +1062,7 @@ public static partial class TrRmExecutableCompiler
                             binding.UsingModule))
                     {
                         throw Unsupported(
-                            "An EN1 class TypeDef Import is not owned by a selected class query root.");
+                            "An EN1 class TypeDef Import is outside the selected class query/provider closure.");
                     }
 
                     if ((binding.ExpectedDefinitionId >> 24) != 0x13
@@ -1052,6 +1075,18 @@ public static partial class TrRmExecutableCompiler
                         || !SameA2SourceTypeProviderSnapshot(
                             binding.Provider,
                             declaration.Declaration.Provider)
+                        || binding.UsingModule.TargetRequirement
+                            != moduleTargetRequirement
+                        || binding.Provider.TargetRequirement
+                            != moduleTargetRequirement
+                        || binding.TargetRequirement
+                            != moduleTargetRequirement
+                        || binding.UsingModule.RuntimePolicy
+                            != (uint)program.RuntimePolicy
+                        || binding.Provider.RuntimePolicy
+                            != (uint)program.RuntimePolicy
+                        || binding.RuntimePolicy
+                            != (uint)program.RuntimePolicy
                         || binding.ProviderDefinitionId
                             != declaration.Declaration.Identity.DefinitionId
                         || binding.ExpectedDefinitionId
@@ -4288,6 +4323,10 @@ public static partial class TrRmExecutableCompiler
                         typeImport.ProducerIdentity)
                     || !BoundEnumTypes.IsValidModuleDeclarationKey(
                         typeImport.ExportKey)
+                    || typeImport.TargetRequirement
+                        != moduleTargetRequirement
+                    || typeImport.RuntimePolicy
+                        != (uint)program.RuntimePolicy
                     || typeImport.RootImportRow < 0
                     || (!typeImport.RootImports.IsDefaultOrEmpty
                         && typeImport.RootImports.Any(rootImport =>
@@ -4661,6 +4700,14 @@ public static partial class TrRmExecutableCompiler
                     && emission.Import is C1EnumClosureImport typeImport
                     && !typeImport.RootImports.IsDefaultOrEmpty;
             if (standardClassRootTables is null
+                || !IsSelectedC1EnumClosureSchemaIdentity(
+                    classView.Provider.SchemaIdentity)
+                || !StringComparer.Ordinal.Equals(
+                    classView.Provider.SchemaIdentity, schemaIdentity)
+                || classView.Provider.TargetRequirement
+                    != moduleTargetRequirement
+                || classView.Provider.RuntimePolicy
+                    != (uint)program.RuntimePolicy
                 || !standardClassRootTablesByProvider.ContainsKey(
                     classView.Provider.ModuleIdentity)
                 || (!allowMultipleClassQueryProviders
@@ -4736,7 +4783,8 @@ public static partial class TrRmExecutableCompiler
                 layoutFieldRows.Add(new TrRmLayoutFieldRow(
                     checked(layoutRows.Count + 1), fieldOrdinal,
                     fieldDefRow));
-                if (standardClassFieldExportKeysByDefinition.TryGetValue(
+                if (!emission.ExportKeys.IsDefaultOrEmpty
+                    && standardClassFieldExportKeysByDefinition.TryGetValue(
                         field.DefinitionId, out var fieldExportKeys))
                 {
                     if (emission.Import is null)

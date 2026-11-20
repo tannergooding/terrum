@@ -1823,8 +1823,11 @@ are unverified under the active hold and do not cover PI1 property carriers.
 Type-only class reference composition now reconciles imported class-handle
 FieldDefs with selected direct provider roots across Modules, preserving exact
 provider expectations and remapping class TypeSpec/TypeDef Import rows by root
-provider identity. Parent-only and multi-root query/reload cases and conflicting
-provider rejection are covered by added regressions, unverified under the hold.
+provider identity. Parent-only, multi-root, transitive Parent-to-Beta-to-Gamma
+query/reload cases and conflicting-provider rejection are covered by added
+regressions, unverified under the hold. Unselected direct class TypeDef
+dependencies still require a checked provider-owned packed closure; class
+handles nested through inline-struct fields remain open.
 Provisional EN1 type+field-key reference selection now retains selected local
 class fields and fields in the selected inline-struct closure, preserving
 caller key order so new query imports use the first explicit alias while

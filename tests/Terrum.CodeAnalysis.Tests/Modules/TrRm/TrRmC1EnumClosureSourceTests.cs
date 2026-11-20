@@ -4325,11 +4325,13 @@ internal sealed class TrRmC1EnumClosureSourceTests
 
         (TrRmStandardArtifactInput Input,
             CompilationReference Reference) CreateClassProvider(
-                string moduleIdentity, string fieldType)
+                string moduleIdentity, string className,
+                string typeExportKey, string fieldExportKey,
+                string fieldType)
         {
             var tree = SyntaxTree.Parse($$"""
                 namespace Demo {
-                    public class Beta {
+                    public class {{className}} {
                         public {{fieldType}} Id;
                     }
                 }
@@ -4349,9 +4351,9 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 .Declarations.Single(declaration =>
                     declaration.Span == classDeclaration.Span).ClassIndex;
             var classExport = new TrRmSourceClassExport(program, classIndex,
-                classDeclaration.Span, "type.beta", [
+                classDeclaration.Span, typeExportKey, [
                     new TrRmSourceClassMemberExport(0,
-                        fieldDeclaration.Span, "field.beta.id"),
+                        fieldDeclaration.Span, fieldExportKey),
                 ]);
             var artifact = TrRmExecutableCompiler.EmitStandard(program,
                 moduleIdentity, schemaIdentity, targetRequirement, [], [],
@@ -4360,12 +4362,51 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 artifact);
             return (input,
                 TrRmExecutableCompiler.CreateStandardReference(input,
-                    moduleIdentity, [], ["type.beta"], [
-                        "field.beta.id",
+                    moduleIdentity, [], [typeExportKey], [
+                        fieldExportKey,
                     ]));
         }
 
-        var beta = CreateClassProvider("BetaProvider", "int32");
+        var gamma = CreateClassProvider("GammaProvider", "Gamma",
+            "type.gamma", "field.gamma.id", "int32");
+        var betaTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public class Beta {
+                    public Gamma Next;
+                }
+            }
+            """);
+        var betaCompilation = Compilation.CreateLibrary(betaTree,
+            gamma.Reference);
+        Assert.That(betaCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, betaCompilation.Diagnostics));
+        var betaProgram = (BoundProgram)betaCompilation.Program!;
+        var betaDeclaration = betaTree.Root.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var betaField = betaDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.FieldDeclaration);
+        var betaClassIndex = betaProgram.SourceClassProgramAssociation!
+            .Declarations.Single(declaration =>
+                declaration.Span == betaDeclaration.Span).ClassIndex;
+        var betaExport = new TrRmSourceClassExport(betaProgram,
+            betaClassIndex, betaDeclaration.Span, "type.beta", [
+                new TrRmSourceClassMemberExport(0, betaField.Span,
+                    "field.beta.next"),
+            ]);
+        var betaArtifact = TrRmExecutableCompiler.EmitStandard(betaProgram,
+            "BetaProvider", schemaIdentity, targetRequirement, [], [],
+            [betaExport], []);
+        var betaInput = new TrRmStandardArtifactInput(schemaIdentity,
+            betaArtifact);
+        var beta = (Input: betaInput,
+            Reference: TrRmExecutableCompiler.CreateStandardReference(
+                betaInput, "BetaProvider", [gamma.Input], ["type.beta"], [
+                    "field.beta.next",
+                ]));
         var parentTree = SyntaxTree.Parse("""
             namespace Demo {
                 public class Parent {
@@ -4401,8 +4442,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var parentInput = new TrRmStandardArtifactInput(schemaIdentity,
             parentArtifact);
         var parentReference = TrRmExecutableCompiler.CreateStandardReference(
-            parentInput, "AlphaProvider", [beta.Input], ["type.parent"],
-            ["field.parent.value"]);
+            parentInput, "AlphaProvider", [beta.Input, gamma.Input],
+            ["type.parent"], ["field.parent.value"]);
         var parentOnlyReference
             = TrRmExecutableCompiler.CreateStandardReferenceSet([
                 parentReference,
@@ -4434,17 +4475,23 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 binding.ProducerIdentity == "BetaProvider"
                 && binding.ExportKey == "type.beta"),
             Is.True);
+        Assert.That(Enumerable.Range(1, parentOnlyTables.Imports.Count)
+            .Select(parentOnlyTables.Imports.GetBindingForImportRow)
+            .Any(static binding =>
+                binding.ProducerIdentity == "GammaProvider"
+                && binding.ExportKey == "type.gamma"),
+            Is.True);
         var parentOnlyLoaded = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(schemaIdentity,
                 parentOnlyArtifact), "ParentOnlyConsumer",
-            [parentInput, beta.Input]);
+            [parentInput, beta.Input, gamma.Input]);
         var parentOnlyReemitted = TrRmExecutableCompiler.EmitStandard(
             parentOnlyLoaded, "ParentOnlyConsumer", schemaIdentity,
             targetRequirement);
         _ = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(schemaIdentity,
                 parentOnlyReemitted), "ParentOnlyConsumer",
-            [parentInput, beta.Input]);
+            [parentInput, beta.Input, gamma.Input]);
 
         var reference = TrRmExecutableCompiler.CreateStandardReferenceSet(
             [parentReference, beta.Reference]);
@@ -4454,6 +4501,9 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var importedBeta = reference.StandardClassDeclarations.Single(
             static declaration =>
                 declaration.Declaration.Name == "Beta");
+        var importedGamma = reference.StandardClassDeclarations.Single(
+            static declaration =>
+                declaration.Declaration.Name == "Gamma");
         var parentFieldType = parent.Declaration.Fields.Single().Type;
         Assert.That(BoundGenericNominalTypeTypes.IsType(parentFieldType),
             Is.True);
@@ -4464,13 +4514,14 @@ internal sealed class TrRmC1EnumClosureSourceTests
         Assert.That(importedBeta.Expectations, Has.Length.EqualTo(1));
         Assert.That(importedBeta.SelectedExportKeys,
             Is.EqualTo(["type.beta"]));
+        Assert.That(importedGamma.Expectations, Has.Length.EqualTo(1));
 
         var queryCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
                 using Demo;
                 nint CombinedOffset() {
                     return unsafe(offsetof(Parent, Value))
-                        + unsafe(offsetof(Beta, Id));
+                        + unsafe(offsetof(Beta, Next));
                 }
                 """), reference, new CompilationOptions {
                 LayoutCoreRegistration
@@ -4503,25 +4554,29 @@ internal sealed class TrRmC1EnumClosureSourceTests
             Is.True);
         Assert.That(imports.Any(static binding =>
                 binding.ProducerIdentity == "BetaProvider"
-                && binding.ExportKey == "field.beta.id"),
+                && binding.ExportKey == "field.beta.next"),
+            Is.True);
+        Assert.That(imports.Any(static binding =>
+                binding.ProducerIdentity == "GammaProvider"
+                && binding.ExportKey == "type.gamma"),
             Is.True);
 
         var loaded = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
-            "ClassHandleConsumer", [parentInput, beta.Input]);
+            "ClassHandleConsumer", [parentInput, beta.Input, gamma.Input]);
         var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
             "ClassHandleConsumer", schemaIdentity, targetRequirement);
         var reloaded = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(schemaIdentity, reemitted),
-            "ClassHandleConsumer", [parentInput, beta.Input]);
+            "ClassHandleConsumer", [parentInput, beta.Input, gamma.Input]);
         Assert.That(reloaded.Functions.Single().Name,
             Is.EqualTo("CombinedOffset"));
 
-        var incompatibleBeta
-            = CreateClassProvider("BetaProvider", "int64");
+        var incompatibleGamma = CreateClassProvider("GammaProvider",
+            "Gamma", "type.gamma", "field.gamma.id", "int64");
         Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.CreateStandardReferenceSet([
-                parentReference, incompatibleBeta.Reference,
+                parentReference, beta.Reference, incompatibleGamma.Reference,
             ]));
     }
 
