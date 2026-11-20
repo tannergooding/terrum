@@ -11128,7 +11128,9 @@ public static partial class TrRmExecutableCompiler
                     || function.NativeFunctionPointerType is not null
                     || function.NativeCallableConvention is not null
                     || function.IndexedBody is not null
-                    || !function.OrdinaryParameterDefaults.IsDefaultOrEmpty
+                    || function.OrdinaryParameterDefaults.IsDefault
+                    || (!schema.UsesClassParameterDefaults()
+                        && !function.OrdinaryParameterDefaults.IsEmpty)
                     || !function.DeclarationContractClauses.IsDefaultOrEmpty
                     || !function.FriendTargets.IsDefaultOrEmpty
                     || function.ParameterCount
@@ -11175,10 +11177,57 @@ public static partial class TrRmExecutableCompiler
                         ordinal, typeSpecReference, 0, 0));
                     if (schema.UsesClassParameterDefaults())
                     {
+                        uint defaultConstantSourceRow = 0;
+                        var parameterDefaults
+                            = function.OrdinaryParameterDefaults
+                                .Where(defaultValue =>
+                                    defaultValue.ParameterOrdinal == ordinal)
+                                .ToArray();
+                        if (parameterDefaults.Length > 1)
+                        {
+                            throw new InvalidDataException(
+                                "A local CM1 module function has duplicate parameter defaults.");
+                        }
+
+                        if (parameterDefaults.Length == 1)
+                        {
+                            var parameterDefault = parameterDefaults[0];
+                            if (parameterDefault.IsPending
+                                || parameterDefault.Value
+                                    is not BoundConstant constant
+                                || parameterDefault.Expression is not null
+                                || constant.Type != parameter.Type
+                                || constant.RepresentationType
+                                    != parameter.Type
+                                || parameter.Type is PrimitiveType.NativeInt
+                                    or PrimitiveType.NativeUInt
+                                || !constant.Bits.IsCanonicalFor(
+                                    parameter.Type)
+                                || !TryGetC1M1SourceScalarTypeSpecReference(
+                                    parameter.Type, out _))
+                            {
+                                throw Unsupported(
+                                    "A local CM1 module function default must be an exact fixed-scalar constant.");
+                            }
+
+                            var frozenValue
+                                = frozenScalarValueBuilder.Add(constant);
+                            if (frozenValue.TypeSpecRef
+                                != typeSpecReference)
+                            {
+                                throw Unsupported(
+                                    "A local CM1 module function default changed its exact parameter TypeSpec.");
+                            }
+
+                            defaultConstantSourceRow
+                                = frozenValue.ConstantSourceRow;
+                        }
+
                         parameterSurfaceRows.Add(
                             new C1M1ParameterSurfaceRow(
                                 methodRows.Count + 1, ordinal,
-                                parameter.Name, 0));
+                                parameter.Name,
+                                defaultConstantSourceRow));
                     }
                     else if (schema.UsesMethodParameterLabels())
                     {
@@ -11755,8 +11804,6 @@ public static partial class TrRmExecutableCompiler
                 || function.Intrinsic != BoundIntrinsic.None
                 || function.NoFailureProof
                 || function.HasPureEvaluationForm
-                || function.HasOrdinaryParameterDefaultSurface
-                || !function.OrdinaryParameterDefaults.IsEmpty
                 || !function.DeclarationContractClauses.IsDefaultOrEmpty
                 || !C1M1DependencyContractsEqual(
                     function.DependencyContracts,

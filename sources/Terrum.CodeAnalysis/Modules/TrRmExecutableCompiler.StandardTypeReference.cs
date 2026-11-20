@@ -1731,6 +1731,11 @@ public static partial class TrRmExecutableCompiler
                 var variables
                     = ImmutableArray.CreateBuilder<BoundVariable>(
                         parameterCount);
+                var ordinaryParameterDefaults
+                    = ImmutableArray.CreateBuilder<
+                        BoundOrdinaryParameterDefault>();
+                var hasClassParameterSurface
+                    = rootTables.Schema.UsesClassParameterDefaults();
                 for (var ordinal = 0; ordinal < parameterCount; ordinal++)
                 {
                     var parameterRow = parameterStart + ordinal;
@@ -1745,9 +1750,62 @@ public static partial class TrRmExecutableCompiler
                             "A selected C2 module function has an unsupported parameter mode or type.");
                     }
 
+                    var parameterName = "arg" + ordinal.ToString(
+                        System.Globalization.CultureInfo.InvariantCulture);
+                    if (hasClassParameterSurface)
+                    {
+                        if (!rootTables.MethodParameterLabels
+                                .TryGetNameStringRow(methodRow,
+                                    checked((uint)ordinal),
+                                    out var nameStringRow)
+                            || !rootTables.MethodParameterLabels
+                                .TryGetDefaultConstantSourceRow(methodRow,
+                                    checked((uint)ordinal),
+                                    out var defaultConstantSourceRow))
+                        {
+                            throw Invalid(
+                                "A CM1 top-level MethodDef has an incomplete parameter surface.");
+                        }
+
+                        parameterName
+                            = rootTables.Strings.DecodeName(nameStringRow);
+                        if (defaultConstantSourceRow != 0)
+                        {
+                            var defaultValue
+                                = TrRmConstantSourceValueValidator
+                                    .MaterializeFrozenScalar(
+                                        checked((int)
+                                            defaultConstantSourceRow),
+                                        rootTables.Parameters
+                                            .GetTypeSpec(parameterRow),
+                                        rootModuleRow,
+                                        rootSnapshot.TargetRequirement,
+                                        rootTables.ConstantSources,
+                                        rootTables.FrozenValueNodes,
+                                        rootTables.Blobs,
+                                        rootTables.TypeSpecs,
+                                        rootTables.Features,
+                                        rootTables.Modules,
+                                        rootTables.A3LayoutResourceLedger);
+                            ordinaryParameterDefaults.Add(
+                                new BoundOrdinaryParameterDefault(ordinal,
+                                    defaultValue, null, -1, default,
+                                    IsPending: false));
+                        }
+                    }
+                    else if (rootTables.Schema.UsesMethodParameterLabels()
+                        && rootTables.MethodParameterLabels
+                            .TryGetNameStringRow(methodRow,
+                                checked((uint)ordinal),
+                                out var labelStringRow))
+                    {
+                        parameterName
+                            = rootTables.Strings.DecodeName(
+                                labelStringRow);
+                    }
+
                     variables.Add(new BoundVariable(
-                        "arg" + ordinal.ToString(
-                            System.Globalization.CultureInfo.InvariantCulture),
+                        parameterName,
                         parameterType, false, default) {
                         IsImplicitRef = isImplicitRef,
                     });
@@ -1784,8 +1842,10 @@ public static partial class TrRmExecutableCompiler
                         moduleIdentity, exportKey,
                         rootSnapshot.TargetRequirement,
                         rootSnapshot.RuntimePolicy),
-                    OrdinaryParameterDefaults =
-                        ImmutableArray<BoundOrdinaryParameterDefault>.Empty,
+                    HasOrdinaryParameterDefaultSurface
+                        = hasClassParameterSurface,
+                    OrdinaryParameterDefaults
+                        = ordinaryParameterDefaults.ToImmutable(),
                 });
             }
         }

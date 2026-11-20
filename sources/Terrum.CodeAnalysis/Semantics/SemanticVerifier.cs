@@ -24777,7 +24777,17 @@ public static partial class SemanticVerifier
             && function.SourceDeclarationInputOrdinal < 0
             && function.GenericMethodInstantiation is null
             && function.ImportedGenericMethod is null;
-        if ((!isImportedClassMethod
+        var isImportedModuleFunction = function.IsExternal
+            && function.IsModuleReference
+            && function.ModuleImport is not null
+            && function.DeclaringStruct is null
+            && function.SourceInputOrdinal < 0
+            && function.SourceDeclarationInputOrdinal < 0
+            && function.GenericMethodInstantiation is null
+            && function.ImportedGenericMethod is null;
+        var isImportedFunction
+            = isImportedClassMethod || isImportedModuleFunction;
+        if ((!isImportedFunction
                 && (function.SourceDeclarationInputOrdinal < 0
                     || function.SourceDeclarationInputOrdinal
                         >= program.SourceInputCount))
@@ -24807,7 +24817,7 @@ public static partial class SemanticVerifier
             if (parameterDefault is null
                 || parameterDefault.ParameterOrdinal <= previousOrdinal
                 || parameterDefault.ParameterOrdinal >= parameterCount
-                || (isImportedClassMethod
+                || (isImportedFunction
                     ? parameterDefault.SourceInputOrdinal != -1
                         || parameterDefault.Span != default
                         || parameterDefault.Value is not BoundConstant

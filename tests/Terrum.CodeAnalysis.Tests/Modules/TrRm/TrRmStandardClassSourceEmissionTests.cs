@@ -5714,6 +5714,121 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
+    public void BindsTopLevelModuleFunctionParameterDefaults()
+    {
+        var schemaIdentity
+            = C1M1Construction2ClassParameterDefaultsCopyEvidenceSchemaIdentity;
+        var providerTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public class Payload {
+                    public int32 Value;
+                    public Payload(int32 value) { Value = value; }
+                }
+                public unsafe int32 Echo(Payload value, int32 count = 7) {
+                    return 7;
+                }
+            }
+            """);
+        var providerCompilation = Compilation.CreateLibrary(providerTree);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var providerProgram = (BoundProgram)providerCompilation.Program!;
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, "DefaultProvider", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], CreateClassExports(providerProgram, providerTree));
+        var providerReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    providerArtifact),
+                "DefaultProvider", []);
+        var echo = providerReference.Functions.Single(
+            static function => function.Name == "Echo");
+        Assert.That(echo.HasOrdinaryParameterDefaultSurface, Is.True);
+        var echoDefault = echo.OrdinaryParameterDefaults.Single();
+        Assert.That(echoDefault.ParameterOrdinal, Is.EqualTo(1));
+        Assert.That(echoDefault.Value!.Bits,
+            Is.EqualTo(ScalarBits.FromPayload(PrimitiveType.Int32,
+                [7, 0, 0, 0])));
+
+        var useTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public unsafe int32 Use(Payload value) {
+                    return unsafe(Echo(value));
+                }
+            }
+            """);
+        var useCompilation = Compilation.CreateLibrary(useTree,
+            providerReference);
+        Assert.That(useCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, useCompilation.Diagnostics));
+        var useProgram = (BoundProgram)useCompilation.Program!;
+        var useArtifact = TrRmExecutableCompiler.EmitStandard(useProgram,
+            "DefaultConsumer", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], CreateClassExports(useProgram, useTree));
+        var useTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                useArtifact,
+                TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft));
+        Assert.That(useTables.Exports.TryGetDefinitionForKey(1, "Use",
+            out var useDefinition), Is.True);
+        var useMethodRow = checked((int)(useDefinition & 0x00FF_FFFF));
+        var useBody = useTables.Bodies.GetRegisterBody(
+            useTables.Methods.GetBodyRow(useMethodRow),
+            useTables.Contracts.Count);
+        Assert.That(useBody.MethodCount, Is.EqualTo(1));
+        Assert.That(useBody.ConstantCount, Is.EqualTo(1));
+        var useConstantSourceRow = checked((int)
+            BinaryPrimitives.ReadUInt32LittleEndian(
+                useBody.ConstantMap.Slice(sizeof(uint))));
+        var useConstantNodeRow = checked((int)
+            useTables.ConstantSources.GetPayloadReference(
+                useConstantSourceRow));
+        Assert.That(useTables.FrozenValueNodes.GetScalarPayload(
+                useConstantNodeRow, useTables.Blobs).ToArray(),
+            Is.EqualTo(new byte[] { 7, 0, 0, 0 }));
+
+        var useInput = new TrRmStandardArtifactInput(schemaIdentity,
+            useArtifact);
+        var useReference
+            = TrRmExecutableCompiler.CreateStandardReference(useInput,
+                "DefaultConsumer", [new TrRmStandardArtifactInput(
+                    schemaIdentity, providerArtifact)]);
+        var sourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), useReference);
+        Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceFreeCompilation.Diagnostics));
+        var sourceFreeArtifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)sourceFreeCompilation.Program!,
+            "DefaultConsumerReemitted", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var sourceFreeTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                sourceFreeArtifact,
+                TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft));
+        Assert.That(sourceFreeTables.Exports.TryGetDefinitionForKey(1,
+            "Use", out var sourceFreeUseDefinition), Is.True);
+        var sourceFreeUseMethodRow = checked((int)(
+            sourceFreeUseDefinition & 0x00FF_FFFF));
+        var sourceFreeUseBody = sourceFreeTables.Bodies.GetRegisterBody(
+            sourceFreeTables.Methods.GetBodyRow(sourceFreeUseMethodRow),
+            sourceFreeTables.Contracts.Count);
+        Assert.That(sourceFreeUseBody.MethodCount, Is.EqualTo(1));
+        Assert.That(sourceFreeUseBody.ConstantCount, Is.EqualTo(1));
+        var sourceFreeConstantSourceRow = checked((int)
+            BinaryPrimitives.ReadUInt32LittleEndian(
+                sourceFreeUseBody.ConstantMap.Slice(sizeof(uint))));
+        var sourceFreeConstantNodeRow = checked((int)
+            sourceFreeTables.ConstantSources.GetPayloadReference(
+                sourceFreeConstantSourceRow));
+        Assert.That(sourceFreeTables.FrozenValueNodes.GetScalarPayload(
+                sourceFreeConstantNodeRow, sourceFreeTables.Blobs).ToArray(),
+            Is.EqualTo(new byte[] { 7, 0, 0, 0 }));
+    }
+
+    [Test]
     public void EmitsAndReemitsUnitCallsToForwardedModuleFunctions()
     {
         var providerTree = SyntaxTree.Parse("""
@@ -5912,7 +6027,9 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     public Payload(int32 value) { Value = value; }
                 }
                 [return: DependsOn(nameof(value))]
-                public unsafe int32 Echo(Payload value) { return 7; }
+                public unsafe int32 Echo(Payload value, int32 count = 7) {
+                    return 7;
+                }
             }
             """);
         var providerCompilation = Compilation.CreateLibrary(providerTree);
@@ -5943,12 +6060,12 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     public Box(int32 value) { Value = value; }
                 }
                 [return: DependsOn(nameof(value))]
-                public unsafe int32 Forward(Payload value) {
-                    return unsafe(Echo(value));
+                public unsafe int32 Forward(Payload value, int32 count) {
+                    return unsafe(Echo(value, count));
                 }
                 [return: DependsOn(nameof(value))]
-                public unsafe int32 ForwardAlias(Payload value) {
-                    return unsafe(EchoAlias(value));
+                public unsafe int32 ForwardAlias(Payload value, int32 count) {
+                    return unsafe(EchoAlias(value, count));
                 }
             }
             """);
@@ -6067,6 +6184,39 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 Assert.That(sourceDefaultRow, Is.Zero, exportKey);
                 Assert.That(reemittedDefaultRow, Is.Zero, exportKey);
             }
+            Assert.That(forwarderTables.MethodParameterLabels
+                    .TryGetNameStringRow(sourceMethodRow, 1,
+                        out var sourceCountLabel),
+                Is.True, exportKey);
+            Assert.That(reemittedTables.MethodParameterLabels
+                    .TryGetNameStringRow(importedMethodRow, 1,
+                        out var reemittedCountLabel),
+                Is.True, exportKey);
+            Assert.That(reemittedTables.Strings.DecodeName(
+                    reemittedCountLabel),
+                Is.EqualTo(forwarderTables.Strings.DecodeName(
+                    sourceCountLabel)), exportKey);
+            var hasSourceCountDefault = forwarderTables
+                .MethodParameterLabels.TryGetDefaultConstantSourceRow(
+                    sourceMethodRow, 1, out var sourceCountDefaultRow);
+            var hasReemittedCountDefault = reemittedTables
+                .MethodParameterLabels.TryGetDefaultConstantSourceRow(
+                    importedMethodRow, 1,
+                    out var reemittedCountDefaultRow);
+            Assert.That(hasSourceCountDefault, Is.True, exportKey);
+            Assert.That(hasReemittedCountDefault, Is.True, exportKey);
+            var sourceCountDefaultNodeRow = checked((int)
+                forwarderTables.ConstantSources.GetPayloadReference(
+                    checked((int)sourceCountDefaultRow)));
+            var reemittedCountDefaultNodeRow = checked((int)
+                reemittedTables.ConstantSources.GetPayloadReference(
+                    checked((int)reemittedCountDefaultRow)));
+            Assert.That(reemittedTables.FrozenValueNodes.GetScalarPayload(
+                    reemittedCountDefaultNodeRow, reemittedTables.Blobs)
+                    .ToArray(),
+                Is.EqualTo(forwarderTables.FrozenValueNodes
+                    .GetScalarPayload(sourceCountDefaultNodeRow,
+                        forwarderTables.Blobs).ToArray()), exportKey);
             Assert.That(reemittedTables.Contracts.GetEffectsMask(
                     importedMethodRow),
                 Is.EqualTo(4));
@@ -6092,7 +6242,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 importedMethodRow);
             var (parameterStart, parameterCount) = reemittedTables.Signatures
                 .GetParamRange(signatureRow);
-            Assert.That(parameterCount, Is.EqualTo(1));
+            Assert.That(parameterCount, Is.EqualTo(2));
             Assert.That(reemittedTables.TypeSpecs.GetNominalTypeDefRow(
                     reemittedTables.Parameters.GetTypeSpec(parameterStart),
                     reemittedTables.TypeDefs, reemittedTables.Imports),
@@ -6134,6 +6284,18 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                         out var reemittedFunctionDefaultRow),
                 Is.True, functionKey);
             Assert.That(reemittedFunctionDefaultRow, Is.Zero, functionKey);
+            Assert.That(reemittedTables.MethodParameterLabels
+                    .TryGetNameStringRow(functionMethodRow, 1,
+                        out var reemittedCountLabel),
+                Is.True, functionKey);
+            Assert.That(reemittedTables.Strings.DecodeName(
+                    reemittedCountLabel),
+                Is.EqualTo("count"), functionKey);
+            Assert.That(reemittedTables.MethodParameterLabels
+                    .TryGetDefaultConstantSourceRow(functionMethodRow, 1,
+                        out var reemittedCountDefault),
+                Is.True, functionKey);
+            Assert.That(reemittedCountDefault, Is.Zero, functionKey);
             Assert.That(reemittedTables.Contracts.GetDependencyContracts(
                     functionMethodRow),
                 Has.Length.EqualTo(1), functionKey);
@@ -6144,7 +6306,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 functionMethodRow);
             var (parameterStart, parameterCount) = reemittedTables.Signatures
                 .GetParamRange(signatureRow);
-            Assert.That(parameterCount, Is.EqualTo(1));
+            Assert.That(parameterCount, Is.EqualTo(2));
             Assert.That(reemittedTables.TypeSpecs.GetNominalTypeDefRow(
                     reemittedTables.Parameters.GetTypeSpec(parameterStart),
                     reemittedTables.TypeDefs, reemittedTables.Imports),
@@ -6168,9 +6330,9 @@ internal sealed class TrRmStandardClassSourceEmissionTests
 
         var useTree = SyntaxTree.Parse("""
             namespace Demo {
-                public int32 Use(Payload value) {
-                    unsafe(Forward(value));
-                    return unsafe(ForwardAlias(value));
+                public int32 Use(Payload value, int32 count) {
+                    unsafe(Forward(value, count));
+                    return unsafe(ForwardAlias(value, count));
                 }
             }
             """);
