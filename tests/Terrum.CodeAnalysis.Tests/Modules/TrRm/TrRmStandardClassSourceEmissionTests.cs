@@ -6361,6 +6361,100 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 .ReturnType,
             Is.EqualTo(PrimitiveType.Int32));
 
+        var relocatedProviderCTree = SyntaxTree.Parse("""
+            namespace Demo {
+                [Blittable] [Layout(LayoutKind.Sequential)]
+                public struct Prefix {
+                    public int32 Marker;
+                }
+                [Blittable] [Layout(LayoutKind.Sequential)]
+                public struct Leaf {
+                    public int32 Value;
+                }
+            }
+            """);
+        var relocatedProviderCCompilation = Compilation.CreateLibrary(
+            relocatedProviderCTree, layoutOptions);
+        Assert.That(relocatedProviderCCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                relocatedProviderCCompilation.Diagnostics));
+        var relocatedProviderCProgram
+            = (BoundProgram)relocatedProviderCCompilation.Program!;
+        var relocatedProviderCArtifact
+            = TrRmExecutableCompiler.EmitStandard(
+                relocatedProviderCProgram, "StructMethodProviderC",
+                schemaIdentity,
+                TrRmModuleTableReader.WindowsX64NativeTargetRequirement, [
+                    new TrRmSourceTypeExport("Demo", "Prefix",
+                        "type.prefix") {
+                        FieldExports = [
+                            new TrRmSourceFieldExport("Marker",
+                                "field.prefix.marker"),
+                        ],
+                    },
+                    new TrRmSourceTypeExport("Demo", "Leaf",
+                        "type.leaf") {
+                        FieldExports = [
+                            new TrRmSourceFieldExport("Value",
+                                "field.leaf.value"),
+                        ],
+                    },
+                ], [], []);
+        var relocatedProviderCTables
+            = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                    relocatedProviderCArtifact,
+                    TrRmArtifactSchema
+                        .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft));
+        var originalProviderCTables
+            = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                    providerCArtifact,
+                    TrRmArtifactSchema
+                        .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft));
+        Assert.That(originalProviderCTables.Exports
+            .TryGetDefinitionForKey(1, "type.leaf",
+                out var originalLeafDefinition), Is.True);
+        Assert.That(relocatedProviderCTables.Exports
+            .TryGetDefinitionForKey(1, "type.leaf",
+                out var relocatedLeafDefinition), Is.True);
+        Assert.That(relocatedLeafDefinition,
+            Is.Not.EqualTo(originalLeafDefinition));
+        Assert.That(originalProviderCTables.Exports
+            .TryGetDefinitionForKey(1, "field.leaf.value",
+                out var originalLeafFieldDefinition), Is.True);
+        Assert.That(relocatedProviderCTables.Exports
+            .TryGetDefinitionForKey(1, "field.leaf.value",
+                out var relocatedLeafFieldDefinition), Is.True);
+        Assert.That(relocatedLeafFieldDefinition,
+            Is.Not.EqualTo(originalLeafFieldDefinition));
+        var relocatedLinkedProgram = TrRmExecutableCompiler.LoadStandard(
+            consumerInput, "StructMethodConsumer", [
+                providerBInput,
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    relocatedProviderCArtifact),
+            ]);
+        Assert.That(relocatedLinkedProgram.Functions.Single(
+                static function => function.Name == "ReadNested")
+                .ReturnType,
+            Is.EqualTo(PrimitiveType.Int32));
+        var relocatedConsumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            relocatedLinkedProgram, "StructMethodConsumer", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        Assert.That(relocatedConsumerArtifact, Is.EqualTo(consumerArtifact));
+        var reloadedRelocatedProgram = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                relocatedConsumerArtifact),
+            "StructMethodConsumer", [
+                providerBInput,
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    relocatedProviderCArtifact),
+            ]);
+        Assert.That(reloadedRelocatedProgram.Functions.Single(
+                static function => function.Name == "ReadNested")
+                .ReturnType,
+            Is.EqualTo(PrimitiveType.Int32));
+
         var incompatibleProviderCTree = SyntaxTree.Parse("""
             namespace Demo {
                 [Blittable] [Layout(LayoutKind.Sequential)]

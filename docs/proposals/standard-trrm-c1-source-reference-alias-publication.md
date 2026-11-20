@@ -215,10 +215,12 @@ or permission to reuse machine code after its dependencies change.
 The combined factory now validates Module-qualified selections and projects
 the first explicit type/field key as the representative, while retaining each
 method view's own key. Public regressions now cover the initial supplied-
-provider chain, source-free remapping, and a type/field alias selection whose
-nonrepresentative keys split under replacement while the selected keys and
-method views remain intact. They remain unverified under the active hold.
-Alias removal, invalid nonrepresentative selections, pre-existing shared
+provider chain, source-free remapping, a type/field alias selection whose
+nonrepresentative keys split under replacement, TypeDef/FieldDef selection
+from a non-first co-located Module, and compatible TypeDef/FieldDef row
+relocation. The selected keys and method views remain intact in the alias
+case. These regressions remain unverified under the active hold. Alias
+removal, invalid nonrepresentative selections, pre-existing shared
 expectation groups, co-located provider Imports, deeper chains/diamonds, and
 multiple using-Module contexts for one expected TypeDef remain open. Emitting
 all selected type/field aliases into one expected DefId is not a valid

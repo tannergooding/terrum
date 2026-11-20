@@ -288,13 +288,17 @@ independent method-view keys, source-free re-emission and provider replacement
 that splits omitted aliases. Both remain unverified under the active hold.
 A third regression selects TypeDef/FieldDef roots from a non-first
 co-located Module and checks consumer ModuleRefs plus source-free reload; it
-also remains unverified. Co-located provider Imports, deeper chains/diamonds,
-alias removal and retained shared-expectation groups, multiple using-Module
-contexts for one expected TypeDef, source-free row remapping under provider
-replacement, CLI selection and runtime qualification remain open. The loader
-still requires the whole validated Module-set TypeDef/method closure to fit
-its bounded Blittable-struct path; selected-root-only loading for unrelated
-declarations remains open. Snapshot-preserving source-free emission does not establish row
+also remains unverified. A fourth regression relocates selected TypeDef/
+FieldDef rows by prepending an unrelated provider struct, loads the unchanged
+consumer and intermediate provider by ExportKey, then source-free re-emits and
+reloads the consumer against the relocated provider; it too remains
+unverified. Co-located provider Imports, deeper chains/diamonds, alias removal
+and retained shared-expectation groups, multiple using-Module contexts for one
+expected TypeDef, and full Import/Export/ModuleRef/Body map permutations remain
+open. The loader still requires the whole validated Module-set
+TypeDef/method closure to fit its bounded Blittable-struct path;
+selected-root-only loading for unrelated declarations remains open.
+Snapshot-preserving source-free emission does not establish general row
 remapping for provider replacement.
 Compiler-owned source-class anchors and explicit member-key capture are
 implemented, but complete bodyful
