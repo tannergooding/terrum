@@ -791,16 +791,12 @@ public static partial class TrRmExecutableCompiler
                     && standard.Value.Expectations.IsEmpty
                     && BoundStandardEnumDeclarationContract
                         .IsValidDefinition(standard.Value, definition));
-            var distinctEnumProviderIdentities = enumProviderIdentities
-                .Where(static identity => identity is not null)
-                .Select(static identity => identity!)
-                .Distinct(StringComparer.Ordinal).ToArray();
             var enumProvidersFitQueryRoots
                 = enumProvidersAreDirect
-                    && distinctEnumProviderIdentities.Length <= 1
-                    && (distinctEnumProviderIdentities.Length == 0
-                        || classQueryRootProviderIdentities.Contains(
-                            distinctEnumProviderIdentities[0]));
+                    && enumProviderIdentities.All(identity =>
+                        identity is not null
+                        && classQueryRootProviderIdentities.Contains(
+                            identity));
             var queryDependenciesFitRoots
                 = structureProvidersFitQueryRoots
                     && enumProvidersFitQueryRoots;
@@ -1239,12 +1235,15 @@ public static partial class TrRmExecutableCompiler
                     var origin = structure.StandardTypeOrigin!;
                     if (rootSnapshot is not null
                         && !SameA2SourceTypeProviderSnapshot(rootSnapshot,
-                            origin.Provider))
+                            origin.Provider)
+                        && !allowMultipleClassQueryProviders)
                     {
                         throw Unsupported(
                             "Mixed EN1 struct and enum re-emission cannot combine root Modules.");
                     }
-                    if (origin.IsLookupRoot)
+                    if (origin.IsLookupRoot
+                        && (!allowMultipleClassQueryProviders
+                            || rootSnapshot is null))
                     {
                         rootSnapshot = origin.Provider;
                     }

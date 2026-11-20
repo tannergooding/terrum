@@ -602,8 +602,22 @@ public static partial class TrRmExecutableCompiler
             BoundSourceTypeProviderSnapshot ownerProvider,
             PrimitiveType type)
         {
-            if (BoundEnumTypes.IsType(type)
-                || BoundGenericNominalTypeTypes.IsType(type)
+            if (BoundEnumTypes.IsType(type))
+            {
+                var enumIndex = BoundEnumTypes.Index(type);
+                var enumDefinitions
+                    = references[referenceIndex].EnumDefinitions;
+                return (uint)enumIndex < (uint)enumDefinitions.Length
+                    && enumDefinitions[enumIndex].ModuleImport is null
+                    && enumDefinitions[enumIndex].Identity
+                        is BoundEnumDeclarationIdentity.Standard standard
+                    && standard.Value.IsLookupRoot
+                    && standard.Value.Expectations.IsEmpty
+                    && SameA2SourceTypeProviderSnapshot(ownerProvider,
+                        standard.Value.Declaration.Site.Snapshot);
+            }
+
+            if (BoundGenericNominalTypeTypes.IsType(type)
                 || BoundSpanTypeTypes.IsType(type)
                 || ManagedClassTypes.IsClass(type)
                 || NativePointerTypes.IsType(type)
@@ -812,8 +826,12 @@ public static partial class TrRmExecutableCompiler
                 PrimitiveType RemapDirectStructureFieldType(
                     PrimitiveType type)
                 {
-                    if (BoundEnumTypes.IsType(type)
-                        || BoundGenericNominalTypeTypes.IsType(type)
+                    if (BoundEnumTypes.IsType(type))
+                    {
+                        return type;
+                    }
+
+                    if (BoundGenericNominalTypeTypes.IsType(type)
                         || BoundSpanTypeTypes.IsType(type)
                         || ManagedClassTypes.IsClass(type)
                         || NativePointerTypes.IsType(type)
@@ -1039,6 +1057,85 @@ public static partial class TrRmExecutableCompiler
             });
         }
         var enumDefinitionsResult = enumDefinitionsBuilder.MoveToImmutable();
+
+        if (directStructureComposition)
+        {
+            var remappedStructures = structuresResult.ToBuilder();
+            for (var structureIndex = 0;
+                structureIndex < directStructureCompositionSources.Count;
+                structureIndex++)
+            {
+                var (referenceIndex, _) =
+                    directStructureCompositionSources[structureIndex];
+                var enumMap = enumMaps[referenceIndex];
+                PrimitiveType RemapDirectStructureEnumType(
+                    PrimitiveType type)
+                {
+                    if (!BoundEnumTypes.IsType(type))
+                    {
+                        return type;
+                    }
+
+                    var enumIndex = BoundEnumTypes.Index(type);
+                    if ((uint)enumIndex >= (uint)enumMap.Length)
+                    {
+                        throw Unsupported(
+                            "A direct class layout struct enum field is outside the selected enum provider closure.");
+                    }
+
+                    return BoundEnumTypes.Type(enumMap[enumIndex]);
+                }
+
+                BoundStructField RemapDirectStructureField(
+                    BoundStructField field)
+                {
+                    var fieldOrigin = field.StandardFieldOrigin;
+                    if (fieldOrigin is not null)
+                    {
+                        if (fieldOrigin.ExpectedDeclaration is not
+                                BoundStructField expectedField)
+                        {
+                            throw Unsupported(
+                                "Direct class layout struct FieldDefs require one exact expected declaration.");
+                        }
+
+                        fieldOrigin = fieldOrigin with {
+                            ExpectedDeclaration = expectedField with {
+                                Type = RemapDirectStructureEnumType(
+                                    expectedField.Type),
+                                StandardFieldOrigin = null,
+                            },
+                        };
+                    }
+
+                    return field with {
+                        Type = RemapDirectStructureEnumType(field.Type),
+                        StandardFieldOrigin = fieldOrigin,
+                    };
+                }
+
+                var structure = remappedStructures[structureIndex];
+                var origin = structure.StandardTypeOrigin!;
+                var expectedDeclaration
+                    = origin.ExpectedDeclaration! with {
+                        Fields = [.. origin.ExpectedDeclaration.Fields
+                            .Select(field => field with {
+                                Type = RemapDirectStructureEnumType(
+                                    field.Type),
+                                StandardFieldOrigin = null,
+                            })],
+                    };
+                remappedStructures[structureIndex] = structure with {
+                    Fields = [.. structure.Fields.Select(
+                        RemapDirectStructureField)],
+                    StandardTypeOrigin = origin with {
+                        ExpectedDeclaration = expectedDeclaration,
+                    },
+                };
+            }
+
+            structuresResult = remappedStructures.MoveToImmutable();
+        }
 
         PrimitiveType RemapClassFieldType(int referenceIndex,
             PrimitiveType type,

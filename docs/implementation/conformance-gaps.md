@@ -95,14 +95,15 @@ composer now preserves exact class target-layout variants across disjoint
 provider Modules and binds queries against both roots in memory. The EN1
 declaration emitter can emit and reload one bounded query function whose
 primitive class layout roots span distinct providers. Reference composition
-also remaps direct scalar-field inline-struct dependencies from distinct
-providers, and EN1 emission retains their selected TypeDef/FieldDef Imports.
-Direct selected enum fields from distinct root providers likewise retain
-their typed provider Imports. Regressions are unverified under the active
-hold. Enum views merge by exact provider site and retain selected aliases.
-Non-scalar or imported struct dependencies, imported enum dependencies
-outside their root provider, class-valued fields and broader
-multi-function/provider dependency closure remain open.
+also remaps direct inline-struct dependencies with scalar and selected enum
+fields across distinct providers. EN1 admits the
+selected enum providers as part of the multi-provider class-query root set
+and retains their typed enum and struct TypeDef/FieldDef Imports. Regressions
+are unverified under the active hold. Enum views merge by exact provider
+site and retain selected aliases. Pointer/other non-scalar or imported
+struct dependencies, imported enum dependencies outside their root provider,
+class-valued fields and broader multi-function/provider dependency closure
+remain open.
 
 Other proposals remain unapproved unless their owner and approval status say
 otherwise; see the [proposal index](../proposals/README.md).
