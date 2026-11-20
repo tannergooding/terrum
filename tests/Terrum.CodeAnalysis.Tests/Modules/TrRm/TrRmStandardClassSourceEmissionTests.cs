@@ -5827,6 +5827,20 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         Assert.That(sourceFreeTables.FrozenValueNodes.GetScalarPayload(
                 sourceFreeConstantNodeRow, sourceFreeTables.Blobs).ToArray(),
             Is.EqualTo(new byte[] { 7, 0, 0, 0 }));
+        var sourceFreeReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    sourceFreeArtifact), "DefaultConsumerReemitted", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        providerArtifact),
+                ]);
+        var sourceFreeEcho = sourceFreeReference.Functions.Single(
+            static function => function.Name == "Echo");
+        Assert.That(sourceFreeEcho.HasOrdinaryParameterDefaultSurface,
+            Is.True);
+        Assert.That(sourceFreeEcho.OrdinaryParameterDefaults.Single()
+            .Value!.Bits, Is.EqualTo(ScalarBits.FromPayload(
+                PrimitiveType.Int32, [7, 0, 0, 0])));
     }
 
     [Test]
