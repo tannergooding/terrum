@@ -73,7 +73,7 @@ public static partial class TrRmExecutableCompiler
         var artifacts = SnapshotStandardInputs(input, providers);
         var schemaIdentities = GetStandardSchemaIdentities(input, providers);
         if (schemaIdentities.Any(
-                IsSelectedTypeDefBindingEqualitySchemaIdentity))
+                StandardGenericMethodSchema.IsTypeBindingViews))
         {
             throw Unsupported(
                 "TypeDefBindingEquality is selected only by the combined method/type reference operation.");
@@ -210,7 +210,7 @@ public static partial class TrRmExecutableCompiler
         var artifacts = SnapshotStandardInputs(input, providers);
         var schemaIdentities = GetStandardSchemaIdentities(input, providers);
         if (schemaIdentities.Any(
-                IsSelectedTypeDefBindingEqualitySchemaIdentity))
+                StandardGenericMethodSchema.IsTypeBindingViews))
         {
             throw Unsupported(
                 "TypeDefBindingEquality is selected only by the combined method/type reference operation.");
@@ -233,6 +233,8 @@ public static partial class TrRmExecutableCompiler
                     StandardC1M1Construction2InitializerCopyEvidenceSchemaIdentity)
                 || StandardGenericMethodSchema
                     .IsTypeBindingViews(schemaIdentity)
+                || StandardGenericMethodSchema
+                    .IsClassTypeBindingViews(schemaIdentity)
                 || StringComparer.Ordinal.Equals(schemaIdentity,
                     StandardC1M1ConstructionL1R1SchemaIdentity)
                 || StringComparer.Ordinal.Equals(schemaIdentity,

@@ -34,13 +34,24 @@ public readonly ref struct TrRmTypeDefBindingEqualityTableReader
     public TrRmTypeDefBindingEqualityTableReader(ReadOnlySpan<byte> section,
         int recordCount, TrRmModuleTableReader modules,
         TrRmTypeDefTableReader types)
-        : this(section, recordCount, modules, types, null)
+        : this(section, recordCount, modules, types,
+            allowClassTypeDefs: false, resourceLedger: null)
     {
     }
 
     internal TrRmTypeDefBindingEqualityTableReader(
         ReadOnlySpan<byte> section, int recordCount,
         TrRmModuleTableReader modules, TrRmTypeDefTableReader types,
+        TrRmA3LayoutResourceLedger? resourceLedger)
+        : this(section, recordCount, modules, types,
+            allowClassTypeDefs: false, resourceLedger: resourceLedger)
+    {
+    }
+
+    internal TrRmTypeDefBindingEqualityTableReader(
+        ReadOnlySpan<byte> section, int recordCount,
+        TrRmModuleTableReader modules, TrRmTypeDefTableReader types,
+        bool allowClassTypeDefs,
         TrRmA3LayoutResourceLedger? resourceLedger)
     {
         if (recordCount is <= 0 or > 0xFF_FFFF
@@ -61,8 +72,10 @@ public readonly ref struct TrRmTypeDefBindingEqualityTableReader
             var rightTypeDef = Read(data, 8);
             if (ownerModule is 0 or > 0xFF_FFFF
                 || ownerModule > modules.Count
-                || !IsStructTypeDef(leftTypeDef, types)
-                || !IsStructTypeDef(rightTypeDef, types))
+                || !IsSupportedTypeDef(leftTypeDef, types,
+                    allowClassTypeDefs)
+                || !IsSupportedTypeDef(rightTypeDef, types,
+                    allowClassTypeDefs))
             {
                 throw InvalidEquality();
             }
@@ -81,12 +94,17 @@ public readonly ref struct TrRmTypeDefBindingEqualityTableReader
     public uint GetRightTypeDef(int row)
         => Read(GetRow(row), 8);
 
-    private static bool IsStructTypeDef(uint reference,
-        TrRmTypeDefTableReader types)
+    private static bool IsSupportedTypeDef(uint reference,
+        TrRmTypeDefTableReader types, bool allowClassTypeDefs)
     {
-        return reference is > 0 and <= 0x00FF_FFFF
-            && reference <= (uint)types.Count
-            && types.GetKind(checked((int)reference)) == 1;
+        if (reference is 0 or > 0x00FF_FFFF
+            || reference > (uint)types.Count)
+        {
+            return false;
+        }
+
+        var kind = types.GetKind(checked((int)reference));
+        return kind == 1 || allowClassTypeDefs && kind == 2;
     }
 
     private ReadOnlySpan<byte> GetRow(int row)
@@ -124,6 +142,12 @@ public static class TrRmTypeDefBindingEqualityTableWriter
     public static byte[] Encode(
         IReadOnlyList<TrRmTypeDefBindingEqualityRow> rows,
         TrRmModuleTableReader modules, TrRmTypeDefTableReader types)
+        => Encode(rows, modules, types, allowClassTypeDefs: false);
+
+    internal static byte[] Encode(
+        IReadOnlyList<TrRmTypeDefBindingEqualityRow> rows,
+        TrRmModuleTableReader modules, TrRmTypeDefTableReader types,
+        bool allowClassTypeDefs)
     {
         ArgumentNullException.ThrowIfNull(rows);
         if (rows.Count is <= 0 or > 0xFF_FFFF)
@@ -145,7 +169,8 @@ public static class TrRmTypeDefBindingEqualityTableWriter
         }
 
         _ = new TrRmTypeDefBindingEqualityTableReader(result, rows.Count,
-            modules, types);
+            modules, types, allowClassTypeDefs,
+            resourceLedger: null);
         return result;
     }
 }

@@ -2091,6 +2091,9 @@ public static class TrRmStructuralMetadataValidator
                     = new TrRmTypeDefBindingEqualityTableReader(
                         typeDefBindingEqualityBytes,
                         typeDefBindingEqualityCount, modules, types,
+                        TrRmExecutableCompiler
+                            .IsSelectedClassTypeDefBindingEqualitySchemaIdentity(
+                                standardSchemaIdentity),
                         selectedA3LayoutResourceLedger);
             }
             for (var formal = 1; formal <= generics.Count; formal++)

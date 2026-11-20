@@ -23,6 +23,107 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
     private const string C1M1Construction2ClassParameterDefaultsSchemaIdentity
         = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-class-parameter-defaults-1";
 
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ClassTypeBindingViews,
+        StandardGenericMethodSchema.C1M1Construction2TypeBindingViews,
+        StandardGenericMethodSchema.C1M1Construction2InitializerCopyEvidence)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsClassTypeBindingViews,
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsTypeBindingViews,
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidence)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsClassTypeBindingViews,
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsTypeBindingViews,
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidence)]
+    public void ReadsClassTypeDefEqualityOnlyInItsExactSuccessor(
+        string classSchemaIdentity, string classlessSchemaIdentity,
+        string parentSchemaIdentity)
+    {
+        var schema = TrRmExecutableCompiler.GetForeignInvocationSchema(
+            classSchemaIdentity);
+        var artifact = CreateRelocatedClassProvider(
+            "TypeBindingClassProvider", classSchemaIdentity);
+        var sourceTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                artifact, schema, null,
+                standardSchemaIdentity: classSchemaIdentity));
+        var prefixDefinition = sourceTables.Exports.GetExportsForModule(1)
+            .Single(static export => export.ExportKey == "PrefixKey")
+            .Definition;
+        var leafDefinition = sourceTables.Exports.GetExportsForModule(1)
+            .Single(static export => export.ExportKey == "LeafKey")
+            .Definition;
+        Assert.That(sourceTables.TypeDefs.GetKind(
+                checked((int)(prefixDefinition & 0x00FF_FFFF))),
+            Is.EqualTo(2));
+        Assert.That(sourceTables.TypeDefs.GetKind(
+                checked((int)(leafDefinition & 0x00FF_FFFF))),
+            Is.EqualTo(2));
+
+        var equalityBytes = new byte[12];
+        BinaryPrimitives.WriteUInt32LittleEndian(equalityBytes, 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            equalityBytes.AsSpan(4, 4),
+            prefixDefinition & 0x00FF_FFFF);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            equalityBytes.AsSpan(8, 4),
+            leafDefinition & 0x00FF_FFFF);
+        var sourceIndex = new TrRmArtifactIndex(artifact, schema, null,
+            standardSchemaIdentity: classSchemaIdentity);
+        var sections = new List<TrRmSection>(sourceIndex.SectionCount + 1);
+        var insertedEqualitySection = false;
+        for (var sectionIndex = 0;
+            sectionIndex < sourceIndex.SectionCount; sectionIndex++)
+        {
+            sourceIndex.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var recordCount);
+            if (!insertedEqualitySection && kind > 0x0067)
+            {
+                sections.Add(new TrRmSection(0x0067, 0, 1,
+                    equalityBytes));
+                insertedEqualitySection = true;
+            }
+
+            sections.Add(new TrRmSection(kind, flags,
+                checked((uint)recordCount), bytes.ToArray()));
+        }
+        if (!insertedEqualitySection)
+        {
+            sections.Add(new TrRmSection(0x0067, 0, 1, equalityBytes));
+        }
+
+        var artifactWithEquality = TrRmArtifactWriter.Encode(sections,
+            schema, standardSchemaIdentity: classSchemaIdentity);
+        var equalityTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                artifactWithEquality, schema, null,
+                standardSchemaIdentity: classSchemaIdentity));
+        Assert.That(equalityTables.TypeDefBindingEqualities.Count,
+            Is.EqualTo(1));
+        Assert.That(equalityTables.TypeDefBindingEqualities.GetOwnerModule(1),
+            Is.EqualTo(1u));
+        Assert.That(equalityTables.TypeDefs.GetKind(checked((int)
+                equalityTables.TypeDefBindingEqualities
+                    .GetLeftTypeDef(1))),
+            Is.EqualTo(2));
+        Assert.That(equalityTables.TypeDefs.GetKind(checked((int)
+                equalityTables.TypeDefBindingEqualities
+                    .GetRightTypeDef(1))),
+            Is.EqualTo(2));
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(
+                    new TrRmArtifactIndex(artifactWithEquality, schema,
+                        null,
+                        standardSchemaIdentity:
+                            classlessSchemaIdentity)));
+        Assert.Throws<InvalidDataException>(() =>
+            new TrRmArtifactIndex(artifactWithEquality, schema, null,
+                standardSchemaIdentity: parentSchemaIdentity));
+        Assert.Throws<InvalidDataException>(() =>
+            new TrRmArtifactIndex(artifactWithEquality, schema));
+    }
+
     [Test]
     public void BindsImportedClassDeclarationsWithoutExecutableClassLayout()
     {

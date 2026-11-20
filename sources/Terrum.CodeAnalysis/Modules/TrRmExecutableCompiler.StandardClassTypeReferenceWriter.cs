@@ -25,6 +25,8 @@ public static partial class TrRmExecutableCompiler
                 => TrRmArtifactSchema.C1M1Construction2InitializerCopyEvidenceDraft,
             StandardC1M1Construction2TypeBindingViewsSchemaIdentity
                 => TrRmArtifactSchema.C1M1Construction2InitializerCopyEvidenceDraft,
+            StandardC1M1Construction2ClassTypeBindingViewsSchemaIdentity
+                => TrRmArtifactSchema.C1M1Construction2InitializerCopyEvidenceDraft,
             StandardC1M1ConstructionL1R1SchemaIdentity
                 => TrRmArtifactSchema.C1M1ConstructionParameterLabelsReceiverAccessDraft,
             StandardC1M1Construction2L1R1SchemaIdentity
@@ -46,6 +48,9 @@ public static partial class TrRmExecutableCompiler
             StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsTypeBindingViewsSchemaIdentity
                 => TrRmArtifactSchema
                     .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft,
+            StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsClassTypeBindingViewsSchemaIdentity
+                => TrRmArtifactSchema
+                    .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft,
             StandardCM1AR1SchemaIdentity
                 => TrRmArtifactSchema
                     .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsDraft,
@@ -53,6 +58,9 @@ public static partial class TrRmExecutableCompiler
                 => TrRmArtifactSchema
                     .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidenceDraft,
             StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsTypeBindingViewsSchemaIdentity
+                => TrRmArtifactSchema
+                    .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidenceDraft,
+            StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsClassTypeBindingViewsSchemaIdentity
                 => TrRmArtifactSchema
                     .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidenceDraft,
             _ => throw Unsupported(
@@ -2977,7 +2985,9 @@ public static partial class TrRmExecutableCompiler
             sections.Add(new TrRmSection(0x0067, 0,
                 checked((uint)typeDefBindingEqualityRows.Count),
                 TrRmTypeDefBindingEqualityTableWriter.Encode(
-                    typeDefBindingEqualityRows, modules, typeDefs)));
+                    typeDefBindingEqualityRows, modules, typeDefs,
+                    IsSelectedClassTypeDefBindingEqualitySchemaIdentity(
+                        standardSchemaIdentity)));
         }
 
         sections.Sort(static (left, right) =>
