@@ -177,6 +177,15 @@ both nested method routes through caller binding and source-free
 load/re-emission/reload; it remains unverified under the active hold. Another
 regression reverses provider B/C Export rows and exercises consumer load and
 source-free re-emission/reload; it also remains unverified.
+Another regression selects Module-2 TypeDef/FieldDef roots whose Import
+closure reaches an external Leaf provider from a Module-1 method root; caller
+binding and source-free load/re-emission/reload remain unverified. Further
+co-located provider Import/replacement chains remain open.
+An unapproved, user-authorized provisional proposal now specifies distinct
+contextual TypeDef expectations plus a consumer-owned `0067`
+`TypeDefBindingEquality` carrier and three exact whole-schema successors.
+This design has not yet been implemented or qualified; its CLI schema pairing
+is a separate decision.
 Import/Export/ModuleRef/Body map permutations and runtime qualification remain
 open. The
 separate unapproved version-3

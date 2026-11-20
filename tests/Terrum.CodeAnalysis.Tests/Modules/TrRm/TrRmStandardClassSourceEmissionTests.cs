@@ -7095,6 +7095,135 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
+    public void ResolvesImportsFromNonRootCoLocatedConstruction2Modules()
+    {
+        var schemaIdentity
+            = C1M1Construction2ClassParameterDefaultsCopyEvidenceSchemaIdentity;
+        var layoutOptions = new CompilationOptions {
+            LayoutCoreRegistration
+                = LayoutCoreRegistrationTestData.Create(),
+        };
+        var leafCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            namespace Demo {
+                [Blittable] [Layout(LayoutKind.Sequential)]
+                public struct Leaf {
+                    public int32 Value;
+                }
+            }
+            """), layoutOptions);
+        Assert.That(leafCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, leafCompilation.Diagnostics));
+        var leafArtifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)leafCompilation.Program!, "CoLocatedLeaf",
+            schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement, [
+                new TrRmSourceTypeExport("Demo", "Leaf", "type.leaf") {
+                    FieldExports = [
+                        new TrRmSourceFieldExport("Value",
+                            "field.leaf.value"),
+                    ],
+                },
+            ], [], []);
+        var leafInput = new TrRmStandardArtifactInput(schemaIdentity,
+            leafArtifact);
+        var leafReference = TrRmExecutableCompiler.CreateStandardReference(
+            leafInput, "CoLocatedLeaf", [], ["type.leaf"],
+            ["field.leaf.value"]);
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                namespace Demo {
+                    [Blittable] [Layout(LayoutKind.Sequential)]
+                    public struct Record {
+                        public Leaf Data;
+                    }
+                    public int32 Read() { return 42; }
+                }
+                """), leafReference, layoutOptions);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)providerCompilation.Program!,
+            "CoLocatedMethodRoot", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement, [
+                new TrRmSourceTypeExport("Demo", "Record", "type.record") {
+                    FieldExports = [
+                        new TrRmSourceFieldExport("Data",
+                            "field.record.data"),
+                    ],
+                },
+            ], [], []);
+        providerArtifact = MoveTypeDefsToSecondModule(providerArtifact,
+            "CoLocatedTypes");
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var coLocatedTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                providerArtifact,
+                TrRmArtifactSchema
+                    .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft));
+        var (methodModuleRefStart, methodModuleRefEnd)
+            = coLocatedTables.Modules.GetModuleRefRange(1);
+        var (typeModuleRefStart, typeModuleRefEnd)
+            = coLocatedTables.Modules.GetModuleRefRange(2);
+        Assert.That(methodModuleRefStart, Is.EqualTo(methodModuleRefEnd));
+        Assert.That(typeModuleRefEnd,
+            Is.GreaterThan(typeModuleRefStart));
+        Assert.That(coLocatedTables.Imports.Count, Is.GreaterThan(0));
+        Assert.That(Enumerable.Range(1, coLocatedTables.Imports.Count)
+            .All(importRow => {
+                var moduleRefRow = coLocatedTables.Imports
+                    .GetModuleRefForImportRow(importRow);
+                return moduleRefRow >= typeModuleRefStart
+                    && moduleRefRow < typeModuleRefEnd;
+            }), Is.True);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, "CoLocatedMethodRoot", [leafInput], ["Read"], [
+                new TrRmStandardExportKeySelection("CoLocatedTypes",
+                    "type.record"),
+                new TrRmStandardExportKeySelection("CoLocatedLeaf",
+                    "type.leaf"),
+            ], [
+                new TrRmStandardExportKeySelection("CoLocatedTypes",
+                    "field.record.data"),
+                new TrRmStandardExportKeySelection("CoLocatedLeaf",
+                    "field.leaf.value"),
+            ]);
+        var consumerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                namespace Demo {
+                    public int32 Forward() { return Read(); }
+                    public int32 ReadNested(Record value) {
+                        return value.Data.Value;
+                    }
+                }
+                """), reference);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)consumerCompilation.Program!,
+            "CoLocatedImportConsumer", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], []);
+        var providers = new[] { providerInput, leafInput };
+        var linkedProgram = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
+            "CoLocatedImportConsumer", providers);
+        Assert.That(linkedProgram.Functions.Single(
+                static function => function.Name == "ReadNested")
+                .ReturnType,
+            Is.EqualTo(PrimitiveType.Int32));
+        var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(
+            linkedProgram, "CoLocatedImportConsumer", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        _ = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                reemittedArtifact),
+            "CoLocatedImportConsumer", providers);
+    }
+
+    [Test]
     public void PublishesFirstTypeAndFieldAliasesAsNewDependencies()
     {
         var schemaIdentity
@@ -10935,16 +11064,17 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         var tables = TrRmStructuralMetadataValidator
             .ValidateC1AndGetExecutionTables(index);
         if (tables.Modules.Count != 1
-            || tables.ModuleRefs.Count != 0
-            || tables.Imports.Count != 0
             || tables.TypeDefs.Count == 0
             || tables.Methods.Count == 0
             || tables.Modules.GetEntryMethod(1) != 0
+            || Enumerable.Range(1, tables.Imports.Count).Any(row =>
+                (tables.Imports.GetExpectedDefinitionForImportRow(row) >> 24)
+                    is not (0x13 or 0x14))
             || !index.TryGetSection(0x0001, out var moduleSection,
                 out _))
         {
             throw new InvalidOperationException(
-                "The co-located fixture requires one import-free library Module with methods and TypeDefs.");
+                "The co-located fixture requires one library Module with methods and TypeDefs and only TypeDef/FieldDef Imports.");
         }
 
         var textRows = new List<(string Text, int Encoding)>(
@@ -10976,7 +11106,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 featureCount,
                 tables.Modules.GetGoverningRuleEdition(1)),
             new TrRmModuleRow(textRows.Count, targetRequirement,
-                runtimePolicy, 0, moduleRefEnd, typeDefStart, methodDefEnd,
+                runtimePolicy, 0, moduleRefStart, typeDefStart, methodDefEnd,
                 sourceFileEnd, featureStart, featureCount,
                 tables.Modules.GetGoverningRuleEdition(1)),
         };
