@@ -531,12 +531,54 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         Assert.That(body.ConstantCount, Is.EqualTo(1));
         Assert.That(body.ConstantMap.Length, Is.EqualTo(8));
         Assert.That(tables.Features.TryGetFeature(11, out _), Is.True);
-        var typeDefRow = Enumerable.Range(1, tables.TypeDefs.Count)
-            .Single(row => tables.TypeDefs.GetName(row) == "Box");
+        var typeDefRow = 0;
+        for (var row = 1; row <= tables.TypeDefs.Count; row++)
+        {
+            if (!StringComparer.Ordinal.Equals(
+                    tables.TypeDefs.GetName(row), "Box"))
+            {
+                continue;
+            }
+
+            if (typeDefRow != 0)
+            {
+                throw new InvalidOperationException(
+                    "The initializer fixture has duplicate Box TypeDefs.");
+            }
+
+            typeDefRow = row;
+        }
+        if (typeDefRow == 0)
+        {
+            throw new InvalidOperationException(
+                "The initializer fixture has no Box TypeDef.");
+        }
         var (fieldStart, fieldCount)
             = tables.TypeDefs.GetFieldRange(typeDefRow);
-        var enabledFieldRow = Enumerable.Range(fieldStart, fieldCount)
-            .Single(row => tables.Fields.GetName(row) == "Enabled");
+        var enabledFieldRow = 0;
+        for (var fieldOrdinal = 0; fieldOrdinal < fieldCount;
+            fieldOrdinal++)
+        {
+            var row = fieldStart + fieldOrdinal;
+            if (!StringComparer.Ordinal.Equals(
+                    tables.Fields.GetName(row), "Enabled"))
+            {
+                continue;
+            }
+
+            if (enabledFieldRow != 0)
+            {
+                throw new InvalidOperationException(
+                    "The initializer fixture has duplicate Enabled FieldDefs.");
+            }
+
+            enabledFieldRow = row;
+        }
+        if (enabledFieldRow == 0)
+        {
+            throw new InvalidOperationException(
+                "The initializer fixture has no Enabled FieldDef.");
+        }
         Assert.That(tables.TypeSpecs.AreEquivalentTypeSpecRefs(
                 BinaryPrimitives.ReadUInt32LittleEndian(body.ConstantMap),
                 tables.Fields.GetTypeSpecRef(enabledFieldRow)),
@@ -1939,17 +1981,47 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
                         artifact));
         Assert.That(tables.Imports.Count, Is.EqualTo(2));
-        Assert.That(Enumerable.Range(1, tables.Imports.Count)
-                .Select(row => tables.Imports
-                    .GetExpectedDefinitionForImportRow(row) >> 24),
-            Is.EquivalentTo([0x13u, 0x14u]));
+        var importKinds = new uint[tables.Imports.Count];
+        for (var row = 1; row <= tables.Imports.Count; row++)
+        {
+            importKinds[row - 1] = tables.Imports
+                .GetExpectedDefinitionForImportRow(row) >> 24;
+        }
+        Assert.That(importKinds, Is.EquivalentTo([0x13u, 0x14u]));
 
-        var leafTypeDefRow = Enumerable.Range(1, tables.TypeDefs.Count)
-            .Single(row => tables.TypeDefs.GetName(row) == "Leaf");
+        var leafTypeDefRow = 0;
+        var boxTypeDefRow = 0;
+        for (var row = 1; row <= tables.TypeDefs.Count; row++)
+        {
+            var name = tables.TypeDefs.GetName(row);
+            if (StringComparer.Ordinal.Equals(name, "Leaf"))
+            {
+                if (leafTypeDefRow != 0)
+                {
+                    throw new InvalidOperationException(
+                        "The imported class field fixture has duplicate Leaf TypeDefs.");
+                }
+
+                leafTypeDefRow = row;
+            }
+            else if (StringComparer.Ordinal.Equals(name, "Box"))
+            {
+                if (boxTypeDefRow != 0)
+                {
+                    throw new InvalidOperationException(
+                        "The imported class field fixture has duplicate Box TypeDefs.");
+                }
+
+                boxTypeDefRow = row;
+            }
+        }
+        if (leafTypeDefRow == 0 || boxTypeDefRow == 0)
+        {
+            throw new InvalidOperationException(
+                "The imported class field fixture is missing Leaf or Box.");
+        }
         var (leafFieldRow, _) = tables.TypeDefs.GetFieldRange(
             leafTypeDefRow);
-        var boxTypeDefRow = Enumerable.Range(1, tables.TypeDefs.Count)
-            .Single(row => tables.TypeDefs.GetName(row) == "Box");
         var (boxFieldRow, _) = tables.TypeDefs.GetFieldRange(boxTypeDefRow);
         var fieldType = tables.TypeSpecs.GetTypeSpecRef(
             tables.Fields.GetTypeSpecRef(boxFieldRow));
@@ -7065,13 +7137,52 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 null,
                 standardSchemaIdentity: schemaIdentity));
         Assert.Throws<InvalidDataException>(() =>
-            TrRmTypeDefBindingEqualityTableWriter.Encode([
-                new TrRmTypeDefBindingEqualityRow(0, 1, 2),
-            ], sourceTables.Modules, sourceTables.TypeDefs));
+            EncodeTypeDefBindingEqualityRow(artifact, schemaIdentity,
+                new TrRmTypeDefBindingEqualityRow(0, 1, 2)));
         Assert.Throws<InvalidDataException>(() =>
-            TrRmTypeDefBindingEqualityTableWriter.Encode([
-                new TrRmTypeDefBindingEqualityRow(1, 1, 0x0100_0002),
-            ], sourceTables.Modules, sourceTables.TypeDefs));
+            EncodeTypeDefBindingEqualityRow(artifact, schemaIdentity,
+                new TrRmTypeDefBindingEqualityRow(2, 1, 2)));
+        Assert.Throws<InvalidDataException>(() =>
+            EncodeTypeDefBindingEqualityRow(artifact, schemaIdentity,
+                new TrRmTypeDefBindingEqualityRow(1, 0, 2)));
+        Assert.Throws<InvalidDataException>(() =>
+            EncodeTypeDefBindingEqualityRow(artifact, schemaIdentity,
+                new TrRmTypeDefBindingEqualityRow(1, 1, 0x0100_0002)));
+        Assert.Throws<InvalidDataException>(() =>
+            EncodeTypeDefBindingEqualityRow(artifact, schemaIdentity,
+                new TrRmTypeDefBindingEqualityRow(1, 1, 3)));
+        Assert.Throws<InvalidDataException>(() =>
+            ReadTypeDefBindingEqualityPayload(artifact, schemaIdentity,
+                [], 0));
+        Assert.Throws<InvalidDataException>(() =>
+            ReadTypeDefBindingEqualityPayload(artifact, schemaIdentity,
+                new byte[11], 1));
+    }
+
+    private static void EncodeTypeDefBindingEqualityRow(byte[] artifact,
+        string schemaIdentity, TrRmTypeDefBindingEqualityRow row)
+    {
+        var schema = TrRmArtifactSchema
+            .C1M1Construction2InitializerCopyEvidenceDraft;
+        var index = new TrRmArtifactIndex(artifact, schema, null,
+            standardSchemaIdentity: schemaIdentity);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(index);
+        _ = TrRmTypeDefBindingEqualityTableWriter.Encode([row],
+            tables.Modules, tables.TypeDefs);
+    }
+
+    private static void ReadTypeDefBindingEqualityPayload(byte[] artifact,
+        string schemaIdentity, byte[] payload, int recordCount)
+    {
+        var schema = TrRmArtifactSchema
+            .C1M1Construction2InitializerCopyEvidenceDraft;
+        var index = new TrRmArtifactIndex(artifact, schema, null,
+            standardSchemaIdentity: schemaIdentity);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(index);
+        _ = new TrRmTypeDefBindingEqualityTableReader(payload, recordCount,
+            tables.Modules, tables.TypeDefs);
     }
 
     [Test]
@@ -9559,8 +9670,28 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 "The generic class MethodDef fixture requires one nongeneric MethodSig.");
         }
 
-        var formalNameRow = Enumerable.Range(1, tables.Strings.Count)
-            .Single(row => tables.Strings.DecodeName(row) == "Echo");
+        var formalNameRow = 0;
+        for (var row = 1; row <= tables.Strings.Count; row++)
+        {
+            if (!StringComparer.Ordinal.Equals(
+                    tables.Strings.DecodeName(row), "Echo"))
+            {
+                continue;
+            }
+
+            if (formalNameRow != 0)
+            {
+                throw new InvalidDataException(
+                    "The generic class MethodDef fixture has duplicate Echo String rows.");
+            }
+
+            formalNameRow = row;
+        }
+        if (formalNameRow == 0)
+        {
+            throw new InvalidDataException(
+                "The generic class MethodDef fixture has no Echo String row.");
+        }
         var genericParam = new byte[32];
         BinaryPrimitives.WriteUInt32LittleEndian(genericParam,
             methodDefinition);
@@ -11802,9 +11933,28 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             moduleReferenceBytes.AsSpan(4, 4), targetRequirement);
         BinaryPrimitives.WriteUInt32LittleEndian(
             moduleReferenceBytes.AsSpan(8, 4), runtimePolicy);
-        var exportKeyStringRow = Enumerable.Range(1, tables.Strings.Count)
-            .Single(row => StringComparer.Ordinal.Equals(
-                tables.Strings.DecodeName(row), exportKey));
+        var exportKeyStringRow = 0;
+        for (var row = 1; row <= tables.Strings.Count; row++)
+        {
+            if (!StringComparer.Ordinal.Equals(
+                    tables.Strings.DecodeName(row), exportKey))
+            {
+                continue;
+            }
+
+            if (exportKeyStringRow != 0)
+            {
+                throw new InvalidOperationException(
+                    "The direct-endpoint fixture has duplicate ExportKey String rows.");
+            }
+
+            exportKeyStringRow = row;
+        }
+        if (exportKeyStringRow == 0)
+        {
+            throw new InvalidOperationException(
+                "The direct-endpoint fixture has no ExportKey String row.");
+        }
         var importBytes = new byte[12];
         BinaryPrimitives.WriteUInt32LittleEndian(importBytes, 1);
         BinaryPrimitives.WriteUInt32LittleEndian(
@@ -11880,29 +12030,65 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             || !index.TryGetSection(0x0018, out var parameterSection,
                 out var parameterCount)
             || !index.TryGetSection(0x001C, out var importSection,
-                out var importCount)
-            || Enumerable.Range(1, importCount).Count(row =>
-                tables.Imports.GetExpectedDefinitionForImportRow(row) >> 24
-                    == 0x13) != 1
-            || Enumerable.Range(1, importCount).Any(row =>
-                tables.Imports.GetExpectedDefinitionForImportRow(row) >> 24
-                    == 0x14))
+                out var importCount))
         {
             throw new InvalidOperationException(
                 "The uncalled equality fixture requires one imported struct with no FieldDef Imports.");
         }
 
-        var typeImportRow = Enumerable.Range(1, importCount).Single(row =>
-            tables.Imports.GetExpectedDefinitionForImportRow(row) >> 24
-                == 0x13);
+        var typeImportRow = 0;
+        var typeImportCount = 0;
+        var hasFieldImport = false;
+        for (var importRow = 1; importRow <= importCount; importRow++)
+        {
+            var definitionKind = tables.Imports
+                .GetExpectedDefinitionForImportRow(importRow) >> 24;
+            if (definitionKind == 0x13)
+            {
+                typeImportCount++;
+                typeImportRow = importRow;
+            }
+            else if (definitionKind == 0x14)
+            {
+                hasFieldImport = true;
+            }
+        }
+
+        if (typeImportCount != 1 || hasFieldImport)
+        {
+            throw new InvalidOperationException(
+                "The uncalled equality fixture requires one imported struct with no FieldDef Imports.");
+        }
+
         var typeImportModuleRef
             = tables.Imports.GetModuleRefForImportRow(typeImportRow);
         var typeImportKey = tables.Imports
             .GetBindingForImportRow(typeImportRow).ExportKey;
-        var typeImportKeyStringRow = Enumerable.Range(1,
-                tables.Strings.Count)
-            .Single(row => StringComparer.Ordinal.Equals(
-                tables.Strings.DecodeNamespace(row), typeImportKey));
+        var typeImportKeyStringRow = 0;
+        for (var stringRow = 1; stringRow <= tables.Strings.Count;
+            stringRow++)
+        {
+            if (!StringComparer.Ordinal.Equals(
+                    tables.Strings.DecodeNamespace(stringRow),
+                    typeImportKey))
+            {
+                continue;
+            }
+
+            if (typeImportKeyStringRow != 0)
+            {
+                throw new InvalidOperationException(
+                    "The imported TypeDef ExportKey has duplicate String rows.");
+            }
+
+            typeImportKeyStringRow = stringRow;
+        }
+
+        if (typeImportKeyStringRow == 0)
+        {
+            throw new InvalidOperationException(
+                "The imported TypeDef ExportKey has no String row.");
+        }
         var (fieldStart, fieldEnd) = tables.TypeDefs.GetFieldRange(1);
         var (layoutStart, layoutCountForType)
             = tables.TypeDefs.GetLayoutRange(1);
@@ -12112,9 +12298,28 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             tables.NativeFunctionPointerSignatures.Count, schema,
             methodDefCount: tables.Methods.Count);
 
-        var readAliasMethodRow = Enumerable.Range(1, tables.Methods.Count)
-            .Single(row => StringComparer.Ordinal.Equals(
-                tables.Methods.GetName(row), "ReadAlias"));
+        var readAliasMethodRow = 0;
+        for (var row = 1; row <= tables.Methods.Count; row++)
+        {
+            if (!StringComparer.Ordinal.Equals(
+                    tables.Methods.GetName(row), "ReadAlias"))
+            {
+                continue;
+            }
+
+            if (readAliasMethodRow != 0)
+            {
+                throw new InvalidOperationException(
+                    "The contextual method fixture has duplicate ReadAlias methods.");
+            }
+
+            readAliasMethodRow = row;
+        }
+        if (readAliasMethodRow == 0)
+        {
+            throw new InvalidOperationException(
+                "The contextual method fixture has no ReadAlias method.");
+        }
         var readAliasSignatureRow
             = tables.Methods.GetSignature(readAliasMethodRow);
         var (readAliasParameterStart, readAliasParameterCount)
@@ -12200,13 +12405,23 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         var index = new TrRmArtifactIndex(artifact, schema);
         var tables = TrRmStructuralMetadataValidator
             .ValidateC1AndGetExecutionTables(index);
+        var hasUnsupportedImport = false;
+        for (var row = 1; row <= tables.Imports.Count; row++)
+        {
+            var kind = tables.Imports
+                .GetExpectedDefinitionForImportRow(row) >> 24;
+            if (kind is not (0x13 or 0x14))
+            {
+                hasUnsupportedImport = true;
+                break;
+            }
+        }
+
         if (tables.Modules.Count != 1
             || tables.TypeDefs.Count == 0
             || tables.Methods.Count == 0
             || tables.Modules.GetEntryMethod(1) != 0
-            || Enumerable.Range(1, tables.Imports.Count).Any(row =>
-                (tables.Imports.GetExpectedDefinitionForImportRow(row) >> 24)
-                    is not (0x13 or 0x14))
+            || hasUnsupportedImport
             || !index.TryGetSection(0x0001, out var moduleSection,
                 out _))
         {
@@ -12283,14 +12498,39 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         var index = new TrRmArtifactIndex(artifact, schema);
         var tables = TrRmStructuralMetadataValidator
             .ValidateC1AndGetExecutionTables(index);
-        var sharedImportRow = Enumerable.Range(1, tables.Imports.Count)
-            .Single(row => StringComparer.Ordinal.Equals(
-                tables.Imports.GetBindingForImportRow(row).ExportKey,
-                sharedExportKey));
-        var aliasImportRow = Enumerable.Range(1, tables.Imports.Count)
-            .Single(row => StringComparer.Ordinal.Equals(
-                tables.Imports.GetBindingForImportRow(row).ExportKey,
-                aliasExportKey));
+        var sharedImportRow = 0;
+        var aliasImportRow = 0;
+        for (var row = 1; row <= tables.Imports.Count; row++)
+        {
+            var exportKey = tables.Imports
+                .GetBindingForImportRow(row).ExportKey;
+            if (StringComparer.Ordinal.Equals(exportKey, sharedExportKey))
+            {
+                if (sharedImportRow != 0)
+                {
+                    throw new InvalidOperationException(
+                        "The shared-expectation fixture has duplicate shared MethodDef Imports.");
+                }
+
+                sharedImportRow = row;
+            }
+            if (StringComparer.Ordinal.Equals(exportKey, aliasExportKey))
+            {
+                if (aliasImportRow != 0)
+                {
+                    throw new InvalidOperationException(
+                        "The shared-expectation fixture has duplicate alias MethodDef Imports.");
+                }
+
+                aliasImportRow = row;
+            }
+        }
+        if (sharedImportRow == 0 || aliasImportRow == 0)
+        {
+            throw new InvalidOperationException(
+                "The shared-expectation fixture requires both selected MethodDef Imports.");
+        }
+
         var expectedDefinition = tables.Imports
             .GetExpectedDefinitionForImportRow(sharedImportRow);
         if (expectedDefinition >> 24 != 0x16
