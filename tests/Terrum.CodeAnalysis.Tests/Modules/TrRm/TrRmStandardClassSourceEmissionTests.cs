@@ -7420,15 +7420,41 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             providerInput, "ContextualNestedProvider", [], [],
             [new TrRmStandardExportKeySelection(
                 "ContextualNestedProvider", "type.leaf")], []);
+        var innerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                namespace Demo {
+                    [Blittable] [Layout(LayoutKind.Sequential)]
+                    public struct InnerA {
+                        public Leaf Child;
+                    }
+                }
+                """), leafReference, options);
+        Assert.That(innerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                innerCompilation.Diagnostics));
+        var innerArtifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)innerCompilation.Program!,
+            "ContextualInnerProvider", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement, [
+                new TrRmSourceTypeExport("Demo", "InnerA",
+                    "type.inner.a"),
+            ], [], []);
+        var innerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            innerArtifact);
+        var innerReference = TrRmExecutableCompiler.CreateStandardReference(
+            innerInput, "ContextualInnerProvider", [], [], [
+                new TrRmStandardExportKeySelection(
+                    "ContextualInnerProvider", "type.inner.a"),
+            ], []);
         var wrapperACompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
                 namespace Demo {
                     [Blittable] [Layout(LayoutKind.Sequential)]
                     public struct WrapperA {
-                        public Leaf Child;
+                        public InnerA Nested;
                     }
                 }
-                """), leafReference, options);
+                """), innerReference, options);
         Assert.That(wrapperACompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine,
                 wrapperACompilation.Diagnostics));
@@ -7466,6 +7492,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
 
         var providers = new[] {
             providerInput,
+            innerInput,
             wrapperAInput,
             wrapperBInput,
         };
@@ -7480,8 +7507,12 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             ["Read"], typeSelections, []);
         var leaf = reference.Structures.Single(static structure =>
             structure.Name == "Demo.Leaf");
+        var inner = reference.Structures.Single(static structure =>
+            structure.Name == "Demo.InnerA");
         Assert.That(leaf.StandardTypeOrigin!.ContextualViewIndexes.Length,
             Is.EqualTo(3));
+        Assert.That(inner.StandardTypeOrigin!.Provider.ModuleIdentity,
+            Is.EqualTo("ContextualInnerProvider"));
         Assert.That(reference.StandardQuerySourceAssociation!
                 .MethodTypeViews.Length,
             Is.EqualTo(1));
