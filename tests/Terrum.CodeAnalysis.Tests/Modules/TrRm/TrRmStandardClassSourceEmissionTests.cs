@@ -7124,7 +7124,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             methodRootArtifact, schemaIdentity);
         methodRootArtifact = ReverseStandardImportRows(
             methodRootArtifact, schemaIdentity);
-        methodRootArtifact = ReverseTypeDefBindingEqualityRows(
+        methodRootArtifact = AddNoncanonicalTypeDefBindingEqualityEdges(
             methodRootArtifact, schemaIdentity);
         methodRootArtifact = ReverseContextualTypeDefRows(
             methodRootArtifact, schemaIdentity);
@@ -11476,25 +11476,30 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         return result;
     }
 
-    private static byte[] ReverseTypeDefBindingEqualityRows(
+    private static byte[] AddNoncanonicalTypeDefBindingEqualityEdges(
         byte[] artifact, string schemaIdentity)
     {
         var schema = TrRmArtifactSchema
             .C1M1Construction2InitializerCopyEvidenceDraft;
         var index = new TrRmArtifactIndex(artifact, schema, null,
             standardSchemaIdentity: schemaIdentity);
-        if (!index.TryGetSection(0x0067, out var equalitySection,
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(index);
+        if (!index.TryGetSection(0x0067, out _,
                 out var equalityCount)
-            || equalityCount != 2)
+            || equalityCount != 2 || tables.TypeDefs.Count != 3)
         {
             throw new InvalidOperationException(
-                "The equality row permutation requires a two-edge group.");
+                "The equality fixture requires a three-view group.");
         }
 
-        var equalityBytes = equalitySection.ToArray();
-        var firstRow = equalityBytes.AsSpan(0, 12).ToArray();
-        equalityBytes.AsSpan(12, 12).CopyTo(equalityBytes);
-        firstRow.CopyTo(equalityBytes, 12);
+        var equalityBytes = TrRmTypeDefBindingEqualityTableWriter.Encode([
+            new TrRmTypeDefBindingEqualityRow(1, 1, 2),
+            new TrRmTypeDefBindingEqualityRow(1, 2, 1),
+            new TrRmTypeDefBindingEqualityRow(1, 2, 3),
+            new TrRmTypeDefBindingEqualityRow(1, 3, 1),
+            new TrRmTypeDefBindingEqualityRow(1, 3, 3),
+        ], tables.Modules, tables.TypeDefs);
         var sections = new List<TrRmSection>(index.SectionCount);
         for (var sectionIndex = 0;
             sectionIndex < index.SectionCount; sectionIndex++)
@@ -11502,7 +11507,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             index.GetSection(sectionIndex, out var kind, out var flags,
                 out var bytes, out var recordCount);
             sections.Add(kind == 0x0067
-                ? new TrRmSection(kind, flags, 2, equalityBytes)
+                ? new TrRmSection(kind, flags, 5, equalityBytes)
                 : new TrRmSection(kind, flags,
                     checked((uint)recordCount), bytes.ToArray()));
         }
@@ -11544,7 +11549,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 out var equalityCount)
             || typeDefCount != 3 || fieldCount != 3 || layoutCount != 3
             || importCount != tables.Imports.Count
-            || layoutFieldCount != 3 || equalityCount != 2
+            || layoutFieldCount != 3 || equalityCount != 5
             || tables.Exports.GetExportsForModule(1).Any(
                 static export => export.Definition >> 24 == 0x13))
         {
