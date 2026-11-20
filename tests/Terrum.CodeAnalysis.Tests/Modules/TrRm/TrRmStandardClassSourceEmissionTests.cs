@@ -7369,6 +7369,150 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
+    public void RetainsNestedProviderTypeViewsWithoutSelectingLeafKey()
+    {
+        var schemaIdentity
+            = C1M1Construction2TypeBindingViewsSchemaIdentity;
+        var options = new CompilationOptions {
+            LayoutCoreRegistration
+                = LayoutCoreRegistrationTestData.Create(),
+        };
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                namespace Demo {
+                    [Blittable] [Layout(LayoutKind.Sequential)]
+                    public struct Leaf {
+                        public int32 Value;
+                    }
+                    public int32 Read(Leaf value) { return 7; }
+                }
+                """), options);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)providerCompilation.Program!,
+            "ContextualNestedProvider", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement, [
+                new TrRmSourceTypeExport("Demo", "Leaf", "type.leaf"),
+            ], [], []);
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var methodRootReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                providerInput, "ContextualNestedProvider", [], ["Read"], [
+                    new TrRmStandardExportKeySelection(
+                        "ContextualNestedProvider", "type.leaf"),
+                ], []);
+        var methodRootCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), methodRootReference);
+        Assert.That(methodRootCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                methodRootCompilation.Diagnostics));
+        var methodRootArtifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)methodRootCompilation.Program!,
+            "ContextualNestedMethodRoot", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var methodRootInput = new TrRmStandardArtifactInput(schemaIdentity,
+            methodRootArtifact);
+
+        var leafReference = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, "ContextualNestedProvider", [], [],
+            [new TrRmStandardExportKeySelection(
+                "ContextualNestedProvider", "type.leaf")], []);
+        var wrapperACompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                namespace Demo {
+                    [Blittable] [Layout(LayoutKind.Sequential)]
+                    public struct WrapperA {
+                        public Leaf Child;
+                    }
+                }
+                """), leafReference, options);
+        Assert.That(wrapperACompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                wrapperACompilation.Diagnostics));
+        var wrapperAArtifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)wrapperACompilation.Program!,
+            "ContextualWrapperAProvider", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement, [
+                new TrRmSourceTypeExport("Demo", "WrapperA",
+                    "type.wrapper.a"),
+            ], [], []);
+        var wrapperAInput = new TrRmStandardArtifactInput(schemaIdentity,
+            wrapperAArtifact);
+
+        var wrapperBCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                namespace Demo {
+                    [Blittable] [Layout(LayoutKind.Sequential)]
+                    public struct WrapperB {
+                        public Leaf Child;
+                    }
+                }
+                """), leafReference, options);
+        Assert.That(wrapperBCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                wrapperBCompilation.Diagnostics));
+        var wrapperBArtifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)wrapperBCompilation.Program!,
+            "ContextualWrapperBProvider", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement, [
+                new TrRmSourceTypeExport("Demo", "WrapperB",
+                    "type.wrapper.b"),
+            ], [], []);
+        var wrapperBInput = new TrRmStandardArtifactInput(schemaIdentity,
+            wrapperBArtifact);
+
+        var providers = new[] {
+            providerInput,
+            wrapperAInput,
+            wrapperBInput,
+        };
+        var typeSelections = new[] {
+            new TrRmStandardExportKeySelection(
+                "ContextualWrapperAProvider", "type.wrapper.a"),
+            new TrRmStandardExportKeySelection(
+                "ContextualWrapperBProvider", "type.wrapper.b"),
+        };
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            methodRootInput, "ContextualNestedMethodRoot", providers,
+            ["Read"], typeSelections, []);
+        var leaf = reference.Structures.Single(static structure =>
+            structure.Name == "Demo.Leaf");
+        Assert.That(leaf.StandardTypeOrigin!.ContextualViewIndexes.Length,
+            Is.EqualTo(3));
+        Assert.That(reference.StandardQuerySourceAssociation!
+                .MethodTypeViews.Length,
+            Is.EqualTo(1));
+
+        var compilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), reference);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)compilation.Program!,
+            "ContextualNestedMethodRootReemitted", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var reemittedTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                reemittedArtifact,
+                TrRmArtifactSchema.C1M1Construction2InitializerCopyEvidenceDraft,
+                null, standardSchemaIdentity: schemaIdentity));
+        Assert.That(reemittedTables.TypeDefBindingEqualities.Count,
+            Is.EqualTo(2));
+        var reloadedReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, reemittedArtifact),
+            "ContextualNestedMethodRootReemitted", providers,
+            ["Read"], typeSelections, []);
+        var reloadedLeaf = reloadedReference.Structures.Single(
+            static structure => structure.Name == "Demo.Leaf");
+        Assert.That(reloadedLeaf.StandardTypeOrigin!
+                .ContextualViewIndexes.Length,
+            Is.EqualTo(3));
+    }
+
+    [Test]
     public void ReemitsEqualityBetweenDirectAndImportedTypeDefViews()
     {
         var schemaIdentity
