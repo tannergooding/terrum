@@ -4487,6 +4487,185 @@ internal sealed class TrRmC1EnumClosureSourceTests
     }
 
     [Test]
+    public void PacksImportedClassExpectationsWithPrivateClassDependencies()
+    {
+        var schemaIdentity
+            = $"{s_schemaIdentities[0]}-class-instance-layout-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        const string childModuleIdentity = "PackedChildProvider";
+        const string parentModuleIdentity = "PackedParentProvider";
+        const string consumerModuleIdentity = "PackedImportConsumer";
+
+        static TrRmSourceClassExport CreateClassExport(
+            BoundProgram program, SyntaxTree tree, string className,
+            string typeExportKey, string fieldExportKey)
+        {
+            var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+                .Single(node =>
+                    node.Kind == SyntaxKind.ClassDeclaration
+                    && node.Children.OfType<SyntaxTokenElement>().Any(token =>
+                        token.Token.Kind == TokenKind.Identifier
+                        && token.Token.Name == className));
+            var fieldDeclaration = classDeclaration.Children
+                .OfType<SyntaxNode>()
+                .Single(static node =>
+                    node.Kind == SyntaxKind.FieldDeclaration);
+            var classIndex = program.SourceClassProgramAssociation!
+                .Declarations.Single(item =>
+                    item.Span == classDeclaration.Span).ClassIndex;
+            return new TrRmSourceClassExport(program, classIndex,
+                classDeclaration.Span, typeExportKey, [
+                    new TrRmSourceClassMemberExport(0,
+                        fieldDeclaration.Span, fieldExportKey),
+                ]);
+        }
+
+        var childTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public class Child {
+                    public int32 Id;
+                }
+            }
+            """);
+        var childCompilation = Compilation.CreateLibrary(childTree);
+        Assert.That(childCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, childCompilation.Diagnostics));
+        var childProgram = (BoundProgram)childCompilation.Program!;
+        var childExport = CreateClassExport(childProgram, childTree,
+            "Child", "type.child", "field.child.id");
+        var childArtifact = TrRmExecutableCompiler.EmitStandard(
+            childProgram, childModuleIdentity, schemaIdentity,
+            targetRequirement, [], [], [childExport], []);
+        var childInput = new TrRmStandardArtifactInput(schemaIdentity,
+            childArtifact);
+        var childReference = TrRmExecutableCompiler.CreateStandardReference(
+            childInput, childModuleIdentity, [], ["type.child"],
+            ["field.child.id"]);
+
+        var parentTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public class Parent {
+                    public Child Value;
+                    public Node Hidden;
+                }
+                public class Node {
+                    public int32 Id;
+                }
+            }
+            """);
+        var parentCompilation = Compilation.CreateLibrary(parentTree,
+            childReference);
+        Assert.That(parentCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                parentCompilation.Diagnostics));
+        var parentProgram = (BoundProgram)parentCompilation.Program!;
+        var parentExport = CreateClassExport(parentProgram, parentTree,
+            "Parent", "type.parent", "field.parent.value");
+        var parentArtifact = TrRmExecutableCompiler.EmitStandard(
+            parentProgram, parentModuleIdentity, schemaIdentity,
+            targetRequirement, [], [], [parentExport], []);
+        var parentInput = new TrRmStandardArtifactInput(schemaIdentity,
+            parentArtifact);
+        var parentReference = TrRmExecutableCompiler.CreateStandardReference(
+            parentInput, parentModuleIdentity, [childInput], ["type.parent"],
+            ["field.parent.value"]);
+        var reference = TrRmExecutableCompiler.CreateStandardReferenceSet(
+            [parentReference]);
+        var queryCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Demo;
+                nint ParentValueOffset() {
+                    return unsafe(offsetof(Parent, Value));
+                }
+                """), reference, new CompilationOptions {
+                LayoutCoreRegistration
+                    = LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(queryCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                queryCompilation.Diagnostics));
+
+        var packedArtifact = TrRmExecutableCompiler.EmitStandard(
+            queryCompilation.Program!, consumerModuleIdentity,
+            schemaIdentity, targetRequirement);
+        var packedTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                packedArtifact, SchemaFor(schemaIdentity), null,
+                usesNativePointerLoads: false,
+                standardSchemaIdentity: schemaIdentity));
+        var parentTypeDefRow = Enumerable.Range(
+                1, packedTables.TypeDefs.Count)
+            .Single(row =>
+                packedTables.TypeDefs.GetName(row) == "Parent");
+        var childTypeDefRow = Enumerable.Range(
+                1, packedTables.TypeDefs.Count)
+            .Single(row =>
+                packedTables.TypeDefs.GetName(row) == "Child"
+                && packedTables.Modules.GetIdentity(
+                    packedTables.TypeDefs.GetOwnerModule(row))
+                    == childModuleIdentity);
+        Assert.That(packedTables.Modules.Count, Is.EqualTo(3));
+        var parentFieldRange
+            = packedTables.TypeDefs.GetFieldRange(parentTypeDefRow);
+        var parentFieldTypeSpec = packedTables.TypeSpecs.GetTypeSpecRef(
+            packedTables.Fields.GetTypeSpecRef(parentFieldRange.Start));
+        Assert.That(parentFieldTypeSpec.Form, Is.EqualTo((byte)0x02));
+        Assert.That(parentFieldTypeSpec.Row, Is.EqualTo(childTypeDefRow));
+
+        var childTypeImportRow = Enumerable.Range(1,
+                packedTables.Imports.Count)
+            .Single(row =>
+                packedTables.Imports.GetBindingForImportRow(row)
+                    .ExportKey == "type.child");
+        var expectedChildTypeDefId = packedTables.Imports
+            .GetExpectedDefinitionForImportRow(childTypeImportRow);
+        var expectedChildTypeDefRow = checked((int)(
+            expectedChildTypeDefId & 0x00FF_FFFF));
+        Assert.That(packedTables.Modules.GetIdentity(
+                packedTables.TypeDefs.GetOwnerModule(
+                    expectedChildTypeDefRow)),
+            Is.EqualTo(parentModuleIdentity));
+        var childModuleRefRow = packedTables.Imports
+            .GetModuleRefForImportRow(childTypeImportRow);
+        Assert.That(packedTables.Modules.GetIdentity(
+                packedTables.ModuleRefs.GetOwnerModule(childModuleRefRow)),
+            Is.EqualTo(parentModuleIdentity));
+        Assert.That(packedTables.ModuleRefs.GetProducerIdentity(
+                childModuleRefRow), Is.EqualTo(childModuleIdentity));
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, packedArtifact),
+            consumerModuleIdentity, []);
+        var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(loaded,
+            consumerModuleIdentity, schemaIdentity, targetRequirement);
+        var reemittedTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                reemittedArtifact, SchemaFor(schemaIdentity), null,
+                usesNativePointerLoads: false,
+                standardSchemaIdentity: schemaIdentity));
+        var reemittedChildImportRow = Enumerable.Range(
+                1, reemittedTables.Imports.Count)
+            .Single(row =>
+                reemittedTables.Imports.GetBindingForImportRow(row)
+                    .ExportKey == "type.child");
+        var reemittedChildModuleRefRow = reemittedTables.Imports
+            .GetModuleRefForImportRow(reemittedChildImportRow);
+        Assert.That(reemittedTables.Modules.GetIdentity(
+                reemittedTables.ModuleRefs.GetOwnerModule(
+                    reemittedChildModuleRefRow)),
+            Is.EqualTo(parentModuleIdentity));
+        var reloaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                reemittedArtifact), consumerModuleIdentity, []);
+        Assert.That(reloaded.StandardClassDeclarations.Any(declaration =>
+                declaration.Declaration.Name == "Child"
+                && declaration.Declaration.Provider.ModuleIdentity
+                    == childModuleIdentity),
+            Is.True);
+    }
+
+    [Test]
     public void ComposesCrossProviderClassHandleDependencies()
     {
         var schemaIdentity

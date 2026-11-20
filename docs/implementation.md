@@ -1830,7 +1830,9 @@ dependencies now use a bounded class-only packed provider closure across
 Module ranges, with source-free direct TypeSpec binding and row remapping.
 Private/transitive-child query, load and re-emission coverage plus mismatched
 Module and duplicate-identity rejection cases are added but unverified under
-the hold. External Imports, non-class/struct dependencies, and class handles
+the hold. The packed path now retains class TypeDef Import expectations and
+owner-scoped ModuleRefs, with imported-class query/re-emission coverage added
+but unverified. Non-class/struct Imports, class Methods, and class handles
 nested through inline-struct fields remain open.
 Provisional EN1 type+field-key reference selection now retains selected local
 class fields and fields in the selected inline-struct closure, preserving

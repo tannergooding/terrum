@@ -1229,6 +1229,76 @@ public static partial class TrRmExecutableCompiler
                 return fieldExpectations.ToImmutable();
             }
 
+            static bool SamePackedClassTypeView(
+                BoundStandardClassTypeView left,
+                BoundStandardClassTypeView right)
+            {
+                if (left.Identity != right.Identity
+                    || !SameA2SourceTypeProviderSnapshot(left.Provider,
+                        right.Provider)
+                    || !StringComparer.Ordinal.Equals(left.Namespace,
+                        right.Namespace)
+                    || !StringComparer.Ordinal.Equals(left.Name,
+                        right.Name)
+                    || left.TypeDefFlags != right.TypeDefFlags
+                    || left.Fields.Length != right.Fields.Length
+                    || left.Layouts.Length != right.Layouts.Length
+                    || !left.Methods.IsEmpty
+                    || !right.Methods.IsEmpty)
+                {
+                    return false;
+                }
+
+                for (var index = 0; index < left.Fields.Length; index++)
+                {
+                    var leftField = left.Fields[index];
+                    var rightField = right.Fields[index];
+                    if (leftField.DefinitionId != rightField.DefinitionId
+                        || leftField.OwnerDefinitionId
+                            != rightField.OwnerDefinitionId
+                        || !StringComparer.Ordinal.Equals(leftField.Name,
+                            rightField.Name)
+                        || leftField.Flags != rightField.Flags
+                        || leftField.TypeSpecReference
+                            != rightField.TypeSpecReference
+                        || leftField.Type != rightField.Type
+                        || !leftField.ExportKeys.SequenceEqual(
+                            rightField.ExportKeys, StringComparer.Ordinal))
+                    {
+                        return false;
+                    }
+                }
+
+                for (var index = 0; index < left.Layouts.Length; index++)
+                {
+                    var leftLayout = left.Layouts[index];
+                    var rightLayout = right.Layouts[index];
+                    if (leftLayout.Row != rightLayout.Row
+                        || leftLayout.OwnerDefinitionId
+                            != rightLayout.OwnerDefinitionId
+                        || leftLayout.TargetProfileReference
+                            != rightLayout.TargetProfileReference
+                        || leftLayout.TargetProfileId
+                            != rightLayout.TargetProfileId
+                        || leftLayout.TargetProfileRuleRevision
+                            != rightLayout.TargetProfileRuleRevision
+                        || leftLayout.Kind != rightLayout.Kind
+                        || leftLayout.Flags != rightLayout.Flags
+                        || leftLayout.Alignment != rightLayout.Alignment
+                        || leftLayout.Pack != rightLayout.Pack
+                        || !leftLayout.FieldDefinitionIds.SequenceEqual(
+                            rightLayout.FieldDefinitionIds))
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+
+            var packedExpectedClassImportEmissionIndexes
+                = new Dictionary<(string ModuleIdentity, uint DefinitionId),
+                    int>();
             foreach (var declaration in standardClassDeclarations)
             {
                 var classView = declaration.Declaration;
@@ -1269,41 +1339,19 @@ public static partial class TrRmExecutableCompiler
                         classView.Provider.ModuleIdentity))
                 {
                     if (declaration.Expectations.Any(expectation =>
-                            expectation.Binding.ImportRow <= 0
-                            || !BoundEnumTypes
-                                .IsValidModuleDeclarationKey(
-                                    expectation.Binding.ExportKey)
-                            || !SameA2SourceTypeProviderSnapshot(
-                                expectation.Binding.UsingModule,
-                                expectation.ExpectedDeclaration.Provider)
-                            || !SameA2SourceTypeProviderSnapshot(
-                                expectation.Binding.Provider,
-                                classView.Provider)
-                            || expectation.Binding.ProviderDefinitionId
-                                != classView.Identity.DefinitionId
-                            || expectation.Binding.ExpectedDefinitionId
-                                != expectation.ExpectedDeclaration.Identity
-                                    .DefinitionId
-                            || expectation.Binding.TargetRequirement
-                                != moduleTargetRequirement
-                            || expectation.Binding.RuntimePolicy
-                                != (uint)program.RuntimePolicy
-                            || expectation.Binding.UsingModule.TargetRequirement
-                                != moduleTargetRequirement
-                            || expectation.Binding.UsingModule.RuntimePolicy
-                                != (uint)program.RuntimePolicy
-                            || (!StringComparer.Ordinal.Equals(
-                                    expectation.Binding.UsingModule
-                                        .ModuleIdentity,
-                                    moduleIdentity)
-                                && !packedClassModuleIdentities.Contains(
-                                    expectation.Binding.UsingModule
-                                        .ModuleIdentity))))
+                            !StringComparer.Ordinal.Equals(
+                                expectation.Binding.UsingModule
+                                    .ModuleIdentity,
+                                moduleIdentity)
+                            && !packedClassModuleIdentities.Contains(
+                                expectation.Binding.UsingModule
+                                    .ModuleIdentity)))
                     {
                         throw Invalid(
                             "An EN1 packed class TypeDef lost its provider or expected-module identity.");
                     }
 
+                    _ = GetClassRootImports(declaration);
                     standardClassEmissions.Add(
                         new C1EnumClosureStandardClassEmission(
                             classView, declaration.ExportKeys, null,
@@ -1311,6 +1359,178 @@ public static partial class TrRmExecutableCompiler
                             OwnerModuleIdentity
                                 = classView.Provider.ModuleIdentity,
                         });
+
+                    foreach (var expectation in declaration.Expectations)
+                    {
+                        var binding = expectation.Binding;
+                        var expectedView
+                            = expectation.ExpectedDeclaration;
+                        var expectedDefinitionId
+                            = binding.ExpectedDefinitionId;
+                        if ((expectedDefinitionId >> 24) != 0x13
+                            || (expectedDefinitionId & 0x00FF_FFFF) == 0
+                            || expectedView.Identity.DefinitionId
+                                != expectedDefinitionId
+                            || !SameA2SourceTypeProviderSnapshot(
+                                binding.UsingModule,
+                                expectedView.Provider)
+                            || !StringComparer.Ordinal.Equals(
+                                binding.UsingModule.ModuleIdentity,
+                                expectedView.Provider.ModuleIdentity)
+                            || !BoundEnumTypes
+                                .IsValidModuleDeclarationKey(
+                                    binding.ExportKey))
+                        {
+                            throw Invalid(
+                                "A packed class Import lost its original expected TypeDef view.");
+                        }
+
+                        if (!expectedView.Methods.IsEmpty)
+                        {
+                            throw Unsupported(
+                                "The EN1 packed class provider closure does not yet retain expected class Methods.");
+                        }
+
+                        var usingModuleIdentity
+                            = binding.UsingModule.ModuleIdentity;
+                        var expectedKey = (usingModuleIdentity,
+                            expectedDefinitionId);
+                        var typeImport = new C1EnumClosureImport(
+                            binding.ProducerIdentity, binding.ExportKey,
+                            binding.TargetRequirement,
+                            binding.RuntimePolicy, binding.ImportRow,
+                            usingModuleIdentity);
+                        if (packedExpectedClassImportEmissionIndexes
+                            .TryGetValue(expectedKey,
+                                out var expectedEmissionIndex))
+                        {
+                            var expectedEmission
+                                = standardClassEmissions[
+                                    expectedEmissionIndex];
+                            if (expectedEmission.Import is not
+                                    C1EnumClosureImport firstImport
+                                || expectedEmission.OwnerModuleIdentity
+                                    != usingModuleIdentity
+                                || !SamePackedClassTypeView(
+                                    expectedEmission.View, expectedView)
+                                || !StringComparer.Ordinal.Equals(
+                                    firstImport.ProducerIdentity,
+                                    typeImport.ProducerIdentity)
+                                || firstImport.TargetRequirement
+                                    != typeImport.TargetRequirement
+                                || firstImport.RuntimePolicy
+                                    != typeImport.RuntimePolicy
+                                || firstImport.ExportKey
+                                    == typeImport.ExportKey
+                                || firstImport.RootImportRow
+                                    == typeImport.RootImportRow
+                                || expectedEmission.AdditionalImports.Any(
+                                    import =>
+                                        import.ExportKey
+                                            == typeImport.ExportKey
+                                        || import.RootImportRow
+                                            == typeImport.RootImportRow))
+                            {
+                                throw Invalid(
+                                    "Packed class Import aliases do not share one exact expected TypeDef view.");
+                            }
+
+                            var additionalImports
+                                = expectedEmission.AdditionalImports
+                                        .IsDefaultOrEmpty
+                                    ? ImmutableArray.Create(typeImport)
+                                    : expectedEmission.AdditionalImports
+                                        .Add(typeImport);
+                            var fieldExpectations
+                                = expectedEmission.FieldExpectations
+                                    .ToBuilder();
+                            var expectedFields
+                                = ImmutableArray.CreateBuilder<
+                                    BoundStandardClassFieldDeclaration>(
+                                        expectedView.Fields.Length);
+                            for (var fieldIndex = 0;
+                                fieldIndex < expectedView.Fields.Length;
+                                fieldIndex++)
+                            {
+                                var existingField
+                                    = expectedEmission.View.Fields[
+                                        fieldIndex];
+                                var selectedFieldKeys
+                                    = ImmutableArray.CreateBuilder<string>(
+                                        existingField.SelectedExportKeys.Length
+                                            + expectedView.Fields[fieldIndex]
+                                                .SelectedExportKeys.Length);
+                                selectedFieldKeys.AddRange(
+                                    existingField.SelectedExportKeys);
+                                foreach (var exportKey in expectedView
+                                    .Fields[fieldIndex].SelectedExportKeys)
+                                {
+                                    if (!selectedFieldKeys.Contains(exportKey,
+                                            StringComparer.Ordinal))
+                                    {
+                                        selectedFieldKeys.Add(exportKey);
+                                    }
+                                }
+
+                                expectedFields.Add(existingField with {
+                                    SelectedExportKeys =
+                                        selectedFieldKeys.ToImmutable(),
+                                });
+                            }
+
+                            foreach (var fieldExpectation in
+                                expectation.FieldExpectations)
+                            {
+                                if (!fieldExpectations.Any(existing =>
+                                        existing.ImportRow
+                                            == fieldExpectation.ImportRow
+                                        && existing.OwnerImportRow
+                                            == fieldExpectation.OwnerImportRow
+                                        && StringComparer.Ordinal.Equals(
+                                            existing.ExportKey,
+                                            fieldExpectation.ExportKey)))
+                                {
+                                    fieldExpectations.Add(fieldExpectation);
+                                }
+                            }
+
+                            standardClassEmissions[
+                                expectedEmissionIndex] = expectedEmission
+                                with {
+                                    View = expectedEmission.View with {
+                                        Fields = expectedFields.ToImmutable(),
+                                    },
+                                    AdditionalImports = additionalImports,
+                                    FieldExpectations =
+                                        fieldExpectations.ToImmutable(),
+                                };
+                        }
+                        else
+                        {
+                            if (binding.ImportRow <= 0
+                                || expectedView.Provider.ModuleRow <= 0)
+                            {
+                                throw Invalid(
+                                    "A packed class Import has an invalid using Module or Import row.");
+                            }
+
+                            var expectedTypeDefRow = checked((int)(
+                                expectedDefinitionId & 0x00FF_FFFF));
+                            var expectedEmissionIndex
+                                = standardClassEmissions.Count;
+                            standardClassEmissions.Add(
+                                new C1EnumClosureStandardClassEmission(
+                                    expectedView, [], typeImport,
+                                    expectedTypeDefRow,
+                                    expectation.FieldExpectations) {
+                                    OwnerModuleIdentity
+                                        = usingModuleIdentity,
+                                });
+                            packedExpectedClassImportEmissionIndexes.Add(
+                                expectedKey, expectedEmissionIndex);
+                        }
+                    }
+
                     continue;
                 }
 
@@ -3508,7 +3728,6 @@ public static partial class TrRmExecutableCompiler
         var standardClassFieldRowsByIdentity = new Dictionary<(
             BoundGenericNominalTypeIdentity Owner, uint FieldDefinitionId),
             int>();
-        var standardClassFieldRowMap = new Dictionary<int, int>();
         var standardClassMethodRowsByIdentity = new Dictionary<(
             BoundGenericNominalTypeIdentity Owner, uint MethodDefinitionId),
             int>();
@@ -3597,9 +3816,31 @@ public static partial class TrRmExecutableCompiler
         var exportRows = new List<TrRmExportRow>();
         var fieldExportRows = new List<TrRmExportRow>();
         var moduleRefRows = new List<TrRmModuleRefRow>();
+        var moduleRefOwnerIdentities = new List<string>();
         var moduleRefRowsByProvider = new Dictionary<
-            (string ProducerIdentity, uint TargetRequirement,
-                uint RuntimePolicy), int>();
+            (string OwnerModuleIdentity, string ProducerIdentity,
+                uint TargetRequirement, uint RuntimePolicy), int>();
+        int GetOrAddModuleRef(string ownerModuleIdentity,
+            string producerIdentity, uint targetRequirement,
+            uint runtimePolicy)
+        {
+            var key = (ownerModuleIdentity, producerIdentity,
+                targetRequirement, runtimePolicy);
+            if (moduleRefRowsByProvider.TryGetValue(key,
+                    out var moduleRefRow))
+            {
+                return moduleRefRow;
+            }
+
+            moduleRefRow = checked(moduleRefRows.Count + 1);
+            moduleRefRows.Add(new TrRmModuleRefRow(
+                AddString(producerIdentity), targetRequirement,
+                runtimePolicy));
+            moduleRefOwnerIdentities.Add(ownerModuleIdentity);
+            moduleRefRowsByProvider.Add(key, moduleRefRow);
+            return moduleRefRow;
+        }
+
         var importRows = new List<TrRmImportRow>();
         var valueBuilder = new TrRmFrozenScalarValueBuilder();
         var hasBlittableEnum = false;
@@ -4303,18 +4544,9 @@ public static partial class TrRmExecutableCompiler
                         "An EN1 enum Import has an invalid producer identity or ExportKey.");
                 }
 
-                var providerKey = (enumImport.ProducerIdentity,
+                var moduleRefRow = GetOrAddModuleRef(moduleIdentity,
+                    enumImport.ProducerIdentity,
                     enumImport.TargetRequirement, enumImport.RuntimePolicy);
-                if (!moduleRefRowsByProvider.TryGetValue(providerKey,
-                        out var moduleRefRow))
-                {
-                    moduleRefRow = moduleRefRows.Count + 1;
-                    moduleRefRows.Add(new TrRmModuleRefRow(
-                        AddString(enumImport.ProducerIdentity),
-                        enumImport.TargetRequirement,
-                        enumImport.RuntimePolicy));
-                    moduleRefRowsByProvider.Add(providerKey, moduleRefRow);
-                }
 
                 importRows.Add(new TrRmImportRow(moduleRefRow,
                     AddString(enumImport.ExportKey),
@@ -4561,18 +4793,11 @@ public static partial class TrRmExecutableCompiler
                         "An EN1 class TypeDef Import has an invalid provider or root identity.");
                 }
 
-                var providerKey = (typeImport.ProducerIdentity,
+                var ownerModuleIdentity
+                    = emission.OwnerModuleIdentity ?? moduleIdentity;
+                var moduleRefRow = GetOrAddModuleRef(ownerModuleIdentity,
+                    typeImport.ProducerIdentity,
                     typeImport.TargetRequirement, typeImport.RuntimePolicy);
-                if (!moduleRefRowsByProvider.TryGetValue(providerKey,
-                        out var moduleRefRow))
-                {
-                    moduleRefRow = moduleRefRows.Count + 1;
-                    moduleRefRows.Add(new TrRmModuleRefRow(
-                        AddString(typeImport.ProducerIdentity),
-                        typeImport.TargetRequirement,
-                        typeImport.RuntimePolicy));
-                    moduleRefRowsByProvider.Add(providerKey, moduleRefRow);
-                }
 
                 importRows.Add(new TrRmImportRow(moduleRefRow,
                     AddString(typeImport.ExportKey),
@@ -4625,18 +4850,9 @@ public static partial class TrRmExecutableCompiler
                         "A mixed EN1 struct Import has an invalid provider identity or ExportKey.");
                 }
 
-                var providerKey = (typeImport.ProducerIdentity,
+                var moduleRefRow = GetOrAddModuleRef(moduleIdentity,
+                    typeImport.ProducerIdentity,
                     typeImport.TargetRequirement, typeImport.RuntimePolicy);
-                if (!moduleRefRowsByProvider.TryGetValue(providerKey,
-                        out var moduleRefRow))
-                {
-                    moduleRefRow = moduleRefRows.Count + 1;
-                    moduleRefRows.Add(new TrRmModuleRefRow(
-                        AddString(typeImport.ProducerIdentity),
-                        typeImport.TargetRequirement,
-                        typeImport.RuntimePolicy));
-                    moduleRefRowsByProvider.Add(providerKey, moduleRefRow);
-                }
 
                 importRows.Add(new TrRmImportRow(moduleRefRow,
                     AddString(typeImport.ExportKey),
@@ -4995,14 +5211,7 @@ public static partial class TrRmExecutableCompiler
                     throw Invalid(
                         "EN1 class re-emission contains a duplicate FieldDef identity.");
                 }
-                var sourceFieldRow = checked((int)(
-                    field.DefinitionId & 0x00FF_FFFF));
-                if (!standardClassFieldRowMap.TryAdd(sourceFieldRow,
-                        fieldDefRow))
-                {
-                    throw Invalid(
-                        "EN1 class re-emission maps one source FieldDef row more than once.");
-                }
+
                 fieldNames.Add(field.Name);
                 layoutFieldRows.Add(new TrRmLayoutFieldRow(
                     checked(layoutRows.Count + 1), fieldOrdinal,
@@ -5053,7 +5262,39 @@ public static partial class TrRmExecutableCompiler
                         continue;
                     }
 
-                    if (emission.Import is not C1EnumClosureImport typeImport
+                    var typeImports = ImmutableArray.CreateBuilder<
+                        C1EnumClosureImport>(
+                            1 + emission.AdditionalImports.Length);
+                    if (emission.Import is C1EnumClosureImport primaryImport)
+                    {
+                        typeImports.Add(primaryImport);
+                    }
+                    typeImports.AddRange(emission.AdditionalImports);
+                    var fieldOwnerModuleIdentity
+                        = emission.OwnerModuleIdentity ?? moduleIdentity;
+                    C1EnumClosureImport? typeImport = null;
+                    foreach (var import in typeImports)
+                    {
+                        if (import.RootImportRow
+                                != fieldExpectation.OwnerImportRow
+                            || (import.RootImportRow != 0
+                                && !StringComparer.Ordinal.Equals(
+                                    import.RootImportProviderIdentity,
+                                    fieldOwnerModuleIdentity)))
+                        {
+                            continue;
+                        }
+
+                        if (typeImport is not null)
+                        {
+                            throw Invalid(
+                                "An EN1 class FieldDef Import has ambiguous owner TypeDef Imports.");
+                        }
+
+                        typeImport = import;
+                    }
+
+                    if (typeImport is null
                         || (typeImport.RootImportRow == 0
                             ? fieldExpectation.ImportRow != 0
                                 || fieldExpectation.OwnerImportRow != 0
@@ -5061,9 +5302,7 @@ public static partial class TrRmExecutableCompiler
                                     != fieldExpectation.ProviderDefinitionId
                                 || fieldExpectation.ExpectedOwnerDefinitionId
                                     != fieldExpectation.ProviderOwnerDefinitionId
-                            : fieldExpectation.ImportRow <= 0
-                                || fieldExpectation.OwnerImportRow
-                                    != typeImport.RootImportRow)
+                            : fieldExpectation.ImportRow <= 0)
                         || fieldExpectation.ExpectedOwnerDefinitionId
                             != classView.Identity.DefinitionId
                         || !StringComparer.Ordinal.Equals(
@@ -5078,22 +5317,11 @@ public static partial class TrRmExecutableCompiler
                             "An EN1 class FieldDef Import lost its retained owner or provider identity.");
                     }
 
-                    var fieldProviderKey = (
+                    var fieldModuleRefRow = GetOrAddModuleRef(
+                        fieldOwnerModuleIdentity,
                         fieldExpectation.Provider.ModuleIdentity,
                         fieldExpectation.Provider.TargetRequirement,
                         fieldExpectation.Provider.RuntimePolicy);
-                    if (!moduleRefRowsByProvider.TryGetValue(
-                            fieldProviderKey, out var fieldModuleRefRow))
-                    {
-                        fieldModuleRefRow = moduleRefRows.Count + 1;
-                        moduleRefRows.Add(new TrRmModuleRefRow(
-                            AddString(fieldExpectation.Provider
-                                .ModuleIdentity),
-                            fieldExpectation.Provider.TargetRequirement,
-                            fieldExpectation.Provider.RuntimePolicy));
-                        moduleRefRowsByProvider.Add(fieldProviderKey,
-                            fieldModuleRefRow);
-                    }
 
                     var localFieldDefinition = 0x1400_0000u
                         | checked((uint)fieldDefRow);
@@ -5292,21 +5520,13 @@ public static partial class TrRmExecutableCompiler
 
                 foreach (var expectation in methodExpectations)
                 {
-                    var providerKey = (
+                    var methodOwnerModuleIdentity
+                        = emission.OwnerModuleIdentity ?? moduleIdentity;
+                    var moduleRefRow = GetOrAddModuleRef(
+                        methodOwnerModuleIdentity,
                         expectation.Provider.ModuleIdentity,
                         expectation.Provider.TargetRequirement,
                         expectation.Provider.RuntimePolicy);
-                    if (!moduleRefRowsByProvider.TryGetValue(providerKey,
-                            out var moduleRefRow))
-                    {
-                        moduleRefRow = moduleRefRows.Count + 1;
-                        moduleRefRows.Add(new TrRmModuleRefRow(
-                            AddString(expectation.Provider.ModuleIdentity),
-                            expectation.Provider.TargetRequirement,
-                            expectation.Provider.RuntimePolicy));
-                        moduleRefRowsByProvider.Add(providerKey,
-                            moduleRefRow);
-                    }
 
                     importRows.Add(new TrRmImportRow(moduleRefRow,
                         AddString(expectation.ExportKey),
@@ -5614,20 +5834,13 @@ public static partial class TrRmExecutableCompiler
 
                     foreach (var fieldImport in fieldImports)
                     {
-                        var providerKey = (fieldImport.ProducerIdentity,
+                        var fieldOwnerModuleIdentity
+                            = emission.OwnerModuleIdentity ?? moduleIdentity;
+                        var moduleRefRow = GetOrAddModuleRef(
+                            fieldOwnerModuleIdentity,
+                            fieldImport.ProducerIdentity,
                             fieldImport.TargetRequirement,
                             fieldImport.RuntimePolicy);
-                        if (!moduleRefRowsByProvider.TryGetValue(
-                                providerKey, out var moduleRefRow))
-                        {
-                            moduleRefRow = moduleRefRows.Count + 1;
-                            moduleRefRows.Add(new TrRmModuleRefRow(
-                                AddString(fieldImport.ProducerIdentity),
-                                fieldImport.TargetRequirement,
-                                fieldImport.RuntimePolicy));
-                            moduleRefRowsByProvider.Add(providerKey,
-                                moduleRefRow);
-                        }
 
                         var localFieldDefinition = 0x1400_0000u
                             | checked((uint)fieldDefRow);
@@ -6456,13 +6669,6 @@ public static partial class TrRmExecutableCompiler
                 "A packed class Module has no checked provider snapshot.");
         }
         if (!packedClassModuleIdentities.IsEmpty
-            && (moduleRefRows.Count != 0 || !importRows.IsEmpty))
-        {
-            throw Unsupported(
-                "The EN1 packed class provider closure cannot retain external Imports yet.");
-        }
-
-        if (!packedClassModuleIdentities.IsEmpty
             && (!retainedClassIndexes.IsEmpty
                 || !retainedStructureIndexes.IsEmpty
                 || !emittedEnums.IsEmpty))
@@ -6596,8 +6802,62 @@ public static partial class TrRmExecutableCompiler
             return ranges;
         }
 
+        var moduleOrderByIdentity = outputModuleIdentities
+            .Select((identity, index) => (identity, index))
+            .ToDictionary(static item => item.identity,
+                static item => item.index, StringComparer.Ordinal);
+        var orderedModuleRefs
+            = Enumerable.Range(0, moduleRefRows.Count)
+                .Select(index => {
+                    if (!moduleOrderByIdentity.TryGetValue(
+                            moduleRefOwnerIdentities[index],
+                            out var moduleOrder))
+                    {
+                        throw Invalid(
+                            "An EN1 ModuleRef owner is outside the emitted Module closure.");
+                    }
+
+                    return (Index: index, ModuleOrder: moduleOrder);
+                })
+                .OrderBy(static item => item.ModuleOrder)
+                .ThenBy(static item => item.Index)
+                .ToArray();
+        var moduleRefRowMap = new int[moduleRefRows.Count + 1];
+        var sortedModuleRefRows
+            = new List<TrRmModuleRefRow>(moduleRefRows.Count);
+        var sortedModuleRefOwnerIdentities
+            = new List<string>(moduleRefOwnerIdentities.Count);
+        for (var index = 0; index < orderedModuleRefs.Length; index++)
+        {
+            var oldIndex = orderedModuleRefs[index].Index;
+            moduleRefRowMap[oldIndex + 1] = index + 1;
+            sortedModuleRefRows.Add(moduleRefRows[oldIndex]);
+            sortedModuleRefOwnerIdentities.Add(
+                moduleRefOwnerIdentities[oldIndex]);
+        }
+
+        for (var index = 0; index < importRows.Count; index++)
+        {
+            var import = importRows[index];
+            if (import.ModuleRefRow <= 0
+                || import.ModuleRefRow >= moduleRefRowMap.Length
+                || moduleRefRowMap[import.ModuleRefRow] == 0)
+            {
+                throw Invalid(
+                    "An EN1 Import lost its ModuleRef while partitioning Module ownership.");
+            }
+
+            importRows[index] = import with {
+                ModuleRefRow = moduleRefRowMap[import.ModuleRefRow],
+            };
+        }
+        moduleRefRows = sortedModuleRefRows;
+        moduleRefOwnerIdentities = sortedModuleRefOwnerIdentities;
+
         var typeDefRanges = CreateModuleRanges(typeDefModuleIdentities,
             outputModuleIdentities, typeDefRows.Count, "TypeDef");
+        var moduleRefRanges = CreateModuleRanges(moduleRefOwnerIdentities,
+            outputModuleIdentities, moduleRefRows.Count, "ModuleRef");
         var methodRanges = CreateModuleRanges(methodOwnerModuleIdentities,
             outputModuleIdentities, methodRows.Count, "MethodDef");
         var moduleRows = new List<TrRmModuleRow>(
@@ -6610,13 +6870,14 @@ public static partial class TrRmExecutableCompiler
                 ? null
                 : packedClassProvidersByIdentity[outputModuleIdentity];
             var typeDefRange = typeDefRanges[outputModuleIdentity];
+            var moduleRefRange = moduleRefRanges[outputModuleIdentity];
             var methodRange = methodRanges[outputModuleIdentity];
             var featureRange = moduleFeatureRanges[outputModuleIdentity];
             moduleRows.Add(new TrRmModuleRow(
                 AddString(outputModuleIdentity),
                 provider?.TargetRequirement ?? moduleTargetRequirement,
                 provider?.RuntimePolicy ?? (uint)program.RuntimePolicy,
-                0, 1, typeDefRange.Start,
+                0, moduleRefRange.Start, typeDefRange.Start,
                 methodRange.Start, 1, featureRange.First,
                 featureRange.Count,
                 provider?.GoverningRuleEdition ?? 1));

@@ -112,9 +112,11 @@ remaps direct TypeSpecs through transitive private children, and preserves
 provider identities through query/load/re-emission; its regression remains
 unverified under the hold. Mismatched Module and duplicate-identity replacement
 rejection cases are also added but unverified. External Imports in packed
-output, pointer/other non-scalar struct dependencies, class handles nested
-through inline-struct fields, and broader multi-function/provider dependency
-closure remain open.
+class closures now retain class TypeDef expectations and owner-scoped
+ModuleRefs; an imported-class query/re-emission regression is added but remains
+unverified. Non-class and class-Method Imports, pointer/other non-scalar struct
+dependencies, class handles nested through inline-struct fields, and broader
+multi-function/provider dependency closure remain open.
 
 Other proposals remain unapproved unless their owner and approval status say
 otherwise; see the [proposal index](../proposals/README.md).

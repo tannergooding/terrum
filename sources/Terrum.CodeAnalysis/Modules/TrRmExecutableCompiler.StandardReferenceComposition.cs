@@ -1367,8 +1367,7 @@ public static partial class TrRmExecutableCompiler
                         "A class handle field lost its selected class declaration view.");
                 var classView = classDeclaration.Declaration;
                 var hasDirectClassView
-                    = classDeclaration.Expectations.IsEmpty
-                        && sourceInstance.TypeSpecForm == 0x02
+                    = sourceInstance.TypeSpecForm == 0x02
                         && StringComparer.Ordinal.Equals(
                             sourceInstance.TypeSpecProviderIdentity,
                             classProvider.ModuleIdentity)
@@ -1838,8 +1837,8 @@ public static partial class TrRmExecutableCompiler
                                             expectation.Binding)));
                 var hasDirectClassHandleDependency
                     = classHandleTypeDependencies.Contains(view.Identity)
-                        && declaration.Expectations.IsEmpty
-                        && typeDefinition.ProviderExpectations.IsDefaultOrEmpty
+                        && (declaration.Expectations.IsEmpty
+                            || hasSelectedImportedClassView)
                         && StringComparer.Ordinal.Equals(
                             view.Identity.ProviderIdentity,
                             view.Identity.ModuleIdentity)
@@ -1848,7 +1847,17 @@ public static partial class TrRmExecutableCompiler
                             view.Provider.ModuleIdentity)
                         && (typeDefinition.Provider is null
                             || SameA2SourceTypeProviderSnapshot(
-                                typeDefinition.Provider, view.Provider));
+                                typeDefinition.Provider, view.Provider))
+                        && (typeDefinition.ProviderExpectations
+                                .IsDefaultOrEmpty
+                            || typeDefinition.ProviderExpectations.All(
+                                expectation =>
+                                    IsSelectedClassProvider(referenceIndex,
+                                        expectation.UsingModule)
+                                    && SameA2SourceTypeProviderSnapshot(
+                                        expectation.Provider, view.Provider)
+                                    && expectation.ProviderDefinitionId
+                                        == view.Identity.DefinitionId));
                 var isSelectedClassRoot
                     = !declaration.SelectedExportKeys.IsDefaultOrEmpty
                         || selectedClassIdentities.Contains(view.Identity);
