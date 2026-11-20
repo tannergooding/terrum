@@ -4182,6 +4182,127 @@ internal sealed class TrRmC1EnumClosureSourceTests
     }
 
     [Test]
+    public void ComposesClassLayoutReferencesWithClassFields()
+    {
+        var schemaIdentity
+            = $"{s_schemaIdentities[0]}-class-instance-layout-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        var tree = SyntaxTree.Parse("""
+            namespace Demo {
+                public class Child {
+                    public int32 Id;
+                }
+                public class Parent {
+                    public Child Value;
+                }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+
+        TrRmSourceClassExport CreateClassExport(string name,
+            string typeExportKey, string fieldExportKey)
+        {
+            var declaration = tree.Root.Children.OfType<SyntaxNode>()
+                .Single(node =>
+                    node.Kind == SyntaxKind.ClassDeclaration
+                    && node.Children.OfType<SyntaxTokenElement>().Any(token =>
+                        token.Token.Kind == TokenKind.Identifier
+                        && token.Token.Name == name));
+            var field = declaration.Children.OfType<SyntaxNode>()
+                .Single(static node =>
+                    node.Kind == SyntaxKind.FieldDeclaration);
+            var classIndex = program.SourceClassProgramAssociation!
+                .Declarations.Single(item =>
+                    item.Span == declaration.Span).ClassIndex;
+            return new TrRmSourceClassExport(program, classIndex,
+                declaration.Span, typeExportKey, [
+                    new TrRmSourceClassMemberExport(0, field.Span,
+                        fieldExportKey),
+                ]);
+        }
+
+        var childExport = CreateClassExport("Child", "type.child",
+            "field.child.id");
+        var parentExport = CreateClassExport("Parent", "type.parent",
+            "field.parent.value");
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "ClassHandleProvider", schemaIdentity, targetRequirement, [],
+            [], [childExport, parentExport], []);
+        var input = new TrRmStandardArtifactInput(schemaIdentity, artifact);
+        var parentReference
+            = TrRmExecutableCompiler.CreateStandardReference(input,
+                "ClassHandleProvider", [], ["type.parent"],
+                ["field.parent.value"]);
+        var childReference
+            = TrRmExecutableCompiler.CreateStandardReference(input,
+                "ClassHandleProvider", [], ["type.child"],
+                ["field.child.id"]);
+        var reference = TrRmExecutableCompiler.CreateStandardReferenceSet(
+            [parentReference, childReference]);
+
+        var parent = reference.StandardClassDeclarations.Single(
+            static declaration =>
+                declaration.Declaration.Name == "Parent");
+        var child = reference.StandardClassDeclarations.Single(
+            static declaration =>
+                declaration.Declaration.Name == "Child");
+        var childType = parent.Declaration.Fields.Single().Type;
+        Assert.That(BoundGenericNominalTypeTypes.IsType(childType), Is.True);
+        Assert.That(reference.GenericNominalTypeInstances[
+                BoundGenericNominalTypeTypes.Index(childType)].Definition,
+            Is.EqualTo(child.Declaration.Identity));
+
+        var consumer = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Demo;
+                nint CombinedOffset() {
+                    return unsafe(offsetof(Parent, Value))
+                        + unsafe(offsetof(Child, Id));
+                }
+                """), reference, new CompilationOptions {
+                LayoutCoreRegistration
+                    = LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            consumer.Program!, "ClassHandleConsumer", schemaIdentity,
+            targetRequirement);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                consumerArtifact, SchemaFor(schemaIdentity), null,
+                usesNativePointerLoads: false,
+                standardSchemaIdentity: schemaIdentity));
+        Assert.That(tables.TargetLayoutDependencies.Count,
+            Is.EqualTo(2));
+        Assert.That(tables.TargetLayoutDependencyFields.Count,
+            Is.EqualTo(2));
+        var imports = Enumerable.Range(1, tables.Imports.Count)
+            .Select(tables.Imports.GetBindingForImportRow).ToArray();
+        Assert.That(imports.Any(static binding =>
+                binding.ProducerIdentity == "ClassHandleProvider"
+                && binding.ExportKey == "type.child"),
+            Is.True);
+        Assert.That(imports.Any(static binding =>
+                binding.ProducerIdentity == "ClassHandleProvider"
+                && binding.ExportKey == "field.parent.value"),
+            Is.True);
+        Assert.That(imports.Any(static binding =>
+                binding.ProducerIdentity == "ClassHandleProvider"
+                && binding.ExportKey == "field.child.id"),
+            Is.True);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
+            "ClassHandleConsumer", [input]);
+        Assert.That(loaded.Functions.Single().Name,
+            Is.EqualTo("CombinedOffset"));
+    }
+
+    [Test]
     public void ComposesClassQueryRootsWithImportedStructFieldProviders()
     {
         var schemaIdentity

@@ -1278,6 +1278,7 @@ public static partial class TrRmExecutableCompiler
             structuresResult = remappedStructures.MoveToImmutable();
         }
 
+        var genericNominalInstanceMaps = new int[references.Length][];
         PrimitiveType RemapClassFieldType(int referenceIndex,
             PrimitiveType type,
             BoundSourceTypeProviderSnapshot classProvider)
@@ -1296,8 +1297,51 @@ public static partial class TrRmExecutableCompiler
                     "A class FieldDef enum type is outside the selected enum provider closure.");
             }
 
-            if (BoundGenericNominalTypeTypes.IsType(type)
-                || BoundSpanTypeTypes.IsType(type)
+            if (BoundGenericNominalTypeTypes.IsType(type))
+            {
+                var instanceIndex
+                    = BoundGenericNominalTypeTypes.Index(type);
+                var sourceInstances
+                    = references[referenceIndex]
+                        .GenericNominalTypeInstances;
+                var sourceDefinitions
+                    = references[referenceIndex]
+                        .GenericNominalTypeDefinitions;
+                if ((uint)instanceIndex >= (uint)sourceInstances.Length
+                    || (uint)instanceIndex
+                        >= (uint)genericNominalInstanceMaps[
+                            referenceIndex].Length)
+                {
+                    throw Unsupported(
+                        "A class FieldDef nominal type is outside its selected provider closure.");
+                }
+
+                var sourceInstance = sourceInstances[instanceIndex];
+                var sourceDefinition = sourceDefinitions.FirstOrDefault(
+                    definition =>
+                        definition.Identity == sourceInstance.Definition);
+                var classDeclaration
+                    = references[referenceIndex]
+                        .StandardClassDeclarations.SingleOrDefault(
+                            declaration =>
+                                declaration.Declaration.Identity
+                                == sourceInstance.Definition);
+                if (sourceDefinition is null
+                    || sourceDefinition.NominalKind != 2
+                    || classDeclaration is null
+                    || !SameA2SourceTypeProviderSnapshot(classProvider,
+                        classDeclaration.Declaration.Provider))
+                {
+                    throw Unsupported(
+                        "Class FieldDefs can only retain direct class TypeDef handle dependencies.");
+                }
+
+                return BoundGenericNominalTypeTypes.Type(
+                    genericNominalInstanceMaps[referenceIndex][
+                        instanceIndex]);
+            }
+
+            if (BoundSpanTypeTypes.IsType(type)
                 || ManagedClassTypes.IsClass(type)
                 || NativePointerTypes.IsType(type)
                 || NativeFixedArrayTypes.IsType(type)
@@ -1358,6 +1402,14 @@ public static partial class TrRmExecutableCompiler
         var declarationIndexes = new Dictionary<
             BoundGenericNominalTypeIdentity, int>();
         var declarationNames = new HashSet<(string Namespace, string Name)>();
+        var selectedClassIdentities = references
+            .SelectMany(static reference =>
+                reference.StandardClassDeclarations)
+            .Where(static declaration =>
+                !declaration.SelectedExportKeys.IsDefaultOrEmpty)
+            .Select(static declaration =>
+                declaration.Declaration.Identity)
+            .ToHashSet();
         var providerSnapshots = new Dictionary<
             (string SchemaIdentity, string ModuleIdentity),
             BoundSourceTypeProviderSnapshot>();
@@ -1466,19 +1518,30 @@ public static partial class TrRmExecutableCompiler
             }
 
             var sourceInstances = reference.GenericNominalTypeInstances;
+            var instanceMap = new int[sourceInstances.Length];
             for (var instanceIndex = 0;
                 instanceIndex < sourceInstances.Length; instanceIndex++)
             {
                 var instance = sourceInstances[instanceIndex];
+                var hasDirectTypeSpec = instance.TypeSpecReference == 0
+                    && instance.TypeSpecProviderIdentity is null
+                    && instance.TypeSpecForm == 0;
+                var hasLocalClassTypeSpec
+                    = instance.TypeSpecReference != 0
+                        && instance.TypeSpecForm == 0x02
+                        && StringComparer.Ordinal.Equals(
+                            instance.TypeSpecProviderIdentity,
+                            instance.Definition.ModuleIdentity)
+                        && sourceDefinitions.Any(definition =>
+                            definition.Identity == instance.Definition
+                            && definition.NominalKind == 2);
                 if (!instance.Arguments.IsEmpty
                     || instance.Qualifiers != 0
-                    || instance.TypeSpecReference != 0
-                    || instance.TypeSpecProviderIdentity is not null
-                    || instance.TypeSpecForm != 0
+                    || (!hasDirectTypeSpec && !hasLocalClassTypeSpec)
                     || !definitionIndexes.ContainsKey(instance.Definition))
                 {
                     throw Unsupported(
-                        "Type-only class composition requires direct, unqualified class instances.");
+                        "Type-only class composition requires direct instances or local class-handle TypeSpecs.");
                 }
 
                 var key = new StandardClassTypeOnlyInstanceKey(
@@ -1486,7 +1549,8 @@ public static partial class TrRmExecutableCompiler
                     instance.TypeSpecReference,
                     instance.TypeSpecProviderIdentity,
                     instance.TypeSpecForm);
-                if (!instanceIndexes.ContainsKey(key))
+                if (!instanceIndexes.TryGetValue(key,
+                        out var mappedInstanceIndex))
                 {
                     if (instances.Count
                         >= BoundGenericNominalTypeTypes.MaximumCount)
@@ -1495,12 +1559,14 @@ public static partial class TrRmExecutableCompiler
                             "The composed Standard class instance table exceeds the analysis limit.");
                     }
 
-                    var mappedInstanceIndex = instances.Count;
+                    mappedInstanceIndex = instances.Count;
                     instanceIndexes.Add(key, mappedInstanceIndex);
                     instances.Add(instance);
                 }
 
+                instanceMap[instanceIndex] = mappedInstanceIndex;
             }
+            genericNominalInstanceMaps[referenceIndex] = instanceMap;
 
             foreach (var declaration in reference.StandardClassDeclarations)
             {
@@ -1519,7 +1585,8 @@ public static partial class TrRmExecutableCompiler
                         classSchemaIdentity)
                     || !definitionIndexes.ContainsKey(view.Identity)
                     || !declaration.Expectations.IsEmpty
-                    || declaration.SelectedExportKeys.IsDefaultOrEmpty
+                    || (declaration.SelectedExportKeys.IsDefaultOrEmpty
+                        && !selectedClassIdentities.Contains(view.Identity))
                     || declaration.ExportKeys.IsDefaultOrEmpty
                     || !view.Methods.IsEmpty)
                 {
