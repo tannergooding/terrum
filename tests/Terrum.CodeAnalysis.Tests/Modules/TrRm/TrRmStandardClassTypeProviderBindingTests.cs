@@ -116,6 +116,38 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
                 equalityTables.TypeDefBindingEqualities
                     .GetRightTypeDef(1))),
             Is.EqualTo(2));
+        byte[] EncodeEqualityRow(uint ownerModule, uint leftTypeDef,
+            uint rightTypeDef)
+        {
+            var bytes = (byte[])equalityBytes.Clone();
+            BinaryPrimitives.WriteUInt32LittleEndian(bytes, ownerModule);
+            BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(4, 4),
+                leftTypeDef);
+            BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(8, 4),
+                rightTypeDef);
+            var rewrittenSections = sections.Select(section =>
+                section.Kind == 0x0067
+                    ? new TrRmSection(0x0067, 0, 1, bytes)
+                    : section).ToArray();
+            return TrRmArtifactWriter.Encode(rewrittenSections, schema,
+                standardSchemaIdentity: classSchemaIdentity);
+        }
+
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                    EncodeEqualityRow(0, prefixDefinition & 0x00FF_FFFF,
+                        leafDefinition & 0x00FF_FFFF),
+                    schema, null,
+                    standardSchemaIdentity: classSchemaIdentity)));
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                    EncodeEqualityRow(1,
+                        prefixDefinition & 0x00FF_FFFF, 0),
+                    schema, null,
+                    standardSchemaIdentity: classSchemaIdentity)));
+
         Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator
                 .ValidateC1AndGetExecutionTables(
