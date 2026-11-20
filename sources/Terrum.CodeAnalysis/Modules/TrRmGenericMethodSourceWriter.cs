@@ -5619,7 +5619,8 @@ public static partial class TrRmExecutableCompiler
         byte[] artifact, BoundProgram program, TrRmArtifactSchema schema,
         TrRmFrozenScalarValueBuilder? methodParameterSurfaceValues,
         out Dictionary<GenericImportedInterfaceAssociatedTypeKey, uint>
-            importedInterfaceAssociatedTypeImportRows)
+            importedInterfaceAssociatedTypeImportRows,
+        string? standardSchemaIdentity = null)
     {
         importedInterfaceAssociatedTypeImportRows = [];
         var emissions = CaptureImportedGenericInterfaceEmissions(program,
@@ -5634,7 +5635,8 @@ public static partial class TrRmExecutableCompiler
                 "Imported G1 interface constraints require the exact G1L1 schema.");
         }
 
-        var artifactIndex = new TrRmArtifactIndex(artifact, schema);
+        var artifactIndex = new TrRmArtifactIndex(artifact, schema,
+            standardSchemaIdentity: standardSchemaIdentity);
         var sections = new List<TrRmSection>(artifactIndex.SectionCount);
         for (var sectionIndex = 0;
             sectionIndex < artifactIndex.SectionCount;
@@ -6307,7 +6309,8 @@ public static partial class TrRmExecutableCompiler
 
         sections.Sort(static (left, right) =>
             left.Kind.CompareTo(right.Kind));
-        return TrRmArtifactWriter.Encode(sections, schema);
+        return TrRmArtifactWriter.Encode(sections, schema,
+            standardSchemaIdentity: standardSchemaIdentity);
     }
 
     private static List<GenericImportedInterfaceEmission>

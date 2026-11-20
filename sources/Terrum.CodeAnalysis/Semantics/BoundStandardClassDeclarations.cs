@@ -119,7 +119,10 @@ internal readonly record struct
 
 internal sealed record BoundStandardClassTypeDefBindingEqualityGroup(
     ImmutableArray<BoundStandardClassTypeDefBindingEqualityEndpoint>
-        Endpoints);
+        Endpoints)
+{
+    internal BoundSourceTypeProviderSnapshot? OwnerModule { get; init; }
+}
 
 internal sealed record BoundStandardClassFieldExpectation(
     int ImportRow, int OwnerImportRow, uint ExpectedDefinitionId,
@@ -505,6 +508,12 @@ internal static class BoundStandardClassDeclarationContract
             {
                 if (group is null || group.Endpoints.IsDefault
                     || group.Endpoints.Length < 2
+                    || (group.OwnerModule is not null
+                        && (!IsValidSnapshot(group.OwnerModule)
+                            || !StringComparer.Ordinal.Equals(
+                                group.OwnerModule.SchemaIdentity,
+                                declaration.Declaration.Provider
+                                    .SchemaIdentity)))
                     || !StandardGenericMethodSchema
                         .IsClassTypeBindingViews(
                             declaration.Declaration.Provider.SchemaIdentity))

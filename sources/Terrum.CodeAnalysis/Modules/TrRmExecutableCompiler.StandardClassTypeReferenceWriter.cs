@@ -9606,7 +9606,8 @@ public static partial class TrRmExecutableCompiler
             throw new InvalidDataException(
                 "The retained C1M1 class root Module row changed.");
         }
-        var rootIndex = new TrRmArtifactIndex(artifacts[0], schema);
+        var rootIndex = new TrRmArtifactIndex(artifacts[0], schema,
+            standardSchemaIdentity: schemaIdentity);
         var rootTables = TrRmStructuralMetadataValidator
             .ValidateC1AndGetExecutionTables(rootIndex);
         EnsureC1ClassDeclarationTablesSupported(rootTables);
@@ -10639,6 +10640,72 @@ public static partial class TrRmExecutableCompiler
         foreach (var oldTypeDefRow in typeDefViewsByOldRow.Keys)
         {
             typeDefRowMap.Add(oldTypeDefRow, ++nextTypeDefRow);
+        }
+
+        var typeDefBindingEqualityRows
+            = new List<TrRmTypeDefBindingEqualityRow>();
+        if (IsSelectedClassTypeDefBindingEqualitySchemaIdentity(
+                schemaIdentity))
+        {
+            foreach (var declaration in program.StandardClassDeclarations)
+            {
+                foreach (var group
+                    in declaration.TypeDefBindingEqualityGroups)
+                {
+                    if (group.OwnerModule is
+                            BoundSourceTypeProviderSnapshot ownerModule
+                        && !SourceTypeSnapshotsMatch(ownerModule,
+                            rootSnapshot))
+                    {
+                        throw Unsupported(
+                            "C1M1 class equality groups require one retained owner Module partition.");
+                    }
+
+                    var typeDefRows = new SortedSet<int>();
+                    foreach (var endpoint in group.Endpoints)
+                    {
+                        if (!SourceTypeSnapshotsMatch(endpoint.OwnerModule,
+                                rootSnapshot))
+                        {
+                            throw Unsupported(
+                                "C1M1 class equality endpoints require one retained TypeDef Module partition.");
+                        }
+
+                        var oldTypeDefRow = GetTypeDefRow(
+                            endpoint.TypeDefDefinitionId);
+                        if (!typeDefRowMap.TryGetValue(oldTypeDefRow,
+                                out var typeDefRow)
+                            || !typeDefRows.Add(typeDefRow))
+                        {
+                            throw new InvalidDataException(
+                                "A class equality endpoint was not emitted as one distinct TypeDef view.");
+                        }
+                    }
+
+                    if (typeDefRows.Count < 2)
+                    {
+                        throw new InvalidDataException(
+                            "A class equality group has fewer than two destination TypeDef views.");
+                    }
+
+                    using var typeDefEnumerator = typeDefRows.GetEnumerator();
+                    _ = typeDefEnumerator.MoveNext();
+                    var leftTypeDef = checked((uint)typeDefEnumerator.Current);
+                    while (typeDefEnumerator.MoveNext())
+                    {
+                        typeDefBindingEqualityRows.Add(
+                            new TrRmTypeDefBindingEqualityRow(1,
+                                leftTypeDef,
+                                checked((uint)typeDefEnumerator.Current)));
+                    }
+                }
+            }
+
+            typeDefBindingEqualityRows
+                = [.. typeDefBindingEqualityRows.Distinct()
+                    .OrderBy(static row => row.OwnerModule)
+                    .ThenBy(static row => row.LeftTypeDef)
+                    .ThenBy(static row => row.RightTypeDef)];
         }
 
         var methodDefRowMap = new Dictionary<int, int>();
@@ -12872,6 +12939,13 @@ public static partial class TrRmExecutableCompiler
             outputTypeDefRows.Count, strings, moduleTables, fieldRows.Count,
             genericParamRows.Count, layoutRows.Count, 0, schema);
 
+        var typeDefBindingEqualityBytes
+            = typeDefBindingEqualityRows.Count == 0 ? []
+                : TrRmTypeDefBindingEqualityTableWriter.Encode(
+                    typeDefBindingEqualityRows, moduleTables, typeDefs,
+                    allowClassTypeDefs:
+                        IsSelectedClassTypeDefBindingEqualitySchemaIdentity(
+                            schemaIdentity));
         var layoutFieldCount = layoutFieldRows.Count;
         var fieldBytes = fieldRows.Count == 0 ? []
             : TrRmFieldDefTableWriter.Encode(fieldRows, strings, typeDefs,
@@ -13036,6 +13110,12 @@ public static partial class TrRmExecutableCompiler
             sections.Add(new TrRmSection(0x001C, 0,
                 checked((uint)classImportRows.Length), importBytes));
         }
+        if (typeDefBindingEqualityBytes.Length != 0)
+        {
+            sections.Add(new TrRmSection(0x0067, 0,
+                checked((uint)typeDefBindingEqualityRows.Count),
+                typeDefBindingEqualityBytes));
+        }
         if (exportBytes.Length != 0)
         {
             sections.Add(new TrRmSection(0x001D, 0,
@@ -13124,8 +13204,8 @@ public static partial class TrRmExecutableCompiler
 
         sections.Sort(static (left, right) =>
             left.Kind.CompareTo(right.Kind));
-        var artifact = TrRmArtifactWriter.Encode(sections,
-            schema);
+        var artifact = TrRmArtifactWriter.Encode(sections, schema,
+            standardSchemaIdentity: schemaIdentity);
         if (genericConstraintPlans.Count != 0
             || genericMethodTypeSpecPlans.Count != 0
             || genericMethodDefaultTypeSpecPlans.Count != 0)
@@ -13140,7 +13220,8 @@ public static partial class TrRmExecutableCompiler
 
         _ = TrRmStructuralMetadataValidator
             .ValidateC1AndGetExecutionTables(
-                new TrRmArtifactIndex(artifact, schema));
+                new TrRmArtifactIndex(artifact, schema,
+                    standardSchemaIdentity: schemaIdentity));
         return artifact;
     }
 
@@ -14528,7 +14609,7 @@ public static partial class TrRmExecutableCompiler
         List<TrRmGenericParamRow> genericParamRows,
         List<TrRmConstraintRow> constraintRows,
         GenericMethodNominalTypeWriter nominalTypes,
-        TrRmArtifactSchema schema)
+        TrRmArtifactSchema schema, string standardSchemaIdentity)
     {
         nominalTypes.Complete();
         var features = ReadFeatureRows(sections);
@@ -14578,7 +14659,8 @@ public static partial class TrRmExecutableCompiler
             checked((uint)typeSpecRows.Count), typeSpecBytes);
         sections.Sort(static (left, right) =>
             left.Kind.CompareTo(right.Kind));
-        return TrRmArtifactWriter.Encode(sections, schema);
+        return TrRmArtifactWriter.Encode(sections, schema,
+            standardSchemaIdentity: standardSchemaIdentity);
     }
 
     private static byte[] ReemitC1M1ClassAssociatedRelationConstraints(
@@ -14607,10 +14689,12 @@ public static partial class TrRmExecutableCompiler
         {
             artifact = AddImportedGenericInterfaceMetadata(artifact,
                 reemissionProgram, schema, null,
-                out importedAssociatedTypeImportRows);
+                out importedAssociatedTypeImportRows,
+                standardSchemaIdentity: rootSnapshot.SchemaIdentity);
         }
 
-        var outputIndex = new TrRmArtifactIndex(artifact, schema);
+        var outputIndex = new TrRmArtifactIndex(artifact, schema,
+            standardSchemaIdentity: rootSnapshot.SchemaIdentity);
         var outputTables = TrRmStructuralMetadataValidator
             .ValidateC1AndGetExecutionTables(outputIndex);
         var outputSections = new SortedDictionary<ushort, TrRmSection>();
@@ -15055,8 +15139,10 @@ public static partial class TrRmExecutableCompiler
 
         artifact = CompleteC1M1NominalTypeEmission(nominalSections,
             nominalNames, outputTypeSpecRows, nominalFormals,
-            nominalConstraints, nominalTypeWriter, schema);
-        outputIndex = new TrRmArtifactIndex(artifact, schema);
+            nominalConstraints, nominalTypeWriter, schema,
+            rootSnapshot.SchemaIdentity);
+        outputIndex = new TrRmArtifactIndex(artifact, schema,
+            standardSchemaIdentity: rootSnapshot.SchemaIdentity);
         outputTables = TrRmStructuralMetadataValidator
             .ValidateC1AndGetExecutionTables(outputIndex);
         outputSections.Clear();
@@ -15267,10 +15353,12 @@ public static partial class TrRmExecutableCompiler
         }
 
         var result = TrRmArtifactWriter.Encode(
-            [.. outputSections.Values], schema);
+            [.. outputSections.Values], schema,
+            standardSchemaIdentity: rootSnapshot.SchemaIdentity);
         _ = TrRmStructuralMetadataValidator
             .ValidateC1AndGetExecutionTables(
-                new TrRmArtifactIndex(result, schema));
+                new TrRmArtifactIndex(result, schema,
+                    standardSchemaIdentity: rootSnapshot.SchemaIdentity));
         return result;
     }
 
