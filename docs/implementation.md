@@ -151,15 +151,17 @@ public regression now covers a consumer-to-method-provider-to-nested-struct
 provider chain, nested FieldMap loading, unchanged source-free artifact
 retention/reload, and incompatible replacement. A second regression covers
 first-list type/field alias representatives, independent method-view keys,
-source-free re-emission, and provider replacement that splits omitted aliases.
-Both remain unverified under the active hold. A third regression selects
+source-free re-emission, split/removed omitted aliases, and invalid
+nonrepresentative keys. A separate case preserves a shared expected MethodDef
+group through source-free re-emission and rejects a provider-target split.
+These regressions remain unverified under the active hold. A third regression selects
 TypeDef/FieldDef roots from a non-first co-located Module and checks consumer
 ModuleRefs plus source-free reload. A fourth regression relocates selected
 TypeDef/FieldDef rows by prepending an unrelated provider struct, loads the
 unchanged consumer and intermediate provider by ExportKey, then source-free
 re-emits and reloads the consumer against the relocated provider. All remain
 unverified under the active hold. Co-located provider Imports, deeper
-chains/diamonds, alias removal and retained shared-expectation groups,
+chains/diamonds, broader shared-expectation transformations,
 multiple using-Module contexts for one expected TypeDef, Import/Export/
 ModuleRef/Body map permutations, CLI selection, and runtime qualification
 remain open.

@@ -284,18 +284,21 @@ key under the separate unapproved alias-publication proposal. A public
 consumer-to-method-provider-to-nested-struct-provider regression now covers
 nested FieldMap loading and unchanged source-free artifact retention/reload.
 A second regression covers first-list type/field alias representatives,
-independent method-view keys, source-free re-emission and provider replacement
-that splits omitted aliases. Both remain unverified under the active hold.
+independent method-view keys, source-free re-emission, split/removed omitted
+aliases and invalid nonrepresentative keys. A separate case preserves a shared
+expected MethodDef group through source-free re-emission and rejects a
+provider-target split. These regressions remain unverified under the active
+hold.
 A third regression selects TypeDef/FieldDef roots from a non-first
 co-located Module and checks consumer ModuleRefs plus source-free reload; it
 also remains unverified. A fourth regression relocates selected TypeDef/
 FieldDef rows by prepending an unrelated provider struct, loads the unchanged
 consumer and intermediate provider by ExportKey, then source-free re-emits and
 reloads the consumer against the relocated provider; it too remains
-unverified. Co-located provider Imports, deeper chains/diamonds, alias removal
-and retained shared-expectation groups, multiple using-Module contexts for one
-expected TypeDef, and full Import/Export/ModuleRef/Body map permutations remain
-open. The loader still requires the whole validated Module-set
+unverified. Co-located provider Imports, deeper chains/diamonds, broader
+shared-expectation transformations, multiple using-Module contexts for one
+expected TypeDef, and full Import/Export/ModuleRef/Body map permutations remain open.
+The loader still requires the whole validated Module-set
 TypeDef/method closure to fit its bounded Blittable-struct path;
 selected-root-only loading for unrelated declarations remains open.
 Snapshot-preserving source-free emission does not establish general row

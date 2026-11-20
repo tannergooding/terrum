@@ -216,15 +216,17 @@ The combined factory now validates Module-qualified selections and projects
 the first explicit type/field key as the representative, while retaining each
 method view's own key. Public regressions now cover the initial supplied-
 provider chain, source-free remapping, a type/field alias selection whose
-nonrepresentative keys split under replacement, TypeDef/FieldDef selection
-from a non-first co-located Module, and compatible TypeDef/FieldDef row
-relocation. The selected keys and method views remain intact in the alias
-case. These regressions remain unverified under the active hold. Alias
-removal, invalid nonrepresentative selections, pre-existing shared
-expectation groups, co-located provider Imports, deeper chains/diamonds, and
-multiple using-Module contexts for one expected TypeDef remain open. Emitting
-all selected type/field aliases into one expected DefId is not a valid
-workaround for current C2 admission.
+nonrepresentative keys split or disappear under replacement, rejection of
+invalid nonrepresentative keys, TypeDef/FieldDef selection from a non-first
+co-located Module, and compatible TypeDef/FieldDef row relocation. The
+selected keys and method views remain intact in the alias case. These
+regressions remain unverified under the active hold. A further regression
+exercises an already-shared expected MethodDef across two Import keys,
+source-free re-emission, and provider-target splitting; it also remains
+unverified. Broader retained-equality transformations, co-located provider
+Imports, deeper chains/diamonds, and multiple using-Module contexts for one
+expected TypeDef remain open. Emitting all selected type/field aliases into
+one expected DefId is not a valid workaround for current C2 admission.
 The [implementation boundary](../implementation/modules.md) and
 [gap index](../implementation/conformance-gaps.md) record unverified combined
 reference/remapping/replacement work. Neither they nor adjacent method-alias
@@ -254,10 +256,10 @@ These are future checks through public APIs, not results from this draft:
 | Case | Required outcome |
 |---|---|
 | Positive selection/publication | Select type/field aliases in an order different from provider Export rows. Produce one source identity and one exact representative Import per new grouped declaration; inspect actual emitted triples. Method calls through two views keep their respective keys and independent expected methods. |
-| Negative capture | Missing, wrong-kind/case/Module, duplicate or inaccessible selections reject even for a nonrepresentative alias. No missing child/field key is inferred; public layout grants no field selection. |
-| Replacement: source-only alias | A public regression now source-free re-emits the consumer and accepts a provider where its nonrepresentative type/field keys split while retained representative and method keys still satisfy their contracts. It remains unverified. Also cover removal rather than splitting, and require fresh source-reference requests to validate every submitted key. |
+| Negative capture | A public regression now rejects missing nonrepresentative TypeDef and FieldDef selections; it remains unverified. Also cover wrong-kind/case/Module, duplicate or inaccessible selections. No missing child/field key is inferred; public layout grants no field selection. |
+| Replacement: source-only alias | A public regression source-free re-emits the consumer and accepts providers where nonrepresentative type/field keys split or disappear while retained representative and method keys still satisfy their contracts. It remains unverified. Fresh source-reference requests must still validate every submitted key. |
 | Replacement: used dependencies | Remove a retained callable/representative key, lose Copy, change nested nominal signature/layout/pack/alignment, unsafe contract or field owner/ordinal: reject without substituting a surviving alias. Independently keyed method aliases may split only while every retained contract and type correspondence passes. |
-| Retained equality | Supply an admitted common-expected-MethodDef alias group; re-emit/remap it, then split its provider targets. Reject before affected use. Separate expected rows alone do not add a group. Unsupported shared TypeDef/FieldDef input still refuses rather than being “repaired” by this policy. |
+| Retained equality | A public regression now supplies a common-expected-MethodDef alias group, source-free re-emits it, and rejects a provider replacement that splits its targets; it remains unverified. Extend coverage to additional transformations. Separate expected rows alone do not add a group. Unsupported shared TypeDef/FieldDef input still refuses rather than being “repaired” by this policy. |
 | Re-encoding | Permute consumer/provider definitions, Export/Import rows and Body maps; source-free re-emit/reload and pack. Retain chosen keys, original expectations, existing shared proxies, FieldPath/owner contexts and source locations. Never choose a representative again from output row order. |
 | Cross-provider | Public regressions cover the supplied-provider chain with nested FieldMap loading and explicit TypeDef/FieldDef selection from a non-first co-located Module. Add co-located provider Imports and chains/diamonds. New selections use their exact declaring Module; provider-owned Imports retain their own keys and all old obligations. The current regressions are unverified under the active hold. |
 | Cross-feature/boundary | Cover all three exact agreements, scalar-only methods, unit/nested Copy-struct fields, CM1 labels/defaults and caller-unsafety where admitted. Preserve conditional Features and CM1AR1 closure; reject wrong/mixed schemas and unsupported required facts. Exercise existing checked row/map capacity boundaries without adding a limit or truncation. |
