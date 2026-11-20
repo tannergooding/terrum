@@ -4190,13 +4190,13 @@ internal sealed class TrRmC1EnumClosureSourceTests
             = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
         var tree = SyntaxTree.Parse("""
             namespace Demo {
-                public class Child {
-                    public int32 Id;
-                }
                 public class Parent {
                     public Child Value;
                 }
                 public class Other {
+                    public int32 Id;
+                }
+                public class Child {
                     public int32 Id;
                 }
             }
@@ -4206,34 +4206,35 @@ internal sealed class TrRmC1EnumClosureSourceTests
             string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = (BoundProgram)compilation.Program!;
 
-        TrRmSourceClassExport CreateClassExport(string name,
-            string typeExportKey, string fieldExportKey)
+        TrRmSourceClassExport CreateClassExport(BoundProgram sourceProgram,
+            SyntaxTree sourceTree, string name, string typeExportKey,
+            string fieldExportKey)
         {
-            var declaration = tree.Root.Children.OfType<SyntaxNode>()
+            var declaration = sourceTree.Root.Children.OfType<SyntaxNode>()
                 .Single(node =>
                     node.Kind == SyntaxKind.ClassDeclaration
                     && node.Children.OfType<SyntaxTokenElement>().Any(token =>
                         token.Token.Kind == TokenKind.Identifier
                         && token.Token.Name == name));
             var field = declaration.Children.OfType<SyntaxNode>()
-                .Single(static node =>
+                .First(static node =>
                     node.Kind == SyntaxKind.FieldDeclaration);
-            var classIndex = program.SourceClassProgramAssociation!
+            var classIndex = sourceProgram.SourceClassProgramAssociation!
                 .Declarations.Single(item =>
                     item.Span == declaration.Span).ClassIndex;
-            return new TrRmSourceClassExport(program, classIndex,
+            return new TrRmSourceClassExport(sourceProgram, classIndex,
                 declaration.Span, typeExportKey, [
                     new TrRmSourceClassMemberExport(0, field.Span,
                         fieldExportKey),
                 ]);
         }
 
-        var childExport = CreateClassExport("Child", "type.child",
-            "field.child.id");
-        var parentExport = CreateClassExport("Parent", "type.parent",
-            "field.parent.value");
-        var otherExport = CreateClassExport("Other", "type.other",
-            "field.other.id");
+        var childExport = CreateClassExport(program, tree, "Child",
+            "type.child", "field.child.id");
+        var parentExport = CreateClassExport(program, tree, "Parent",
+            "type.parent", "field.parent.value");
+        var otherExport = CreateClassExport(program, tree, "Other",
+            "type.other", "field.other.id");
         var artifact = TrRmExecutableCompiler.EmitStandard(program,
             "ClassHandleProvider", schemaIdentity, targetRequirement, [],
             [], [childExport, parentExport, otherExport], []);
@@ -4306,13 +4307,183 @@ internal sealed class TrRmC1EnumClosureSourceTests
         Assert.That(loaded.Functions.Single().Name,
             Is.EqualTo("CombinedOffset"));
 
-        var otherReference
-            = TrRmExecutableCompiler.CreateStandardReference(input,
-                "ClassHandleProvider", [], ["type.other"],
-                ["field.other.id"]);
+        const string packedProviderIdentity
+            = "PrivateClassHandleProvider";
+        const string packedDependencyIdentity
+            = "PrivateClassHandleDependency";
+        const string packedLeafIdentity = "PrivateClassHandleLeaf";
+        var packedTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public class Parent {
+                    public Child Value;
+                }
+                public class Other {
+                    public int32 Id;
+                }
+                public class Child {
+                    public int32 Id;
+                    public Leaf Link;
+                }
+                public class Leaf {
+                    public int32 Data;
+                }
+            }
+            """);
+        var packedCompilation = Compilation.CreateLibrary(packedTree);
+        Assert.That(packedCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, packedCompilation.Diagnostics));
+        var packedProgram = (BoundProgram)packedCompilation.Program!;
+        var packedParentExport = CreateClassExport(packedProgram, packedTree,
+            "Parent", "type.parent", "field.parent.value");
+        var packedOtherExport = CreateClassExport(packedProgram, packedTree,
+            "Other", "type.other", "field.other.id");
+        var packedSingleModuleArtifact
+            = TrRmExecutableCompiler.EmitStandard(packedProgram,
+                packedProviderIdentity, schemaIdentity, targetRequirement,
+                [], [], [packedParentExport, packedOtherExport], []);
+        var packedProviderArtifact = AssignTrailingClassTypeDefsToModules(
+            packedSingleModuleArtifact, schemaIdentity, [
+                (packedDependencyIdentity, "Child"),
+                (packedLeafIdentity, "Leaf"),
+            ]);
+        var packedProviderInput = new TrRmStandardArtifactInput(
+            schemaIdentity, packedProviderArtifact);
+        var packedParentReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                packedProviderInput, packedProviderIdentity, [],
+                ["type.parent"], ["field.parent.value"]);
+        var packedOtherReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                packedProviderInput, packedProviderIdentity, [],
+                ["type.other"], ["field.other.id"]);
+        var packedReference
+            = TrRmExecutableCompiler.CreateStandardReferenceSet([
+                packedParentReference, packedOtherReference,
+            ]);
+        var packedChild
+            = packedReference.StandardClassDeclarations.Single(
+                static declaration =>
+                    declaration.Declaration.Name == "Child");
+        Assert.That(packedChild.ExportKeys, Is.Empty);
+        Assert.That(packedChild.SelectedExportKeys, Is.Empty);
+        Assert.That(packedChild.Expectations, Is.Empty);
+
+        var packedQuery = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Demo;
+                nint CombinedOffset() {
+                    return unsafe(offsetof(Parent, Value))
+                        + unsafe(offsetof(Other, Id));
+                }
+                """), packedReference, new CompilationOptions {
+                LayoutCoreRegistration
+                    = LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(packedQuery.HasErrors, Is.False,
+            string.Join(Environment.NewLine, packedQuery.Diagnostics));
+        var packedArtifact = TrRmExecutableCompiler.EmitStandard(
+            packedQuery.Program!, "PrivateClassHandleConsumer",
+            schemaIdentity, targetRequirement);
+        var packedTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                packedArtifact, SchemaFor(schemaIdentity), null,
+                usesNativePointerLoads: false,
+                standardSchemaIdentity: schemaIdentity));
+        Assert.That(packedTables.Modules.Count, Is.EqualTo(4));
+        var packedParentTypeDefRow = Enumerable.Range(
+                1, packedTables.TypeDefs.Count)
+            .Single(row => packedTables.TypeDefs.GetName(row) == "Parent");
+        var packedChildTypeDefRow = Enumerable.Range(
+                1, packedTables.TypeDefs.Count)
+            .Single(row => packedTables.TypeDefs.GetName(row) == "Child");
+        var packedLeafTypeDefRow = Enumerable.Range(
+                1, packedTables.TypeDefs.Count)
+            .Single(row => packedTables.TypeDefs.GetName(row) == "Leaf");
+        Assert.That(packedTables.Modules.GetIdentity(
+                packedTables.TypeDefs.GetOwnerModule(packedParentTypeDefRow)),
+            Is.EqualTo(packedProviderIdentity));
+        Assert.That(packedTables.Modules.GetIdentity(
+                packedTables.TypeDefs.GetOwnerModule(packedChildTypeDefRow)),
+            Is.EqualTo(packedDependencyIdentity));
+        Assert.That(packedTables.Modules.GetIdentity(
+                packedTables.TypeDefs.GetOwnerModule(packedLeafTypeDefRow)),
+            Is.EqualTo(packedLeafIdentity));
+        var packedParentFieldRange
+            = packedTables.TypeDefs.GetFieldRange(packedParentTypeDefRow);
+        var packedParentFieldTypeSpec
+            = packedTables.TypeSpecs.GetTypeSpecRef(
+                packedTables.Fields.GetTypeSpecRef(
+                    packedParentFieldRange.Start));
+        Assert.That(packedParentFieldTypeSpec.Form,
+            Is.EqualTo((byte)0x02));
+        Assert.That(packedParentFieldTypeSpec.Row,
+            Is.EqualTo(packedChildTypeDefRow));
+        var packedChildFieldRange
+            = packedTables.TypeDefs.GetFieldRange(packedChildTypeDefRow);
+        var packedChildFieldTypeSpec
+            = packedTables.TypeSpecs.GetTypeSpecRef(
+                packedTables.Fields.GetTypeSpecRef(
+                    packedChildFieldRange.Start + 1));
+        Assert.That(packedChildFieldTypeSpec.Form,
+            Is.EqualTo((byte)0x02));
+        Assert.That(packedChildFieldTypeSpec.Row,
+            Is.EqualTo(packedLeafTypeDefRow));
+        Assert.That(Enumerable.Range(1, packedTables.Imports.Count)
+            .Select(packedTables.Imports.GetBindingForImportRow)
+            .Any(static binding =>
+                binding.ExportKey is "type.child" or "type.leaf"),
+            Is.False);
+        var packedLoaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, packedArtifact),
+            "PrivateClassHandleConsumer", []);
+        var packedLoadedChild
+            = packedLoaded.StandardClassDeclarations.Single(
+                static declaration =>
+                    declaration.Declaration.Name == "Child");
+        Assert.That(packedLoadedChild.Declaration.Provider.ModuleIdentity,
+            Is.EqualTo(packedDependencyIdentity));
+        var packedLoadedLeaf
+            = packedLoaded.StandardClassDeclarations.Single(
+                static declaration =>
+                    declaration.Declaration.Name == "Leaf");
+        Assert.That(packedLoadedLeaf.Declaration.Provider.ModuleIdentity,
+            Is.EqualTo(packedLeafIdentity));
+        var packedReemitted = TrRmExecutableCompiler.EmitStandard(
+            packedLoaded, "PrivateClassHandleConsumer", schemaIdentity,
+            targetRequirement);
+        var packedReemittedLoaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                packedReemitted), "PrivateClassHandleConsumer", []);
+        Assert.That(packedReemittedLoaded.StandardClassDeclarations
+            .Single(static declaration =>
+                declaration.Declaration.Name == "Leaf")
+            .Declaration.Provider.ModuleIdentity, Is.EqualTo(packedLeafIdentity));
+
+        var replacementClassExport = CreateClassExport(packedProgram,
+            packedTree, "Child", "type.child", "field.child.id");
+        var replacementArtifact = TrRmExecutableCompiler.EmitStandard(
+            packedProgram, packedDependencyIdentity, schemaIdentity,
+            targetRequirement, [], [], [replacementClassExport], []);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    packedArtifact), "PrivateClassHandleConsumer", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        replacementArtifact),
+                ]));
+
+        var incompatibleOwnerArtifact
+            = AssignTrailingClassTypeDefsToModules(
+                packedSingleModuleArtifact,
+                schemaIdentity, [
+                    (packedDependencyIdentity, "Child"),
+                    (packedLeafIdentity, "Leaf"),
+                ], dependencyTargetRequirement: 0);
         Assert.Throws<NotSupportedException>(() =>
-            TrRmExecutableCompiler.CreateStandardReferenceSet(
-                [parentReference, otherReference]));
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    incompatibleOwnerArtifact), packedProviderIdentity, [],
+                ["type.parent"], ["field.parent.value"]));
     }
 
     [Test]
@@ -7341,6 +7512,198 @@ internal sealed class TrRmC1EnumClosureSourceTests
             checked((uint)importRows.Count), importBytes));
         sections.Sort(static (left, right)
             => left.Kind.CompareTo(right.Kind));
+        var result = TrRmArtifactWriter.Encode(sections, schema);
+        _ = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                new TrRmArtifactIndex(result, schema));
+        return result;
+
+        static int GetTextEncoding(string text)
+            => text.Any(static character => character > 0x7F) ? 1 : 0;
+    }
+
+    private static byte[] AssignTrailingClassTypeDefsToModules(
+        byte[] artifact, string schemaIdentity,
+        IReadOnlyList<(string ModuleIdentity, string TypeDefName)>
+            dependencies, uint? dependencyTargetRequirement = null)
+    {
+        var schema = SchemaFor(schemaIdentity);
+        var index = new TrRmArtifactIndex(artifact, schema);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(index);
+        var sourceIdentity = tables.Modules.GetIdentity(1);
+        var seenModuleIdentities = new HashSet<string>(
+            StringComparer.Ordinal) {
+            sourceIdentity,
+        };
+        if (tables.Modules.Count != 1 || dependencies.Count == 0
+            || dependencies.Any(dependency =>
+                string.IsNullOrEmpty(dependency.ModuleIdentity)
+                || !seenModuleIdentities.Add(dependency.ModuleIdentity)))
+        {
+            throw new InvalidDataException(
+                "The packed class fixture requires distinct dependency Modules.");
+        }
+
+        var typeDefRange = tables.Modules.GetTypeDefRange(1);
+        var firstDependencyTypeDefRow
+            = typeDefRange.End - dependencies.Count;
+        if (typeDefRange.Start != 1
+            || typeDefRange.End != tables.TypeDefs.Count + 1
+            || firstDependencyTypeDefRow <= typeDefRange.Start)
+        {
+            throw new InvalidDataException(
+                "The packed class fixture requires trailing dependency TypeDefs.");
+        }
+
+        for (var index = 0; index < dependencies.Count; index++)
+        {
+            var typeDefRow = firstDependencyTypeDefRow + index;
+            if (!StringComparer.Ordinal.Equals(
+                    tables.TypeDefs.GetName(typeDefRow),
+                    dependencies[index].TypeDefName))
+            {
+                throw new InvalidDataException(
+                    "The packed class fixture dependency TypeDefs are not in the expected trailing row order.");
+            }
+        }
+
+        if (!index.TryGetSection(0x0002, out var originalStringBytes,
+                out var originalStringCount))
+        {
+            throw new InvalidDataException(
+                "The packed class fixture has no String table.");
+        }
+
+        var textRows = new List<(string Text, int Encoding)>(
+            originalStringCount + dependencies.Count);
+        var stringRowsByText = new Dictionary<string, int>(
+            StringComparer.Ordinal);
+        var originalStrings = new TrRmStringTableReader(
+            originalStringBytes, originalStringCount);
+        for (var row = 1; row <= originalStringCount; row++)
+        {
+            var text = originalStrings.DecodeNamespace(row);
+            textRows.Add((text, GetTextEncoding(text)));
+            _ = stringRowsByText.TryAdd(text, row);
+        }
+
+        int AddString(string text)
+        {
+            if (!stringRowsByText.TryGetValue(text, out var row))
+            {
+                row = textRows.Count + 1;
+                textRows.Add((text, GetTextEncoding(text)));
+                stringRowsByText.Add(text, row);
+            }
+
+            return row;
+        }
+
+        var sourceIdentityRow = AddString(sourceIdentity);
+        var dependencyIdentityRows = dependencies
+            .Select(dependency => AddString(dependency.ModuleIdentity))
+            .ToArray();
+        var stringBytes = TrRmStringTableWriter.EncodeTextRows(textRows);
+        var strings = new TrRmStringTableReader(stringBytes,
+            textRows.Count);
+        var (targetRequirement, runtimePolicy)
+            = tables.Modules.GetRequirements(1);
+        var (featureFirst, featureCount)
+            = tables.Modules.GetFeatureRange(1);
+        if ((featureCount == 0 && featureFirst != 0)
+            || (featureCount != 0 && featureFirst != 1)
+            || featureCount != tables.Features.Count)
+        {
+            throw new InvalidDataException(
+                "The packed class fixture requires one complete source Feature range.");
+        }
+
+        var sourceFeatures = Enumerable.Range(1, tables.Features.Count)
+            .Select(tables.Features.GetFeature).ToArray();
+        var packedFeatures = new List<TrRmFeatureRow>(
+            checked(sourceFeatures.Length * (dependencies.Count + 1)));
+        for (var moduleIndex = 0;
+            moduleIndex <= dependencies.Count; moduleIndex++)
+        {
+            packedFeatures.AddRange(sourceFeatures);
+        }
+
+        var featureBytes = TrRmFeatureTableWriter.EncodeModuleRanges(
+            packedFeatures, schema);
+        var moduleRefRange = tables.Modules.GetModuleRefRange(1);
+        var methodDefRange = tables.Modules.GetMethodDefRange(1);
+        var sourceFileRange = tables.Modules.GetSourceFileRange(1);
+        var governingRuleEdition
+            = tables.Modules.GetGoverningRuleEdition(1);
+        var moduleRows = new List<TrRmModuleRow>(
+            dependencies.Count + 1) {
+            new(sourceIdentityRow, targetRequirement,
+                runtimePolicy, tables.Modules.GetEntryMethod(1),
+                moduleRefRange.Start, typeDefRange.Start,
+                methodDefRange.Start, sourceFileRange.Start,
+                featureCount == 0 ? 0 : 1, sourceFeatures.Length,
+                governingRuleEdition),
+        };
+        for (var dependencyIndex = 0;
+            dependencyIndex < dependencies.Count; dependencyIndex++)
+        {
+            var featureFirst = featureCount == 0
+                ? 0
+                : ((dependencyIndex + 1) * sourceFeatures.Length) + 1;
+            moduleRows.Add(new TrRmModuleRow(
+                dependencyIdentityRows[dependencyIndex],
+                dependencyTargetRequirement ?? targetRequirement,
+                runtimePolicy, 0, moduleRefRange.End,
+                firstDependencyTypeDefRow + dependencyIndex,
+                methodDefRange.End, sourceFileRange.End, featureFirst,
+                sourceFeatures.Length, governingRuleEdition));
+        }
+
+        var moduleBytes = TrRmModuleTableWriter.Encode(moduleRows, strings,
+            tables.Modules.ModuleRefCount, tables.TypeDefs.Count,
+            tables.Methods.Count, tables.Modules.SourceFileCount,
+            packedFeatures.Count);
+
+        var sections = new List<TrRmSection>(index.SectionCount);
+        var replacedModule = false;
+        var replacedStrings = false;
+        var replacedFeatures = false;
+        for (var entry = 0; entry < index.SectionCount; entry++)
+        {
+            index.GetSection(entry, out var kind, out var flags,
+                out var section, out var recordCount);
+            switch (kind)
+            {
+                case 0x0001:
+                    sections.Add(new TrRmSection(kind, flags,
+                        checked((uint)moduleRows.Count),
+                        moduleBytes));
+                    replacedModule = true;
+                    break;
+                case 0x0002:
+                    sections.Add(new TrRmSection(kind, flags,
+                        checked((uint)textRows.Count), stringBytes));
+                    replacedStrings = true;
+                    break;
+                case 0x0004:
+                    sections.Add(new TrRmSection(kind, flags,
+                        checked((uint)packedFeatures.Count), featureBytes));
+                    replacedFeatures = true;
+                    break;
+                default:
+                    sections.Add(new TrRmSection(kind, flags, recordCount,
+                        section.ToArray()));
+                    break;
+            }
+        }
+
+        if (!replacedModule || !replacedStrings || !replacedFeatures)
+        {
+            throw new InvalidDataException(
+                "The packed class fixture is missing a required metadata section.");
+        }
+
         var result = TrRmArtifactWriter.Encode(sections, schema);
         _ = TrRmStructuralMetadataValidator
             .ValidateC1AndGetExecutionTables(

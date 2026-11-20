@@ -3201,7 +3201,8 @@ public static partial class TrRmExecutableCompiler
     private static ImmutableArray<BoundStatement> DecodeStandardRegisteredQueryBody(
         TrRmRegisterBodyReader body, BoundFunction function,
         ImmutableArray<BoundVariable>.Builder variables,
-        TrRmTypeDefTableReader typeDefs, TrRmTypeSpecTableReader typeSpecs,
+        TrRmModuleTableReader modules, TrRmTypeDefTableReader typeDefs,
+        TrRmTypeSpecTableReader typeSpecs,
         TrRmFieldDefTableReader fields, TrRmFieldPathTableReader fieldPaths,
         TrRmImportTableReader imports,
         List<NativePointerTypeDefinition> nativePointerTypes,
@@ -3538,7 +3539,7 @@ public static partial class TrRmExecutableCompiler
                             signatureIndexByAnchorMethod,
                             structureTypeByTypeDef,
                             standardClassQueryProgram,
-                            typeSpecProviderIdentity);
+                            typeSpecProviderIdentity, modules);
                         var isOffsetOfPlace = queryKind == 4;
                         if (isOffsetOfPlace && path.Steps.Length != 1)
                         {
@@ -7762,7 +7763,8 @@ public static partial class TrRmExecutableCompiler
         List<NativePointerTypeDefinition> nativePointerTypes,
         int[] signatureIndexByAnchorMethod, int[] structureTypeByTypeDef,
         BoundProgram? standardClassQueryProgram = null,
-        string? typeSpecProviderIdentity = null)
+        string? typeSpecProviderIdentity = null,
+        TrRmModuleTableReader modules = default)
     {
         var tokenKind = (byte)(fieldMapToken >> 24);
         var tokenRow = (int)(fieldMapToken & 0x00FF_FFFF);
@@ -7800,7 +7802,8 @@ public static partial class TrRmExecutableCompiler
                 rootTypeSpecRef, typeDefs, imports)) == 2)
         {
             if (standardClassQueryProgram is null
-                || typeSpecProviderIdentity is null)
+                || typeSpecProviderIdentity is null
+                || modules.Count == 0)
             {
                 throw Unsupported(
                     "An EN1 class query Body has no selected source-free class declaration context.");
@@ -7816,7 +7819,8 @@ public static partial class TrRmExecutableCompiler
 
             return ReadStandardRegisteredQueryClassFieldPath(
                 rootTypeSpecRef, rootTypeSpec, tokenRow, classFieldCount,
-                typeSpecProviderIdentity, typeDefs, typeSpecs, fields,
+                typeSpecProviderIdentity, modules, typeDefs,
+                typeSpecs, fields,
                 fieldPaths, imports, nativePointerTypes,
                 signatureIndexByAnchorMethod, structureTypeByTypeDef,
                 standardClassQueryProgram);
@@ -7880,6 +7884,7 @@ public static partial class TrRmExecutableCompiler
             uint rootTypeSpecRef, TrRmTypeSpecRefInfo rootTypeSpec,
             int fieldPathRow, int fieldCount,
             string typeSpecProviderIdentity,
+            TrRmModuleTableReader modules,
             TrRmTypeDefTableReader typeDefs,
             TrRmTypeSpecTableReader typeSpecs,
             TrRmFieldDefTableReader fields,
@@ -7903,7 +7908,8 @@ public static partial class TrRmExecutableCompiler
         }
         else
         {
-            providerIdentity = typeSpecProviderIdentity;
+            providerIdentity = modules.GetIdentity(
+                typeDefs.GetOwnerModule(expectedRootTypeDefRow));
         }
 
         var classDeclaration = classQueryProgram
@@ -7916,29 +7922,45 @@ public static partial class TrRmExecutableCompiler
                         StringComparer.Ordinal)
                     : declaration.Declaration.Identity.DefinitionId
                         == (0x1300_0000u
-                            | checked((uint)expectedRootTypeDefRow))
-                        && !declaration.SelectedExportKeys.IsEmpty));
+                            | checked((uint)expectedRootTypeDefRow)));
         if (classDeclaration is null)
         {
             throw Invalid(
                 "An EN1 class query FieldPath has no selected class declaration.");
         }
 
-        var classTypeIndex
-            = classQueryProgram.GenericNominalTypeInstances
-                .Select((instance, index) => (instance, index))
-                .Where(item =>
-                    item.instance.Definition
-                        == classDeclaration.Declaration.Identity
-                    && item.instance.Arguments.IsEmpty
-                    && item.instance.Qualifiers == rootTypeSpec.Qualifiers
-                    && item.instance.TypeSpecReference == rootTypeSpecRef
-                    && StringComparer.Ordinal.Equals(
-                        item.instance.TypeSpecProviderIdentity,
-                        typeSpecProviderIdentity)
-                    && item.instance.TypeSpecForm == rootTypeSpec.Form)
-                .Select(static item => item.index)
-                .SingleOrDefault(-1);
+        var classTypeIndex = -1;
+        var fallbackClassTypeIndex = -1;
+        for (var instanceIndex = 0;
+            instanceIndex
+                < classQueryProgram.GenericNominalTypeInstances.Length;
+            instanceIndex++)
+        {
+            var instance = classQueryProgram.GenericNominalTypeInstances[
+                instanceIndex];
+            if (instance.Definition
+                    != classDeclaration.Declaration.Identity
+                || !instance.Arguments.IsEmpty
+                || instance.Qualifiers != rootTypeSpec.Qualifiers)
+            {
+                continue;
+            }
+
+            fallbackClassTypeIndex = instanceIndex;
+            if (instance.TypeSpecReference == rootTypeSpecRef
+                && StringComparer.Ordinal.Equals(
+                    instance.TypeSpecProviderIdentity,
+                    typeSpecProviderIdentity)
+                && instance.TypeSpecForm == rootTypeSpec.Form)
+            {
+                classTypeIndex = instanceIndex;
+                break;
+            }
+        }
+        if (classTypeIndex < 0)
+        {
+            classTypeIndex = fallbackClassTypeIndex;
+        }
         if (classTypeIndex < 0)
         {
             throw Invalid(

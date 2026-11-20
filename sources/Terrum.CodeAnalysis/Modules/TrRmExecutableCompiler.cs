@@ -5820,8 +5820,8 @@ public static partial class TrRmExecutableCompiler
                         && registerBody.HasLayoutQueryOperation)
                     {
                         statements = DecodeStandardRegisteredQueryBody(
-                            registerBody, declaration, variables, typeDefs,
-                            types, fields, fieldPaths, imports,
+                            registerBody, declaration, variables, modules,
+                            typeDefs, types, fields, fieldPaths, imports,
                             nativePointerTypeDefinitions,
                             signatureIndexByAnchorMethod,
                             structureTypeByTypeDef,
@@ -5859,8 +5859,8 @@ public static partial class TrRmExecutableCompiler
                     if (registerBody.HasLayoutQueryOperation)
                     {
                         statements = DecodeStandardRegisteredQueryBody(
-                            registerBody, declaration, variables, typeDefs,
-                            types, fields, fieldPaths, imports,
+                            registerBody, declaration, variables, modules,
+                            typeDefs, types, fields, fieldPaths, imports,
                             nativePointerTypeDefinitions,
                             signatureIndexByAnchorMethod,
                             structureTypeByTypeDef);

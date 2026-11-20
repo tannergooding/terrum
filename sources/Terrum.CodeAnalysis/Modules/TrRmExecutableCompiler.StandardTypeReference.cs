@@ -665,6 +665,8 @@ public static partial class TrRmExecutableCompiler
 
         var localClassTypeDefRows = new SortedSet<int>();
         var pendingLocalClassTypeDefRows = new Queue<int>();
+        var selectedPackedClassTypeKeys
+            = new Dictionary<int, List<string>>();
         foreach (var typeDefRow in selectedTypeDefs.Keys)
         {
             if (localClassTypeDefRows.Add(typeDefRow))
@@ -691,6 +693,81 @@ public static partial class TrRmExecutableCompiler
                     {
                         throw Unsupported(
                             "The C1 local class TypeSpec closure exceeds the registered class limit.");
+                    }
+
+                    pendingLocalClassTypeDefRows.Enqueue(typeDefRow);
+                }
+            }
+        }
+        if (!selectedImportedClassTypeKeys.IsDefaultOrEmpty)
+        {
+            var packedModuleRowsByIdentity
+                = moduleValidation.Modules
+                    .Where(static module =>
+                        module.ArtifactIndex == 0)
+                    .ToDictionary(static module => module.Identity,
+                        static module => module.ModuleRow,
+                        StringComparer.Ordinal);
+            foreach (var (providerIdentity, exportKey) in
+                selectedImportedClassTypeKeys)
+            {
+                if (!packedModuleRowsByIdentity.TryGetValue(
+                        providerIdentity, out var providerModuleRow)
+                    || providerModuleRow == rootModuleRow)
+                {
+                    continue;
+                }
+
+                if (!rootTables.Exports.TryGetDefinitionForKey(
+                        providerModuleRow, exportKey,
+                        out var definitionId)
+                    || (definitionId >> 24) != 0x13)
+                {
+                    throw Invalid(
+                        "A selected packed class TypeDef key lost its exact Module export.");
+                }
+
+                var typeDefRow = checked((int)(
+                    definitionId & 0x00FF_FFFF));
+                var (providerTargetRequirement,
+                    providerRuntimePolicy) = rootTables.Modules
+                        .GetRequirements(providerModuleRow);
+                if (rootTables.TypeDefs.GetOwnerModule(typeDefRow)
+                        != providerModuleRow
+                    || rootTables.TypeDefs.GetKind(typeDefRow) != 2
+                    || rootTables.Imports.IsExpectedDefinition(definitionId)
+                    || providerTargetRequirement
+                        != rootTables.Modules.GetRequirements(
+                            rootModuleRow).TargetRequirement
+                    || providerRuntimePolicy
+                        != rootTables.Modules.GetRequirements(
+                            rootModuleRow).RuntimePolicy)
+                {
+                    throw Invalid(
+                        "A selected packed class TypeDef is not a direct compatible provider declaration.");
+                }
+
+                if (!selectedPackedClassTypeKeys.TryGetValue(typeDefRow,
+                        out var selectedKeys))
+                {
+                    selectedKeys = [];
+                    selectedPackedClassTypeKeys.Add(typeDefRow,
+                        selectedKeys);
+                }
+                if (!selectedKeys.Contains(exportKey,
+                        StringComparer.Ordinal))
+                {
+                    selectedKeys.Add(exportKey);
+                }
+
+                if (localClassTypeDefRows.Add(typeDefRow))
+                {
+                    if (localClassTypeDefRows.Count
+                        > ManagedClassTypes.OptionalFirst
+                            - ManagedClassTypes.First)
+                    {
+                        throw Unsupported(
+                            "The C1 packed class TypeDef closure exceeds the registered class limit.");
                     }
 
                     pendingLocalClassTypeDefRows.Enqueue(typeDefRow);
@@ -853,14 +930,19 @@ public static partial class TrRmExecutableCompiler
             }
 
             var typeDefRow = checked((int)type.Row);
-            if (rootTables.TypeDefs.GetOwnerModule(typeDefRow)
-                != rootModuleRow)
+            var typeDefModuleRow
+                = rootTables.TypeDefs.GetOwnerModule(typeDefRow);
+            var kind = rootTables.TypeDefs.GetKind(typeDefRow);
+            if (typeDefModuleRow != rootModuleRow
+                && (!isEN1 || kind != 2
+                    || rootTables.Modules.GetRequirements(
+                        typeDefModuleRow)
+                        != rootTables.Modules.GetRequirements(rootModuleRow)))
             {
                 throw Invalid(
-                    "A direct C1 class TypeSpec references a TypeDef owned by another Module.");
+                    "A direct C1 class TypeSpec references a TypeDef outside its checked packed class provider closure.");
             }
 
-            var kind = rootTables.TypeDefs.GetKind(typeDefRow);
             if (kind == 2)
             {
                 var definitionId = 0x1300_0000u
@@ -930,9 +1012,13 @@ public static partial class TrRmExecutableCompiler
             BoundGenericNominalTypeIdentity, int>();
         foreach (var typeDefRow in localClassTypeDefRows)
         {
+            var providerModuleRow = rootTables.TypeDefs.GetOwnerModule(
+                typeDefRow);
+            var providerIdentity = rootTables.Modules.GetIdentity(
+                providerModuleRow);
             AddTypeDefinition(typeDefinitions, definitionsByIdentity,
-                bindingsByActualType, rootTables, moduleIdentity,
-                rootModuleRow, typeDefRow);
+                bindingsByActualType, rootTables, providerIdentity,
+                providerModuleRow, typeDefRow);
         }
         foreach (var binding in typeProviderBindings)
         {
@@ -1085,8 +1171,12 @@ public static partial class TrRmExecutableCompiler
                 continue;
             }
 
+            var providerModuleRow = rootTables.TypeDefs.GetOwnerModule(
+                typeDefRow);
+            var providerIdentity = rootTables.Modules.GetIdentity(
+                providerModuleRow);
             var identity = new BoundGenericNominalTypeIdentity(
-                moduleIdentity, moduleIdentity,
+                providerIdentity, providerIdentity,
                 0x1300_0000u | checked((uint)typeDefRow));
             if (!classIdentities.Add(identity))
             {
@@ -1095,9 +1185,43 @@ public static partial class TrRmExecutableCompiler
             }
 
             var declaration = CreateStandardClassTypeView(rootTables,
-                identity, rootSnapshot, typeDefRow);
+                identity, GetSnapshot(0, providerModuleRow), typeDefRow);
+            var selectedFields = ImmutableArray.CreateBuilder<
+                BoundStandardClassFieldDeclaration>(
+                    declaration.Fields.Length);
+            foreach (var field in declaration.Fields)
+            {
+                var selectedKeys = selectedFieldExportKeys.Where(
+                        field.ExportKeys.Contains)
+                    .ToImmutableArray();
+                if (!selectedKeys.IsEmpty
+                    && ((field.Flags & 3) != 2
+                        || (field.Flags & 8) != 0))
+                {
+                    throw new ArgumentException(
+                        "A selected packed FieldDef ExportKey does not identify a public instance class field.",
+                        nameof(selectedFieldExportKeys));
+                }
+
+                selectedFields.Add(field with {
+                    SelectedExportKeys = selectedKeys,
+                });
+            }
+
+            declaration = declaration with {
+                Fields = selectedFields.MoveToImmutable(),
+            };
+            var selectedTypeKeys
+                = selectedPackedClassTypeKeys.TryGetValue(typeDefRow,
+                        out var packedTypeKeys)
+                    ? packedTypeKeys.ToImmutableArray()
+                    : ImmutableArray<string>.Empty;
             classDeclarations.Add(new BoundStandardClassDeclaration(
-                declaration, [], []));
+                declaration,
+                GetStandardTypeExportKeys(rootTables, providerModuleRow,
+                    typeDefRow), []) {
+                SelectedExportKeys = selectedTypeKeys,
+            });
         }
 
         var retainedImportedClassTypeKeys
@@ -2792,7 +2916,9 @@ public static partial class TrRmExecutableCompiler
                 schemaIdentities, moduleIdentity, selectedExportKeys,
                 selectedFieldExportKeys,
                 allowClassLayoutQueryBody: allowClassLayoutQueryBody,
-                resolveAllClassFieldTypes: resolveAllClassFieldTypes);
+                resolveAllClassFieldTypes: resolveAllClassFieldTypes,
+                selectedImportedClassTypeKeys:
+                    selectedImportedClassTypeKeys);
         }
 
         var classKeySet = selectedClassKeys.ToHashSet(
@@ -2808,7 +2934,8 @@ public static partial class TrRmExecutableCompiler
                 schemaIdentities, moduleIdentity, enumAndStructKeys,
                 selectedFieldExportKeys, classReference,
                 allowClassLayoutQueryBody,
-                resolveAllClassFieldTypes);
+                resolveAllClassFieldTypes,
+                selectedImportedClassTypeKeys);
         if (selectedFieldExportKeys.Length != 0)
         {
             var selectedFields = new Dictionary<string, (
@@ -2912,7 +3039,9 @@ public static partial class TrRmExecutableCompiler
         string[] selectedExportKeys, string[] selectedFieldExportKeys,
         CompilationReference? standardClassReference = null,
         bool allowClassLayoutQueryBody = false,
-        bool resolveAllClassFieldTypes = false)
+        bool resolveAllClassFieldTypes = false,
+        ImmutableArray<(string ProviderIdentity, string ExportKey)>
+            selectedImportedClassTypeKeys = default)
     {
         var moduleValidation = ValidateStandardInputModules(artifacts,
             schemaIdentities, moduleIdentity, a3LayoutResourceLedger: null);
@@ -3030,7 +3159,9 @@ public static partial class TrRmExecutableCompiler
             rootTables.TypeDefs.GetKind(typeDefRow) == 4);
         if (rootTables.Modules.GetEntryMethod(rootModuleRow) != 0
             || (methodStart != methodEnd && !allowClassLayoutQueryBody)
-            || typeDefCount == 0
+            || (typeDefCount == 0
+                && (!allowClassLayoutQueryBody
+                    || selectedImportedClassTypeKeys.IsDefaultOrEmpty))
             || typeDefCount > SemanticVerifier.MaximumAnalysisVisits
             || structTypeDefRows.Length
                 > ManagedClassTypes.First - 100
@@ -3392,17 +3523,24 @@ public static partial class TrRmExecutableCompiler
         foreach (var declaration in standardClassDeclarations)
         {
             var classIdentity = declaration.Declaration.Identity;
-            if (BoundStandardEnumDeclarationContract.SnapshotsMatch(
-                    declaration.Declaration.Provider, rootSnapshot))
+            if (StringComparer.Ordinal.Equals(
+                    declaration.Declaration.Provider.SchemaIdentity,
+                    rootSnapshot.SchemaIdentity)
+                && declaration.Declaration.Provider.ArtifactSnapshot
+                    .AsSpan().SequenceEqual(
+                        rootSnapshot.ArtifactSnapshot.AsSpan()))
             {
                 var typeDefId = classIdentity.DefinitionId;
+                var typeDefRow = checked((int)(
+                    typeDefId & 0x00FF_FFFF));
                 if ((typeDefId >> 24) != 0x13
+                    || rootTables.TypeDefs.GetOwnerModule(typeDefRow)
+                        != declaration.Declaration.Provider.ModuleRow
                     || !classIdentityByRootTypeDefRow.TryAdd(
-                        checked((int)(typeDefId & 0x00FF_FFFF)),
-                        classIdentity))
+                        typeDefRow, classIdentity))
                 {
                     throw Invalid(
-                        "The EN1 class reference contains an invalid or duplicate local class TypeDef identity.");
+                        "The EN1 class reference contains an invalid or duplicate packed class TypeDef identity.");
                 }
             }
 
@@ -3652,7 +3790,8 @@ public static partial class TrRmExecutableCompiler
             structures = structureBuilder.ToImmutable();
         }
 
-        bool TryDecodeSelectedClassFieldType(uint typeSpecReference,
+        bool TryDecodeSelectedClassFieldType(
+            string typeSpecProviderIdentity, uint typeSpecReference,
             out PrimitiveType fieldType, int recursionDepth = 0)
         {
             if (recursionDepth > SemanticVerifier.MaximumDepth)
@@ -3728,7 +3867,9 @@ public static partial class TrRmExecutableCompiler
                     pointeeType = scalarPointeeType;
                 }
                 else if (TryDecodeSelectedClassFieldType(
-                        pointeeTypeSpecReference, out var nominalPointeeType,
+                        typeSpecProviderIdentity,
+                        pointeeTypeSpecReference,
+                        out var nominalPointeeType,
                         recursionDepth + 1)
                     && IsC1EnumClosurePointerPointeeType(
                         nominalPointeeType,
@@ -3791,7 +3932,7 @@ public static partial class TrRmExecutableCompiler
                         "An EN1 class query field has no complete nongeneric class identity.");
                 }
 
-                var key = (classTypeIdentity, rootSnapshot.ModuleIdentity,
+                var key = (classTypeIdentity, typeSpecProviderIdentity,
                     typeSpecReference);
                 if (!classTypeInstanceIndexes.TryGetValue(key,
                         out var instanceIndex))
@@ -3808,7 +3949,7 @@ public static partial class TrRmExecutableCompiler
                         new BoundGenericNominalTypeInstance(
                             classTypeIdentity, [],
                             qualifierSource.Qualifiers,
-                            typeSpecReference, rootSnapshot.ModuleIdentity,
+                            typeSpecReference, typeSpecProviderIdentity,
                             typeSpecForm));
                     classTypeInstanceIndexes.Add(key, instanceIndex);
                 }
@@ -3865,8 +4006,12 @@ public static partial class TrRmExecutableCompiler
             {
                 var declaration = declarations[declarationIndex];
                 if (declaration.SelectedExportKeys.IsEmpty
-                    || !BoundStandardEnumDeclarationContract.SnapshotsMatch(
-                        declaration.Declaration.Provider, rootSnapshot))
+                    || !StringComparer.Ordinal.Equals(
+                        declaration.Declaration.Provider.SchemaIdentity,
+                        rootSnapshot.SchemaIdentity)
+                    || !declaration.Declaration.Provider.ArtifactSnapshot
+                        .AsSpan().SequenceEqual(
+                            rootSnapshot.ArtifactSnapshot.AsSpan()))
                 {
                     continue;
                 }
@@ -3882,6 +4027,7 @@ public static partial class TrRmExecutableCompiler
                         continue;
                     }
                     if (!TryDecodeSelectedClassFieldType(
+                            declaration.Declaration.Provider.ModuleIdentity,
                             field.TypeSpecReference, out var fieldType))
                     {
                         if (resolveAllClassFieldTypes

@@ -28,6 +28,7 @@ public static partial class TrRmExecutableCompiler
         ImmutableArray<BoundStandardClassFieldExpectation>
             FieldExpectations)
     {
+        internal string? OwnerModuleIdentity { get; init; }
         internal ImmutableArray<C1EnumClosureImport> AdditionalImports
             { get; init; } = [];
         internal ImmutableArray<BoundStandardClassMethodExpectation>
@@ -199,9 +200,9 @@ public static partial class TrRmExecutableCompiler
         BoundSourceTypeProviderSnapshot rootSnapshot,
         TrRmStructuralMetadataValidator.ValidatedExecutionTables rootTables)
     {
-        if (instance.TypeSpecProviderIdentity is not string providerIdentity
-            || !StringComparer.Ordinal.Equals(providerIdentity,
-                rootSnapshot.ModuleIdentity)
+        if (instance.TypeSpecProviderIdentity is not string usingModuleIdentity
+            || !rootTables.Modules.TryFindModule(usingModuleIdentity,
+                out var usingModuleRow)
             || instance.Qualifiers != 0
             || instance.TypeSpecForm is not (0x02 or 0x03))
         {
@@ -232,6 +233,26 @@ public static partial class TrRmExecutableCompiler
         {
             throw Invalid(
                 "An EN1 class query Body root Import does not expect a TypeDef.");
+        }
+        if (typeSpec.Form == 0x02
+            && !StringComparer.Ordinal.Equals(
+                rootTables.Modules.GetIdentity(
+                    rootTables.TypeDefs.GetOwnerModule(typeDefRow)),
+                rootSnapshot.ModuleIdentity))
+        {
+            throw Invalid(
+                "An EN1 direct class query root changed its packed provider Module identity.");
+        }
+        if (typeSpec.Form == 0x03
+            && (rootTables.TypeDefs.GetOwnerModule(typeDefRow)
+                    != usingModuleRow
+                || !StringComparer.Ordinal.Equals(
+                    rootTables.Imports.GetBindingForImportRow(
+                        checked((int)typeSpec.Row)).ProducerIdentity,
+                    rootSnapshot.ModuleIdentity)))
+        {
+            throw Invalid(
+                "An EN1 class query root Import changed its using or provider Module identity.");
         }
         if (rootTables.TypeDefs.GetKind(typeDefRow) != 2)
         {
@@ -839,6 +860,8 @@ public static partial class TrRmExecutableCompiler
         var standardClassEmissions
             = new List<C1EnumClosureStandardClassEmission>();
         var allowMultipleClassQueryProviders = false;
+        var packedClassModuleIdentities
+            = new HashSet<string>(StringComparer.Ordinal);
         if (hasStandardClassDeclarations)
         {
             if (schema.UsesPropertyInitializedState())
@@ -966,7 +989,10 @@ public static partial class TrRmExecutableCompiler
                                 && declaration.Expectations.All(
                                     expectation =>
                                         IsSelectedClassQueryRootProvider(
-                                            expectation.Binding.UsingModule))));
+                                            expectation.Binding.UsingModule)))
+                            || (declaration.Expectations.IsEmpty
+                                && IsSelectedClassQueryRootProvider(
+                                    declaration.Declaration.Provider)));
             if (importedStructRootProvider is not null)
             {
                 rootSnapshot = importedStructRootProvider;
@@ -1009,9 +1035,11 @@ public static partial class TrRmExecutableCompiler
                         declaration.Declaration.Provider);
                 }
                 else if (declaration.Expectations.IsEmpty
-                    && StringComparer.Ordinal.Equals(
-                        declaration.Declaration.Provider.ModuleIdentity,
-                        moduleIdentity))
+                    && (StringComparer.Ordinal.Equals(
+                            declaration.Declaration.Provider.ModuleIdentity,
+                            moduleIdentity)
+                        || classQueryRootIdentities.Contains(
+                            declaration.Declaration.Identity)))
                 {
                     classRootProviders.Add(
                         declaration.Declaration.Provider);
@@ -1049,6 +1077,63 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 rootSnapshot ??= provider;
+            }
+
+            if (standardClassDeclarations.Any(declaration =>
+                    selectedClassHandleTypeIdentities.Contains(
+                        declaration.Declaration.Identity)
+                    && declaration.SelectedExportKeys.IsDefaultOrEmpty
+                    && declaration.Expectations.IsEmpty
+                    && !StringComparer.Ordinal.Equals(
+                        declaration.Declaration.Provider.ModuleIdentity,
+                        moduleIdentity)))
+            {
+                foreach (var declaration in standardClassDeclarations)
+                {
+                    if ((classQueryRootIdentities.Contains(
+                            declaration.Declaration.Identity)
+                        || selectedClassHandleTypeIdentities.Contains(
+                            declaration.Declaration.Identity))
+                        && !StringComparer.Ordinal.Equals(
+                            declaration.Declaration.Provider.ModuleIdentity,
+                            moduleIdentity))
+                    {
+                        _ = packedClassModuleIdentities.Add(
+                            declaration.Declaration.Provider.ModuleIdentity);
+                    }
+                }
+
+                if (!program.Classes.IsEmpty
+                    || !program.Structures.IsEmpty
+                    || !program.EnumDefinitions.IsEmpty
+                    || !program.NativePointerTypes.IsEmpty
+                    || !program.NativeFixedArrayTypes.IsEmpty
+                    || !program.NativeFunctionPointerSignatures.IsEmpty
+                    || !program.CheckedReferenceTypes.IsEmpty)
+                {
+                    throw Unsupported(
+                        "The EN1 packed class provider closure currently requires class-only TypeDef and Body rows.");
+                }
+
+                foreach (var declaration in standardClassDeclarations.Where(
+                    declaration =>
+                        packedClassModuleIdentities.Contains(
+                            declaration.Declaration.Provider.ModuleIdentity)
+                        && (classQueryRootIdentities.Contains(
+                                declaration.Declaration.Identity)
+                            || selectedClassHandleTypeIdentities.Contains(
+                                declaration.Declaration.Identity))))
+                {
+                    if (!declaration.Declaration.Methods.IsEmpty
+                        || declaration.Declaration.Fields.Any(field =>
+                            !BoundGenericNominalTypeTypes.IsType(field.Type)
+                            && !IsStandardClassTypeOnlyComposedFieldType(
+                                field.Type)))
+                    {
+                        throw Unsupported(
+                            "The EN1 packed class provider closure supports scalar and packed class-handle fields only.");
+                    }
+                }
             }
 
             ImmutableArray<C1EnumClosureRootImport> GetClassRootImports(
@@ -1180,6 +1265,55 @@ public static partial class TrRmExecutableCompiler
 
                 var rootTypeDefRow = checked((int)(
                     classView.Identity.DefinitionId & 0x00FF_FFFF));
+                if (packedClassModuleIdentities.Contains(
+                        classView.Provider.ModuleIdentity))
+                {
+                    if (declaration.Expectations.Any(expectation =>
+                            expectation.Binding.ImportRow <= 0
+                            || !BoundEnumTypes
+                                .IsValidModuleDeclarationKey(
+                                    expectation.Binding.ExportKey)
+                            || !SameA2SourceTypeProviderSnapshot(
+                                expectation.Binding.UsingModule,
+                                expectation.ExpectedDeclaration.Provider)
+                            || !SameA2SourceTypeProviderSnapshot(
+                                expectation.Binding.Provider,
+                                classView.Provider)
+                            || expectation.Binding.ProviderDefinitionId
+                                != classView.Identity.DefinitionId
+                            || expectation.Binding.ExpectedDefinitionId
+                                != expectation.ExpectedDeclaration.Identity
+                                    .DefinitionId
+                            || expectation.Binding.TargetRequirement
+                                != moduleTargetRequirement
+                            || expectation.Binding.RuntimePolicy
+                                != (uint)program.RuntimePolicy
+                            || expectation.Binding.UsingModule.TargetRequirement
+                                != moduleTargetRequirement
+                            || expectation.Binding.UsingModule.RuntimePolicy
+                                != (uint)program.RuntimePolicy
+                            || (!StringComparer.Ordinal.Equals(
+                                    expectation.Binding.UsingModule
+                                        .ModuleIdentity,
+                                    moduleIdentity)
+                                && !packedClassModuleIdentities.Contains(
+                                    expectation.Binding.UsingModule
+                                        .ModuleIdentity))))
+                    {
+                        throw Invalid(
+                            "An EN1 packed class TypeDef lost its provider or expected-module identity.");
+                    }
+
+                    standardClassEmissions.Add(
+                        new C1EnumClosureStandardClassEmission(
+                            classView, declaration.ExportKeys, null,
+                            rootTypeDefRow, []) {
+                            OwnerModuleIdentity
+                                = classView.Provider.ModuleIdentity,
+                        });
+                    continue;
+                }
+
                 if (!declaration.Expectations.IsDefaultOrEmpty
                     && declaration.Expectations.Any(expectation =>
                         !expectation.MethodExpectations.IsDefaultOrEmpty))
@@ -1293,13 +1427,26 @@ public static partial class TrRmExecutableCompiler
                         GetDirectClassFieldExpectations(classView)));
             }
 
-            standardClassEmissions.Sort(static (left, right) =>
+            standardClassEmissions.Sort((left, right) =>
             {
-                var providerOrder = StringComparer.Ordinal.Compare(
-                    left.View.Provider.ModuleIdentity,
-                    right.View.Provider.ModuleIdentity);
-                return providerOrder != 0
-                    ? providerOrder
+                var leftOwner = left.OwnerModuleIdentity ?? moduleIdentity;
+                var rightOwner = right.OwnerModuleIdentity ?? moduleIdentity;
+                var leftOwnerOrder
+                    = StringComparer.Ordinal.Equals(
+                        leftOwner, moduleIdentity) ? 0 : 1;
+                var rightOwnerOrder
+                    = StringComparer.Ordinal.Equals(
+                        rightOwner, moduleIdentity) ? 0 : 1;
+                var ownerOrder = leftOwnerOrder.CompareTo(rightOwnerOrder);
+                if (ownerOrder != 0)
+                {
+                    return ownerOrder;
+                }
+
+                var ownerIdentityOrder = StringComparer.Ordinal.Compare(
+                    leftOwner, rightOwner);
+                return ownerIdentityOrder != 0
+                    ? ownerIdentityOrder
                     : left.RootTypeDefRow.CompareTo(right.RootTypeDefRow);
             });
             for (var index = 1;
@@ -1685,6 +1832,22 @@ public static partial class TrRmExecutableCompiler
                 : program.SourceTypeDeclarations.ToDictionary(
                     static declaration => declaration.StructureIndex);
         var usedExportKeys = new HashSet<string>(StringComparer.Ordinal);
+        var moduleExportKeysByIdentity = new Dictionary<string,
+            HashSet<string>>(StringComparer.Ordinal) {
+            [moduleIdentity] = usedExportKeys,
+        };
+        HashSet<string> GetModuleExportKeys(string identity)
+        {
+            if (!moduleExportKeysByIdentity.TryGetValue(identity,
+                    out var exportKeys))
+            {
+                exportKeys = new HashSet<string>(StringComparer.Ordinal);
+                moduleExportKeysByIdentity.Add(identity, exportKeys);
+            }
+
+            return exportKeys;
+        }
+
         var sourceClassExportsByIndex
             = new SortedDictionary<int, List<string>>();
         var sourceClassFieldExportsByIndex = new Dictionary<
@@ -3150,6 +3313,10 @@ public static partial class TrRmExecutableCompiler
             emittedEnums.Count + retainedClassIndexes.Count
                 + standardClassDeclarationsByTypeDef.Length
                 + retainedStructureIndexes.Count);
+        var typeDefModuleIdentities = new List<string>(
+            emittedEnums.Count + retainedClassIndexes.Count
+                + standardClassDeclarationsByTypeDef.Length
+                + retainedStructureIndexes.Count);
         var methodSignatureRows = new List<TrRmMethodSigRow>();
         var methodRows = new List<TrRmMethodDefRow>();
         var nativeFunctionPointerAnchorMethodRows = new int[
@@ -3382,6 +3549,41 @@ public static partial class TrRmExecutableCompiler
                         + retainedClassIndexes.Count + ordinal + 1))
                 .ToDictionary(static item => item.emission.View.Identity,
                     static item => item.typeDefRow);
+        var packedClassIdentityByRootClassImport
+            = new Dictionary<(string ModuleIdentity, int ImportRow),
+                BoundGenericNominalTypeIdentity>();
+        foreach (var declaration in standardClassDeclarations)
+        {
+            if (!packedClassModuleIdentities.Contains(
+                    declaration.Declaration.Provider.ModuleIdentity)
+                || !typeDefRowByRootClassIdentity.ContainsKey(
+                    declaration.Declaration.Identity))
+            {
+                continue;
+            }
+
+            foreach (var expectation in declaration.Expectations)
+            {
+                var key = (
+                    expectation.Binding.UsingModule.ModuleIdentity,
+                    expectation.Binding.ImportRow);
+                if (packedClassIdentityByRootClassImport.TryGetValue(
+                        key, out var existingIdentity))
+                {
+                    if (existingIdentity
+                        != declaration.Declaration.Identity)
+                    {
+                        throw Invalid(
+                            "One packed class Import row resolves to conflicting nominal TypeDefs.");
+                    }
+
+                    continue;
+                }
+
+                packedClassIdentityByRootClassImport.Add(key,
+                    declaration.Declaration.Identity);
+            }
+        }
         var typeDefRowByStructure = retainedStructureIndexes
             .Select((structureIndex, ordinal) => (structureIndex,
                 typeDefRow: emittedEnums.Count + retainedClassIndexes.Count
@@ -3661,15 +3863,24 @@ public static partial class TrRmExecutableCompiler
                 {
                     var oldReferenceRow = checked((int)type.Row);
                     uint newReferenceRow;
+                    var newForm = type.Form;
+                    var typeDefProviderIdentity = type.Form == 0x02
+                        ? sourceTables.Modules.GetIdentity(
+                            sourceTables.TypeDefs.GetOwnerModule(
+                                oldReferenceRow))
+                        : sourceProvider.ModuleIdentity;
                     if (type.Form == 0x02
                         && typeDefRowByProviderClassTypeDef.TryGetValue((
-                            sourceProvider.ModuleIdentity,
+                            typeDefProviderIdentity,
                             oldReferenceRow), out var providerTypeDefRow))
                     {
                         newReferenceRow
                             = checked((uint)providerTypeDefRow);
                     }
                     else if (type.Form == 0x02
+                        && StringComparer.Ordinal.Equals(
+                            typeDefProviderIdentity,
+                            sourceProvider.ModuleIdentity)
                         && rootSnapshot is not null
                         && SameA2SourceTypeProviderSnapshot(rootSnapshot,
                             sourceProvider)
@@ -3677,6 +3888,17 @@ public static partial class TrRmExecutableCompiler
                             oldReferenceRow, out var classTypeDefRow))
                     {
                         newReferenceRow = checked((uint)classTypeDefRow);
+                    }
+                    else if (type.Form == 0x03
+                        && packedClassIdentityByRootClassImport.TryGetValue((
+                            sourceProvider.ModuleIdentity,
+                            oldReferenceRow), out var packedIdentity)
+                        && typeDefRowByRootClassIdentity.TryGetValue(
+                            packedIdentity, out var packedTypeDefRow))
+                    {
+                        newForm = 0x02;
+                        newReferenceRow
+                            = checked((uint)packedTypeDefRow);
                     }
                     else if (type.Form == 0x03
                         && importRowByRootClassImport.TryGetValue(
@@ -3688,7 +3910,7 @@ public static partial class TrRmExecutableCompiler
                     }
                     else if (type.Form == 0x02 && type.Qualifiers == 0
                         && enumIndexByProviderTypeDefRow.TryGetValue(
-                            (sourceProvider.ModuleIdentity,
+                            (typeDefProviderIdentity,
                                 oldReferenceRow),
                             out var enumIndex))
                     {
@@ -3708,7 +3930,7 @@ public static partial class TrRmExecutableCompiler
                     }
                     else if (type.Form == 0x02 && type.Qualifiers == 0
                         && structureIndexByRootTypeDefRow.TryGetValue(
-                            (sourceProvider.ModuleIdentity,
+                            (typeDefProviderIdentity,
                                 oldReferenceRow),
                             out var structureIndex))
                     {
@@ -3734,7 +3956,7 @@ public static partial class TrRmExecutableCompiler
 
                     encodedTypeSpec = checked((uint)typeSpecRows.Count + 1);
                     typeSpecRows.Add(TrRmTypeSpecTableWriter.Reference(
-                        type.Form, newReferenceRow, type.Qualifiers));
+                        newForm, newReferenceRow, type.Qualifiers));
                 }
                 else
                 {
@@ -4066,6 +4288,7 @@ public static partial class TrRmExecutableCompiler
                 checked((uint)layoutFirst),
                 checked((uint)emittedEnum.Layouts.Length),
                 0, 0));
+            typeDefModuleIdentities.Add(moduleIdentity);
             typeDefNames.Add((namespaceName, typeName));
 
             var enumImportRow = 0;
@@ -4676,6 +4899,7 @@ public static partial class TrRmExecutableCompiler
             typeDefRows.Add(new TrRmTypeDefRow(0, 0, typeDefFlags,
                 fieldFirst, @class.Fields.Length, 0, 0,
                 checked((uint)(layoutRows.Count + 1)), 1, 0, 0));
+            typeDefModuleIdentities.Add(moduleIdentity);
             typeDefNames.Add((namespaceName, typeName));
             layoutRows.Add(new TrRmLayoutRow(typeDefRow, 0, 0, 0, 0, 0,
                 layoutFieldFirst, @class.Fields.Length));
@@ -4783,18 +5007,40 @@ public static partial class TrRmExecutableCompiler
                 layoutFieldRows.Add(new TrRmLayoutFieldRow(
                     checked(layoutRows.Count + 1), fieldOrdinal,
                     fieldDefRow));
-                if (!emission.ExportKeys.IsDefaultOrEmpty
-                    && standardClassFieldExportKeysByDefinition.TryGetValue(
-                        field.DefinitionId, out var fieldExportKeys))
+                if (emission.Import is null)
                 {
-                    if (emission.Import is null)
+                    ImmutableArray<string> fieldExportKeys;
+                    if (emission.OwnerModuleIdentity is not null)
                     {
-                        foreach (var exportKey in fieldExportKeys)
+                        fieldExportKeys = field.ExportKeys;
+                    }
+                    else if (!emission.ExportKeys.IsDefaultOrEmpty
+                        && standardClassFieldExportKeysByDefinition
+                            .TryGetValue(field.DefinitionId,
+                                out var rootFieldExportKeys))
+                    {
+                        fieldExportKeys = rootFieldExportKeys.ToImmutableArray();
+                    }
+                    else
+                    {
+                        fieldExportKeys = [];
+                    }
+
+                    var moduleExportKeys = GetModuleExportKeys(
+                        emission.OwnerModuleIdentity ?? moduleIdentity);
+                    foreach (var exportKey in fieldExportKeys)
+                    {
+                        if (!BoundEnumTypes.IsValidModuleDeclarationKey(
+                                exportKey)
+                            || !moduleExportKeys.Add(exportKey))
                         {
-                            fieldExportRows.Add(new TrRmExportRow(
-                                0x1400_0000u | checked((uint)fieldDefRow),
-                                AddString(exportKey)));
+                            throw Invalid(
+                                "An EN1 class FieldDef ExportKey is invalid or duplicated within its Module.");
                         }
+
+                        fieldExportRows.Add(new TrRmExportRow(
+                            0x1400_0000u | checked((uint)fieldDefRow),
+                            AddString(exportKey)));
                     }
                 }
 
@@ -5243,9 +5489,20 @@ public static partial class TrRmExecutableCompiler
                 classView.TypeDefFlags, fieldFirst,
                 classView.Fields.Length, 0, 0,
                 checked((uint)layoutFirst), 1, 0, 0));
+            typeDefModuleIdentities.Add(
+                emission.OwnerModuleIdentity ?? moduleIdentity);
             typeDefNames.Add((classView.Namespace, classView.Name));
+            var typeModuleExportKeys = GetModuleExportKeys(
+                emission.OwnerModuleIdentity ?? moduleIdentity);
             foreach (var exportKey in emission.ExportKeys)
             {
+                if (!BoundEnumTypes.IsValidModuleDeclarationKey(exportKey)
+                    || !typeModuleExportKeys.Add(exportKey))
+                {
+                    throw Invalid(
+                        "An EN1 class TypeDef ExportKey is invalid or duplicated within its Module.");
+                }
+
                 exportRows.Add(new TrRmExportRow(
                     0x1300_0000u | checked((uint)typeDefRow),
                     AddString(exportKey)));
@@ -5414,6 +5671,7 @@ public static partial class TrRmExecutableCompiler
             typeDefRows.Add(new TrRmTypeDefRow(0, 0, typeDefFlags,
                 fieldFirst, structure.Fields.Length, 0, 0,
                 checked((uint)layoutRow), 1, 0, 0));
+            typeDefModuleIdentities.Add(moduleIdentity);
             typeDefNames.Add((namespaceName, typeName));
             layoutRows.Add(new TrRmLayoutRow(typeDefRow, 0, 0, 0, 0, 0,
                 layoutFieldFirst, structure.Fields.Length));
@@ -5957,6 +6215,18 @@ public static partial class TrRmExecutableCompiler
                     var sourceType = providerTables.TypeSpecs
                         .GetTypeSpecRef(instance.TypeSpecReference);
                     if (sourceType.Form == 0x03
+                        && packedClassIdentityByRootClassImport.TryGetValue(
+                            (provider.ModuleIdentity,
+                                checked((int)sourceType.Row)),
+                            out var packedIdentity)
+                        && typeDefRowByRootClassIdentity.TryGetValue(
+                            packedIdentity, out var packedRootTypeDefRow))
+                    {
+                        typeReference
+                            = TrRmTypeSpecTableWriter.Reference(0x02,
+                                checked((uint)packedRootTypeDefRow));
+                    }
+                    else if (sourceType.Form == 0x03
                         && importRowByRootClassImport.TryGetValue(
                             (provider.ModuleIdentity,
                                 checked((int)sourceType.Row)),
@@ -6078,6 +6348,12 @@ public static partial class TrRmExecutableCompiler
         {
             _ = AddString(fieldName);
         }
+        _ = AddString(moduleIdentity);
+        foreach (var packedModuleIdentity in packedClassModuleIdentities
+            .OrderBy(static identity => identity, StringComparer.Ordinal))
+        {
+            _ = AddString(packedModuleIdentity);
+        }
 
         var textBytes = TrRmStringTableWriter.EncodeTextRows(stringRows);
         var strings = new TrRmStringTableReader(textBytes, stringRows.Count);
@@ -6138,8 +6414,217 @@ public static partial class TrRmExecutableCompiler
         }
         featureRows.Sort(static (left, right)
             => left.FeatureId.CompareTo(right.FeatureId));
+        if (typeDefModuleIdentities.Count != typeDefRows.Count)
+        {
+            throw Invalid(
+                "EN1 TypeDef ownership was not retained while packing the class closure.");
+        }
+
+        var packedClassProvidersByIdentity
+            = new Dictionary<string,
+                BoundSourceTypeProviderSnapshot>(StringComparer.Ordinal);
+        foreach (var emission in standardClassDeclarationsByTypeDef)
+        {
+            var provider = emission.View.Provider;
+            if (!packedClassModuleIdentities.Contains(
+                    provider.ModuleIdentity))
+            {
+                continue;
+            }
+
+            if (packedClassProvidersByIdentity.TryGetValue(
+                    provider.ModuleIdentity, out var existingProvider))
+            {
+                if (!SameA2SourceTypeProviderSnapshot(existingProvider,
+                        provider))
+                {
+                    throw Invalid(
+                        "A packed class Module has conflicting provider snapshots.");
+                }
+            }
+            else
+            {
+                packedClassProvidersByIdentity.Add(provider.ModuleIdentity,
+                    provider);
+            }
+        }
+
+        if (packedClassModuleIdentities.Count
+            != packedClassProvidersByIdentity.Count)
+        {
+            throw Invalid(
+                "A packed class Module has no checked provider snapshot.");
+        }
+        if (!packedClassModuleIdentities.IsEmpty
+            && (moduleRefRows.Count != 0 || !importRows.IsEmpty))
+        {
+            throw Unsupported(
+                "The EN1 packed class provider closure cannot retain external Imports yet.");
+        }
+
+        if (!packedClassModuleIdentities.IsEmpty
+            && (!retainedClassIndexes.IsEmpty
+                || !retainedStructureIndexes.IsEmpty
+                || !emittedEnums.IsEmpty))
+        {
+            throw Unsupported(
+                "The EN1 packed class closure currently requires class-only TypeDef, FieldDef and MethodDef dependencies.");
+        }
+
+        var outputModuleIdentities = new List<string>(
+            1 + packedClassModuleIdentities.Count) {
+            moduleIdentity,
+        };
+        outputModuleIdentities.AddRange(
+            packedClassModuleIdentities
+                .OrderBy(static identity => identity,
+                    StringComparer.Ordinal));
+        var outputFeatureRows = new List<TrRmFeatureRow>();
+        var moduleFeatureRanges
+            = new Dictionary<string, (int First, int Count)>(
+                StringComparer.Ordinal);
+        foreach (var outputModuleIdentity in outputModuleIdentities)
+        {
+            var sourceFeatures = StringComparer.Ordinal.Equals(
+                    outputModuleIdentity, moduleIdentity)
+                ? featureRows
+                : packedClassProvidersByIdentity[
+                        outputModuleIdentity].Features
+                    .Select(static feature => new TrRmFeatureRow(
+                        feature.FeatureId, feature.RuleRevision))
+                    .ToList();
+            sourceFeatures.Sort(static (left, right)
+                => left.FeatureId.CompareTo(right.FeatureId));
+            var distinctFeatures
+                = new List<TrRmFeatureRow>(sourceFeatures.Count);
+            foreach (var feature in sourceFeatures)
+            {
+                if (distinctFeatures.Count != 0
+                    && distinctFeatures[^1].FeatureId == feature.FeatureId)
+                {
+                    if (distinctFeatures[^1].RuleRevision
+                        != feature.RuleRevision)
+                    {
+                        throw Invalid(
+                            "A packed Module has conflicting revisions for one Feature.");
+                    }
+
+                    continue;
+                }
+
+                distinctFeatures.Add(feature);
+            }
+
+            var featureFirst = distinctFeatures.Count == 0
+                ? 0 : checked(outputFeatureRows.Count + 1);
+            outputFeatureRows.AddRange(distinctFeatures);
+            moduleFeatureRanges.Add(outputModuleIdentity,
+                (featureFirst, distinctFeatures.Count));
+        }
+
+        var methodOwnerModuleIdentities
+            = new List<string>(methodRows.Count);
+        foreach (var method in methodRows)
+        {
+            if (method.OwnerTypeDefRow < 0
+                || method.OwnerTypeDefRow > typeDefModuleIdentities.Count)
+            {
+                throw Invalid(
+                    "An EN1 MethodDef has an invalid packed TypeDef owner.");
+            }
+
+            methodOwnerModuleIdentities.Add(method.OwnerTypeDefRow == 0
+                ? moduleIdentity
+                : typeDefModuleIdentities[method.OwnerTypeDefRow - 1]);
+        }
+
+        static Dictionary<string, (int Start, int Count)> CreateModuleRanges(
+            List<string> owners, IReadOnlyList<string> moduleIdentities,
+            int recordCount, string tableName)
+        {
+            var ranges = new Dictionary<string, (int Start, int Count)>(
+                StringComparer.Ordinal);
+            var cursor = 1;
+            foreach (var identity in moduleIdentities)
+            {
+                var first = -1;
+                var count = 0;
+                for (var index = 0; index < owners.Count; index++)
+                {
+                    if (!StringComparer.Ordinal.Equals(
+                            owners[index], identity))
+                    {
+                        continue;
+                    }
+
+                    if (first < 0)
+                    {
+                        first = index;
+                    }
+                    count++;
+                }
+
+                if (count != 0)
+                {
+                    if (first + 1 != cursor)
+                    {
+                        throw Unsupported(
+                            $"EN1 packed {tableName} rows are not grouped by Module identity.");
+                    }
+
+                    for (var offset = 0; offset < count; offset++)
+                    {
+                        if (!StringComparer.Ordinal.Equals(
+                                owners[first + offset], identity))
+                        {
+                            throw Unsupported(
+                                $"EN1 packed {tableName} rows are not contiguous by Module identity.");
+                        }
+                    }
+                }
+
+                ranges.Add(identity, (cursor, count));
+                cursor = checked(cursor + count);
+            }
+
+            if (cursor != recordCount + 1)
+            {
+                throw Invalid(
+                    $"EN1 packed {tableName} rows have no Module owner.");
+            }
+
+            return ranges;
+        }
+
+        var typeDefRanges = CreateModuleRanges(typeDefModuleIdentities,
+            outputModuleIdentities, typeDefRows.Count, "TypeDef");
+        var methodRanges = CreateModuleRanges(methodOwnerModuleIdentities,
+            outputModuleIdentities, methodRows.Count, "MethodDef");
+        var moduleRows = new List<TrRmModuleRow>(
+            outputModuleIdentities.Count);
+        foreach (var outputModuleIdentity in outputModuleIdentities)
+        {
+            var isRootModule = StringComparer.Ordinal.Equals(
+                outputModuleIdentity, moduleIdentity);
+            var provider = isRootModule
+                ? null
+                : packedClassProvidersByIdentity[outputModuleIdentity];
+            var typeDefRange = typeDefRanges[outputModuleIdentity];
+            var methodRange = methodRanges[outputModuleIdentity];
+            var featureRange = moduleFeatureRanges[outputModuleIdentity];
+            moduleRows.Add(new TrRmModuleRow(
+                AddString(outputModuleIdentity),
+                provider?.TargetRequirement ?? moduleTargetRequirement,
+                provider?.RuntimePolicy ?? (uint)program.RuntimePolicy,
+                0, 1, typeDefRange.Start,
+                methodRange.Start, 1, featureRange.First,
+                featureRange.Count,
+                provider?.GoverningRuleEdition ?? 1));
+        }
+
         var targetProfileCount = hasTargetProfile ? 1 : 0;
-        var totalRows = 1L + stringRows.Count + typeDefRows.Count
+        var totalRows = (long)moduleRows.Count + stringRows.Count
+            + typeDefRows.Count
             + moduleRefRows.Count + importRows.Count + fieldRows.Count
             + layoutRows.Count + layoutFieldRows.Count + methodRows.Count
             + methodSignatureRows.Count + parameterRows.Count + bodyRows.Count
@@ -6147,10 +6632,12 @@ public static partial class TrRmExecutableCompiler
             + targetLayoutDependencyFieldReferences.Count + enumRows.Count
             + enumMemberRows.Count + typeSpecRows.Count + exportRows.Count
             + methodParameterLabelRows.Count + contractRows.Count
-            + featureRows.Count + targetProfileCount + valueBuilder.BlobCount
+            + outputFeatureRows.Count + targetProfileCount
+            + valueBuilder.BlobCount
             + valueBuilder.ConstantSourceCount
             + valueBuilder.FrozenValueNodeCount;
-        if (stringRows.Count > 0xFF_FFFF
+        if (moduleRows.Count > 0xFF_FFFF
+            || stringRows.Count > 0xFF_FFFF
             || typeDefRows.Count > 0xFF_FFFF
             || moduleRefRows.Count > 0xFF_FFFF
             || importRows.Count > 0xFF_FFFF
@@ -6170,28 +6657,27 @@ public static partial class TrRmExecutableCompiler
             || exportRows.Count > 0xFF_FFFF
             || methodParameterLabelRows.Count > 0xFF_FFFF
             || contractRows.Count > 0xFF_FFFF
-            || featureRows.Count > 0xFF_FFFF
+            || outputFeatureRows.Count > 0xFF_FFFF
             || totalRows > SemanticVerifier.MaximumAnalysisVisits)
         {
             throw Unsupported(
                 "The EN1 enum closure exceeds the checked metadata row limits.");
         }
 
-        var featureBytes = TrRmFeatureTableWriter.Encode(featureRows, schema);
-        var moduleBytes = TrRmModuleTableWriter.Encode([
-            new TrRmModuleRow(2, moduleTargetRequirement,
-                (uint)program.RuntimePolicy, 0, 1, 1, 1, 1,
-                featureRows.Count == 0 ? 0u : 1u,
-                checked((uint)featureRows.Count)),
-        ], strings, moduleRefRows.Count, typeDefRows.Count,
-            methodRows.Count, 0, featureRows.Count);
-        var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
+        var featureBytes
+            = TrRmFeatureTableWriter.EncodeModuleRanges(
+                outputFeatureRows, schema);
+        var moduleBytes = TrRmModuleTableWriter.Encode(moduleRows, strings,
             moduleRefRows.Count, typeDefRows.Count, methodRows.Count, 0,
-            featureRows.Count);
-        var features = featureRows.Count == 0
+            outputFeatureRows.Count);
+        var modules = new TrRmModuleTableReader(moduleBytes,
+            moduleRows.Count, strings,
+            moduleRefRows.Count, typeDefRows.Count, methodRows.Count, 0,
+            outputFeatureRows.Count);
+        var features = outputFeatureRows.Count == 0
             ? default
-            : new TrRmFeatureTableReader(featureBytes, featureRows.Count,
-                schema);
+            : new TrRmFeatureTableReader(featureBytes,
+                outputFeatureRows.Count, schema);
         var moduleRefBytes = moduleRefRows.Count == 0 ? []
             : TrRmModuleRefTableWriter.Encode(moduleRefRows, strings,
                 modules);
@@ -6327,13 +6813,13 @@ public static partial class TrRmExecutableCompiler
         }
 
         var sections = new List<TrRmSection> {
-            new(0x0001, 0, 1, moduleBytes),
+            new(0x0001, 0, checked((uint)moduleRows.Count), moduleBytes),
             new(0x0002, 0, checked((uint)stringRows.Count), textBytes),
         };
-        if (featureRows.Count != 0)
+        if (outputFeatureRows.Count != 0)
         {
             sections.Add(new TrRmSection(0x0004, 0,
-                checked((uint)featureRows.Count), featureBytes));
+                checked((uint)outputFeatureRows.Count), featureBytes));
         }
         if (values.BlobCount != 0)
         {

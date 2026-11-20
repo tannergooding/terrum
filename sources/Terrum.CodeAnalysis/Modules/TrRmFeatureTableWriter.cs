@@ -173,6 +173,35 @@ public static class TrRmFeatureTableWriter
         return result;
     }
 
+    internal static byte[] EncodeModuleRanges(
+        IReadOnlyList<TrRmFeatureRow> rows,
+        TrRmArtifactSchema schema)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+        if (rows.Count > 0xFF_FFFF)
+        {
+            throw new ArgumentOutOfRangeException(nameof(rows));
+        }
+
+        var result = new byte[checked(rows.Count * 2 * sizeof(uint))];
+        for (var index = 0; index < rows.Count; index++)
+        {
+            var row = rows[index];
+            if (!TrRmFeatureTableReader.TryGetRuleRevision(row.FeatureId,
+                    schema, out var assignedRevision)
+                || row.RuleRevision != assignedRevision)
+            {
+                throw InvalidFeature();
+            }
+
+            var offset = index * 2 * sizeof(uint);
+            Write(result, offset, row.FeatureId);
+            Write(result, offset + sizeof(uint), row.RuleRevision);
+        }
+
+        return result;
+    }
+
     private static void Write(byte[] bytes, int offset, uint value)
         => BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset), value);
 

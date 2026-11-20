@@ -106,10 +106,15 @@ struct TypeDef Imports and each root's provider FieldDef imports. Compatible
 and conflicting cross-provider class-handle query/reload regressions, including
 a transitive Parent-to-Beta-to-Gamma provider chain, are added but remain
 unverified under the active hold. Enum views merge by exact
-provider site and retain selected aliases. Pointer/other non-scalar struct
-dependencies, unselected direct class-handle dependencies requiring packed
-provider closure, class handles nested through inline-struct fields, and
-broader multi-function/provider dependency closure remain open.
+provider site and retain selected aliases. A bounded class-only packed
+provider closure now partitions direct class TypeDefs across Module ranges,
+remaps direct TypeSpecs through transitive private children, and preserves
+provider identities through query/load/re-emission; its regression remains
+unverified under the hold. Mismatched Module and duplicate-identity replacement
+rejection cases are also added but unverified. External Imports in packed
+output, pointer/other non-scalar struct dependencies, class handles nested
+through inline-struct fields, and broader multi-function/provider dependency
+closure remain open.
 
 Other proposals remain unapproved unless their owner and approval status say
 otherwise; see the [proposal index](../proposals/README.md).

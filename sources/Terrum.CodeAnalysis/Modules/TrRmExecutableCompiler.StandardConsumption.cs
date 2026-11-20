@@ -1398,17 +1398,11 @@ public static partial class TrRmExecutableCompiler
             }
 
             string providerIdentity;
-            string typeExportKey;
+            string[] typeExportKeys;
             if (typeReference.Form == 0x02)
             {
                 var providerModuleRow = tables.TypeDefs.GetOwnerModule(
                     typeDefRow);
-                if (providerModuleRow != rootModuleRow)
-                {
-                    throw new InvalidDataException(
-                        "A direct EN1 class query root is not owned by its using Module.");
-                }
-
                 var classDefinition
                     = 0x1300_0000u | checked((uint)typeDefRow);
                 var typeKeys = tables.Exports.GetExportsForModule(
@@ -1422,13 +1416,27 @@ public static partial class TrRmExecutableCompiler
                         "A direct EN1 class query root has no TypeDef ExportKey.");
                 }
 
-                foreach (var key in typeKeys)
+                providerIdentity
+                    = tables.Modules.GetIdentity(providerModuleRow);
+                typeExportKeys = typeKeys;
+                if (providerModuleRow == rootModuleRow)
                 {
-                    AddTypeKey(key);
+                    foreach (var key in typeExportKeys)
+                    {
+                        AddTypeKey(key);
+                    }
                 }
-
-                providerIdentity = moduleIdentity;
-                typeExportKey = typeKeys[0];
+                else
+                {
+                    foreach (var key in typeExportKeys)
+                    {
+                        var packedClassKey = (providerIdentity, key);
+                        if (importedTypeKeySet.Add(packedClassKey))
+                        {
+                            importedTypeKeys.Add(packedClassKey);
+                        }
+                    }
+                }
             }
             else
             {
@@ -1436,8 +1444,8 @@ public static partial class TrRmExecutableCompiler
                 var import = tables.Imports.GetBindingForImportRow(
                     typeImportRow);
                 providerIdentity = import.ProducerIdentity;
-                typeExportKey = import.ExportKey;
-                var importedKey = (providerIdentity, typeExportKey);
+                typeExportKeys = [import.ExportKey];
+                var importedKey = (providerIdentity, import.ExportKey);
                 if (importedTypeKeySet.Add(importedKey))
                 {
                     importedTypeKeys.Add(importedKey);
@@ -1483,12 +1491,15 @@ public static partial class TrRmExecutableCompiler
                 }
             }
 
-            var root = new EN1ClassQueryRoot(providerIdentity,
-                typeExportKey, typeSpecReference, typeReference.Form,
-                typeReference.Qualifiers);
-            if (rootSet.Add(root))
+            foreach (var typeExportKey in typeExportKeys)
             {
-                roots.Add(root);
+                var root = new EN1ClassQueryRoot(providerIdentity,
+                    typeExportKey, typeSpecReference, typeReference.Form,
+                    typeReference.Qualifiers);
+                if (rootSet.Add(root))
+                {
+                    roots.Add(root);
+                }
             }
         }
 

@@ -1287,6 +1287,26 @@ public static partial class TrRmExecutableCompiler
         var classHandleTypeDependencies
             = new HashSet<BoundGenericNominalTypeIdentity>();
         var genericNominalInstanceMaps = new int[references.Length][];
+        bool IsSelectedClassTypeSpecProvider(int referenceIndex,
+            string providerIdentity)
+            => references[referenceIndex].StandardClassDeclarations.Any(
+                declaration =>
+                    StringComparer.Ordinal.Equals(
+                        declaration.Declaration.Provider.ModuleIdentity,
+                        providerIdentity)
+                    && (IsSelectedClassProvider(referenceIndex,
+                            declaration.Declaration.Provider)
+                        || (classHandleTypeDependencies.Contains(
+                                declaration.Declaration.Identity)
+                            && declaration.Expectations.IsEmpty
+                            && StringComparer.Ordinal.Equals(
+                                declaration.Declaration.Identity
+                                    .ProviderIdentity,
+                                providerIdentity)
+                            && StringComparer.Ordinal.Equals(
+                                declaration.Declaration.Identity
+                                    .ModuleIdentity,
+                                providerIdentity))));
         PrimitiveType RemapClassFieldType(int referenceIndex,
             PrimitiveType type,
             BoundSourceTypeProviderSnapshot classProvider)
@@ -1348,8 +1368,18 @@ public static partial class TrRmExecutableCompiler
                 var classView = classDeclaration.Declaration;
                 var hasDirectClassView
                     = classDeclaration.Expectations.IsEmpty
-                    && SameA2SourceTypeProviderSnapshot(classProvider,
-                        classView.Provider);
+                        && sourceInstance.TypeSpecForm == 0x02
+                        && StringComparer.Ordinal.Equals(
+                            sourceInstance.TypeSpecProviderIdentity,
+                            classProvider.ModuleIdentity)
+                        && IsSelectedClassTypeSpecProvider(referenceIndex,
+                            classProvider.ModuleIdentity)
+                        && StringComparer.Ordinal.Equals(
+                            classView.Identity.ProviderIdentity,
+                            classView.Provider.ModuleIdentity)
+                        && StringComparer.Ordinal.Equals(
+                            classView.Identity.ModuleIdentity,
+                            classView.Provider.ModuleIdentity);
                 var hasImportedClassView
                     = !classDeclaration.Expectations.IsDefaultOrEmpty
                     && classDeclaration.Expectations.Any(expectation =>
@@ -1516,6 +1546,10 @@ public static partial class TrRmExecutableCompiler
                 }
             }
         }
+        var retainedClassIdentities
+            = new HashSet<BoundGenericNominalTypeIdentity>(
+                selectedClassIdentities);
+        retainedClassIdentities.UnionWith(classHandleTypeDependencies);
         var providerSnapshots = new Dictionary<
             (string SchemaIdentity, string ModuleIdentity),
             BoundSourceTypeProviderSnapshot>();
@@ -1582,6 +1616,13 @@ public static partial class TrRmExecutableCompiler
             foreach (var definition in sourceDefinitions)
             {
                 var isClassDefinition = definition.NominalKind == 2;
+                if (isClassDefinition
+                    && !retainedClassIdentities.Contains(
+                        definition.Identity))
+                {
+                    continue;
+                }
+
                 var isStructureDefinition
                     = definition.NominalKind == 1
                         && structureDefinitionIdentities.Contains(
@@ -1671,20 +1712,31 @@ public static partial class TrRmExecutableCompiler
                 var instanceDefinition = sourceDefinitions.FirstOrDefault(
                     definition =>
                         definition.Identity == instance.Definition);
+                if (instanceDefinition is null)
+                {
+                    throw Invalid(
+                        "A selected class reference instance has no nominal TypeDef definition.");
+                }
+                if (!retainedClassIdentities.Contains(instance.Definition)
+                    && !structureDefinitionIdentities.Contains(
+                        instance.Definition))
+                {
+                    continue;
+                }
+
                 var instanceClassDeclaration
                     = reference.StandardClassDeclarations.SingleOrDefault(
                         declaration =>
                             declaration.Declaration.Identity
                             == instance.Definition);
-                var hasLocalClassTypeSpec
+                var hasDirectClassTypeSpec
                     = instance.TypeSpecReference != 0
                         && instance.TypeSpecForm == 0x02
-                        && StringComparer.Ordinal.Equals(
-                            instance.TypeSpecProviderIdentity,
-                            instance.Definition.ModuleIdentity)
-                        && sourceDefinitions.Any(definition =>
-                            definition.Identity == instance.Definition
-                            && definition.NominalKind == 2);
+                        && instance.TypeSpecProviderIdentity is
+                            string typeSpecProviderIdentity
+                        && instanceDefinition.NominalKind == 2
+                        && IsSelectedClassTypeSpecProvider(referenceIndex,
+                            typeSpecProviderIdentity);
                 var hasImportedClassTypeSpec = false;
                 if (instance.TypeSpecReference != 0
                     && instance.TypeSpecForm == 0x03
@@ -1711,12 +1763,12 @@ public static partial class TrRmExecutableCompiler
                 }
                 if (!instance.Arguments.IsEmpty
                     || instance.Qualifiers != 0
-                    || (!hasDirectTypeSpec && !hasLocalClassTypeSpec
+                    || (!hasDirectTypeSpec && !hasDirectClassTypeSpec
                         && !hasImportedClassTypeSpec)
                     || !definitionIndexes.ContainsKey(instance.Definition))
                 {
                     throw Unsupported(
-                        "Type-only class composition requires direct instances or local class-handle TypeSpecs.");
+                        "Type-only class composition requires direct instances or selected direct/imported class-handle TypeSpecs.");
                 }
 
                 var key = new StandardClassTypeOnlyInstanceKey(
@@ -1745,6 +1797,12 @@ public static partial class TrRmExecutableCompiler
 
             foreach (var declaration in reference.StandardClassDeclarations)
             {
+                if (!retainedClassIdentities.Contains(
+                        declaration.Declaration.Identity))
+                {
+                    continue;
+                }
+
                 var view = declaration.Declaration with {
                     Fields = [.. declaration.Declaration.Fields.Select(
                         field => field with {
@@ -1778,6 +1836,19 @@ public static partial class TrRmExecutableCompiler
                                         .AreEquivalentProviderExpectations(
                                             typeExpectation,
                                             expectation.Binding)));
+                var hasDirectClassHandleDependency
+                    = classHandleTypeDependencies.Contains(view.Identity)
+                        && declaration.Expectations.IsEmpty
+                        && typeDefinition.ProviderExpectations.IsDefaultOrEmpty
+                        && StringComparer.Ordinal.Equals(
+                            view.Identity.ProviderIdentity,
+                            view.Identity.ModuleIdentity)
+                        && StringComparer.Ordinal.Equals(
+                            view.Identity.ModuleIdentity,
+                            view.Provider.ModuleIdentity)
+                        && (typeDefinition.Provider is null
+                            || SameA2SourceTypeProviderSnapshot(
+                                typeDefinition.Provider, view.Provider));
                 var isSelectedClassRoot
                     = !declaration.SelectedExportKeys.IsDefaultOrEmpty
                         || selectedClassIdentities.Contains(view.Identity);
@@ -1788,9 +1859,11 @@ public static partial class TrRmExecutableCompiler
                         classSchemaIdentity)
                     || !definitionIndexes.ContainsKey(view.Identity)
                     || (!isSelectedClassRoot
-                        && !hasSelectedImportedClassView)
+                        && !hasSelectedImportedClassView
+                        && !hasDirectClassHandleDependency)
                     || (declaration.ExportKeys.IsDefaultOrEmpty
-                        && !hasSelectedImportedClassView)
+                        && !hasSelectedImportedClassView
+                        && !hasDirectClassHandleDependency)
                     || !view.Methods.IsEmpty)
                 {
                     throw Unsupported(
@@ -1974,7 +2047,10 @@ public static partial class TrRmExecutableCompiler
             }
 
             if (sourceDefinitions.Any(definition =>
-                    !declarationIndexes.ContainsKey(definition.Identity)
+                    (definition.NominalKind != 2
+                        || retainedClassIdentities.Contains(
+                            definition.Identity))
+                    && !declarationIndexes.ContainsKey(definition.Identity)
                     && !structureDefinitionIdentities.Contains(
                         definition.Identity)))
             {
