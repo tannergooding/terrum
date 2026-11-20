@@ -163,8 +163,11 @@ re-emits and reloads the consumer against the relocated provider. All remain
 unverified under the active hold. Co-located provider Imports, deeper
 chains/diamonds, broader shared-expectation transformations,
 multiple using-Module contexts for one expected TypeDef, Import/Export/
-ModuleRef/Body map permutations, CLI selection, and runtime qualification
-remain open.
+ModuleRef/Body map permutations, and runtime qualification remain open. The
+separate unapproved version-3
+`docs\proposals\standard-trrm-c1-method-type-source-provider-cli-transport.md`
+now proposes the CLI shape and exact schema pairing; reader/dispatch,
+regressions and CLI qualification remain unimplemented.
 The loader still requires the whole validated Module-set TypeDef/method
 closure to fit its bounded Blittable-struct path. Snapshot-preserving
 source-free emission does not establish general row remapping under provider
