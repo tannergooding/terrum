@@ -476,6 +476,43 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
             Is.EqualTo("Provider"));
     }
 
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsClassTypeBindingViews)]
+    public void RejectsProviderTypeSplitForProviderOwnedEqualityGroup(
+        string schemaIdentity)
+    {
+        var provider = CreateRootArtifactWithTwoClassImports("Provider",
+            "LeafProviderA", "BoxKey", "LeafKey", "LeafAliasKey",
+            schemaIdentity, includeEquality: true,
+            uncalledEqualityImports: true,
+            secondProviderIdentity: "LeafProviderB");
+        var leafProviderA = CreateClassArtifact("LeafProviderA", "Leaf",
+            "LeafKey", 0xF200_0008, schemaIdentity, layoutKind: 0, pack: 0);
+        var leafProviderB = CreateClassArtifact("LeafProviderB", "Leaf",
+            "LeafAliasKey", 0xF200_0008, schemaIdentity, layoutKind: 0,
+            pack: 0);
+        var root = CreateArtifact("Root", "Holder", "HolderKey",
+            0xF200_0008, schemaIdentity, "Provider", "BoxKey",
+            TrRmTypeSpecTableWriter.Reference(0x03, 1),
+            layoutKind: 0, pack: 0, useRequestedLayoutForImports: true,
+            importedTypeName: "Box");
+
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, root),
+                "Root", [
+                    new TrRmStandardArtifactInput(schemaIdentity, provider),
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        leafProviderA),
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        leafProviderB),
+                ], ["HolderKey"]));
+    }
+
     [Test]
     public void BindsClassSchemaStructEqualityWithoutCopyOrBlittableProof()
     {
@@ -2846,7 +2883,8 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
         string firstProviderExportKey, string secondProviderExportKey,
         string schemaIdentity, bool useStructLeaves = false,
         bool includeEquality = false,
-        bool uncalledEqualityImports = false)
+        bool uncalledEqualityImports = false,
+        string? secondProviderIdentity = null)
     {
         const uint targetRequirement
             = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
@@ -2871,17 +2909,25 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
             (firstProviderExportKey, 1),
             (exportKey, 1),
         };
+        var secondProviderIdentityRow = 0;
+        if (secondProviderIdentity is not null)
+        {
+            secondProviderIdentityRow = names.Length + 1;
+            names = [.. names, (secondProviderIdentity, 1)];
+        }
         var stringBytes = TrRmStringTableWriter.EncodeTextRows(names);
         var strings = new TrRmStringTableReader(stringBytes, names.Length);
         var schema = TrRmExecutableCompiler.GetForeignInvocationSchema(
             schemaIdentity);
+        var moduleRefCount = secondProviderIdentity is null ? 1 : 2;
 
         var moduleBytes = TrRmModuleTableWriter.Encode([
             new TrRmModuleRow(1, targetRequirement, 0, 0, 1, 1, 1, 1,
                 featureRange.First, featureCount, governingRuleEdition),
-        ], strings, moduleRefCount: 1, typeDefCount: 3, methodDefCount: 0,
+        ], strings, moduleRefCount, typeDefCount: 3, methodDefCount: 0,
             sourceFileCount: 0, featureCount: featureCount);
-        var modules = new TrRmModuleTableReader(moduleBytes, 1, strings, 1,
+        var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
+            moduleRefCount,
             3, 0, 0, featureCount);
 
         var typeSpecRows = new ReadOnlyMemory<byte>[] {
@@ -2958,14 +3004,20 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
             ];
         var layoutFieldBytes = TrRmLayoutFieldTableWriter.Encode(
             layoutFieldRows, layouts, typeDefs, fields);
-        var moduleRefBytes = new byte[12];
+        var moduleRefBytes = new byte[checked(moduleRefCount * 12)];
         Write(moduleRefBytes, 0, 8);
         Write(moduleRefBytes, 4, targetRequirement);
+        if (moduleRefCount == 2)
+        {
+            Write(moduleRefBytes, 12,
+                checked((uint)secondProviderIdentityRow));
+            Write(moduleRefBytes, 16, targetRequirement);
+        }
         var importBytes = new byte[24];
         Write(importBytes, 0, 1);
         Write(importBytes, 4, 9);
         Write(importBytes, 8, 0x1300_0002);
-        Write(importBytes, 12, 1);
+        Write(importBytes, 12, moduleRefCount == 2 ? 2u : 1u);
         Write(importBytes, 16, 10);
         Write(importBytes, 20, 0x1300_0003);
         var exportBytes = new byte[8];
@@ -2976,7 +3028,8 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
             new(0x0001, 0, 1, moduleBytes),
             new(0x0002, 0, checked((uint)names.Length), stringBytes),
             featureSection,
-            new(0x0010, 0, 1, moduleRefBytes),
+            new(0x0010, 0, checked((uint)moduleRefCount),
+                moduleRefBytes),
             new(0x0011, 0, checked((uint)typeSpecRows.Length),
                 typeSpecBytes),
             new(0x0013, 0, 3, typeDefBytes),
@@ -2984,7 +3037,7 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
             new(0x0015, 0, 3, layoutBytes),
             new(0x001C, 0, 2, importBytes),
             new(0x001D, 0, 1, exportBytes),
-            new(0x0023, 0, 4, layoutFieldBytes),
+            new(0x0023, 0, checked((uint)fieldCount), layoutFieldBytes),
         };
         if (includeEquality)
         {
