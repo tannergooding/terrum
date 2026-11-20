@@ -905,6 +905,7 @@ internal sealed partial class CliTests
                     Is.EqualTo("TRM2000"));
             }
             Assert.That(File.Exists(consumerArtifact), Is.False);
+
         }
         finally
         {
@@ -1399,6 +1400,48 @@ internal sealed partial class CliTests
                 $"{absentInvalidResult}{Environment.NewLine}{absentInvalidError}");
             Assert.That(absentInvalidError, Is.Empty);
             using (var document = JsonDocument.Parse(absentInvalidResult))
+            {
+                Assert.That(document.RootElement
+                        .GetProperty("diagnostic").GetProperty("code")
+                        .GetString(),
+                    Is.EqualTo("TRM2001"));
+            }
+            Assert.That(File.Exists(consumerArtifact), Is.False);
+
+            var missingProviderPath = Path.Combine(
+                TestArtifactPaths.DirectoryPath,
+                $"source-provider-cli-scalar-missing-{Guid.NewGuid():N}.trrm");
+            await File.WriteAllTextAsync(providerSelections,
+                JsonSerializer.Serialize(new {
+                    schemaVersion = 3,
+                    providers = new[] {
+                        new {
+                            schemaIdentity,
+                            path = missingProviderPath,
+                        },
+                    },
+                    references = new[] {
+                        new {
+                            providerInputOrdinal = 0,
+                            moduleIdentity = providerIdentity,
+                            methodExportKeys = new[] { "Ping" },
+                            typeExportKeys = Array.Empty<object>(),
+                            fieldExportKeys = Array.Empty<object>(),
+                        },
+                    },
+                }), new UTF8Encoding(false)).ConfigureAwait(true);
+            var (missingProviderExit, missingProviderOutput,
+                missingProviderError) = await RunAsync(
+                    Encoding.UTF8.GetBytes("invalid Terrum source"),
+                    "compile-trrm", "-", "--identity", consumerIdentity,
+                    "--trrm-schema", schemaIdentity,
+                    "--trrm-source-providers", providerSelections,
+                    "--library", "-o", consumerArtifact, "--runtime",
+                    "fail-fast", "--json").ConfigureAwait(false);
+            Assert.That(missingProviderExit, Is.EqualTo(2),
+                $"{missingProviderOutput}{Environment.NewLine}{missingProviderError}");
+            Assert.That(missingProviderError, Is.Empty);
+            using (var document = JsonDocument.Parse(missingProviderOutput))
             {
                 Assert.That(document.RootElement
                         .GetProperty("diagnostic").GetProperty("code")

@@ -194,6 +194,8 @@ but unverified. Duplicate provider paths, source/provider role aliases,
 absent-output preservation for malformed configurations, and byte-identical
 provider inputs with duplicate Module identities rejected before malformed
 stdin are also covered.
+An invalid provider path is rejected as TRM2001 before malformed stdin is
+compiled and keeps absent output absent; this regression is unverified.
 Windows file-symlink and parent-directory-symlink provider aliases have
 isolated CLI regressions; they remain unverified and skip explicitly if
 symlink creation is unavailable. Other absent-output failures, broader
