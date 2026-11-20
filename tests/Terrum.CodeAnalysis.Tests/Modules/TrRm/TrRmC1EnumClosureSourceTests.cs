@@ -3325,14 +3325,15 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var betaTree = SyntaxTree.Parse("""
             namespace Demo {
                 public struct Record {
-                    public int32 Value;
+                    public Hue Value;
                 }
                 public class Beta {
                     public Record Data;
                 }
             }
             """);
-        var betaCompilation = Compilation.CreateLibrary(betaTree);
+        var betaCompilation = Compilation.CreateLibrary(betaTree,
+            enumReference);
         Assert.That(betaCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine,
                 betaCompilation.Diagnostics));
@@ -3367,10 +3368,15 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var betaInput = new TrRmStandardArtifactInput(schemaIdentity,
             betaArtifact);
         var betaReference = TrRmExecutableCompiler.CreateStandardReference(
-            betaInput, "BetaProvider", [], ["type.beta", "type.record"],
+            betaInput, "BetaProvider", [enumInput],
+            ["type.beta", "type.record"],
             ["field.beta.data", "field.record.value"]);
         var reference = TrRmExecutableCompiler.CreateStandardReferenceSet(
             [alphaReference, betaReference]);
+        Assert.That(reference.EnumDefinitions, Has.Length.EqualTo(1));
+        Assert.That(((BoundEnumDeclarationIdentity.Standard)
+                reference.EnumDefinitions[0].Identity).Value
+                .Expectations, Has.Length.EqualTo(2));
 
         var consumer = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
@@ -3421,6 +3427,12 @@ internal sealed class TrRmC1EnumClosureSourceTests
                     binding.ProducerIdentity == "BetaProvider"
                     && binding.ExportKey == "field.record.value"),
             Is.True);
+        Assert.That(Enumerable.Range(1, tables.Imports.Count)
+                .Select(tables.Imports.GetBindingForImportRow)
+                .Count(static binding =>
+                    binding.ProducerIdentity == "HueProvider"
+                    && binding.ExportKey == "type.hue"),
+            Is.EqualTo(1));
         var loaded = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(schemaIdentity, artifact),
             "ImportedEnumLayoutConsumer",

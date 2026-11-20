@@ -17,6 +17,9 @@ public static partial class TrRmExecutableCompiler
         string ProducerIdentity, string ExportKey, uint TargetRequirement,
         uint RuntimePolicy, int RootImportRow = 0);
 
+    private sealed record C1EnumClosureRootImport(
+        string ProviderIdentity, int ImportRow);
+
     private sealed record C1EnumClosureStandardClassEmission(
         BoundStandardClassTypeView View, ImmutableArray<string> ExportKeys,
         C1EnumClosureImport? Import, int RootTypeDefRow,
@@ -248,7 +251,8 @@ public static partial class TrRmExecutableCompiler
         ImmutableArray<C1EnumClosureEmissionLayout> Layouts,
         ImmutableArray<C1EnumClosureEmissionMember> Members,
         ImmutableArray<string> ExportKeys,
-        C1EnumClosureImport? Import, int RootImportRow = 0);
+        C1EnumClosureImport? Import,
+        ImmutableArray<C1EnumClosureRootImport> RootImports = default);
 
     private sealed record C1EnumClosureSourceConstructorPlan(
         int ClassIndex, BoundFunction Function, int FunctionIndex,
@@ -714,7 +718,8 @@ public static partial class TrRmExecutableCompiler
         C1EnumClosureEmission CreateStandardEmission(
             int definitionIndex, BoundStandardEnumView view,
             ImmutableArray<string> exportKeys,
-            C1EnumClosureImport? import, int rootImportRow = 0)
+            C1EnumClosureImport? import,
+            ImmutableArray<C1EnumClosureRootImport> rootImports = default)
         {
             EnsureEmissionCapacity(view.Members.Length);
             var layouts
@@ -741,7 +746,7 @@ public static partial class TrRmExecutableCompiler
                 view.Namespace, view.Name, view.TypeDefFlags,
                 view.UnderlyingType, view.EnumFlags,
                 layouts.MoveToImmutable(), members.MoveToImmutable(),
-                exportKeys, import, rootImportRow);
+                exportKeys, import, rootImports);
         }
 
         var standardClassEmissions
@@ -755,27 +760,20 @@ public static partial class TrRmExecutableCompiler
                     "EN1 class re-emission does not retain PI1 property and initialized-state declarations.");
             }
 
-            var classQueryRootProviderIdentities
-                = standardClassDeclarations
-                    .Where(declaration =>
-                        classQueryRootIdentities.Contains(
-                            declaration.Declaration.Identity))
-                    .Select(static declaration =>
-                        declaration.Declaration.Provider.ModuleIdentity)
-                    .ToHashSet(StringComparer.Ordinal);
-            var structureProviderIdentities = program.Structures
-                .Where(static structure =>
-                    structure.StandardTypeOrigin is not null)
-                .Select(static structure =>
-                    structure.StandardTypeOrigin!.Provider.ModuleIdentity)
-                .Distinct(StringComparer.Ordinal).ToArray();
+            bool IsSelectedClassQueryRootProvider(
+                BoundSourceTypeProviderSnapshot provider)
+                => standardClassDeclarations.Any(declaration =>
+                    classQueryRootIdentities.Contains(
+                        declaration.Declaration.Identity)
+                    && declaration.Expectations.IsEmpty
+                    && BoundStandardEnumDeclarationContract.SnapshotsMatch(
+                        declaration.Declaration.Provider, provider));
+
             var structureProvidersFitQueryRoots
                 = program.Structures.All(static structure =>
-                    structure.StandardTypeOrigin is not null)
-                    && structureProviderIdentities.All(
-                        classQueryRootProviderIdentities.Contains);
-            BoundSourceTypeProviderSnapshot? importedEnumRootProvider
-                = null;
+                    structure.StandardTypeOrigin is not null
+                    && IsSelectedClassQueryRootProvider(
+                        structure.StandardTypeOrigin.Provider));
             var enumProvidersFitQueryRoots = true;
             foreach (var definition in program.EnumDefinitions)
             {
@@ -794,9 +792,8 @@ public static partial class TrRmExecutableCompiler
                     && occurrence.Expectations.IsEmpty)
                 {
                     enumProvidersFitQueryRoots
-                        = classQueryRootProviderIdentities.Contains(
-                            occurrence.Declaration.Site.Snapshot
-                                .ModuleIdentity);
+                        = IsSelectedClassQueryRootProvider(
+                            occurrence.Declaration.Site.Snapshot);
                 }
                 else if (!occurrence.IsLookupRoot
                     && occurrence.SelectedExportKeys.IsEmpty
@@ -805,19 +802,11 @@ public static partial class TrRmExecutableCompiler
                     foreach (var expectation in occurrence.Expectations)
                     {
                         var usingModule = expectation.Binding.UsingModule;
-                        if (!classQueryRootProviderIdentities.Contains(
-                                usingModule.ModuleIdentity)
-                            || (importedEnumRootProvider is not null
-                                && !BoundStandardEnumDeclarationContract
-                                    .SnapshotsMatch(
-                                        importedEnumRootProvider,
-                                        usingModule)))
+                        if (!IsSelectedClassQueryRootProvider(usingModule))
                         {
                             enumProvidersFitQueryRoots = false;
                             break;
                         }
-
-                        importedEnumRootProvider ??= usingModule;
                     }
                 }
                 else
@@ -843,22 +832,22 @@ public static partial class TrRmExecutableCompiler
                         .All(static declaration =>
                             declaration.Expectations.IsEmpty);
             if (allowMultipleClassQueryProviders
-                && importedEnumRootProvider is not null)
-            {
-                rootSnapshot = importedEnumRootProvider;
-            }
-            else if (allowMultipleClassQueryProviders
                 && !program.Structures.IsEmpty)
             {
                 rootSnapshot = program.Structures[0].StandardTypeOrigin!
                     .Provider;
             }
             else if (allowMultipleClassQueryProviders
-                && !program.EnumDefinitions.IsEmpty)
+                && program.EnumDefinitions.Any(static definition =>
+                    definition.Identity
+                        is BoundEnumDeclarationIdentity.Standard standard
+                    && standard.Value.IsLookupRoot))
             {
-                var enumOccurrence
-                    = (BoundEnumDeclarationIdentity.Standard)
-                        program.EnumDefinitions[0].Identity;
+                var enumOccurrence = (BoundEnumDeclarationIdentity.Standard)
+                    program.EnumDefinitions.First(static definition =>
+                        definition.Identity
+                            is BoundEnumDeclarationIdentity.Standard standard
+                        && standard.Value.IsLookupRoot).Identity;
                 rootSnapshot
                     = enumOccurrence.Value.Declaration.Site.Snapshot;
             }
@@ -1337,11 +1326,13 @@ public static partial class TrRmExecutableCompiler
                 var occurrence
                     = ((BoundEnumDeclarationIdentity.Standard)
                         definition.Identity).Value;
+                var snapshot = occurrence.Declaration.Site.Snapshot;
                 if (occurrence.Expectations.IsEmpty)
                 {
                     if (!BoundStandardEnumDeclarationContract.SnapshotsMatch(
                             occurrence.Declaration.Site.Snapshot,
-                            rootSnapshot))
+                            rootSnapshot)
+                        && !allowMultipleClassQueryProviders)
                     {
                         throw Unsupported(
                             "EN1 source-free enum emission cannot re-own a declaration from another Module.");
@@ -1374,23 +1365,31 @@ public static partial class TrRmExecutableCompiler
                     continue;
                 }
 
-                foreach (var expectation in occurrence.Expectations)
+                var rootExpectations = occurrence.Expectations
+                    .Where(expectation =>
+                        IsSelectedClassQueryRootProvider(
+                            expectation.Binding.UsingModule))
+                    .ToArray();
+                if (rootExpectations.Length == 0)
                 {
-                    var binding = expectation.Binding;
-                    if (!BoundStandardEnumDeclarationContract.SnapshotsMatch(
-                            binding.UsingModule, rootSnapshot))
-                    {
-                        continue;
-                    }
-
-                    emittedEnums.Add(CreateStandardEmission(
-                        definitionIndex, expectation.ExpectedDeclaration, [],
-                        new C1EnumClosureImport(
-                            binding.ProducerIdentity, binding.ExportKey,
-                            binding.TargetRequirement,
-                            binding.RuntimePolicy),
-                        binding.ImportRow));
+                    continue;
                 }
+
+                var firstExpectation = rootExpectations[0];
+                var firstBinding = firstExpectation.Binding;
+                var rootImports = rootExpectations.Select(expectation =>
+                        new C1EnumClosureRootImport(
+                            expectation.Binding.UsingModule.ModuleIdentity,
+                            expectation.Binding.ImportRow))
+                    .Distinct().ToImmutableArray();
+                emittedEnums.Add(CreateStandardEmission(
+                    definitionIndex, firstExpectation.ExpectedDeclaration, [],
+                    new C1EnumClosureImport(
+                        firstBinding.ProducerIdentity,
+                        firstBinding.ExportKey,
+                        firstBinding.TargetRequirement,
+                        firstBinding.RuntimePolicy),
+                    rootImports));
             }
         }
 
@@ -2967,7 +2966,8 @@ public static partial class TrRmExecutableCompiler
         var typeSpecByBoundEnumIndex = new Dictionary<int, uint>();
         var typeDefRowByEnumIndex = new Dictionary<int, int>();
         var importRowByEnumIndex = new Dictionary<int, int>();
-        var enumIndexByRootEnumImport = new Dictionary<int, int>();
+        var enumIndexByRootEnumImport
+            = new Dictionary<(string ModuleIdentity, int ImportRow), int>();
         var importRowByStructureIndex = new Dictionary<int, int>();
         var importRowByRootStructureImport
             = new Dictionary<(string ModuleIdentity, int ImportRow), int>();
@@ -3064,10 +3064,10 @@ public static partial class TrRmExecutableCompiler
                 exportKeys.Add(exportKey);
             }
         }
-        var enumIndexByRootTypeDefRow = new Dictionary<int, int>();
+        var enumIndexByRootTypeDefRow
+            = new Dictionary<(string ModuleIdentity, int TypeDefRow), int>();
         var enumIndexByProviderTypeDefRow
             = new Dictionary<(string ModuleIdentity, int TypeDefRow), int>();
-        var importRowByRootEnumImport = new Dictionary<int, int>();
         var importRowByProviderEnumImport
             = new Dictionary<(string ModuleIdentity, int ImportRow), int>();
         for (var enumIndex = 0;
@@ -3087,20 +3087,13 @@ public static partial class TrRmExecutableCompiler
             if ((typeDefId >> 24) != 0x13 || typeDefRow == 0
                 || !enumIndexByProviderTypeDefRow.TryAdd((
                     view.Site.Snapshot.ModuleIdentity, typeDefRow),
+                    enumIndex)
+                || !enumIndexByRootTypeDefRow.TryAdd((
+                    view.Site.Snapshot.ModuleIdentity, typeDefRow),
                     enumIndex))
             {
                 throw Invalid(
                     "EN1 class re-emission found an invalid or duplicate enum provider TypeDef identity.");
-            }
-
-            if (rootSnapshot is not null
-                && BoundStandardEnumDeclarationContract.SnapshotsMatch(
-                    view.Site.Snapshot, rootSnapshot)
-                && !enumIndexByRootTypeDefRow.TryAdd(typeDefRow,
-                    enumIndex))
-            {
-                throw Invalid(
-                    "EN1 class re-emission found a duplicate root enum TypeDef identity.");
             }
         }
 
@@ -3737,59 +3730,116 @@ public static partial class TrRmExecutableCompiler
                     AddString(enumImport.ExportKey),
                     0x1300_0000u | checked((uint)typeDefRow)));
                 enumImportRow = importRows.Count;
-                if (emittedEnum.RootImportRow != 0)
+                if (!emittedEnum.RootImports.IsDefaultOrEmpty)
                 {
-                    if (standardClassRootTables is null
-                        || emittedEnum.RootImportRow < 0
-                        || !importRowByRootEnumImport.TryAdd(
-                            emittedEnum.RootImportRow, enumImportRow))
+                    foreach (var rootImport in emittedEnum.RootImports)
                     {
-                        throw Invalid(
-                            "An EN1 class field Import lost its exact root enum Import mapping.");
-                    }
-                    if (!importRowByProviderEnumImport.TryAdd(
-                            (rootSnapshot!.ModuleIdentity,
-                                emittedEnum.RootImportRow),
-                            enumImportRow))
-                    {
-                        throw Invalid(
-                            "An EN1 class enum Import row is ambiguous in its provider Module.");
-                    }
+                        var occurrence
+                            = ((BoundEnumDeclarationIdentity.Standard)
+                                program.EnumDefinitions[
+                                    emittedEnum.DefinitionIndex].Identity)
+                                .Value;
+                        var rootExpectation = occurrence.Expectations
+                            .SingleOrDefault(expectation =>
+                                expectation.Binding.ImportRow
+                                    == rootImport.ImportRow
+                                && StringComparer.Ordinal.Equals(
+                                    expectation.Binding.UsingModule
+                                        .ModuleIdentity,
+                                    rootImport.ProviderIdentity));
+                        if (rootImport.ImportRow <= 0
+                            || rootExpectation is null
+                            || !standardClassDeclarationsByTypeDef.Any(
+                                emission =>
+                                    BoundStandardEnumDeclarationContract
+                                        .SnapshotsMatch(
+                                            emission.View.Provider,
+                                            rootExpectation.Binding
+                                                .UsingModule))
+                            || !standardClassRootTablesByProvider.TryGetValue(
+                                rootImport.ProviderIdentity,
+                                out var rootTables))
+                        {
+                            throw Invalid(
+                                "An EN1 class enum Import lost its exact root provider snapshot.");
+                        }
 
-                    var expectedEnumDefinition
-                        = standardClassRootTables.Imports
-                            .GetExpectedDefinitionForImportRow(
-                                emittedEnum.RootImportRow);
-                    var expectedEnumTypeDefRow = checked((int)(
-                        expectedEnumDefinition & 0x00FF_FFFF));
-                    var expectedEnumProviderTypeDefKey
-                        = (rootSnapshot!.ModuleIdentity,
-                            expectedEnumTypeDefRow);
-                    var hasExpectedEnumProviderTypeDef
-                        = enumIndexByProviderTypeDefRow.TryGetValue(
-                            expectedEnumProviderTypeDefKey,
-                            out var existingExpectedEnumIndex);
-                    if (!hasExpectedEnumProviderTypeDef)
-                    {
-                        _ = enumIndexByProviderTypeDefRow.TryAdd(
-                            expectedEnumProviderTypeDefKey,
-                            emittedEnum.DefinitionIndex);
-                    }
-                    if ((expectedEnumDefinition >> 24) != 0x13
-                        || standardClassRootTables.TypeDefs.GetKind(
-                            expectedEnumTypeDefRow) != 4
-                        || (hasExpectedEnumProviderTypeDef
-                            && existingExpectedEnumIndex
+                        var rootBinding
+                            = rootTables.Imports.GetBindingForImportRow(
+                                rootImport.ImportRow);
+                        var expectedEnumDefinition
+                            = rootTables.Imports
+                                .GetExpectedDefinitionForImportRow(
+                                    rootImport.ImportRow);
+                        var expectedEnumTypeDefRow = checked((int)(
+                            expectedEnumDefinition & 0x00FF_FFFF));
+                        var expectedEnumProviderTypeDefKey
+                            = (rootImport.ProviderIdentity,
+                                expectedEnumTypeDefRow);
+                        if (!StringComparer.Ordinal.Equals(
+                                rootBinding.ProducerIdentity,
+                                enumImport.ProducerIdentity)
+                            || rootBinding.TargetRequirement
+                                != enumImport.TargetRequirement
+                            || rootBinding.RuntimePolicy
+                                != enumImport.RuntimePolicy
+                            || !StringComparer.Ordinal.Equals(
+                                rootBinding.ExportKey,
+                                rootExpectation.Binding.ExportKey)
+                            || expectedEnumDefinition
+                                != rootExpectation.Binding
+                                    .ExpectedDefinitionId
+                            || (expectedEnumDefinition >> 24) != 0x13
+                            || expectedEnumTypeDefRow <= 0
+                            || expectedEnumTypeDefRow
+                                > rootTables.TypeDefs.Count
+                            || rootTables.ModuleRefs.GetOwnerModule(
+                                rootTables.Imports.GetModuleRefForImportRow(
+                                    rootImport.ImportRow))
+                                != rootExpectation.Binding.UsingModule
+                                    .ModuleRow
+                            || rootTables.TypeDefs.GetKind(
+                                expectedEnumTypeDefRow) != 4
+                            || !importRowByProviderEnumImport.TryAdd((
+                                rootImport.ProviderIdentity,
+                                rootImport.ImportRow), enumImportRow))
+                        {
+                            throw Invalid(
+                                "An EN1 class enum Import has an invalid or duplicate root Import identity.");
+                        }
+
+                        if (!enumIndexByProviderTypeDefRow.TryAdd(
+                                expectedEnumProviderTypeDefKey,
+                                emittedEnum.DefinitionIndex)
+                            && enumIndexByProviderTypeDefRow[
+                                expectedEnumProviderTypeDefKey]
                                 != emittedEnum.DefinitionIndex)
-                        || !enumIndexByRootTypeDefRow.TryAdd(
-                            expectedEnumTypeDefRow,
+                        {
+                            throw Invalid(
+                                "An EN1 class enum Import conflicts with its expected provider TypeDef identity.");
+                        }
+                        if (!enumIndexByRootTypeDefRow.TryAdd(
+                                expectedEnumProviderTypeDefKey,
+                                emittedEnum.DefinitionIndex)
+                            && enumIndexByRootTypeDefRow[
+                                expectedEnumProviderTypeDefKey]
+                                != emittedEnum.DefinitionIndex)
+                        {
+                            throw Invalid(
+                                "An EN1 class enum Import conflicts with its expected root TypeDef identity.");
+                        }
+                        if (!enumIndexByRootEnumImport.TryAdd((
+                                rootImport.ProviderIdentity,
+                                rootImport.ImportRow),
                             emittedEnum.DefinitionIndex)
-                        || !enumIndexByRootEnumImport.TryAdd(
-                            emittedEnum.RootImportRow,
-                            emittedEnum.DefinitionIndex))
-                    {
-                        throw Invalid(
-                            "An EN1 class enum Import has an invalid or duplicate expected TypeDef identity.");
+                            && enumIndexByRootEnumImport[(
+                                rootImport.ProviderIdentity,
+                                rootImport.ImportRow)]
+                                != emittedEnum.DefinitionIndex)
+                        {
+                            throw Invalid(
+                                "An EN1 class enum Import conflicts with its expected root Import identity.");
+                        }
                     }
                 }
                 else
@@ -3824,16 +3874,6 @@ public static partial class TrRmExecutableCompiler
                             "An EN1 direct enum Import lost its provider TypeDef identity.");
                     }
 
-                    if (rootSnapshot is not null
-                        && BoundStandardEnumDeclarationContract.SnapshotsMatch(
-                            rootSnapshot, enumProviderSnapshot)
-                        && !enumIndexByRootTypeDefRow.TryAdd(
-                            providerTypeDefRow,
-                            emittedEnum.DefinitionIndex))
-                    {
-                        throw Invalid(
-                            "An EN1 direct enum Import duplicates a root TypeDef identity.");
-                    }
                 }
                 _ = importRowByEnumIndex.TryAdd(
                     emittedEnum.DefinitionIndex, enumImportRow);
@@ -4988,13 +5028,15 @@ public static partial class TrRmExecutableCompiler
 
             var enumIndex = -1;
             if (sourceType.IsRow && sourceType.Form == 0x02
-                && enumIndexByRootTypeDefRow.TryGetValue(sourceType.Row,
-                    out enumIndex))
+                && enumIndexByRootTypeDefRow.TryGetValue(
+                    (rootSnapshot.ModuleIdentity,
+                        checked((int)sourceType.Row)), out enumIndex))
             {
             }
             else if (sourceType.IsRow && sourceType.Form == 0x03
                 && enumIndexByRootEnumImport.TryGetValue(
-                    checked((int)sourceType.Row), out enumIndex))
+                    (rootSnapshot.ModuleIdentity,
+                        checked((int)sourceType.Row)), out enumIndex))
             {
             }
             else
