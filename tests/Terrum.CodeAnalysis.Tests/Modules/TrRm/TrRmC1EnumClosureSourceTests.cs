@@ -2725,8 +2725,11 @@ internal sealed class TrRmC1EnumClosureSourceTests
             = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
         var providerTree = SyntaxTree.Parse("""
             namespace Demo {
-                public struct Payload {
+                public struct Leaf {
                     public int32 Value;
+                }
+                public struct Payload {
+                    public Leaf Header;
                 }
                 public class Alpha {
                     public Payload Data;
@@ -2756,11 +2759,17 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var providerArtifact = TrRmExecutableCompiler.EmitStandard(
             providerProgram, "AlphaStructProvider", schemaIdentity,
             targetRequirement, [
+                new TrRmSourceTypeExport("Demo", "Leaf", "type.leaf") {
+                    FieldExports = [
+                        new TrRmSourceFieldExport("Value",
+                            "field.leaf.value"),
+                    ],
+                },
                 new TrRmSourceTypeExport("Demo", "Payload",
                     "type.payload") {
                     FieldExports = [
-                        new TrRmSourceFieldExport("Value",
-                            "field.payload.value"),
+                        new TrRmSourceFieldExport("Header",
+                            "field.payload.header"),
                     ],
                 },
             ], [], [classExport], []);
@@ -2768,9 +2777,10 @@ internal sealed class TrRmC1EnumClosureSourceTests
             providerArtifact);
         var alphaReference = TrRmExecutableCompiler.CreateStandardReference(
             alphaInput, "AlphaStructProvider", [], [
-                "type.alpha", "type.payload",
+                "type.alpha", "type.leaf", "type.payload",
             ], [
-                "field.alpha.data", "field.payload.value",
+                "field.alpha.data", "field.leaf.value",
+                "field.payload.header",
             ]);
 
         var betaTree = SyntaxTree.Parse("""
@@ -2827,21 +2837,25 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var reference = TrRmExecutableCompiler.CreateStandardReferenceSet(
             [alphaReference, betaReference]);
 
-        Assert.That(reference.Structures, Has.Length.EqualTo(2));
-        Assert.That((int)reference.StandardClassDeclarations.Single(
+        Assert.That(reference.Structures, Has.Length.EqualTo(3));
+        var alphaDataType = reference.StandardClassDeclarations.Single(
             static declaration =>
                 declaration.Declaration.Name == "Alpha")
-            .Declaration.Fields.Single().Type, Is.EqualTo(100));
-        Assert.That((int)reference.StandardClassDeclarations.Single(
+            .Declaration.Fields.Single().Type;
+        var betaDataType = reference.StandardClassDeclarations.Single(
             static declaration =>
                 declaration.Declaration.Name == "Beta")
-            .Declaration.Fields.Single().Type, Is.EqualTo(101));
+            .Declaration.Fields.Single().Type;
+        Assert.That(reference.Structures[(int)alphaDataType - 100].Name,
+            Is.EqualTo("Demo.Payload"));
+        Assert.That(reference.Structures[(int)betaDataType - 100].Name,
+            Is.EqualTo("Demo.Record"));
 
         var consumer = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
                 using Demo;
                 nint CombinedOffset() {
-                    return unsafe(offsetof(Alpha, Data.Value))
+                    return unsafe(offsetof(Alpha, Data.Header.Value))
                         + unsafe(offsetof(Beta, Data.Value));
                 }
                 """), reference, new CompilationOptions {
@@ -2861,7 +2875,7 @@ internal sealed class TrRmC1EnumClosureSourceTests
         Assert.That(tables.TargetLayoutDependencies.Count,
             Is.EqualTo(2));
         Assert.That(tables.TargetLayoutDependencyFields.Count,
-            Is.EqualTo(4));
+            Is.EqualTo(5));
         Assert.That(tables.ModuleRefs.Count, Is.EqualTo(2));
         var imports = Enumerable.Range(1, tables.Imports.Count)
             .Select(tables.Imports.GetBindingForImportRow).ToArray();
@@ -2871,7 +2885,15 @@ internal sealed class TrRmC1EnumClosureSourceTests
             Is.True);
         Assert.That(imports.Any(static binding =>
                 binding.ProducerIdentity == "AlphaStructProvider"
-                && binding.ExportKey == "field.payload.value"),
+                && binding.ExportKey == "type.leaf"),
+            Is.True);
+        Assert.That(imports.Any(static binding =>
+                binding.ProducerIdentity == "AlphaStructProvider"
+                && binding.ExportKey == "field.payload.header"),
+            Is.True);
+        Assert.That(imports.Any(static binding =>
+                binding.ProducerIdentity == "AlphaStructProvider"
+                && binding.ExportKey == "field.leaf.value"),
             Is.True);
         Assert.That(imports.Any(static binding =>
                 binding.ProducerIdentity == "BetaProvider"

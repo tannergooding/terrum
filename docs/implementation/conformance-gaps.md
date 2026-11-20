@@ -100,9 +100,9 @@ providers, and EN1 emission retains their selected TypeDef/FieldDef Imports.
 Direct selected enum fields from distinct root providers likewise retain
 their typed provider Imports. Regressions are unverified under the active
 hold. Enum views merge by exact provider site and retain selected aliases.
-Nested/non-scalar struct dependencies, imported enum dependencies outside
-their root provider, class-valued fields and broader multi-function/provider
-dependency closure remain open.
+Non-scalar or imported struct dependencies, imported enum dependencies
+outside their root provider, class-valued fields and broader
+multi-function/provider dependency closure remain open.
 
 Other proposals remain unapproved unless their owner and approval status say
 otherwise; see the [proposal index](../proposals/README.md).

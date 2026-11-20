@@ -568,6 +568,7 @@ public static partial class TrRmExecutableCompiler
         }
 
         var structureReferences = new List<CompilationReference>();
+        var structureReferenceIndexes = new List<int>();
         for (var referenceIndex = 0;
             referenceIndex < references.Length; referenceIndex++)
         {
@@ -589,6 +590,7 @@ public static partial class TrRmExecutableCompiler
                     "Class layout composition with inline struct dependencies requires the exact class-instance-layout schema.");
             }
 
+            structureReferenceIndexes.Add(referenceIndex);
             structureReferences.Add(new CompilationReference(
                 reference.Structures, [], runtimePolicy,
                 nativePointerTypes: reference.NativePointerTypes,
@@ -596,25 +598,82 @@ public static partial class TrRmExecutableCompiler
                     reference.StandardQuerySourceAssociation));
         }
 
-        var directStructureComposition
-            = structureReferences.Count > 1
-                && structureReferences.All(reference =>
-                    reference.NativePointerTypes.IsEmpty
-                    && reference.StandardQuerySourceAssociation is null
-                    && reference.Structures.All(structure =>
-                        structure.StandardTypeOrigin is
-                            BoundStandardTypeOrigin origin
-                        && origin.Expectations.IsDefaultOrEmpty
-                        && origin.IsLookupRoot
-                        && !origin.SelectedExportKeys.IsDefaultOrEmpty
-                        && origin.ExpectedDeclaration is not null
-                        && StringComparer.Ordinal.Equals(
-                            origin.Provider.SchemaIdentity,
-                            classSchemaIdentity)
-                        && structure.Fields.All(field =>
-                            (int)field.Type < 100
-                            && IsStandardClassTypeOnlyComposedFieldType(
-                                field.Type))));
+        bool IsDirectStructureFieldType(int referenceIndex,
+            BoundSourceTypeProviderSnapshot ownerProvider,
+            PrimitiveType type)
+        {
+            if (BoundEnumTypes.IsType(type)
+                || BoundGenericNominalTypeTypes.IsType(type)
+                || BoundSpanTypeTypes.IsType(type)
+                || ManagedClassTypes.IsClass(type)
+                || NativePointerTypes.IsType(type)
+                || NativeFixedArrayTypes.IsType(type)
+                || NativeFunctionPointerTypes.IsType(type)
+                || CheckedReferenceTypes.IsType(type))
+            {
+                return false;
+            }
+
+            var structureIndex = (int)type - 100;
+            if (structureIndex < 0)
+            {
+                return IsStandardClassTypeOnlyComposedFieldType(type);
+            }
+
+            var sourceStructures
+                = references[referenceIndex].Structures;
+            return (uint)structureIndex < (uint)sourceStructures.Length
+                && sourceStructures[structureIndex].StandardTypeOrigin
+                    is BoundStandardTypeOrigin nestedOrigin
+                && SameA2SourceTypeProviderSnapshot(ownerProvider,
+                    nestedOrigin.Provider);
+        }
+
+        var directStructureComposition = structureReferences.Count > 1;
+        for (var referencePosition = 0;
+            directStructureComposition
+                && referencePosition < structureReferences.Count;
+            referencePosition++)
+        {
+            var structureReference = structureReferences[referencePosition];
+            var referenceIndex
+                = structureReferenceIndexes[referencePosition];
+            if (!structureReference.NativePointerTypes.IsEmpty
+                || structureReference.StandardQuerySourceAssociation
+                    is not null)
+            {
+                directStructureComposition = false;
+                break;
+            }
+
+            foreach (var structure in structureReference.Structures)
+            {
+                if (structure.StandardTypeOrigin is not
+                        BoundStandardTypeOrigin origin
+                    || !origin.Expectations.IsDefaultOrEmpty
+                    || !origin.IsLookupRoot
+                    || origin.SelectedExportKeys.IsDefaultOrEmpty
+                    || origin.ExpectedDeclaration is null
+                    || !origin.AdditionalExpectedDeclarations.IsDefaultOrEmpty
+                    || !StringComparer.Ordinal.Equals(
+                        origin.Provider.SchemaIdentity,
+                        classSchemaIdentity)
+                    || structure.Fields.Any(field =>
+                        field.StandardFieldOrigin is not null
+                        && (field.StandardFieldOrigin
+                                .ExpectedDeclaration is null
+                            || !field.StandardFieldOrigin
+                                .AdditionalExpectedDeclarations
+                                .IsDefaultOrEmpty))
+                    || structure.Fields.Any(field =>
+                        !IsDirectStructureFieldType(referenceIndex,
+                            origin.Provider, field.Type)))
+                {
+                    directStructureComposition = false;
+                    break;
+                }
+            }
+        }
         if (structureReferences.Count > 1
             && !directStructureComposition
             && structureReferences.Any(static reference =>
@@ -625,6 +684,8 @@ public static partial class TrRmExecutableCompiler
         }
 
         CompilationReference? structureReferenceSet = null;
+        var directStructureCompositionSources
+            = new List<(int ReferenceIndex, int StructureIndex)>();
         ImmutableArray<BoundStruct> structuresResult;
         ImmutableArray<NativePointerTypeDefinition>
             nativePointerTypesResult;
@@ -636,10 +697,20 @@ public static partial class TrRmExecutableCompiler
                 = ImmutableArray.CreateBuilder<BoundStruct>();
             var directStructureIndexes = new Dictionary<(
                 string ModuleIdentity, uint DefinitionId), int>();
-            foreach (var structureReference in structureReferences)
+            for (var referencePosition = 0;
+                referencePosition < structureReferences.Count;
+                referencePosition++)
             {
-                foreach (var structure in structureReference.Structures)
+                var structureReference
+                    = structureReferences[referencePosition];
+                var referenceIndex
+                    = structureReferenceIndexes[referencePosition];
+                for (var structureIndex = 0;
+                    structureIndex < structureReference.Structures.Length;
+                    structureIndex++)
                 {
+                    var structure
+                        = structureReference.Structures[structureIndex];
                     var origin = structure.StandardTypeOrigin!;
                     var key = (origin.Provider.ModuleIdentity,
                         origin.DefinitionId);
@@ -651,6 +722,8 @@ public static partial class TrRmExecutableCompiler
                     }
 
                     mergedDirectStructures.Add(structure);
+                    directStructureCompositionSources.Add((referenceIndex,
+                        structureIndex));
                 }
             }
 
@@ -721,6 +794,122 @@ public static partial class TrRmExecutableCompiler
             }
 
             structureMaps[referenceIndex] = map;
+        }
+
+        if (directStructureComposition)
+        {
+            var remappedStructures = structuresResult.ToBuilder();
+            for (var structureIndex = 0;
+                structureIndex < directStructureCompositionSources.Count;
+                structureIndex++)
+            {
+                var (referenceIndex, sourceStructureIndex)
+                    = directStructureCompositionSources[structureIndex];
+                var sourceStructure
+                    = references[referenceIndex]
+                        .Structures[sourceStructureIndex];
+                var origin = sourceStructure.StandardTypeOrigin!;
+                PrimitiveType RemapDirectStructureFieldType(
+                    PrimitiveType type)
+                {
+                    if (BoundEnumTypes.IsType(type)
+                        || BoundGenericNominalTypeTypes.IsType(type)
+                        || BoundSpanTypeTypes.IsType(type)
+                        || ManagedClassTypes.IsClass(type)
+                        || NativePointerTypes.IsType(type)
+                        || NativeFixedArrayTypes.IsType(type)
+                        || NativeFunctionPointerTypes.IsType(type)
+                        || CheckedReferenceTypes.IsType(type))
+                    {
+                        throw Unsupported(
+                            "Direct class layout struct composition supports only scalar and same-provider inline-struct fields.");
+                    }
+
+                    var nestedStructureIndex = (int)type - 100;
+                    if (nestedStructureIndex >= 0
+                        && nestedStructureIndex
+                            < references[referenceIndex].Structures.Length)
+                    {
+                        var nestedOrigin
+                            = references[referenceIndex]
+                                .Structures[nestedStructureIndex]
+                                .StandardTypeOrigin
+                            ?? throw Invalid(
+                                "A nested class layout struct lost its provider origin.");
+                        if (!SameA2SourceTypeProviderSnapshot(
+                                origin.Provider, nestedOrigin.Provider))
+                        {
+                            throw Unsupported(
+                                "Direct class layout struct nesting must remain within its provider Module.");
+                        }
+
+                        return (PrimitiveType)(100
+                            + structureMaps[referenceIndex][
+                                nestedStructureIndex]);
+                    }
+                    if (nestedStructureIndex >= 0
+                        || !IsStandardClassTypeOnlyComposedFieldType(type))
+                    {
+                        throw Unsupported(
+                            "A direct class layout struct field is outside the selected scalar or nested-struct closure.");
+                    }
+
+                    return type;
+                }
+
+                var fields
+                    = ImmutableArray.CreateBuilder<BoundStructField>(
+                        sourceStructure.Fields.Length);
+                foreach (var field in sourceStructure.Fields)
+                {
+                    var fieldOrigin = field.StandardFieldOrigin;
+                    if (fieldOrigin is not null)
+                    {
+                        if (fieldOrigin.ExpectedDeclaration is not
+                                BoundStructField expectedField
+                            || !fieldOrigin.AdditionalExpectedDeclarations
+                                .IsDefaultOrEmpty)
+                        {
+                            throw Unsupported(
+                                "Direct class layout struct FieldDefs require one exact expected declaration.");
+                        }
+
+                        fieldOrigin = fieldOrigin with {
+                            ExpectedDeclaration = expectedField with {
+                                Type = RemapDirectStructureFieldType(
+                                    expectedField.Type),
+                                StandardFieldOrigin = null,
+                            },
+                        };
+                    }
+
+                    fields.Add(field with {
+                        Type = RemapDirectStructureFieldType(field.Type),
+                        StandardFieldOrigin = fieldOrigin,
+                    });
+                }
+
+                var expectedDeclaration
+                    = origin.ExpectedDeclaration! with {
+                        Fields = [.. origin.ExpectedDeclaration.Fields
+                            .Select(field => field with {
+                                Type = RemapDirectStructureFieldType(
+                                    field.Type),
+                                StandardFieldOrigin = null,
+                            })],
+                        StandardTypeOrigin = null,
+                        StandardLayoutOnly = false,
+                    };
+                remappedStructures[structureIndex]
+                    = sourceStructure with {
+                        Fields = fields.MoveToImmutable(),
+                        StandardTypeOrigin = origin with {
+                            ExpectedDeclaration = expectedDeclaration,
+                        },
+                    };
+            }
+
+            structuresResult = remappedStructures.MoveToImmutable();
         }
 
         var enumDefinitionGroups = new List<(
