@@ -5386,6 +5386,10 @@ public static partial class TrRmExecutableCompiler
                 requiresUnsafeCaller = declaredRequiresUnsafeCaller
                     || nativeAbiRole is 1 or 2 or 3 or 4;
             }
+            else if (standardConstruction2MethodLinkingProfile)
+            {
+                declaredRequiresUnsafeCaller = requiresUnsafeCaller;
+            }
 
             DirectNativeImport? directNativeImport = null;
             NativeVTableMethodDefinition? nativeVTableMethod = null;

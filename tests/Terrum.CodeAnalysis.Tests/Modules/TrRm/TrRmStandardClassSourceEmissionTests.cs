@@ -5836,7 +5836,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             = C1M1Construction2ClassParameterDefaultsCopyEvidenceSchemaIdentity;
         var providerTree = SyntaxTree.Parse("""
             namespace Demo {
-                public int32 Get() { return 42; }
+                public unsafe int32 Get() { return 42; }
             }
             """);
         var providerCompilation = Compilation.CreateLibrary(providerTree);
@@ -5854,7 +5854,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
 
         var consumerTree = SyntaxTree.Parse("""
             namespace Demo {
-                int32 Main() { return Get(); }
+                int32 Main() { return unsafe(Get()); }
             }
             """);
         var consumerCompilation = Compilation.Create(consumerTree,
@@ -5877,6 +5877,13 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         Assert.That(loaded.Functions.Any(static function =>
                 function.IsExternal || function.IsModuleReference),
             Is.False);
+        var main = loaded.Functions.Single(
+            static function => function.Name == "Main");
+        var mainCall = (BoundCall)((BoundReturn)
+            main.Body.Statements.Single()).Value!;
+        var linkedTarget = loaded.Functions[mainCall.Function];
+        Assert.That(linkedTarget.RequiresUnsafeCaller, Is.True);
+        Assert.That(mainCall.IsUnsafeAuthorized, Is.True);
         Assert.That(NativeModuleCompiler.ExecuteStandard(consumerInput,
             "MethodRuntimeConsumer", providers,
             NativeRuntimePolicy.FailFast), Is.EqualTo(42));
