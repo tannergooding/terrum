@@ -7091,6 +7091,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                         public int32 Value;
                     }
                     public int32 Read(Leaf value) { return 7; }
+                        public int32 ReadAlias(Leaf value) { return 8; }
                 }
                 """), options);
         Assert.That(providerCompilation.HasErrors, Is.False,
@@ -7105,7 +7106,8 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
             providerArtifact);
         var providerReference = TrRmExecutableCompiler.CreateStandardReference(
-            providerInput, "ContextualTypeProvider", [], ["Read"], [
+            providerInput, "ContextualTypeProvider", [],
+            ["Read", "ReadAlias"], [
                 new TrRmStandardExportKeySelection(
                     "ContextualTypeProvider", "type.leaf"),
             ], []);
@@ -7125,9 +7127,13 @@ internal sealed class TrRmStandardClassSourceEmissionTests
 
         var reference = TrRmExecutableCompiler.CreateStandardReference(
             methodRootInput, "ContextualMethodRoot", [providerInput],
-            ["Read"], [], []);
+            ["Read", "ReadAlias"], [], []);
         var structure = reference.Structures.Single();
         Assert.That(structure.StandardTypeOrigin!.ContextualViewIndexes.Length,
+            Is.EqualTo(3));
+        Assert.That(reference.StandardQuerySourceAssociation!
+                .MethodTypeViews.Select(static view => view.TypeViewIndex)
+                .Distinct().Count(),
             Is.EqualTo(2));
 
         var sourceFreeCompilation = Compilation.CreateLibrary(
@@ -7144,24 +7150,105 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 reemittedArtifact,
                 TrRmArtifactSchema.C1M1Construction2InitializerCopyEvidenceDraft,
                 null, standardSchemaIdentity: schemaIdentity));
-        Assert.That(reemittedTables.TypeDefs.Count, Is.EqualTo(2));
+        Assert.That(reemittedTables.TypeDefs.Count, Is.EqualTo(3));
         Assert.That(reemittedTables.TypeDefBindingEqualities.Count,
-            Is.EqualTo(1));
+            Is.EqualTo(2));
         Assert.That(reemittedTables.TypeDefBindingEqualities.GetOwnerModule(1),
             Is.EqualTo(1u));
         Assert.That(reemittedTables.TypeDefBindingEqualities.GetLeftTypeDef(1),
             Is.EqualTo(1u));
         Assert.That(reemittedTables.TypeDefBindingEqualities.GetRightTypeDef(1),
             Is.EqualTo(2u));
+        Assert.That(reemittedTables.TypeDefBindingEqualities.GetLeftTypeDef(2),
+            Is.EqualTo(1u));
+        Assert.That(reemittedTables.TypeDefBindingEqualities.GetRightTypeDef(2),
+            Is.EqualTo(3u));
 
         var reloadedReference = TrRmExecutableCompiler.CreateStandardReference(
             new TrRmStandardArtifactInput(schemaIdentity,
                 reemittedArtifact),
-            "ContextualMethodRootReemitted", [providerInput], ["Read"], [],
-            []);
+            "ContextualMethodRootReemitted", [providerInput],
+            ["Read", "ReadAlias"], [], []);
         Assert.That(reloadedReference.Structures.Single()
                 .StandardTypeOrigin!.ContextualViewIndexes.Length,
-            Is.EqualTo(2));
+            Is.EqualTo(3));
+
+        var relocatedProviderCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                namespace Demo {
+                    [Blittable] [Layout(LayoutKind.Sequential)]
+                    public struct Earlier {
+                        public int32 Value;
+                    }
+                    [Blittable] [Layout(LayoutKind.Sequential)]
+                    public struct Leaf {
+                        public int32 Value;
+                    }
+                    public int32 Read(Leaf value) { return 7; }
+                    public int32 ReadAlias(Leaf value) { return 8; }
+                }
+                """), options);
+        Assert.That(relocatedProviderCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                relocatedProviderCompilation.Diagnostics));
+        var relocatedProviderArtifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)relocatedProviderCompilation.Program!,
+            "ContextualTypeProvider", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement, [
+                new TrRmSourceTypeExport("Demo", "Leaf", "type.leaf"),
+            ], [], []);
+        var originalProviderTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                providerArtifact,
+                TrRmArtifactSchema.C1M1Construction2InitializerCopyEvidenceDraft,
+                null, standardSchemaIdentity: schemaIdentity));
+        var relocatedProviderTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                relocatedProviderArtifact,
+                TrRmArtifactSchema.C1M1Construction2InitializerCopyEvidenceDraft,
+                null, standardSchemaIdentity: schemaIdentity));
+        var originalLeafDefinition = originalProviderTables.Exports
+            .GetExportsForModule(1)
+            .Single(static export => export.ExportKey == "type.leaf")
+            .Definition;
+        var relocatedLeafDefinition = relocatedProviderTables.Exports
+            .GetExportsForModule(1)
+            .Single(static export => export.ExportKey == "type.leaf")
+            .Definition;
+        Assert.That(relocatedLeafDefinition & 0x00FF_FFFF,
+            Is.Not.EqualTo(originalLeafDefinition & 0x00FF_FFFF));
+        var relocatedReference = TrRmExecutableCompiler
+            .CreateStandardReference(methodRootInput,
+                "ContextualMethodRoot", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        relocatedProviderArtifact),
+                ], ["Read", "ReadAlias"], [], []);
+        Assert.That(relocatedReference.Structures.Single()
+                .StandardTypeOrigin!.ContextualViewIndexes.Length,
+            Is.EqualTo(3));
+
+        var splitProviderArtifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)providerCompilation.Program!,
+            "ContextualTypeProviderSplit", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement, [
+                new TrRmSourceTypeExport("Demo", "Leaf", "type.leaf"),
+            ], [], []);
+        var splitMethodRootArtifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)methodRootCompilation.Program!,
+            "ContextualMethodRoot", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        splitMethodRootArtifact = AddUncalledTypeDefBindingEqualityView(
+            splitMethodRootArtifact, schemaIdentity,
+            "ContextualTypeProviderSplit");
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    splitMethodRootArtifact),
+                "ContextualMethodRoot", [
+                    providerInput,
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        splitProviderArtifact),
+                ], ["Read", "ReadAlias"], [], []));
     }
 
     [Test]
@@ -11238,7 +11325,8 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft);
 
     private static byte[] AddUncalledTypeDefBindingEqualityView(
-        byte[] artifact, string schemaIdentity)
+        byte[] artifact, string schemaIdentity,
+        string? thirdTypeProviderIdentity = null)
     {
         var schema = TrRmArtifactSchema
             .C1M1Construction2InitializerCopyEvidenceDraft;
@@ -11257,6 +11345,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 out var layoutCount)
             || !index.TryGetSection(0x0023, out var layoutFieldSection,
                 out var layoutFieldCount)
+            || !index.TryGetSection(0x0011, out var typeSpecSection,
+                out var typeSpecCount)
+            || !index.TryGetSection(0x0018, out var parameterSection,
+                out var parameterCount)
             || !index.TryGetSection(0x001C, out var importSection,
                 out var importCount)
             || Enumerable.Range(1, importCount).Count(row =>
@@ -11290,100 +11382,117 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 "The uncalled equality fixture requires a complete struct layout.");
         }
 
-        var typeDefBytes = new byte[typeDefSection.Length + 44];
+        var typeDefBytes = new byte[typeDefSection.Length + (2 * 44)];
         typeDefSection.Span.CopyTo(typeDefBytes);
-        var typeDefOffset = typeDefSection.Length;
-        typeDefSection.Span[..44].CopyTo(
-            typeDefBytes.AsSpan(typeDefOffset, 44));
-        BinaryPrimitives.WriteUInt32LittleEndian(
-            typeDefBytes.AsSpan(typeDefOffset + 12, 4),
-            checked((uint)(fieldCount + 1)));
-        BinaryPrimitives.WriteUInt32LittleEndian(
-            typeDefBytes.AsSpan(typeDefOffset + 16, 4),
-            checked((uint)(fieldEnd - fieldStart)));
-        BinaryPrimitives.WriteUInt32LittleEndian(
-            typeDefBytes.AsSpan(typeDefOffset + 20, 4), 0);
-        BinaryPrimitives.WriteUInt32LittleEndian(
-            typeDefBytes.AsSpan(typeDefOffset + 24, 4), 0);
-        BinaryPrimitives.WriteUInt32LittleEndian(
-            typeDefBytes.AsSpan(typeDefOffset + 28, 4),
-            checked((uint)(layoutCount + 1)));
-        BinaryPrimitives.WriteUInt32LittleEndian(
-            typeDefBytes.AsSpan(typeDefOffset + 32, 4),
-            checked((uint)layoutCountForType));
-        BinaryPrimitives.WriteUInt32LittleEndian(
-            typeDefBytes.AsSpan(typeDefOffset + 36, 4), 0);
-        BinaryPrimitives.WriteUInt32LittleEndian(
-            typeDefBytes.AsSpan(typeDefOffset + 40, 4), 0);
-
         var duplicatedFieldCount = fieldEnd - fieldStart;
         var fieldBytes = new byte[fieldSection.Length
-            + (duplicatedFieldCount * 16)];
+            + (2 * duplicatedFieldCount * 16)];
         fieldSection.Span.CopyTo(fieldBytes);
-        for (var fieldOrdinal = 0;
-            fieldOrdinal < duplicatedFieldCount; fieldOrdinal++)
+        for (var cloneIndex = 0; cloneIndex < 2; cloneIndex++)
         {
-            var sourceRow = fieldStart + fieldOrdinal;
-            var sourceOffset = (sourceRow - 1) * 16;
-            var destinationOffset = fieldSection.Length
-                + (fieldOrdinal * 16);
-            fieldSection.Span.Slice(sourceOffset, 16).CopyTo(
-                fieldBytes.AsSpan(destinationOffset, 16));
+            var typeDefOffset = typeDefSection.Length
+                + (cloneIndex * 44);
+            typeDefSection.Span[..44].CopyTo(
+                typeDefBytes.AsSpan(typeDefOffset, 44));
             BinaryPrimitives.WriteUInt32LittleEndian(
-                fieldBytes.AsSpan(destinationOffset, 4), 2);
+                typeDefBytes.AsSpan(typeDefOffset + 12, 4),
+                checked((uint)(fieldCount
+                    + (cloneIndex * duplicatedFieldCount) + 1)));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                typeDefBytes.AsSpan(typeDefOffset + 16, 4),
+                checked((uint)duplicatedFieldCount));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                typeDefBytes.AsSpan(typeDefOffset + 20, 4), 0);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                typeDefBytes.AsSpan(typeDefOffset + 24, 4), 0);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                typeDefBytes.AsSpan(typeDefOffset + 28, 4),
+                checked((uint)(layoutCount
+                    + (cloneIndex * layoutCountForType) + 1)));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                typeDefBytes.AsSpan(typeDefOffset + 32, 4),
+                checked((uint)layoutCountForType));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                typeDefBytes.AsSpan(typeDefOffset + 36, 4), 0);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                typeDefBytes.AsSpan(typeDefOffset + 40, 4), 0);
+
+            for (var fieldOrdinal = 0;
+                fieldOrdinal < duplicatedFieldCount; fieldOrdinal++)
+            {
+                var sourceRow = fieldStart + fieldOrdinal;
+                var sourceOffset = (sourceRow - 1) * 16;
+                var destinationOffset = fieldSection.Length
+                    + ((cloneIndex * duplicatedFieldCount + fieldOrdinal)
+                        * 16);
+                fieldSection.Span.Slice(sourceOffset, 16).CopyTo(
+                    fieldBytes.AsSpan(destinationOffset, 16));
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    fieldBytes.AsSpan(destinationOffset, 4),
+                    checked((uint)(cloneIndex + 2)));
+            }
         }
 
         var layoutBytes = new byte[layoutSection.Length
-            + (layoutCountForType * 28)];
+            + (2 * layoutCountForType * 28)];
         layoutSection.Span.CopyTo(layoutBytes);
         var layoutFieldBytes = new byte[layoutFieldSection.Length];
         layoutFieldSection.Span.CopyTo(layoutFieldBytes);
         var appendedLayoutFieldRows = new List<byte[]>();
-        for (var layoutOrdinal = 0;
-            layoutOrdinal < layoutCountForType; layoutOrdinal++)
+        for (var cloneIndex = 0; cloneIndex < 2; cloneIndex++)
         {
-            var sourceLayoutRow = layoutStart + layoutOrdinal;
-            var destinationLayoutRow = layoutCount + layoutOrdinal + 1;
-            var sourceOffset = (sourceLayoutRow - 1) * 28;
-            var destinationOffset = layoutSection.Length
-                + (layoutOrdinal * 28);
-            layoutSection.Span.Slice(sourceOffset, 28).CopyTo(
-                layoutBytes.AsSpan(destinationOffset, 28));
-            BinaryPrimitives.WriteUInt32LittleEndian(
-                layoutBytes.AsSpan(destinationOffset, 4), 2);
-            var (fieldFirst, fieldListCount)
-                = tables.Layouts.GetLayoutFieldRange(sourceLayoutRow);
-            var destinationFieldFirst = fieldListCount == 0
-                ? 0
-                : layoutFieldCount + appendedLayoutFieldRows.Count + 1;
-            BinaryPrimitives.WriteUInt32LittleEndian(
-                layoutBytes.AsSpan(destinationOffset + 20, 4),
-                checked((uint)destinationFieldFirst));
-            for (var ordinal = 0; ordinal < fieldListCount; ordinal++)
+            for (var layoutOrdinal = 0;
+                layoutOrdinal < layoutCountForType; layoutOrdinal++)
             {
-                var sourceLayoutFieldRow = fieldFirst + ordinal;
-                var sourceFieldRow = tables.LayoutFields.GetFieldDef(
-                    sourceLayoutFieldRow);
-                var sourceFieldOrdinal = sourceFieldRow - fieldStart;
-                if ((uint)sourceFieldOrdinal
-                    >= (uint)duplicatedFieldCount)
+                var sourceLayoutRow = layoutStart + layoutOrdinal;
+                var destinationLayoutRow = layoutCount
+                    + (cloneIndex * layoutCountForType)
+                    + layoutOrdinal + 1;
+                var sourceOffset = (sourceLayoutRow - 1) * 28;
+                var destinationOffset = layoutSection.Length
+                    + ((cloneIndex * layoutCountForType + layoutOrdinal)
+                        * 28);
+                layoutSection.Span.Slice(sourceOffset, 28).CopyTo(
+                    layoutBytes.AsSpan(destinationOffset, 28));
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    layoutBytes.AsSpan(destinationOffset, 4),
+                    checked((uint)(cloneIndex + 2)));
+                var (fieldFirst, fieldListCount)
+                    = tables.Layouts.GetLayoutFieldRange(sourceLayoutRow);
+                var destinationFieldFirst = fieldListCount == 0
+                    ? 0
+                    : layoutFieldCount + appendedLayoutFieldRows.Count + 1;
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    layoutBytes.AsSpan(destinationOffset + 20, 4),
+                    checked((uint)destinationFieldFirst));
+                for (var ordinal = 0; ordinal < fieldListCount; ordinal++)
                 {
-                    throw new InvalidOperationException(
-                        "A source LayoutField is outside its owning struct.");
-                }
+                    var sourceLayoutFieldRow = fieldFirst + ordinal;
+                    var sourceFieldRow = tables.LayoutFields.GetFieldDef(
+                        sourceLayoutFieldRow);
+                    var sourceFieldOrdinal = sourceFieldRow - fieldStart;
+                    if ((uint)sourceFieldOrdinal
+                        >= (uint)duplicatedFieldCount)
+                    {
+                        throw new InvalidOperationException(
+                            "A source LayoutField is outside its owning struct.");
+                    }
 
-                var sourceLayoutFieldOffset
-                    = (sourceLayoutFieldRow - 1) * 12;
-                var layoutFieldRow = new byte[12];
-                layoutFieldSection.Span.Slice(
-                    sourceLayoutFieldOffset, 12).CopyTo(layoutFieldRow);
-                BinaryPrimitives.WriteUInt32LittleEndian(
-                    layoutFieldRow.AsSpan(0, 4),
-                    checked((uint)destinationLayoutRow));
-                BinaryPrimitives.WriteUInt32LittleEndian(
-                    layoutFieldRow.AsSpan(8, 4),
-                    checked((uint)(fieldCount + sourceFieldOrdinal + 1)));
-                appendedLayoutFieldRows.Add(layoutFieldRow);
+                    var sourceLayoutFieldOffset
+                        = (sourceLayoutFieldRow - 1) * 12;
+                    var layoutFieldRow = new byte[12];
+                    layoutFieldSection.Span.Slice(
+                        sourceLayoutFieldOffset, 12).CopyTo(layoutFieldRow);
+                    BinaryPrimitives.WriteUInt32LittleEndian(
+                        layoutFieldRow.AsSpan(0, 4),
+                        checked((uint)destinationLayoutRow));
+                    BinaryPrimitives.WriteUInt32LittleEndian(
+                        layoutFieldRow.AsSpan(8, 4),
+                        checked((uint)(fieldCount
+                            + (cloneIndex * duplicatedFieldCount)
+                            + sourceFieldOrdinal + 1)));
+                    appendedLayoutFieldRows.Add(layoutFieldRow);
+                }
             }
         }
         var newLayoutFieldBytes = new byte[layoutFieldBytes.Length
@@ -11396,23 +11505,112 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 layoutFieldBytes.Length + (indexOfRow * 12));
         }
 
-        var importBytes = new byte[importSection.Length + 12];
+        var importBytes = new byte[importSection.Length + 24];
         importSection.Span.CopyTo(importBytes);
         var importOffset = importSection.Length;
+        for (var cloneIndex = 0; cloneIndex < 2; cloneIndex++)
+        {
+            var destinationOffset = importOffset + (cloneIndex * 12);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                importBytes.AsSpan(destinationOffset, 4),
+                checked((uint)typeImportModuleRef));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                importBytes.AsSpan(destinationOffset + 4, 4),
+                checked((uint)typeImportKeyStringRow));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                importBytes.AsSpan(destinationOffset + 8, 4),
+                0x1300_0002u | checked((uint)cloneIndex));
+        }
+
+        byte[]? splitProviderStringBytes = null;
+        byte[]? splitProviderModuleRefBytes = null;
+        if (thirdTypeProviderIdentity is not null)
+        {
+            if (tables.Modules.Count != 1
+                || tables.ModuleRefs.Count != 1
+                || !index.TryGetSection(0x0010,
+                    out var moduleRefSection, out var moduleRefCount))
+            {
+                throw new InvalidOperationException(
+                    "The split-provider fixture requires one owning ModuleRef.");
+            }
+
+            var textRows = new List<(string Text, int Encoding)>(
+                tables.Strings.Count + 1);
+            for (var row = 1; row <= tables.Strings.Count; row++)
+            {
+                textRows.Add((tables.Strings.DecodeNamespace(row), 1));
+            }
+
+            textRows.Add((thirdTypeProviderIdentity, 1));
+            splitProviderStringBytes
+                = TrRmStringTableWriter.EncodeTextRows(textRows);
+            splitProviderModuleRefBytes
+                = new byte[moduleRefSection.Length + 12];
+            moduleRefSection.Span.CopyTo(splitProviderModuleRefBytes);
+            var newModuleRefOffset = moduleRefSection.Length;
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                splitProviderModuleRefBytes.AsSpan(newModuleRefOffset, 4),
+                checked((uint)textRows.Count));
+            var (targetRequirement, runtimePolicy)
+                = tables.ModuleRefs.GetRequirements(1);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                splitProviderModuleRefBytes.AsSpan(
+                    newModuleRefOffset + 4, 4), targetRequirement);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                splitProviderModuleRefBytes.AsSpan(
+                    newModuleRefOffset + 8, 4), runtimePolicy);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                importBytes.AsSpan(importOffset + 12, 4),
+                checked((uint)(moduleRefCount + 1)));
+        }
+        var typeSpecIndex = new TrRmVariableTableIndex(
+            typeSpecSection.Span, typeSpecCount, 2, 1);
+        var typeSpecRows
+            = new ReadOnlyMemory<byte>[typeSpecCount + 1];
+        for (var typeSpecRow = 1;
+            typeSpecRow <= typeSpecCount; typeSpecRow++)
+        {
+            typeSpecRows[typeSpecRow - 1]
+                = typeSpecIndex.GetRow(typeSpecRow).ToArray();
+        }
+        typeSpecRows[typeSpecCount]
+            = TrRmTypeSpecTableWriter.Reference(0x03,
+                checked((uint)(importCount + 1)));
+        var typeSpecBytes = TrRmTypeSpecTableWriter.Encode(typeSpecRows, 2,
+            importCount + 1, tables.GenericParams.Count,
+            tables.NativeFunctionPointerSignatures.Count, schema,
+            methodDefCount: tables.Methods.Count);
+
+        var readAliasMethodRow = Enumerable.Range(1, tables.Methods.Count)
+            .Single(row => StringComparer.Ordinal.Equals(
+                tables.Methods.GetName(row), "ReadAlias"));
+        var readAliasSignatureRow
+            = tables.Methods.GetSignature(readAliasMethodRow);
+        var (readAliasParameterStart, readAliasParameterCount)
+            = tables.Signatures.GetParamRange(readAliasSignatureRow);
+        if (readAliasParameterCount != 1)
+        {
+            throw new InvalidOperationException(
+                "The contextual method fixture requires one ReadAlias formal.");
+        }
+        var parameterBytes = parameterSection.ToArray();
         BinaryPrimitives.WriteUInt32LittleEndian(
-            importBytes.AsSpan(importOffset, 4),
-            checked((uint)typeImportModuleRef));
-        BinaryPrimitives.WriteUInt32LittleEndian(
-            importBytes.AsSpan(importOffset + 4, 4),
-            checked((uint)typeImportKeyStringRow));
-        BinaryPrimitives.WriteUInt32LittleEndian(
-            importBytes.AsSpan(importOffset + 8, 4), 0x1300_0002u);
-        var equalityBytes = new byte[12];
+            parameterBytes.AsSpan((readAliasParameterStart - 1) * 16 + 8,
+                4),
+            checked((uint)(typeSpecCount + 1)));
+        var equalityBytes = new byte[24];
         BinaryPrimitives.WriteUInt32LittleEndian(equalityBytes, 1);
         BinaryPrimitives.WriteUInt32LittleEndian(
             equalityBytes.AsSpan(4, 4), 1);
         BinaryPrimitives.WriteUInt32LittleEndian(
             equalityBytes.AsSpan(8, 4), 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            equalityBytes.AsSpan(12, 4), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            equalityBytes.AsSpan(16, 4), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            equalityBytes.AsSpan(20, 4), 3);
 
         var sections = new List<TrRmSection>(index.SectionCount + 1);
         for (var sectionIndex = 0;
@@ -11421,15 +11619,29 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             index.GetSection(sectionIndex, out var kind, out var flags,
                 out var bytes, out var recordCount);
             sections.Add(kind switch {
-                0x0013 => new TrRmSection(kind, flags, 2, typeDefBytes),
+                0x0002 when splitProviderStringBytes is not null
+                    => new TrRmSection(kind, flags,
+                        checked((uint)tables.Strings.Count + 1),
+                        splitProviderStringBytes),
+                0x0010 when splitProviderModuleRefBytes is not null
+                    => new TrRmSection(kind, flags,
+                        checked((uint)tables.ModuleRefs.Count + 1),
+                        splitProviderModuleRefBytes),
+                0x0013 => new TrRmSection(kind, flags, 3, typeDefBytes),
                 0x0014 => new TrRmSection(kind, flags,
-                    checked((uint)(fieldCount + duplicatedFieldCount)),
+                    checked((uint)(fieldCount
+                        + (2 * duplicatedFieldCount))),
                     fieldBytes),
                 0x0015 => new TrRmSection(kind, flags,
-                    checked((uint)(layoutCount + layoutCountForType)),
+                    checked((uint)(layoutCount
+                        + (2 * layoutCountForType))),
                     layoutBytes),
+                0x0011 => new TrRmSection(kind, flags,
+                    checked((uint)(typeSpecCount + 1)), typeSpecBytes),
+                0x0018 => new TrRmSection(kind, flags,
+                    checked((uint)parameterCount), parameterBytes),
                 0x001C => new TrRmSection(kind, flags,
-                    checked((uint)(importCount + 1)), importBytes),
+                    checked((uint)(importCount + 2)), importBytes),
                 0x0023 => new TrRmSection(kind, flags,
                     checked((uint)(layoutFieldCount
                         + appendedLayoutFieldRows.Count)),
@@ -11438,7 +11650,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     checked((uint)recordCount), bytes.ToArray()),
             });
         }
-        sections.Add(new TrRmSection(0x0067, 0, 1, equalityBytes));
+        sections.Add(new TrRmSection(0x0067, 0, 2, equalityBytes));
         sections.Sort(static (left, right) =>
             left.Kind.CompareTo(right.Kind));
         var result = TrRmArtifactWriter.Encode(sections, schema,
