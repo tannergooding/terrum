@@ -154,6 +154,14 @@ public static partial class TrRmExecutableCompiler
     private const string StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidenceSchemaIdentity
         = StandardGenericMethodSchema
             .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidence;
+    private const string StandardC1M1Construction2TypeBindingViewsSchemaIdentity
+        = StandardGenericMethodSchema.C1M1Construction2TypeBindingViews;
+    private const string StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsTypeBindingViewsSchemaIdentity
+        = StandardGenericMethodSchema
+            .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsTypeBindingViews;
+    private const string StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsTypeBindingViewsSchemaIdentity
+        = StandardGenericMethodSchema
+            .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsTypeBindingViews;
     private const string StandardC1M1ConstructionL1R1PropertyInitializedStateSchemaIdentity
         = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-1-parameter-labels-1-receiver-access-1-property-initialized-state-1";
     private const string StandardC1M1Construction2L1R1PropertyInitializedStateSchemaIdentity
@@ -210,6 +218,7 @@ public static partial class TrRmExecutableCompiler
                 StandardCM1AR1SchemaIdentity)
             || StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidenceSchemaIdentity)
+            || StandardGenericMethodSchema.IsTypeBindingViews(schemaIdentity)
             || StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardC1M1ConstructionL1R1PropertyInitializedStateSchemaIdentity)
             || StringComparer.Ordinal.Equals(schemaIdentity,
@@ -259,6 +268,10 @@ public static partial class TrRmExecutableCompiler
         string schemaIdentity)
         => BoundStandardEnumDeclarationContract
             .IsSelectedClassInstanceLayoutSchemaIdentity(schemaIdentity);
+
+    internal static bool IsSelectedTypeDefBindingEqualitySchemaIdentity(
+        string? schemaIdentity)
+        => StandardGenericMethodSchema.IsTypeBindingViews(schemaIdentity);
 
     private static bool IsSelectedGeneralPredicateGraphsSchemaIdentity(
         string schemaIdentity)
@@ -1220,6 +1233,12 @@ public static partial class TrRmExecutableCompiler
                     sourceGenericMethodExports,
                     TrRmArtifactSchema.C1M1Construction2InitializerCopyEvidenceDraft,
                     sourceClassExports),
+            StandardC1M1Construction2TypeBindingViewsSchemaIdentity
+                => EmitC1M1Construction2(program, moduleIdentity,
+                    moduleTargetRequirement, sourceTypeExports,
+                    sourceGenericMethodExports,
+                    TrRmArtifactSchema.C1M1Construction2InitializerCopyEvidenceDraft,
+                    sourceClassExports),
             StandardC1M1Construction2L1R1SchemaIdentity
                 => EmitC1M1Construction2(program, moduleIdentity,
                     moduleTargetRequirement, sourceTypeExports,
@@ -1240,6 +1259,13 @@ public static partial class TrRmExecutableCompiler
                     TrRmArtifactSchema
                         .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft,
                     sourceClassExports),
+            StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsTypeBindingViewsSchemaIdentity
+                => EmitC1M1Construction2(program, moduleIdentity,
+                    moduleTargetRequirement, sourceTypeExports,
+                    sourceGenericMethodExports,
+                    TrRmArtifactSchema
+                        .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft,
+                    sourceClassExports),
             StandardCM1AR1SchemaIdentity
                 => EmitC1M1Construction2(program, moduleIdentity,
                     moduleTargetRequirement, sourceTypeExports,
@@ -1248,6 +1274,13 @@ public static partial class TrRmExecutableCompiler
                         .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsDraft,
                     sourceClassExports),
             StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidenceSchemaIdentity
+                => EmitC1M1Construction2(program, moduleIdentity,
+                    moduleTargetRequirement, sourceTypeExports,
+                    sourceGenericMethodExports,
+                    TrRmArtifactSchema
+                        .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidenceDraft,
+                    sourceClassExports),
+            StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsTypeBindingViewsSchemaIdentity
                 => EmitC1M1Construction2(program, moduleIdentity,
                     moduleTargetRequirement, sourceTypeExports,
                     sourceGenericMethodExports,

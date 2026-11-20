@@ -522,11 +522,21 @@ public readonly ref struct TrRmArtifactIndex
         string? standardSchemaIdentity = null)
     {
         _resourceLedger = resourceLedger;
-        if (standardSchemaIdentity is not null
-            && (!TrRmExecutableCompiler
+        var isClassInstanceLayoutSchema
+            = standardSchemaIdentity is not null
+                && TrRmExecutableCompiler
                     .IsSelectedC1ClassInstanceLayoutSchemaIdentity(
                         standardSchemaIdentity)
-                || !schema.UsesC1EnumClosure()))
+                && schema.UsesC1EnumClosure();
+        var isTypeDefBindingEqualitySchema
+            = TrRmExecutableCompiler
+                .IsSelectedTypeDefBindingEqualitySchemaIdentity(
+                    standardSchemaIdentity);
+        if (standardSchemaIdentity is not null
+            && !isClassInstanceLayoutSchema
+            && (!isTypeDefBindingEqualitySchema
+                || TrRmExecutableCompiler.GetForeignInvocationSchema(
+                    standardSchemaIdentity) != schema))
         {
             throw InvalidArtifact();
         }
@@ -725,7 +735,8 @@ public readonly ref struct TrRmArtifactIndex
             }
 
             ConsumeWork();
-            var stride = FixedStride(kind, schema);
+            var stride = FixedStride(kind, schema,
+                standardSchemaIdentity);
             ConsumeWork();
             if (kind < 0x8000 && stride == -1)
             {
@@ -1288,7 +1299,8 @@ public readonly ref struct TrRmArtifactIndex
             var ordinal = ReadU32AndCharge(section, offset + 12);
             var reserved = ReadU16AndCharge(section, offset + 10);
             if (!IsValidSlot(targetKind, selector, row, block, ordinal,
-                    reserved, kind, sectionCounts, schema))
+                    reserved, kind, sectionCounts, schema,
+                    standardSchemaIdentity))
             {
                 throw InvalidArtifact();
             }
@@ -1297,7 +1309,8 @@ public readonly ref struct TrRmArtifactIndex
 
     private bool IsValidSlot(ushort targetKind, ushort selector, uint row,
         uint block, uint ordinal, ushort reserved, int kind,
-        ReadOnlySpan<uint> sectionCounts, TrRmArtifactSchema schema)
+        ReadOnlySpan<uint> sectionCounts, TrRmArtifactSchema schema,
+        string? standardSchemaIdentity)
     {
         ConsumeWork();
         if (row is 0 or > 0xFF_FFFF)
@@ -1326,13 +1339,15 @@ public readonly ref struct TrRmArtifactIndex
             }
 
             ConsumeWork();
-            if (!IsReferenceSlotTableKind(targetKind, schema))
+            if (!IsReferenceSlotTableKind(targetKind, schema,
+                    standardSchemaIdentity))
             {
                 return false;
             }
 
             ConsumeWork();
-            if (FixedStride(targetKind, schema) == -1)
+            if (FixedStride(targetKind, schema,
+                    standardSchemaIdentity) == -1)
             {
                 return false;
             }
@@ -1398,9 +1413,14 @@ public readonly ref struct TrRmArtifactIndex
         return true;
     }
 
-    private static bool IsReferenceSlotTableKind(int kind, TrRmArtifactSchema schema)
+    private static bool IsReferenceSlotTableKind(int kind,
+        TrRmArtifactSchema schema, string? standardSchemaIdentity)
         => !schema.IsDevelopmentProfile()
             ? kind is >= 0x0001 and <= 0x004B
+                || kind == 0x0067
+                    && TrRmExecutableCompiler
+                        .IsSelectedTypeDefBindingEqualitySchemaIdentity(
+                            standardSchemaIdentity)
                 || (schema.SupportsNominalEnumDeclarations()
                     && (kind is 0x0053 or 0x0054 or 0x0064 or 0x0065))
                 || (schema.UsesGeneralPredicateGraphs()
@@ -1408,7 +1428,8 @@ public readonly ref struct TrRmArtifactIndex
                         or (>= 0x0055 and <= 0x005E)))
             : kind is >= 0x0001 and <= 0x0020 and not 0x0004;
 
-    private static int FixedStride(int kind, TrRmArtifactSchema schema)
+    private static int FixedStride(int kind, TrRmArtifactSchema schema,
+        string? standardSchemaIdentity)
     {
         if (schema.IsDevelopmentProfile())
         {
@@ -1507,6 +1528,9 @@ public readonly ref struct TrRmArtifactIndex
             0x0065 when schema.UsesGenericConstantMethods() => 12,
             0x0066 when schema.UsesClassParameterDefaults() => 16,
             0x0066 when schema.UsesMethodParameterLabels() => 12,
+            0x0067 when TrRmExecutableCompiler
+                .IsSelectedTypeDefBindingEqualitySchemaIdentity(
+                    standardSchemaIdentity) => 12,
             _ => -1,
         };
     }

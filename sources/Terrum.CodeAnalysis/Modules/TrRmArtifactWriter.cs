@@ -29,7 +29,8 @@ public static class TrRmArtifactWriter
 
     internal static byte[] Encode(IReadOnlyList<TrRmSection> sections,
         TrRmArtifactSchema schema,
-        TrRmA3LayoutResourceLedger? resourceLedger = null)
+        TrRmA3LayoutResourceLedger? resourceLedger = null,
+        string? standardSchemaIdentity = null)
     {
         ArgumentNullException.ThrowIfNull(sections);
         resourceLedger?.ConsumeWork();
@@ -136,7 +137,7 @@ public static class TrRmArtifactWriter
                 or TrRmArtifactSchema
                     .InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft;
         _ = new TrRmArtifactIndex(result, schema, resourceLedger,
-            usesNativePointerLoads);
+            usesNativePointerLoads, standardSchemaIdentity);
         return result;
     }
 

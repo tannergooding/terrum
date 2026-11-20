@@ -1063,6 +1063,12 @@ internal static class StandardGenericMethodSchema
         = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-class-parameter-defaults-1-initializer-copy-evidence-1";
     internal const string C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidence
         = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-class-parameter-defaults-1-associated-relation-constraints-1-initializer-copy-evidence-1";
+    internal const string C1M1Construction2TypeBindingViews
+        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-initializer-copy-evidence-1-type-binding-views-1";
+    internal const string C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsTypeBindingViews
+        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-class-parameter-defaults-1-initializer-copy-evidence-1-type-binding-views-1";
+    internal const string C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsTypeBindingViews
+        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-class-parameter-defaults-1-associated-relation-constraints-1-initializer-copy-evidence-1-type-binding-views-1";
 
     internal static bool IsGenericMethodCalls(string? schemaIdentity)
         => StringComparer.Ordinal.Equals(schemaIdentity,
@@ -1085,6 +1091,14 @@ internal static class StandardGenericMethodSchema
                 C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraints)
             || StringComparer.Ordinal.Equals(schemaIdentity,
                 C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidence);
+
+    internal static bool IsTypeBindingViews(string? schemaIdentity)
+        => StringComparer.Ordinal.Equals(schemaIdentity,
+                C1M1Construction2TypeBindingViews)
+            || StringComparer.Ordinal.Equals(schemaIdentity,
+                C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsTypeBindingViews)
+            || StringComparer.Ordinal.Equals(schemaIdentity,
+                C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsTypeBindingViews);
 
     internal static bool IsCM1ClassParameterDefaults(string? schemaIdentity)
         => StringComparer.Ordinal.Equals(schemaIdentity,

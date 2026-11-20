@@ -38,6 +38,7 @@ public static class TrRmStructuralMetadataValidator
             TrRmAssociatedConstDefTableReader associatedConstDefs,
             TrRmImmutableDataTableReader immutableData,
             TrRmAssociatedRelationTableReader associatedRelations,
+            TrRmTypeDefBindingEqualityTableReader typeDefBindingEqualities,
             TrRmUnionCaseDefTableReader unionCaseDefs,
             TrRmUnionCaseFieldTableReader unionCaseFields,
             TrRmBuilderRegistrationTableReader builderRegistrations,
@@ -123,6 +124,7 @@ public static class TrRmStructuralMetadataValidator
             AssociatedConstDefs = associatedConstDefs;
             ImmutableData = immutableData;
             AssociatedRelations = associatedRelations;
+            TypeDefBindingEqualities = typeDefBindingEqualities;
             UnionCaseDefs = unionCaseDefs;
             UnionCaseFields = unionCaseFields;
             BuilderRegistrations = builderRegistrations;
@@ -220,6 +222,8 @@ public static class TrRmStructuralMetadataValidator
         internal TrRmAssociatedConstDefTableReader AssociatedConstDefs { get; }
         internal TrRmImmutableDataTableReader ImmutableData { get; }
         internal TrRmAssociatedRelationTableReader AssociatedRelations { get; }
+        internal TrRmTypeDefBindingEqualityTableReader
+            TypeDefBindingEqualities { get; }
         internal TrRmUnionCaseDefTableReader UnionCaseDefs { get; }
         internal TrRmUnionCaseFieldTableReader UnionCaseFields { get; }
         internal TrRmBuilderRegistrationTableReader BuilderRegistrations { get; }
@@ -1570,6 +1574,9 @@ public static class TrRmStructuralMetadataValidator
         _ = index.TryGetSection(0x0035, out var unionCaseFieldBytes, out var unionCaseFieldCount);
         _ = index.TryGetSection(0x0036, out var associatedRelationBytes,
             out var associatedRelationCount);
+        _ = index.TryGetSection(0x0067,
+            out var typeDefBindingEqualityBytes,
+            out var typeDefBindingEqualityCount);
         _ = index.TryGetSection(0x003F, out var frozenValueNodeBytes,
             out var frozenValueNodeCount);
         _ = index.TryGetSection(0x0064, out var constantTemplateBytes,
@@ -1874,6 +1881,8 @@ public static class TrRmStructuralMetadataValidator
         var associatedConstDefs = default(TrRmAssociatedConstDefTableReader);
         var immutableData = default(TrRmImmutableDataTableReader);
         var associatedRelations = default(TrRmAssociatedRelationTableReader);
+        var typeDefBindingEqualities
+            = default(TrRmTypeDefBindingEqualityTableReader);
         var unionCaseDefs = default(TrRmUnionCaseDefTableReader);
         var unionCaseFields = default(TrRmUnionCaseFieldTableReader);
         var builderRegistrations = default(TrRmBuilderRegistrationTableReader);
@@ -2072,6 +2081,18 @@ public static class TrRmStructuralMetadataValidator
                 associatedRelationBytes, associatedRelationCount, typeSpecs,
                 associatedTypeDefs.Count, imports,
                 selectedA3LayoutResourceLedger);
+            if (index.StandardSchemaIdentity is { } standardSchemaIdentity
+                && TrRmExecutableCompiler
+                    .IsSelectedTypeDefBindingEqualitySchemaIdentity(
+                        standardSchemaIdentity)
+                && typeDefBindingEqualityCount != 0)
+            {
+                typeDefBindingEqualities
+                    = new TrRmTypeDefBindingEqualityTableReader(
+                        typeDefBindingEqualityBytes,
+                        typeDefBindingEqualityCount, modules, types,
+                        selectedA3LayoutResourceLedger);
+            }
             for (var formal = 1; formal <= generics.Count; formal++)
             {
                 if (generics.GetFormalKind(formal) != 2
@@ -2693,7 +2714,8 @@ public static class TrRmStructuralMetadataValidator
             witnessAssociatedTypes, witnessAssociatedConsts,
             interfaceBases, interfaceMethods,
             interfaceConstDefs, associatedConstDefs, immutableData, associatedRelations,
-            unionCaseDefs, unionCaseFields, builderRegistrations, textTargets,
+            typeDefBindingEqualities, unionCaseDefs, unionCaseFields,
+            builderRegistrations, textTargets,
             textContentShapes, textCaptureShapes, textFragmentShapes,
             predicateGraphs, predicateChildEdges, predicateReadFootprints,
             predicateCaptures, predicateNodes, predicateNodeOperands,

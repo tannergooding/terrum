@@ -6983,6 +6983,96 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
+    public void ReadsTypeDefBindingEqualityOnlyInItsExactSchemaSuccessor()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-initializer-copy-evidence-1-type-binding-views-1";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            namespace Demo {
+                [Blittable] [Layout(LayoutKind.Sequential)]
+                public struct Left {
+                    public int32 Value;
+                }
+                [Blittable] [Layout(LayoutKind.Sequential)]
+                public struct Right {
+                    public int32 Value;
+                }
+            }
+            """), new CompilationOptions {
+            LayoutCoreRegistration
+                = LayoutCoreRegistrationTestData.Create(),
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)compilation.Program!, "TypeBindingEqualityProvider",
+            schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement, [
+                new TrRmSourceTypeExport("Demo", "Left", "type.left"),
+                new TrRmSourceTypeExport("Demo", "Right", "type.right"),
+            ], [], []);
+        var schema = TrRmArtifactSchema
+            .C1M1Construction2InitializerCopyEvidenceDraft;
+        var sourceTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                new TrRmArtifactIndex(artifact, schema));
+        var equalityBytes = TrRmTypeDefBindingEqualityTableWriter.Encode([
+            new TrRmTypeDefBindingEqualityRow(1, 1, 2),
+        ], sourceTables.Modules, sourceTables.TypeDefs);
+        var sections = new List<TrRmSection>();
+        var insertedEqualitySection = false;
+        var sourceIndex = new TrRmArtifactIndex(artifact, schema);
+        for (var sectionIndex = 0;
+            sectionIndex < sourceIndex.SectionCount; sectionIndex++)
+        {
+            sourceIndex.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var recordCount);
+            if (!insertedEqualitySection && kind > 0x0067)
+            {
+                sections.Add(new TrRmSection(0x0067, 0, 1, equalityBytes));
+                insertedEqualitySection = true;
+            }
+
+            sections.Add(new TrRmSection(kind, flags,
+                checked((uint)recordCount), bytes.ToArray()));
+        }
+        if (!insertedEqualitySection)
+        {
+            sections.Add(new TrRmSection(0x0067, 0, 1, equalityBytes));
+        }
+
+        var artifactWithEquality = TrRmArtifactWriter.Encode(sections,
+            schema, standardSchemaIdentity: schemaIdentity);
+        var equalityIndex = new TrRmArtifactIndex(artifactWithEquality,
+            schema, null, standardSchemaIdentity: schemaIdentity);
+        var equalityTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(equalityIndex);
+        Assert.That(equalityTables.TypeDefBindingEqualities.Count,
+            Is.EqualTo(1));
+        Assert.That(equalityTables.TypeDefBindingEqualities.GetOwnerModule(1),
+            Is.EqualTo(1u));
+        Assert.That(equalityTables.TypeDefBindingEqualities.GetLeftTypeDef(1),
+            Is.EqualTo(1u));
+        Assert.That(equalityTables.TypeDefBindingEqualities.GetRightTypeDef(1),
+            Is.EqualTo(2u));
+        Assert.Throws<InvalidDataException>(() =>
+            new TrRmArtifactIndex(artifactWithEquality, schema));
+        Assert.Throws<InvalidDataException>(() =>
+            new TrRmArtifactIndex(artifact, TrRmArtifactSchema
+                .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft,
+                null,
+                standardSchemaIdentity: schemaIdentity));
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmTypeDefBindingEqualityTableWriter.Encode([
+                new TrRmTypeDefBindingEqualityRow(0, 1, 2),
+            ], sourceTables.Modules, sourceTables.TypeDefs));
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmTypeDefBindingEqualityTableWriter.Encode([
+                new TrRmTypeDefBindingEqualityRow(1, 1, 0x0100_0002),
+            ], sourceTables.Modules, sourceTables.TypeDefs));
+    }
+
+    [Test]
     public void SelectsTypesFromNonRootCoLocatedConstruction2Modules()
     {
         var schemaIdentity

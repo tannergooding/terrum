@@ -23,6 +23,8 @@ public static partial class TrRmExecutableCompiler
                 => TrRmArtifactSchema.C1M1Construction2Draft,
             StandardC1M1Construction2InitializerCopyEvidenceSchemaIdentity
                 => TrRmArtifactSchema.C1M1Construction2InitializerCopyEvidenceDraft,
+            StandardC1M1Construction2TypeBindingViewsSchemaIdentity
+                => TrRmArtifactSchema.C1M1Construction2InitializerCopyEvidenceDraft,
             StandardC1M1ConstructionL1R1SchemaIdentity
                 => TrRmArtifactSchema.C1M1ConstructionParameterLabelsReceiverAccessDraft,
             StandardC1M1Construction2L1R1SchemaIdentity
@@ -41,10 +43,16 @@ public static partial class TrRmExecutableCompiler
             StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceSchemaIdentity
                 => TrRmArtifactSchema
                     .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft,
+            StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsTypeBindingViewsSchemaIdentity
+                => TrRmArtifactSchema
+                    .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft,
             StandardCM1AR1SchemaIdentity
                 => TrRmArtifactSchema
                     .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsDraft,
             StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidenceSchemaIdentity
+                => TrRmArtifactSchema
+                    .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidenceDraft,
+            StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsTypeBindingViewsSchemaIdentity
                 => TrRmArtifactSchema
                     .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidenceDraft,
             _ => throw Unsupported(

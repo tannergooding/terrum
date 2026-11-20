@@ -116,6 +116,8 @@ public static partial class TrRmExecutableCompiler
                     StandardCM1AR1SchemaIdentity)
                 && !StringComparer.Ordinal.Equals(schemaIdentities[0],
                     StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidenceSchemaIdentity)
+                && !StandardGenericMethodSchema.IsTypeBindingViews(
+                    schemaIdentities[0])
                 && !StringComparer.Ordinal.Equals(schemaIdentities[0],
                     StandardC1M1ConstructionL1R1SchemaIdentity)
                 && !StringComparer.Ordinal.Equals(schemaIdentities[0],
@@ -217,6 +219,8 @@ public static partial class TrRmExecutableCompiler
                     StandardC1M1Construction2SchemaIdentity)
                 || StringComparer.Ordinal.Equals(schemaIdentity,
                     StandardC1M1Construction2InitializerCopyEvidenceSchemaIdentity)
+                || StandardGenericMethodSchema
+                    .IsTypeBindingViews(schemaIdentity)
                 || StringComparer.Ordinal.Equals(schemaIdentity,
                     StandardC1M1ConstructionL1R1SchemaIdentity)
                 || StringComparer.Ordinal.Equals(schemaIdentity,
@@ -2839,6 +2843,9 @@ public static partial class TrRmExecutableCompiler
         => schemaIdentity is
             StandardC1M1Construction2SchemaIdentity
             or StandardC1M1Construction2InitializerCopyEvidenceSchemaIdentity
+            or StandardC1M1Construction2TypeBindingViewsSchemaIdentity
+            or StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsTypeBindingViewsSchemaIdentity
+            or StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsTypeBindingViewsSchemaIdentity
             or StandardC1M1ConstructionL1R1SchemaIdentity
             or StandardC1M1Construction2L1R1SchemaIdentity
             or StandardC1M1ConstructionL1R1EnumClosureSchemaIdentity

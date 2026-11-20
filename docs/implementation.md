@@ -184,8 +184,10 @@ co-located provider Import/replacement chains remain open.
 An unapproved, user-authorized provisional proposal now specifies distinct
 contextual TypeDef expectations plus a consumer-owned `0067`
 `TypeDefBindingEquality` carrier and three exact whole-schema successors.
-This design has not yet been implemented or qualified; its CLI schema pairing
-is a separate decision.
+Exact schema identity admission and the bounded equality-row codec/structural
+checks are implemented, with a focused table-level regression still
+unverified. Contextual view propagation, binding/replacement and source-free
+emission remain unimplemented. The CLI schema pairing is a separate decision.
 Import/Export/ModuleRef/Body map permutations and runtime qualification remain
 open. The
 separate unapproved version-3

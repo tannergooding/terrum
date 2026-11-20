@@ -110,7 +110,9 @@ internal static class TrRmFixedArrayProviderBindingValidator
             || StringComparer.Ordinal.Equals(schemaIdentity,
                 CM1InitializerCopyEvidenceSchemaIdentity)
             || StringComparer.Ordinal.Equals(schemaIdentity,
-                CM1AR1InitializerCopyEvidenceSchemaIdentity);
+                CM1AR1InitializerCopyEvidenceSchemaIdentity)
+            || StandardGenericMethodSchema.IsTypeBindingViews(
+                schemaIdentity);
 
     private static bool IsInitializationReferenceLocalFieldLayoutSchemaIdentity(
         string schemaIdentity)

@@ -1367,5 +1367,6 @@ public static partial class TrRmExecutableCompiler
         => schemaIdentity is
             StandardC1M1Construction2InitializerCopyEvidenceSchemaIdentity
             or StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceSchemaIdentity
-            or StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidenceSchemaIdentity;
+            or StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidenceSchemaIdentity
+            || StandardGenericMethodSchema.IsTypeBindingViews(schemaIdentity);
 }
