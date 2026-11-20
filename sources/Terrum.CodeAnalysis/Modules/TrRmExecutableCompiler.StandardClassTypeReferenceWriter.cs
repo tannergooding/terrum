@@ -10694,8 +10694,14 @@ public static partial class TrRmExecutableCompiler
                         BoundSourceTypeProviderSnapshot ownerModule
                     && !SourceTypeSnapshotsMatch(ownerModule, rootSnapshot))
                 {
+                    if (!ownerModule.ArtifactSnapshot.AsSpan().SequenceEqual(
+                            rootSnapshot.ArtifactSnapshot.AsSpan()))
+                    {
+                        return;
+                    }
+
                     throw Unsupported(
-                        "C1M1 class equality groups require one retained owner Module partition.");
+                        "C1M1 class equality groups in another owner Module of the root artifact are not yet re-emitted.");
                 }
 
                 var typeDefRows = new SortedSet<int>();
