@@ -265,6 +265,11 @@ public static partial class TrRmExecutableCompiler
         uint ClassTypeSpecReference,
         ImmutableArray<SourceClassMemberExport> MemberExports);
 
+    private sealed record C1EnumClosureRetainedClassMethodBodyPlan(
+        BoundStandardClassTypeView Owner,
+        BoundStandardClassMethodDeclaration Method,
+        int SourceMethodDefRow, int MethodDefRow);
+
     private static byte[] EncodeEN1ImportedClassConstructionClause(
         BoundStandardClassMethodDeclaration method,
         BoundGenericNominalTypeIdentity owner,
@@ -2535,6 +2540,15 @@ public static partial class TrRmExecutableCompiler
         };
         var standardClassDeclarationsByTypeDef
             = standardClassEmissions.ToArray();
+        var standardClassRootTables
+            = standardClassDeclarationsByTypeDef.Length == 0
+                ? null
+                : ValidateForeignInvocationArtifact(
+                    CreateForeignInvocationIndex(
+                        rootSnapshot!.ArtifactSnapshot.ToArray(),
+                        rootSnapshot.SchemaIdentity),
+                    rootSnapshot.SchemaIdentity, null,
+                    createA3ResourceLedger: false);
         var typeDefRows = new List<TrRmTypeDefRow>(
             emittedEnums.Count + retainedClassIndexes.Count
                 + standardClassDeclarationsByTypeDef.Length
@@ -2581,13 +2595,93 @@ public static partial class TrRmExecutableCompiler
             {
                 AddFunctionPointerSignature(field.Type);
             }
+            var retainedMethods = emission.Import is null
+                ? emission.View.Methods
+                : emission.Import.RootImportRow > 0
+                    ? emission.View.Methods.Where(method =>
+                            emission.MethodExpectations.Any(
+                                expectation =>
+                                    expectation.ExpectedDefinitionId
+                                        == method.DefinitionId))
+                        .ToImmutableArray()
+                    : ImmutableArray<BoundStandardClassMethodDeclaration>.Empty;
+            foreach (var method in retainedMethods)
+            {
+                foreach (var parameter in method.Parameters)
+                {
+                    AddFunctionPointerSignatureFromTypeSpec(
+                        parameter.TypeSpecReference);
+                }
+                AddFunctionPointerSignatureFromTypeSpec(
+                    method.ReturnTypeSpecReference);
+                AddFunctionPointerSignatureFromTypeSpec(
+                    method.ReceiverTypeSpecReference);
+            }
         }
 
-        var nextFunctionPointerAnchorRow = 1;
+        foreach (var function in program.Functions.Where(
+            static function => function.IsClassConstructor))
+        {
+            foreach (var variable in function.Variables)
+            {
+                AddFunctionPointerSignature(variable.Type);
+            }
+        }
+
+        var classMethodCountBeforeFunctionPointerAnchors
+            = standardClassDeclarationsByTypeDef.Sum(emission =>
+                emission.Import is null
+                    ? emission.View.Methods.Length
+                    : emission.Import.RootImportRow > 0
+                        ? emission.MethodExpectations.Select(
+                                static expectation =>
+                                    expectation.ExpectedDefinitionId)
+                            .Distinct().Count()
+                        : 0);
+        var nextFunctionPointerAnchorRow
+            = checked(classMethodCountBeforeFunctionPointerAnchors + 1);
         foreach (var signatureIndex in usedFunctionPointerSignatureIndexes)
         {
             nativeFunctionPointerAnchorMethodRows[signatureIndex]
                 = nextFunctionPointerAnchorRow++;
+        }
+
+        void AddFunctionPointerSignatureFromTypeSpec(
+            uint typeSpecReference)
+        {
+            if (typeSpecReference == 0 || standardClassRootTables is null)
+            {
+                return;
+            }
+
+            var typeSpec = standardClassRootTables.TypeSpecs.GetTypeSpecRef(
+                typeSpecReference);
+            if (!typeSpec.IsRow || typeSpec.Form != 0x0D)
+            {
+                return;
+            }
+
+            var signature = DecodeEN1FieldFunctionPointer(
+                standardClassRootTables, typeSpec.Row,
+                rootSnapshot!.ModuleRow);
+            for (var signatureIndex = 0;
+                signatureIndex < program.NativeFunctionPointerSignatures.Length;
+                signatureIndex++)
+            {
+                if (!NativeFunctionPointerContract.AreEquivalent(
+                        program.NativeFunctionPointerSignatures[
+                            signatureIndex], signature))
+                {
+                    continue;
+                }
+
+                _ = usedFunctionPointerSignatureIndexes.Add(
+                    signatureIndex);
+                return;
+            }
+
+            throw Invalid(
+                "An EN1 class MethodDef TypeSpec has no retained function-pointer signature.");
         }
 
         var parameterRows = new List<TrRmParamRow>();
@@ -2624,6 +2718,7 @@ public static partial class TrRmExecutableCompiler
         var typeSpecByBoundEnumIndex = new Dictionary<int, uint>();
         var typeDefRowByEnumIndex = new Dictionary<int, int>();
         var importRowByEnumIndex = new Dictionary<int, int>();
+        var enumIndexByRootEnumImport = new Dictionary<int, int>();
         var importRowByStructureIndex = new Dictionary<int, int>();
         var importRowByRootStructureImport = new Dictionary<int, int>();
         var importRowByRootClassImport = new Dictionary<int, int>();
@@ -2631,10 +2726,15 @@ public static partial class TrRmExecutableCompiler
         var standardClassFieldRowsByIdentity = new Dictionary<(
             BoundGenericNominalTypeIdentity Owner, uint FieldDefinitionId),
             int>();
+        var standardClassFieldRowMap = new Dictionary<int, int>();
         var standardClassMethodRowsByIdentity = new Dictionary<(
             BoundGenericNominalTypeIdentity Owner, uint MethodDefinitionId),
             int>();
+        var standardClassMethodDefRowMap = new Dictionary<int, int>();
+        var retainedClassMethodBodyPlans
+            = new List<C1EnumClosureRetainedClassMethodBodyPlan>();
         var hasImportedClassConstructionMethods = false;
+        var hasLocalClassConstructionBodies = false;
         var standardFieldImportRows = new Dictionary<(
             uint ExpectedDefinitionId, string ProducerIdentity,
             string ExportKey), int>();
@@ -2671,15 +2771,6 @@ public static partial class TrRmExecutableCompiler
         var valueBuilder = new TrRmFrozenScalarValueBuilder();
         var hasBlittableEnum = false;
         var hasTargetProfile = false;
-        var standardClassRootTables
-            = standardClassDeclarationsByTypeDef.Length == 0
-                ? null
-                : ValidateForeignInvocationArtifact(
-                    CreateForeignInvocationIndex(
-                        rootSnapshot!.ArtifactSnapshot.ToArray(),
-                        rootSnapshot.SchemaIdentity),
-                    rootSnapshot.SchemaIdentity, null,
-                    createA3ResourceLedger: false);
         var standardClassFieldExportKeysByDefinition
             = new Dictionary<uint, List<string>>();
         if (standardClassRootTables is not null)
@@ -2827,6 +2918,76 @@ public static partial class TrRmExecutableCompiler
                 standardClassTypeSpecRows.Add(sourceTypeSpec,
                     pointerTypeSpecRow);
                 return pointerTypeSpecRow;
+            }
+            if (type.Form == 0x0D && type.Qualifiers == 0)
+            {
+                if (standardClassTypeSpecRows.TryGetValue(sourceTypeSpec,
+                        out var existingFunctionPointerTypeSpec))
+                {
+                    return existingFunctionPointerTypeSpec;
+                }
+
+                var anchorMethodRow = standardClassRootTables
+                    .NativeFunctionPointerAnchors
+                    .GetAnchorMethodDefRow(type.Row);
+                var signatureRow = 0;
+                for (var candidateRow = 1;
+                    candidateRow
+                        <= standardClassRootTables
+                            .NativeFunctionPointerSignatures.Count;
+                    candidateRow++)
+                {
+                    if (standardClassRootTables
+                            .NativeFunctionPointerSignatures
+                            .GetMethodDefRow(candidateRow)
+                        == anchorMethodRow)
+                    {
+                        signatureRow = candidateRow;
+                        break;
+                    }
+                }
+                if (signatureRow == 0)
+                {
+                    throw Invalid(
+                        "An EN1 class MethodDef TypeSpec lost its function-pointer anchor.");
+                }
+
+                var signature = DecodeEN1FieldFunctionPointer(
+                    standardClassRootTables, type.Row,
+                    rootSnapshot!.ModuleRow);
+                var signatureIndex = -1;
+                for (var index = 0;
+                    index < program.NativeFunctionPointerSignatures.Length;
+                    index++)
+                {
+                    if (NativeFunctionPointerContract.AreEquivalent(
+                            program.NativeFunctionPointerSignatures[index],
+                            signature))
+                    {
+                        signatureIndex = index;
+                        break;
+                    }
+                }
+                if (signatureIndex < 0
+                    || (uint)signatureIndex
+                        >= (uint)nativeFunctionPointerAnchorMethodRows.Length
+                    || nativeFunctionPointerAnchorMethodRows[
+                        signatureIndex] == 0)
+                {
+                    throw Invalid(
+                        "An EN1 class MethodDef function-pointer signature has no output anchor.");
+                }
+
+                var functionPointerTypeSpecRow
+                    = checked((uint)typeSpecRows.Count + 1);
+                typeSpecRows.Add(
+                    TrRmTypeSpecTableWriter.NativeFunctionPointer(
+                        (byte)signature.CallingConvention,
+                        checked((uint)nativeFunctionPointerAnchorMethodRows[
+                            signatureIndex])));
+                standardClassTypeSpecRows.Add(sourceTypeSpec,
+                    functionPointerTypeSpecRow);
+                return functionPointerTypeSpecRow;
             }
             if (standardClassTypeSpecRows.TryGetValue(sourceTypeSpec,
                     out var existingTypeSpec))
@@ -3285,6 +3446,26 @@ public static partial class TrRmExecutableCompiler
                         throw Invalid(
                             "An EN1 class field Import lost its exact root enum Import mapping.");
                     }
+
+                    var expectedEnumDefinition
+                        = standardClassRootTables.Imports
+                            .GetExpectedDefinitionForImportRow(
+                                emittedEnum.RootImportRow);
+                    if ((expectedEnumDefinition >> 24) != 0x13
+                        || standardClassRootTables.TypeDefs.GetKind(
+                            checked((int)(expectedEnumDefinition
+                                & 0x00FF_FFFF))) != 4
+                        || !enumIndexByRootTypeDefRow.TryAdd(
+                            checked((int)(expectedEnumDefinition
+                                & 0x00FF_FFFF)),
+                            emittedEnum.DefinitionIndex)
+                        || !enumIndexByRootEnumImport.TryAdd(
+                            emittedEnum.RootImportRow,
+                            emittedEnum.DefinitionIndex))
+                    {
+                        throw Invalid(
+                            "An EN1 class enum Import has an invalid or duplicate expected TypeDef identity.");
+                    }
                 }
                 _ = importRowByEnumIndex.TryAdd(
                     emittedEnum.DefinitionIndex, enumImportRow);
@@ -3686,6 +3867,14 @@ public static partial class TrRmExecutableCompiler
                     throw Invalid(
                         "EN1 class re-emission contains a duplicate FieldDef identity.");
                 }
+                var sourceFieldRow = checked((int)(
+                    field.DefinitionId & 0x00FF_FFFF));
+                if (!standardClassFieldRowMap.TryAdd(sourceFieldRow,
+                        fieldDefRow))
+                {
+                    throw Invalid(
+                        "EN1 class re-emission maps one source FieldDef row more than once.");
+                }
                 fieldNames.Add(field.Name);
                 layoutFieldRows.Add(new TrRmLayoutFieldRow(
                     checked(layoutRows.Count + 1), fieldOrdinal,
@@ -3905,6 +4094,14 @@ public static partial class TrRmExecutableCompiler
                     throw Invalid(
                         "An EN1 imported class MethodDef identity was emitted more than once.");
                 }
+                var expectedMethodRow = checked((int)(
+                    method.DefinitionId & 0x00FF_FFFF));
+                if (!standardClassMethodDefRowMap.TryAdd(
+                        expectedMethodRow, methodDefRow))
+                {
+                    throw Invalid(
+                        "An EN1 imported class MethodDef row was emitted more than once.");
+                }
 
                 importedConstructorMethods.Add((method, methodDefRow,
                     methodExpectations));
@@ -3964,6 +4161,173 @@ public static partial class TrRmExecutableCompiler
                         AddString(expectation.ExportKey),
                         0x1600_0000u | checked((uint)methodDefRow)));
                 }
+            }
+
+            if (emission.Import is null)
+            {
+                if (standardClassRootTables is null
+                    || classView.Methods.Any(static method =>
+                        method.BodyRow == 0))
+                {
+                    throw Unsupported(
+                        "EN1 source-free local class methods require their retained provider Bodies.");
+                }
+
+                var localMethods
+                    = new List<(BoundStandardClassMethodDeclaration Method,
+                        int SourceMethodDefRow, int MethodDefRow)>();
+                foreach (var method in classView.Methods.OrderBy(
+                    static method => method.DefinitionId))
+                {
+                    if (!IsSupportedClassConstructorMethod(method)
+                        || (method.DefinitionId >> 24) != 0x16
+                        || (method.DefinitionId & 0x00FF_FFFF) == 0)
+                    {
+                        throw Unsupported(
+                            "EN1 source-free local class Methods are limited to the supported I/P construction declarations.");
+                    }
+
+                    var sourceMethodRow = checked((int)(
+                        method.DefinitionId & 0x00FF_FFFF));
+                    if (standardClassRootTables.Methods.GetOwnerType(
+                            sourceMethodRow)
+                            != (int)(classView.Identity.DefinitionId
+                                & 0x00FF_FFFF)
+                        || standardClassRootTables.Methods.GetBodyRow(
+                            sourceMethodRow) != method.BodyRow
+                        || standardClassRootTables.Methods.GetFlags(
+                            sourceMethodRow) != method.Flags)
+                    {
+                        throw Invalid(
+                            "An EN1 source-free local class MethodDef changed its retained owner, Body or access flags.");
+                    }
+
+                    var methodDefRow = checked(methodRows.Count + 1);
+                    var signatureRow = checked(
+                        methodSignatureRows.Count + 1);
+                    var parameterFirst = method.Parameters.IsEmpty
+                        ? 0 : checked(parameterRows.Count + 1);
+                    var resultTypeSpec = RemapStandardClassTypeSpecReference(
+                        method.ReturnTypeSpecReference, 0);
+                    var receiverTypeSpec
+                        = method.ReceiverTypeSpecReference == 0 ? 0
+                        : RemapStandardClassTypeSpecReference(
+                            method.ReceiverTypeSpecReference, 0);
+                    for (var ordinal = 0;
+                        ordinal < method.Parameters.Length; ordinal++)
+                    {
+                        var parameter = method.Parameters[ordinal];
+                        if (parameter.Mode != 0 || parameter.Flags != 0
+                            || parameter.DefaultValue is not null)
+                        {
+                            throw Unsupported(
+                                "EN1 source-free local constructor MethodDefs require ordinary parameters without defaults.");
+                        }
+
+                        parameterRows.Add(new TrRmParamRow(signatureRow,
+                            ordinal,
+                            RemapStandardClassTypeSpecReference(
+                                parameter.TypeSpecReference, 0),
+                            parameter.Mode, parameter.Flags));
+                        if (schema.UsesMethodParameterLabels())
+                        {
+                            methodParameterLabelRows.Add((
+                                methodDefRow, ordinal, parameter.Name));
+                            _ = AddString(parameter.Name);
+                        }
+                    }
+
+                    methodSignatureRows.Add(new TrRmMethodSigRow(
+                        resultTypeSpec, receiverTypeSpec, parameterFirst,
+                        method.Parameters.Length, 0, 0));
+                    methodRows.Add(new TrRmMethodDefRow(typeDefRow,
+                        AddString(method.Name), signatureRow, method.Flags,
+                        0, 0, 0));
+                    if (!standardClassMethodRowsByIdentity.TryAdd((
+                            classView.Identity, method.DefinitionId),
+                            methodDefRow)
+                        || !standardClassMethodDefRowMap.TryAdd(
+                            sourceMethodRow, methodDefRow))
+                    {
+                        throw Invalid(
+                            "EN1 source-free local class MethodDef rows are duplicated.");
+                    }
+
+                    if ((method.Flags & 3) == 2
+                        && method.ExportKeys.IsEmpty)
+                    {
+                        throw Invalid(
+                            "An EN1 source-free public class MethodDef has no retained ExportKey.");
+                    }
+
+                    foreach (var exportKey in method.ExportKeys)
+                    {
+                        if (!BoundEnumTypes.IsValidModuleDeclarationKey(
+                                exportKey)
+                            || !usedExportKeys.Add(exportKey))
+                        {
+                            throw Invalid(
+                                "An EN1 source-free class MethodDef ExportKey is invalid or duplicated.");
+                        }
+
+                        exportRows.Add(new TrRmExportRow(
+                            0x1600_0000u
+                                | checked((uint)methodDefRow),
+                            AddString(exportKey)));
+                    }
+
+                    localMethods.Add((method, sourceMethodRow,
+                        methodDefRow));
+                    retainedClassMethodBodyPlans.Add(
+                        new C1EnumClosureRetainedClassMethodBodyPlan(
+                            classView, method, sourceMethodRow,
+                            methodDefRow));
+                }
+
+                foreach (var (method, _, methodDefRow) in localMethods)
+                {
+                    var constructionPayload
+                        = EncodeEN1ImportedClassConstructionClause(method,
+                            classView.Identity,
+                            standardClassFieldRowsByIdentity,
+                            standardClassMethodRowsByIdentity);
+                    var contractFirst = contractRows.Count + 1;
+                    var contractCount = 0;
+                    if (method.EffectsMask != 0)
+                    {
+                        contractRows.Add(new TrRmContractRow(
+                            0x1600_0000u
+                                | checked((uint)methodDefRow),
+                            1, s_effectPayloads[method.EffectsMask]));
+                        contractCount++;
+                    }
+
+                    if (contractFirst == 0)
+                    {
+                        contractFirst = contractRows.Count + 1;
+                    }
+                    contractRows.Add(new TrRmContractRow(
+                        0x1600_0000u
+                            | checked((uint)methodDefRow),
+                        0x0003, constructionPayload));
+                    contractCount++;
+                    methodRows[methodDefRow - 1] = methodRows[
+                        methodDefRow - 1] with {
+                        ContractFirst = contractFirst,
+                        ContractCount = contractCount,
+                    };
+                }
+
+                hasLocalClassConstructionBodies
+                    |= localMethods.Count != 0;
+            }
+            else if (emission.Import is {
+                    RootImportRow: > 0,
+                } && classView.Methods.Any(static method =>
+                    method.BodyRow != 0))
+            {
+                throw Invalid(
+                    "An EN1 imported class method expectation contains a provider Body.");
             }
 
             var layoutFirst = checked(layoutRows.Count + 1);
@@ -4139,6 +4503,143 @@ public static partial class TrRmExecutableCompiler
                 }
             }
         }
+
+        foreach (var plan in retainedClassMethodBodyPlans)
+        {
+            if (standardClassRootTables is null
+                || !SameA2SourceTypeProviderSnapshot(rootSnapshot!,
+                    plan.Owner.Provider))
+            {
+                throw Invalid(
+                    "An EN1 local constructor Body lost its exact root provider snapshot.");
+            }
+
+            var fieldRowMap = new Dictionary<int, int>(
+                plan.Owner.Fields.Length);
+            foreach (var field in plan.Owner.Fields)
+            {
+                if (!standardClassFieldRowsByIdentity.TryGetValue(
+                        (plan.Owner.Identity, field.DefinitionId),
+                        out var remappedFieldRow)
+                    || !fieldRowMap.TryAdd(checked((int)(
+                            field.DefinitionId & 0x00FF_FFFF)),
+                            remappedFieldRow))
+                {
+                    throw Invalid(
+                        "An EN1 local constructor Body has an unmapped FieldDef.");
+                }
+            }
+
+            var sourceMethodRow = plan.SourceMethodDefRow;
+            if (standardClassRootTables.Methods.GetBodyRow(sourceMethodRow)
+                    != plan.Method.BodyRow
+                || standardClassRootTables.Methods.GetOwnerType(
+                    sourceMethodRow)
+                    != (int)(plan.Owner.Identity.DefinitionId
+                        & 0x00FF_FFFF))
+            {
+                throw Invalid(
+                    "An EN1 local constructor Body changed its source MethodDef owner or Body row.");
+            }
+
+            var sourceBody = standardClassRootTables.Bodies.GetRow(
+                checked((int)plan.Method.BodyRow)).ToArray();
+            var remappedBody = RemapC1M1ClassMethodBody(
+                standardClassRootTables, sourceBody,
+                new Dictionary<int, int>(),
+                standardClassMethodDefRowMap, fieldRowMap,
+                new Dictionary<int, int>(),
+                new Dictionary<int, int>(), fieldPathRows,
+                new Dictionary<C1M1FieldPathIdentity, int>(),
+                new Dictionary<int, int>(), valueBuilder,
+                typeSpecRows, new Dictionary<int, uint>(), [],
+                schema, new Dictionary<int, int>(),
+                typeSpecReference
+                    => RemapStandardClassTypeSpecReference(
+                        typeSpecReference, 0),
+                RemapConstructorConstantSource);
+            bodyRows.Add(remappedBody);
+            methodRows[plan.MethodDefRow - 1]
+                = methodRows[plan.MethodDefRow - 1] with {
+                    BodyRow = bodyRows.Count,
+                };
+        }
+
+        TrRmFrozenScalarValueReference RemapConstructorConstantSource(
+            int constantSourceRow, uint sourceTypeSpecReference)
+        {
+            if (standardClassRootTables is null || rootSnapshot is null)
+            {
+                throw Invalid(
+                    "An EN1 constructor constant has no root value context.");
+            }
+
+            var constant = TrRmConstantSourceValueValidator
+                .MaterializeFrozenScalar(constantSourceRow,
+                    sourceTypeSpecReference, rootSnapshot.ModuleRow,
+                    rootSnapshot.TargetRequirement,
+                    standardClassRootTables.ConstantSources,
+                    standardClassRootTables.FrozenValueNodes,
+                    standardClassRootTables.Blobs,
+                    standardClassRootTables.TypeSpecs,
+                    standardClassRootTables.Features,
+                    standardClassRootTables.Modules,
+                    standardClassRootTables.TypeDefs,
+                    standardClassRootTables.EnumDefs,
+                    standardClassRootTables.Imports,
+                    standardClassRootTables.A3LayoutResourceLedger,
+                    standardClassRootTables.Fields);
+            var remappedTypeSpec
+                = RemapStandardClassTypeSpecReference(
+                    sourceTypeSpecReference, 0);
+            var sourceType = standardClassRootTables.TypeSpecs
+                .GetTypeSpecRef(sourceTypeSpecReference);
+            if (!sourceType.IsRow && sourceType.Form == 0x01
+                && sourceType.Qualifiers == 0
+                && TrRmConstantSourceValueValidator.TryGetBoundScalarType(
+                    sourceType.TypeCode, out _))
+            {
+                var frozenValue = valueBuilder.Add(constant);
+                if (frozenValue.TypeSpecRef != remappedTypeSpec)
+                {
+                    throw Invalid(
+                        "An EN1 constructor scalar ConstantMap changed its exact TypeSpec.");
+                }
+
+                return frozenValue;
+            }
+
+            var enumIndex = -1;
+            if (sourceType.IsRow && sourceType.Form == 0x02
+                && enumIndexByRootTypeDefRow.TryGetValue(sourceType.Row,
+                    out enumIndex))
+            {
+            }
+            else if (sourceType.IsRow && sourceType.Form == 0x03
+                && enumIndexByRootEnumImport.TryGetValue(
+                    checked((int)sourceType.Row), out enumIndex))
+            {
+            }
+            else
+            {
+                throw Unsupported(
+                    "An EN1 constructor ConstantMap requires a selected scalar or nominal enum value.");
+            }
+
+            if ((uint)enumIndex >= (uint)program.EnumDefinitions.Length)
+            {
+                throw Invalid(
+                    "An EN1 constructor ConstantMap lost its nominal enum identity.");
+            }
+
+            var underlyingType
+                = program.EnumDefinitions[enumIndex].UnderlyingType;
+            var enumConstant = new BoundConstant(constant.Bits,
+                BoundEnumTypes.Type(enumIndex), underlyingType, default);
+            return valueBuilder.AddC1EnumClosureMember(enumConstant,
+                remappedTypeSpec, underlyingType, schema);
+        }
+
         exportRows.AddRange(fieldExportRows);
 
         if (usedFunctionPointerSignatureIndexes.Count != 0)
@@ -4146,6 +4647,11 @@ public static partial class TrRmExecutableCompiler
             var anchorNames = program.Functions.Select(
                     static function => function.Name)
                 .ToHashSet(StringComparer.Ordinal);
+            foreach (var method in methodRows)
+            {
+                _ = anchorNames.Add(
+                    stringRows[method.NameStringRow - 1].Text);
+            }
             var anchorNameOrdinal = 1;
             foreach (var signatureIndex
                 in usedFunctionPointerSignatureIndexes)
@@ -4642,7 +5148,8 @@ public static partial class TrRmExecutableCompiler
         }
         if (schema.UsesObjectConstruction()
             && (sourceClassConstructorPlans.Count != 0
-                || hasImportedClassConstructionMethods))
+                || hasImportedClassConstructionMethods
+                || hasLocalClassConstructionBodies))
         {
             featureRows.Add(TrRmFeatureRow.ClassConstructionBodiesCandidate);
         }

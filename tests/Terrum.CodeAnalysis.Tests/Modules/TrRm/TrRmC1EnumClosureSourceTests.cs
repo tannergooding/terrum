@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
@@ -1364,9 +1365,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
     }
 
     [Test]
-    public void EmitsEN1ConstructorBodyWithNominalEnumConstant()
+    public void ReemitsEN1LocalConstructorBodiesWithNominalEnumConstants()
     {
-        var schemaIdentity = s_schemaIdentities[0];
         var tree = SyntaxTree.Parse("""
             namespace Demo {
                 public enum Shade : int8 { Dark = -1 }
@@ -1399,28 +1399,94 @@ internal sealed class TrRmC1EnumClosureSourceTests
             ]);
         var enumExport = CreateExport(program, tree, 0, "Shade",
             ["type.shade"], "shade");
-        var artifact = TrRmExecutableCompiler.EmitStandard(program,
-            "EnumConstructor", schemaIdentity, 1, [], [], [classExport],
-            [enumExport]);
-        var tables = TrRmStructuralMetadataValidator
-            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
-                artifact, SchemaFor(schemaIdentity)));
-        var classTypeDefRow = Enumerable.Range(1, tables.TypeDefs.Count)
-            .Single(row => tables.TypeDefs.GetName(row) == "Box");
-        var initializerMethodRow = Enumerable.Range(1,
-                tables.Methods.Count)
-            .Single(row => tables.Methods.GetOwnerType(row)
-                    == classTypeDefRow
-                && tables.Contracts.HasConstructionClause(row)
-                && tables.Contracts.GetConstructionClause(row).RoleTag == 1);
-        var initializerBody = tables.Bodies.GetRegisterBody(
-            tables.Methods.GetBodyRow(initializerMethodRow),
-            tables.Contracts.Count);
-
-        Assert.That(initializerBody.ConstantCount, Is.EqualTo(1));
-        Assert.That(Enumerable.Range(1, tables.Features.Count)
-                .Select(row => tables.Features.GetFeature(row).FeatureId),
-            Does.Contain(11u));
+        foreach (var schemaIdentity in new[] {
+            s_schemaIdentities[0], s_schemaIdentities[1],
+        })
+        {
+            var artifact = TrRmExecutableCompiler.EmitStandard(program,
+                "EnumConstructor", schemaIdentity, 1, [], [], [classExport],
+                [enumExport]);
+            var input = new TrRmStandardArtifactInput(schemaIdentity,
+                artifact);
+            var reference = TrRmExecutableCompiler.CreateStandardReference(
+                input, "EnumConstructor", [], ["type.box"]);
+            var sourceFreeCompilation = Compilation.CreateLibrary(
+                SyntaxTree.Parse(string.Empty), reference);
+            Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    sourceFreeCompilation.Diagnostics));
+            var reemitted = TrRmExecutableCompiler.EmitStandard(
+                sourceFreeCompilation.Program!, "EnumConstructor",
+                schemaIdentity, 1);
+            var tables = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                    reemitted, SchemaFor(schemaIdentity)));
+            var classTypeDefRow = Enumerable.Range(1, tables.TypeDefs.Count)
+                .Single(row => tables.TypeDefs.GetName(row) == "Box");
+            var initializerMethodRow = Enumerable.Range(1,
+                    tables.Methods.Count)
+                .Single(row => tables.Methods.GetOwnerType(row)
+                        == classTypeDefRow
+                    && tables.Contracts.HasConstructionClause(row)
+                    && tables.Contracts.GetConstructionClause(row)
+                        .RoleTag == 1);
+            var initializerBody = tables.Bodies.GetRegisterBody(
+                tables.Methods.GetBodyRow(initializerMethodRow),
+                tables.Contracts.Count);
+            Assert.That(initializerBody.ConstantCount, Is.EqualTo(1),
+                schemaIdentity);
+            var enumConstantTypeSpec
+                = BinaryPrimitives.ReadUInt32LittleEndian(
+                    initializerBody.ConstantMap);
+            var enumConstantType = tables.TypeSpecs.GetTypeSpecRef(
+                enumConstantTypeSpec);
+            Assert.That(enumConstantType.Form, Is.EqualTo((byte)0x02),
+                schemaIdentity);
+            Assert.That(tables.TypeDefs.GetKind(enumConstantType.Row),
+                Is.EqualTo((byte)4), schemaIdentity);
+            Assert.That(tables.TypeDefs.GetName(enumConstantType.Row),
+                Is.EqualTo("Shade"), schemaIdentity);
+            var constantSourceRow = checked((int)
+                BinaryPrimitives.ReadUInt32LittleEndian(
+                    initializerBody.ConstantMap.Slice(sizeof(uint))));
+            var materialized = TrRmConstantSourceValueValidator
+                .MaterializeFrozenScalar(constantSourceRow,
+                    enumConstantTypeSpec, 1,
+                    tables.Modules.GetRequirements(1).TargetRequirement,
+                    tables.ConstantSources, tables.FrozenValueNodes,
+                    tables.Blobs, tables.TypeSpecs, tables.Features,
+                    tables.Modules, tables.TypeDefs, tables.EnumDefs,
+                    tables.Imports, tables.A3LayoutResourceLedger,
+                    tables.Fields);
+            Assert.That(BoundEnumTypes.IsType(materialized.Type), Is.True,
+                schemaIdentity);
+            Assert.That(materialized.Value, Is.EqualTo(-1), schemaIdentity);
+            Assert.That(Enumerable.Range(1, tables.Features.Count)
+                    .Select(row => tables.Features.GetFeature(row).FeatureId),
+                Does.Contain(11u), schemaIdentity);
+            if (schemaIdentity == s_schemaIdentities[1])
+            {
+                var projectionMethodRow = Enumerable.Range(1,
+                        tables.Methods.Count)
+                    .Single(methodRow =>
+                            tables.Methods.GetOwnerType(methodRow)
+                                == classTypeDefRow
+                            && tables.Contracts.HasConstructionClause(
+                                methodRow)
+                            && tables.Contracts.GetConstructionClause(
+                                methodRow).RoleTag == 2);
+                var projectionBody = tables.Bodies.GetRegisterBody(
+                    tables.Methods.GetBodyRow(projectionMethodRow),
+                    tables.Contracts.Count);
+                Assert.That(projectionBody.MethodMap.Length,
+                    Is.EqualTo(sizeof(uint)), schemaIdentity);
+                Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                        projectionBody.MethodMap),
+                    Is.EqualTo(0x1600_0000u
+                        | checked((uint)initializerMethodRow)),
+                    schemaIdentity);
+            }
+        }
     }
 
     [Test]

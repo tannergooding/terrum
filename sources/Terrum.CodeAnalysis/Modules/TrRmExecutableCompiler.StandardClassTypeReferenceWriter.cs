@@ -15322,7 +15322,10 @@ public static partial class TrRmExecutableCompiler
         List<ReadOnlyMemory<byte>> outputTypeSpecRows,
         Dictionary<int, uint> typeSpecRowMap,
         HashSet<int> activeTypeSpecRows, TrRmArtifactSchema schema,
-        Dictionary<int, int> genericParamRowMap)
+        Dictionary<int, int> genericParamRowMap,
+        Func<uint, uint>? typeSpecReferenceRemapper = null,
+        Func<int, uint, TrRmFrozenScalarValueReference>?
+            constantSourceRemapper = null)
     {
         if (!bodyBytes.IsEmpty && bodyBytes.Span[0] is (0x02 or 0x03))
         {
@@ -15344,6 +15347,14 @@ public static partial class TrRmExecutableCompiler
 
         var body = new TrRmRegisterBodyReader(bodyBytes.Span,
             sourceTables.Contracts.Count, schema);
+        uint RemapTypeSpecReference(uint typeSpecReference)
+            => typeSpecReferenceRemapper is not null
+                ? typeSpecReferenceRemapper(typeSpecReference)
+                : RemapC1M1ClassTypeSpec(sourceTables,
+                    typeSpecReference, typeDefRowMap, importRowMap,
+                    outputTypeSpecRows, typeSpecRowMap,
+                    activeTypeSpecRows, depth: 0,
+                    genericParamRowMap: genericParamRowMap);
 
         var typeMap = body.TypeMap.ToArray();
         for (var typeMapIndex = 0; typeMapIndex < body.TypeCount;
@@ -15359,10 +15370,8 @@ public static partial class TrRmExecutableCompiler
                 _ => throw Unsupported(
                     "CM1 local class MethodDef Body TypeMap entries must be inline or TypeSpec-backed."),
             };
-            var remappedTypeSpec = RemapC1M1ClassTypeSpec(sourceTables,
-                typeSpecReference, typeDefRowMap, importRowMap,
-                outputTypeSpecRows, typeSpecRowMap, activeTypeSpecRows,
-                depth: 0, genericParamRowMap: genericParamRowMap);
+            var remappedTypeSpec
+                = RemapTypeSpecReference(typeSpecReference);
             BinaryPrimitives.WriteUInt32LittleEndian(typeMap.AsSpan(offset),
                 CreateStandardBodyTypeMapToken(remappedTypeSpec));
         }
@@ -15377,10 +15386,8 @@ public static partial class TrRmExecutableCompiler
 
             var sourceRootTypeSpec = sourceTables.FieldPaths
                 .GetRootTypeSpecRef(sourceRow);
-            var rootTypeSpec = RemapC1M1ClassTypeSpec(sourceTables,
-                sourceRootTypeSpec, typeDefRowMap, importRowMap,
-                outputTypeSpecRows, typeSpecRowMap, activeTypeSpecRows,
-                depth: 0, genericParamRowMap: genericParamRowMap);
+            var rootTypeSpec
+                = RemapTypeSpecReference(sourceRootTypeSpec);
             var fieldCount = sourceTables.FieldPaths.GetFieldCount(
                 sourceRow);
             var fieldReferences = new uint[fieldCount];
@@ -15480,6 +15487,22 @@ public static partial class TrRmExecutableCompiler
             var offset = constantMapIndex * 2 * sizeof(uint);
             var typeSpecReference = BinaryPrimitives
                 .ReadUInt32LittleEndian(constantMap.AsSpan(offset));
+            var sourceRow = checked((int)BinaryPrimitives
+                .ReadUInt32LittleEndian(constantMap.AsSpan(
+                    offset + sizeof(uint))));
+            if (constantSourceRemapper is not null)
+            {
+                var remappedConstant = constantSourceRemapper(sourceRow,
+                    typeSpecReference);
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    constantMap.AsSpan(offset),
+                    remappedConstant.TypeSpecRef);
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    constantMap.AsSpan(offset + sizeof(uint)),
+                    remappedConstant.ConstantSourceRow);
+                continue;
+            }
+
             var type = sourceTables.TypeSpecs.GetTypeSpecRef(
                 typeSpecReference);
             if (type.IsRow || type.Form != 0x01 || type.Qualifiers != 0
@@ -15490,9 +15513,6 @@ public static partial class TrRmExecutableCompiler
                     "CM1 local class MethodDef Body ConstantMap entries require an inline scalar TypeSpec.");
             }
 
-            var sourceRow = checked((int)BinaryPrimitives
-                .ReadUInt32LittleEndian(constantMap.AsSpan(
-                    offset + sizeof(uint))));
             if (sourceTables.ConstantSources.GetKind(sourceRow) != 1)
             {
                 throw Unsupported(
