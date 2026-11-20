@@ -372,6 +372,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 """
                 public void Consume(Box value, int32 count) {}
                 internal void Helper(Box value) {}
+                internal void HelperAgain(Box value) { Helper(value); }
                 """),
             classReference);
         Assert.That(functionCompilation.HasErrors, Is.False,
@@ -439,6 +440,17 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             Is.EqualTo(1u));
         Assert.That(reemittedTables.Methods.GetBodyRow(helperMethodRow),
             Is.GreaterThan(0));
+        var helperAgainMethodRow = Enumerable.Range(1,
+                reemittedTables.Methods.Count)
+            .Single(row => reemittedTables.Methods.GetOwnerType(row) == 0
+                && reemittedTables.Methods.GetName(row) == "HelperAgain");
+        var helperAgainBody = reemittedTables.Bodies.GetRegisterBody(
+            reemittedTables.Methods.GetBodyRow(helperAgainMethodRow),
+            reemittedTables.Contracts.Count);
+        Assert.That(helperAgainBody.MethodMap.Length, Is.EqualTo(sizeof(uint)));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                helperAgainBody.MethodMap),
+            Is.EqualTo(0x1600_0000u | checked((uint)helperMethodRow)));
 
         var reemittedReference
             = TrRmExecutableCompiler.CreateStandardReference(
