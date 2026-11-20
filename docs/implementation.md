@@ -176,6 +176,9 @@ existing/absent-output preservation on schema mismatch before malformed stdin
 source acquisition are also covered but unverified. Alternate case/link/
 hard-link aliases, duplicate provider/source roles, other absent-output
 failures, broader source/provider isolation and CLI qualification remain open.
+The external-provider CLI output is source-free loaded, byte-for-byte
+re-emitted and reloaded against the same method/type provider chain; this
+regression is also unverified under the active hold.
 The loader still requires the whole validated Module-set TypeDef/method
 closure to fit its bounded Blittable-struct path. Snapshot-preserving
 source-free emission does not establish general row remapping under provider

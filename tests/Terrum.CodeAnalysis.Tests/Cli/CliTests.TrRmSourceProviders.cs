@@ -809,6 +809,31 @@ internal sealed partial class CliTests
             Assert.That(importRows.Where(static import => import.Kind == 0x16)
                 .Select(static import => import.ProducerIdentity).Distinct(),
                 Is.EquivalentTo([methodProviderIdentity]));
+            var consumerInput = new TrRmStandardArtifactInput(schemaIdentity,
+                File.ReadAllBytes(consumerArtifact));
+            var linkedProgram = TrRmExecutableCompiler.LoadStandard(
+                consumerInput, consumerIdentity, [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        methodProviderArtifactBytes),
+                    typeProviderInput,
+                ]);
+            var sourceFreeArtifact = TrRmExecutableCompiler.EmitStandard(
+                linkedProgram, consumerIdentity, schemaIdentity,
+                TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+            Assert.That(sourceFreeArtifact,
+                Is.EqualTo(consumerInput.Artifact.ToArray()));
+            var reloadedProgram = TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    sourceFreeArtifact),
+                consumerIdentity, [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        methodProviderArtifactBytes),
+                    typeProviderInput,
+                ]);
+            Assert.That(reloadedProgram.Functions.Single(
+                    static function => function.Name == "ReadData")
+                    .ReturnType,
+                Is.EqualTo(PrimitiveType.Int32));
 
             await File.WriteAllBytesAsync(consumerArtifact, retained)
                 .ConfigureAwait(true);
