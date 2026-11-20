@@ -1849,6 +1849,36 @@ internal sealed class TrRmC1EnumClosureSourceTests
                     static structure => structure.Name == "Demo.Payload")
                     .DeclaredCopyEvidence,
                 Is.True, schemaIdentity);
+            var relocatedSourceFreeCompilation = Compilation.CreateLibrary(
+                SyntaxTree.Parse(string.Empty), relocatedReference);
+            Assert.That(relocatedSourceFreeCompilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    relocatedSourceFreeCompilation.Diagnostics));
+            var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(
+                relocatedSourceFreeCompilation.Program!, "CopyConsumer",
+                schemaIdentity, 1);
+            var reemittedTables = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                    reemittedArtifact, SchemaFor(schemaIdentity)));
+            var reemittedPayloadTypeDefRow
+                = Enumerable.Range(1, reemittedTables.TypeDefs.Count)
+                    .Single(row => reemittedTables.TypeDefs.GetName(row)
+                        == "Payload");
+            Assert.That((reemittedTables.TypeDefs.GetFlags(
+                    reemittedPayloadTypeDefRow) & 0x20u),
+                Is.Not.Zero, schemaIdentity);
+            var reloadedReference
+                = TrRmExecutableCompiler.CreateStandardReference(
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        reemittedArtifact),
+                    "CopyConsumer", [
+                        new TrRmStandardArtifactInput(schemaIdentity,
+                            relocatedProviderArtifact),
+                    ], ["type.owner"]);
+            Assert.That(reloadedReference.Structures.Single(
+                    static structure => structure.Name == "Demo.Payload")
+                    .DeclaredCopyEvidence,
+                Is.True, schemaIdentity);
 
             var missingCopyProvider = providerArtifact.ToArray();
             SetTypeDefFlags(missingCopyProvider, payloadTypeDefRow,
