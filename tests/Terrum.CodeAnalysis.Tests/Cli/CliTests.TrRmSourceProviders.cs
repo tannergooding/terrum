@@ -1,6 +1,7 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.Buffers.Binary;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -1063,6 +1064,133 @@ internal sealed partial class CliTests
         }
     }
 
+    [Test]
+    public async Task CompileTrRmSelectsNonFirstCoLocatedMethodProviderModuleAsync()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-initializer-copy-evidence-1";
+        const string typeModuleIdentity = "source-provider-cli-colocated-types";
+        const string methodModuleIdentity = "source-provider-cli-colocated-methods";
+        const string consumerIdentity = "source-provider-cli-colocated-consumer";
+        var providerSelections = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"source-provider-cli-colocated-{Guid.NewGuid():N}.json");
+        var providerArtifact = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"source-provider-cli-colocated-{Guid.NewGuid():N}.trrm");
+        var consumerArtifact = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"source-provider-cli-colocated-{Guid.NewGuid():N}.trrm");
+        try
+        {
+            var providerTree = SyntaxTree.Parse("""
+                [Blittable] [Layout(LayoutKind.Sequential)]
+                public struct Record {
+                    public int32 Data;
+                }
+                public void Ping() {}
+                """);
+            var providerCompilation = Compilation.CreateLibrary(providerTree,
+                new CompilationOptions {
+                    LayoutCoreRegistration
+                        = LayoutCoreRegistrationTestData.Create(),
+                });
+            Assert.That(providerCompilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    providerCompilation.Diagnostics));
+            var providerProgram = (BoundProgram)providerCompilation.Program!;
+            var providerArtifactBytes = TrRmExecutableCompiler.EmitStandard(
+                providerProgram, typeModuleIdentity, schemaIdentity,
+                TrRmModuleTableReader.WindowsX64NativeTargetRequirement, [
+                    new TrRmSourceTypeExport("", "Record", "type.record") {
+                        FieldExports = [
+                            new TrRmSourceFieldExport("Data",
+                                "field.record.data"),
+                        ],
+                    },
+                ], [], []);
+            providerArtifactBytes = MoveMethodsToSecondModule(
+                providerArtifactBytes, typeModuleIdentity,
+                methodModuleIdentity);
+            await File.WriteAllBytesAsync(providerArtifact,
+                providerArtifactBytes).ConfigureAwait(true);
+
+            var providerConfiguration = JsonSerializer.Serialize(new {
+                schemaVersion = 3,
+                providers = new[] {
+                    new { schemaIdentity, path = providerArtifact },
+                },
+                references = new[] {
+                    new {
+                        providerInputOrdinal = 0,
+                        moduleIdentity = methodModuleIdentity,
+                        methodExportKeys = new[] { "Ping" },
+                        typeExportKeys = new[] {
+                            new {
+                                moduleIdentity = typeModuleIdentity,
+                                exportKey = "type.record",
+                            },
+                        },
+                        fieldExportKeys = new[] {
+                            new {
+                                moduleIdentity = typeModuleIdentity,
+                                exportKey = "field.record.data",
+                            },
+                        },
+                    },
+                },
+            });
+            await File.WriteAllTextAsync(providerSelections,
+                providerConfiguration, new UTF8Encoding(false))
+                .ConfigureAwait(true);
+
+            var consumerSource = """
+                public void Forward() { Ping(); }
+                public int32 ReadData(Record value) { return value.Data; }
+                """;
+            var (exit, result, error) = await RunAsync(
+                Encoding.UTF8.GetBytes(consumerSource), "compile-trrm", "-",
+                "--identity", consumerIdentity, "--trrm-schema", schemaIdentity,
+                "--trrm-source-providers", providerSelections, "--library",
+                "-o", consumerArtifact, "--runtime", "fail-fast", "--json")
+                .ConfigureAwait(false);
+            Assert.That(exit, Is.Zero,
+                $"{result}{Environment.NewLine}{error}");
+            Assert.That(error, Is.Empty);
+
+            var tables = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                    File.ReadAllBytes(consumerArtifact),
+                    TrRmArtifactSchema
+                        .C1M1Construction2InitializerCopyEvidenceDraft));
+            Assert.That(tables.Modules.Count, Is.EqualTo(1));
+            foreach (var (kind, exportKey, expectedModuleIdentity) in new[] {
+                (0x13u, "type.record", typeModuleIdentity),
+                (0x14u, "field.record.data", typeModuleIdentity),
+                (0x16u, "Ping", methodModuleIdentity),
+            })
+            {
+                var importRow = Enumerable.Range(1, tables.Imports.Count)
+                    .Single(row =>
+                        tables.Imports.GetExpectedDefinitionForImportRow(row)
+                            >> 24 == kind
+                        && StringComparer.Ordinal.Equals(
+                            tables.Imports.GetBindingForImportRow(row)
+                                .ExportKey,
+                            exportKey));
+                Assert.That(tables.ModuleRefs.GetProducerIdentity(
+                        tables.Imports.GetModuleRefForImportRow(importRow)),
+                    Is.EqualTo(expectedModuleIdentity));
+            }
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(providerSelections)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(providerArtifact)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(consumerArtifact)
+                .ConfigureAwait(true);
+        }
+    }
+
     [TestCase(
         "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-class-parameter-defaults-1")]
     [TestCase(
@@ -1805,6 +1933,91 @@ internal sealed partial class CliTests
             TrRmStructuralMetadataValidator.ValidateC1AndGetExecutionTables(
                 TrRmArtifactIndex.ForC1M1Construction2Draft(
                     invalidProvider)));
+    }
+
+    private static byte[] MoveMethodsToSecondModule(byte[] artifact,
+        string firstModuleIdentity, string secondModuleIdentity)
+    {
+        var schema
+            = TrRmArtifactSchema
+                .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft;
+        var index = new TrRmArtifactIndex(artifact, schema);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(index);
+        if (tables.Modules.Count != 1
+            || tables.ModuleRefs.Count != 0
+            || tables.Imports.Count != 0
+            || tables.TypeDefs.Count == 0
+            || tables.Methods.Count == 0
+            || tables.Modules.GetEntryMethod(1) != 0
+            || !StringComparer.Ordinal.Equals(
+                tables.Modules.GetIdentity(1), firstModuleIdentity)
+            || !index.TryGetSection(0x0001, out var moduleSection,
+                out var moduleCount)
+            || moduleCount != 1)
+        {
+            throw new InvalidOperationException(
+                "The co-located fixture requires one import-free library Module with TypeDefs and Methods.");
+        }
+
+        var textRows = new List<(string Text, int Encoding)>(
+            tables.Strings.Count + 1);
+        for (var row = 1; row <= tables.Strings.Count; row++)
+        {
+            textRows.Add((tables.Strings.DecodeNamespace(row), 1));
+        }
+        textRows.Add((secondModuleIdentity, 1));
+        var stringsBytes = TrRmStringTableWriter.EncodeTextRows(textRows);
+        var strings = new TrRmStringTableReader(stringsBytes, textRows.Count);
+        var firstModuleIdentityStringRow = checked((int)
+            BinaryPrimitives.ReadUInt32LittleEndian(moduleSection.Span));
+        var secondModuleIdentityStringRow = textRows.Count;
+        var (targetRequirement, runtimePolicy)
+            = tables.Modules.GetRequirements(1);
+        var (moduleRefStart, moduleRefEnd)
+            = tables.Modules.GetModuleRefRange(1);
+        var (typeDefStart, typeDefEnd)
+            = tables.Modules.GetTypeDefRange(1);
+        var (methodDefStart, _) = tables.Modules.GetMethodDefRange(1);
+        var (sourceFileStart, _) = tables.Modules.GetSourceFileRange(1);
+        var (featureStart, featureCount)
+            = tables.Modules.GetFeatureRange(1);
+        var moduleRows = new[] {
+            new TrRmModuleRow(firstModuleIdentityStringRow,
+                targetRequirement, runtimePolicy, 0, moduleRefStart,
+                typeDefStart, methodDefStart, sourceFileStart, featureStart,
+                featureCount, tables.Modules.GetGoverningRuleEdition(1)),
+            new TrRmModuleRow(secondModuleIdentityStringRow,
+                targetRequirement, runtimePolicy, 0, moduleRefEnd,
+                typeDefEnd, methodDefStart, sourceFileStart, featureStart,
+                featureCount, tables.Modules.GetGoverningRuleEdition(1)),
+        };
+        var featureTableCount = index.TryGetSection(0x0004, out _,
+            out var featureCountInSection) ? featureCountInSection : 0;
+        var moduleBytes = TrRmModuleTableWriter.Encode(moduleRows, strings,
+            tables.ModuleRefs.Count, tables.TypeDefs.Count,
+            tables.Methods.Count, tables.Modules.SourceFileCount,
+            featureTableCount);
+
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var sectionIndex = 0; sectionIndex < index.SectionCount;
+            sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var section, out var recordCount);
+            sections.Add(kind switch {
+                0x0001 => new TrRmSection(kind, flags, 2, moduleBytes),
+                0x0002 => new TrRmSection(kind, flags,
+                    checked((uint)textRows.Count), stringsBytes),
+                _ => new TrRmSection(kind, flags,
+                    checked((uint)recordCount), section.ToArray()),
+            });
+        }
+
+        var result = TrRmArtifactWriter.Encode(sections, schema);
+        _ = TrRmStructuralMetadataValidator.ValidateC1AndGetExecutionTables(
+            new TrRmArtifactIndex(result, schema));
+        return result;
     }
 
     private static byte[] CreateC1M1ClassProvider(string moduleIdentity,

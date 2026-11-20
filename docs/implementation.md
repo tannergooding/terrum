@@ -167,8 +167,11 @@ ModuleRef/Body map permutations, and runtime qualification remain open. The
 separate unapproved version-3
 `docs\proposals\standard-trrm-c1-method-type-source-provider-cli-transport.md`
 specifies the unapproved CLI shape and exact schema pairing. Its reader,
-pairing and dispatch are implemented; regressions are added but remain
-unverified, and CLI qualification remains open.
+pairing and dispatch are implemented. Regressions cover all three pairings,
+nonzero providerInputOrdinal, scalar-only empty selections, malformed v3
+shapes, schema-mismatch output preservation, and a co-located method root in
+Module 2 with TypeDef/FieldDef roots in Module 1; they remain unverified under
+the active hold. Path/source isolation and CLI qualification remain open.
 The loader still requires the whole validated Module-set TypeDef/method
 closure to fit its bounded Blittable-struct path. Snapshot-preserving
 source-free emission does not establish general row remapping under provider

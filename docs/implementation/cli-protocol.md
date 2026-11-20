@@ -117,8 +117,11 @@ does not establish those routes.
 The separate unapproved [Construction-2 method/type transport proposal](../proposals/standard-trrm-c1-method-type-source-provider-cli-transport.md)
 specifies version 3 for one classless combined method/type/field reference
 under the exact three Copy-evidence schemas. Its strict reader, schema pairing
-and single-call dispatch are implemented; end-to-end CLI regressions were
-added but remain unverified under the active hold. Versions 1 and 2, the
+and single-call dispatch are implemented. End-to-end CLI regressions cover all
+three schemas, an external type provider, a method provider at nonzero
+providerInputOrdinal, scalar-only empty selections and a non-first
+co-located method Module; they remain unverified under the active hold.
+Versions 1 and 2, the
 publication manifests and artifact-command provider whitelist are unchanged.
 Artifact commands accept exact per-artifact schema identities and a root
 Module identity, plus repeatable explicitly selected provider schema/path
