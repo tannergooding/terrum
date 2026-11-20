@@ -123,7 +123,8 @@ providerInputOrdinal, scalar-only empty selections and a non-first
 co-located method Module. Manifest/source/output/provider alias collisions
 and existing/absent-output preservation on schema mismatch before malformed
 stdin source acquisition are also covered; all remain unverified under the
-active hold. The external-provider CLI output is additionally source-free
+active hold, including Windows case-only and provider/output hard-link aliases.
+The external-provider CLI output is additionally source-free
 loaded, byte-for-byte re-emitted and reloaded against the same provider chain;
 that regression remains unverified as well. The co-located Module-2 method
 root/Module-1 type-field case receives the same source-free load/re-emission/

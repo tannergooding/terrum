@@ -1036,6 +1036,34 @@ internal sealed partial class CliTests
                 providerArtifact, providerArtifact).ConfigureAwait(true);
             if (OperatingSystem.IsWindows())
             {
+                var caseVariantConfiguration = JsonSerializer.Serialize(new {
+                    schemaVersion = 3,
+                    providers = new[] {
+                        new {
+                            schemaIdentity,
+                            path = Path.GetFullPath(providerArtifact)
+                                .ToUpperInvariant(),
+                        },
+                    },
+                    references = new[] {
+                        new {
+                            providerInputOrdinal = 0,
+                            moduleIdentity = providerIdentity,
+                            methodExportKeys = new[] { "Ping" },
+                            typeExportKeys = Array.Empty<object>(),
+                            fieldExportKeys = Array.Empty<object>(),
+                        },
+                    },
+                });
+                await File.WriteAllTextAsync(providerSelections,
+                    caseVariantConfiguration, new UTF8Encoding(false))
+                    .ConfigureAwait(true);
+                await AssertAliasFailureAsync("-", providerSelections,
+                    providerArtifact, providerArtifact).ConfigureAwait(true);
+
+                await File.WriteAllTextAsync(providerSelections,
+                    providerConfiguration, new UTF8Encoding(false))
+                    .ConfigureAwait(true);
                 providerHardLink = Path.Combine(
                     TestArtifactPaths.DirectoryPath,
                     $"source-provider-cli-scalar-hardlink-{Guid.NewGuid():N}.trrm");
