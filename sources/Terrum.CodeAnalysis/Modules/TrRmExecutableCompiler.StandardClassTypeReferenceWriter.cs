@@ -64,8 +64,9 @@ public static partial class TrRmExecutableCompiler
         ReadOnlyMemory<byte> Body);
 
     private sealed record C1M1ModuleFunctionEmissionPlan(
-        int MethodDefRow, BoundFunction Function,
-        ImmutableArray<string> ExportKeys);
+        int MethodDefRow, BoundFunction? Function,
+        ImmutableArray<string> ExportKeys,
+        ImmutableArray<int> ImportRows);
 
     private sealed record C1M1PrivateModuleFunctionEmissionPlan(
         int MethodDefRow);
@@ -9756,6 +9757,71 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
+        var moduleFunctionImportRowsByImportRow
+            = new SortedDictionary<int, int>();
+        var moduleFunctionImportRowByMethodRow
+            = new SortedDictionary<int, List<int>>();
+        var moduleFunctionProviderExports
+            = new HashSet<(string ProducerIdentity, string ExportKey,
+                uint TargetRequirement, uint RuntimePolicy)>();
+        for (var importRow = 1;
+            importRow <= rootTables.Imports.Count; importRow++)
+        {
+            var moduleRefRow = rootTables.Imports
+                .GetModuleRefForImportRow(importRow);
+            if (rootTables.ModuleRefs.GetOwnerModule(moduleRefRow)
+                    != rootModuleRow
+                || (rootTables.Imports
+                    .GetExpectedDefinitionForImportRow(importRow) >> 24)
+                    != 0x16)
+            {
+                continue;
+            }
+
+            var expectedDefinition = rootTables.Imports
+                .GetExpectedDefinitionForImportRow(importRow);
+            var methodRow = GetMethodDefRow(expectedDefinition);
+            if (rootTables.Methods.GetOwnerType(methodRow) != 0)
+            {
+                continue;
+            }
+
+            if (rootTables.Methods.GetOwnerModule(methodRow) != rootModuleRow
+                || rootTables.Methods.GetBodyRow(methodRow) != 0)
+            {
+                throw new InvalidDataException(
+                    "A top-level MethodDef Import is duplicated or has a local implementation.");
+            }
+
+            moduleFunctionImportRowsByImportRow.Add(importRow, methodRow);
+            if (!moduleFunctionImportRowByMethodRow.TryGetValue(methodRow,
+                    out var methodImportRows))
+            {
+                methodImportRows = [];
+                moduleFunctionImportRowByMethodRow.Add(methodRow,
+                    methodImportRows);
+            }
+            methodImportRows.Add(importRow);
+            var binding = rootTables.Imports
+                .GetBindingForImportRow(importRow);
+            var requirements = rootTables.ModuleRefs.GetRequirements(
+                moduleRefRow);
+            if (!StringComparer.Ordinal.Equals(
+                    binding.ProducerIdentity,
+                    rootTables.ModuleRefs.GetProducerIdentity(moduleRefRow))
+                || binding.TargetRequirement
+                    != requirements.TargetRequirement
+                || binding.RuntimePolicy != requirements.RuntimePolicy)
+            {
+                throw new InvalidDataException(
+                    "A top-level MethodDef Import differs from its ModuleRef binding.");
+            }
+
+            _ = moduleFunctionProviderExports.Add((
+                binding.ProducerIdentity, binding.ExportKey,
+                binding.TargetRequirement, binding.RuntimePolicy));
+        }
+
         var moduleFunctionCandidates
             = new List<(int FunctionIndex, int MethodDefRow,
                 BoundFunction Function, string ExportKey)>();
@@ -9770,9 +9836,21 @@ public static partial class TrRmExecutableCompiler
                 continue;
             }
 
+            if (!StringComparer.Ordinal.Equals(
+                    import.ProducerIdentity, rootSnapshot.ModuleIdentity))
+            {
+                if (!moduleFunctionProviderExports.Contains((
+                        import.ProducerIdentity, import.ExportKey,
+                        import.TargetRequirement, import.RuntimePolicy)))
+                {
+                    throw Unsupported(
+                        "A retained top-level class-reference function has no exact root MethodDef Import.");
+                }
+
+                continue;
+            }
+
             if (!schema.UsesObjectConstruction()
-                || !StringComparer.Ordinal.Equals(
-                    import.ProducerIdentity, rootSnapshot.ModuleIdentity)
                 || import.TargetRequirement != rootSnapshot.TargetRequirement
                 || import.RuntimePolicy != rootSnapshot.RuntimePolicy
                 || !StringComparer.Ordinal.Equals(function.Name,
@@ -9823,7 +9901,7 @@ public static partial class TrRmExecutableCompiler
                     representative.MethodDefRow,
                     new C1M1ModuleFunctionEmissionPlan(
                         representative.MethodDefRow,
-                        representative.Function, exportKeys)))
+                        representative.Function, exportKeys, [])))
             {
                 throw new InvalidDataException(
                     "A top-level class-reference MethodDef has conflicting retained ExportKeys.");
@@ -9836,6 +9914,18 @@ public static partial class TrRmExecutableCompiler
                     throw new InvalidDataException(
                         "A top-level class-reference function view was retained more than once.");
                 }
+            }
+        }
+
+        foreach (var (methodRow, importRows)
+            in moduleFunctionImportRowByMethodRow)
+        {
+            if (!moduleFunctionEmissionPlans.TryAdd(methodRow,
+                    new C1M1ModuleFunctionEmissionPlan(methodRow, null, [],
+                        [.. importRows])))
+            {
+                throw new InvalidDataException(
+                    "A top-level MethodDef Import overlaps a retained function definition.");
             }
         }
 
@@ -9929,7 +10019,9 @@ public static partial class TrRmExecutableCompiler
                     ? !bindingsByImportRow.ContainsKey(importRow)
                     : definitionKind == 0x14
                         ? !fieldBindingsByImportRow.ContainsKey(importRow)
-                        : !methodBindingsByImportRow.ContainsKey(importRow)))
+                        : !methodBindingsByImportRow.ContainsKey(importRow)
+                            && !moduleFunctionImportRowsByImportRow
+                                .ContainsKey(importRow)))
             {
                 throw new NotSupportedException(
                     "C1M1 class re-emission only retains selected TypeDef, FieldDef and bodyless MethodDef Imports.");
@@ -9939,6 +10031,7 @@ public static partial class TrRmExecutableCompiler
         if (typeDefViewsByOldRow.Count == 0
             || bindingsByImportRow.Count + fieldBindingsByImportRow.Count
                 + methodBindingsByImportRow.Count
+                + moduleFunctionImportRowsByImportRow.Count
                 + interfaceImportRows.Count
                 + nominalTypeImportRows.Count != rootImportCount)
         {
@@ -9979,11 +10072,18 @@ public static partial class TrRmExecutableCompiler
         foreach (var importRow in bindingsByImportRow.Keys
             .Concat(fieldBindingsByImportRow.Keys)
             .Concat(methodBindingsByImportRow.Keys)
+            .Concat(moduleFunctionImportRowsByImportRow.Keys)
             .Concat(interfaceImportRows)
             .Concat(nominalTypeImportRows).Order())
         {
             if (interfaceImportRows.Contains(importRow)
                 || nominalTypeImportRows.Contains(importRow))
+            {
+                _ = moduleRefRowsByOldRow.Add(rootTables.Imports
+                    .GetModuleRefForImportRow(importRow));
+                continue;
+            }
+            if (moduleFunctionImportRowsByImportRow.ContainsKey(importRow))
             {
                 _ = moduleRefRowsByOldRow.Add(rootTables.Imports
                     .GetModuleRefForImportRow(importRow));
@@ -10141,7 +10241,8 @@ public static partial class TrRmExecutableCompiler
         var nextImportRow = 0;
         foreach (var oldImportRow in bindingsByImportRow.Keys
             .Concat(fieldBindingsByImportRow.Keys)
-            .Concat(methodBindingsByImportRow.Keys).Order())
+            .Concat(methodBindingsByImportRow.Keys)
+            .Concat(moduleFunctionImportRowsByImportRow.Keys).Order())
         {
             importRowMap.Add(oldImportRow, ++nextImportRow);
         }
@@ -11354,10 +11455,25 @@ public static partial class TrRmExecutableCompiler
             var oldMethodRow = plan.MethodDefRow;
             var newMethodRow = methodDefRowMap[oldMethodRow];
             var function = plan.Function;
+            var isForwardedImport = !plan.ImportRows.IsEmpty;
             var signatureRow
                 = rootTables.Methods.GetSignature(oldMethodRow);
             var (parameterStart, parameterCount)
                 = rootTables.Signatures.GetParamRange(signatureRow);
+            for (var ordinal = 0; ordinal < parameterCount; ordinal++)
+            {
+                if (rootTables.MethodParameterLabels
+                        .TryGetNameStringRow(oldMethodRow,
+                            checked((uint)ordinal), out _)
+                    || rootTables.MethodParameterLabels
+                        .TryGetDefaultConstantSourceRow(oldMethodRow,
+                            checked((uint)ordinal), out _))
+                {
+                    throw Unsupported(
+                        "Top-level class-reference function re-emission does not retain parameter-label or default surfaces.");
+                }
+            }
+
             var effectsMask
                 = rootTables.Contracts.GetEffectsMask(oldMethodRow);
             var dependencyContractRows
@@ -11372,13 +11488,35 @@ public static partial class TrRmExecutableCompiler
             var methodFlags
                 = rootTables.Methods.GetFlags(oldMethodRow);
             if (rootTables.Methods.GetOwnerType(oldMethodRow) != 0
-                || rootTables.Methods.GetBodyRow(oldMethodRow) == 0
                 || rootTables.Signatures.GetReceiverTypeSpec(signatureRow) != 0
                 || rootTables.Signatures.GetGenericRange(signatureRow).Count
                     != 0
                 || (methodFlags & 3) != 2
                 || (methodFlags & 4) != 0
-                || (effectsMask & ~6u) != 0
+                || (effectsMask & ~6u) != 0)
+            {
+                throw new InvalidDataException(
+                    "A retained top-level class-reference function differs from its checked MethodDef contract.");
+            }
+
+            if (isForwardedImport)
+            {
+                var definitionId = 0x1600_0000u
+                    | checked((uint)oldMethodRow);
+                if (function is not null || plan.ImportRows.IsEmpty
+                    || rootTables.Methods.GetBodyRow(oldMethodRow) != 0
+                    || plan.ImportRows.Any(importRow =>
+                        rootTables.Imports
+                            .GetExpectedDefinitionForImportRow(importRow)
+                            != definitionId)
+                    || !plan.ExportKeys.IsEmpty)
+                {
+                    throw new InvalidDataException(
+                        "A forwarded top-level MethodDef must retain bodyless Import aliases and no local Export.");
+                }
+            }
+            else if (function is null
+                || rootTables.Methods.GetBodyRow(oldMethodRow) == 0
                 || function.ParameterCount != parameterCount
                 || function.Variables.Length != parameterCount
                 || function.IsPrivate || function.IsInternal
@@ -11407,8 +11545,9 @@ public static partial class TrRmExecutableCompiler
 
             var resultTypeSpecReference
                 = rootTables.Signatures.GetResultTypeSpec(signatureRow);
-            if (!ModuleFunctionTypeMatches(resultTypeSpecReference,
-                    function.ReturnType))
+            if (function is BoundFunction moduleFunction
+                && !ModuleFunctionTypeMatches(resultTypeSpecReference,
+                    moduleFunction.ReturnType))
             {
                 throw new InvalidDataException(
                     "A retained top-level class-reference function result differs from its MethodSig.");
@@ -11429,13 +11568,18 @@ public static partial class TrRmExecutableCompiler
                     = rootTables.Parameters.GetTypeSpec(parameterRow);
                 var mode = rootTables.Parameters.GetMode(parameterRow);
                 var flags = rootTables.Parameters.GetFlags(parameterRow);
-                var variable = function.Variables[ordinal];
                 if (mode != 0 || flags > 1
-                    || variable.IsMutable || variable.IsOut
-                    || variable.IsInit || variable.IsInitializationLocal
-                    || variable.IsImplicitRef != (flags == 1)
-                    || !ModuleFunctionTypeMatches(typeSpecReference,
-                        variable.Type))
+                    || (function is BoundFunction moduleFunction
+                        && (moduleFunction.Variables[ordinal].IsMutable
+                            || moduleFunction.Variables[ordinal].IsOut
+                            || moduleFunction.Variables[ordinal].IsInit
+                            || moduleFunction.Variables[ordinal]
+                                .IsInitializationLocal
+                            || moduleFunction.Variables[ordinal]
+                                .IsImplicitRef != (flags == 1)
+                            || !ModuleFunctionTypeMatches(
+                                typeSpecReference,
+                                moduleFunction.Variables[ordinal].Type)))
                 {
                     throw new InvalidDataException(
                         "A retained top-level class-reference parameter differs from its checked Param row.");
@@ -11490,25 +11634,38 @@ public static partial class TrRmExecutableCompiler
                 methodContractCount++;
             }
 
-            var sourceBodyRow
-                = rootTables.Methods.GetBodyRow(oldMethodRow);
-            var sourceBody = rootTables.Bodies.GetRow(sourceBodyRow);
-            if (sourceBody.IsEmpty
-                || sourceBody.Span[0] is not
-                    (0x01 or 0x02 or 0x03 or 0x04 or 0x05))
+            var outputBodyRow = 0;
+            if (isForwardedImport)
             {
-                throw Unsupported(
-                    "Top-level Construction-2 function re-emission supports Body kinds 01-05.");
+                if (rootTables.Methods.GetBodyRow(oldMethodRow) != 0)
+                {
+                    throw new InvalidDataException(
+                        "A forwarded top-level MethodDef unexpectedly has a local Body.");
+                }
             }
+            else
+            {
+                var sourceBodyRow
+                    = rootTables.Methods.GetBodyRow(oldMethodRow);
+                var sourceBody = rootTables.Bodies.GetRow(sourceBodyRow);
+                if (sourceBody.IsEmpty
+                    || sourceBody.Span[0] is not
+                        (0x01 or 0x02 or 0x03 or 0x04 or 0x05))
+                {
+                    throw Unsupported(
+                        "Top-level Construction-2 function re-emission supports Body kinds 01-05.");
+                }
 
-            var outputBodyRow = bodyRows.Count + 1;
-            bodyRows.Add(RemapC1M1ClassMethodBody(rootTables, sourceBody,
-                typeDefRowMap, methodDefRowMap, fieldRowMap, importRowMap,
-                fieldPathRowMap, fieldPathRows, fieldPathRowsByIdentity,
-                methodDependencyContractRowMap,
-                frozenScalarValueBuilder, outputTypeSpecRows,
-                typeSpecRowMap, activeTypeSpecRows, schema,
-                genericParamRowMap));
+                outputBodyRow = bodyRows.Count + 1;
+                bodyRows.Add(RemapC1M1ClassMethodBody(rootTables, sourceBody,
+                    typeDefRowMap, methodDefRowMap, fieldRowMap,
+                    importRowMap, fieldPathRowMap, fieldPathRows,
+                    fieldPathRowsByIdentity,
+                    methodDependencyContractRowMap,
+                    frozenScalarValueBuilder, outputTypeSpecRows,
+                    typeSpecRowMap, activeTypeSpecRows, schema,
+                    genericParamRowMap));
+            }
             methodRows.Add(new TrRmMethodDefRow(0, 0,
                 signatureOutputRow, methodFlags, methodContractFirst,
                 methodContractCount, outputBodyRow));
@@ -11799,6 +11956,11 @@ public static partial class TrRmExecutableCompiler
         {
             AddString(binding.ExportKey);
         }
+        foreach (var importRow in moduleFunctionImportRowsByImportRow.Keys)
+        {
+            AddString(rootTables.Imports.GetBindingForImportRow(importRow)
+                .ExportKey);
+        }
         foreach (var exportRow in exportRows)
         {
             AddString(exportRow.Key);
@@ -11938,7 +12100,9 @@ public static partial class TrRmExecutableCompiler
                 contractRows.Count, bodyRows.Count, schema);
         var classImportRows = CreateC1M1ClassImports(
             bindingsByImportRow, fieldBindingsByImportRow,
-            methodBindingsByImportRow, importRowMap, moduleRefRowMap,
+            methodBindingsByImportRow,
+            moduleFunctionImportRowsByImportRow,
+            importRowMap, moduleRefRowMap,
             typeDefRowMap, fieldRowMap, methodDefRowMap, stringRows,
             rootTables);
         var featureReader = featureRows.Length == 0 ? default
@@ -15343,6 +15507,7 @@ public static partial class TrRmExecutableCompiler
             fieldBindingsByImportRow,
         SortedDictionary<int, BoundStandardClassMethodExpectation>
             methodBindingsByImportRow,
+        SortedDictionary<int, int> moduleFunctionImportRowsByImportRow,
         Dictionary<int, int> importRowMap,
         Dictionary<int, int> moduleRefRowMap,
         Dictionary<int, int> typeDefRowMap,
@@ -15353,10 +15518,12 @@ public static partial class TrRmExecutableCompiler
     {
         var rows = new TrRmImportRow[checked(bindingsByImportRow.Count
             + fieldBindingsByImportRow.Count
-            + methodBindingsByImportRow.Count)];
+            + methodBindingsByImportRow.Count
+            + moduleFunctionImportRowsByImportRow.Count)];
         foreach (var oldImportRow in bindingsByImportRow.Keys
             .Concat(fieldBindingsByImportRow.Keys)
-            .Concat(methodBindingsByImportRow.Keys).Order())
+            .Concat(methodBindingsByImportRow.Keys)
+            .Concat(moduleFunctionImportRowsByImportRow.Keys).Order())
         {
             var newImportRow = importRowMap[oldImportRow];
             var oldModuleRefRow = sourceTables.Imports
@@ -15387,15 +15554,29 @@ public static partial class TrRmExecutableCompiler
                 continue;
             }
 
-            var methodBinding
-                = methodBindingsByImportRow[oldImportRow];
-            var expectedOldMethodDefRow
-                = GetMethodDefRow(methodBinding.ExpectedDefinitionId);
+            if (methodBindingsByImportRow.TryGetValue(oldImportRow,
+                    out var methodBinding))
+            {
+                var expectedOldMethodDefRow
+                    = GetMethodDefRow(
+                        methodBinding.ExpectedDefinitionId);
+                rows[newImportRow - 1] = new TrRmImportRow(
+                    newModuleRefRow,
+                    stringRows[methodBinding.ExportKey],
+                    0x1600_0000u | checked((uint)methodDefRowMap[
+                        expectedOldMethodDefRow]));
+                continue;
+            }
+
+            var expectedModuleFunctionMethodRow
+                = moduleFunctionImportRowsByImportRow[oldImportRow];
+            var moduleFunctionBinding = sourceTables.Imports
+                .GetBindingForImportRow(oldImportRow);
             rows[newImportRow - 1] = new TrRmImportRow(
                 newModuleRefRow,
-                stringRows[methodBinding.ExportKey],
+                stringRows[moduleFunctionBinding.ExportKey],
                 0x1600_0000u | checked((uint)methodDefRowMap[
-                    expectedOldMethodDefRow]));
+                    expectedModuleFunctionMethodRow]));
         }
 
         return rows;

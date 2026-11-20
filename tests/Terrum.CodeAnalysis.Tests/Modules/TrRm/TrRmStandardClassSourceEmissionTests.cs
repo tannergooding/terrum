@@ -25,6 +25,8 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2";
     private const string C1M1Construction2ClassParameterDefaultsSchemaIdentity
         = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-class-parameter-defaults-1";
+    private const string C1M1Construction2ClassParameterDefaultsCopyEvidenceSchemaIdentity
+        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-class-parameter-defaults-1-initializer-copy-evidence-1";
 
     [Test]
     public void EmitsCapturedC1M1ClassDeclarationsAndRemapsWithoutSource()
@@ -5700,6 +5702,260 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
+    public void ReemitsForwardedTopLevelMethodImportsAndBindsTheirProvider()
+    {
+        var schemaIdentity
+            = C1M1Construction2ClassParameterDefaultsCopyEvidenceSchemaIdentity;
+        var providerTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public class Payload {
+                    public int32 Value;
+                    public Payload(int32 value) { Value = value; }
+                }
+                [return: DependsOn(nameof(value))]
+                public unsafe int32 Echo(Payload value) { return 7; }
+            }
+            """);
+        var providerCompilation = Compilation.CreateLibrary(providerTree);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var providerProgram = (BoundProgram)providerCompilation.Program!;
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, "FunctionProvider", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], CreateClassExports(providerProgram, providerTree));
+        providerArtifact = AddMethodExportAlias(providerArtifact, "Echo",
+            "EchoAlias",
+            TrRmArtifactSchema
+                .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft);
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var providerReference
+            = TrRmExecutableCompiler.CreateStandardReference(providerInput,
+                "FunctionProvider", []);
+        Assert.That(providerReference.Functions.Select(
+                static function => function.Name),
+            Does.Contain("Echo").And.Contain("EchoAlias"));
+
+        var forwarderTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public class Box {
+                    public int32 Value;
+                    public Box(int32 value) { Value = value; }
+                }
+                [return: DependsOn(nameof(value))]
+                public unsafe int32 Forward(Payload value) {
+                    return unsafe(Echo(value));
+                }
+                [return: DependsOn(nameof(value))]
+                public unsafe int32 ForwardAlias(Payload value) {
+                    return unsafe(EchoAlias(value));
+                }
+            }
+            """);
+        var forwarderCompilation = Compilation.CreateLibrary(
+            forwarderTree, providerReference);
+        Assert.That(forwarderCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                forwarderCompilation.Diagnostics));
+        var forwarderProgram = (BoundProgram)forwarderCompilation.Program!;
+        var forwarderArtifact = TrRmExecutableCompiler.EmitStandard(
+            forwarderProgram, "FunctionForwarder", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], CreateClassExports(forwarderProgram, forwarderTree));
+        var forwarderTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                forwarderArtifact,
+                TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft));
+        var importedMethodRows = Enumerable.Range(1,
+                forwarderTables.Imports.Count)
+            .Where(row => forwarderTables.Imports
+                .GetExpectedDefinitionForImportRow(row) >> 24 == 0x16)
+            .ToArray();
+        Assert.That(importedMethodRows, Has.Length.EqualTo(2));
+        Assert.That(importedMethodRows.Select(row => forwarderTables.Imports
+                .GetBindingForImportRow(row).ExportKey),
+            Is.EquivalentTo(["Echo", "EchoAlias"]));
+        Assert.That(importedMethodRows.Select(row =>
+                forwarderTables.ModuleRefs.GetProducerIdentity(
+                    forwarderTables.Imports.GetModuleRefForImportRow(row))),
+            Is.All.EqualTo("FunctionProvider"));
+        foreach (var importRow in importedMethodRows)
+        {
+            var importedMethodRow = checked((int)(
+                forwarderTables.Imports
+                    .GetExpectedDefinitionForImportRow(importRow)
+                    & 0x00FF_FFFF));
+            Assert.That(forwarderTables.Contracts.GetEffectsMask(
+                    importedMethodRow),
+                Is.EqualTo(4));
+            Assert.That(forwarderTables.Contracts.GetDependencyContracts(
+                    importedMethodRow), Has.Length.EqualTo(1));
+        }
+
+        var forwarderInput = new TrRmStandardArtifactInput(schemaIdentity,
+            forwarderArtifact);
+        var forwarderReference
+            = TrRmExecutableCompiler.CreateStandardReference(forwarderInput,
+                "FunctionForwarder", [providerInput]);
+        var sourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), forwarderReference);
+        Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceFreeCompilation.Diagnostics));
+        var reemitted = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)sourceFreeCompilation.Program!,
+            "FunctionForwarderReemitted", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var reemittedTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                reemitted,
+                TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft));
+        var reemittedMethodImports = Enumerable.Range(1,
+                reemittedTables.Imports.Count)
+            .Where(row => reemittedTables.Imports
+                .GetExpectedDefinitionForImportRow(row) >> 24 == 0x16)
+            .ToArray();
+        Assert.That(reemittedMethodImports, Has.Length.EqualTo(2));
+        Assert.That(reemittedMethodImports.Select(row => reemittedTables
+                .Imports.GetBindingForImportRow(row).ExportKey),
+            Is.EquivalentTo(["Echo", "EchoAlias"]));
+        Assert.That(reemittedMethodImports.Select(row =>
+                reemittedTables.ModuleRefs.GetProducerIdentity(
+                    reemittedTables.Imports.GetModuleRefForImportRow(row))),
+            Is.All.EqualTo("FunctionProvider"));
+        foreach (var importRow in reemittedMethodImports)
+        {
+            var importedMethodRow = checked((int)(
+                reemittedTables.Imports
+                    .GetExpectedDefinitionForImportRow(importRow)
+                    & 0x00FF_FFFF));
+            Assert.That(reemittedTables.Contracts.GetEffectsMask(
+                    importedMethodRow),
+                Is.EqualTo(4));
+            Assert.That(reemittedTables.Contracts.GetDependencyContracts(
+                    importedMethodRow), Has.Length.EqualTo(1));
+        }
+        var payloadTypeImportRow = Enumerable.Range(1,
+                reemittedTables.Imports.Count)
+            .Single(row => reemittedTables.Imports
+                .GetExpectedDefinitionForImportRow(row) >> 24 == 0x13
+                && reemittedTables.Imports.GetBindingForImportRow(row)
+                    .ExportKey == "PayloadKey");
+        var payloadTypeDefRow = checked((int)(
+            reemittedTables.Imports.GetExpectedDefinitionForImportRow(
+                payloadTypeImportRow) & 0x00FF_FFFF));
+        foreach (var importRow in reemittedMethodImports)
+        {
+            var importedMethodRow = checked((int)(
+                reemittedTables.Imports
+                    .GetExpectedDefinitionForImportRow(importRow)
+                    & 0x00FF_FFFF));
+            var signatureRow = reemittedTables.Methods.GetSignature(
+                importedMethodRow);
+            var (parameterStart, parameterCount) = reemittedTables.Signatures
+                .GetParamRange(signatureRow);
+            Assert.That(parameterCount, Is.EqualTo(1));
+            Assert.That(reemittedTables.TypeSpecs.GetNominalTypeDefRow(
+                    reemittedTables.Parameters.GetTypeSpec(parameterStart),
+                    reemittedTables.TypeDefs, reemittedTables.Imports),
+                Is.EqualTo(payloadTypeDefRow));
+        }
+
+        foreach (var (functionKey, importedKey) in new[] {
+            ("Forward", "Echo"),
+            ("ForwardAlias", "EchoAlias"),
+        })
+        {
+            Assert.That(reemittedTables.Exports.TryGetDefinitionForKey(1,
+                functionKey, out var functionDefinition), Is.True);
+            var functionMethodRow = checked((int)(
+                functionDefinition & 0x00FF_FFFF));
+            Assert.That(reemittedTables.Contracts.GetDependencyContracts(
+                    functionMethodRow),
+                Has.Length.EqualTo(1), functionKey);
+            Assert.That(reemittedTables.Contracts.GetEffectsMask(
+                    functionMethodRow),
+                Is.EqualTo(4), functionKey);
+            var signatureRow = reemittedTables.Methods.GetSignature(
+                functionMethodRow);
+            var (parameterStart, parameterCount) = reemittedTables.Signatures
+                .GetParamRange(signatureRow);
+            Assert.That(parameterCount, Is.EqualTo(1));
+            Assert.That(reemittedTables.TypeSpecs.GetNominalTypeDefRow(
+                    reemittedTables.Parameters.GetTypeSpec(parameterStart),
+                    reemittedTables.TypeDefs, reemittedTables.Imports),
+                Is.EqualTo(payloadTypeDefRow));
+            var bodyRow = reemittedTables.Methods
+                .GetBodyRow(functionMethodRow);
+            var body = reemittedTables.Bodies.GetRegisterBody(bodyRow,
+                reemittedTables.Contracts.Count);
+            Assert.That(body.MethodMap.Length, Is.EqualTo(sizeof(uint)));
+            var targetDefinition
+                = BinaryPrimitives.ReadUInt32LittleEndian(body.MethodMap);
+            Assert.That(reemittedMethodImports.Any(importRow =>
+                    reemittedTables.Imports
+                        .GetBindingForImportRow(importRow).ExportKey
+                            == importedKey
+                    && reemittedTables.Imports
+                        .GetExpectedDefinitionForImportRow(importRow)
+                            == targetDefinition),
+                Is.True, functionKey);
+        }
+
+        var useTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public int32 Use(Payload value) {
+                    unsafe(Forward(value));
+                    return unsafe(ForwardAlias(value));
+                }
+            }
+            """);
+        var useCompilation = Compilation.CreateLibrary(useTree,
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+                "FunctionForwarderReemitted", [providerInput]));
+        Assert.That(useCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, useCompilation.Diagnostics));
+
+        var incompatibleProviderTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public class Payload {
+                    public int32 Value;
+                    public Payload(int32 value) { Value = value; }
+                }
+                [return: DependsOn(nameof(value))]
+                public int32 Echo(int32 value) { return value; }
+            }
+            """);
+        var incompatibleProviderCompilation
+            = Compilation.CreateLibrary(incompatibleProviderTree);
+        Assert.That(incompatibleProviderCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                incompatibleProviderCompilation.Diagnostics));
+        var incompatibleProviderProgram
+            = (BoundProgram)incompatibleProviderCompilation.Program!;
+        var incompatibleProviderArtifact
+            = TrRmExecutableCompiler.EmitStandard(
+                incompatibleProviderProgram, "FunctionProvider",
+                schemaIdentity,
+                TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+                [], [], CreateClassExports(incompatibleProviderProgram,
+                    incompatibleProviderTree));
+        incompatibleProviderArtifact = AddMethodExportAlias(
+            incompatibleProviderArtifact, "Echo", "EchoAlias",
+            TrRmArtifactSchema
+                .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+                "FunctionForwarderReemitted", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        incompatibleProviderArtifact),
+                ]));
+    }
+
+    [Test]
     public void BindsImportedImplicitReferenceMethodsAfterReemission()
     {
         var schemaIdentity
@@ -8430,13 +8686,11 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     private static byte[] AddMethodExportAlias(byte[] artifact,
-        string originalExportKey, string aliasExportKey)
+        string originalExportKey, string aliasExportKey,
+        TrRmArtifactSchema schema = TrRmArtifactSchema
+            .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft)
     {
-        var schema = TrRmArtifactSchema
-            .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft;
-        var index = TrRmArtifactIndex
-            .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
-                artifact);
+        var index = new TrRmArtifactIndex(artifact, schema);
         var tables = TrRmStructuralMetadataValidator
             .ValidateC1AndGetExecutionTables(index);
         if (index.TryGetSection(0x0010, out _, out _)
@@ -8512,9 +8766,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
 
         var result = TrRmArtifactWriter.Encode(sections, schema);
         _ = TrRmStructuralMetadataValidator.ValidateC1AndGetExecutionTables(
-            TrRmArtifactIndex
-                .ForC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft(
-                    result));
+            new TrRmArtifactIndex(result, schema));
         return result;
 
         int AddString(string text)

@@ -935,6 +935,10 @@ internal static class TrRmFixedArrayProviderBindingValidator
             var methodRows = new Dictionary<(
                 int ArtifactIndex, int OwnerImportRow,
                 int ExpectedMethodDefRow), int>();
+            var topLevelMethodTargets = new Dictionary<
+                (int ArtifactIndex, int ExpectedMethodDefRow),
+                (int ProviderArtifactIndex, int ProviderModuleRow,
+                    int ProviderMethodRow)>();
             foreach (var ownerResolution in _imports.Values)
             {
                 var expectedTables = GetTables(
@@ -1026,8 +1030,152 @@ internal static class TrRmFixedArrayProviderBindingValidator
                     var expectedOwnerTypeDefRow
                         = consumer.Methods.GetOwnerType(
                             expectedMethodRow);
-                    if (expectedOwnerTypeDefRow == 0
-                        || consumer.TypeDefs.GetKind(
+                    if (expectedOwnerTypeDefRow == 0)
+                    {
+                        if (!consumer.Schema.UsesObjectConstruction())
+                        {
+                            throw new NotSupportedException(
+                                "Top-level MethodDef Imports in a class reference require the exact Construction-2 profile.");
+                        }
+
+                        var importBinding = consumer.Imports
+                            .GetBindingForImportRow(importRow);
+                        if (consumer.ModuleRefs.GetOwnerModule(moduleRefRow)
+                                != module.ModuleRow
+                            || !StringComparer.Ordinal.Equals(
+                                consumer.ModuleRefs.GetProducerIdentity(
+                                    moduleRefRow),
+                                importBinding.ProducerIdentity)
+                            || consumer.ModuleRefs.GetRequirements(
+                                moduleRefRow)
+                                != (importBinding.TargetRequirement,
+                                    importBinding.RuntimePolicy)
+                            || !StringComparer.Ordinal.Equals(
+                                consumer.Modules.GetIdentity(module.ModuleRow),
+                                module.Identity)
+                            || consumer.Methods.GetOwnerModule(
+                                expectedMethodRow) != module.ModuleRow
+                            || consumer.Methods.GetBodyRow(
+                                expectedMethodRow) != 0
+                            || consumer.Signatures.GetReceiverTypeSpec(
+                                consumer.Methods.GetSignature(
+                                    expectedMethodRow)) != 0
+                            || consumer.Signatures.GetGenericCount(
+                                consumer.Methods.GetSignature(
+                                    expectedMethodRow)) != 0
+                            || consumer.Contracts.HasConstructionClause(
+                                expectedMethodRow)
+                            || !consumer.Contracts.GetOutputStateContracts(
+                                expectedMethodRow).IsEmpty
+                            || !consumer.Contracts.GetNativeParameters(
+                                expectedMethodRow).IsEmpty
+                            || !consumer.Contracts.GetNativeOutputs(
+                                expectedMethodRow).IsEmpty
+                            || consumer.StandardNativeImports
+                                .HasImportForMethod(expectedMethodRow))
+                        {
+                            throw InvalidBinding();
+                        }
+
+                        var selected = FindModule(
+                            importBinding.ProducerIdentity);
+                        if (selected.ArtifactIndex
+                                == module.ArtifactIndex
+                            && selected.ModuleRow == module.ModuleRow)
+                        {
+                            throw InvalidBinding();
+                        }
+
+                        var provider = GetTables(selected.ArtifactIndex);
+                        if (!StringComparer.Ordinal.Equals(
+                                provider.Modules.GetIdentity(
+                                    selected.ModuleRow),
+                                importBinding.ProducerIdentity)
+                            || provider.Modules.GetRequirements(
+                                selected.ModuleRow)
+                                != (importBinding.TargetRequirement,
+                                    importBinding.RuntimePolicy)
+                            || !provider.Exports.TryGetDefinitionForKey(
+                                selected.ModuleRow, importBinding.ExportKey,
+                                out var providerDefinition)
+                            || (providerDefinition >> 24) != 0x16
+                            || !provider.Exports.TryGetExportRowForKey(
+                                selected.ModuleRow, importBinding.ExportKey,
+                                out _))
+                        {
+                            throw InvalidBinding();
+                        }
+
+                        var providerMethodRow = checked((int)(
+                            providerDefinition & 0x00FF_FFFF));
+                        if (provider.Methods.GetOwnerModule(
+                                providerMethodRow) != selected.ModuleRow
+                            || provider.Methods.GetOwnerType(
+                                providerMethodRow) != 0
+                            || provider.Methods.GetBodyRow(
+                                providerMethodRow) == 0
+                            || provider.Imports.IsExpectedDefinition(
+                                providerDefinition)
+                            || provider.Signatures.GetReceiverTypeSpec(
+                                provider.Methods.GetSignature(
+                                    providerMethodRow)) != 0
+                            || provider.Signatures.GetGenericCount(
+                                provider.Methods.GetSignature(
+                                    providerMethodRow)) != 0
+                            || provider.Contracts.HasConstructionClause(
+                                providerMethodRow)
+                            || !provider.Contracts.GetOutputStateContracts(
+                                providerMethodRow).IsEmpty
+                            || !provider.Contracts.GetNativeParameters(
+                                providerMethodRow).IsEmpty
+                            || !provider.Contracts.GetNativeOutputs(
+                                providerMethodRow).IsEmpty
+                            || provider.StandardNativeImports
+                                .HasImportForMethod(providerMethodRow))
+                        {
+                            throw InvalidBinding();
+                        }
+
+                        var target = (selected.ArtifactIndex,
+                            selected.ModuleRow, providerMethodRow);
+                        var expectedTargetKey = (module.ArtifactIndex,
+                            expectedMethodRow);
+                        if (topLevelMethodTargets.TryGetValue(
+                                expectedTargetKey, out var existingTarget))
+                        {
+                            if (existingTarget != target)
+                            {
+                                throw InvalidBinding();
+                            }
+                        }
+                        else
+                        {
+                            topLevelMethodTargets.Add(expectedTargetKey,
+                                target);
+                        }
+
+                        var methodContext = this;
+                        if (!MethodDeclarationTypesMatch(
+                                ref methodContext, consumer,
+                                module.ArtifactIndex, module.ModuleRow, 0,
+                                expectedMethodRow, provider,
+                                selected.ArtifactIndex, selected.ModuleRow,
+                                0, providerMethodRow, pendingTypes,
+                                compareMethodName: false))
+                        {
+                            throw InvalidBinding();
+                        }
+
+                        _cachedProviderTables
+                            = methodContext._cachedProviderTables;
+                        _cachedProviderArtifactIndex
+                            = methodContext._cachedProviderArtifactIndex;
+                        _hasCachedProviderTables
+                            = methodContext._hasCachedProviderTables;
+                        continue;
+                    }
+
+                    if (consumer.TypeDefs.GetKind(
                             expectedOwnerTypeDefRow) != 2)
                     {
                         continue;
@@ -1240,7 +1388,8 @@ internal static class TrRmFixedArrayProviderBindingValidator
                     providerTables,
                 int providerArtifactIndex, int providerModuleRow,
                 int providerOwnerTypeDefRow, int providerMethodRow,
-                Queue<TypeOriginPair> typePairs)
+                Queue<TypeOriginPair> typePairs,
+                bool compareMethodName = true)
             {
                 var expectedFlags = expectedTables.Methods.GetFlags(
                     expectedMethodRow);
@@ -1254,9 +1403,12 @@ internal static class TrRmFixedArrayProviderBindingValidator
                     .GetGenericCount(expectedSignature);
                 var providerGenericCount = providerTables.Signatures
                     .GetGenericCount(providerSignature);
-                if (!StringComparer.Ordinal.Equals(
-                        expectedTables.Methods.GetName(expectedMethodRow),
-                        providerTables.Methods.GetName(providerMethodRow))
+                if ((compareMethodName
+                        && !StringComparer.Ordinal.Equals(
+                            expectedTables.Methods.GetName(
+                                expectedMethodRow),
+                            providerTables.Methods.GetName(
+                                providerMethodRow)))
                     || expectedFlags != providerFlags
                     || expectedTables.Contracts.GetEffectsMask(
                         expectedMethodRow)
