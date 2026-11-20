@@ -11218,7 +11218,127 @@ public static partial class TrRmExecutableCompiler
 
                     var targetFunction
                         = program.Functions[directCall.Function];
-                    var targetPlans = methodEmissionPlans.Values.Where(plan =>
+                    C1M1ModuleFunctionEmissionPlan[] targetImportPlans
+                        = targetFunction.ModuleImport
+                                is BoundModuleImport targetImport
+                            && targetFunction.IsExternal
+                            && targetFunction.IsModuleReference
+                            ? moduleFunctionEmissionPlans.Values.Where(plan =>
+                                plan.Function is null
+                                && plan.ImportRows.Any(importRow => {
+                                    var binding = rootTables.Imports
+                                        .GetBindingForImportRow(importRow);
+                                    return StringComparer.Ordinal.Equals(
+                                            binding.ProducerIdentity,
+                                            targetImport.ProducerIdentity)
+                                        && StringComparer.Ordinal.Equals(
+                                            binding.ExportKey,
+                                            targetImport.ExportKey)
+                                        && binding.TargetRequirement
+                                            == targetImport.TargetRequirement
+                                        && binding.RuntimePolicy
+                                            == targetImport.RuntimePolicy;
+                                })).ToArray()
+                            : [];
+                    if (targetImportPlans.Length > 1)
+                    {
+                        throw new InvalidDataException(
+                            "A forwarded module function call resolves to multiple retained Import expectations.");
+                    }
+
+                    if (targetImportPlans.Length == 1)
+                    {
+                        var targetPlan = targetImportPlans[0];
+                        var oldTargetMethodRow = targetPlan.MethodDefRow;
+                        var targetMethodRow = methodDefRowMap[
+                            oldTargetMethodRow];
+                        var targetSignatureRow
+                            = rootTables.Methods.GetSignature(
+                                oldTargetMethodRow);
+                        var targetResultTypeSpec
+                            = rootTables.TypeSpecs.GetTypeSpecRef(
+                                rootTables.Signatures
+                                    .GetResultTypeSpec(targetSignatureRow));
+                        if (targetFunction.ReturnType
+                                != PrimitiveType.Void
+                            || targetFunction.ParameterCount != 0
+                            || !targetFunction.Variables.IsEmpty
+                            || !targetFunction.IsModuleReference
+                            || !targetFunction.IsExternal
+                            || targetFunction.RequiresUnsafeCaller
+                            || targetFunction.DoesNotReturn
+                            || !targetFunction.DependencyContracts.IsEmpty
+                            || targetFunction.DirectNativeImport is not null
+                            || targetFunction.NativeVTableMethod is not null
+                            || targetFunction.NativeFunctionPointerType
+                                is not null
+                            || targetFunction.NativeCallableEntryName
+                                is not null
+                            || targetFunction.NativeCallableConvention
+                                is not null
+                            || targetFunction.HasNativeExport
+                            || !directCall.Arguments.IsEmpty
+                            || !directCall.DefaultedArguments.IsDefaultOrEmpty
+                            || directCall.Type != PrimitiveType.Void
+                            || directCall.InterfaceCallIdentity is not null
+                            || directCall.GenericMethodCall is not null
+                            || directCall.ImportedGenericMethodCall is not null
+                            || directCall.IsUnsafeAuthorized
+                            || rootTables.Methods.GetOwnerModule(
+                                oldTargetMethodRow) != rootModuleRow
+                            || rootTables.Methods.GetOwnerType(
+                                oldTargetMethodRow) != 0
+                            || rootTables.Methods.GetBodyRow(
+                                oldTargetMethodRow) != 0
+                            || (rootTables.Methods.GetFlags(
+                                oldTargetMethodRow) & 7) != 2
+                            || rootTables.Signatures
+                                .GetReceiverTypeSpec(targetSignatureRow) != 0
+                            || rootTables.Signatures.GetGenericCount(
+                                targetSignatureRow) != 0
+                            || !IsUnitTypeSpec(rootTables.TypeSpecs,
+                                rootTables.Signatures.GetResultTypeSpec(
+                                    targetSignatureRow))
+                            || rootTables.Signatures.GetParamRange(
+                                targetSignatureRow).Count != 0
+                            || rootTables.Contracts.GetEffectsMask(
+                                oldTargetMethodRow) != 0
+                            || rootTables.Contracts.HasConstructionClause(
+                                oldTargetMethodRow)
+                            || !rootTables.Contracts
+                                .GetOutputStateContracts(oldTargetMethodRow)
+                                .IsEmpty
+                            || !rootTables.Contracts
+                                .GetNativeParameters(oldTargetMethodRow)
+                                .IsEmpty
+                            || !rootTables.Contracts
+                                .GetNativeOutputs(oldTargetMethodRow)
+                                .IsEmpty
+                            || rootTables.NativeImports
+                                .HasImportForMethod(oldTargetMethodRow)
+                            || rootTables.NativeCallables
+                                .HasCallableEntryForMethod(
+                                    oldTargetMethodRow)
+                            || rootTables.NativeVTables
+                                .HasVTableForMethod(oldTargetMethodRow)
+                            || !rootTables.Contracts
+                                .GetDependencyContracts(oldTargetMethodRow)
+                                .IsEmpty
+                            || rootTables.StandardNativeImports
+                                .HasImportForMethod(oldTargetMethodRow)
+                            || targetResultTypeSpec.IsRow)
+                        {
+                            throw Unsupported(
+                                "A local class-reference function can call only a safe, zero-argument, unit-returning forwarded top-level MethodDef.");
+                        }
+
+                        bodyRows.Add(
+                            EncodeC1M1MetadataClassDirectModuleUnitCallBody(
+                                targetMethodRow, schema));
+                    }
+                    else
+                    {
+                        var targetPlans = methodEmissionPlans.Values.Where(plan =>
                             StringComparer.Ordinal.Equals(
                                 targetFunction.Name,
                                 (string.IsNullOrEmpty(plan.Owner.Namespace)
@@ -11226,69 +11346,70 @@ public static partial class TrRmExecutableCompiler
                                     : plan.Owner.Namespace + "."
                                         + plan.Owner.Name)
                                 + "." + plan.Method.Name))
-                        .ToArray();
-                    if (targetPlans.Length != 1)
-                    {
-                        throw Unsupported(
-                            "An ordinary class call requires exactly one retained selected MethodDef view.");
-                    }
+                            .ToArray();
+                        if (targetPlans.Length != 1)
+                        {
+                            throw Unsupported(
+                                "An ordinary class call requires exactly one retained selected MethodDef view.");
+                        }
 
-                    var targetPlan = targetPlans[0];
-                    var oldTargetMethodRow = GetMethodDefRow(
-                        targetPlan.Method.DefinitionId);
-                    if (!methodDefRowMap.TryGetValue(oldTargetMethodRow,
-                            out var targetMethodDefRow))
-                    {
-                        throw new InvalidDataException(
-                            "A selected ordinary class MethodDef has no output row.");
-                    }
+                        var targetPlan = targetPlans[0];
+                        var oldTargetMethodRow = GetMethodDefRow(
+                            targetPlan.Method.DefinitionId);
+                        if (!methodDefRowMap.TryGetValue(oldTargetMethodRow,
+                                out var targetMethodDefRow))
+                        {
+                            throw new InvalidDataException(
+                                "A selected ordinary class MethodDef has no output row.");
+                        }
 
-                    var receiverTypeSpec
-                        = targetPlan.Method.ReceiverTypeSpecReference;
-                    if (receiverTypeSpec == 0
-                        || (targetPlan.Method.Flags & 4) != 0)
-                    {
-                        throw Unsupported(
-                            "This ordinary class-call Body requires an ordinary receiver in the exact Construction-2 schema.");
-                    }
+                        var receiverTypeSpec
+                            = targetPlan.Method.ReceiverTypeSpecReference;
+                        if (receiverTypeSpec == 0
+                            || (targetPlan.Method.Flags & 4) != 0)
+                        {
+                            throw Unsupported(
+                                "This ordinary class-call Body requires an ordinary receiver in the exact Construction-2 schema.");
+                        }
 
-                    var receiverType
-                        = rootTables.TypeSpecs.GetTypeSpecRef(
-                            receiverTypeSpec);
-                    if (!receiverType.IsRow
-                        || receiverType.Form is not (0x02 or 0x03)
-                        || (receiverType.Qualifiers & ~0x01) != 0)
-                    {
-                        throw Unsupported(
-                            "This ordinary class-call Body requires a direct normal class receiver TypeSpec.");
-                    }
+                        var receiverType
+                            = rootTables.TypeSpecs.GetTypeSpecRef(
+                                receiverTypeSpec);
+                        if (!receiverType.IsRow
+                            || receiverType.Form is not (0x02 or 0x03)
+                            || (receiverType.Qualifiers & ~0x01) != 0)
+                        {
+                            throw Unsupported(
+                                "This ordinary class-call Body requires a direct normal class receiver TypeSpec.");
+                        }
 
-                    var targetReturnTypeSpec
-                        = rootTables.TypeSpecs.GetTypeSpecRef(
-                            targetPlan.Method.ReturnTypeSpecReference);
-                    var targetReturnMatches
-                        = function.ReturnType == PrimitiveType.Void
-                            ? !targetReturnTypeSpec.IsRow
-                                && targetReturnTypeSpec.Form == 1
-                                && targetReturnTypeSpec.Qualifiers == 0
-                                && targetReturnTypeSpec.TypeCode == 0
-                            : TryGetC1M1ClassScalarType(rootTables,
-                                targetPlan.Method.ReturnTypeSpecReference,
-                                out var targetReturnType)
-                                && targetReturnType == function.ReturnType;
-                    if (!targetReturnMatches)
-                    {
-                        throw Unsupported(
-                            "This ordinary class-call Body requires a matching unit or fixed-scalar MethodDef result.");
-                    }
+                        var targetReturnTypeSpec
+                            = rootTables.TypeSpecs.GetTypeSpecRef(
+                                targetPlan.Method.ReturnTypeSpecReference);
+                        var targetReturnMatches
+                            = function.ReturnType == PrimitiveType.Void
+                                ? !targetReturnTypeSpec.IsRow
+                                    && targetReturnTypeSpec.Form == 1
+                                    && targetReturnTypeSpec.Qualifiers == 0
+                                    && targetReturnTypeSpec.TypeCode == 0
+                                : TryGetC1M1ClassScalarType(rootTables,
+                                    targetPlan.Method.ReturnTypeSpecReference,
+                                    out var targetReturnType)
+                                    && targetReturnType == function.ReturnType;
+                        if (!targetReturnMatches)
+                        {
+                            throw Unsupported(
+                                "This ordinary class-call Body requires a matching unit or fixed-scalar MethodDef result.");
+                        }
 
-                    bodyRows.Add(
-                        EncodeC1M1MetadataClassDirectCallBody(
-                            function, directCall, targetFunction,
-                            targetPlan, targetMethodDefRow,
-                            (receiverType.Qualifiers & 1) != 0,
-                            program, frozenScalarValueBuilder,
-                            SourceFunctionTypeSpecReference, schema));
+                        bodyRows.Add(
+                            EncodeC1M1MetadataClassDirectCallBody(
+                                function, directCall, targetFunction,
+                                targetPlan, targetMethodDefRow,
+                                (receiverType.Qualifiers & 1) != 0,
+                                program, frozenScalarValueBuilder,
+                                SourceFunctionTypeSpecReference, schema));
+                    }
                 }
 
                 methodRows.Add(new TrRmMethodDefRow(0, 0, signatureRow,
@@ -12386,6 +12507,37 @@ public static partial class TrRmExecutableCompiler
             [new TrRmRegisterBodyBlock(0,
                 checked((uint)code.Length), 0)],
             records, code, contractCount: 0, schema: schema,
+            generalPredicateGraphsInitializationReferenceBodies
+                : schema.UsesGeneralPredicateGraphs());
+    }
+
+    private static byte[] EncodeC1M1MetadataClassDirectModuleUnitCallBody(
+        int targetMethodDefRow, TrRmArtifactSchema schema)
+    {
+        if (!schema.UsesObjectConstruction()
+            || targetMethodDefRow is <= 0 or > 0xFF_FFFF)
+        {
+            throw new ArgumentOutOfRangeException(nameof(targetMethodDefRow));
+        }
+
+        var targetMethodToken
+            = 0x1600_0000u | checked((uint)targetMethodDefRow);
+        var maps = TrRmRegisterBodyMapBuilder.Create([], [
+            targetMethodToken,
+        ]);
+        var callSite = TrRmRegisterBodyRecordWriter.EncodeCallSite(1, 0,
+            maps.GetMethodMapIndex(targetMethodToken), 0, [], [],
+            schema: schema);
+        ReadOnlyMemory<byte>[] records = [
+            new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 },
+            new(callSite),
+        ];
+        var code = new byte[] { 0xE0, 0, 1, 0, 0x18, 0 };
+        return TrRmRegisterBodyWriter.Encode(default, maps.TypeMap,
+            maps.MethodMap, default, default, [
+                new TrRmRegisterBodyBlock(0,
+                    checked((uint)code.Length), 0),
+            ], records, code, contractCount: 0, schema: schema,
             generalPredicateGraphsInitializationReferenceBodies
                 : schema.UsesGeneralPredicateGraphs());
     }

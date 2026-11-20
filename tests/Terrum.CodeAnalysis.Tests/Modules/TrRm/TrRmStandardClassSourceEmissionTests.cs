@@ -5714,6 +5714,125 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
+    public void EmitsAndReemitsUnitCallsToForwardedModuleFunctions()
+    {
+        var providerTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public class Payload {
+                    public int32 Value;
+                    public Payload(int32 value) { Value = value; }
+                }
+                public void Ping() {}
+            }
+            """);
+        var providerCompilation = Compilation.CreateLibrary(providerTree);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var providerProgram = (BoundProgram)providerCompilation.Program!;
+        var providerSchema = C1M1Construction2SchemaIdentity;
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, "UnitFunctionProvider", providerSchema,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], CreateClassExports(providerProgram, providerTree));
+        var providerInput = new TrRmStandardArtifactInput(providerSchema,
+            providerArtifact);
+        var providerReference = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, "UnitFunctionProvider", []);
+
+        var forwarderTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public class Box {
+                    public int32 Value;
+                    public Box(int32 value) { Value = value; }
+                }
+                public void Forward() { Ping(); }
+            }
+            """);
+        var forwarderCompilation = Compilation.CreateLibrary(forwarderTree,
+            providerReference);
+        Assert.That(forwarderCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                forwarderCompilation.Diagnostics));
+        var forwarderProgram = (BoundProgram)forwarderCompilation.Program!;
+        var forwarderArtifact = TrRmExecutableCompiler.EmitStandard(
+            forwarderProgram, "UnitFunctionForwarder", providerSchema,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], CreateClassExports(forwarderProgram, forwarderTree));
+        var forwarderTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                forwarderArtifact,
+                TrRmArtifactSchema.C1M1Construction2Draft));
+        var pingImportRow = Enumerable.Range(1,
+                forwarderTables.Imports.Count)
+            .Single(row => forwarderTables.Imports
+                .GetBindingForImportRow(row).ExportKey == "Ping");
+        var pingExpectedMethodRow = checked((int)(
+            forwarderTables.Imports
+                .GetExpectedDefinitionForImportRow(pingImportRow)
+            & 0x00FF_FFFF));
+        Assert.That(forwarderTables.Exports.TryGetDefinitionForKey(1,
+            "Forward", out var forwardDefinition), Is.True);
+        var forwardMethodRow = checked((int)(
+            forwardDefinition & 0x00FF_FFFF));
+        var forwardBodyRow
+            = forwarderTables.Methods.GetBodyRow(forwardMethodRow);
+        var forwardBody = forwarderTables.Bodies.GetRegisterBody(
+            forwardBodyRow, forwarderTables.Contracts.Count);
+        Assert.That(forwardBody.MethodMap.Length, Is.EqualTo(sizeof(uint)));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                forwardBody.MethodMap),
+            Is.EqualTo(0x1600_0000u
+                | checked((uint)pingExpectedMethodRow)));
+
+        var forwarderReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(providerSchema,
+                    forwarderArtifact),
+                "UnitFunctionForwarder", [providerInput]);
+        var sourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), forwarderReference);
+        Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceFreeCompilation.Diagnostics));
+        var reemitted = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)sourceFreeCompilation.Program!,
+            "UnitFunctionForwarderReemitted", providerSchema,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var reemittedTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                reemitted, TrRmArtifactSchema.C1M1Construction2Draft));
+        var reemittedPingImportRow = Enumerable.Range(1,
+                reemittedTables.Imports.Count)
+            .Single(row => reemittedTables.Imports
+                .GetBindingForImportRow(row).ExportKey == "Ping");
+        var reemittedPingMethodRow = checked((int)(
+            reemittedTables.Imports.GetExpectedDefinitionForImportRow(
+                reemittedPingImportRow) & 0x00FF_FFFF));
+        Assert.That(reemittedTables.Exports.TryGetDefinitionForKey(1,
+            "Forward", out var reemittedForwardDefinition), Is.True);
+        var reemittedForwardRow = checked((int)(
+            reemittedForwardDefinition & 0x00FF_FFFF));
+        var reemittedForwardBody
+            = reemittedTables.Bodies.GetRegisterBody(
+                reemittedTables.Methods.GetBodyRow(reemittedForwardRow),
+                reemittedTables.Contracts.Count);
+        Assert.That(reemittedForwardBody.MethodMap.Length,
+            Is.EqualTo(sizeof(uint)));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                reemittedForwardBody.MethodMap),
+            Is.EqualTo(0x1600_0000u
+                | checked((uint)reemittedPingMethodRow)));
+
+        var downstream = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public void InvokeForward() { Forward(); }
+            """), TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(providerSchema, reemitted),
+                "UnitFunctionForwarderReemitted", [providerInput]));
+        Assert.That(downstream.HasErrors, Is.False,
+            string.Join(Environment.NewLine, downstream.Diagnostics));
+    }
+
+    [Test]
     public void ReemitsForwardedTopLevelMethodImportsAndBindsTheirProvider()
     {
         var schemaIdentity
