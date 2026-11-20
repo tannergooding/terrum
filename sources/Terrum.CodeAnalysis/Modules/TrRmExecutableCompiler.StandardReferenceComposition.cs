@@ -2329,6 +2329,8 @@ public static partial class TrRmExecutableCompiler
                     StandardC1M1Construction2L1R1SchemaIdentity)
                 || StandardGenericMethodSchema.IsCM1ClassParameterDefaults(
                     schemaIdentity)
+                || StandardGenericMethodSchema.IsClassTypeBindingViews(
+                    schemaIdentity)
                 || IsSelectedC1EnumClosureSchemaIdentity(schemaIdentity);
     }
 

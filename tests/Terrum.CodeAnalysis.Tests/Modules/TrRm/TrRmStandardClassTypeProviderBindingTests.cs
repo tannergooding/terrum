@@ -130,6 +130,45 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
             new TrRmArtifactIndex(artifactWithEquality, schema));
     }
 
+    [TestCase(StandardGenericMethodSchema.C1M1Construction2ClassTypeBindingViews)]
+    [TestCase(StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsClassTypeBindingViews)]
+    [TestCase(StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsClassTypeBindingViews)]
+    public void ComposesDistinctClassViewsOfOneProviderType(
+        string schemaIdentity)
+    {
+        var provider = CreateClassArtifact("Provider", "Leaf", "LeafKey",
+            0xF200_0008, schemaIdentity);
+        var rootA = CreateRootArtifact("RootA", "BoxA", "BoxAKey",
+            0xF200_0008, schemaIdentity);
+        var rootB = CreateRootArtifact("RootB", "BoxB", "BoxBKey",
+            0xF200_0008, schemaIdentity);
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            provider);
+        var referenceA = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, rootA), "RootA",
+            [providerInput], ["BoxAKey"]);
+        var referenceB = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, rootB), "RootB",
+            [providerInput], ["BoxBKey"]);
+
+        var composed = TrRmExecutableCompiler.CreateStandardReferenceSet(
+            [referenceA, referenceB]);
+        var leaf = composed.StandardClassDeclarations.Single(
+            static declaration =>
+                declaration.Declaration.Name == "Leaf");
+        Assert.That(leaf.Declaration.Identity.ModuleIdentity,
+            Is.EqualTo("Provider"));
+        Assert.That(leaf.Expectations, Has.Length.EqualTo(2));
+        Assert.That(leaf.Expectations.Select(
+                static expectation =>
+                    expectation.Binding.UsingModule.ModuleIdentity),
+            Is.EquivalentTo(["RootA", "RootB"]));
+        Assert.That(leaf.Expectations.Select(
+                static expectation =>
+                    expectation.Binding.ImportRow),
+            Is.All.EqualTo(1));
+    }
+
     [Test]
     public void BindsImportedClassDeclarationsWithoutExecutableClassLayout()
     {
