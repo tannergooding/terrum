@@ -1784,6 +1784,72 @@ internal sealed class TrRmC1EnumClosureSourceTests
                     .DeclaredCopyEvidence,
                 Is.True, schemaIdentity);
 
+            var relocatedProviderTree = SyntaxTree.Parse("""
+                namespace Demo {
+                    public struct Decoy { public uint8 Byte; }
+                    public struct Payload { public int32 Value; }
+                    public class Anchor {
+                        public int32 Value;
+                        public Anchor(int32 value) { Value = value; }
+                    }
+                }
+                """);
+            var relocatedProviderCompilation
+                = Compilation.CreateLibrary(relocatedProviderTree);
+            Assert.That(relocatedProviderCompilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    relocatedProviderCompilation.Diagnostics));
+            var relocatedProviderProgram
+                = (BoundProgram)relocatedProviderCompilation.Program!;
+            var decoyExport = new TrRmSourceTypeExport("Demo", "Decoy",
+                "type.decoy") {
+                FieldExports = [
+                    new TrRmSourceFieldExport("Byte",
+                        "field.decoy.byte"),
+                ],
+            };
+            var relocatedPayloadExport
+                = new TrRmSourceTypeExport("Demo", "Payload",
+                    "type.payload") {
+                    FieldExports = [
+                        new TrRmSourceFieldExport("Value",
+                            "field.payload.value"),
+                    ],
+                };
+            var relocatedAnchorExport = CreateSourceClassExport(
+                relocatedProviderProgram, relocatedProviderTree, "Anchor",
+                "type.anchor", "constructor.anchor",
+                (0, "field.anchor.value"));
+            var relocatedProviderArtifact
+                = TrRmExecutableCompiler.EmitStandard(
+                    relocatedProviderProgram, "CopyProvider",
+                    schemaIdentity, 1, [decoyExport, relocatedPayloadExport],
+                    [], [relocatedAnchorExport]);
+            var relocatedProviderTables
+                = TrRmStructuralMetadataValidator
+                    .ValidateC1AndGetExecutionTables(
+                        new TrRmArtifactIndex(relocatedProviderArtifact,
+                            SchemaFor(schemaIdentity)));
+            var relocatedPayloadTypeDefRow
+                = Enumerable.Range(1,
+                        relocatedProviderTables.TypeDefs.Count)
+                    .Single(row => relocatedProviderTables.TypeDefs
+                        .GetName(row) == "Payload");
+            Assert.That(relocatedPayloadTypeDefRow,
+                Is.Not.EqualTo(payloadTypeDefRow), schemaIdentity);
+            var relocatedReference
+                = TrRmExecutableCompiler.CreateStandardReference(
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        consumerArtifact),
+                    "CopyConsumer", [
+                        new TrRmStandardArtifactInput(schemaIdentity,
+                            relocatedProviderArtifact),
+                    ], ["type.owner"]);
+            Assert.That(relocatedReference.Structures.Single(
+                    static structure => structure.Name == "Demo.Payload")
+                    .DeclaredCopyEvidence,
+                Is.True, schemaIdentity);
+
             var missingCopyProvider = providerArtifact.ToArray();
             SetTypeDefFlags(missingCopyProvider, payloadTypeDefRow,
                 providerTables.TypeDefs.GetFlags(payloadTypeDefRow) & ~0x20u);
