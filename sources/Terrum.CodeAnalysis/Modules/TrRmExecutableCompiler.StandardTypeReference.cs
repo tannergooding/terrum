@@ -124,6 +124,8 @@ public static partial class TrRmExecutableCompiler
                     StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidenceSchemaIdentity)
                 && !StandardGenericMethodSchema.IsTypeBindingViews(
                     schemaIdentities[0])
+                && !StandardGenericMethodSchema.IsClassTypeBindingViews(
+                    schemaIdentities[0])
                 && !StringComparer.Ordinal.Equals(schemaIdentities[0],
                     StandardC1M1ConstructionL1R1SchemaIdentity)
                 && !StringComparer.Ordinal.Equals(schemaIdentities[0],
@@ -316,10 +318,14 @@ public static partial class TrRmExecutableCompiler
             schemaIdentities[0]);
         var isCM1 = StandardGenericMethodSchema.IsCM1ClassParameterDefaults(
             schemaIdentities[0]);
+        var isClassTypeBindingViews
+            = StandardGenericMethodSchema.IsClassTypeBindingViews(
+                schemaIdentities[0]);
         var isConstruction
             = IsSelectedC1ClassConstructionSchemaIdentity(
                 schemaIdentities[0]);
-        if ((!isEN1 && !isCM1 && !isConstruction
+        if ((!isEN1 && !isCM1 && !isClassTypeBindingViews
+                && !isConstruction
                 && !StringComparer.Ordinal.Equals(schemaIdentities[0],
                     StandardC1M1SchemaIdentity))
             || schemaIdentities.Skip(1).Any(schemaIdentity =>
@@ -2836,6 +2842,8 @@ public static partial class TrRmExecutableCompiler
                 StandardC1M1SchemaIdentity)
             && !StandardGenericMethodSchema
                 .IsCM1ClassParameterDefaults(schemaIdentity)
+            && !StandardGenericMethodSchema
+                .IsClassTypeBindingViews(schemaIdentity)
             && !IsSelectedC1ClassConstructionSchemaIdentity(
                 schemaIdentity)
             && !IsSelectedC1EnumClosureSchemaIdentity(schemaIdentity))

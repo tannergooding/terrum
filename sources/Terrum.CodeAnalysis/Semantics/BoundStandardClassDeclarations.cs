@@ -88,6 +88,8 @@ internal sealed record BoundStandardClassTypeView(
                     "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1")
                 || StandardGenericMethodSchema.IsCM1ClassParameterDefaults(
                     Provider.SchemaIdentity)
+                || StandardGenericMethodSchema.IsClassTypeBindingViews(
+                    Provider.SchemaIdentity)
                 || BoundStandardEnumDeclarationContract
                     .IsSelectedSchemaIdentity(Provider.SchemaIdentity)))
         {
@@ -172,9 +174,14 @@ internal static class BoundStandardClassDeclarationContract
         {
             var selectedImportedClassView
                 = !candidate.Expectations.IsEmpty
-                    && StandardGenericMethodSchema
-                        .IsCM1ClassParameterDefaults(
-                            candidate.Declaration.Provider.SchemaIdentity);
+                    && (StandardGenericMethodSchema
+                            .IsCM1ClassParameterDefaults(
+                                candidate.Declaration.Provider
+                                    .SchemaIdentity)
+                        || StandardGenericMethodSchema
+                            .IsClassTypeBindingViews(
+                                candidate.Declaration.Provider
+                                    .SchemaIdentity));
             if (candidate.Declaration.Identity == instance.Definition
                 && !candidate.SelectedExportKeys.IsEmpty
                 && (candidate.Expectations.IsEmpty
@@ -256,6 +263,9 @@ internal static class BoundStandardClassDeclarationContract
                     && !declaration.SelectedExportKeys.IsEmpty
                     && !StandardGenericMethodSchema
                         .IsCM1ClassParameterDefaults(
+                            declaration.Declaration.Provider.SchemaIdentity)
+                    && !StandardGenericMethodSchema
+                        .IsClassTypeBindingViews(
                             declaration.Declaration.Provider.SchemaIdentity)
                     && !BoundStandardEnumDeclarationContract
                         .IsSelectedClassInstanceLayoutSchemaIdentity(
@@ -504,6 +514,9 @@ internal static class BoundStandardClassDeclarationContract
                 && !StandardGenericMethodSchema
                     .IsCM1ClassParameterDefaults(
                         view.Provider.SchemaIdentity)
+                && !StandardGenericMethodSchema
+                    .IsClassTypeBindingViews(
+                        view.Provider.SchemaIdentity)
                 && !BoundStandardEnumDeclarationContract
                     .IsSelectedSchemaIdentity(
                         view.Provider.SchemaIdentity))
@@ -521,6 +534,9 @@ internal static class BoundStandardClassDeclarationContract
                     C1M1Construction2L1R1SchemaIdentity)
                 || StandardGenericMethodSchema
                     .IsCM1ClassParameterDefaults(
+                        view.Provider.SchemaIdentity)
+                || StandardGenericMethodSchema
+                    .IsClassTypeBindingViews(
                         view.Provider.SchemaIdentity)
                 || BoundStandardEnumDeclarationContract
                     .IsSelectedSchemaIdentity(

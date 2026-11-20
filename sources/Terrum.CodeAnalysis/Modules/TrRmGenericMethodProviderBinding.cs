@@ -642,6 +642,10 @@ public static partial class TrRmExecutableCompiler
                     => TrRmArtifactSchema.C1M1Construction2InitializerCopyEvidenceDraft,
                 StandardC1M1Construction2TypeBindingViewsSchemaIdentity
                     => TrRmArtifactSchema.C1M1Construction2InitializerCopyEvidenceDraft,
+                StandardGenericMethodSchema
+                    .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsClassTypeBindingViews
+                    => TrRmArtifactSchema
+                        .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft,
                 StandardC1M1Construction2L1R1SchemaIdentity
                     => TrRmArtifactSchema
                         .C1M1Construction2ParameterLabelsReceiverAccessDraft,
@@ -661,6 +665,10 @@ public static partial class TrRmExecutableCompiler
                     => TrRmArtifactSchema
                         .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidenceDraft,
                 StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsTypeBindingViewsSchemaIdentity
+                    => TrRmArtifactSchema
+                        .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidenceDraft,
+                StandardGenericMethodSchema
+                    .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsClassTypeBindingViews
                     => TrRmArtifactSchema
                         .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidenceDraft,
                 StandardC1M1ConstructionL1R1PropertyInitializedStateSchemaIdentity

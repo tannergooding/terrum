@@ -43,6 +43,12 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
             classSchemaIdentity);
         var artifact = CreateRelocatedClassProvider(
             "TypeBindingClassProvider", classSchemaIdentity);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(classSchemaIdentity, artifact),
+            "TypeBindingClassProvider", ["PrefixKey", "LeafKey"]);
+        Assert.That(reference.StandardClassDeclarations.Select(
+                static declaration => declaration.Declaration.Name),
+            Is.EquivalentTo(["Leaf", "Prefix"]));
         var sourceTables = TrRmStructuralMetadataValidator
             .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
                 artifact, schema, null,

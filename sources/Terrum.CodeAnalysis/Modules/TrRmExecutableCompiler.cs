@@ -1013,7 +1013,9 @@ public static partial class TrRmExecutableCompiler
                 || StringComparer.Ordinal.Equals(schemaIdentity,
                     StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidenceSchemaIdentity)
                 || StringComparer.Ordinal.Equals(schemaIdentity,
-                    StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsTypeBindingViewsSchemaIdentity);
+                    StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsTypeBindingViewsSchemaIdentity)
+                || StandardGenericMethodSchema.IsClassTypeBindingViews(
+                    schemaIdentity);
         var hasContextualTypeViews
             = program.StandardQuerySourceAssociation
                 is BoundStandardQuerySourceAssociation typeViewAssociation
