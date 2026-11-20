@@ -713,6 +713,42 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
+        var classTypeTablesByProvider = new List<(
+            BoundSourceTypeProviderSnapshot Provider,
+            TrRmStructuralMetadataValidator.ValidatedExecutionTables Tables)>();
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables
+            GetClassTypeTables(BoundSourceTypeProviderSnapshot provider)
+        {
+            foreach (var cached in classTypeTablesByProvider)
+            {
+                if (SameA2SourceTypeProviderSnapshot(cached.Provider,
+                        provider))
+                {
+                    return cached.Tables;
+                }
+            }
+
+            var schema = GetForeignInvocationSchema(
+                provider.SchemaIdentity);
+            var index = new TrRmArtifactIndex(
+                provider.ArtifactSnapshot.ToArray(), schema,
+                standardSchemaIdentity: provider.SchemaIdentity);
+            var tables = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(index);
+            if (provider.ModuleRow <= 0
+                || provider.ModuleRow > tables.Modules.Count
+                || !StringComparer.Ordinal.Equals(
+                    tables.Modules.GetIdentity(provider.ModuleRow),
+                    provider.ModuleIdentity))
+            {
+                throw Invalid(
+                    "A retained class/struct TypeDef provider snapshot lost its Module identity.");
+            }
+
+            classTypeTablesByProvider.Add((provider, tables));
+            return tables;
+        }
+
         for (var referenceIndex = 0;
             referenceIndex < references.Length; referenceIndex++)
         {
@@ -771,6 +807,16 @@ public static partial class TrRmExecutableCompiler
             var visitedClassIdentities
                 = new HashSet<BoundGenericNominalTypeIdentity>();
             var visitedStructureIndexes = new HashSet<int>();
+            var pendingStructIdentities
+                = new Queue<BoundGenericNominalTypeIdentity>(
+                    reference.GenericNominalTypeDefinitions
+                        .Where(static definition =>
+                            definition.NominalKind == 1
+                            && !definition.SelectedExportKeys
+                                .IsDefaultOrEmpty)
+                        .Select(static definition => definition.Identity));
+            var visitedStructIdentities
+                = new HashSet<BoundGenericNominalTypeIdentity>();
 
             void IncludeClassHandleType(PrimitiveType type,
                 BoundSourceTypeProviderSnapshot ownerProvider)
@@ -860,6 +906,8 @@ public static partial class TrRmExecutableCompiler
                     {
                         _ = classFieldStructTypeDependencies.Add(
                             definition.Identity);
+                        pendingStructIdentities.Enqueue(
+                            definition.Identity);
                         if (instance.TypeSpecForm == 0x03
                             && instance.TypeSpecImportRow > 0
                             && instance.TypeSpecProviderIdentity
@@ -934,24 +982,236 @@ public static partial class TrRmExecutableCompiler
                 }
             }
 
-            while (pendingClassIdentities.TryDequeue(
-                out var classIdentity))
+            void IncludeClassTypeSpecDependency(uint typeSpecReference,
+                BoundSourceTypeProviderSnapshot ownerProvider)
             {
-                if (!visitedClassIdentities.Add(classIdentity))
+                var tables = GetClassTypeTables(ownerProvider);
+                var typeSpec = tables.TypeSpecs.GetTypeSpecRef(
+                    typeSpecReference);
+                if (typeSpec.Qualifiers == 0
+                    && (typeSpec.Form is 0x01 or 0x0F)
+                    && TrRmConstantSourceValueValidator
+                        .TryGetBoundScalarType(typeSpec.TypeCode, out _))
+                {
+                    return;
+                }
+
+                if (!typeSpec.IsRow
+                    || typeSpec.Form is not (0x02 or 0x03)
+                    || typeSpec.Qualifiers > 1)
+                {
+                    throw Unsupported(
+                        "A composed struct TypeDef contains an unsupported field TypeSpec.");
+                }
+
+                var expectedTypeDefRow = tables.TypeSpecs
+                    .GetNominalTypeDefRow(typeSpecReference,
+                        tables.TypeDefs, tables.Imports);
+                var expectedDefinitionId = 0x1300_0000u
+                    | checked((uint)expectedTypeDefRow);
+                var nominalKind = tables.TypeDefs.GetKind(
+                    expectedTypeDefRow);
+                if (nominalKind is not (1 or 2))
+                {
+                    throw Unsupported(
+                        "A composed struct field does not reference a class or struct TypeDef.");
+                }
+
+                BoundGenericNominalTypeDefinition? targetDefinition;
+                BoundSourceTypeExpectation? importExpectation = null;
+                BoundSourceTypeProviderSnapshot targetProvider;
+                if (typeSpec.Form == 0x03)
+                {
+                    var importRow = checked((int)typeSpec.Row);
+                    targetDefinition
+                        = reference.GenericNominalTypeDefinitions
+                            .SingleOrDefault(definition =>
+                                definition.ProviderExpectations.Any(
+                                    expectation =>
+                                        expectation.ImportRow == importRow
+                                        && expectation.ExpectedDefinitionId
+                                            == expectedDefinitionId
+                                        && SameA2SourceTypeProviderSnapshot(
+                                            expectation.UsingModule,
+                                            ownerProvider)));
+                    importExpectation = targetDefinition?
+                        .ProviderExpectations.SingleOrDefault(expectation =>
+                            expectation.ImportRow == importRow
+                            && expectation.ExpectedDefinitionId
+                                == expectedDefinitionId
+                            && SameA2SourceTypeProviderSnapshot(
+                                expectation.UsingModule, ownerProvider));
+                    if (targetDefinition is null
+                        || importExpectation is null)
+                    {
+                        throw Unsupported(
+                            "A composed struct field Import is outside the retained TypeDef provider closure.");
+                    }
+
+                    targetProvider = importExpectation.Provider;
+                    if (importExpectation.ProviderDefinitionId
+                        != targetDefinition.Identity.DefinitionId)
+                    {
+                        throw Invalid(
+                            "A composed struct field Import changed its actual TypeDef.");
+                    }
+
+                    AddClassTypeBindingEqualityEndpoint(
+                        targetDefinition.Identity,
+                        new BoundStandardTypeDefBindingEqualityEndpoint(
+                            importExpectation.UsingModule,
+                            importExpectation.ExpectedDefinitionId,
+                            importExpectation.ImportRow,
+                            importExpectation.ExportKey));
+                }
+                else
+                {
+                    if (tables.Imports.IsExpectedDefinition(
+                            expectedDefinitionId))
+                    {
+                        throw Invalid(
+                            "A direct composed struct field cannot name an expected TypeDef stub.");
+                    }
+
+                    var targetModuleRow = tables.TypeDefs.GetOwnerModule(
+                        expectedTypeDefRow);
+                    targetProvider = CreateA2SourceTypeProviderSnapshot(
+                        tables, ownerProvider.ArtifactSnapshot.ToArray(),
+                        ownerProvider.SchemaIdentity, targetModuleRow);
+                    var identity = new BoundGenericNominalTypeIdentity(
+                        targetProvider.ModuleIdentity,
+                        targetProvider.ModuleIdentity,
+                        expectedDefinitionId);
+                    targetDefinition
+                        = reference.GenericNominalTypeDefinitions
+                            .SingleOrDefault(definition =>
+                                definition.Identity == identity);
+                    if (targetDefinition is null)
+                    {
+                        throw Unsupported(
+                            "A direct nested struct TypeDef is outside the retained nominal closure.");
+                    }
+
+                    AddClassTypeBindingEqualityEndpoint(
+                        identity,
+                        new BoundStandardTypeDefBindingEqualityEndpoint(
+                            targetProvider, expectedDefinitionId, 0, null));
+                }
+
+                if (targetDefinition is null)
+                {
+                    throw Unsupported(
+                        "A composed struct field TypeSpec is outside the retained nominal TypeDef closure.");
+                }
+                if (targetDefinition.NominalKind != nominalKind)
+                {
+                    throw Invalid(
+                        "A composed struct field TypeSpec changed its nominal TypeDef kind.");
+                }
+                var retainedProvider = targetDefinition.Provider
+                    ?? targetDefinition.ProviderExpectations
+                        .FirstOrDefault()?.Provider;
+                if (retainedProvider is null
+                    || !SameA2SourceTypeProviderSnapshot(retainedProvider,
+                        targetProvider))
+                {
+                    throw Invalid(
+                        "A composed struct field TypeSpec changed its provider snapshot.");
+                }
+
+                if (nominalKind == 1)
+                {
+                    _ = classFieldStructTypeDependencies.Add(
+                        targetDefinition.Identity);
+                    pendingStructIdentities.Enqueue(
+                        targetDefinition.Identity);
+                }
+                else
+                {
+                    _ = classHandleTypeDependencies.Add(
+                        targetDefinition.Identity);
+                    pendingClassIdentities.Enqueue(
+                        targetDefinition.Identity);
+                }
+            }
+
+            var remainingClassTypeVisits
+                = SemanticVerifier.MaximumAnalysisVisits;
+            while (pendingClassIdentities.Count != 0
+                || pendingStructIdentities.Count != 0)
+            {
+                if (pendingClassIdentities.TryDequeue(
+                        out var classIdentity))
+                {
+                    if (!visitedClassIdentities.Add(classIdentity))
+                    {
+                        continue;
+                    }
+
+                    var declaration
+                        = reference.StandardClassDeclarations
+                            .SingleOrDefault(candidate =>
+                                candidate.Declaration.Identity
+                                == classIdentity)
+                            ?? throw Invalid(
+                                "A selected class handle dependency has no provider declaration view.");
+                    foreach (var field in declaration.Declaration.Fields)
+                    {
+                        if (--remainingClassTypeVisits < 0)
+                        {
+                            throw Unsupported(
+                                "The composed class/struct TypeDef field closure exceeds its traversal limit.");
+                        }
+
+                        IncludeClassHandleType(field.Type,
+                            declaration.Declaration.Provider);
+                    }
+
+                    continue;
+                }
+
+                var structIdentity = pendingStructIdentities.Dequeue();
+                if (!visitedStructIdentities.Add(structIdentity))
                 {
                     continue;
                 }
 
-                var declaration
-                    = reference.StandardClassDeclarations.SingleOrDefault(
-                        candidate =>
-                            candidate.Declaration.Identity == classIdentity)
-                        ?? throw Invalid(
-                            "A selected class handle dependency has no provider declaration view.");
-                foreach (var field in declaration.Declaration.Fields)
+                var structDefinition
+                    = reference.GenericNominalTypeDefinitions
+                        .SingleOrDefault(definition =>
+                            definition.Identity == structIdentity)
+                    ?? throw Invalid(
+                        "A selected struct TypeDef dependency has no nominal definition.");
+                var structProvider = structDefinition.Provider
+                    ?? structDefinition.ProviderExpectations
+                        .FirstOrDefault()?.Provider
+                    ?? throw Invalid(
+                        "A selected struct TypeDef dependency lost its provider snapshot.");
+                var tables = GetClassTypeTables(structProvider);
+                var typeDefRow = checked((int)(
+                    structDefinition.Identity.DefinitionId & 0x00FF_FFFF));
+                if (tables.TypeDefs.GetKind(typeDefRow) != 1
+                    || tables.TypeDefs.GetOwnerModule(typeDefRow)
+                        != structProvider.ModuleRow)
                 {
-                    IncludeClassHandleType(field.Type,
-                        declaration.Declaration.Provider);
+                    throw Invalid(
+                        "A selected struct TypeDef identity does not match its provider Module.");
+                }
+
+                var (fieldStart, fieldEnd)
+                    = tables.TypeDefs.GetFieldRange(typeDefRow);
+                for (var fieldRow = fieldStart; fieldRow < fieldEnd;
+                    fieldRow++)
+                {
+                    if (--remainingClassTypeVisits < 0)
+                    {
+                        throw Unsupported(
+                            "The composed class/struct TypeDef field closure exceeds its traversal limit.");
+                    }
+
+                    IncludeClassTypeSpecDependency(
+                        tables.Fields.GetTypeSpecRef(fieldRow),
+                        structProvider);
                 }
             }
         }

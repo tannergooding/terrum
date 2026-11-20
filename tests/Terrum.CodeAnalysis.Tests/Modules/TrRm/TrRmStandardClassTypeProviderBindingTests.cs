@@ -267,6 +267,51 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
         StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsClassTypeBindingViews)]
     [TestCase(
         StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsClassTypeBindingViews)]
+    public void ComposesNestedDirectStructClosureFromStructRoot(
+        string schemaIdentity)
+    {
+        var classProvider = CreateClassArtifact("ClassProvider", "Box",
+            "BoxKey", 0xF200_0008, schemaIdentity);
+        var structProvider = CreateArtifact("StructProvider", "Leaf",
+            "LeafKey", 0, schemaIdentity, null, null, null,
+            localDependencyTypeName: "Inner");
+        SetTypeDefFlags(structProvider, 0x06, typeDefRow: 1);
+        SetTypeDefFlags(structProvider, 0x06, typeDefRow: 2);
+
+        var classReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    classProvider),
+                "ClassProvider", [], ["BoxKey"]);
+        var structReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    structProvider),
+                "StructProvider", [], ["LeafKey"]);
+        var composed = TrRmExecutableCompiler.CreateStandardReferenceSet(
+            [classReference, structReference]);
+        var structDefinitions = composed.GenericNominalTypeDefinitions
+            .Where(static definition => definition.NominalKind == 1)
+            .ToArray();
+        Assert.That(structDefinitions.Select(
+                static definition => definition.Name),
+            Is.EquivalentTo(["Leaf", "Inner"]));
+        Assert.That(structDefinitions.Single(
+                static definition => definition.Name == "Leaf")
+                .SelectedExportKeys,
+            Is.EqualTo(["LeafKey"]));
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public void Use(Box box, Leaf leaf) {}"), composed);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsClassTypeBindingViews)]
     public void ReemitsSelectedDirectStructRootsWithClassViews(
         string schemaIdentity)
     {

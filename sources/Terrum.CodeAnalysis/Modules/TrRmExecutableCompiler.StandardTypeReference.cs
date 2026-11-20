@@ -752,6 +752,8 @@ public static partial class TrRmExecutableCompiler
         var pendingLocalClassTypeDefRows = new Queue<int>();
         var directStructTypeDefRows = new SortedSet<int>();
         var pendingDirectStructTypeDefRows = new Queue<int>();
+        var importedStructTypeDefIdentities
+            = new HashSet<BoundGenericNominalTypeIdentity>();
         var selectedPackedClassTypeKeys
             = new Dictionary<int, List<string>>();
         foreach (var typeDefRow in selectedTypeDefs.Keys)
@@ -1098,7 +1100,8 @@ public static partial class TrRmExecutableCompiler
                         "The C1 class TypeSpec closure imports an unsupported TypeDef kind.");
                 }
 
-                if (createsClassTypeBindingEquality && expectedKind == 2)
+                if (createsClassTypeBindingEquality
+                    && (expectedKind is 1 or 2))
                 {
                     var importBindings = typeProviderBindings.Where(binding =>
                             binding.ConsumerArtifactIndex == 0
@@ -1122,6 +1125,11 @@ public static partial class TrRmExecutableCompiler
                         = new BoundGenericNominalTypeIdentity(
                             providerModule.Identity, providerModule.Identity,
                             importBinding.ProviderDefinitionId);
+                    if (expectedKind == 1)
+                    {
+                        _ = importedStructTypeDefIdentities.Add(
+                            actualIdentity);
+                    }
                     AddClassTypeBindingEqualityEndpoint(actualIdentity,
                         new BoundStandardTypeDefBindingEqualityEndpoint(
                             rootSnapshot, expectedDefinitionId, importRow,
@@ -1671,6 +1679,259 @@ public static partial class TrRmExecutableCompiler
 
         if (createsClassTypeBindingEquality)
         {
+            var pendingStructIdentities
+                = new Queue<BoundGenericNominalTypeIdentity>();
+            foreach (var typeDefRow in directStructTypeDefRows)
+            {
+                var providerModuleRow = rootTables.TypeDefs
+                    .GetOwnerModule(typeDefRow);
+                var moduleIdentity = rootTables.Modules.GetIdentity(
+                    providerModuleRow);
+                pendingStructIdentities.Enqueue(
+                    new BoundGenericNominalTypeIdentity(moduleIdentity,
+                        moduleIdentity,
+                        0x1300_0000u | checked((uint)typeDefRow)));
+            }
+            foreach (var identity in importedStructTypeDefIdentities)
+            {
+                pendingStructIdentities.Enqueue(identity);
+            }
+
+            {
+                var visitedStructIdentities
+                    = new HashSet<BoundGenericNominalTypeIdentity>();
+                var remainingStructTypeVisits
+                    = SemanticVerifier.MaximumAnalysisVisits;
+
+                void VisitStructFieldTypeSpec(
+                    TrRmStructuralMetadataValidator.ValidatedExecutionTables
+                        tables,
+                    int artifactIndex, int ownerModuleRow,
+                    BoundSourceTypeProviderSnapshot ownerSnapshot,
+                    uint typeSpecReference, int depth)
+                {
+                    if (depth > SemanticVerifier.MaximumDepth
+                        || --remainingStructTypeVisits < 0)
+                    {
+                        throw Unsupported(
+                            "The C1 class inline-struct TypeDef closure exceeds its traversal limit.");
+                    }
+
+                    var typeSpec = tables.TypeSpecs.GetTypeSpecRef(
+                        typeSpecReference);
+                    if (typeSpec.Form == 0x06 && typeSpec.Qualifiers == 0)
+                    {
+                        var row = tables.TypeSpecs.GetRow(typeSpec.Row);
+                        VisitStructFieldTypeSpec(tables, artifactIndex,
+                            ownerModuleRow, ownerSnapshot,
+                            BinaryPrimitives.ReadUInt32LittleEndian(row[2..]),
+                            depth + 1);
+                        return;
+                    }
+
+                    if (typeSpec.Qualifiers == 0
+                        && (typeSpec.Form is 0x01 or 0x0F)
+                        && TrRmConstantSourceValueValidator
+                            .TryGetBoundScalarType(typeSpec.TypeCode, out _))
+                    {
+                        return;
+                    }
+
+                    if (!typeSpec.IsRow
+                        || typeSpec.Form is not (0x02 or 0x03)
+                        || typeSpec.Qualifiers > 1)
+                    {
+                        throw Unsupported(
+                            "The C1 class inline-struct closure contains an unsupported field TypeSpec.");
+                    }
+
+                    var expectedTypeDefRow = tables.TypeSpecs
+                        .GetNominalTypeDefRow(typeSpecReference,
+                            tables.TypeDefs, tables.Imports);
+                    var expectedDefinitionId = 0x1300_0000u
+                        | checked((uint)expectedTypeDefRow);
+                    var nominalKind = tables.TypeDefs.GetKind(
+                        expectedTypeDefRow);
+                    if (nominalKind is not (1 or 2))
+                    {
+                        throw Unsupported(
+                            "The C1 class inline-struct closure contains an unsupported nominal TypeDef.");
+                    }
+
+                    int actualArtifactIndex;
+                    int actualModuleRow;
+                    int actualTypeDefRow;
+                    uint actualDefinitionId;
+                    BoundSourceTypeProviderSnapshot actualSnapshot;
+                    BoundGenericNominalTypeIdentity actualIdentity;
+                    if (typeSpec.Form == 0x03)
+                    {
+                        var importRow = checked((int)typeSpec.Row);
+                        var importBindings = typeProviderBindings.Where(
+                                binding =>
+                                    binding.ConsumerArtifactIndex == artifactIndex
+                                    && binding.ConsumerModuleRow
+                                        == ownerModuleRow
+                                    && binding.ImportRow == importRow
+                                    && binding.ExpectedTypeDefRow
+                                        == expectedTypeDefRow)
+                            .ToArray();
+                        if (importBindings.Length != 1)
+                        {
+                            throw Invalid(
+                                "A nested struct field TypeSpec has no unique checked TypeDef Import.");
+                        }
+
+                        var binding = importBindings[0];
+                        actualArtifactIndex = binding.ProviderArtifactIndex;
+                        actualModuleRow = binding.ProviderModuleRow;
+                        actualTypeDefRow = binding.ProviderTypeDefRow;
+                        actualDefinitionId = binding.ActualDefinitionId;
+                        actualSnapshot = GetSnapshot(actualArtifactIndex,
+                            actualModuleRow);
+                        actualIdentity = new BoundGenericNominalTypeIdentity(
+                            actualSnapshot.ModuleIdentity,
+                            actualSnapshot.ModuleIdentity,
+                            actualDefinitionId);
+                        AddClassTypeBindingEqualityEndpoint(actualIdentity,
+                            new BoundStandardTypeDefBindingEqualityEndpoint(
+                                ownerSnapshot, expectedDefinitionId, importRow,
+                                binding.ExportKey));
+                    }
+                    else
+                    {
+                        if (tables.Imports.IsExpectedDefinition(
+                                expectedDefinitionId))
+                        {
+                            throw Invalid(
+                                "A direct nested struct TypeSpec cannot name an expected TypeDef stub.");
+                        }
+
+                        actualArtifactIndex = artifactIndex;
+                        actualModuleRow = tables.TypeDefs.GetOwnerModule(
+                            expectedTypeDefRow);
+                        actualTypeDefRow = expectedTypeDefRow;
+                        actualDefinitionId = expectedDefinitionId;
+                        actualSnapshot = GetSnapshot(actualArtifactIndex,
+                            actualModuleRow);
+                        actualIdentity = new BoundGenericNominalTypeIdentity(
+                            actualSnapshot.ModuleIdentity,
+                            actualSnapshot.ModuleIdentity,
+                            actualDefinitionId);
+                        AddClassTypeBindingEqualityEndpoint(actualIdentity,
+                            new BoundStandardTypeDefBindingEqualityEndpoint(
+                                actualSnapshot, actualDefinitionId, 0, null));
+                    }
+
+                    if (actualSnapshot.SchemaIdentity
+                            != schemaIdentities[actualArtifactIndex])
+                    {
+                        throw Invalid(
+                            "A nested struct field provider changed its exact schema selection.");
+                    }
+
+                    if (!definitionsByIdentity.ContainsKey(actualIdentity))
+                    {
+                        var actualTables = GetC1M1Tables(artifacts,
+                            schemaIdentities, actualArtifactIndex);
+                        AddTypeDefinition(typeDefinitions,
+                            definitionsByIdentity, bindingsByActualType,
+                            actualTables, actualSnapshot.ModuleIdentity,
+                            actualModuleRow, actualTypeDefRow, actualSnapshot);
+                    }
+
+                    if (nominalKind == 2
+                        && !classDeclarations.Any(declaration =>
+                            declaration.Declaration.Identity
+                                == actualIdentity))
+                    {
+                        var actualTables = GetC1M1Tables(artifacts,
+                            schemaIdentities, actualArtifactIndex);
+                        var classView = CreateStandardClassTypeView(
+                            actualTables, actualIdentity, actualSnapshot,
+                            actualTypeDefRow);
+                        ImmutableArray<BoundStandardClassExpectation>
+                            expectations
+                            = classExpectationsByActualType.TryGetValue(
+                                actualIdentity, out var actualExpectations)
+                                ? [.. actualExpectations]
+                                : [];
+                        classDeclarations.Add(
+                            new BoundStandardClassDeclaration(classView,
+                                GetStandardTypeExportKeys(actualTables,
+                                    actualModuleRow, actualTypeDefRow),
+                                expectations));
+                        _ = classIdentities.Add(actualIdentity);
+                    }
+
+                    if (nominalKind == 1)
+                    {
+                        if (!visitedStructIdentities.Contains(actualIdentity))
+                        {
+                            pendingStructIdentities.Enqueue(actualIdentity);
+                        }
+                    }
+                }
+
+                while (pendingStructIdentities.TryDequeue(
+                    out var structIdentity))
+                {
+                    if (!visitedStructIdentities.Add(structIdentity))
+                    {
+                        continue;
+                    }
+
+                    if (!definitionsByIdentity.TryGetValue(structIdentity,
+                            out var definitionIndex))
+                    {
+                        throw Invalid(
+                            "A nested struct TypeDef lost its nominal definition carrier.");
+                    }
+
+                    var definition = typeDefinitions[definitionIndex];
+                    var provider = definition.Provider
+                        ?? definition.ProviderExpectations.FirstOrDefault()
+                            ?.Provider
+                        ?? throw Invalid(
+                            "A nested struct TypeDef lost its provider snapshot.");
+                    var providerModule = moduleValidation.Modules.Single(
+                        module => module.ModuleRow == provider.ModuleRow
+                            && StringComparer.Ordinal.Equals(module.Identity,
+                                provider.ModuleIdentity)
+                            && StringComparer.Ordinal.Equals(
+                                schemaIdentities[module.ArtifactIndex],
+                                provider.SchemaIdentity)
+                            && artifacts[module.ArtifactIndex].AsSpan()
+                                .SequenceEqual(
+                                    provider.ArtifactSnapshot.AsSpan()));
+                    var providerTables = GetC1M1Tables(artifacts,
+                        schemaIdentities, providerModule.ArtifactIndex);
+                    var typeDefRow = checked((int)(
+                        structIdentity.DefinitionId & 0x00FF_FFFF));
+                    if (providerTables.TypeDefs.GetKind(typeDefRow) != 1
+                        || providerTables.TypeDefs.GetOwnerModule(typeDefRow)
+                            != provider.ModuleRow)
+                    {
+                        throw Invalid(
+                            "A nested struct TypeDef identity does not match its provider Module.");
+                    }
+
+                    var (fieldStart, fieldEnd)
+                        = providerTables.TypeDefs.GetFieldRange(typeDefRow);
+                    for (var fieldRow = fieldStart; fieldRow < fieldEnd;
+                        fieldRow++)
+                    {
+                        VisitStructFieldTypeSpec(providerTables,
+                            providerModule.ArtifactIndex, provider.ModuleRow,
+                            provider,
+                            providerTables.Fields.GetTypeSpecRef(fieldRow), 0);
+                    }
+                }
+            }
+        }
+
+        if (createsClassTypeBindingEquality)
+        {
             var equalityTable = rootTables.TypeDefBindingEqualities;
             var equalityGraphs = new Dictionary<(
                 int OwnerModuleRow,
@@ -2089,6 +2350,10 @@ public static partial class TrRmExecutableCompiler
 
         if (isClassTypeBindingViews)
         {
+            var decodedStructTypeIdentities
+                = new HashSet<BoundGenericNominalTypeIdentity>();
+            var remainingClassFieldTypeVisits
+                = SemanticVerifier.MaximumAnalysisVisits;
             var classFieldTypeSpecInstanceIndexes = new Dictionary<(
                 BoundGenericNominalTypeIdentity Identity,
                 string TypeSpecProviderIdentity,
@@ -2113,6 +2378,12 @@ public static partial class TrRmExecutableCompiler
                 for (var fieldIndex = 0; fieldIndex < fields.Count;
                     fieldIndex++)
                 {
+                    if (--remainingClassFieldTypeVisits < 0)
+                    {
+                        throw Unsupported(
+                            "The C1 class/struct FieldDef TypeSpec closure exceeds its traversal limit.");
+                    }
+
                     var field = fields[fieldIndex];
                     var typeSpec = tables.TypeSpecs.GetTypeSpecRef(
                         field.TypeSpecReference);
@@ -2255,6 +2526,14 @@ public static partial class TrRmExecutableCompiler
                     {
                         throw Unsupported(
                             "A writable class field TypeSpec requires a mutable class provider.");
+                    }
+                    if (nominalKind == 1
+                        && decodedStructTypeIdentities.Add(identity))
+                    {
+                        var structView = CreateStandardClassTypeView(
+                            actualTables, identity, actualSnapshot,
+                            actualTypeDefRow);
+                        _ = DecodeClassFieldTypes(structView);
                     }
 
                     var key = (identity, view.Provider.ModuleIdentity,
