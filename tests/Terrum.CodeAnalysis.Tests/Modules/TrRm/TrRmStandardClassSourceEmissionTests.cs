@@ -5911,6 +5911,76 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
+    public void LinksTopLevelConstruction2MethodImportsWithClassHandleTypes()
+    {
+        var schemaIdentity
+            = C1M1Construction2ClassParameterDefaultsCopyEvidenceSchemaIdentity;
+        var providerTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public class Marker { }
+                public int32 Read(Marker value) { return 7; }
+            }
+            """);
+        var providerCompilation = Compilation.CreateLibrary(providerTree);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var providerProgram = (BoundProgram)providerCompilation.Program!;
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, "ClassMethodProvider", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], CreateClassExports(providerProgram, providerTree));
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var providerReference
+            = TrRmExecutableCompiler.CreateStandardReference(providerInput,
+                "ClassMethodProvider", []);
+
+        var consumerTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public int32 Forward(Marker value) {
+                    return Read(value);
+                }
+            }
+            """);
+        var consumerCompilation = Compilation.CreateLibrary(consumerTree,
+            providerReference);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerProgram = (BoundProgram)consumerCompilation.Program!;
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            consumerProgram, "ClassMethodConsumer", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], CreateClassExports(consumerProgram, consumerTree));
+        var consumerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            consumerArtifact);
+        var loaded = TrRmExecutableCompiler.LoadStandard(consumerInput,
+            "ClassMethodConsumer", [providerInput]);
+
+        var forward = loaded.Functions.Single(
+            static function => function.Name == "Forward");
+        var call = (BoundCall)((BoundReturn)forward.Body.Statements.Single())
+            .Value!;
+        var target = loaded.Functions[call.Function];
+        Assert.That(target.IsExternal, Is.False);
+        Assert.That(call.Arguments[0].Type,
+            Is.EqualTo(forward.Variables[0].Type));
+        Assert.That(BoundGenericNominalTypeTypes.IsType(
+                forward.Variables[0].Type),
+            Is.True);
+        var classIdentity = loaded.GenericNominalTypeInstances[
+            BoundGenericNominalTypeTypes.Index(
+                forward.Variables[0].Type)].Definition;
+        Assert.That(classIdentity.ProviderIdentity,
+            Is.EqualTo("ClassMethodProvider"));
+        Assert.That(classIdentity.ModuleIdentity,
+            Is.EqualTo("ClassMethodProvider"));
+        Assert.That(loaded.StandardClassDeclarations.Any(declaration =>
+                declaration.Declaration.Identity == classIdentity),
+            Is.True);
+    }
+
+    [Test]
     public void EmitsAndReemitsUnitCallsToForwardedModuleFunctions()
     {
         var providerTree = SyntaxTree.Parse("""

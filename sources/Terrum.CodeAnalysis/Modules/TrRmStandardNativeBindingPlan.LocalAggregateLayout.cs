@@ -11,6 +11,16 @@ namespace Terrum.CodeAnalysis.Modules;
 
 internal sealed partial class TrRmStandardNativeBindingPlan
 {
+    internal static BoundProgram BuildConstruction2MethodProviderClosure(
+        BoundStandardMethodProviderClosure closure)
+        => new LocalAggregateLayoutNativeProgramBuilder(closure,
+            initializationReferenceLocalFieldLayout: false,
+            nestedInitializationReferenceFieldDestinations: false,
+            generalPredicateGraphsInitializationReferenceBodies: false,
+            standardNativePointerLoads: false,
+            nativeParameterContracts: false,
+            construction2MethodLinking: true).Build();
+
     private BoundProgram CreateLocalAggregateLayoutLoweringProgram(
         bool initializationReferenceLocalFieldLayout = false,
         bool nestedInitializationReferenceFieldDestinations = false,
@@ -230,6 +240,7 @@ internal sealed partial class TrRmStandardNativeBindingPlan
             _generalPredicateGraphsInitializationReferenceBodies;
         private readonly bool _standardNativePointerLoads;
         private readonly bool _nativeParameterContracts;
+        private readonly bool _construction2MethodLinking;
         private readonly ModuleOrigin _root;
         private readonly Dictionary<ModuleOrigin, BoundStandardMethodProviderModule> _modules = [];
         private readonly Dictionary<MethodOrigin, int> _methods = [];
@@ -256,7 +267,8 @@ internal sealed partial class TrRmStandardNativeBindingPlan
             bool nestedInitializationReferenceFieldDestinations,
             bool generalPredicateGraphsInitializationReferenceBodies,
             bool standardNativePointerLoads,
-            bool nativeParameterContracts)
+            bool nativeParameterContracts,
+            bool construction2MethodLinking = false)
         {
             _closure = closure;
             _initializationReferenceLocalFieldLayout
@@ -267,6 +279,7 @@ internal sealed partial class TrRmStandardNativeBindingPlan
                 = generalPredicateGraphsInitializationReferenceBodies;
             _standardNativePointerLoads = standardNativePointerLoads;
             _nativeParameterContracts = nativeParameterContracts;
+            _construction2MethodLinking = construction2MethodLinking;
             _root = new ModuleOrigin(closure.RootArtifactIndex,
                 closure.RootModuleRow);
         }
@@ -278,7 +291,11 @@ internal sealed partial class TrRmStandardNativeBindingPlan
             foreach (var artifact in _closure.Artifacts)
             {
                 var artifactIndex
-                    = _nativeParameterContracts
+                    = _construction2MethodLinking
+                    ? TrRmExecutableCompiler.CreateForeignInvocationIndex(
+                        artifact.ArtifactSnapshot.ToArray(),
+                        artifact.SchemaIdentity)
+                    : _nativeParameterContracts
                     ? _generalPredicateGraphsInitializationReferenceBodies
                         ? TrRmArtifactIndex
                             .ForInitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft(
@@ -307,7 +324,12 @@ internal sealed partial class TrRmStandardNativeBindingPlan
                     : TrRmArtifactIndex.ForLocalAggregateLayoutDraft(
                         artifact.ArtifactSnapshot.AsSpan());
                 var tables
-                    = _nativeParameterContracts
+                    = _construction2MethodLinking
+                    ? TrRmExecutableCompiler
+                        .ValidateForeignInvocationArtifact(artifactIndex,
+                        artifact.SchemaIdentity,
+                        createA3ResourceLedger: false)
+                    : _nativeParameterContracts
                     ? _generalPredicateGraphsInitializationReferenceBodies
                         ? TrRmStructuralMetadataValidator
                             .ValidateInitializationReferenceGeneralPredicatePointerLoadNativeParameterDraftAndGetExecutionTables(
@@ -331,19 +353,30 @@ internal sealed partial class TrRmStandardNativeBindingPlan
                     var location = Location(module);
                     _modules.Add(location, module);
                     ValidateProgram(module.Program,
-                        _initializationReferenceLocalFieldLayout
+                        _construction2MethodLinking
+                            || _initializationReferenceLocalFieldLayout
                             || _generalPredicateGraphsInitializationReferenceBodies
                             || _standardNativePointerLoads,
                         _standardNativePointerLoads,
-                        _nativeParameterContracts);
+                        _nativeParameterContracts,
+                        _construction2MethodLinking);
                     var (typeStart, typeEnd) = tables.Modules.GetTypeDefRange(
                         module.ModuleRow);
-                    if (typeEnd - typeStart != module.Program.Structures.Length)
+                    if (!_construction2MethodLinking
+                        && typeEnd - typeStart
+                            != module.Program.Structures.Length)
                     {
                         throw new InvalidDataException(
                             "The L1 native type map lost its Module-owned TypeDef range.");
                     }
-                    for (var index = 0; index < module.Program.Structures.Length; index++)
+                    if (_construction2MethodLinking
+                        && !module.Program.Structures.IsEmpty)
+                    {
+                        throw new NotSupportedException(
+                            "Construction-2 Method linking initially requires class-handle and scalar types without value-struct remapping.");
+                    }
+                    for (var index = 0; !_construction2MethodLinking
+                        && index < module.Program.Structures.Length; index++)
                     {
                         _declarations.Add(new TypeOrigin(location,
                             0x1300_0000u | checked((uint)(typeStart + index))),
@@ -396,6 +429,36 @@ internal sealed partial class TrRmStandardNativeBindingPlan
                 var actual = new TypeOrigin(new ModuleOrigin(
                     edge.ProviderArtifactIndex, edge.ProviderModuleRow),
                     edge.ActualDefinitionId);
+                if (_construction2MethodLinking)
+                {
+                    var actualModule = _modules[actual.Module];
+                    var actualIdentity
+                        = new BoundGenericNominalTypeIdentity(
+                            actualModule.Identity, actualModule.Identity,
+                            edge.ActualDefinitionId);
+                    var expectedModule = _modules[expected.Module];
+                    var expectedIdentity
+                        = new BoundGenericNominalTypeIdentity(
+                            expectedModule.Identity,
+                            expectedModule.Identity,
+                            edge.ExpectedDefinitionId);
+                    var classDeclaration
+                        = actualModule.Program.StandardClassDeclarations
+                            .SingleOrDefault(declaration =>
+                                declaration.Declaration.Identity
+                                    == actualIdentity);
+                    if (classDeclaration is null
+                        || !classDeclaration.Expectations.Any(
+                            expectation => expectation.ExpectedDeclaration
+                                .Identity == expectedIdentity))
+                    {
+                        throw new InvalidDataException(
+                            "A Construction-2 class TypeDef Import has no matching checked nominal provider view.");
+                    }
+
+                    continue;
+                }
+
                 if (_typeProviders.TryGetValue(expected, out var previous)
                     && previous != actual)
                 {
@@ -538,15 +601,20 @@ internal sealed partial class TrRmStandardNativeBindingPlan
         private static void ValidateProgram(BoundProgram program,
             bool supportsCheckedReferenceTypes,
             bool standardNativePointerLoads,
-            bool nativeParameterContracts)
+            bool nativeParameterContracts,
+            bool construction2MethodLinking)
         {
             if (program.RuntimePolicy != BoundRuntimePolicy.FailFast
                 || !program.Classes.IsEmpty || !program.Buffers.IsEmpty
                 || !program.NativeFunctionPointerSignatures.IsEmpty
                 || (!supportsCheckedReferenceTypes
                     && !program.CheckedReferenceTypes.IsEmpty)
-                || !program.GenericNominalTypeDefinitions.IsEmpty
-                || !program.GenericNominalTypeInstances.IsEmpty
+                || (!construction2MethodLinking
+                    && !program.GenericNominalTypeDefinitions.IsEmpty)
+                || (!construction2MethodLinking
+                    && !program.GenericNominalTypeInstances.IsEmpty)
+                || (!construction2MethodLinking
+                    && !program.StandardClassDeclarations.IsEmpty)
                 || !program.Interfaces.IsEmpty || !program.EnumDefinitions.IsEmpty
                 || program.RequiresSourceGrant
                 || program.Functions.Any(static function =>
@@ -620,6 +688,12 @@ internal sealed partial class TrRmStandardNativeBindingPlan
             BoundStandardMethodProviderModule module, PrimitiveType type,
             int depth = 0)
         {
+            if (_construction2MethodLinking
+                && BoundGenericNominalTypeTypes.IsType(type))
+            {
+                return type;
+            }
+
             var origin = new LocalTypeOrigin(Location(module), type);
             if (_types.TryGetValue(origin, out var mapped))
             {

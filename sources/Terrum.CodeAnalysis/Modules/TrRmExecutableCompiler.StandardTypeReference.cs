@@ -291,7 +291,8 @@ public static partial class TrRmExecutableCompiler
             selectedImportedClassTypeKeys = default,
         bool allowClassLayoutQueryBody = false,
         bool resolveAllClassFieldTypes = false,
-        bool includeModuleFunctions = false)
+        bool includeModuleFunctions = false,
+        bool allowModuleEntryPointForRuntimeLinking = false)
     {
         var isEN1 = IsSelectedC1EnumClosureSchemaIdentity(
             schemaIdentities[0]);
@@ -355,7 +356,8 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        if (rootTables.Modules.GetEntryMethod(rootModuleRow) != 0
+        if ((!allowModuleEntryPointForRuntimeLinking
+                && rootTables.Modules.GetEntryMethod(rootModuleRow) != 0)
             || (hasUnsupportedClassMethod && !allowClassLayoutQueryBody
                 && !isCM1 && !isConstruction))
         {
@@ -2708,7 +2710,7 @@ public static partial class TrRmExecutableCompiler
         return tables;
     }
 
-    private static bool IsSelectedC1ClassConstructionSchemaIdentity(
+    internal static bool IsSelectedC1ClassConstructionSchemaIdentity(
         string schemaIdentity)
         => schemaIdentity is
             StandardC1M1Construction2SchemaIdentity

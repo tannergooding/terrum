@@ -3284,7 +3284,9 @@ public static partial class TrRmExecutableCompiler
         int[] structureTypeByTypeDef,
         List<CheckedReferenceTypeDefinition> checkedReferenceTypes,
         Dictionary<CheckedReferenceTypeDefinition, int>
-            checkedReferenceTypeIndexes)
+            checkedReferenceTypeIndexes,
+        IReadOnlyDictionary<uint, PrimitiveType>?
+            nominalClassTypesByTypeSpecReference = null)
     {
         if (index >= body.TypeCount)
         {
@@ -3296,7 +3298,8 @@ public static partial class TrRmExecutableCompiler
         return FromNativeValueRow(typeSpecs,
             NormalizeStandardRegisteredQueryTypeSpecRef(typeSpecRef),
             nativePointerTypes, structureTypeByTypeDef, imports,
-            checkedReferenceTypes, checkedReferenceTypeIndexes);
+            checkedReferenceTypes, checkedReferenceTypeIndexes,
+            nominalClassTypesByTypeSpecReference);
     }
 
     private static BoundFieldRead DecodeStandardInitializationFieldPath(
@@ -3312,12 +3315,15 @@ public static partial class TrRmExecutableCompiler
         int[] structureTypeByTypeDef,
         List<CheckedReferenceTypeDefinition> checkedReferenceTypes,
         Dictionary<CheckedReferenceTypeDefinition, int>
-            checkedReferenceTypeIndexes)
+            checkedReferenceTypeIndexes,
+        IReadOnlyDictionary<uint, PrimitiveType>?
+            nominalClassTypesByTypeSpecReference = null)
     {
         var rootTypeSpecRef = fieldPaths.GetRootTypeSpecRef(fieldPathRow);
         var resolvedRootType = FromNativeValueRow(typeSpecs,
             rootTypeSpecRef, nativePointerTypes, structureTypeByTypeDef,
-            imports, checkedReferenceTypes, checkedReferenceTypeIndexes);
+            imports, checkedReferenceTypes, checkedReferenceTypeIndexes,
+            nominalClassTypesByTypeSpecReference);
         if (resolvedRootType != rootType)
         {
             throw Invalid(
@@ -3386,7 +3392,8 @@ public static partial class TrRmExecutableCompiler
             var fieldType = FromNativeValueRow(typeSpecs,
                 fieldTypeSpecRef, nativePointerTypes,
                 structureTypeByTypeDef, imports, checkedReferenceTypes,
-                checkedReferenceTypeIndexes);
+                checkedReferenceTypeIndexes,
+                nominalClassTypesByTypeSpecReference);
             if (ordinal + 1 == fieldCount)
             {
                 if (fieldType != expectedLeafType)
@@ -3494,7 +3501,9 @@ public static partial class TrRmExecutableCompiler
             ImmutableArray<BoundFunction>.Builder functions,
             int[] functionIndexByMethodRow,
             bool construction2MethodLinking = false,
-            ImmutableArray<BoundConstant> scalarConstants = default)
+            ImmutableArray<BoundConstant> scalarConstants = default,
+            IReadOnlyDictionary<uint, PrimitiveType>?
+                nominalClassTypesByTypeSpecReference = null)
     {
         if (body.BlockCount is not (1 or 3) || body.HasExceptionDirectory
             || body.FieldCount != 0
@@ -3530,7 +3539,8 @@ public static partial class TrRmExecutableCompiler
             var homeType = GetStandardInitializationBodyType(body,
                 typeMapIndex, typeSpecs, imports, nativePointerTypes,
                 structureTypeByTypeDef, checkedReferenceTypes,
-                checkedReferenceTypeIndexes);
+                checkedReferenceTypeIndexes,
+                nominalClassTypesByTypeSpecReference);
             homeRoles[homeIndex] = role;
             homeTypes[homeIndex] = homeType;
             homeTypeMapIndexes[homeIndex] = typeMapIndex;
@@ -3847,7 +3857,8 @@ public static partial class TrRmExecutableCompiler
                             referentTypeMapIndex, typeSpecs, imports,
                             nativePointerTypes, structureTypeByTypeDef,
                             checkedReferenceTypes,
-                            checkedReferenceTypeIndexes);
+                            checkedReferenceTypeIndexes,
+                            nominalClassTypesByTypeSpecReference);
                         outputPlace = new BoundFieldRead(
                             new BoundRead(variable, homeTypes[baseHomeIndex],
                                 default),
@@ -3869,7 +3880,8 @@ public static partial class TrRmExecutableCompiler
                             body, referentTypeMapIndex, typeSpecs, imports,
                             nativePointerTypes, structureTypeByTypeDef,
                             checkedReferenceTypes,
-                            checkedReferenceTypeIndexes);
+                            checkedReferenceTypeIndexes,
+                            nominalClassTypesByTypeSpecReference);
                         outputPlace = DecodeStandardInitializationFieldPath(
                             checked((int)targetRef), variable,
                             homeTypes[baseHomeIndex], referentType,
@@ -4327,7 +4339,8 @@ public static partial class TrRmExecutableCompiler
                         body, checked((ushort)typeMapIndex), typeSpecs,
                         imports, nativePointerTypes,
                         structureTypeByTypeDef, checkedReferenceTypes,
-                        checkedReferenceTypeIndexes);
+                        checkedReferenceTypeIndexes,
+                        nominalClassTypesByTypeSpecReference);
                     if (!SemanticVerifier.IsTotalConversion(value.Type,
                             destinationType)
                         || (body.UsesNativePointerLoads
@@ -4391,7 +4404,8 @@ public static partial class TrRmExecutableCompiler
                             body, typeMapIndex, typeSpecs, imports,
                             nativePointerTypes, structureTypeByTypeDef,
                             checkedReferenceTypes,
-                            checkedReferenceTypeIndexes);
+                            checkedReferenceTypeIndexes,
+                            nominalClassTypesByTypeSpecReference);
                         valueByRegister[register]
                             = DecodeStandardInitializationFieldPath(
                                 checked((int)fieldRowValue), variable,
@@ -4401,7 +4415,8 @@ public static partial class TrRmExecutableCompiler
                                 imports, nativePointerTypes,
                                 structureTypeByTypeDef,
                                 checkedReferenceTypes,
-                                checkedReferenceTypeIndexes);
+                                checkedReferenceTypeIndexes,
+                                nominalClassTypesByTypeSpecReference);
                         break;
                     }
                     if (record[0] != 0x04
@@ -4440,7 +4455,8 @@ public static partial class TrRmExecutableCompiler
                     var fieldType = GetStandardInitializationBodyType(body,
                         typeMapIndex, typeSpecs, imports, nativePointerTypes,
                         structureTypeByTypeDef, checkedReferenceTypes,
-                        checkedReferenceTypeIndexes);
+                        checkedReferenceTypeIndexes,
+                        nominalClassTypesByTypeSpecReference);
                     valueByRegister[register] = new BoundFieldRead(
                         new BoundRead(variable, homeTypes[baseHomeIndex],
                             default),

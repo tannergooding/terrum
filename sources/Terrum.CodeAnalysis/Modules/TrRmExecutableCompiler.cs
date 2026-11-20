@@ -4721,7 +4721,9 @@ public static partial class TrRmExecutableCompiler
             coreContractFailureIdentitySelections = default,
         int selectedModuleRow = 0,
         BoundProgram? standardClassQueryProgram = null,
-        bool standardConstruction2MethodLinking = false)
+        bool standardConstruction2MethodLinking = false,
+        IReadOnlyDictionary<uint, PrimitiveType>?
+            nominalClassTypesByTypeSpecReference = null)
     {
         var standardInitializationReferenceBodies
             = standardSchemaIdentity is not null
@@ -5056,7 +5058,9 @@ public static partial class TrRmExecutableCompiler
             includedTypeDefRows: selectedTypeDefRows,
             allowDuplicateImportedViews: schema is TrRmArtifactSchema.Standard
                 or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
-                or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft);
+                or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft,
+            nominalClassTypesByTypeSpecReference:
+                nominalClassTypesByTypeSpecReference);
 
         var declaredExports = new HashSet<int>(exportCount);
         for (var row = 0; row < exportCount; row++)
@@ -5112,7 +5116,8 @@ public static partial class TrRmExecutableCompiler
             var resultType = FromNativeValueRow(types, sigs.GetResultTypeSpec(signature),
                 nativePointerTypeDefinitions, structureTypeByTypeDef,
                 imports, checkedReferenceTypeDefinitions,
-                checkedReferenceTypeIndexes);
+                checkedReferenceTypeIndexes,
+                nominalClassTypesByTypeSpecReference);
             var (first, count) = sigs.GetParamRange(signature);
             var parameterTypes = ImmutableArray.CreateBuilder<PrimitiveType>(count);
             for (var parameter = 0; parameter < count; parameter++)
@@ -5121,7 +5126,8 @@ public static partial class TrRmExecutableCompiler
                     parameters.GetTypeSpec(first + parameter),
                     nativePointerTypeDefinitions, structureTypeByTypeDef,
                     imports, checkedReferenceTypeDefinitions,
-                    checkedReferenceTypeIndexes));
+                    checkedReferenceTypeIndexes,
+                    nominalClassTypesByTypeSpecReference));
             }
 
             nativeFunctionPointerSignatureDefinitions.Add(
@@ -5268,7 +5274,8 @@ public static partial class TrRmExecutableCompiler
                     : FromNativeValueRow(types, typeSpecRow,
                         nativePointerTypeDefinitions, structureTypeByTypeDef,
                         imports, checkedReferenceTypeDefinitions,
-                        checkedReferenceTypeIndexes);
+                        checkedReferenceTypeIndexes,
+                        nominalClassTypesByTypeSpecReference);
                 var mode = parameters.GetMode(first + param);
                 var initializationReferenceParameter
                     = standardInitializationReferenceBodies
@@ -5320,6 +5327,11 @@ public static partial class TrRmExecutableCompiler
                     var kind = BinaryPrimitives.ReadUInt16LittleEndian(clause[4..]);
                     if (standardInitializationReferenceBodies
                         && (kind is 0x0002 or 0x000B))
+                    {
+                        continue;
+                    }
+                    if (standardConstruction2MethodLinkingProfile
+                        && kind == 4)
                     {
                         continue;
                     }
@@ -5483,12 +5495,14 @@ public static partial class TrRmExecutableCompiler
                         ? FromNativeValueRow(types, resultTypeRow,
                             nativePointerTypeDefinitions, structureTypeByTypeDef,
                             imports, checkedReferenceTypeDefinitions,
-                            checkedReferenceTypeIndexes)
+                            checkedReferenceTypeIndexes,
+                            nominalClassTypesByTypeSpecReference)
                         : throw Invalid("Unsupported direct native import result type.")
                 : FromNativeValueRow(types, resultTypeRow,
                     nativePointerTypeDefinitions, structureTypeByTypeDef,
                     imports, checkedReferenceTypeDefinitions,
-                    checkedReferenceTypeIndexes);
+                    checkedReferenceTypeIndexes,
+                    nominalClassTypesByTypeSpecReference);
             var function = new BoundFunction(name, returnType,
                 variables.ToImmutable(), count, new BoundBlock([], default), default) {
                 DoesNotReturn = doesNotReturn,
@@ -5574,29 +5588,48 @@ public static partial class TrRmExecutableCompiler
                 "The Standard initialization-reference profile has an unbound or unsupported Import.");
         }
 
+        var selectedConstruction2MethodImportCount = 0;
+        var selectedConstruction2ClassTypeImportCount = 0;
+        var selectedConstruction2FieldImportCount = 0;
+        if (standardConstruction2MethodLinkingProfile)
+        {
+            foreach (var importRow in selectedImportRows)
+            {
+                var definition
+                    = imports.GetExpectedDefinitionForImportRow(importRow);
+                var definitionKind = definition >> 24;
+                if (definitionKind == 0x16)
+                {
+                    var methodRow = checked((int)(
+                        definition & 0x00FF_FFFF));
+                    if (!standardNativeImports
+                            .HasImportForMethod(methodRow)
+                        && !nativeImports.HasImportForMethod(methodRow)
+                        && !nativeCallables.HasCallableForMethod(methodRow)
+                        && !nativeVTables.HasVTableForMethod(methodRow))
+                    {
+                        selectedConstruction2MethodImportCount++;
+                    }
+                }
+                else if (definitionKind == 0x13
+                    && typeDefs.GetKind(checked((int)(
+                        definition & 0x00FF_FFFF))) == 2)
+                {
+                    selectedConstruction2ClassTypeImportCount++;
+                }
+                else if (definitionKind == 0x14)
+                {
+                    selectedConstruction2FieldImportCount++;
+                }
+            }
+        }
+
         if (importedNativeCallableCount + importedNativeVTableCount
                 + importedNativeParameterMethodCount
                 + importedInitializationReferenceMethodCount
-                + (standardConstruction2MethodLinkingProfile
-                    ? selectedImportRows.Count(importRow => {
-                        var definition = imports
-                            .GetExpectedDefinitionForImportRow(importRow);
-                        if ((definition >> 24) != 0x16)
-                        {
-                            return false;
-                        }
-
-                        var methodRow = checked((int)(
-                            definition & 0x00FF_FFFF));
-                        return !standardNativeImports
-                                .HasImportForMethod(methodRow)
-                            && !nativeImports
-                                .HasImportForMethod(methodRow)
-                            && !nativeCallables
-                                .HasCallableForMethod(methodRow)
-                            && !nativeVTables
-                                .HasVTableForMethod(methodRow);
-                    }) : 0)
+                + selectedConstruction2MethodImportCount
+                + selectedConstruction2ClassTypeImportCount
+                + selectedConstruction2FieldImportCount
                 + initializationReferenceTypeImportCount
                 + layoutQueryImportCount != selectedImportRows.Count)
         {
@@ -5782,7 +5815,9 @@ public static partial class TrRmExecutableCompiler
                                 functions, functionIndexByMethodRow,
                                 construction2MethodLinking:
                                     standardConstruction2MethodLinkingProfile,
-                                scalarConstants: scalarConstants);
+                                scalarConstants: scalarConstants,
+                                nominalClassTypesByTypeSpecReference:
+                                    nominalClassTypesByTypeSpecReference);
                     }
 
                     registeredQueryBody = true;
@@ -8619,7 +8654,9 @@ public static partial class TrRmExecutableCompiler
         ImmutableArray<BoundStruct>? previousStructures = null,
         TrRmImportTableReader imports = default,
         HashSet<int>? includedTypeDefRows = null,
-        bool allowDuplicateImportedViews = false)
+        bool allowDuplicateImportedViews = false,
+        IReadOnlyDictionary<uint, PrimitiveType>?
+            nominalClassTypesByTypeSpecReference = null)
     {
         fixedArrayTypes ??= ImmutableArray<BoundNativeFixedArrayType>.Empty;
         if (!targetProfiles.TryGetProfile(1, 1, out var windowsX64ProfileRow))
@@ -8746,7 +8783,9 @@ public static partial class TrRmExecutableCompiler
                 {
                     fieldType = FromNativeValueRow(typeSpecs,
                         fieldTypeSpecRef, nativePointerTypes,
-                        structureTypeByTypeDef, imports);
+                        structureTypeByTypeDef, imports,
+                        nominalClassTypesByTypeSpecReference:
+                            nominalClassTypesByTypeSpecReference);
                 }
                 var fieldFlags = fields.GetFlags(fieldRow);
                 structureFields.Add(new BoundStructField(fields.GetName(fieldRow),
@@ -8821,8 +8860,17 @@ public static partial class TrRmExecutableCompiler
         TrRmImportTableReader imports = default,
         List<CheckedReferenceTypeDefinition>? checkedReferenceTypeDefinitions = null,
         Dictionary<CheckedReferenceTypeDefinition, int>?
-            checkedReferenceTypeIndexes = null)
+            checkedReferenceTypeIndexes = null,
+        IReadOnlyDictionary<uint, PrimitiveType>?
+            nominalClassTypesByTypeSpecReference = null)
     {
+        if (nominalClassTypesByTypeSpecReference is not null
+            && nominalClassTypesByTypeSpecReference.TryGetValue(
+                typeSpecRef, out var nominalClassType))
+        {
+            return nominalClassType;
+        }
+
         var type = types.GetTypeSpecBytes(typeSpecRef);
         if (type.Length == 4 && type[0] == 0x01 && type[2] == 0x8C)
         {
@@ -8844,7 +8892,8 @@ public static partial class TrRmExecutableCompiler
             var pointeeType = FromNativeValueRow(types, pointeeRef,
                 nativePointerTypes, structureTypeByTypeDef, imports,
                 checkedReferenceTypeDefinitions,
-                checkedReferenceTypeIndexes);
+                checkedReferenceTypeIndexes,
+                nominalClassTypesByTypeSpecReference);
             return pointeeType == PrimitiveType.Void && type[1] == 0
                 ? PrimitiveType.NativeRawPointer
                 : GetNativePointerType(nativePointerTypes, pointeeType,
@@ -8857,7 +8906,8 @@ public static partial class TrRmExecutableCompiler
             var pointeeType = FromNativeValueRow(types, pointeeRef,
                 nativePointerTypes, structureTypeByTypeDef, imports,
                 checkedReferenceTypeDefinitions,
-                checkedReferenceTypeIndexes);
+                checkedReferenceTypeIndexes,
+                nominalClassTypesByTypeSpecReference);
             return pointeeType == PrimitiveType.Void && type[1] == 0
                 ? PrimitiveType.NativeRawPointer
                 : GetNativePointerType(nativePointerTypes, pointeeType, type[1] != 0);
@@ -8879,7 +8929,8 @@ public static partial class TrRmExecutableCompiler
             var referentType = FromNativeValueRow(types, referentTypeSpec,
                 nativePointerTypes, structureTypeByTypeDef, imports,
                 checkedReferenceTypeDefinitions,
-                checkedReferenceTypeIndexes);
+                checkedReferenceTypeIndexes,
+                nominalClassTypesByTypeSpecReference);
             var isInitialization = type[0] == 0x0E;
             var qualifiers = type[1];
             var definition = new CheckedReferenceTypeDefinition(
@@ -8972,9 +9023,13 @@ public static partial class TrRmExecutableCompiler
     private static PrimitiveType FromNativeValueRow(TrRmTypeSpecTableReader types,
         int row, List<NativePointerTypeDefinition> nativePointerTypes,
         int[] structureTypeByTypeDef,
-        TrRmImportTableReader imports = default)
+        TrRmImportTableReader imports = default,
+        IReadOnlyDictionary<uint, PrimitiveType>?
+            nominalClassTypesByTypeSpecReference = null)
         => FromNativeValueRow(types, checked((uint)row), nativePointerTypes,
-            structureTypeByTypeDef, imports);
+            structureTypeByTypeDef, imports,
+            nominalClassTypesByTypeSpecReference:
+                nominalClassTypesByTypeSpecReference);
 
     private static PrimitiveType GetNativePointerType(
         List<NativePointerTypeDefinition> nativePointerTypes,

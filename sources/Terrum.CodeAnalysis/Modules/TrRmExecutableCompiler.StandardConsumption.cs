@@ -1092,21 +1092,13 @@ public static partial class TrRmExecutableCompiler
 
         if (construction2MethodLinking && tables.Methods.Count != 0)
         {
-            if (artifacts.Length != 1
-                || moduleValidation.Modules.Length != 1)
-            {
-                throw Invalid(
-                    "A Construction-2 Method module without imports cannot consume unreferenced provider artifacts.");
-            }
-
-            var loadedModule = LoadConstruction2MethodLinkModule(
-                artifacts[0], tables,
-                moduleValidation.Modules.Single(module =>
-                    module.ArtifactIndex == 0
-                    && module.ModuleRow == rootModuleRow),
-                new Dictionary<int, BoundModuleImport>(),
-                schemaIdentities[0]);
-            return loadedModule.Program;
+            return LoadLocalAggregateLayoutProviderClosure(artifacts,
+                schemaIdentities, moduleIdentity, moduleValidation,
+                allTypeProviderBindings,
+                standardFieldProviderValidation.FieldBindings.AddRange(
+                    classProviderValidation.FieldBindings)
+                    .Distinct().ToImmutableArray(),
+                construction2MethodLinking: true);
         }
 
         if (includesInitializationReferenceBodies)
@@ -4177,7 +4169,7 @@ public static partial class TrRmExecutableCompiler
             or StandardC1M1ConstructionL1R1PropertyInitializedStateClassInstanceLayoutSchemaIdentity
             or StandardC1M1Construction2L1R1PropertyInitializedStateClassInstanceLayoutSchemaIdentity;
 
-    private static TrRmArtifactSchema GetForeignInvocationSchema(
+    internal static TrRmArtifactSchema GetForeignInvocationSchema(
         string schemaIdentity)
         => schemaIdentity switch
         {
@@ -4292,7 +4284,7 @@ public static partial class TrRmExecutableCompiler
                 nameof(schemaIdentity)),
         };
 
-    private static TrRmArtifactIndex CreateForeignInvocationIndex(
+    internal static TrRmArtifactIndex CreateForeignInvocationIndex(
         byte[] artifact, string schemaIdentity,
         TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
@@ -4441,7 +4433,7 @@ public static partial class TrRmExecutableCompiler
                 : TrRmArtifactIndex.ForForeignInvocationDraft(artifact);
     }
 
-    private static TrRmStructuralMetadataValidator.ValidatedExecutionTables
+    internal static TrRmStructuralMetadataValidator.ValidatedExecutionTables
         ValidateForeignInvocationArtifact(TrRmArtifactIndex index,
             string schemaIdentity,
             TrRmA3LayoutResourceLedger? a3LayoutResourceLedger = null,

@@ -6,6 +6,7 @@ using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
 using Terrum.CodeAnalysis.Semantics;
+using Terrum.CodeAnalysis.Syntax;
 
 namespace Terrum.CodeAnalysis.Modules;
 
@@ -35,6 +36,11 @@ public static partial class TrRmExecutableCompiler
         string ExportKey, uint TargetRequirement, uint RuntimePolicy,
         int ProviderArtifactIndex, int ProviderModuleRow,
         string ProviderModuleIdentity, int ProviderTypeDefRow);
+
+    private sealed record Construction2ClassTypeContext(
+        BoundProgram Program,
+        Dictionary<(int ArtifactIndex, int ModuleRow),
+            IReadOnlyDictionary<uint, PrimitiveType>> TypeMaps);
 
     private static bool HasLocalAggregateMethodClosureWork(
         byte[][] artifacts, string[] schemaIdentities,
@@ -704,6 +710,11 @@ public static partial class TrRmExecutableCompiler
 
         ValidateNoConflictingMethodProviderOrigins(methodEdges);
 
+        var construction2ClassTypeContext = construction2MethodLinking
+            ? CreateConstruction2ClassTypeContext(artifacts,
+                schemaIdentities, rootModuleIdentity, moduleValidation,
+                typeProviderBindings, fieldProviderBindings)
+            : null;
         var modulePrograms = new Dictionary<
             (int ArtifactIndex, int ModuleRow),
             LocalAggregateLayoutLoadedModule>(
@@ -728,7 +739,10 @@ public static partial class TrRmExecutableCompiler
                 var loadedModule = construction2MethodLinking
                     ? LoadConstruction2MethodLinkModule(
                         artifacts[artifactIndex], moduleTables, module,
-                        selectedImports, schemaIdentities[artifactIndex])
+                        selectedImports, schemaIdentities[artifactIndex],
+                        construction2ClassTypeContext!.Program,
+                        construction2ClassTypeContext.TypeMaps[
+                            (module.ArtifactIndex, module.ModuleRow)])
                 : initializationReferenceBodyProfile
                     ? LoadInitializationReferenceLocalFieldLayoutModule(
                         artifacts[artifactIndex], moduleTables, module,
@@ -848,9 +862,13 @@ public static partial class TrRmExecutableCompiler
             modulesForCarrier.MoveToImmutable(),
             methodEdgesForCarrier.MoveToImmutable(),
             typeEdges.MoveToImmutable());
-        return rootProgramData.Program with {
+        var rootProgram = rootProgramData.Program with {
             StandardMethodProviderClosure = closure,
         };
+        return construction2MethodLinking
+            ? TrRmStandardNativeBindingPlan
+                .BuildConstruction2MethodProviderClosure(closure)
+            : rootProgram;
     }
 
     private static LocalAggregateLayoutLoadedModule
@@ -859,7 +877,379 @@ public static partial class TrRmExecutableCompiler
         TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
         TrRmStandardModuleSelection module,
         IReadOnlyDictionary<int, BoundModuleImport> selectedImports,
-        string schemaIdentity)
+        string schemaIdentity,
+        BoundProgram classTypeProgram,
+        IReadOnlyDictionary<uint, PrimitiveType>
+            nominalClassTypesByTypeSpecReference)
+    {
+        var selectedMethodImports
+            = new Dictionary<int, BoundModuleImport>();
+        foreach (var importRow in selectedImports.Keys)
+        {
+            var expectedDefinition = tables.Imports
+                .GetExpectedDefinitionForImportRow(importRow);
+            if ((expectedDefinition >> 24) != 0x16)
+            {
+                throw Unsupported(
+                    "Construction-2 Method linking initially requires top-level MethodDef Imports without type or field Import calls.");
+            }
+
+            var expectedMethodRow = checked((int)(
+                expectedDefinition & 0x00FF_FFFF));
+            if (!selectedMethodImports.ContainsKey(expectedMethodRow))
+            {
+                selectedMethodImports.Add(expectedMethodRow,
+                    selectedImports[importRow]);
+            }
+        }
+
+        var program = LoadDevelopment(artifact,
+            GetForeignInvocationSchema(schemaIdentity),
+            standardSchemaIdentity: schemaIdentity,
+            selectedModuleImports: selectedMethodImports,
+            selectedModuleRow: module.ModuleRow,
+            standardClassQueryProgram: classTypeProgram,
+            standardConstruction2MethodLinking: true,
+            nominalClassTypesByTypeSpecReference:
+                nominalClassTypesByTypeSpecReference);
+        if (program.Functions.Length
+            != module.MethodDefEnd - module.MethodDefStart)
+        {
+            throw Invalid(
+                "The Construction-2 Method loader lost a selected Module's MethodDef range.");
+        }
+
+        var functionIndexByMethodRow = new int[tables.Methods.Count + 1];
+        Array.Fill(functionIndexByMethodRow, -1);
+        var functionIndexByName = program.Functions
+            .Select((function, index) => (function.Name, index))
+            .ToDictionary(static item => item.Name,
+                static item => item.index, StringComparer.Ordinal);
+        for (var methodRow = module.MethodDefStart;
+            methodRow < module.MethodDefEnd; methodRow++)
+        {
+            if (!functionIndexByName.TryGetValue(
+                    tables.Methods.GetName(methodRow),
+                    out var functionIndex))
+            {
+                throw Invalid(
+                    "The Construction-2 Method loader lost a selected MethodDef identity.");
+            }
+
+            functionIndexByMethodRow[methodRow] = functionIndex;
+        }
+
+        var functionIndexByImportRow = new int[tables.Imports.Count + 1];
+        Array.Fill(functionIndexByImportRow, -1);
+        foreach (var importRow in selectedImports.Keys)
+        {
+            var expectedDefinition = tables.Imports
+                .GetExpectedDefinitionForImportRow(importRow);
+            var expectedMethodRow = checked((int)(
+                expectedDefinition & 0x00FF_FFFF));
+            var functionIndex = functionIndexByMethodRow[
+                expectedMethodRow];
+            if (functionIndex < 0)
+            {
+                throw Invalid(
+                    "A Construction-2 Method Import has no reconstructed function.");
+            }
+
+            functionIndexByImportRow[importRow] = functionIndex;
+        }
+
+        return new LocalAggregateLayoutLoadedModule(program,
+            functionIndexByMethodRow, functionIndexByImportRow);
+    }
+
+    private static Construction2ClassTypeContext
+        CreateConstruction2ClassTypeContext(
+        byte[][] artifacts, string[] schemaIdentities,
+        string rootModuleIdentity,
+        StandardModuleValidation moduleValidation,
+        ImmutableArray<TrRmStandardTypeProviderBinding>
+            typeProviderBindings,
+        ImmutableArray<TrRmStandardFieldProviderBinding>
+            fieldProviderBindings)
+    {
+        var rootTables = GetC1M1Tables(artifacts, schemaIdentities, 0);
+        var rootModule = moduleValidation.Modules.Single(module =>
+            module.ArtifactIndex == 0
+            && module.ModuleRow == moduleValidation.RootModuleRow);
+        if (!StringComparer.Ordinal.Equals(rootModule.Identity,
+                rootModuleIdentity))
+        {
+            throw Invalid(
+                "The Construction-2 class type context changed its root Module.");
+        }
+
+        var hasClassTypes = false;
+        foreach (var module in moduleValidation.Modules)
+        {
+            var tables = GetC1M1Tables(artifacts, schemaIdentities,
+                module.ArtifactIndex);
+            var (typeDefStart, typeDefEnd)
+                = tables.Modules.GetTypeDefRange(module.ModuleRow);
+            for (var typeDefRow = typeDefStart;
+                typeDefRow < typeDefEnd; typeDefRow++)
+            {
+                if (tables.TypeDefs.GetKind(typeDefRow) == 2)
+                {
+                    hasClassTypes = true;
+                    break;
+                }
+            }
+
+            if (hasClassTypes)
+            {
+                break;
+            }
+        }
+
+        if (!hasClassTypes)
+        {
+            return new Construction2ClassTypeContext(
+                new BoundProgram([], -1) {
+                    RuntimePolicy = BoundRuntimePolicy.FailFast,
+                },
+                moduleValidation.Modules.ToDictionary(
+                    static module => (module.ArtifactIndex,
+                        module.ModuleRow),
+                    static _ => (IReadOnlyDictionary<uint, PrimitiveType>)
+                        new Dictionary<uint, PrimitiveType>()));
+        }
+
+        var typeExportKeys
+            = ImmutableArray.CreateBuilder<string>();
+        var fieldExportKeys
+            = ImmutableArray.CreateBuilder<string>();
+        var fieldKeySet = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (definitionId, exportKey) in
+            rootTables.Exports.GetExportsForModule(
+                moduleValidation.RootModuleRow))
+        {
+            if ((definitionId >> 24) == 0x13)
+            {
+                var typeDefRow = GetTypeDefRow(definitionId);
+                if (rootTables.TypeDefs.GetKind(typeDefRow) == 2)
+                {
+                    typeExportKeys.Add(exportKey);
+                }
+            }
+            else if ((definitionId >> 24) == 0x14)
+            {
+                var fieldRow = GetFieldDefRow(definitionId);
+                var ownerTypeDefRow
+                    = rootTables.Fields.GetOwnerTypeDef(fieldRow);
+                var flags = rootTables.Fields.GetFlags(fieldRow);
+                if (rootTables.TypeDefs.GetKind(ownerTypeDefRow) == 2
+                    && (flags & 3) == 2 && (flags & 8) == 0
+                    && fieldKeySet.Add(exportKey))
+                {
+                    fieldExportKeys.Add(exportKey);
+                }
+            }
+        }
+
+        var importedTypeKeys
+            = ImmutableArray.CreateBuilder<(string ProviderIdentity,
+                string ExportKey)>();
+        var importedTypeKeySet
+            = new HashSet<(string ProviderIdentity, string ExportKey)>();
+        foreach (var binding in typeProviderBindings)
+        {
+            var providerTables = GetC1M1Tables(artifacts,
+                schemaIdentities, binding.ProviderArtifactIndex);
+            if (providerTables.TypeDefs.GetKind(binding.ProviderTypeDefRow)
+                    == 2
+                && importedTypeKeySet.Add((binding.ProducerIdentity,
+                    binding.ExportKey)))
+            {
+                importedTypeKeys.Add((binding.ProducerIdentity,
+                    binding.ExportKey));
+            }
+        }
+        foreach (var binding in fieldProviderBindings)
+        {
+            var providerTables = GetC1M1Tables(artifacts,
+                schemaIdentities, binding.ProviderArtifactIndex);
+            var fieldFlags = providerTables.Fields.GetFlags(
+                binding.ProviderFieldDefRow);
+            if (providerTables.TypeDefs.GetKind(binding.ProviderTypeDefRow)
+                    == 2
+                && (fieldFlags & 3) == 2 && (fieldFlags & 8) == 0
+                && fieldKeySet.Add(binding.ExportKey))
+            {
+                fieldExportKeys.Add(binding.ExportKey);
+            }
+        }
+
+        var reference = CreateC1M1ClassSourceTypeReference(artifacts,
+            schemaIdentities, rootModuleIdentity,
+            typeExportKeys.ToArray(), fieldExportKeys.ToArray(),
+            importedTypeKeys.ToImmutable(),
+            allowModuleEntryPointForRuntimeLinking: true);
+        var compilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), reference);
+        if (compilation.HasErrors)
+        {
+            throw new InvalidDataException(
+                "The Construction-2 class TypeDef/FieldDef closure failed semantic binding: "
+                + string.Join(Environment.NewLine,
+                    compilation.Diagnostics));
+        }
+
+        var classProgram = (BoundProgram)compilation.Program!;
+        var classDeclarations = classProgram.StandardClassDeclarations
+            .Select(static declaration => declaration.Declaration.Identity)
+            .ToHashSet();
+        var typeInstances = classProgram.GenericNominalTypeInstances
+            .ToBuilder();
+        var typeIndexByIdentity = new Dictionary<(
+            BoundGenericNominalTypeIdentity Identity, byte Qualifiers), int>();
+        for (var index = 0; index < typeInstances.Count; index++)
+        {
+            var instance = typeInstances[index];
+            if (instance.Arguments.IsEmpty
+                && classDeclarations.Contains(instance.Definition))
+            {
+                _ = typeIndexByIdentity.TryAdd(
+                    (instance.Definition, instance.Qualifiers), index);
+            }
+        }
+
+        var modulesByLocation = moduleValidation.Modules.ToDictionary(
+            static module => (module.ArtifactIndex, module.ModuleRow));
+        var typeBindingsByImport
+            = typeProviderBindings.ToDictionary(binding =>
+                (binding.ConsumerArtifactIndex,
+                    binding.ConsumerModuleRow, binding.ImportRow));
+        var typeMaps = new Dictionary<(int ArtifactIndex, int ModuleRow),
+            IReadOnlyDictionary<uint, PrimitiveType>>();
+        foreach (var module in moduleValidation.Modules)
+        {
+            var tables = GetC1M1Tables(artifacts, schemaIdentities,
+                module.ArtifactIndex);
+            var typeMap = new Dictionary<uint, PrimitiveType>();
+            for (var typeSpecRow = 1;
+                typeSpecRow <= tables.TypeSpecs.Count; typeSpecRow++)
+            {
+                var typeSpecReference = checked((uint)typeSpecRow);
+                var typeSpec = tables.TypeSpecs.GetTypeSpecRef(
+                    typeSpecReference);
+                if (!typeSpec.IsRow
+                    || typeSpec.Form is not (0x02 or 0x03)
+                    || typeSpec.Qualifiers > 1)
+                {
+                    continue;
+                }
+
+                var typeDefRow = tables.TypeSpecs.GetNominalTypeDefRow(
+                    typeSpecReference, tables.TypeDefs, tables.Imports);
+                if (tables.TypeDefs.GetKind(typeDefRow) != 2)
+                {
+                    continue;
+                }
+
+                BoundGenericNominalTypeIdentity identity;
+                if (typeSpec.Form == 0x02)
+                {
+                    if (tables.TypeDefs.GetOwnerModule(typeDefRow)
+                        != module.ModuleRow)
+                    {
+                        continue;
+                    }
+
+                    identity = new BoundGenericNominalTypeIdentity(
+                        module.Identity, module.Identity,
+                        0x1300_0000u | checked((uint)typeDefRow));
+                }
+                else
+                {
+                    var importRow = checked((int)typeSpec.Row);
+                    var moduleRefRow = tables.Imports
+                        .GetModuleRefForImportRow(importRow);
+                    if (tables.ModuleRefs.GetOwnerModule(moduleRefRow)
+                        != module.ModuleRow)
+                    {
+                        continue;
+                    }
+
+                    if (!typeBindingsByImport.TryGetValue(
+                            (module.ArtifactIndex, module.ModuleRow,
+                                importRow), out var binding))
+                    {
+                        throw Invalid(
+                            "A Construction-2 class TypeSpec Import has no validated provider edge.");
+                    }
+
+                    var providerModule = modulesByLocation[(
+                        binding.ProviderArtifactIndex,
+                        binding.ProviderModuleRow)];
+                    identity = new BoundGenericNominalTypeIdentity(
+                        providerModule.Identity, providerModule.Identity,
+                        binding.ActualDefinitionId);
+                }
+
+                var classDeclaration
+                    = classProgram.StandardClassDeclarations
+                        .SingleOrDefault(declaration =>
+                            declaration.Declaration.Identity == identity);
+                if (classDeclaration is null)
+                {
+                    throw Unsupported(
+                        "A Construction-2 class TypeSpec is outside the selected public class-reference closure.");
+                }
+                if ((typeSpec.Qualifiers & 1) != 0
+                    && (!classDeclaration.Declaration
+                            .TryGetDeclaredMutability(
+                                out var classIsMutable)
+                        || !classIsMutable))
+                {
+                    throw Invalid(
+                        "A Construction-2 class TypeSpec requests writable access to a readonly class.");
+                }
+
+                var key = (identity, typeSpec.Qualifiers);
+                if (!typeIndexByIdentity.TryGetValue(key,
+                        out var typeIndex))
+                {
+                    if (typeInstances.Count
+                        >= BoundGenericNominalTypeTypes.MaximumCount)
+                    {
+                        throw Invalid(
+                            "The Construction-2 class type map exceeds the nominal instance limit.");
+                    }
+
+                    typeIndex = typeInstances.Count;
+                    typeInstances.Add(new BoundGenericNominalTypeInstance(
+                        identity, [], typeSpec.Qualifiers));
+                    typeIndexByIdentity.Add(key, typeIndex);
+                }
+
+                typeMap.Add(typeSpecReference,
+                    BoundGenericNominalTypeTypes.Type(typeIndex));
+            }
+
+            typeMaps.Add((module.ArtifactIndex, module.ModuleRow),
+                typeMap);
+        }
+
+        return new Construction2ClassTypeContext(classProgram with {
+            GenericNominalTypeInstances = typeInstances.ToImmutable(),
+        }, typeMaps);
+    }
+
+    private static LocalAggregateLayoutLoadedModule
+        LoadConstruction2MethodLinkModule(
+        byte[] artifact,
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+        TrRmStandardModuleSelection module,
+        IReadOnlyDictionary<int, BoundModuleImport> selectedImports,
+        string schemaIdentity,
+        BoundProgram classTypeProgram,
+        IReadOnlyDictionary<uint, PrimitiveType>
+            nominalClassTypesByTypeSpecReference)
     {
         var selectedMethodImports
             = new Dictionary<int, BoundModuleImport>();
@@ -887,7 +1277,10 @@ public static partial class TrRmExecutableCompiler
             standardSchemaIdentity: schemaIdentity,
             selectedModuleImports: selectedMethodImports,
             selectedModuleRow: module.ModuleRow,
-            standardConstruction2MethodLinking: true);
+            standardClassQueryProgram: classTypeProgram,
+            standardConstruction2MethodLinking: true,
+            nominalClassTypesByTypeSpecReference:
+                nominalClassTypesByTypeSpecReference);
         if (program.Functions.Length
             != module.MethodDefEnd - module.MethodDefStart)
         {
