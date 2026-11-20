@@ -3015,10 +3015,12 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
         }
         var importBytes = new byte[24];
         Write(importBytes, 0, 1);
-        Write(importBytes, 4, 9);
+        Write(importBytes, 4,
+            secondProviderIdentity is null ? 9u : 10u);
         Write(importBytes, 8, 0x1300_0002);
         Write(importBytes, 12, moduleRefCount == 2 ? 2u : 1u);
-        Write(importBytes, 16, 10);
+        Write(importBytes, 16,
+            secondProviderIdentity is null ? 10u : 9u);
         Write(importBytes, 20, 0x1300_0003);
         var exportBytes = new byte[8];
         Write(exportBytes, 0, 0x1300_0001);
