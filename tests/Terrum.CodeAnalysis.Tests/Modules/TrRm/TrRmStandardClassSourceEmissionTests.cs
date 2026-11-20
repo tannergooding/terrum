@@ -7235,6 +7235,8 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             methodRootArtifact, schemaIdentity);
         methodRootArtifact = ReverseStandardImportRows(
             methodRootArtifact, schemaIdentity);
+        methodRootArtifact = ReverseContextualMethodSignatureAndParamRows(
+            methodRootArtifact, schemaIdentity);
         methodRootArtifact = AddNoncanonicalTypeDefBindingEqualityEdges(
             methodRootArtifact, schemaIdentity);
         methodRootArtifact = ReverseContextualTypeDefRows(
@@ -11757,6 +11759,118 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         => AddExportAlias(artifact, originalExportKey, aliasExportKey,
             TrRmArtifactSchema
                 .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft);
+
+    private static byte[] ReverseContextualMethodSignatureAndParamRows(
+        byte[] artifact, string schemaIdentity)
+    {
+        var schema = TrRmArtifactSchema
+            .C1M1Construction2InitializerCopyEvidenceDraft;
+        var index = new TrRmArtifactIndex(artifact, schema, null,
+            standardSchemaIdentity: schemaIdentity);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(index);
+        if (tables.Modules.Count != 1
+            || tables.Methods.Count != 2
+            || tables.Signatures.Count != 2
+            || tables.Parameters.Count != 2
+            || tables.GenericParams.Count != 0
+            || tables.Bodies.Count != 0
+            || !index.TryGetSection(0x0016, out var methodSection,
+                out var methodCount)
+            || !index.TryGetSection(0x0017, out _,
+                out var methodSigCount)
+            || !index.TryGetSection(0x0018, out _,
+                out var paramCount)
+            || methodCount != tables.Methods.Count
+            || methodSigCount != tables.Signatures.Count
+            || paramCount != tables.Parameters.Count)
+        {
+            throw new InvalidOperationException(
+                "The MethodSig permutation requires two bodyless nongeneric functions with one formal each.");
+        }
+
+        var newSignatureRowByOld = new int[methodSigCount + 1];
+        for (var oldRow = 1; oldRow <= methodSigCount; oldRow++)
+        {
+            newSignatureRowByOld[oldRow] = methodSigCount - oldRow + 1;
+        }
+
+        var newSignatureRows = new TrRmMethodSigRow[methodSigCount];
+        var newParameterRows = new List<TrRmParamRow>(paramCount);
+        for (var newSignatureRow = 1;
+            newSignatureRow <= methodSigCount; newSignatureRow++)
+        {
+            var oldSignatureRow
+                = methodSigCount - newSignatureRow + 1;
+            var (oldParamStart, oldParamCount)
+                = tables.Signatures.GetParamRange(oldSignatureRow);
+            var (oldGenericStart, oldGenericCount)
+                = tables.Signatures.GetGenericRange(oldSignatureRow);
+            if (oldParamCount != 1 || oldGenericCount != 0)
+            {
+                throw new InvalidOperationException(
+                    "The MethodSig permutation requires one nongeneric formal per selected signature.");
+            }
+
+            var newParamStart = newParameterRows.Count + 1;
+            for (var ordinal = 0; ordinal < oldParamCount; ordinal++)
+            {
+                var oldParamRow = oldParamStart + ordinal;
+                newParameterRows.Add(new TrRmParamRow(newSignatureRow,
+                    ordinal, tables.Parameters.GetTypeSpec(oldParamRow),
+                    tables.Parameters.GetMode(oldParamRow),
+                    tables.Parameters.GetFlags(oldParamRow)));
+            }
+
+            newSignatureRows[newSignatureRow - 1]
+                = new TrRmMethodSigRow(
+                    tables.Signatures.GetResultTypeSpec(oldSignatureRow),
+                    tables.Signatures.GetReceiverTypeSpec(oldSignatureRow),
+                    newParamStart, oldParamCount, oldGenericStart,
+                    oldGenericCount);
+        }
+
+        var methodSignatureBytes = TrRmMethodSigTableWriter.Encode(
+            newSignatureRows, tables.TypeSpecs, newParameterRows.Count,
+            tables.GenericParams.Count);
+        var methodSignatures = new TrRmMethodSigTableReader(
+            methodSignatureBytes, newSignatureRows.Length, tables.TypeSpecs,
+            newParameterRows.Count, tables.GenericParams.Count);
+        var parameterBytes = TrRmParamTableWriter.Encode(newParameterRows,
+            methodSignatures, tables.TypeSpecs, schema);
+        var methodBytes = methodSection.ToArray();
+        for (var methodRow = 1; methodRow <= methodCount; methodRow++)
+        {
+            var oldSignatureRow = tables.Methods.GetSignature(methodRow);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                methodBytes.AsSpan((methodRow - 1) * 28 + 8, 4),
+                checked((uint)newSignatureRowByOld[oldSignatureRow]));
+        }
+
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var sectionIndex = 0;
+            sectionIndex < index.SectionCount; sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var recordCount);
+            var sectionBytes = kind switch {
+                0x0016 => methodBytes,
+                0x0017 => methodSignatureBytes,
+                0x0018 => parameterBytes,
+                _ => bytes.ToArray(),
+            };
+            sections.Add(new TrRmSection(kind, flags,
+                checked((uint)recordCount), sectionBytes));
+        }
+
+        var result = TrRmArtifactWriter.Encode(sections, schema,
+            standardSchemaIdentity: schemaIdentity);
+        _ = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                new TrRmArtifactIndex(result, schema, null,
+                    standardSchemaIdentity: schemaIdentity));
+        return result;
+    }
 
     private static byte[] PermuteContextualModuleRefAndImportRows(
         byte[] artifact, string schemaIdentity)
