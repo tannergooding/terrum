@@ -935,6 +935,7 @@ internal sealed partial class CliTests
         var manifestOutputAlias = Path.Combine(
             TestArtifactPaths.DirectoryPath,
             $"source-provider-cli-scalar-manifest-{Guid.NewGuid():N}.trrm");
+        string? providerHardLink = null;
         try
         {
             var providerCompilation = Compilation.CreateLibrary(
@@ -1033,6 +1034,24 @@ internal sealed partial class CliTests
                 .ConfigureAwait(true);
             await AssertAliasFailureAsync("-", providerSelections,
                 providerArtifact, providerArtifact).ConfigureAwait(true);
+            if (OperatingSystem.IsWindows())
+            {
+                providerHardLink = Path.Combine(
+                    TestArtifactPaths.DirectoryPath,
+                    $"source-provider-cli-scalar-hardlink-{Guid.NewGuid():N}.trrm");
+                if (!CreateHardLink(providerHardLink, providerArtifact,
+                        IntPtr.Zero))
+                {
+                    throw new IOException(
+                        "Could not create the source provider test hard link.",
+                        new System.ComponentModel.Win32Exception(
+                            System.Runtime.InteropServices.Marshal
+                                .GetLastWin32Error()));
+                }
+
+                await AssertAliasFailureAsync("-", providerSelections,
+                    providerHardLink, providerArtifact).ConfigureAwait(true);
+            }
 
             var invalidConfigurations = new[] {
                 JsonSerializer.Serialize(new {
@@ -1149,6 +1168,11 @@ internal sealed partial class CliTests
                 .ConfigureAwait(true);
             await TestFileCleanup.DeleteWithRetryAsync(manifestOutputAlias)
                 .ConfigureAwait(true);
+            if (providerHardLink is not null)
+            {
+                await TestFileCleanup.DeleteWithRetryAsync(providerHardLink)
+                    .ConfigureAwait(true);
+            }
             await TestFileCleanup.DeleteWithRetryAsync(providerArtifact)
                 .ConfigureAwait(true);
             await TestFileCleanup.DeleteWithRetryAsync(consumerArtifact)

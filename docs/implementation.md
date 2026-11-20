@@ -171,11 +171,12 @@ pairing and dispatch are implemented. Regressions cover all three pairings,
 nonzero providerInputOrdinal, scalar-only empty selections, malformed v3
 shapes, schema-mismatch output preservation, and a co-located method root in
 Module 2 with TypeDef/FieldDef roots in Module 1; they remain unverified under
-the active hold. Manifest/source/output/provider alias collisions and
-existing/absent-output preservation on schema mismatch before malformed stdin
-source acquisition are also covered but unverified. Alternate case/link/
-hard-link aliases, duplicate provider/source roles, other absent-output
-failures, broader source/provider isolation and CLI qualification remain open.
+the active hold. Manifest/source/output/provider alias collisions, including
+a Windows provider/output hard link, and existing/absent-output preservation
+on schema mismatch before malformed stdin source acquisition are also covered
+but unverified. Case-only/symlink aliases, other hard-link role pairs,
+duplicate provider/source roles, other absent-output failures, broader
+source/provider isolation and CLI qualification remain open.
 The external-provider CLI output is source-free loaded, byte-for-byte
 re-emitted and reloaded against the same method/type provider chain; this
 regression is also unverified under the active hold.
