@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Text;
 
@@ -63,7 +64,10 @@ public static partial class TrRmExecutableCompiler
             retainedMethodDefinitions = null,
         byte[]? baseArtifact = null,
         TrRmFrozenScalarValueBuilder? frozenScalarValueBuilder = null,
-        SourceClassExports? sourceClassExports = null)
+        SourceClassExports? sourceClassExports = null,
+        IReadOnlyList<C1M1SourceClassMethodGenericFormalPlan>?
+            sourceClassMethodGenericFormalPlans = null,
+        string? standardSchemaIdentity = null)
     {
         if (program.GenericMethodDefinitions.IsDefault)
         {
@@ -86,9 +90,21 @@ public static partial class TrRmExecutableCompiler
                 "Source generic class-method mappings belong to a different checked program.",
                 nameof(sourceClassExports));
         }
+        if (sourceClassMethodGenericFormalPlans is not null
+            && sourceClassMethodGenericFormalPlans.Count != 0
+            && (baseArtifact is null
+                || !schema.UsesGenericMethodCalls()
+                || sourceClassExports is null))
+        {
+            throw new ArgumentException(
+                "Inherited class MethodDef generic constraints require the exact CM1 source-class composition.",
+                nameof(sourceClassMethodGenericFormalPlans));
+        }
 
         if (baseArtifact is not null
-            && (!schema.UsesClassParameterDefaults()
+            && ((!schema.UsesClassParameterDefaults()
+                    && (sourceClassMethodGenericFormalPlans is null
+                        || sourceClassMethodGenericFormalPlans.Count == 0))
                 || baseSchema != schema
                 || frozenScalarValueBuilder is null))
         {
@@ -196,7 +212,7 @@ public static partial class TrRmExecutableCompiler
             artifact = RemoveGenericMethodEmitterSeed(artifact, baseSchema);
         }
         var hasGenericCallTargets = ArtifactHasGenericCallTargets(artifact,
-            schema);
+            schema, standardSchemaIdentity);
         var exportedInterfaceTypeSpecRows
             = new Dictionary<(string QualifiedName, int Arity), uint>();
         var exportedInterfaceMethodDefRows
@@ -216,6 +232,18 @@ public static partial class TrRmExecutableCompiler
             = new Dictionary<BoundGenericNominalTypeIdentity, uint>();
         var importedNominalTypeSnapshots
             = Array.Empty<BoundSourceTypeProviderSnapshot>();
+        var sourceClassMethodGenericPlans
+            = sourceClassMethodGenericFormalPlans is null
+                ? ImmutableArray<C1M1SourceClassMethodGenericFormalPlan>.Empty
+                : ImmutableArray.CreateRange(
+                    sourceClassMethodGenericFormalPlans);
+        var interfaceMetadataProgram = program;
+        if (!sourceClassMethodGenericPlans.IsEmpty)
+        {
+            (interfaceMetadataProgram, sourceClassMethodGenericPlans)
+                = PrepareC1M1SourceClassMethodGenericRelationProgram(
+                    program, sourceClassMethodGenericPlans);
+        }
         if (sourceTypeExports is { Count: > 0 })
         {
             if (sourceMethodExports is null)
@@ -231,11 +259,17 @@ public static partial class TrRmExecutableCompiler
                 out exportedInterfaceMethodDefRows,
                 out exportedInterfaceAssociatedTypeDefRows);
         }
+        if (emissionRows.Count != 0
+            || !sourceClassMethodGenericPlans.IsEmpty)
+        {
+            artifact = AddImportedGenericInterfaceMetadata(artifact,
+                interfaceMetadataProgram, schema,
+                methodParameterSurfaceValues,
+                out importedInterfaceAssociatedTypeImportRows,
+                standardSchemaIdentity);
+        }
         if (emissionRows.Count != 0)
         {
-            artifact = AddImportedGenericInterfaceMetadata(artifact, program,
-                schema, methodParameterSurfaceValues,
-                out importedInterfaceAssociatedTypeImportRows);
             artifact = AddImportedGenericMethodMetadata(artifact,
                 program, emissionRows, exportedInterfaceTypeSpecRows,
                 exportedInterfaceAssociatedTypeDefRows,
@@ -254,7 +288,8 @@ public static partial class TrRmExecutableCompiler
                     "G1 metadata emission requires an explicit source mapping set.",
                     nameof(sourceMethodExports));
             }
-            var standardIndex = new TrRmArtifactIndex(artifact, schema);
+            var standardIndex = new TrRmArtifactIndex(artifact, schema,
+                standardSchemaIdentity: standardSchemaIdentity);
             _ = standardIndex.TryGetSection(0x0016, out _,
                 out var baseMethodCount);
             for (var emissionIndex = 0;
@@ -277,10 +312,27 @@ public static partial class TrRmExecutableCompiler
                 methodParameterSurfaceValues, sourceClassExports);
         }
         else if (hasGenericCallTargets
-            || ArtifactHasGenericWriteConstraints(artifact, schema))
+            || ArtifactHasGenericWriteConstraints(artifact, schema,
+                standardSchemaIdentity))
         {
             artifact = AddGenericMethodFeatures(artifact, schema,
-                hasGenericCallTargets);
+                hasGenericCallTargets, standardSchemaIdentity);
+        }
+
+        if (!sourceClassMethodGenericPlans.IsEmpty)
+        {
+            artifact = AddGenericMethodFeatures(artifact, schema,
+                includeGenericMethodCalls: true,
+                standardSchemaIdentity: standardSchemaIdentity);
+            artifact = EmitC1M1SourceClassMethodGenericConstraints(
+                artifact, interfaceMetadataProgram,
+                sourceClassMethodGenericPlans, schema,
+                standardSchemaIdentity,
+                exportedInterfaceTypeSpecRows,
+                exportedInterfaceAssociatedTypeDefRows,
+                importedInterfaceAssociatedTypeImportRows,
+                importedNominalTypeReferences,
+                importedNominalTypeSnapshots);
         }
 
         if (methodParameterSurfaceValues is not null
@@ -289,8 +341,8 @@ public static partial class TrRmExecutableCompiler
         {
             if (baseArtifact is null)
             {
-                var existingIndex = new TrRmArtifactIndex(artifact,
-                    schema);
+                var existingIndex = new TrRmArtifactIndex(artifact, schema,
+                    standardSchemaIdentity: standardSchemaIdentity);
                 var hasExistingValues
                     = existingIndex.TryGetSection(0x0030, out _,
                         out var existingSources)
@@ -309,10 +361,11 @@ public static partial class TrRmExecutableCompiler
             }
 
             artifact = ReplaceFrozenScalarValueSections(artifact, schema,
-                methodParameterSurfaceValues);
+                methodParameterSurfaceValues, standardSchemaIdentity);
         }
 
-        var index = new TrRmArtifactIndex(artifact, schema);
+        var index = new TrRmArtifactIndex(artifact, schema,
+            standardSchemaIdentity: standardSchemaIdentity);
         var tables = TrRmStructuralMetadataValidator
             .ValidateGenericMethodCallsDraftAndGetExecutionTables(index);
         for (var methodRow = 1; methodRow <= tables.Methods.Count;
@@ -324,15 +377,490 @@ public static partial class TrRmExecutableCompiler
                 tables.ValidateRegisterBodyMapsForMethod(methodRow);
             }
         }
-
         return artifact;
+    }
+
+    private static byte[] EmitC1M1SourceClassMethodGenericConstraints(
+        byte[] artifact, BoundProgram program,
+        ImmutableArray<C1M1SourceClassMethodGenericFormalPlan> plans,
+        TrRmArtifactSchema schema, string? standardSchemaIdentity,
+        IReadOnlyDictionary<(string QualifiedName, int Arity), uint>
+            exportedInterfaceTypeSpecRows,
+        IReadOnlyDictionary<(
+            string QualifiedName, int Arity, int MemberOrdinal,
+            string DeclarationKey), uint>
+            exportedInterfaceAssociatedTypeDefRows,
+        IReadOnlyDictionary<GenericImportedInterfaceAssociatedTypeKey,
+            uint> importedInterfaceAssociatedTypeImportRows,
+        IReadOnlyDictionary<BoundGenericNominalTypeIdentity, uint>
+            importedNominalTypeReferences,
+        IReadOnlyList<BoundSourceTypeProviderSnapshot>
+            importedNominalTypeSnapshots)
+    {
+        if (plans.IsDefaultOrEmpty
+            || !schema.UsesGenericMethodCalls()
+            || (!schema.UsesAssociatedRelationConstraints()
+                && plans.Any(static plan =>
+                    plan.SourceFormal.Constraints.Any(
+                        static constraint => constraint.Kind == 3))))
+        {
+            throw new ArgumentException(
+                "The source class generic constraint plan is empty or unsupported by the selected schema.",
+                nameof(plans));
+        }
+
+        var index = new TrRmArtifactIndex(artifact, schema,
+            standardSchemaIdentity: standardSchemaIdentity);
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var sectionIndex = 0; sectionIndex < index.SectionCount;
+            sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var count);
+            sections.Add(new TrRmSection(kind, flags,
+                checked((uint)count), bytes.ToArray()));
+        }
+
+        var stringSection = GetSection(sections, 0x0002);
+        var strings = new TrRmStringTableReader(stringSection.Bytes.Span,
+            checked((int)stringSection.RecordCount));
+        var names = new List<(string Text, int Encoding)>(strings.Count + 8);
+        for (var stringRow = 1; stringRow <= strings.Count; stringRow++)
+        {
+            names.Add((strings.DecodeNamespace(stringRow), 1));
+        }
+
+        var typeSpecRows = ReadVariableRows(sections, 0x0011, 2, 1);
+        var genericParameterRows = ReadGenericParamRows(sections);
+        var constraintRows = ReadConstraintRows(sections);
+        var associatedRelationRows = ReadAssociatedRelationRows(sections);
+        var outputTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                new TrRmArtifactIndex(artifact, schema,
+                    standardSchemaIdentity: standardSchemaIdentity));
+        var importedInterfaceImportRows
+            = ReadImportedInterfaceImportRows(sections, strings);
+        var nominalTypes = new GenericMethodNominalTypeWriter(sections,
+            names, typeSpecRows, genericParameterRows, constraintRows,
+            program, [], schema);
+        nominalTypes.ImportDefinitionReferences(
+            importedNominalTypeReferences, importedNominalTypeSnapshots);
+        var emittedConstraintsByFormal
+            = new Dictionary<int, List<TrRmConstraintRow>>();
+        var interfaceConstraintVisits
+            = new Dictionary<int, int>();
+
+        foreach (var methodPlans in plans.GroupBy(
+                     static plan => plan.MethodRow))
+        {
+            var orderedPlans = methodPlans.OrderBy(
+                static plan => plan.FormalOrdinal).ToArray();
+            var roots = orderedPlans.SelectMany(static plan => plan.Roots)
+                .Distinct().ToArray();
+            if (roots.Length == 0
+                || roots.Any(root =>
+                    root.Origin.MethodDefId != roots[0].Origin.MethodDefId
+                    || !StringComparer.Ordinal.Equals(
+                        root.Origin.ProviderIdentity,
+                        roots[0].Origin.ProviderIdentity)
+                    || !root.Origin.ProviderArtifactDigest.AsSpan()
+                        .SequenceEqual(
+                            roots[0].Origin.ProviderArtifactDigest.AsSpan())
+                    || root.Origin.ClassOwner
+                        != roots[0].Origin.ClassOwner
+                    || !AreC1M1SourceClassMethodRootsEquivalent(
+                        roots[0], root)))
+            {
+                throw new InvalidDataException(
+                    "A class MethodDef has ambiguous typed generic constraint roots.");
+            }
+
+            var root = roots[0];
+            var provider = orderedPlans[0].Provider;
+            if (orderedPlans.Any(plan =>
+                    !SameA2SourceTypeProviderSnapshot(
+                        plan.Provider, provider))
+                || !StringComparer.Ordinal.Equals(
+                    root.Origin.ProviderIdentity, provider.ModuleIdentity)
+                || root.Origin.ProviderArtifactDigest.IsDefault)
+            {
+                throw new InvalidDataException(
+                    "A class MethodDef generic constraint lost its exact provider artifact context.");
+            }
+
+            var providerArtifact = provider.ArtifactSnapshot.ToArray();
+            var providerIndex = new TrRmArtifactIndex(providerArtifact,
+                GetC1M1ClassMetadataSchema(provider.SchemaIdentity),
+                standardSchemaIdentity: provider.SchemaIdentity);
+            var sourceTables = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(providerIndex);
+            if (provider.ModuleRow <= 0
+                || provider.ModuleRow > sourceTables.Modules.Count
+                || !StringComparer.Ordinal.Equals(
+                    sourceTables.Modules.GetIdentity(provider.ModuleRow),
+                    provider.ModuleIdentity)
+                || !root.Origin.ProviderArtifactDigest.AsSpan()
+                    .SequenceEqual(SHA256.HashData(
+                        provider.ArtifactSnapshot.AsSpan())))
+            {
+                throw new InvalidDataException(
+                    "A class MethodDef generic constraint has an invalid source Module snapshot.");
+            }
+
+            var sourceMethodRow = checked((int)(
+                root.Origin.MethodDefId & 0x00FF_FFFF));
+            if (sourceTables.Methods.GetOwnerType(sourceMethodRow)
+                    != checked((int)(root.Origin.ClassOwner!
+                        .Identity.DefinitionId & 0x00FF_FFFF))
+                || outputTables.Methods.GetBodyRow(methodPlans.Key) != 0)
+            {
+                throw new InvalidDataException(
+                    "A class MethodDef generic constraint changed its exact provider owner or Body role.");
+            }
+
+            var sourceSignature = sourceTables.Methods
+                .GetSignature(sourceMethodRow);
+            var (sourceGenericFirst, sourceGenericCount)
+                = sourceTables.Signatures.GetGenericRange(sourceSignature);
+            var outputSignature = outputTables.Methods
+                .GetSignature(methodPlans.Key);
+            var (outputGenericFirst, outputGenericCount)
+                = outputTables.Signatures.GetGenericRange(outputSignature);
+            if (sourceGenericCount != root.Formals.Length
+                || sourceGenericCount != outputGenericCount
+                || sourceGenericCount != orderedPlans.Length
+                || orderedPlans.Where((plan, ordinal) =>
+                    plan.FormalOrdinal != ordinal).Any())
+            {
+                throw new InvalidDataException(
+                    "A class MethodDef generic constraint has an incomplete formal mapping.");
+            }
+
+            var genericParamRowMap = new Dictionary<int, int>();
+            for (var ordinal = 0; ordinal < sourceGenericCount; ordinal++)
+            {
+                var sourceGenericParamRow = sourceGenericFirst + ordinal;
+                var outputGenericParamRow = outputGenericFirst + ordinal;
+                if (sourceTables.GenericParams.GetOwnerDefId(
+                        sourceGenericParamRow)
+                        != root.Origin.MethodDefId
+                    || sourceTables.GenericParams.GetOrdinal(
+                        sourceGenericParamRow) != (uint)ordinal
+                    || outputTables.GenericParams.GetOwnerDefId(
+                        outputGenericParamRow)
+                        != (0x1600_0000u
+                            | checked((uint)methodPlans.Key))
+                    || outputTables.GenericParams.GetOrdinal(
+                        outputGenericParamRow) != (uint)ordinal
+                    || !genericParamRowMap.TryAdd(sourceGenericParamRow,
+                        outputGenericParamRow))
+                {
+                    throw new InvalidDataException(
+                        "A class MethodDef generic constraint has an invalid provider or destination GenericParam owner.");
+                }
+            }
+
+            var typeContext = CreateC1M1GenericMethodTypeEmissionContext(
+                program, root, sourceMethodRow, sourceTables,
+                genericParamRowMap, typeSpecRows);
+            interfaceConstraintVisits.Add(methodPlans.Key,
+                SemanticVerifier.MaximumAnalysisVisits);
+            foreach (var plan in orderedPlans)
+            {
+                if ((uint)plan.FormalOrdinal >= (uint)root.Formals.Length
+                    || plan.SourceFormal.Ordinal
+                        != (uint)plan.FormalOrdinal
+                    || !StringComparer.Ordinal.Equals(
+                        plan.SourceFormal.Name,
+                        root.Formals[plan.FormalOrdinal].Name)
+                    || plan.SourceFormal.Constraints.IsDefault
+                    || !emittedConstraintsByFormal.TryAdd(
+                        plan.GenericParamRow, []))
+                {
+                    throw new InvalidDataException(
+                        "A class MethodDef generic formal has no exact typed provider constraint view.");
+                }
+
+                var typedFormal = root.Formals[plan.FormalOrdinal];
+                var interfaceConstraintOrdinal = 0;
+                var associatedRelationOrdinal = 0;
+                var remainingVisits
+                    = interfaceConstraintVisits[methodPlans.Key];
+                var generatedConstraints
+                    = emittedConstraintsByFormal[plan.GenericParamRow];
+                foreach (var sourceConstraint
+                    in plan.SourceFormal.Constraints)
+                {
+                    switch (sourceConstraint.Kind)
+                    {
+                        case 1:
+                        {
+                            if ((uint)interfaceConstraintOrdinal
+                                >= (uint)typedFormal.InterfaceConstraints
+                                    .Length)
+                            {
+                                throw new InvalidDataException(
+                                    "A class MethodDef lost its typed interface constraint.");
+                            }
+
+                            var interfaceConstraint
+                                = typedFormal.InterfaceConstraints[
+                                    interfaceConstraintOrdinal++];
+                            var payload
+                                = GenericMethodInterfaceConstraintTypeSpecRef(
+                                    interfaceConstraint,
+                                    typeContext.Definition,
+                                    exportedInterfaceTypeSpecRows,
+                                    importedInterfaceImportRows,
+                                    typeContext.FormalTypeSpecRows,
+                                    typeContext.GenericParamRows,
+                                    typeContext.BuiltInTypeSpecRows,
+                                    typeSpecRows, depth: 0,
+                                    ref remainingVisits);
+                            generatedConstraints.Add(
+                                new TrRmConstraintRow(
+                                    plan.GenericParamRow, 1, payload));
+                            break;
+                        }
+
+                        case 2 when sourceConstraint.Payload is >= 1 and <= 3:
+                            generatedConstraints.Add(
+                                new TrRmConstraintRow(
+                                    plan.GenericParamRow, 2,
+                                    sourceConstraint.Payload));
+                            break;
+
+                        case 3 when schema
+                            .UsesAssociatedRelationConstraints():
+                        {
+                            if ((uint)associatedRelationOrdinal
+                                    >= (uint)typedFormal
+                                        .AssociatedRelations.Length)
+                            {
+                                throw new InvalidDataException(
+                                    "A class MethodDef lost its typed associated-relation constraint.");
+                            }
+
+                            var relation = typedFormal.AssociatedRelations[
+                                associatedRelationOrdinal++];
+                            if (relation.FormalOrdinal
+                                    != plan.FormalOrdinal
+                                || !typedFormal.InterfaceConstraints.Any(
+                                    constraint =>
+                                        BoundInterfaceContract
+                                            .AreEquivalentProviderInterfaceViews(
+                                                constraint,
+                                                relation.AssociatedType
+                                                    .DeclaringInterface)))
+                            {
+                                throw new InvalidDataException(
+                                    "A class MethodDef associated relation has no matching interface constraint.");
+                            }
+
+                            var sourceRelationRow
+                                = relation.AssociatedRelationRow;
+                            if (sourceRelationRow <= 0
+                                || relation.DeclaringInterfaceTypeSpecReference
+                                    != sourceTables.AssociatedRelations
+                                        .GetDeclaringInterfaceTypeSpecRef(
+                                            sourceRelationRow)
+                                || relation.AssociatedTypeDefReference
+                                    != sourceTables.AssociatedRelations
+                                        .GetAssociatedTypeDefReference(
+                                            sourceRelationRow)
+                                || relation.RequiredTypeSpecReference
+                                    != sourceTables.AssociatedRelations
+                                        .GetRequiredTypeSpecRef(
+                                            sourceRelationRow))
+                            {
+                                throw new InvalidDataException(
+                                    "A class MethodDef associated relation differs from its exact provider row.");
+                            }
+
+                            var declaringInterfaceTypeSpec
+                                = GenericMethodInterfaceConstraintTypeSpecRef(
+                                    relation.AssociatedType
+                                        .DeclaringInterface,
+                                    typeContext.Definition,
+                                    exportedInterfaceTypeSpecRows,
+                                    importedInterfaceImportRows,
+                                    typeContext.FormalTypeSpecRows,
+                                    typeContext.GenericParamRows,
+                                    typeContext.BuiltInTypeSpecRows,
+                                    typeSpecRows, depth: 0,
+                                    ref remainingVisits);
+                            var associatedTypeDef
+                                = GenericMethodAssociatedTypeDefReference(
+                                    relation,
+                                    exportedInterfaceAssociatedTypeDefRows,
+                                    importedInterfaceAssociatedTypeImportRows);
+                            var requiredTypeSpec
+                                = nominalTypes.TypeTermRef(
+                                    relation.RequiredType,
+                                    typeContext.Definition,
+                                    typeContext.FormalTypeSpecRows,
+                                    typeContext.BuiltInTypeSpecRows,
+                                    depth: 0);
+                            var relationRow
+                                = checked((uint)associatedRelationRows.Count
+                                    + 1);
+                            associatedRelationRows.Add(
+                                new TrRmAssociatedRelationRow(
+                                    declaringInterfaceTypeSpec,
+                                    associatedTypeDef,
+                                    requiredTypeSpec));
+                            generatedConstraints.Add(
+                                new TrRmConstraintRow(
+                                    plan.GenericParamRow, 3,
+                                    relationRow));
+                            break;
+                        }
+
+                        default:
+                            throw new InvalidDataException(
+                                "A class MethodDef has an unsupported generic constraint kind or payload.");
+                    }
+                }
+
+                if (interfaceConstraintOrdinal
+                        != typedFormal.InterfaceConstraints.Length
+                    || associatedRelationOrdinal
+                        != typedFormal.AssociatedRelations.Length)
+                {
+                    throw new InvalidDataException(
+                        "A class MethodDef lost part of its typed generic constraint closure.");
+                }
+
+                interfaceConstraintVisits[methodPlans.Key]
+                    = remainingVisits;
+            }
+        }
+
+        var temporaryArtifact = CompleteC1M1NominalTypeEmission(sections,
+            names, typeSpecRows, genericParameterRows, constraintRows,
+            nominalTypes, schema,
+            standardSchemaIdentity
+                ?? throw new InvalidDataException(
+                    "CM1AR1 class method relation emission requires its exact Standard schema identity."));
+        var temporaryIndex = new TrRmArtifactIndex(temporaryArtifact,
+            schema, standardSchemaIdentity: standardSchemaIdentity);
+        var temporaryTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(temporaryIndex);
+        var temporarySections = new List<TrRmSection>(
+            temporaryIndex.SectionCount);
+        for (var sectionIndex = 0;
+            sectionIndex < temporaryIndex.SectionCount; sectionIndex++)
+        {
+            temporaryIndex.GetSection(sectionIndex, out var kind,
+                out var flags, out var bytes, out var count);
+            temporarySections.Add(new TrRmSection(kind, flags,
+                checked((uint)count), bytes.ToArray()));
+        }
+        var rebuiltGenericParameters
+            = ReadGenericParamRows(temporarySections);
+        var rebuiltConstraints
+            = new List<TrRmConstraintRow>();
+        for (var genericParamRow = 1;
+            genericParamRow <= temporaryTables.GenericParams.Count;
+            genericParamRow++)
+        {
+            if (!emittedConstraintsByFormal.TryGetValue(genericParamRow,
+                    out var formalConstraints))
+            {
+                formalConstraints = [];
+                var (constraintFirst, constraintCount)
+                    = temporaryTables.GenericParams
+                        .GetConstraintRange(genericParamRow);
+                for (var offset = 0; offset < constraintCount; offset++)
+                {
+                    var constraintRow = constraintFirst + offset;
+                    formalConstraints.Add(new TrRmConstraintRow(
+                        genericParamRow,
+                        temporaryTables.Constraints.GetKind(constraintRow),
+                        temporaryTables.Constraints.GetPayload(
+                            constraintRow)));
+                }
+            }
+
+            var constraintFirst = formalConstraints.Count == 0 ? 0
+                : rebuiltConstraints.Count + 1;
+            foreach (var constraint in formalConstraints)
+            {
+                if (constraint.OwnerGenericParamRow != genericParamRow)
+                {
+                    throw new InvalidDataException(
+                        "A class MethodDef Constraint has an invalid GenericParam owner.");
+                }
+
+                rebuiltConstraints.Add(constraint);
+            }
+
+            rebuiltGenericParameters[genericParamRow - 1]
+                = rebuiltGenericParameters[genericParamRow - 1] with {
+                    ConstraintFirst = constraintFirst,
+                    ConstraintCount = formalConstraints.Count,
+                };
+        }
+
+        SetSection(temporarySections, 0x0019,
+            checked((uint)rebuiltGenericParameters.Count),
+            EncodeC1M1GenericParamRows(rebuiltGenericParameters));
+        SetSection(temporarySections, 0x001A,
+            checked((uint)rebuiltConstraints.Count),
+            EncodeC1M1ConstraintRows(rebuiltConstraints));
+        var associatedRelationBytes
+            = TrRmAssociatedRelationTableWriter.Encode(
+                associatedRelationRows, temporaryTables.TypeSpecs,
+                temporaryTables.AssociatedTypeDefs.Count,
+                temporaryTables.Imports);
+        SetSection(temporarySections, 0x0036,
+            checked((uint)associatedRelationRows.Count),
+            associatedRelationBytes);
+        temporarySections.Sort(static (left, right) =>
+            left.Kind.CompareTo(right.Kind));
+        var result = TrRmArtifactWriter.Encode(temporarySections, schema,
+            standardSchemaIdentity: standardSchemaIdentity);
+        _ = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                new TrRmArtifactIndex(result, schema,
+                    standardSchemaIdentity: standardSchemaIdentity));
+        return result;
+    }
+
+    private static bool AreC1M1SourceClassMethodRootsEquivalent(
+        BoundGenericMethodImport left, BoundGenericMethodImport right)
+    {
+        if (left.Formals.Length != right.Formals.Length)
+        {
+            return false;
+        }
+
+        for (var ordinal = 0; ordinal < left.Formals.Length; ordinal++)
+        {
+            var leftFormal = left.Formals[ordinal];
+            var rightFormal = right.Formals[ordinal];
+            if (leftFormal.Ordinal != rightFormal.Ordinal
+                || !StringComparer.Ordinal.Equals(leftFormal.Name,
+                    rightFormal.Name)
+                || !leftFormal.InterfaceConstraints.SequenceEqual(
+                    rightFormal.InterfaceConstraints)
+                || !leftFormal.AssociatedRelations.SequenceEqual(
+                    rightFormal.AssociatedRelations))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static byte[] ReplaceFrozenScalarValueSections(byte[] artifact,
         TrRmArtifactSchema schema,
-        TrRmFrozenScalarValueBuilder frozenScalarValueBuilder)
+        TrRmFrozenScalarValueBuilder frozenScalarValueBuilder,
+        string? standardSchemaIdentity = null)
     {
-        var index = new TrRmArtifactIndex(artifact, schema);
+        var index = new TrRmArtifactIndex(artifact, schema,
+            standardSchemaIdentity: standardSchemaIdentity);
         var values = frozenScalarValueBuilder.Encode(default);
         var sections = new List<TrRmSection>(index.SectionCount + 3);
         for (var sectionIndex = 0; sectionIndex < index.SectionCount;
@@ -366,7 +894,8 @@ public static partial class TrRmExecutableCompiler
 
         sections.Sort(static (left, right) =>
             left.Kind.CompareTo(right.Kind));
-        return TrRmArtifactWriter.Encode(sections, schema);
+        return TrRmArtifactWriter.Encode(sections, schema,
+            standardSchemaIdentity: standardSchemaIdentity);
     }
 
     private static BoundFunction CreateGenericMethodEmitterSeed()
@@ -520,9 +1049,11 @@ public static partial class TrRmExecutableCompiler
     }
 
     private static bool ArtifactHasGenericCallTargets(byte[] artifact,
-        TrRmArtifactSchema schema)
+        TrRmArtifactSchema schema,
+        string? standardSchemaIdentity = null)
     {
-        var index = new TrRmArtifactIndex(artifact, schema);
+        var index = new TrRmArtifactIndex(artifact, schema,
+            standardSchemaIdentity: standardSchemaIdentity);
         if (!index.TryGetSection(0x0020, out var bodyBytes,
                 out var bodyCount)
             || bodyCount == 0)
@@ -558,9 +1089,10 @@ public static partial class TrRmExecutableCompiler
     }
 
     private static bool ArtifactHasGenericWriteConstraints(byte[] artifact,
-        TrRmArtifactSchema schema)
+        TrRmArtifactSchema schema, string? standardSchemaIdentity = null)
     {
-        var index = new TrRmArtifactIndex(artifact, schema);
+        var index = new TrRmArtifactIndex(artifact, schema,
+            standardSchemaIdentity: standardSchemaIdentity);
         if (!index.TryGetSection(0x001A, out var constraints,
                 out var count))
         {
@@ -586,9 +1118,11 @@ public static partial class TrRmExecutableCompiler
     }
 
     private static byte[] AddGenericMethodFeatures(byte[] artifact,
-        TrRmArtifactSchema schema, bool includeGenericMethodCalls)
+        TrRmArtifactSchema schema, bool includeGenericMethodCalls,
+        string? standardSchemaIdentity = null)
     {
-        var index = new TrRmArtifactIndex(artifact, schema);
+        var index = new TrRmArtifactIndex(artifact, schema,
+            standardSchemaIdentity: standardSchemaIdentity);
         var sections = new List<TrRmSection>(index.SectionCount);
         for (var sectionIndex = 0; sectionIndex < index.SectionCount;
             sectionIndex++)
@@ -643,7 +1177,8 @@ public static partial class TrRmExecutableCompiler
             featureBytes);
         sections.Sort(static (left, right) =>
             left.Kind.CompareTo(right.Kind));
-        return TrRmArtifactWriter.Encode(sections, schema);
+        return TrRmArtifactWriter.Encode(sections, schema,
+            standardSchemaIdentity: standardSchemaIdentity);
     }
 
     private static bool ContainsInterfaceCall(BoundFunction function)
@@ -5629,7 +6164,10 @@ public static partial class TrRmExecutableCompiler
         {
             return artifact;
         }
-        if (!schema.UsesMethodParameterLabels())
+        if (!schema.UsesMethodParameterLabels()
+            && emissions.Any(static emission =>
+                emission.Definition.Members.Any(static member =>
+                    member.Kind == BoundInterfaceMemberKind.Callable)))
         {
             throw Unsupported(
                 "Imported G1 interface constraints require the exact G1L1 schema.");

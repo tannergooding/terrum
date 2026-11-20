@@ -356,7 +356,8 @@ public static partial class TrRmExecutableCompiler
         var rootTables = ValidateForeignInvocationArtifact(
             CreateForeignInvocationIndex(artifacts[0], schemaIdentities[0]),
             schemaIdentities[0], null, createA3ResourceLedger: false);
-        EnsureC1ClassDeclarationTablesSupported(rootTables);
+        EnsureC1ClassDeclarationTablesSupported(rootTables,
+            schemaIdentities[0]);
         var usesMethodReceiverAccess
             = !isEN1 && GetC1M1ClassMetadataSchema(
                 schemaIdentities[0]).UsesMethodReceiverAccess();
@@ -477,7 +478,7 @@ public static partial class TrRmExecutableCompiler
             methodProviderBindings
                 = classProviderValidation.MethodBindings;
         }
-        var genericClassMethodRead = isCM1
+        var genericClassMethodRead = isCM1 || isClassTypeBindingViews
             ? CreateCM1GenericClassMethodImports(artifacts,
                 schemaIdentities, moduleIdentity, rootModuleRow,
                 rootTables, typeProviderBindings, methodProviderBindings,
@@ -4054,23 +4055,105 @@ public static partial class TrRmExecutableCompiler
     }
 
     private static void EnsureC1ClassDeclarationTablesSupported(
-        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables)
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+        string schemaIdentity)
     {
-        if (tables.Interfaces.Count != 0
+        var classMethodInterfaceConstraints
+            = HasC1ClassMethodInterfaceConstraints(tables);
+        var canRetainClassMethodInterfaces
+            = (StandardGenericMethodSchema.IsClassTypeBindingViews(
+                    schemaIdentity)
+                || StandardGenericMethodSchema.IsCM1AR1(schemaIdentity))
+                && classMethodInterfaceConstraints;
+        if ((!canRetainClassMethodInterfaces
+                && (tables.Interfaces.Count != 0
+                    || tables.AssociatedTypeDefs.Count != 0
+                    || tables.AssociatedRelations.Count != 0))
             || tables.InterfaceBases.Count != 0
-            || tables.InterfaceMethods.Count != 0
             || tables.InterfaceConstDefs.Count != 0
             || tables.InterfaceWitnesses.Count != 0
             || tables.WitnessMembers.Count != 0
             || tables.WitnessAssociatedTypes.Count != 0
             || tables.WitnessAssociatedConsts.Count != 0
-            || tables.AssociatedTypeDefs.Count != 0
             || tables.AssociatedConstDefs.Count != 0
-            || tables.AssociatedRelations.Count != 0)
+            || (tables.InterfaceMethods.Count != 0
+                && !tables.Schema.UsesMethodParameterLabels()))
         {
             throw Unsupported(
-                "The C1 metadata-only class projection does not yet support interface or witness declarations.");
+                "The C1 metadata-only class projection does not support interface or witness declarations outside retained class MethodDef constraints.");
         }
+    }
+
+    private static bool HasC1ClassMethodInterfaceConstraints(
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables)
+    {
+        for (var methodRow = 1; methodRow <= tables.Methods.Count;
+            methodRow++)
+        {
+            var ownerTypeDefRow
+                = tables.Methods.GetOwnerType(methodRow);
+            if (ownerTypeDefRow == 0
+                || tables.TypeDefs.GetKind(ownerTypeDefRow) != 2)
+            {
+                continue;
+            }
+
+            var signatureRow = tables.Methods.GetSignature(methodRow);
+            var (formalFirst, formalCount)
+                = tables.Signatures.GetGenericRange(signatureRow);
+            if (formalCount == 0)
+            {
+                continue;
+            }
+
+            for (var formalOffset = 0; formalOffset < formalCount;
+                formalOffset++)
+            {
+                var (constraintFirst, constraintCount)
+                    = tables.GenericParams.GetConstraintRange(
+                        formalFirst + formalOffset);
+                for (var constraintOffset = 0;
+                    constraintOffset < constraintCount;
+                    constraintOffset++)
+                {
+                    var constraintRow = constraintFirst + constraintOffset;
+                    var kind = tables.Constraints.GetKind(constraintRow);
+                    if (kind == 3
+                        && tables.Schema
+                            .UsesAssociatedRelationConstraints())
+                    {
+                        return true;
+                    }
+
+                    if (kind != 1)
+                    {
+                        continue;
+                    }
+
+                    var typeSpecReference
+                        = tables.Constraints.GetPayload(constraintRow);
+                    var typeSpec
+                        = tables.TypeSpecs.GetTypeSpecRef(
+                            typeSpecReference);
+                    if (!typeSpec.IsRow
+                        || typeSpec.Form is not (0x02 or 0x03 or 0x05))
+                    {
+                        continue;
+                    }
+
+                    var targetTypeDefRow
+                        = tables.TypeSpecs.GetNominalTypeDefRow(
+                            typeSpecReference, tables.TypeDefs,
+                            tables.Imports);
+                    if (tables.TypeDefs.GetKind(targetTypeDefRow) == 3)
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
     }
 
     private static TrRmStructuralMetadataValidator.ValidatedExecutionTables
@@ -4096,7 +4179,7 @@ public static partial class TrRmExecutableCompiler
             CreateForeignInvocationIndex(artifacts[artifactIndex],
                 schemaIdentity), schemaIdentity, null,
             createA3ResourceLedger: false);
-        EnsureC1ClassDeclarationTablesSupported(tables);
+        EnsureC1ClassDeclarationTablesSupported(tables, schemaIdentity);
         return tables;
     }
 

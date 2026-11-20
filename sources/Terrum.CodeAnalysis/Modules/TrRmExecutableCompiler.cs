@@ -1185,7 +1185,8 @@ public static partial class TrRmExecutableCompiler
             }
 
             return EmitC1M1SourceClassDeclarations(program, moduleIdentity,
-                moduleTargetRequirement, sourceClassExports, out _);
+                moduleTargetRequirement, sourceClassExports, out _,
+                out _);
         }
 
         if ((StringComparer.Ordinal.Equals(schemaIdentity,
@@ -1680,9 +1681,11 @@ public static partial class TrRmExecutableCompiler
 
             var classArtifact = EmitC1M1SourceClassDeclarations(program,
                 moduleIdentity, moduleTargetRequirement, sourceClassExports,
-                out var frozenScalarValueBuilder, schema,
+                out var frozenScalarValueBuilder,
+                out var classMethodGenericFormalPlans, schema,
                 standardSchemaIdentity);
-            if (schema.UsesClassParameterDefaults())
+            if (schema.UsesClassParameterDefaults()
+                || !classMethodGenericFormalPlans.IsEmpty)
             {
                 return EmitGenericMethodCallsDraftSource(program,
                     moduleIdentity, moduleTargetRequirement,
@@ -1692,7 +1695,10 @@ public static partial class TrRmExecutableCompiler
                     baseArtifact: classArtifact,
                     frozenScalarValueBuilder:
                         frozenScalarValueBuilder,
-                    sourceClassExports: sourceClassExports);
+                    sourceClassExports: sourceClassExports,
+                    sourceClassMethodGenericFormalPlans:
+                        classMethodGenericFormalPlans,
+                    standardSchemaIdentity: standardSchemaIdentity);
             }
 
             if (sourceTypeExports is { Count: > 0 }

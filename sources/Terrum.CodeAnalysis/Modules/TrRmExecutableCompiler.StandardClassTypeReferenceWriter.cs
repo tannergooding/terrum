@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
@@ -128,6 +129,342 @@ public static partial class TrRmExecutableCompiler
         BoundSourceTypeProviderSnapshot Provider,
         ImmutableArray<string> ExportKeys);
 
+    private sealed record C1M1ImportedClassTypeDefViewPlan(
+        int StandardClassIndex, BoundStandardClassTypeView Declaration,
+        BoundSourceTypeProviderSnapshot Provider,
+        ImmutableArray<string> ExportKeys,
+        ImmutableArray<BoundStandardClassExpectation> Expectations,
+        bool IsSelectedView);
+
+    private sealed record C1M1SourceClassMethodImportPlan(
+        BoundSourceTypeProviderSnapshot Provider, string ExportKey);
+
+    private sealed record C1M1SourceClassMethodPlan(
+        int StandardClassViewIndex,
+        BoundStandardClassTypeView OwnerView,
+        BoundStandardClassMethodDeclaration Method,
+        int MethodRow,
+        ImmutableArray<C1M1SourceClassMethodImportPlan> Imports,
+        ImmutableArray<BoundGenericMethodImport> GenericMethodRoots,
+        BoundSourceTypeProviderSnapshot? GenericMethodProvider);
+
+    private sealed record C1M1SourceClassMethodGenericFormalPlan(
+        int MethodRow, int GenericParamRow, int FormalOrdinal,
+        BoundStandardClassMethodGenericParameter SourceFormal,
+        ImmutableArray<BoundGenericMethodImport> Roots,
+        BoundSourceTypeProviderSnapshot Provider);
+
+    private static ImmutableArray<BoundGenericMethodImport>
+        GetC1M1SourceClassMethodGenericRoots(
+            BoundProgram program,
+            BoundStandardClassMethodDeclaration method,
+            BoundStandardClassTypeView methodView,
+            BoundStandardClassExpectation? typeExpectation,
+            BoundSourceTypeProviderSnapshot provider)
+    {
+        var digest = SHA256.HashData(provider.ArtifactSnapshot.AsSpan());
+        var methodExpectations = typeExpectation is null
+            ? Array.Empty<BoundStandardClassMethodExpectation>()
+            : typeExpectation.MethodExpectations.Where(expectation =>
+                expectation.ExpectedDefinitionId == method.DefinitionId)
+                .ToArray();
+        if (typeExpectation is not null && methodExpectations.Length == 0)
+        {
+            throw new InvalidDataException(
+                "A retained class MethodDef with generic constraints has no exact method Import expectation.");
+        }
+
+        var roots = ImmutableArray.CreateBuilder<BoundGenericMethodImport>();
+        foreach (var root in program.RetainedGenericMethodRoots)
+        {
+            var origin = root.Origin;
+            if (origin.IsMethodDefTarget
+                || !StringComparer.Ordinal.Equals(origin.ProviderIdentity,
+                    provider.ModuleIdentity)
+                || origin.TargetRequirement != provider.TargetRequirement
+                || origin.RuntimePolicy != provider.RuntimePolicy
+                || origin.ProviderArtifactDigest.IsDefault
+                || !origin.ProviderArtifactDigest.AsSpan()
+                    .SequenceEqual(digest)
+                || root.Binding is not null)
+            {
+                continue;
+            }
+
+            var owner = origin.ClassOwner;
+            if (owner is null
+                || owner.Identity.DefinitionId >> 24 != 0x13)
+            {
+                continue;
+            }
+
+            if (methodExpectations.Length == 0)
+            {
+                if (origin.MethodDefId != method.DefinitionId
+                    || owner.Identity.DefinitionId
+                        != methodView.Identity.DefinitionId)
+                {
+                    continue;
+                }
+
+                roots.Add(root);
+                continue;
+            }
+
+            foreach (var expectation in methodExpectations)
+            {
+                if (origin.MethodDefId
+                        != expectation.ProviderDefinitionId
+                    || !StringComparer.Ordinal.Equals(origin.ExportKey,
+                        expectation.ExportKey)
+                    || owner.Identity.DefinitionId
+                        != expectation.ProviderOwnerDefinitionId
+                    || owner.ExpectedDefinitionId
+                        != expectation.ExpectedOwnerDefinitionId
+                    || !StringComparer.Ordinal.Equals(owner.ExportKey,
+                        typeExpectation!.Binding.ExportKey))
+                {
+                    continue;
+                }
+
+                roots.Add(root);
+                break;
+            }
+        }
+
+        if (roots.Count == 0)
+        {
+            throw new InvalidDataException(
+                "A retained class MethodDef generic constraint has no exact typed provider root.");
+        }
+
+        return roots.Distinct().ToImmutableArray();
+    }
+
+    private static (BoundProgram Program,
+        ImmutableArray<C1M1SourceClassMethodGenericFormalPlan> Plans)
+        PrepareC1M1SourceClassMethodGenericRelationProgram(
+            BoundProgram program,
+            IReadOnlyList<C1M1SourceClassMethodGenericFormalPlan> plans)
+    {
+        var rootsBySource = plans.SelectMany(plan =>
+                plan.Roots.Select(root => (Plan: plan, Root: root)))
+            .GroupBy(static item => item.Root)
+            .ToArray();
+        var rewrittenRoots
+            = new Dictionary<BoundGenericMethodImport,
+                BoundGenericMethodImport>();
+        var localInterfaceMappings
+            = new List<(string Name, int Arity, BoundModuleImport Import,
+                HashSet<(int Ordinal, string DeclarationKey)>
+                    AssociatedMembers)>();
+        foreach (var rootGroup in rootsBySource)
+        {
+            var sourceRoot = rootGroup.Key;
+            var sourcePlan = rootGroup.First().Plan;
+            if (rootGroup.Any(item =>
+                    !SameA2SourceTypeProviderSnapshot(
+                        item.Plan.Provider, sourcePlan.Provider)))
+            {
+                throw new InvalidDataException(
+                    "A retained class MethodDef generic root has conflicting source Module snapshots.");
+            }
+
+            var provider = sourcePlan.Provider;
+            var sourceArtifact = provider.ArtifactSnapshot.ToArray();
+            var sourceIndex = new TrRmArtifactIndex(sourceArtifact,
+                GetC1M1ClassMetadataSchema(provider.SchemaIdentity),
+                standardSchemaIdentity: provider.SchemaIdentity);
+            var sourceTables = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(sourceIndex);
+            if (provider.ModuleRow <= 0
+                || provider.ModuleRow > sourceTables.Modules.Count
+                || sourceRoot.Origin.MethodDefId >> 24 != 0x16
+                || sourceRoot.Formals.IsDefault
+                || sourceRoot.Formals.Any(static formal =>
+                    formal is null
+                    || formal.InterfaceConstraints.IsDefault
+                    || formal.AssociatedRelations.IsDefault)
+                || !StringComparer.Ordinal.Equals(
+                    sourceTables.Modules.GetIdentity(provider.ModuleRow),
+                    provider.ModuleIdentity))
+            {
+                throw new InvalidDataException(
+                    "A retained class MethodDef generic root has an invalid source Module or MethodDef identity.");
+            }
+
+            var localImports
+                = new Dictionary<(string Name, int Arity),
+                    BoundModuleImport>();
+            foreach (var formal in sourceRoot.Formals)
+            {
+                foreach (var constraint in formal.InterfaceConstraints)
+                {
+                    if (constraint.ModuleImport is null)
+                    {
+                        _ = GetC1M1AssociatedInterfaceModuleImport(
+                            constraint, sourceTables, provider.ModuleRow,
+                            provider, localImports);
+                    }
+                }
+
+                foreach (var relation in formal.AssociatedRelations)
+                {
+                    var declaringInterface
+                        = relation.AssociatedType.DeclaringInterface;
+                    if (declaringInterface.ModuleImport is null)
+                    {
+                        _ = GetC1M1AssociatedInterfaceModuleImport(
+                            declaringInterface, sourceTables,
+                            provider.ModuleRow, provider, localImports);
+                    }
+                }
+            }
+
+            var rewrittenRoot = localImports.Count == 0 ? sourceRoot
+                : RewriteC1M1AssociatedMethodImport(sourceRoot,
+                    sourceTables, provider.ModuleRow, provider,
+                    localImports);
+            rewrittenRoots.Add(sourceRoot, rewrittenRoot);
+            foreach (var (key, import) in localImports)
+            {
+                var associatedMembers = new HashSet<(
+                    int Ordinal, string DeclarationKey)>();
+                foreach (var relation in sourceRoot.Formals
+                    .SelectMany(static formal => formal.AssociatedRelations))
+                {
+                    var declaringInterface
+                        = relation.AssociatedType.DeclaringInterface;
+                    if (declaringInterface.Kind
+                            == BoundInterfaceTypeKind.Nominal
+                        && StringComparer.Ordinal.Equals(
+                            declaringInterface.NominalName, key.Name)
+                        && (declaringInterface.TypeArguments.IsDefault
+                                ? 0
+                                : declaringInterface.TypeArguments.Length)
+                            == key.Arity)
+                    {
+                        _ = associatedMembers.Add((
+                            relation.AssociatedType.MemberOrdinal,
+                            relation.AssociatedType.DeclarationKey));
+                    }
+                }
+
+                if (!localInterfaceMappings.Any(candidate =>
+                        candidate.Name == key.Name
+                        && candidate.Arity == key.Arity
+                        && candidate.Import == import))
+                {
+                    localInterfaceMappings.Add((key.Name, key.Arity,
+                        import, associatedMembers));
+                }
+                else
+                {
+                    var mappingIndex = localInterfaceMappings.FindIndex(
+                        candidate => candidate.Name == key.Name
+                            && candidate.Arity == key.Arity
+                            && candidate.Import == import);
+                    _ = localInterfaceMappings[mappingIndex]
+                        .AssociatedMembers.UnionWith(associatedMembers);
+                }
+            }
+        }
+
+        var matchedInterfaceMappings
+            = new HashSet<(string Name, int Arity,
+                BoundModuleImport Import)>();
+        var interfaces
+            = ImmutableArray.CreateBuilder<BoundInterfaceDefinition>(
+                program.Interfaces.Length);
+        foreach (var definition in program.Interfaces)
+        {
+            var key = (definition.QualifiedName,
+                definition.Formals.Length);
+            if (definition.ModuleImport is BoundModuleImport existingImport)
+            {
+                foreach (var mapping in localInterfaceMappings.Where(
+                    mapping =>
+                        StringComparer.Ordinal.Equals(mapping.Name,
+                            key.Item1)
+                        && mapping.Arity == key.Item2
+                        && mapping.Import == existingImport))
+                {
+                    _ = matchedInterfaceMappings.Add((mapping.Name,
+                        mapping.Arity, mapping.Import));
+                }
+
+                interfaces.Add(definition);
+                continue;
+            }
+
+            var candidates = localInterfaceMappings.Where(mapping =>
+                StringComparer.Ordinal.Equals(mapping.Name, key.Item1)
+                && mapping.Arity == key.Item2
+                && (mapping.AssociatedMembers.Count == 0
+                    || mapping.AssociatedMembers.All(member =>
+                        definition.Members.Any(candidate =>
+                            candidate.Ordinal == member.Ordinal
+                            && (StringComparer.Ordinal.Equals(
+                                    candidate.DeclarationKey,
+                                    member.DeclarationKey)
+                                || candidate.AdditionalDeclarationKeys
+                                    .Contains(member.DeclarationKey,
+                                        StringComparer.Ordinal)))))
+            ).ToArray();
+            if (candidates.Length == 0)
+            {
+                interfaces.Add(definition);
+                continue;
+            }
+
+            if (candidates.Length != 1)
+            {
+                throw new InvalidDataException(
+                    "A retained class MethodDef relation has no unique exact local InterfaceDef declaration.");
+            }
+
+            var mapping = candidates[0];
+            _ = matchedInterfaceMappings.Add((mapping.Name, mapping.Arity,
+                mapping.Import));
+            interfaces.Add(definition with {
+                ModuleImport = mapping.Import,
+            });
+        }
+
+        if (matchedInterfaceMappings.Count != localInterfaceMappings.Count)
+        {
+            throw new InvalidDataException(
+                "A retained class MethodDef relation has no exact local InterfaceDef import/export closure.");
+        }
+
+        var retainedRoots
+            = ImmutableArray.CreateBuilder<BoundGenericMethodImport>(
+                program.RetainedGenericMethodRoots.Length);
+        foreach (var root in program.RetainedGenericMethodRoots)
+        {
+            retainedRoots.Add(rewrittenRoots.TryGetValue(root,
+                out var rewritten) ? rewritten : root);
+        }
+
+        var rewrittenProgram = program with {
+            Interfaces = interfaces.MoveToImmutable(),
+            RetainedGenericMethodRoots = retainedRoots.MoveToImmutable(),
+        };
+        var rewrittenPlans
+            = ImmutableArray.CreateBuilder<
+                C1M1SourceClassMethodGenericFormalPlan>(plans.Count);
+        foreach (var plan in plans)
+        {
+            rewrittenPlans.Add(plan with {
+                Roots = [.. plan.Roots.Select(root =>
+                    rewrittenRoots.TryGetValue(root, out var rewritten)
+                        ? rewritten : root)],
+            });
+        }
+
+        return (rewrittenProgram, rewrittenPlans.MoveToImmutable());
+    }
+
     private readonly record struct C1M1Construction2ConditionalReturn(
         BoundIf Root);
 
@@ -187,9 +524,12 @@ public static partial class TrRmExecutableCompiler
         BoundProgram program, string moduleIdentity,
         uint moduleTargetRequirement, SourceClassExports sourceClassExports,
         out TrRmFrozenScalarValueBuilder frozenScalarValueBuilder,
+        out ImmutableArray<C1M1SourceClassMethodGenericFormalPlan>
+            sourceClassMethodGenericFormalPlans,
         TrRmArtifactSchema schema = TrRmArtifactSchema.C1M1Draft,
         string? standardSchemaIdentity = null)
     {
+        sourceClassMethodGenericFormalPlans = [];
         var emitsConstruction2 = schema.UsesObjectConstruction();
         if (schema != TrRmArtifactSchema.C1M1Draft
             && !emitsConstruction2)
@@ -207,6 +547,14 @@ public static partial class TrRmExecutableCompiler
                 structure.StandardTypeOrigin is
                     BoundStandardTypeOrigin origin
                 && origin.ContextualViewIndexes.Length > 1);
+        var hasClassContextualTypeViews
+            = program.StandardClassDeclarations.Any(
+                static declaration =>
+                    declaration.Expectations.Length > 1
+                    || !declaration.TypeDefBindingEqualityGroups.IsEmpty);
+        var supportsClassTypeBindingViews
+            = IsSelectedClassTypeDefBindingEqualitySchemaIdentity(
+                standardSchemaIdentity);
         var hasTypeOnlyContext = typeViews.Length != 0
             && program.Classes.IsEmpty
             && sourceClassExports.Exports.IsEmpty;
@@ -222,6 +570,13 @@ public static partial class TrRmExecutableCompiler
         {
             throw new InvalidDataException(
                 "A contextual TypeDef equality group has no retained view graph.");
+        }
+        if (hasClassContextualTypeViews
+            && !IsSelectedClassTypeDefBindingEqualitySchemaIdentity(
+                standardSchemaIdentity))
+        {
+            throw Unsupported(
+                "Distinct class TypeDef expectations require an exact class TypeBindingViews schema.");
         }
 
         SemanticVerifier.VerifyLibraryReferences(program);
@@ -473,17 +828,120 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
+        var standardClassTypeDefViews
+            = new List<C1M1ImportedClassTypeDefViewPlan>();
+        var standardClassTypeDefViewIndexesByClass
+            = new Dictionary<int, List<int>>();
+        for (var standardClassIndex = 0;
+            standardClassIndex < program.StandardClassDeclarations.Length;
+            standardClassIndex++)
+        {
+            var declaration
+                = program.StandardClassDeclarations[standardClassIndex];
+            var importPlan = GetC1M1ImportedClassImportPlan(program,
+                declaration);
+            var viewIndexes = new List<int>();
+            standardClassTypeDefViewIndexesByClass.Add(standardClassIndex,
+                viewIndexes);
+
+            if (!supportsClassTypeBindingViews)
+            {
+                AddView(declaration.Declaration, importPlan.Provider,
+                    importPlan.ExportKeys, declaration.Expectations, false);
+            }
+            else
+            {
+                foreach (var expectation in declaration.Expectations)
+                {
+                    var binding = expectation.Binding;
+                    AddView(expectation.ExpectedDeclaration,
+                        binding.Provider, [binding.ExportKey], [expectation],
+                        isSelectedView: false);
+                }
+
+                var hasDirectEqualityEndpoint
+                    = declaration.TypeDefBindingEqualityGroups.Any(group =>
+                        group.Endpoints.Any(endpoint =>
+                            endpoint.ImportRow == 0
+                            && endpoint.TypeDefDefinitionId
+                                == declaration.Declaration.Identity
+                                    .DefinitionId
+                            && SameA2SourceTypeProviderSnapshot(
+                                endpoint.OwnerModule,
+                                declaration.Declaration.Provider)));
+                foreach (var exportKey in declaration.SelectedExportKeys)
+                {
+                    var isAlreadyAnExpectation
+                        = declaration.Expectations.Any(expectation =>
+                            StringComparer.Ordinal.Equals(
+                                expectation.Binding.ExportKey, exportKey));
+                    if (isAlreadyAnExpectation
+                        && !hasDirectEqualityEndpoint)
+                    {
+                        continue;
+                    }
+
+                    AddView(declaration.Declaration,
+                        declaration.Declaration.Provider, [exportKey], [],
+                        isSelectedView: true);
+                }
+            }
+
+            if (viewIndexes.Count == 0)
+            {
+                throw Unsupported(
+                    "C1M1 class source emission requires an exact TypeDef view for every retained class declaration.");
+            }
+
+            void AddView(BoundStandardClassTypeView view,
+                BoundSourceTypeProviderSnapshot provider,
+                ImmutableArray<string> exportKeys,
+                ImmutableArray<BoundStandardClassExpectation> expectations,
+                bool isSelectedView)
+            {
+                if (!SameA2SourceTypeProviderSnapshot(provider,
+                        declaration.Declaration.Provider)
+                    || exportKeys.IsDefaultOrEmpty
+                    || exportKeys.Distinct(StringComparer.Ordinal).Count()
+                        != exportKeys.Length
+                    || exportKeys.Any(exportKey =>
+                        !BoundEnumTypes.IsValidModuleDeclarationKey(exportKey)
+                        || !declaration.ExportKeys.Contains(exportKey,
+                            StringComparer.Ordinal)))
+                {
+                    throw new InvalidDataException(
+                        "A retained class TypeDef view lost its exact provider ExportKey.");
+                }
+
+                var viewIndex = standardClassTypeDefViews.Count;
+                standardClassTypeDefViews.Add(
+                    new C1M1ImportedClassTypeDefViewPlan(
+                        standardClassIndex, view, provider, exportKeys,
+                        expectations, isSelectedView));
+                viewIndexes.Add(viewIndex);
+            }
+        }
+        int[][] sourceClassEqualityViewGroups
+            = supportsClassTypeBindingViews
+                ? standardClassTypeDefViewIndexesByClass.Values
+                .Select(viewIndexes => viewIndexes.Where(viewIndex =>
+                        standardClassTypeDefViews[viewIndex].IsSelectedView)
+                    .ToArray())
+                .Where(static viewIndexes => viewIndexes.Length > 1)
+                .ToArray()
+                : [];
+
         var typeDefRows = new List<TrRmTypeDefRow>(
             exportKeysByClass.Count
-                + program.StandardClassDeclarations.Length);
+                + standardClassTypeDefViews.Count);
         var typeDefNames = new List<(string Namespace, string Name)>(
             exportKeysByClass.Count
-                + program.StandardClassDeclarations.Length);
+                + standardClassTypeDefViews.Count);
         var fieldRows = new List<TrRmFieldDefRow>();
         var fieldNames = new List<string>();
         var layoutRows = new List<TrRmLayoutRow>(
             exportKeysByClass.Count
-                + program.StandardClassDeclarations.Length
+                + standardClassTypeDefViews.Count
                 + structureTypeDefViews.Count);
         var layoutFieldRows = new List<TrRmLayoutFieldRow>();
         var typeSpecRows = new List<ReadOnlyMemory<byte>>();
@@ -496,6 +954,9 @@ public static partial class TrRmExecutableCompiler
         var methodNames = new List<string>();
         var methodSignatureRows = new List<TrRmMethodSigRow>();
         var parameterRows = new List<TrRmParamRow>();
+        var genericParamRows = new List<TrRmGenericParamRow>();
+        var genericParamNames = new List<string>();
+        var genericConstraintRows = new List<TrRmConstraintRow>();
         var parameterSurfaceRows
             = new List<C1M1ParameterSurfaceRow>();
         var contractRows = new List<TrRmContractRow>();
@@ -516,23 +977,25 @@ public static partial class TrRmExecutableCompiler
                 static item => item.typeDefRow);
         var fieldDefRowByClassAndIndex = new Dictionary<
             (int ClassIndex, int FieldIndex), int>();
-        var fieldDefRowByStandardClassAndIndex = new Dictionary<
-            (int StandardClassIndex, int FieldIndex), int>();
-        var fieldImportRowByStandardClassAndIndex = new Dictionary<
-            (int StandardClassIndex, int FieldIndex), int>();
+        var fieldDefRowByStandardClassViewAndIndex = new Dictionary<
+            (int StandardClassViewIndex, int FieldIndex), int>();
+        var fieldImportRowByStandardClassViewAndIndex = new Dictionary<
+            (int StandardClassViewIndex, int FieldIndex), int>();
+        var methodDefRowByStandardClassViewAndId = new Dictionary<
+            (int StandardClassViewIndex, uint MethodDefinitionId), int>();
         var fieldDefRowByStructureAndIndex = new Dictionary<
             (int StructureIndex, int FieldIndex), int>();
         var fieldDefRowByTypeViewAndIndex = new Dictionary<
             (int TypeViewIndex, int FieldIndex), int>();
-        var standardClassIndexes = Enumerable.Range(0,
-            program.StandardClassDeclarations.Length).ToHashSet();
-        var typeDefRowByStandardClass = standardClassIndexes
-            .Order()
-            .Select(static (standardClassIndex, ordinal) =>
-                (standardClassIndex,
-                    typeDefRow: ordinal + 1))
-            .ToDictionary(static item => item.standardClassIndex,
-                item => item.typeDefRow + exportKeysByClass.Count);
+        var typeDefRowByStandardClassView
+            = new Dictionary<int, int>(standardClassTypeDefViews.Count);
+        for (var classViewIndex = 0;
+            classViewIndex < standardClassTypeDefViews.Count;
+            classViewIndex++)
+        {
+            var typeDefRow = exportKeysByClass.Count + classViewIndex + 1;
+            typeDefRowByStandardClassView.Add(classViewIndex, typeDefRow);
+        }
         var contextualTypeViews = typeViews;
         var structureTypeDefViews = new List<(int StructureIndex,
             int TypeViewIndex)>();
@@ -570,7 +1033,7 @@ public static partial class TrRmExecutableCompiler
             var (structureIndex, typeViewIndex)
                 = structureTypeDefViews[index];
             var typeDefRow = exportKeysByClass.Count
-                + standardClassIndexes.Count + index + 1;
+                + standardClassTypeDefViews.Count + index + 1;
             _ = typeDefRowByStructure.TryAdd(structureIndex, typeDefRow);
             if (typeViewIndex >= 0)
             {
@@ -581,9 +1044,11 @@ public static partial class TrRmExecutableCompiler
                 }
             }
         }
-        var typeImportRowByStandardClass = new Dictionary<int, int>();
-        var typeImportPlanByStandardClass
-            = new Dictionary<int, C1M1ImportedClassImportPlan>();
+        var typeImportRowByStandardClassView
+            = new Dictionary<int, int>(standardClassTypeDefViews.Count);
+        var typeImportPlanByStandardClassView
+            = new Dictionary<int, C1M1ImportedClassImportPlan>(
+                standardClassTypeDefViews.Count);
         var typeImportRowByStructure = new Dictionary<int, int>();
         var typeImportPlanByStructure
             = new Dictionary<int, C1M1ImportedStructImportPlan>();
@@ -662,26 +1127,32 @@ public static partial class TrRmExecutableCompiler
             ]);
         }
 
-        foreach (var standardClassIndex in standardClassIndexes.Order())
+        for (var classViewIndex = 0;
+            classViewIndex < standardClassTypeDefViews.Count;
+            classViewIndex++)
         {
-            var declaration
-                = program.StandardClassDeclarations[standardClassIndex];
-            var importPlan = GetC1M1ImportedClassImportPlan(program,
-                declaration);
-            typeImportPlanByStandardClass.Add(standardClassIndex,
-                importPlan);
+            var view = standardClassTypeDefViews[classViewIndex];
+            var importPlan = new C1M1ImportedClassImportPlan(
+                view.Provider, view.ExportKeys);
             var typeDefRow
-                = typeDefRowByStandardClass[standardClassIndex];
+                = typeDefRowByStandardClassView[classViewIndex];
+            var importRow = 0;
             foreach (var exportKey in importPlan.ExportKeys)
             {
-                AddImport(importPlan.Provider.ModuleIdentity,
+                var addedImportRow = AddImport(
+                    importPlan.Provider.ModuleIdentity,
                     importPlan.Provider.TargetRequirement,
                     importPlan.Provider.RuntimePolicy, exportKey,
                     0x1300_0000u | checked((uint)typeDefRow));
+                if (importRow == 0)
+                {
+                    importRow = addedImportRow;
+                }
             }
 
-            typeImportRowByStandardClass.Add(standardClassIndex,
-                imports.Count - importPlan.ExportKeys.Length + 1);
+            typeImportPlanByStandardClassView.Add(classViewIndex,
+                importPlan);
+            typeImportRowByStandardClassView.Add(classViewIndex, importRow);
         }
 
         foreach (var (structureIndex, typeViewIndex)
@@ -735,19 +1206,81 @@ public static partial class TrRmExecutableCompiler
         var typeDefOrder = exportKeysByClass.Keys
             .Select(static classIndex =>
                 (Kind: 0, Index: classIndex, TypeViewIndex: -1))
-            .Concat(standardClassIndexes.Order().Select(
-                static standardClassIndex => (Kind: 1,
-                    Index: standardClassIndex, TypeViewIndex: -1)))
+            .Concat(Enumerable.Range(0,
+                    standardClassTypeDefViews.Count)
+                .Select(static classViewIndex => (Kind: 1,
+                    Index: classViewIndex, TypeViewIndex: -1)))
             .Concat(structureTypeDefViews.Select(
                 static view => (Kind: 2,
                     Index: view.StructureIndex,
                     TypeViewIndex: view.TypeViewIndex)));
 
+        int GetStandardClassTypeDefViewIndex(int standardClassIndex,
+            int instanceIndex)
+        {
+            if ((uint)instanceIndex
+                    >= (uint)program.GenericNominalTypeInstances.Length
+                || !standardClassTypeDefViewIndexesByClass.TryGetValue(
+                    standardClassIndex, out var viewIndexes))
+            {
+                throw new InvalidDataException(
+                    "A captured source type refers to an unretained Standard class TypeDef view.");
+            }
+
+            var instance = program.GenericNominalTypeInstances[instanceIndex];
+            var matches = viewIndexes.Where(viewIndex =>
+            {
+                var view = standardClassTypeDefViews[viewIndex];
+                if (instance.TypeSpecImportRow > 0)
+                {
+                    return view.Expectations.Any(expectation =>
+                        expectation.Binding.ImportRow
+                            == instance.TypeSpecImportRow
+                        && StringComparer.Ordinal.Equals(
+                            expectation.Binding.UsingModule.ModuleIdentity,
+                            instance.TypeSpecProviderIdentity));
+                }
+
+                if (view.IsSelectedView)
+                {
+                    return instance.TypeSpecProviderIdentity is null
+                        || StringComparer.Ordinal.Equals(
+                            view.Provider.ModuleIdentity,
+                            instance.TypeSpecProviderIdentity);
+                }
+
+                return false;
+            }).ToArray();
+            if (matches.Length == 0 && viewIndexes.Count == 1
+                && instance.TypeSpecImportRow == 0)
+            {
+                return viewIndexes[0];
+            }
+            if (matches.Length == 1)
+            {
+                return matches[0];
+            }
+            if (matches.Length > 1
+                && matches.All(viewIndex =>
+                    standardClassTypeDefViews[viewIndex].IsSelectedView))
+            {
+                return matches.OrderBy(viewIndex =>
+                        standardClassTypeDefViews[viewIndex].ExportKeys[0],
+                        StringComparer.Ordinal)
+                    .First();
+            }
+
+            throw new InvalidDataException(
+                "A class TypeSpec does not identify one exact retained TypeDef view.");
+        }
+
         uint ImportedClassTypeSpecReference(
             int standardClassIndex, int instanceIndex)
         {
-            if (!typeImportRowByStandardClass.TryGetValue(
-                    standardClassIndex, out var importRow))
+            var classViewIndex = GetStandardClassTypeDefViewIndex(
+                standardClassIndex, instanceIndex);
+            if (!typeImportRowByStandardClassView.TryGetValue(
+                    classViewIndex, out var importRow))
             {
                 throw new InvalidDataException(
                     "A captured source type refers to an unretained Standard class TypeDef.");
@@ -1128,9 +1661,10 @@ public static partial class TrRmExecutableCompiler
                     "C1M1 class TypeDefs require ownership evidence selected by the exact schema.");
             }
 
-            var standardClassView = isStandardClass
-                ? program.StandardClassDeclarations[sourceIndex].Declaration
+            var standardClassViewPlan = isStandardClass
+                ? standardClassTypeDefViews[sourceIndex]
                 : null;
+            var standardClassView = standardClassViewPlan?.Declaration;
             var isContextualTypeView = typeKind == 2 && typeViewIndex >= 0;
             var sourceStructure = typeKind == 2
                 ? isContextualTypeView
@@ -1175,7 +1709,7 @@ public static partial class TrRmExecutableCompiler
             var typeDefRow = isClass
                 ? typeDefRowByClass[sourceIndex]
                 : isStandardClass
-                ? typeDefRowByStandardClass[sourceIndex]
+                ? typeDefRowByStandardClassView[sourceIndex]
                 : isContextualTypeView
                     ? typeDefRowByTypeView[typeViewIndex]
                     : typeDefRowByStructure[sourceIndex];
@@ -1211,15 +1745,18 @@ public static partial class TrRmExecutableCompiler
                 : separator < 0 ? declarationName
                     : declarationName[(separator + 1)..];
             var sourceName = (namespaceName, typeName);
+            var sourceNameIdentity = isStandardClass
+                ? (typeKind, standardClassViewPlan!.StandardClassIndex)
+                : (typeKind, sourceIndex);
             if (typeName.Length == 0
                 || sourceNames.TryGetValue(sourceName,
                     out var existingSourceName)
-                    && existingSourceName != (typeKind, sourceIndex))
+                    && existingSourceName != sourceNameIdentity)
             {
                 throw new InvalidDataException(
                     "Captured source class names are empty or duplicated.");
             }
-            sourceNames[sourceName] = (typeKind, sourceIndex);
+            sourceNames[sourceName] = sourceNameIdentity;
 
             var fieldFirst = fieldRows.Count + 1;
             var layoutFieldFirst = layoutFieldRows.Count + 1;
@@ -1283,7 +1820,7 @@ public static partial class TrRmExecutableCompiler
                 }
                 else if (isStandardClass)
                 {
-                    fieldDefRowByStandardClassAndIndex.Add(
+                    fieldDefRowByStandardClassViewAndIndex.Add(
                         (sourceIndex, fieldOrdinal), fieldDefRow);
                 }
                 else
@@ -1422,38 +1959,285 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        foreach (var standardClassIndex in standardClassIndexes.Order())
+        if (schema.UsesGenericMethodCalls()
+            && classMethodPlans.Any(static plan =>
+                plan.Method.GenericParameterCount != 0)
+            && !featureRows.Contains(
+                TrRmFeatureRow.GenericMethodCallsCandidate))
         {
-            var classView = program.StandardClassDeclarations[
-                standardClassIndex].Declaration;
-            if (!typeImportPlanByStandardClass.TryGetValue(
-                    standardClassIndex, out var importPlan))
+            featureRows.Add(TrRmFeatureRow.GenericMethodCallsCandidate);
+        }
+
+        (Dictionary<int, int> TypeDefRows,
+            Dictionary<int, int> ImportRows,
+            HashSet<int> AmbiguousTypeDefRows)
+            CreateMethodTypeMaps(
+                BoundSourceTypeProviderSnapshot sourceSnapshot)
+        {
+            var typeDefRows = new Dictionary<int, int>();
+            var importRows = new Dictionary<int, int>();
+            var ambiguousTypeDefRows = new HashSet<int>();
+            void AddTypeDefMapping(uint definitionId,
+                int destinationTypeDefRow)
             {
-                throw new InvalidDataException(
-                    "A retained Standard class has no TypeDef Import plan.");
+                if (definitionId >> 24 != 0x13
+                    || (definitionId & 0x00FF_FFFF) == 0)
+                {
+                    throw new InvalidDataException(
+                        "A class MethodSig has an invalid TypeDef identity.");
+                }
+
+                var sourceTypeDefRow = checked((int)
+                    (definitionId & 0x00FF_FFFF));
+                if (ambiguousTypeDefRows.Contains(sourceTypeDefRow))
+                {
+                    return;
+                }
+
+                if (!typeDefRows.TryGetValue(sourceTypeDefRow,
+                        out var existingTypeDefRow))
+                {
+                    typeDefRows.Add(sourceTypeDefRow,
+                        destinationTypeDefRow);
+                    return;
+                }
+
+                if (existingTypeDefRow != destinationTypeDefRow)
+                {
+                    _ = typeDefRows.Remove(sourceTypeDefRow);
+                    _ = ambiguousTypeDefRows.Add(sourceTypeDefRow);
+                }
             }
+
+            for (var mappedViewIndex = 0;
+                mappedViewIndex < standardClassTypeDefViews.Count;
+                mappedViewIndex++)
+            {
+                var mappedView = standardClassTypeDefViews[
+                    mappedViewIndex];
+                var destinationTypeDefRow
+                    = typeDefRowByStandardClassView[mappedViewIndex];
+                if (SameA2SourceTypeProviderSnapshot(
+                        mappedView.Declaration.Provider, sourceSnapshot))
+                {
+                    AddTypeDefMapping(
+                        mappedView.Declaration.Identity.DefinitionId,
+                        destinationTypeDefRow);
+                }
+
+                foreach (var expectation in mappedView.Expectations)
+                {
+                    if (!SameA2SourceTypeProviderSnapshot(
+                            expectation.Binding.UsingModule,
+                            sourceSnapshot))
+                    {
+                        continue;
+                    }
+
+                    AddTypeDefMapping(
+                        expectation.Binding.ExpectedDefinitionId,
+                        destinationTypeDefRow);
+                    var sourceImportRow
+                        = expectation.Binding.ImportRow;
+                    var destinationImportRow
+                        = typeImportRowByStandardClassView[
+                            mappedViewIndex];
+                    if (!importRows.TryAdd(sourceImportRow,
+                            destinationImportRow)
+                        && importRows[sourceImportRow]
+                            != destinationImportRow)
+                    {
+                        throw new InvalidDataException(
+                            "A class MethodSig Import has multiple destination view mappings.");
+                    }
+                }
+            }
+
+            for (var structureViewIndex = 0;
+                structureViewIndex < structureTypeDefViews.Count;
+                structureViewIndex++)
+            {
+                var (structureIndex, typeViewIndex)
+                    = structureTypeDefViews[structureViewIndex];
+                if (typeViewIndex < 0)
+                {
+                    if (program.Structures[structureIndex]
+                            .StandardTypeOrigin
+                        is not BoundStandardTypeOrigin origin)
+                    {
+                        continue;
+                    }
+
+                    var destinationTypeDefRow
+                        = typeDefRowByStructure[structureIndex];
+                    if (SameA2SourceTypeProviderSnapshot(origin.Provider,
+                            sourceSnapshot))
+                    {
+                        AddTypeDefMapping(origin.DefinitionId,
+                            destinationTypeDefRow);
+                    }
+
+                    foreach (var expectation in origin.Expectations)
+                    {
+                        if (!SameA2SourceTypeProviderSnapshot(
+                                expectation.UsingModule, sourceSnapshot))
+                        {
+                            continue;
+                        }
+
+                        AddTypeDefMapping(
+                            expectation.ExpectedDefinitionId,
+                            destinationTypeDefRow);
+                        if (typeImportRowByStructure.TryGetValue(
+                                structureIndex,
+                                out var destinationImportRow))
+                        {
+                            if (!importRows.TryAdd(expectation.ImportRow,
+                                    destinationImportRow)
+                                && importRows[expectation.ImportRow]
+                                    != destinationImportRow)
+                            {
+                                throw new InvalidDataException(
+                                    "A class MethodSig Import has multiple destination TypeDef views.");
+                            }
+                        }
+                    }
+
+                    continue;
+                }
+
+                var typeView = contextualTypeViews[typeViewIndex];
+                var contextualTypeDefRow
+                    = typeDefRowByTypeView[typeViewIndex];
+                if (SameA2SourceTypeProviderSnapshot(typeView.Provider,
+                        sourceSnapshot))
+                {
+                    AddTypeDefMapping(typeView.ProviderDefinitionId,
+                        contextualTypeDefRow);
+                }
+
+                if (typeView.Expectation is BoundSourceTypeExpectation
+                        typeExpectation
+                    && SameA2SourceTypeProviderSnapshot(
+                        typeExpectation.UsingModule, sourceSnapshot))
+                {
+                    AddTypeDefMapping(
+                        typeExpectation.ExpectedDefinitionId,
+                        contextualTypeDefRow);
+                    if (typeImportRowByTypeView.TryGetValue(typeViewIndex,
+                            out var destinationImportRow))
+                    {
+                        if (!importRows.TryAdd(typeExpectation.ImportRow,
+                                destinationImportRow)
+                            && importRows[typeExpectation.ImportRow]
+                                != destinationImportRow)
+                        {
+                            throw new InvalidDataException(
+                                "A class MethodSig Import has multiple destination TypeDef views.");
+                        }
+                    }
+                }
+            }
+
+            return (typeDefRows, importRows, ambiguousTypeDefRows);
+        }
+
+        for (var classViewIndex = 0;
+            classViewIndex < standardClassTypeDefViews.Count;
+            classViewIndex++)
+        {
+            var viewPlan = standardClassTypeDefViews[classViewIndex];
+            var classView = viewPlan.Declaration;
+            var importPlan
+                = typeImportPlanByStandardClassView[classViewIndex];
+            var providerClassView = program.StandardClassDeclarations[
+                viewPlan.StandardClassIndex].Declaration;
+            var expectationFieldImports = supportsClassTypeBindingViews
+                ? viewPlan.Expectations.SelectMany(static expectation =>
+                    expectation.FieldExpectations).ToArray()
+                : [];
 
             for (var fieldIndex = 0;
                 fieldIndex < classView.Fields.Length; fieldIndex++)
             {
                 var field = classView.Fields[fieldIndex];
-                if (field.SelectedExportKeys.IsDefaultOrEmpty)
+                var matchingExpectations = expectationFieldImports
+                    .Where(fieldExpectation =>
+                        fieldExpectation.ExpectedDefinitionId
+                            == field.DefinitionId
+                        && fieldExpectation.ExpectedOwnerDefinitionId
+                            == classView.Identity.DefinitionId)
+                    .ToArray();
+                if (matchingExpectations.Length == 0
+                    && field.SelectedExportKeys.IsDefaultOrEmpty)
                 {
                     continue;
                 }
 
-                if (!IsC1M1ImportedClassFieldImportable(classView, field,
-                        importPlan)
-                    || !fieldDefRowByStandardClassAndIndex.TryGetValue((
-                        standardClassIndex, fieldIndex), out var fieldDefRow))
+                var importableField = supportsClassTypeBindingViews
+                    && !viewPlan.Expectations.IsEmpty
+                    ? providerClassView.Fields[fieldIndex]
+                    : field;
+                var importableOwner = supportsClassTypeBindingViews
+                    && !viewPlan.Expectations.IsEmpty
+                    ? providerClassView : classView;
+                if (!IsC1M1ImportedClassFieldImportable(importableOwner,
+                        importableField, importPlan)
+                    || !fieldDefRowByStandardClassViewAndIndex.TryGetValue((
+                        classViewIndex, fieldIndex), out var fieldDefRow))
                 {
                     throw Unsupported(
                         "C1M1 class source emission requires public instance FieldDef exports from the exact imported class provider.");
                 }
 
                 var fieldImportRow = 0;
+                var fieldImportKeys = matchingExpectations.Length != 0
+                    ? matchingExpectations.Select(
+                        static fieldExpectation =>
+                            fieldExpectation.ExportKey)
+                        .Distinct(StringComparer.Ordinal)
+                        .ToArray()
+                    : field.SelectedExportKeys.ToArray();
+                foreach (var fieldExpectation in matchingExpectations)
+                {
+                    var ownerExpectation = viewPlan.Expectations.SingleOrDefault(
+                        expectation =>
+                            expectation.Binding.ImportRow
+                                == fieldExpectation.OwnerImportRow);
+                    if (fieldExpectation.ImportRow <= 0
+                        || ownerExpectation is null
+                        || !SameA2SourceTypeProviderSnapshot(
+                            fieldExpectation.Provider,
+                            importPlan.Provider)
+                        || !fieldImportKeys.Contains(
+                            fieldExpectation.ExportKey,
+                            StringComparer.Ordinal))
+                    {
+                        throw new InvalidDataException(
+                            "A retained class FieldDef Import lost its exact owner view or ExportKey.");
+                    }
+
+                    var importRow = AddImport(
+                        fieldExpectation.Provider.ModuleIdentity,
+                        fieldExpectation.Provider.TargetRequirement,
+                        fieldExpectation.Provider.RuntimePolicy,
+                        fieldExpectation.ExportKey,
+                        0x1400_0000u | checked((uint)fieldDefRow));
+                    if (fieldImportRow == 0)
+                    {
+                        fieldImportRow = importRow;
+                    }
+                }
+
                 foreach (var exportKey in field.SelectedExportKeys)
                 {
+                    if (matchingExpectations.Any(fieldExpectation =>
+                            StringComparer.Ordinal.Equals(
+                                fieldExpectation.ExportKey, exportKey)))
+                    {
+                        continue;
+                    }
+
                     var importRow = AddImport(
                         importPlan.Provider.ModuleIdentity,
                         importPlan.Provider.TargetRequirement,
@@ -1465,8 +2249,8 @@ public static partial class TrRmExecutableCompiler
                     }
                 }
 
-                fieldImportRowByStandardClassAndIndex.Add(
-                    (standardClassIndex, fieldIndex), fieldImportRow);
+                fieldImportRowByStandardClassViewAndIndex.Add(
+                    (classViewIndex, fieldIndex), fieldImportRow);
             }
         }
 
@@ -1847,9 +2631,12 @@ public static partial class TrRmExecutableCompiler
                         = TryGetC1M1Construction2FieldReference(
                             program, methodFunction, classIndex,
                             standardClassIndexByIdentity,
-                            typeImportPlanByStandardClass,
+                            typeImportPlanByStandardClassView,
                             fieldDefRowByClassAndIndex,
-                            fieldImportRowByStandardClassAndIndex);
+                            fieldDefRowByStandardClassViewAndIndex,
+                            fieldImportRowByStandardClassViewAndIndex,
+                            standardClassTypeDefViews,
+                            GetStandardClassTypeDefViewIndex);
                     var isSupportedFieldReferenceBody
                         = fieldReference.HasValue;
                     var nestedFieldRead
@@ -1860,10 +2647,12 @@ public static partial class TrRmExecutableCompiler
                                 sourceStructDeclarations,
                                 typeImportPlanByStructure,
                                 standardClassIndexByIdentity,
-                                typeImportPlanByStandardClass,
+                                typeImportPlanByStandardClassView,
                                 fieldDefRowByClassAndIndex,
-                                fieldDefRowByStandardClassAndIndex,
-                                fieldDefRowByStructureAndIndex)
+                                fieldDefRowByStandardClassViewAndIndex,
+                                fieldDefRowByStructureAndIndex,
+                                standardClassTypeDefViews,
+                                GetStandardClassTypeDefViewIndex)
                             : null;
                     var directFieldWriteIndex = -1;
                     var isSupportedDirectFieldWriteInstanceMethod
@@ -1878,8 +2667,11 @@ public static partial class TrRmExecutableCompiler
                             ? TryGetC1M1Construction2ImportedClassFieldWrite(
                                 program, methodFunction,
                                 standardClassIndexByIdentity,
-                                typeImportPlanByStandardClass,
-                                fieldDefRowByStandardClassAndIndex)
+                                typeImportPlanByStandardClassView,
+                                fieldDefRowByStandardClassViewAndIndex,
+                                fieldImportRowByStandardClassViewAndIndex,
+                                standardClassTypeDefViews,
+                                GetStandardClassTypeDefViewIndex)
                             : null;
                     nestedFieldWrite ??=
                         !isSupportedDirectFieldWriteInstanceMethod
@@ -2526,6 +3318,696 @@ public static partial class TrRmExecutableCompiler
 
         }
 
+        var classMethodPlans
+            = new List<C1M1SourceClassMethodPlan>();
+        var classMethodGenericFormalPlans
+            = new List<C1M1SourceClassMethodGenericFormalPlan>();
+        for (var classViewIndex = 0;
+            classViewIndex < standardClassTypeDefViews.Count;
+            classViewIndex++)
+        {
+            var viewPlan = standardClassTypeDefViews[classViewIndex];
+            var providerView = program.StandardClassDeclarations[
+                viewPlan.StandardClassIndex].Declaration;
+            var methodViews = viewPlan.Expectations.IsEmpty
+                ? new[] { (viewPlan.Declaration,
+                    (BoundStandardClassExpectation?)null) }
+                : viewPlan.Expectations.Select(static expectation =>
+                    (expectation.ExpectedDeclaration,
+                    (BoundStandardClassExpectation?)expectation))
+                    .ToArray();
+            foreach (var (methodView, viewExpectation) in methodViews)
+            {
+                if (viewExpectation is BoundStandardClassExpectation
+                        expectedView
+                    && (expectedView.Binding.ExpectedDefinitionId
+                            != methodView.Identity.DefinitionId
+                        || !SameA2SourceTypeProviderSnapshot(
+                            expectedView.Binding.UsingModule,
+                            methodView.Provider)))
+                {
+                    throw new InvalidDataException(
+                        "A retained class MethodDef view lost its exact owning TypeDef context.");
+                }
+
+                foreach (var method in methodView.Methods)
+                {
+                    if (method.DefinitionId >> 24 != 0x16
+                        || (method.DefinitionId & 0x00FF_FFFF) == 0
+                        || method.Parameters.IsDefault
+                        || method.ExportKeys.IsDefault
+                        || method.SelectedExportKeys.IsDefault
+                        || method.GenericParameters.IsDefault
+                        || method.DependencyClauses.IsDefault)
+                    {
+                        throw new InvalidDataException(
+                            "A retained class MethodDef view has invalid declaration rows.");
+                    }
+
+                    if (schema.UsesGenericMethodCalls()
+                        && method.GenericParameters.Any(formal =>
+                            formal is null || formal.Constraints.IsDefault))
+                    {
+                        throw new InvalidDataException(
+                            "A retained class MethodDef has an invalid generic constraint view.");
+                    }
+
+                    var hasRetainedGenericConstraints
+                        = schema.UsesGenericMethodCalls()
+                            && method.GenericParameters.Any(formal =>
+                                formal.Constraints.Any(constraint =>
+                                    constraint.Kind == 1
+                                    || (schema
+                                        .UsesAssociatedRelationConstraints()
+                                        && constraint.Kind == 3)));
+                    var genericMethodRoots
+                        = hasRetainedGenericConstraints
+                            ? GetC1M1SourceClassMethodGenericRoots(program,
+                                method, methodView, viewExpectation,
+                                viewPlan.Provider)
+                            : ImmutableArray<BoundGenericMethodImport>.Empty;
+
+                    var imports
+                        = ImmutableArray.CreateBuilder<
+                            C1M1SourceClassMethodImportPlan>();
+                    var importKeys = new HashSet<(string ModuleIdentity,
+                        string ExportKey)>();
+                    if (viewExpectation is BoundStandardClassExpectation
+                        expectation)
+                    {
+                        foreach (var methodExpectation
+                            in expectation.MethodExpectations.Where(
+                                candidate => candidate.ExpectedDefinitionId
+                                    == method.DefinitionId))
+                        {
+                            if (methodExpectation.OwnerImportRow
+                                    != expectation.Binding.ImportRow
+                                || methodExpectation.ExpectedOwnerDefinitionId
+                                    != expectation.Binding.ExpectedDefinitionId
+                                || !SameA2SourceTypeProviderSnapshot(
+                                    methodExpectation.Provider,
+                                    viewPlan.Provider)
+                                || providerView.Identity.DefinitionId
+                                    != methodExpectation
+                                        .ProviderOwnerDefinitionId
+                                || !providerView.Methods.Any(
+                                    providerMethod =>
+                                        providerMethod.DefinitionId
+                                            == methodExpectation
+                                                .ProviderDefinitionId
+                                        && providerMethod.ExportKeys.Contains(
+                                            methodExpectation.ExportKey,
+                                            StringComparer.Ordinal)))
+                            {
+                                throw new InvalidDataException(
+                                    "A retained class MethodDef Import lost its exact provider, owner, or ExportKey.");
+                            }
+
+                            if (importKeys.Add((
+                                    methodExpectation.Provider.ModuleIdentity,
+                                    methodExpectation.ExportKey)))
+                            {
+                                imports.Add(
+                                    new C1M1SourceClassMethodImportPlan(
+                                        methodExpectation.Provider,
+                                        methodExpectation.ExportKey));
+                            }
+                        }
+                    }
+
+                    foreach (var exportKey in method.SelectedExportKeys)
+                    {
+                        var providerMethod = providerView.Methods
+                            .SingleOrDefault(candidate =>
+                                StringComparer.Ordinal.Equals(
+                                    candidate.Name, method.Name)
+                                && candidate.ExportKeys.Contains(exportKey,
+                                    StringComparer.Ordinal));
+                        if (providerMethod is null)
+                        {
+                            throw new InvalidDataException(
+                                "A selected class MethodDef key is absent from its checked provider owner.");
+                        }
+
+                        if (importKeys.Add((
+                                viewPlan.Provider.ModuleIdentity, exportKey)))
+                        {
+                            imports.Add(
+                                new C1M1SourceClassMethodImportPlan(
+                                    viewPlan.Provider, exportKey));
+                        }
+                    }
+
+                    if (classMethodPlans.Count >= 0xFF_FFFF
+                        || methodRows.Count + classMethodPlans.Count
+                            >= 0xFF_FFFF)
+                    {
+                        throw Unsupported(
+                            "C1M1 class MethodDef views exceed the metadata row limit.");
+                    }
+
+                    var methodRow
+                        = methodRows.Count + classMethodPlans.Count + 1;
+                    if (!methodDefRowByStandardClassViewAndId.TryAdd(
+                            (classViewIndex, method.DefinitionId),
+                            methodRow))
+                    {
+                        throw new InvalidDataException(
+                            "A class TypeDef view contains a duplicate MethodDef identity.");
+                    }
+
+                    classMethodPlans.Add(new C1M1SourceClassMethodPlan(
+                        classViewIndex, methodView, method, methodRow,
+                        imports.MoveToImmutable(), genericMethodRoots,
+                        hasRetainedGenericConstraints
+                            ? viewPlan.Provider : null));
+                }
+            }
+        }
+
+        for (var classViewIndex = 0;
+            classViewIndex < standardClassTypeDefViews.Count;
+            classViewIndex++)
+        {
+            var viewPlan = standardClassTypeDefViews[classViewIndex];
+            var classView = viewPlan.Declaration;
+            var sourceSnapshot = classView.Provider;
+            var sourceArtifact = sourceSnapshot.ArtifactSnapshot.ToArray();
+            var sourceIndex = new TrRmArtifactIndex(sourceArtifact,
+                GetC1M1ClassMetadataSchema(sourceSnapshot.SchemaIdentity),
+                standardSchemaIdentity: sourceSnapshot.SchemaIdentity);
+            var sourceTables = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(sourceIndex);
+            if (sourceSnapshot.ModuleRow <= 0
+                || sourceSnapshot.ModuleRow > sourceTables.Modules.Count
+                || !StringComparer.Ordinal.Equals(
+                    sourceTables.Modules.GetIdentity(
+                        sourceSnapshot.ModuleRow),
+                    sourceSnapshot.ModuleIdentity))
+            {
+                throw new InvalidDataException(
+                    "A retained class MethodDef view has an invalid owner Module snapshot.");
+            }
+
+            var viewMethodPlans = classMethodPlans.Where(plan =>
+                plan.StandardClassViewIndex == classViewIndex).ToArray();
+            foreach (var plan in viewMethodPlans)
+            {
+                var method = plan.Method;
+                var methodSourceSnapshot = plan.OwnerView.Provider;
+                var methodSourceArtifact
+                    = methodSourceSnapshot.ArtifactSnapshot.ToArray();
+                var methodSourceIndex = new TrRmArtifactIndex(
+                    methodSourceArtifact,
+                    GetC1M1ClassMetadataSchema(
+                        methodSourceSnapshot.SchemaIdentity),
+                    standardSchemaIdentity:
+                        methodSourceSnapshot.SchemaIdentity);
+                var methodSourceTables
+                    = TrRmStructuralMetadataValidator
+                        .ValidateC1AndGetExecutionTables(
+                            methodSourceIndex);
+                if (methodSourceSnapshot.ModuleRow <= 0
+                    || methodSourceSnapshot.ModuleRow
+                        > methodSourceTables.Modules.Count
+                    || !StringComparer.Ordinal.Equals(
+                        methodSourceTables.Modules.GetIdentity(
+                            methodSourceSnapshot.ModuleRow),
+                        methodSourceSnapshot.ModuleIdentity))
+                {
+                    throw new InvalidDataException(
+                        "A retained class MethodDef view has an invalid owner Module snapshot.");
+                }
+
+                var (methodTypeDefRowMap, methodTypeImportRowMap,
+                    ambiguousMethodTypeDefRows)
+                    = CreateMethodTypeMaps(methodSourceSnapshot);
+                var sourceMethodRow = checked((int)
+                    (method.DefinitionId & 0x00FF_FFFF));
+                var sourceOwnerTypeDefRow = checked((int)
+                    (plan.OwnerView.Identity.DefinitionId & 0x00FF_FFFF));
+                var exactMethodOwnerTypeDefRows
+                    = new Dictionary<int, int> {
+                        [sourceOwnerTypeDefRow]
+                            = typeDefRowByStandardClassView[
+                                classViewIndex],
+                    };
+                if (methodSourceTables.Methods.GetOwnerType(sourceMethodRow)
+                        != sourceOwnerTypeDefRow
+                    || methodSourceTables.Methods.GetBodyRow(sourceMethodRow)
+                        != checked((int)method.BodyRow))
+                {
+                    throw new InvalidDataException(
+                        "A retained class MethodDef changed its source owner or Body role.");
+                }
+
+                var outputMethodRow = plan.MethodRow;
+                var genericParamFirst = method.GenericParameters.IsEmpty
+                    ? 0 : genericParamRows.Count + 1;
+                var genericParamRowMap = new Dictionary<int, int>();
+                if (method.GenericParameterCount
+                        != method.GenericParameters.Length
+                    || method.GenericParameterCount > 8)
+                {
+                    throw Unsupported(
+                        "Class MethodDef GenericParam views exceed the selected source-class writer contract.");
+                }
+
+                for (var ordinal = 0;
+                    ordinal < method.GenericParameters.Length;
+                    ordinal++)
+                {
+                    var formal = method.GenericParameters[ordinal];
+                    if (formal is null || formal.Row <= 0
+                        || formal.OwnerDefinitionId != method.DefinitionId
+                        || formal.Ordinal != (uint)ordinal
+                        || formal.FormalKind != 1
+                        || formal.ConstantTypeSpecReference != 0
+                        || formal.Constraints.IsDefault
+                        || string.IsNullOrEmpty(formal.Name))
+                    {
+                        throw new InvalidDataException(
+                            "A class MethodDef GenericParam has an invalid owner, kind, or ordinal.");
+                    }
+
+                    var outputGenericParamRow
+                        = genericParamRows.Count + 1;
+                    if (!genericParamRowMap.TryAdd(formal.Row,
+                            outputGenericParamRow))
+                    {
+                        throw new InvalidDataException(
+                            "A class MethodDef GenericParam row is duplicated.");
+                    }
+
+                    genericParamNames.Add(formal.Name);
+                    genericParamRows.Add(default);
+                    if (schema.UsesGenericMethodCalls()
+                        && formal.Constraints.Any(constraint =>
+                            constraint.Kind == 1
+                            || (schema.UsesAssociatedRelationConstraints()
+                                && constraint.Kind == 3)))
+                    {
+                        if (plan.GenericMethodRoots.IsEmpty
+                            || plan.GenericMethodProvider is not
+                                BoundSourceTypeProviderSnapshot provider)
+                        {
+                            throw new InvalidDataException(
+                                "A class MethodDef generic constraint has no exact typed provider root.");
+                        }
+
+                        classMethodGenericFormalPlans.Add(
+                            new C1M1SourceClassMethodGenericFormalPlan(
+                                outputMethodRow, outputGenericParamRow,
+                                ordinal, formal,
+                                plan.GenericMethodRoots, provider));
+                    }
+                }
+
+                var sourceTypeSpecRows = new Dictionary<int, uint>();
+                var activeTypeSpecRows = new HashSet<int>();
+
+                var signatureRow = methodSignatureRows.Count + 1;
+                var resultTypeSpec = RemapC1M1ClassTypeSpec(
+                    methodSourceTables,
+                    method.ReturnTypeSpecReference, methodTypeDefRowMap,
+                    methodTypeImportRowMap, typeSpecRows,
+                    sourceTypeSpecRows, activeTypeSpecRows, depth: 0,
+                    genericParamRowMap: genericParamRowMap,
+                    ambiguousTypeDefRows: ambiguousMethodTypeDefRows,
+                    exactTypeDefRowMap: exactMethodOwnerTypeDefRows);
+                var receiverTypeSpec = method.ReceiverTypeSpecReference == 0
+                    ? 0 : RemapC1M1ClassTypeSpec(methodSourceTables,
+                        method.ReceiverTypeSpecReference,
+                        methodTypeDefRowMap, methodTypeImportRowMap,
+                        typeSpecRows, sourceTypeSpecRows,
+                        activeTypeSpecRows, depth: 0,
+                        genericParamRowMap: genericParamRowMap,
+                        ambiguousTypeDefRows: ambiguousMethodTypeDefRows,
+                        exactTypeDefRowMap:
+                            exactMethodOwnerTypeDefRows);
+                var parameterFirst = method.Parameters.IsEmpty
+                    ? 0 : parameterRows.Count + 1;
+                for (var ordinal = 0; ordinal < method.Parameters.Length;
+                    ordinal++)
+                {
+                    var parameter = method.Parameters[ordinal];
+                    var typeSpecReference = RemapC1M1ClassTypeSpec(
+                        methodSourceTables, parameter.TypeSpecReference,
+                        methodTypeDefRowMap, methodTypeImportRowMap,
+                        typeSpecRows, sourceTypeSpecRows,
+                        activeTypeSpecRows, depth: 0,
+                        genericParamRowMap: genericParamRowMap,
+                        ambiguousTypeDefRows: ambiguousMethodTypeDefRows,
+                        exactTypeDefRowMap:
+                            exactMethodOwnerTypeDefRows);
+                    parameterRows.Add(new TrRmParamRow(signatureRow, ordinal,
+                        typeSpecReference, parameter.Mode, parameter.Flags));
+
+                    if (schema.UsesClassParameterDefaults())
+                    {
+                        uint defaultConstantSourceRow = 0;
+                        if (parameter.DefaultValue is BoundConstant value)
+                        {
+                            if (!TryGetC1M1ClassScalarType(
+                                    methodSourceTables,
+                                    parameter.TypeSpecReference,
+                                    out var parameterType)
+                                || parameterType
+                                    is PrimitiveType.NativeInt
+                                        or PrimitiveType.NativeUInt
+                                || value.Type != parameterType
+                                || value.RepresentationType != parameterType
+                                || !value.Bits.IsCanonicalFor(parameterType))
+                            {
+                                throw Unsupported(
+                                    "A retained class MethodDef default must be an exact fixed-width scalar value.");
+                            }
+
+                            var frozenValue
+                                = frozenScalarValueBuilder.Add(value);
+                            if (frozenValue.TypeSpecRef != typeSpecReference)
+                            {
+                                throw Unsupported(
+                                    "A retained class MethodDef default changed its exact parameter TypeSpec.");
+                            }
+
+                            defaultConstantSourceRow
+                                = frozenValue.ConstantSourceRow;
+                        }
+
+                        parameterSurfaceRows.Add(
+                            new C1M1ParameterSurfaceRow(outputMethodRow,
+                                ordinal, parameter.Name,
+                                defaultConstantSourceRow));
+                    }
+                    else if (parameter.DefaultValue is not null)
+                    {
+                        throw Unsupported(
+                            "The selected source-class schema does not retain class MethodDef parameter defaults.");
+                    }
+                }
+
+                methodSignatureRows.Add(new TrRmMethodSigRow(
+                    resultTypeSpec, receiverTypeSpec, parameterFirst,
+                    method.Parameters.Length, genericParamFirst,
+                    method.GenericParameterCount));
+
+                var contractFirst = 0;
+                var methodContractCount = 0;
+                void AddMethodContract(ushort kind, byte[] payload)
+                {
+                    if (contractFirst == 0)
+                    {
+                        contractFirst = contractRows.Count + 1;
+                    }
+
+                    contractRows.Add(new TrRmContractRow(
+                        0x1600_0000u | checked((uint)outputMethodRow),
+                        kind, payload));
+                    methodContractCount++;
+                }
+
+                if (method.EffectsMask != 0)
+                {
+                    if ((method.EffectsMask & ~6u) != 0
+                        || !s_effectPayloads.TryGetValue(
+                            method.EffectsMask, out var effectPayload))
+                    {
+                        throw Unsupported(
+                            "A retained class MethodDef has an unselected effect contract.");
+                    }
+
+                    AddMethodContract(1, effectPayload);
+                }
+
+                if (method.ConstructionRole is 1 or 2)
+                {
+                    if (!schema.UsesObjectConstruction()
+                        || method.ConstructionPropertyDefinitionId != 0)
+                    {
+                        throw Unsupported(
+                            "A retained class MethodDef construction contract is not selected by this source schema.");
+                    }
+
+                    byte[] constructionPayload;
+                    if (method.ConstructionRole == 1)
+                    {
+                        if (method.InitializerMethodDefinitionId != 0
+                            || method.InitializedMemberDefinitionIds.IsDefault)
+                        {
+                            throw new InvalidDataException(
+                                "A class initializer MethodDef has an invalid construction role.");
+                        }
+
+                        var initializedFields = new uint[
+                            method.InitializedMemberDefinitionIds.Length];
+                        for (var memberIndex = 0;
+                            memberIndex < initializedFields.Length;
+                            memberIndex++)
+                        {
+                            var fieldDefinitionId
+                                = method.InitializedMemberDefinitionIds[
+                                    memberIndex];
+                            var fieldIndex = -1;
+                            for (var candidateIndex = 0;
+                                candidateIndex < classView.Fields.Length;
+                                candidateIndex++)
+                            {
+                                if (classView.Fields[candidateIndex]
+                                        .DefinitionId == fieldDefinitionId)
+                                {
+                                    fieldIndex = candidateIndex;
+                                    break;
+                                }
+                            }
+                            if (fieldIndex < 0)
+                            {
+                                foreach (var expectation
+                                    in viewPlan.Expectations)
+                                {
+                                    var fieldExpectation
+                                        = expectation.FieldExpectations
+                                            .SingleOrDefault(candidate =>
+                                                candidate.ExpectedDefinitionId
+                                                    == fieldDefinitionId
+                                                && candidate
+                                                    .ExpectedOwnerDefinitionId
+                                                    == plan.OwnerView.Identity
+                                                        .DefinitionId
+                                                && candidate
+                                                    .ProviderOwnerDefinitionId
+                                                    == classView.Identity
+                                                        .DefinitionId);
+                                    if (fieldExpectation is null)
+                                    {
+                                        continue;
+                                    }
+
+                                    for (var candidateIndex = 0;
+                                        candidateIndex
+                                            < classView.Fields.Length;
+                                        candidateIndex++)
+                                    {
+                                        if (classView.Fields[candidateIndex]
+                                                .DefinitionId
+                                            == fieldExpectation
+                                                .ProviderDefinitionId)
+                                        {
+                                            if (fieldIndex >= 0)
+                                            {
+                                                throw new InvalidDataException(
+                                                    "A class initializer FieldDef expectation has multiple destination rows.");
+                                            }
+
+                                            fieldIndex = candidateIndex;
+                                        }
+                                    }
+                                }
+                            }
+                            if (fieldIndex < 0
+                                || !fieldDefRowByStandardClassViewAndIndex
+                                    .TryGetValue((classViewIndex, fieldIndex),
+                                        out var fieldDefRow))
+                            {
+                                throw new InvalidDataException(
+                                    "A class initializer MethodDef refers to an unretained FieldDef.");
+                            }
+
+                            initializedFields[memberIndex]
+                                = 0x1400_0000u
+                                    | checked((uint)fieldDefRow);
+                        }
+
+                        constructionPayload = new byte[checked(
+                            8 + (initializedFields.Length * sizeof(uint)))];
+                        constructionPayload[0] = 1;
+                        BinaryPrimitives.WriteUInt32LittleEndian(
+                            constructionPayload.AsSpan(4),
+                            checked((uint)initializedFields.Length));
+                        for (var memberIndex = 0;
+                            memberIndex < initializedFields.Length;
+                            memberIndex++)
+                        {
+                            BinaryPrimitives.WriteUInt32LittleEndian(
+                                constructionPayload.AsSpan(
+                                    8 + (memberIndex * sizeof(uint))),
+                                initializedFields[memberIndex]);
+                        }
+                    }
+                    else
+                    {
+                        if ((method.InitializerMethodDefinitionId >> 24)
+                                != 0x16
+                            || !methodDefRowByStandardClassViewAndId.TryGetValue(
+                                (classViewIndex,
+                                    method.InitializerMethodDefinitionId),
+                                out var initializerMethodRow))
+                        {
+                            throw new InvalidDataException(
+                                "A class construction projection lost its exact owner initializer MethodDef.");
+                        }
+
+                        constructionPayload
+                            = EncodeC1M1Construction2ProjectionContract(
+                                initializerMethodRow);
+                    }
+
+                    AddMethodContract(0x0003, constructionPayload);
+                }
+                else if (method.ConstructionRole != 0
+                    || method.InitializerMethodDefinitionId != 0
+                    || method.ConstructionPropertyDefinitionId != 0
+                    || !method.InitializedMemberDefinitionIds
+                        .IsDefaultOrEmpty)
+                {
+                    throw new InvalidDataException(
+                        "A class MethodDef has an unsupported construction role.");
+                }
+
+                foreach (var dependency
+                    in method.DependencyClauses)
+                {
+                    var payload = new byte[12];
+                    payload[0] = dependency.DestinationKind;
+                    payload[1] = dependency.SourceKind;
+                    payload[2] = dependency.Relationship;
+                    payload[3] = dependency.Phase;
+                    BinaryPrimitives.WriteUInt32LittleEndian(
+                        payload.AsSpan(4),
+                        dependency.DestinationOrdinal);
+                    BinaryPrimitives.WriteUInt32LittleEndian(
+                        payload.AsSpan(8), dependency.SourceOrdinal);
+                    AddMethodContract(4, payload);
+                }
+
+                if (method.GenericParameters.IsEmpty
+                    && method.GenericParameterCount != 0)
+                {
+                    throw new InvalidDataException(
+                        "A class MethodDef lost its GenericParam rows.");
+                }
+                for (var formalOrdinal = 0;
+                    formalOrdinal < method.GenericParameters.Length;
+                    formalOrdinal++)
+                {
+                    var formal = method.GenericParameters[formalOrdinal];
+                    var genericParamRow = genericParamRowMap[formal.Row];
+                    var constraintFirst = genericConstraintRows.Count + 1;
+                    foreach (var constraint in formal.Constraints)
+                    {
+                        if (constraint.OwnerGenericParamRow != formal.Row)
+                        {
+                            throw new InvalidDataException(
+                                "A class MethodDef Constraint has an invalid owner.");
+                        }
+
+                        uint payload;
+                        switch (constraint.Kind)
+                        {
+                            case 1 when schema.UsesGenericMethodCalls():
+                            case 3 when schema
+                                .UsesAssociatedRelationConstraints():
+                                continue;
+                            case 1:
+                                payload = RemapC1M1ClassTypeSpec(
+                                    methodSourceTables, constraint.Payload,
+                                    methodTypeDefRowMap,
+                                    methodTypeImportRowMap, typeSpecRows,
+                                    sourceTypeSpecRows, activeTypeSpecRows,
+                                    depth: 0,
+                                    genericParamRowMap:
+                                        genericParamRowMap,
+                                    ambiguousTypeDefRows:
+                                        ambiguousMethodTypeDefRows,
+                                    exactTypeDefRowMap:
+                                        exactMethodOwnerTypeDefRows);
+                                break;
+                            case 2 when constraint.Payload is >= 1 and <= 3:
+                                payload = constraint.Payload;
+                                break;
+                            default:
+                                throw new InvalidDataException(
+                                    "A class MethodDef Constraint has an unsupported kind or payload.");
+                        }
+
+                        genericConstraintRows.Add(new TrRmConstraintRow(
+                            genericParamRow, constraint.Kind, payload));
+                    }
+
+                    var constraintCount = genericConstraintRows.Count
+                        - constraintFirst;
+                    if (constraintCount == 0)
+                    {
+                        constraintFirst = 0;
+                    }
+
+                    genericParamRows[genericParamRow - 1]
+                        = new TrRmGenericParamRow(
+                            0x1600_0000u
+                                | checked((uint)outputMethodRow),
+                            formalOrdinal, 0, constraintFirst,
+                            constraintCount, formal.FormalKind,
+                            formal.OwnershipDomain,
+                            formal.NullabilityDomain, 0,
+                            formal.DefaultArgumentReference == 0 ? 0
+                                : RemapC1M1ClassTypeSpec(methodSourceTables,
+                                    formal.DefaultArgumentReference,
+                                    methodTypeDefRowMap,
+                                    methodTypeImportRowMap, typeSpecRows,
+                                    sourceTypeSpecRows,
+                                    activeTypeSpecRows, depth: 0,
+                                    genericParamRowMap:
+                                        genericParamRowMap,
+                                    ambiguousTypeDefRows:
+                                        ambiguousMethodTypeDefRows,
+                                    exactTypeDefRowMap:
+                                        exactMethodOwnerTypeDefRows));
+                }
+
+                var ownerTypeDefRow
+                    = typeDefRowByStandardClassView[classViewIndex];
+                methodRows.Add(new TrRmMethodDefRow(ownerTypeDefRow,
+                    0, signatureRow, method.Flags,
+                    contractFirst, methodContractCount, 0));
+                methodNames.Add(method.Name);
+
+                foreach (var methodImport in plan.Imports)
+                {
+                    _ = AddImport(methodImport.Provider.ModuleIdentity,
+                        methodImport.Provider.TargetRequirement,
+                        methodImport.Provider.RuntimePolicy,
+                        methodImport.ExportKey,
+                        0x1600_0000u | checked((uint)outputMethodRow));
+                }
+            }
+        }
+
+        if (frozenScalarValueBuilder.ConstantSourceCount != 0
+            && !featureRows.Contains(TrRmFeatureRow.TypedFrozenValues))
+        {
+            featureRows.Add(TrRmFeatureRow.TypedFrozenValues);
+        }
+
         if (hasTypeOnlyContext)
         {
             if (program.Functions.Any(static function =>
@@ -2638,6 +4120,7 @@ public static partial class TrRmExecutableCompiler
             + typeSpecRows.Count + exportRows.Count
             + moduleReferences.Count + imports.Count + methodRows.Count
             + methodSignatureRows.Count + parameterRows.Count
+            + genericParamRows.Count + genericConstraintRows.Count
             + parameterSurfaceRows.Count + contractRows.Count
             + bodyRows.Count + featureRows.Count
             + frozenScalarValueBuilder.BlobCount
@@ -2654,6 +4137,8 @@ public static partial class TrRmExecutableCompiler
             || methodRows.Count > 0xFF_FFFF
             || methodSignatureRows.Count > 0xFF_FFFF
             || parameterRows.Count > 0xFF_FFFF
+            || genericParamRows.Count > 0xFF_FFFF
+            || genericConstraintRows.Count > 0xFF_FFFF
             || parameterSurfaceRows.Count > 0xFF_FFFF
             || contractRows.Count > 0xFF_FFFF
             || bodyRows.Count > 0xFF_FFFF
@@ -2696,6 +4181,11 @@ public static partial class TrRmExecutableCompiler
         foreach (var methodName in methodNames)
         {
             _ = AddString(methodName);
+        }
+
+        foreach (var genericParamName in genericParamNames)
+        {
+            _ = AddString(genericParamName);
         }
 
         foreach (var parameterSurface in parameterSurfaceRows)
@@ -2745,6 +4235,17 @@ public static partial class TrRmExecutableCompiler
             };
         }
 
+        for (var genericParamIndex = 0;
+            genericParamIndex < genericParamRows.Count;
+            genericParamIndex++)
+        {
+            genericParamRows[genericParamIndex]
+                = genericParamRows[genericParamIndex] with {
+                    NameStringRow = stringRows[
+                        genericParamNames[genericParamIndex]],
+                };
+        }
+
         var featureBytes = featureRows.Count == 0 ? []
             : TrRmFeatureTableWriter.Encode(featureRows, schema);
         var features = featureRows.Count == 0 ? default
@@ -2774,20 +4275,22 @@ public static partial class TrRmExecutableCompiler
             : new TrRmModuleRefTableReader(moduleRefBytes,
                 moduleRefRows.Length, strings, modules);
         var typeDefBytes = TrRmTypeDefTableWriter.Encode(typeDefRows,
-            strings, modules, fieldRows.Count, methodRows.Count,
+            strings, modules, fieldRows.Count, genericParamRows.Count,
             layoutRows.Count, contractRows.Count, schema);
         var typeDefs = new TrRmTypeDefTableReader(typeDefBytes,
             typeDefRows.Count, strings, modules, fieldRows.Count,
-            methodRows.Count, layoutRows.Count, contractRows.Count, schema);
+            genericParamRows.Count, layoutRows.Count, contractRows.Count,
+            schema);
         var typeSpecBytes = typeSpecRows.Count == 0 ? [] :
             TrRmTypeSpecTableWriter.Encode(typeSpecRows, typeDefRows.Count,
-                imports.Count, 0, 0, schema,
+                imports.Count, genericParamRows.Count, 0, schema,
                 methodDefCount: methodRows.Count);
         var typeSpecs = new TrRmTypeSpecTableReader(
             typeSpecRows.Count == 0
                 ? new byte[sizeof(uint)] : typeSpecBytes,
-            typeSpecRows.Count, typeDefRows.Count, imports.Count, 0, 0,
-            schema, methodDefCount: methodRows.Count);
+            typeSpecRows.Count, typeDefRows.Count, imports.Count,
+            genericParamRows.Count, 0, schema,
+            methodDefCount: methodRows.Count);
         var frozenScalarValueTables
             = frozenScalarValueBuilder.Encode(typeSpecs);
         var parameterSurfaceBytes
@@ -2819,11 +4322,11 @@ public static partial class TrRmExecutableCompiler
                 import.ExpectedDefinitionId)).ToArray();
         var signatureBytes = methodSignatureRows.Count == 0 ? []
             : TrRmMethodSigTableWriter.Encode(methodSignatureRows,
-                typeSpecs, parameterRows.Count, 0);
+                typeSpecs, parameterRows.Count, genericParamRows.Count);
         var signatures = methodSignatureRows.Count == 0 ? default
             : new TrRmMethodSigTableReader(signatureBytes,
                 methodSignatureRows.Count, typeSpecs,
-                parameterRows.Count, 0);
+                parameterRows.Count, genericParamRows.Count);
         var parameterBytes = parameterRows.Count == 0 ? []
             : TrRmParamTableWriter.Encode(parameterRows, signatures,
                 typeSpecs, schema);
@@ -2842,6 +4345,24 @@ public static partial class TrRmExecutableCompiler
             : TrRmImportTableWriter.Encode(importRows, strings, moduleRefs,
                 typeDefs, methods, default, default, default, fields,
                 features, modules, schema);
+        var imports = importRows.Length == 0 ? default
+            : new TrRmImportTableReader(importBytes, importRows.Length,
+                strings, moduleRefs, typeDefs, methods, default, default,
+                default, fields, features, modules, schema);
+        var genericParamBytes = genericParamRows.Count == 0 ? []
+            : TrRmGenericParamTableWriter.Encode(genericParamRows, strings,
+                typeDefs, methods, signatures, typeSpecs,
+                genericConstraintRows.Count);
+        var genericParams = genericParamRows.Count == 0 ? default
+            : new TrRmGenericParamTableReader(genericParamBytes,
+                genericParamRows.Count, strings, typeDefs, methods,
+                signatures, typeSpecs, genericConstraintRows.Count);
+        var associatedRelations
+            = new TrRmAssociatedRelationTableReader([], 0, typeSpecs, 0,
+                imports);
+        var constraintBytes = genericConstraintRows.Count == 0 ? []
+            : TrRmConstraintTableWriter.Encode(genericConstraintRows,
+                genericParams, typeSpecs, associatedRelations);
         var contractBytes = contractRows.Count == 0 ? []
             : TrRmContractTableWriter.EncodeC1M1Construction2Draft(
                 contractRows, typeDefs, methods, signatures, parameters,
@@ -2899,6 +4420,152 @@ public static partial class TrRmExecutableCompiler
                 }
             }
         }
+        if (IsSelectedClassTypeDefBindingEqualitySchemaIdentity(
+                standardSchemaIdentity))
+        {
+            var parentByView = Enumerable.Range(0,
+                standardClassTypeDefViews.Count).ToArray();
+
+            int FindViewRoot(int viewIndex)
+            {
+                var root = viewIndex;
+                while (parentByView[root] != root)
+                {
+                    root = parentByView[root];
+                }
+
+                while (parentByView[viewIndex] != viewIndex)
+                {
+                    var next = parentByView[viewIndex];
+                    parentByView[viewIndex] = root;
+                    viewIndex = next;
+                }
+
+                return root;
+            }
+
+            void JoinViews(int leftView, int rightView)
+            {
+                var leftRoot = FindViewRoot(leftView);
+                var rightRoot = FindViewRoot(rightView);
+                if (leftRoot != rightRoot)
+                {
+                    parentByView[Math.Max(leftRoot, rightRoot)]
+                        = Math.Min(leftRoot, rightRoot);
+                }
+            }
+
+            foreach (var group in sourceClassEqualityViewGroups)
+            {
+                var firstView = group[0];
+                for (var index = 1; index < group.Length; index++)
+                {
+                    JoinViews(firstView, group[index]);
+                }
+            }
+
+            foreach (var (standardClassIndex, viewIndexes)
+                     in standardClassTypeDefViewIndexesByClass)
+            {
+                var declaration = program.StandardClassDeclarations[
+                    standardClassIndex];
+                foreach (var group in declaration
+                             .TypeDefBindingEqualityGroups)
+                {
+                    if (group.OwnerModule is
+                            BoundSourceTypeProviderSnapshot ownerModule
+                        && !viewIndexes.Any(viewIndex =>
+                            standardClassTypeDefViews[viewIndex]
+                                .Expectations.Any(expectation =>
+                                    SameA2SourceTypeProviderSnapshot(
+                                        ownerModule,
+                                        expectation.Binding.UsingModule))))
+                    {
+                        continue;
+                    }
+
+                    var endpointViews = new HashSet<int>();
+                    foreach (var endpoint in group.Endpoints)
+                    {
+                        var matches = viewIndexes.Where(viewIndex =>
+                        {
+                            var view
+                                = standardClassTypeDefViews[viewIndex];
+                            if (endpoint.ImportRow == 0)
+                            {
+                                return view.IsSelectedView
+                                    && endpoint.TypeDefDefinitionId
+                                        == declaration.Declaration.Identity
+                                            .DefinitionId
+                                    && SameA2SourceTypeProviderSnapshot(
+                                        endpoint.OwnerModule,
+                                        view.Provider);
+                            }
+
+                            return view.Expectations.Any(expectation =>
+                                expectation.Binding.ImportRow
+                                    == endpoint.ImportRow
+                                && expectation.Binding.ExpectedDefinitionId
+                                    == endpoint.TypeDefDefinitionId
+                                && StringComparer.Ordinal.Equals(
+                                    expectation.Binding.ExportKey,
+                                    endpoint.ExportKey)
+                                && SameA2SourceTypeProviderSnapshot(
+                                    endpoint.OwnerModule,
+                                    expectation.Binding.UsingModule));
+                        }).ToArray();
+                        if (matches.Length == 0)
+                        {
+                            throw new InvalidDataException(
+                                "A class TypeDef equality endpoint has no exact emitted view.");
+                        }
+
+                        foreach (var viewIndex in matches)
+                        {
+                            _ = endpointViews.Add(viewIndex);
+                        }
+                    }
+
+                    if (endpointViews.Count < 2)
+                    {
+                        throw new InvalidDataException(
+                            "A class TypeDef equality group has fewer than two emitted views.");
+                    }
+
+                    var firstView = endpointViews.Min();
+                    foreach (var viewIndex in endpointViews)
+                    {
+                        JoinViews(firstView, viewIndex);
+                    }
+                }
+            }
+
+            var equalityComponents = Enumerable.Range(0,
+                    standardClassTypeDefViews.Count)
+                .GroupBy(FindViewRoot)
+                .Where(static component => component.Count() > 1)
+                .Select(component => component.Select(viewIndex =>
+                        typeDefRowByStandardClassView[viewIndex])
+                    .Order().ToArray())
+                .OrderBy(static rows => rows[0])
+                .ToArray();
+            foreach (var component in equalityComponents)
+            {
+                var leftTypeDef = checked((uint)component[0]);
+                for (var index = 1; index < component.Length; index++)
+                {
+                    typeDefBindingEqualityRows.Add(
+                        new TrRmTypeDefBindingEqualityRow(1, leftTypeDef,
+                            checked((uint)component[index])));
+                }
+            }
+
+            typeDefBindingEqualityRows = [.. typeDefBindingEqualityRows
+                .Distinct()
+                .OrderBy(static row => row.OwnerModule)
+                .ThenBy(static row => row.LeftTypeDef)
+                .ThenBy(static row => row.RightTypeDef)];
+        }
 
         var sections = new List<TrRmSection> {
             new TrRmSection(0x0001, 0, 1, moduleBytes),
@@ -2948,6 +4615,17 @@ public static partial class TrRmExecutableCompiler
             sections.Add(new TrRmSection(0x0018, 0,
                 checked((uint)parameterRows.Count), parameterBytes));
         }
+        if (genericParamRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x0019, 0,
+                checked((uint)genericParamRows.Count), genericParamBytes));
+        }
+        if (genericConstraintRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x001A, 0,
+                checked((uint)genericConstraintRows.Count),
+                constraintBytes));
+        }
         if (contractRows.Count != 0)
         {
             sections.Add(new TrRmSection(0x001B, 0,
@@ -2994,7 +4672,8 @@ public static partial class TrRmExecutableCompiler
             left.Kind.CompareTo(right.Kind));
         var artifact = TrRmArtifactWriter.Encode(sections,
             schema, standardSchemaIdentity: standardSchemaIdentity);
-        if (!schema.UsesClassParameterDefaults())
+        if (!schema.UsesClassParameterDefaults()
+            && classMethodGenericFormalPlans.Count == 0)
         {
             _ = TrRmStructuralMetadataValidator
                 .ValidateC1AndGetExecutionTables(
@@ -3003,6 +4682,8 @@ public static partial class TrRmExecutableCompiler
                             standardSchemaIdentity));
         }
 
+        sourceClassMethodGenericFormalPlans
+            = [.. classMethodGenericFormalPlans];
         return artifact;
     }
 
@@ -6882,11 +8563,16 @@ public static partial class TrRmExecutableCompiler
             IReadOnlyDictionary<BoundGenericNominalTypeIdentity, int>
                 standardClassIndexByIdentity,
             IReadOnlyDictionary<int, C1M1ImportedClassImportPlan>
-                typeImportPlanByStandardClass,
+                typeImportPlanByStandardClassView,
             IReadOnlyDictionary<(int ClassIndex, int FieldIndex), int>
                 fieldDefRowByClassAndIndex,
-            IReadOnlyDictionary<(int StandardClassIndex, int FieldIndex),
-                int> fieldImportRowByStandardClassAndIndex)
+            IReadOnlyDictionary<(int StandardClassViewIndex, int FieldIndex),
+                int> fieldDefRowByStandardClassViewAndIndex,
+            IReadOnlyDictionary<(int StandardClassViewIndex, int FieldIndex),
+                int> fieldImportRowByStandardClassViewAndIndex,
+            IReadOnlyList<C1M1ImportedClassTypeDefViewPlan>
+                standardClassTypeDefViews,
+            Func<int, int, int> getStandardClassTypeDefViewIndex)
     {
         if (function.ParameterCount != function.Variables.Length
             || function.Body.RetiredManagedLocals.Length != 0
@@ -6975,29 +8661,44 @@ public static partial class TrRmExecutableCompiler
 
         if (!TryGetC1M1ImportedClassFieldType(fieldRead.Receiver.Type,
                 program, standardClassIndexByIdentity,
-                out var standardClassIndex, out _)
-            || !typeImportPlanByStandardClass.TryGetValue(
-                standardClassIndex, out var importPlan)
-            || !fieldImportRowByStandardClassAndIndex.TryGetValue((
-                standardClassIndex, fieldRead.Field), out var fieldImportRow))
+                out var standardClassIndex, out var instanceIndex))
+        {
+            return null;
+        }
+
+        var standardClassViewIndex = getStandardClassTypeDefViewIndex(
+            standardClassIndex, instanceIndex);
+        if (!typeImportPlanByStandardClassView.TryGetValue(
+                standardClassViewIndex, out var importPlan)
+            || !fieldDefRowByStandardClassViewAndIndex.ContainsKey((
+                standardClassViewIndex, fieldRead.Field))
+            || !fieldImportRowByStandardClassViewAndIndex.TryGetValue((
+                standardClassViewIndex, fieldRead.Field),
+                out var fieldImportRow))
         {
             return null;
         }
 
         var classDeclaration
+            = standardClassTypeDefViews[standardClassViewIndex]
+                .Declaration;
+        var providerClassDeclaration
             = program.StandardClassDeclarations[standardClassIndex]
                 .Declaration;
-        if ((uint)fieldRead.Field >= (uint)classDeclaration.Fields.Length)
+        if ((uint)fieldRead.Field >= (uint)classDeclaration.Fields.Length
+            || (uint)fieldRead.Field
+                >= (uint)providerClassDeclaration.Fields.Length)
         {
             return null;
         }
 
         var field = classDeclaration.Fields[fieldRead.Field];
+        var providerField
+            = providerClassDeclaration.Fields[fieldRead.Field];
         if (field.Type != reference.ReferentType
-            || field.SelectedExportKeys.IsEmpty
             || !TryGetC1M1SourceScalarTypeSpecReference(field.Type, out _)
-            || !IsC1M1ImportedClassFieldImportable(classDeclaration,
-                field, importPlan))
+            || !IsC1M1ImportedClassFieldImportable(
+                providerClassDeclaration, providerField, importPlan))
         {
             return null;
         }
@@ -7016,13 +8717,16 @@ public static partial class TrRmExecutableCompiler
             IReadOnlyDictionary<BoundGenericNominalTypeIdentity, int>
                 standardClassIndexByIdentity,
             IReadOnlyDictionary<int, C1M1ImportedClassImportPlan>
-                typeImportPlanByStandardClass,
+                typeImportPlanByStandardClassView,
             IReadOnlyDictionary<(int ClassIndex, int FieldIndex), int>
                 fieldDefRowByClassAndIndex,
-            IReadOnlyDictionary<(int StandardClassIndex, int FieldIndex),
-                int> fieldDefRowByStandardClassAndIndex,
+            IReadOnlyDictionary<(int StandardClassViewIndex, int FieldIndex),
+                int> fieldDefRowByStandardClassViewAndIndex,
             IReadOnlyDictionary<(int StructureIndex, int FieldIndex), int>
-                fieldDefRowByStructureAndIndex)
+                fieldDefRowByStructureAndIndex,
+            IReadOnlyList<C1M1ImportedClassTypeDefViewPlan>
+                standardClassTypeDefViews,
+            Func<int, int, int> getStandardClassTypeDefViewIndex)
     {
         if (function.IsStatic
             || function.ParameterCount != function.Variables.Length
@@ -7104,6 +8808,7 @@ public static partial class TrRmExecutableCompiler
 
         var baseVariableIndex = receiver.Variable;
         var standardClassIndex = -1;
+        var standardClassInstanceIndex = -1;
         if (baseVariableIndex == 0)
         {
             if (function.ParameterCount != 1 || fieldPath.Count < 2
@@ -7118,7 +8823,7 @@ public static partial class TrRmExecutableCompiler
             && function.ParameterCount == 2
             && TryGetC1M1ImportedClassFieldType(receiver.Type, program,
                 standardClassIndexByIdentity, out standardClassIndex,
-                out _))
+                out standardClassInstanceIndex))
         {
             if (fieldPath.Count == 0)
             {
@@ -7161,22 +8866,34 @@ public static partial class TrRmExecutableCompiler
             }
             else if (index == 0)
             {
-                var classFields
+                var standardClassViewIndex
+                    = getStandardClassTypeDefViewIndex(standardClassIndex,
+                        standardClassInstanceIndex);
+                var classViewPlan
+                    = standardClassTypeDefViews[standardClassViewIndex];
+                var classFields = classViewPlan.Declaration.Fields;
+                var providerClassFields
                     = program.StandardClassDeclarations[standardClassIndex]
                         .Declaration.Fields;
                 if (!TryGetC1M1ImportedClassFieldType(ownerType, program,
                         standardClassIndexByIdentity,
-                        out var fieldOwnerStandardClassIndex, out _)
+                        out var fieldOwnerStandardClassIndex,
+                        out var fieldOwnerInstanceIndex)
                     || fieldOwnerStandardClassIndex != standardClassIndex
+                    || getStandardClassTypeDefViewIndex(
+                        fieldOwnerStandardClassIndex,
+                        fieldOwnerInstanceIndex) != standardClassViewIndex
                     || (uint)fieldRead.Field >= (uint)classFields.Length
-                    || !typeImportPlanByStandardClass.TryGetValue(
-                        standardClassIndex, out var importPlan)
+                    || (uint)fieldRead.Field
+                        >= (uint)providerClassFields.Length
+                    || !typeImportPlanByStandardClassView.TryGetValue(
+                        standardClassViewIndex, out var importPlan)
                     || !IsC1M1ImportedClassFieldImportable(
-                        program.StandardClassDeclarations[standardClassIndex]
-                            .Declaration,
-                        classFields[fieldRead.Field], importPlan)
-                    || !fieldDefRowByStandardClassAndIndex.TryGetValue((
-                        standardClassIndex, fieldRead.Field),
+                        program.StandardClassDeclarations[
+                            standardClassIndex].Declaration,
+                        providerClassFields[fieldRead.Field], importPlan)
+                    || !fieldDefRowByStandardClassViewAndIndex.TryGetValue((
+                        standardClassViewIndex, fieldRead.Field),
                         out fieldDefRow))
                 {
                     return null;
@@ -7322,9 +9039,14 @@ public static partial class TrRmExecutableCompiler
             IReadOnlyDictionary<BoundGenericNominalTypeIdentity, int>
                 standardClassIndexByIdentity,
             IReadOnlyDictionary<int, C1M1ImportedClassImportPlan>
-                typeImportPlanByStandardClass,
-            IReadOnlyDictionary<(int StandardClassIndex, int FieldIndex),
-                int> fieldDefRowByStandardClassAndIndex)
+                typeImportPlanByStandardClassView,
+            IReadOnlyDictionary<(int StandardClassViewIndex, int FieldIndex),
+                int> fieldDefRowByStandardClassViewAndIndex,
+            IReadOnlyDictionary<(int StandardClassViewIndex, int FieldIndex),
+                int> fieldImportRowByStandardClassViewAndIndex,
+            IReadOnlyList<C1M1ImportedClassTypeDefViewPlan>
+                standardClassTypeDefViews,
+            Func<int, int, int> getStandardClassTypeDefViewIndex)
     {
         if (!function.IsStatic || function.ReturnType != PrimitiveType.Void
             || function.ParameterCount is < 1 or > 2
@@ -7347,9 +9069,15 @@ public static partial class TrRmExecutableCompiler
             || !TryGetC1M1ImportedClassFieldType(
                 function.Variables[0].Type, program,
                 standardClassIndexByIdentity,
-                out var standardClassIndex, out var instanceIndex)
-            || !typeImportPlanByStandardClass.TryGetValue(
-                standardClassIndex, out var importPlan))
+                out var standardClassIndex, out var instanceIndex))
+        {
+            return null;
+        }
+
+        var standardClassViewIndex = getStandardClassTypeDefViewIndex(
+            standardClassIndex, instanceIndex);
+        if (!typeImportPlanByStandardClassView.TryGetValue(
+                standardClassViewIndex, out var importPlan))
         {
             return null;
         }
@@ -7369,13 +9097,18 @@ public static partial class TrRmExecutableCompiler
         }
 
         var classDeclaration
+            = standardClassTypeDefViews[standardClassViewIndex]
+                .Declaration;
+        var providerClassDeclaration
             = program.StandardClassDeclarations[standardClassIndex]
                 .Declaration;
         var classTypeInstance
             = program.GenericNominalTypeInstances[instanceIndex];
         if ((classTypeInstance.Qualifiers & 0x01) == 0
             || (classDeclaration.TypeDefFlags & 0x80) == 0
-            || (uint)assignment.Field >= (uint)classDeclaration.Fields.Length)
+            || (uint)assignment.Field >= (uint)classDeclaration.Fields.Length
+            || (uint)assignment.Field
+                >= (uint)providerClassDeclaration.Fields.Length)
         {
             return null;
         }
@@ -7383,13 +9116,17 @@ public static partial class TrRmExecutableCompiler
         var field = classDeclaration.Fields[assignment.Field];
         if ((field.Flags & 3) != 2 || (field.Flags & 0x08) != 0
             || (field.Flags & 0x04) == 0
-            || field.SelectedExportKeys.IsEmpty
             || field.Type != assignment.Value.Type
             || !TryGetC1M1SourceScalarTypeSpecReference(field.Type, out _)
-            || !IsC1M1ImportedClassFieldImportable(classDeclaration,
-                field, importPlan)
-            || !fieldDefRowByStandardClassAndIndex.TryGetValue((
-                standardClassIndex, assignment.Field), out var fieldDefRow))
+            || !IsC1M1ImportedClassFieldImportable(
+                providerClassDeclaration,
+                providerClassDeclaration.Fields[assignment.Field],
+                importPlan)
+            || !fieldImportRowByStandardClassViewAndIndex.ContainsKey((
+                standardClassViewIndex, assignment.Field))
+            || !fieldDefRowByStandardClassViewAndIndex.TryGetValue((
+                standardClassViewIndex, assignment.Field),
+                out var fieldDefRow))
         {
             return null;
         }
@@ -16467,7 +18204,9 @@ public static partial class TrRmExecutableCompiler
         Dictionary<int, int> importRowMap,
         List<ReadOnlyMemory<byte>> outputRows,
         Dictionary<int, uint> rowMap, HashSet<int> activeRows, int depth,
-        Dictionary<int, int>? genericParamRowMap = null)
+        Dictionary<int, int>? genericParamRowMap = null,
+        HashSet<int>? ambiguousTypeDefRows = null,
+        Dictionary<int, int>? exactTypeDefRowMap = null)
     {
         if (depth > SemanticVerifier.MaximumDepth)
         {
@@ -16504,6 +18243,21 @@ public static partial class TrRmExecutableCompiler
                     var oldTypeDefRow = checked((int)
                         BinaryPrimitives.ReadUInt32LittleEndian(
                             row.AsSpan(2)));
+                    if (exactTypeDefRowMap is not null
+                        && exactTypeDefRowMap.TryGetValue(oldTypeDefRow,
+                            out var exactTypeDefRow))
+                    {
+                        Write(row, 2, checked((uint)exactTypeDefRow));
+                        break;
+                    }
+
+                    if (ambiguousTypeDefRows?.Contains(oldTypeDefRow)
+                        == true)
+                    {
+                        throw new InvalidDataException(
+                            "A class MethodSig direct TypeDef reference cannot distinguish its contextual destination view.");
+                    }
+
                     if (!typeDefRowMap.TryGetValue(oldTypeDefRow,
                             out var newTypeDefRow))
                     {
@@ -16562,7 +18316,8 @@ public static partial class TrRmExecutableCompiler
                     var remappedGenericType = RemapC1M1ClassTypeSpec(
                         sourceTables, genericTypeSpec, typeDefRowMap,
                         importRowMap, outputRows, rowMap, activeRows,
-                        depth + 1, genericParamRowMap);
+                        depth + 1, genericParamRowMap,
+                        ambiguousTypeDefRows, exactTypeDefRowMap);
                     Write(row, 2, remappedGenericType);
                     for (var offset = 6; offset < row.Length; offset += 4)
                     {
@@ -16571,7 +18326,8 @@ public static partial class TrRmExecutableCompiler
                         var remappedArgument = RemapC1M1ClassTypeSpec(
                             sourceTables, argument, typeDefRowMap,
                             importRowMap, outputRows, rowMap, activeRows,
-                            depth + 1, genericParamRowMap);
+                            depth + 1, genericParamRowMap,
+                            ambiguousTypeDefRows, exactTypeDefRowMap);
                         Write(row, offset, remappedArgument);
                     }
                     break;
@@ -16585,7 +18341,8 @@ public static partial class TrRmExecutableCompiler
                     var remappedChild = RemapC1M1ClassTypeSpec(
                         sourceTables, child, typeDefRowMap, importRowMap,
                         outputRows, rowMap, activeRows, depth + 1,
-                        genericParamRowMap);
+                        genericParamRowMap, ambiguousTypeDefRows,
+                        exactTypeDefRowMap);
                     Write(row, 2, remappedChild);
                     break;
                 }
@@ -16597,7 +18354,8 @@ public static partial class TrRmExecutableCompiler
                     var remappedChild = RemapC1M1ClassTypeSpec(
                         sourceTables, child, typeDefRowMap, importRowMap,
                         outputRows, rowMap, activeRows, depth + 1,
-                        genericParamRowMap);
+                        genericParamRowMap, ambiguousTypeDefRows,
+                        exactTypeDefRowMap);
                     Write(row, 3, remappedChild);
                     break;
                 }

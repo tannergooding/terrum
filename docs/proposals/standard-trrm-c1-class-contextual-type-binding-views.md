@@ -6,10 +6,13 @@ existing candidate `0067 TypeDefBindingEquality` semantics to class-bearing
 declaration graphs through three distinct exact successors. This selects
 neither normative adoption nor compiler conformance or qualification.
 Implementation is in progress: class/struct equality carriers, provider
-binding, class/struct reference composition, and same-Module direct struct
-re-emission are implemented with focused regressions. Validation remains held;
-multi-owner source-free remapping, broader closure/acceptance coverage, and
-final qualification are outstanding.
+binding, class/struct reference composition, and source-class publication of
+distinct class/inline-struct views are implemented with focused regressions.
+The source publisher preserves view-owned fields/layouts/TypeSpecs and
+bodyless MethodDef Imports, signatures, contracts, defaults, dependencies,
+and CM1/CM1AR1 interface/associated-relation constraints. Validation remains
+held; multi-owner source-free remapping, broader closure/acceptance coverage,
+and final qualification are outstanding.
 
 ## Finding, owners and scope
 

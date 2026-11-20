@@ -157,19 +157,16 @@ public static partial class TrRmExecutableCompiler
                     continue;
                 }
 
-                if (tables.Exports.HasExportForTypeDef(typeDef)
-                    || tables.Imports.IsExpectedDefinition(
-                        0x1300_0000u | checked((uint)typeDef))
-                    || tables.Imports.IsExpectedDefinition(
-                        0x2000_0000u | checked((uint)interfaceDef)))
+                var (firstMethod, methodCount)
+                    = tables.Interfaces.GetMethodRange(interfaceDef);
+                var (_, associatedTypeCount)
+                    = tables.Interfaces.GetAssociatedTypeRange(interfaceDef);
+                if (methodCount != 0 || associatedTypeCount != 0)
                 {
                     throw Unsupported(
-                        "A G1 interface source view requires exact G1L1 label metadata.");
+                        "A class generic MethodDef without parameter labels can retain only methodless, non-associated InterfaceDef constraints.");
                 }
             }
-
-            context.InterfaceDefinitions.Add(cacheKey, []);
-            return [];
         }
 
         var exportedDefinitions
@@ -1912,8 +1909,11 @@ public static partial class TrRmExecutableCompiler
         }
         var isSupportedClassMethod
             = ownerTypeDefRow != 0
-                && StandardGenericMethodSchema
-                    .IsCM1ClassParameterDefaults(context.SchemaIdentity)
+                && (StandardGenericMethodSchema
+                        .IsCM1ClassParameterDefaults(
+                            context.SchemaIdentity)
+                    || StandardGenericMethodSchema.IsClassTypeBindingViews(
+                        context.SchemaIdentity))
                 && tables.TypeDefs.GetKind(ownerTypeDefRow) == 2
                 && (tables.TypeDefs.GetFlags(ownerTypeDefRow) & 3) == 2
                 && tables.TypeDefs.GetGenericRange(ownerTypeDefRow).Count == 0
@@ -1999,7 +1999,11 @@ public static partial class TrRmExecutableCompiler
                 switch (constraintKind)
                 {
                     case 1:
-                        if (!context.Schema.UsesMethodParameterLabels())
+                        if (!context.Schema.UsesMethodParameterLabels()
+                            && !(ownerTypeDefRow != 0
+                                && StandardGenericMethodSchema
+                                    .IsClassTypeBindingViews(
+                                        context.SchemaIdentity)))
                         {
                             throw Unsupported(
                                 "G1 interface constraints require the exact G1L1 schema.");

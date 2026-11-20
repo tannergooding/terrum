@@ -5058,6 +5058,759 @@ internal sealed class TrRmGenericMethodSourceWriterTests
     }
 
     [Test]
+    public void PublishesInheritedCM1AR1ClassMethodRelationsAcrossReloadAndProviderReplacement()
+    {
+        const string providerIdentity = "cm1ar1.inherited.class.provider";
+        const string publisherIdentity = "cm1ar1.inherited.class.publisher";
+        const string schemaIdentity = StandardGenericMethodSchema
+            .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsClassTypeBindingViews;
+        const string classExportKey = "example.class/Box";
+        const string classAliasExportKey = "example.class/BoxAlias";
+        const string methodExportKey = "Box.Constrained";
+        const string interfaceExportKey = "example.interface/ISource";
+        const string associatedTypeExportKey
+            = "example.interface/ISource.Item";
+        var providerArtifact = CreateCM1AR1ClassMethodProvider(
+            providerIdentity, includePrefix: false,
+            schemaIdentity: schemaIdentity);
+        var replacementArtifact = CreateCM1AR1ClassMethodProvider(
+            providerIdentity, includePrefix: true,
+            schemaIdentity: schemaIdentity);
+        var schema = TrRmExecutableCompiler.GetForeignInvocationSchema(
+            schemaIdentity);
+        var providerTables
+            = TrRmStructuralMetadataValidator
+                .ValidateGenericMethodCallsDraftAndGetExecutionTables(
+                    new TrRmArtifactIndex(providerArtifact, schema,
+                        standardSchemaIdentity: schemaIdentity));
+        var replacementTables
+            = TrRmStructuralMetadataValidator
+                .ValidateGenericMethodCallsDraftAndGetExecutionTables(
+                    new TrRmArtifactIndex(replacementArtifact, schema,
+                        standardSchemaIdentity: schemaIdentity));
+        Assert.That(providerTables.Exports.TryGetDefinitionForKey(1,
+                classExportKey, out var providerClassId),
+            Is.True);
+        Assert.That(replacementTables.Exports.TryGetDefinitionForKey(1,
+                classExportKey, out var replacementClassId),
+            Is.True);
+        providerArtifact = AddExportAlias(providerArtifact, schema,
+            providerClassId, classAliasExportKey, schemaIdentity);
+        replacementArtifact = AddExportAlias(replacementArtifact, schema,
+            replacementClassId, classAliasExportKey, schemaIdentity);
+        Assert.That(replacementArtifact.AsSpan().SequenceEqual(
+                providerArtifact),
+            Is.False);
+        Assert.That(providerClassId >> 24, Is.EqualTo(0x13u));
+        Assert.That(replacementClassId >> 24, Is.EqualTo(0x13u));
+
+        var providerInput = new TrRmStandardArtifactInput(
+            schemaIdentity, providerArtifact);
+        var providerReference = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, providerIdentity,
+            Array.Empty<TrRmStandardArtifactInput>(),
+            [classExportKey, classAliasExportKey]);
+        var tree = SyntaxTree.Parse("""
+            namespace Example {
+                public class Container {
+                    public Box Value;
+                }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree, providerReference);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var containerDeclaration = tree.Root.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.NamespaceDeclaration)
+            .Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Children.OfType<SyntaxTokenElement>().Any(
+                    static token => token.Token.Name == "Container"));
+        var valueDeclaration = containerDeclaration.Children
+            .OfType<SyntaxNode>().Single(static node =>
+                node.Kind == SyntaxKind.FieldDeclaration);
+        var containerClassIndex = Enumerable.Range(0,
+                program.Classes.Length)
+            .Single(index => program.Classes[index].Name == "Container");
+        var publishedArtifact = TrRmExecutableCompiler.EmitStandard(program,
+            publisherIdentity, schemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(),
+            Array.Empty<TrRmSourceGenericMethodExport>(), [
+                new TrRmSourceClassExport(program, containerClassIndex,
+                    containerDeclaration.Span, "example.class/Container", [
+                        new TrRmSourceClassMemberExport(containerClassIndex,
+                            valueDeclaration.Span, "Container.Value"),
+                    ]),
+            ]);
+        var publishedTables
+            = TrRmStructuralMetadataValidator
+                .ValidateGenericMethodCallsDraftAndGetExecutionTables(
+                    new TrRmArtifactIndex(publishedArtifact, schema,
+                        standardSchemaIdentity: schemaIdentity));
+        var boxRows = new List<int>();
+        for (var row = 1; row <= publishedTables.TypeDefs.Count; row++)
+        {
+            if (StringComparer.Ordinal.Equals(
+                    publishedTables.TypeDefs.GetName(row), "Box"))
+            {
+                boxRows.Add(row);
+            }
+        }
+        Assert.That(boxRows, Has.Count.EqualTo(2));
+        var methodRows = new List<int>();
+        var classImportKeys = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var boxRow in boxRows)
+        {
+            var boxImportRow = 0;
+            for (var importRow = 1;
+                importRow <= publishedTables.Imports.Count;
+                importRow++)
+            {
+                if (publishedTables.Imports
+                        .GetExpectedDefinitionForImportRow(importRow)
+                    == (0x1300_0000u | checked((uint)boxRow)))
+                {
+                    boxImportRow = importRow;
+                    break;
+                }
+            }
+            Assert.That(boxImportRow, Is.Not.Zero);
+            Assert.That(publishedTables.Imports.GetBindingForImportRow(
+                    boxImportRow).ExportKey,
+                Is.AnyOf(classExportKey, classAliasExportKey));
+            _ = classImportKeys.Add(publishedTables.Imports
+                .GetBindingForImportRow(boxImportRow).ExportKey);
+
+            var methodRow = 0;
+            for (var row = 1; row <= publishedTables.Methods.Count; row++)
+            {
+                if (publishedTables.Methods.GetOwnerType(row) == boxRow
+                    && StringComparer.Ordinal.Equals(
+                        publishedTables.Methods.GetName(row),
+                        "Constrained"))
+                {
+                    methodRow = row;
+                    break;
+                }
+            }
+            Assert.That(methodRow, Is.Not.Zero);
+            methodRows.Add(methodRow);
+            Assert.That(publishedTables.Methods.GetBodyRow(methodRow),
+                Is.Zero);
+            var methodImportRow = 0;
+            for (var importRow = 1;
+                importRow <= publishedTables.Imports.Count;
+                importRow++)
+            {
+                if (publishedTables.Imports
+                        .GetExpectedDefinitionForImportRow(importRow)
+                    == (0x1600_0000u | checked((uint)methodRow)))
+                {
+                    methodImportRow = importRow;
+                    break;
+                }
+            }
+            Assert.That(methodImportRow, Is.Not.Zero);
+            Assert.That(publishedTables.Imports.GetBindingForImportRow(
+                    methodImportRow).ExportKey,
+                Is.EqualTo(methodExportKey));
+
+            var methodSignature = publishedTables.Methods
+                .GetSignature(methodRow);
+            var (formalFirst, formalCount) = publishedTables.Signatures
+                .GetGenericRange(methodSignature);
+            Assert.That(formalCount, Is.EqualTo(2));
+            var (constraintFirst, constraintCount)
+                = publishedTables.GenericParams.GetConstraintRange(
+                    formalFirst);
+            var constraintKinds = new ushort[constraintCount];
+            for (var offset = 0; offset < constraintCount; offset++)
+            {
+                constraintKinds[offset]
+                    = publishedTables.Constraints.GetKind(
+                        constraintFirst + offset);
+            }
+            Assert.That(constraintKinds, Does.Contain(1));
+            Assert.That(constraintKinds, Does.Contain(3));
+            var relationConstraint = 0;
+            for (var offset = 0; offset < constraintCount; offset++)
+            {
+                var row = constraintFirst + offset;
+                if (publishedTables.Constraints.GetKind(row) == 3)
+                {
+                    relationConstraint = row;
+                }
+            }
+            Assert.That(relationConstraint, Is.Not.Zero);
+
+            var relationRow = checked((int)publishedTables.Constraints
+                .GetPayload(relationConstraint));
+            var associatedTypeImportReference
+                = publishedTables.AssociatedRelations
+                    .GetAssociatedTypeDefReference(relationRow);
+            Assert.That(associatedTypeImportReference >> 24,
+                Is.EqualTo(0x1C));
+            var associatedTypeImportRow = checked((int)(
+                associatedTypeImportReference & 0x00FF_FFFF));
+            var associatedTypeBinding = publishedTables.Imports
+                .GetBindingForImportRow(associatedTypeImportRow);
+            Assert.That(associatedTypeBinding.ExportKey,
+                Is.EqualTo(associatedTypeExportKey));
+            Assert.That(publishedTables.ModuleRefs.GetProducerIdentity(
+                    publishedTables.Imports.GetModuleRefForImportRow(
+                        associatedTypeImportRow)),
+                Is.EqualTo(providerIdentity));
+            var interfaceTypeDefRow = publishedTables.TypeSpecs
+                .GetNominalTypeDefRow(
+                    publishedTables.AssociatedRelations
+                        .GetDeclaringInterfaceTypeSpecRef(relationRow),
+                    publishedTables.TypeDefs, publishedTables.Imports);
+            var interfaceImportRow = 0;
+            for (var importRow = 1;
+                importRow <= publishedTables.Imports.Count;
+                importRow++)
+            {
+                if (publishedTables.Imports
+                        .GetExpectedDefinitionForImportRow(importRow)
+                    == (0x1300_0000u
+                        | checked((uint)interfaceTypeDefRow)))
+                {
+                    interfaceImportRow = importRow;
+                    break;
+                }
+            }
+            Assert.That(interfaceImportRow, Is.Not.Zero);
+            Assert.That(publishedTables.Imports.GetBindingForImportRow(
+                    interfaceImportRow).ExportKey,
+                Is.EqualTo(interfaceExportKey));
+        }
+
+        Assert.That(methodRows.Distinct(), Has.Count.EqualTo(2));
+
+        var publishedInput = new TrRmStandardArtifactInput(
+            schemaIdentity, publishedArtifact);
+        var originalReload = TrRmExecutableCompiler.CreateStandardReference(
+            publishedInput, publisherIdentity, [providerInput],
+            ["example.class/Container"]);
+        var replacementInput = new TrRmStandardArtifactInput(
+            schemaIdentity, replacementArtifact);
+        var replacementReload
+            = TrRmExecutableCompiler.CreateStandardReference(
+                publishedInput, publisherIdentity, [replacementInput],
+                ["example.class/Container"]);
+        foreach (var reloadedReference in new[] {
+            originalReload, replacementReload,
+        })
+        {
+            var reloadedMethods = reloadedReference.GenericMethodImports
+                .Where(import => StringComparer.Ordinal.Equals(
+                    import.Origin.ExportKey, methodExportKey)).ToArray();
+            Assert.That(reloadedMethods, Has.Length.EqualTo(2));
+            Assert.That(reloadedMethods.All(import =>
+                    StringComparer.Ordinal.Equals(
+                        import.Origin.ProviderIdentity, providerIdentity)
+                    && import.Formals[0].AssociatedRelations.Length == 1
+                    && StringComparer.Ordinal.Equals(
+                        import.Formals[0].AssociatedRelations[0]
+                            .AssociatedType.DeclarationKey,
+                        associatedTypeExportKey)),
+                Is.True);
+        }
+    }
+
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsClassTypeBindingViews)]
+    public void PublishesInheritedInterfaceConstraintsForClassTypeViews(
+        string schemaIdentity)
+    {
+        const string providerIdentity = "c1m1.interface.class.provider";
+        const string publisherIdentity = "c1m1.interface.class.publisher";
+        const string classExportKey = "example.class/Box";
+        const string classAliasExportKey = "example.class/BoxAlias";
+        const string methodExportKey = "Box.Constrained";
+        const string interfaceExportKey = "example.interface/IMarker";
+        var providerArtifact
+            = CreateC1M1InterfaceConstraintClassMethodProvider(
+                providerIdentity, schemaIdentity, includePrefix: false);
+        var replacementArtifact
+            = CreateC1M1InterfaceConstraintClassMethodProvider(
+                providerIdentity, schemaIdentity, includePrefix: true);
+        var schema = TrRmExecutableCompiler.GetForeignInvocationSchema(
+            schemaIdentity);
+        var providerTables
+            = TrRmStructuralMetadataValidator
+                .ValidateGenericMethodCallsDraftAndGetExecutionTables(
+                    new TrRmArtifactIndex(providerArtifact, schema,
+                        standardSchemaIdentity: schemaIdentity));
+        var replacementTables
+            = TrRmStructuralMetadataValidator
+                .ValidateGenericMethodCallsDraftAndGetExecutionTables(
+                    new TrRmArtifactIndex(replacementArtifact, schema,
+                        standardSchemaIdentity: schemaIdentity));
+        Assert.That(providerTables.Exports.TryGetDefinitionForKey(1,
+                classExportKey, out var providerClassId),
+            Is.True);
+        Assert.That(replacementTables.Exports.TryGetDefinitionForKey(1,
+                classExportKey, out var replacementClassId),
+            Is.True);
+        providerArtifact = AddExportAlias(providerArtifact, schema,
+            providerClassId, classAliasExportKey, schemaIdentity);
+        replacementArtifact = AddExportAlias(replacementArtifact, schema,
+            replacementClassId, classAliasExportKey, schemaIdentity);
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var providerReference = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, providerIdentity,
+            Array.Empty<TrRmStandardArtifactInput>(),
+            [classExportKey, classAliasExportKey]);
+        var tree = SyntaxTree.Parse("""
+            namespace Example {
+                public class Container {
+                    public Box Value;
+                }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree, providerReference);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var containerDeclaration = tree.Root.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.NamespaceDeclaration)
+            .Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Children.OfType<SyntaxTokenElement>().Any(
+                    static token => token.Token.Name == "Container"));
+        var valueDeclaration = containerDeclaration.Children
+            .OfType<SyntaxNode>().Single(static node =>
+                node.Kind == SyntaxKind.FieldDeclaration);
+        var containerClassIndex = Enumerable.Range(0,
+                program.Classes.Length)
+            .Single(index => program.Classes[index].Name == "Container");
+        var publishedArtifact = TrRmExecutableCompiler.EmitStandard(program,
+            publisherIdentity, schemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(),
+            Array.Empty<TrRmSourceGenericMethodExport>(), [
+                new TrRmSourceClassExport(program, containerClassIndex,
+                    containerDeclaration.Span, "example.class/Container", [
+                        new TrRmSourceClassMemberExport(containerClassIndex,
+                            valueDeclaration.Span, "Container.Value"),
+                    ]),
+            ]);
+        var publishedTables
+            = TrRmStructuralMetadataValidator
+                .ValidateGenericMethodCallsDraftAndGetExecutionTables(
+                    new TrRmArtifactIndex(publishedArtifact, schema,
+                        standardSchemaIdentity: schemaIdentity));
+        var boxRows = new List<int>();
+        for (var row = 1; row <= publishedTables.TypeDefs.Count; row++)
+        {
+            if (StringComparer.Ordinal.Equals(
+                    publishedTables.TypeDefs.GetName(row), "Box"))
+            {
+                boxRows.Add(row);
+            }
+        }
+
+        Assert.That(boxRows, Has.Count.EqualTo(2));
+        var classImportKeys = new HashSet<string>(StringComparer.Ordinal);
+        var methodRows = new List<int>();
+        foreach (var boxRow in boxRows)
+        {
+            var boxImportRow = 0;
+            for (var importRow = 1;
+                importRow <= publishedTables.Imports.Count;
+                importRow++)
+            {
+                if (publishedTables.Imports
+                        .GetExpectedDefinitionForImportRow(importRow)
+                    == (0x1300_0000u | checked((uint)boxRow)))
+                {
+                    boxImportRow = importRow;
+                    break;
+                }
+            }
+
+            Assert.That(boxImportRow, Is.Not.Zero);
+            Assert.That(publishedTables.Imports.GetBindingForImportRow(
+                    boxImportRow).ExportKey,
+                Is.AnyOf(classExportKey, classAliasExportKey));
+            _ = classImportKeys.Add(publishedTables.Imports
+                .GetBindingForImportRow(boxImportRow).ExportKey);
+            var methodRow = 0;
+            for (var row = 1; row <= publishedTables.Methods.Count; row++)
+            {
+                if (publishedTables.Methods.GetOwnerType(row) == boxRow
+                    && StringComparer.Ordinal.Equals(
+                        publishedTables.Methods.GetName(row),
+                        "Constrained"))
+                {
+                    methodRow = row;
+                    break;
+                }
+            }
+
+            Assert.That(methodRow, Is.Not.Zero);
+            methodRows.Add(methodRow);
+            var methodImportRow = 0;
+            for (var importRow = 1;
+                importRow <= publishedTables.Imports.Count;
+                importRow++)
+            {
+                if (publishedTables.Imports
+                        .GetExpectedDefinitionForImportRow(importRow)
+                    == (0x1600_0000u | checked((uint)methodRow)))
+                {
+                    methodImportRow = importRow;
+                    break;
+                }
+            }
+
+            Assert.That(methodImportRow, Is.Not.Zero);
+            Assert.That(publishedTables.Imports.GetBindingForImportRow(
+                    methodImportRow).ExportKey,
+                Is.EqualTo(methodExportKey));
+            var methodSignature = publishedTables.Methods
+                .GetSignature(methodRow);
+            var (formalFirst, formalCount) = publishedTables.Signatures
+                .GetGenericRange(methodSignature);
+            Assert.That(formalCount, Is.EqualTo(1));
+            var (constraintFirst, constraintCount)
+                = publishedTables.GenericParams.GetConstraintRange(
+                    formalFirst);
+            Assert.That(constraintCount, Is.EqualTo(1));
+            Assert.That(publishedTables.Constraints
+                .GetKind(constraintFirst), Is.EqualTo(1));
+            var interfaceTypeDefRow = publishedTables.TypeSpecs
+                .GetNominalTypeDefRow(
+                    publishedTables.Constraints.GetPayload(constraintFirst),
+                    publishedTables.TypeDefs, publishedTables.Imports);
+            var interfaceImportRow = 0;
+            for (var importRow = 1;
+                importRow <= publishedTables.Imports.Count;
+                importRow++)
+            {
+                if (publishedTables.Imports
+                        .GetExpectedDefinitionForImportRow(importRow)
+                    == (0x1300_0000u
+                        | checked((uint)interfaceTypeDefRow)))
+                {
+                    interfaceImportRow = importRow;
+                    break;
+                }
+            }
+
+            Assert.That(interfaceImportRow, Is.Not.Zero);
+            Assert.That(publishedTables.Imports.GetBindingForImportRow(
+                    interfaceImportRow).ExportKey,
+                Is.EqualTo(interfaceExportKey));
+        }
+
+        Assert.That(methodRows.Distinct(), Has.Count.EqualTo(2));
+        Assert.That(classImportKeys,
+            Is.EquivalentTo([classExportKey, classAliasExportKey]));
+        Assert.That(publishedTables.AssociatedRelations.Count, Is.Zero);
+        var publishedInput = new TrRmStandardArtifactInput(schemaIdentity,
+            publishedArtifact);
+        var replacementInput = new TrRmStandardArtifactInput(schemaIdentity,
+            replacementArtifact);
+        foreach (var provider in new[] { providerInput, replacementInput })
+        {
+            var reloadedReference
+                = TrRmExecutableCompiler.CreateStandardReference(
+                    publishedInput, publisherIdentity, [provider],
+                    ["example.class/Container"]);
+            var reloadedMethods = reloadedReference.GenericMethodImports
+                .Where(import => StringComparer.Ordinal.Equals(
+                    import.Origin.ExportKey, methodExportKey)).ToArray();
+            Assert.That(reloadedMethods, Has.Length.EqualTo(2));
+            Assert.That(reloadedMethods.All(import =>
+                    import.Formals[0].InterfaceConstraints.Length == 1
+                    && StringComparer.Ordinal.Equals(
+                        import.Formals[0].InterfaceConstraints[0]
+                            .NominalName, "Example.IMarker")),
+                Is.True);
+        }
+    }
+
+    [Test]
+    public void PublishesExpectedCM1AR1ClassMethodViewsAcrossProviderReplacement()
+    {
+        const string schemaIdentity = StandardGenericMethodSchema
+            .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsClassTypeBindingViews;
+        const string providerIdentity = "cm1ar1.expected.views.provider";
+        const string publisherIdentity = "cm1ar1.expected.views.publisher";
+        const string classExportKey = "LeafKey";
+        const string classAliasExportKey = "LeafAliasKey";
+        const string firstMethodExportKey = "Leaf.ReadAlias";
+        const string secondMethodExportKey = "Leaf.Read";
+        const string interfaceExportKey = "ISource";
+        const string associatedTypeExportKey = "ISource.Item";
+        var providerArtifact = CreateCM1AR1LeafMethodProvider(
+            providerIdentity, schemaIdentity, includePrefix: false);
+        var replacementArtifact = CreateCM1AR1LeafMethodProvider(
+            providerIdentity, schemaIdentity, includePrefix: true);
+        var schema = TrRmExecutableCompiler.GetForeignInvocationSchema(
+            schemaIdentity);
+        var providerTables
+            = TrRmStructuralMetadataValidator
+                .ValidateGenericMethodCallsDraftAndGetExecutionTables(
+                    new TrRmArtifactIndex(providerArtifact, schema,
+                        standardSchemaIdentity: schemaIdentity));
+        var replacementTables
+            = TrRmStructuralMetadataValidator
+                .ValidateGenericMethodCallsDraftAndGetExecutionTables(
+                    new TrRmArtifactIndex(replacementArtifact, schema,
+                        standardSchemaIdentity: schemaIdentity));
+        Assert.That(providerTables.Exports.TryGetDefinitionForKey(1,
+                classExportKey, out var providerLeafId),
+            Is.True);
+        Assert.That(replacementTables.Exports.TryGetDefinitionForKey(1,
+                classExportKey, out var replacementLeafId),
+            Is.True);
+        Assert.That(replacementArtifact.AsSpan().SequenceEqual(
+                providerArtifact),
+            Is.False);
+
+        var rootArtifact
+            = TrRmStandardClassTypeProviderBindingTests
+                .CreateRootArtifactWithTwoClassImports("ClassRoot",
+                    providerIdentity, "RootBoxKey", classExportKey,
+                    classAliasExportKey, schemaIdentity,
+                    firstMethodExportKey: firstMethodExportKey,
+                    secondMethodExportKey: secondMethodExportKey,
+                    includeMethodParameterNames: true);
+        rootArtifact = AddCM1AR1GenericMethodViewsToRoot(rootArtifact,
+            providerArtifact, providerIdentity, interfaceExportKey,
+            associatedTypeExportKey, schemaIdentity);
+        var rootInput = new TrRmStandardArtifactInput(schemaIdentity,
+            rootArtifact);
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            rootInput, "ClassRoot", [providerInput], ["RootBoxKey"]);
+        var leaf = reference.StandardClassDeclarations.Single(
+            static declaration =>
+                declaration.Declaration.Name == "Leaf");
+        Assert.That(leaf.Expectations, Has.Length.EqualTo(2));
+        Assert.That(leaf.Expectations.All(expectation =>
+                expectation.MethodExpectations.Length == 1
+                && expectation.MethodExpectations[0].OwnerImportRow
+                    == expectation.Binding.ImportRow),
+            Is.True);
+        Assert.That(leaf.Expectations.All(expectation =>
+                expectation.MethodExpectations[0].ExportKey
+                    == (expectation.Binding.ExportKey == classExportKey
+                        ? secondMethodExportKey
+                        : firstMethodExportKey)),
+            Is.True);
+        Assert.That(leaf.Expectations.SelectMany(
+                static expectation => expectation.MethodExpectations)
+            .Select(static expectation => expectation.ExportKey),
+            Is.EquivalentTo([firstMethodExportKey, secondMethodExportKey]));
+
+        var tree = SyntaxTree.Parse("""
+            public class Container {
+                public Box Value;
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree, reference);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var containerDeclaration = tree.Root.Children
+            .OfType<SyntaxNode>().Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var valueDeclaration = containerDeclaration.Children
+            .OfType<SyntaxNode>().Single(static node =>
+                node.Kind == SyntaxKind.FieldDeclaration);
+        var containerClassIndex = Enumerable.Range(0,
+                program.Classes.Length)
+            .Single(index => program.Classes[index].Name == "Container");
+        var publishedArtifact = TrRmExecutableCompiler.EmitStandard(program,
+            publisherIdentity, schemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(),
+            Array.Empty<TrRmSourceGenericMethodExport>(), [
+                new TrRmSourceClassExport(program, containerClassIndex,
+                    containerDeclaration.Span, "ContainerKey", [
+                        new TrRmSourceClassMemberExport(containerClassIndex,
+                            valueDeclaration.Span, "Container.Value"),
+                    ]),
+            ]);
+        var publishedTables
+            = TrRmStructuralMetadataValidator
+                .ValidateGenericMethodCallsDraftAndGetExecutionTables(
+                    new TrRmArtifactIndex(publishedArtifact, schema,
+                        standardSchemaIdentity: schemaIdentity));
+        var leafRows = new List<int>();
+        for (var row = 1; row <= publishedTables.TypeDefs.Count; row++)
+        {
+            if (StringComparer.Ordinal.Equals(
+                    publishedTables.TypeDefs.GetName(row), "Leaf"))
+            {
+                leafRows.Add(row);
+            }
+        }
+
+        Assert.That(leafRows, Has.Count.EqualTo(2));
+        var classImportKeys = new HashSet<string>(StringComparer.Ordinal);
+        var methodRows = new List<int>();
+        foreach (var leafRow in leafRows)
+        {
+            var classImportRow = 0;
+            for (var row = 1; row <= publishedTables.Imports.Count; row++)
+            {
+                if (publishedTables.Imports
+                        .GetExpectedDefinitionForImportRow(row)
+                    == (0x1300_0000u | checked((uint)leafRow)))
+                {
+                    classImportRow = row;
+                    break;
+                }
+            }
+
+            Assert.That(classImportRow, Is.Not.Zero);
+            _ = classImportKeys.Add(publishedTables.Imports
+                .GetBindingForImportRow(classImportRow).ExportKey);
+            var methodRow = 0;
+            for (var row = 1; row <= publishedTables.Methods.Count; row++)
+            {
+                if (publishedTables.Methods.GetOwnerType(row) == leafRow
+                    && StringComparer.Ordinal.Equals(
+                        publishedTables.Methods.GetName(row), "Read"))
+                {
+                    methodRow = row;
+                    break;
+                }
+            }
+
+            Assert.That(methodRow, Is.Not.Zero);
+            methodRows.Add(methodRow);
+            var methodImportRow = 0;
+            for (var row = 1; row <= publishedTables.Imports.Count; row++)
+            {
+                if (publishedTables.Imports
+                        .GetExpectedDefinitionForImportRow(row)
+                    == (0x1600_0000u | checked((uint)methodRow)))
+                {
+                    methodImportRow = row;
+                    break;
+                }
+            }
+
+            Assert.That(methodImportRow, Is.Not.Zero);
+            var classImportKey = publishedTables.Imports
+                .GetBindingForImportRow(classImportRow).ExportKey;
+            Assert.That(publishedTables.Imports.GetBindingForImportRow(
+                    methodImportRow).ExportKey,
+                Is.EqualTo(classImportKey == classExportKey
+                    ? secondMethodExportKey
+                    : firstMethodExportKey));
+            Assert.That(publishedTables.MethodParameterLabels
+                    .TryGetNameStringRow(methodRow, 0,
+                        out var parameterNameRow),
+                Is.True);
+            Assert.That(publishedTables.Strings.DecodeName(
+                    parameterNameRow),
+                Is.EqualTo("value"));
+            var methodSignature = publishedTables.Methods
+                .GetSignature(methodRow);
+            var (formalFirst, formalCount) = publishedTables.Signatures
+                .GetGenericRange(methodSignature);
+            Assert.That(formalCount, Is.EqualTo(2));
+            var (constraintFirst, constraintCount)
+                = publishedTables.GenericParams.GetConstraintRange(
+                    formalFirst);
+            var relationConstraint = 0;
+            for (var offset = 0; offset < constraintCount; offset++)
+            {
+                var constraintRow = constraintFirst + offset;
+                if (publishedTables.Constraints.GetKind(constraintRow) == 3)
+                {
+                    relationConstraint = constraintRow;
+                }
+            }
+
+            Assert.That(relationConstraint, Is.Not.Zero);
+            var relationRow = checked((int)publishedTables.Constraints
+                .GetPayload(relationConstraint));
+            var associatedTypeImport = publishedTables.AssociatedRelations
+                .GetAssociatedTypeDefReference(relationRow);
+            Assert.That(associatedTypeImport >> 24, Is.EqualTo(0x1C));
+            var associatedTypeImportRow = checked((int)(
+                associatedTypeImport & 0x00FF_FFFF));
+            Assert.That(publishedTables.Imports
+                    .GetBindingForImportRow(associatedTypeImportRow)
+                    .ExportKey,
+                Is.EqualTo(associatedTypeExportKey));
+            var interfaceTypeDefRow = publishedTables.TypeSpecs
+                .GetNominalTypeDefRow(
+                    publishedTables.AssociatedRelations
+                        .GetDeclaringInterfaceTypeSpecRef(relationRow),
+                    publishedTables.TypeDefs, publishedTables.Imports);
+            var interfaceImportRow = 0;
+            for (var row = 1; row <= publishedTables.Imports.Count; row++)
+            {
+                if (publishedTables.Imports
+                        .GetExpectedDefinitionForImportRow(row)
+                    == (0x1300_0000u
+                        | checked((uint)interfaceTypeDefRow)))
+                {
+                    interfaceImportRow = row;
+                    break;
+                }
+            }
+
+            Assert.That(interfaceImportRow, Is.Not.Zero);
+            Assert.That(publishedTables.Imports
+                    .GetBindingForImportRow(interfaceImportRow).ExportKey,
+                Is.EqualTo(interfaceExportKey));
+        }
+
+        Assert.That(classImportKeys,
+            Is.EquivalentTo([classExportKey, classAliasExportKey]));
+        Assert.That(methodRows.Distinct(), Has.Count.EqualTo(2));
+        Assert.That(publishedTables.AssociatedRelations.Count,
+            Is.EqualTo(2));
+
+        var publishedInput = new TrRmStandardArtifactInput(schemaIdentity,
+            publishedArtifact);
+        var replacementInput = new TrRmStandardArtifactInput(schemaIdentity,
+            replacementArtifact);
+        foreach (var provider in new[] { providerInput, replacementInput })
+        {
+            var reloadedReference
+                = TrRmExecutableCompiler.CreateStandardReference(
+                    publishedInput, publisherIdentity, [provider],
+                    ["ContainerKey"]);
+            var reloadedMethods = reloadedReference.GenericMethodImports
+                .Where(import => StringComparer.Ordinal.Equals(
+                    import.Origin.ExportKey, firstMethodExportKey)
+                    || StringComparer.Ordinal.Equals(import.Origin.ExportKey,
+                        secondMethodExportKey))
+                .ToArray();
+            Assert.That(reloadedMethods, Has.Length.EqualTo(2));
+            Assert.That(reloadedMethods.All(import =>
+                    import.Formals[0].AssociatedRelations.Length == 1
+                    && StringComparer.Ordinal.Equals(
+                        import.Formals[0].AssociatedRelations[0]
+                            .AssociatedType.DeclarationKey,
+                        associatedTypeExportKey)
+                    && import.Formals[0].InterfaceConstraints.Length == 1
+                    && StringComparer.Ordinal.Equals(
+                        import.Formals[0].InterfaceConstraints[0]
+                            .NominalName, "ISource")),
+                Is.True);
+        }
+    }
+
+    [Test]
     public void ReemitsCM1AR1RequiredConstructedGenericNominalType()
     {
         var nominalTree = SyntaxTree.Parse("""
@@ -10951,15 +11704,1151 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft);
     }
 
+    private static byte[] CreateC1M1ClassMethodInterfaceConstraintProvider(
+        string moduleIdentity, string schemaIdentity, bool includePrefix)
+    {
+        var sourceSchemaIdentity
+            = StandardGenericMethodSchema.IsClassTypeBindingViews(
+                schemaIdentity)
+                && !TrRmExecutableCompiler.GetForeignInvocationSchema(
+                    schemaIdentity).UsesClassParameterDefaults()
+                ? StandardGenericMethodSchema
+                    .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsClassTypeBindingViews
+                : schemaIdentity;
+        var prefixText = includePrefix
+            ? "public class Prefix {}" : string.Empty;
+        var tree = SyntaxTree.Parse($$"""
+            namespace Example {
+                public interface IMarker<T> { }
+                {{prefixText}}
+                public class Box {
+                    public static int32 Constrained() { return 7; }
+                }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var namespaceDeclaration = tree.Root.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.NamespaceDeclaration);
+        var classDeclarations = namespaceDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Where(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration).ToArray();
+        var boxDeclaration = classDeclarations.Single(static declaration =>
+            declaration.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Box"));
+        var methodDeclaration = boxDeclaration.Children
+            .OfType<SyntaxNode>().Single(static node =>
+                node.Kind == SyntaxKind.FunctionDeclaration);
+        var boxIndex = Enumerable.Range(0, program.Classes.Length)
+            .Single(index => program.Classes[index].Name == "Box");
+        var classExports = new List<TrRmSourceClassExport>();
+        if (includePrefix)
+        {
+            var prefixDeclaration = classDeclarations.Single(
+                static declaration =>
+                    declaration.Children.OfType<SyntaxTokenElement>().Any(
+                        static token => token.Token.Name == "Prefix"));
+            var prefixIndex = Enumerable.Range(0, program.Classes.Length)
+                .Single(index => program.Classes[index].Name == "Prefix");
+            classExports.Add(new TrRmSourceClassExport(program, prefixIndex,
+                prefixDeclaration.Span, "example.class/Prefix"));
+        }
+
+        classExports.Add(new TrRmSourceClassExport(program, boxIndex,
+            boxDeclaration.Span, "example.class/Box", [
+                new TrRmSourceClassMemberExport(boxIndex,
+                    methodDeclaration.Span, "Box.Constrained"),
+            ]));
+        var typeExport = new TrRmSourceTypeExport("Example", "IMarker",
+            "example.interface/IMarker") {
+            GenericArity = 1,
+            InterfaceMethodExports = [],
+            InterfaceAssociatedTypeExports = [],
+        };
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            moduleIdentity, sourceSchemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [typeExport], [], classExports);
+        artifact = AddC1M1ClassMethodInterfaceConstraint(artifact,
+            "Box.Constrained", "example.class/Box",
+            "example.interface/IMarker", sourceSchemaIdentity);
+        return StringComparer.Ordinal.Equals(sourceSchemaIdentity,
+                schemaIdentity)
+            ? artifact
+            : ReencodeC1M1ClassMethodProviderSchema(artifact,
+                sourceSchemaIdentity, schemaIdentity);
+    }
+
+    private static byte[] ReencodeC1M1ClassMethodProviderSchema(
+        byte[] artifact, string sourceSchemaIdentity,
+        string destinationSchemaIdentity)
+    {
+        var sourceSchema
+            = TrRmExecutableCompiler.GetForeignInvocationSchema(
+                sourceSchemaIdentity);
+        var sourceIndex = new TrRmArtifactIndex(artifact, sourceSchema,
+            standardSchemaIdentity: sourceSchemaIdentity);
+        var destinationSchema
+            = TrRmExecutableCompiler.GetForeignInvocationSchema(
+                destinationSchemaIdentity);
+        var sections = new SortedDictionary<ushort, TrRmSection>();
+        var featureRows = new List<TrRmFeatureRow>();
+        var sourceFeatureRange
+            = TrRmStructuralMetadataValidator
+                .ValidateGenericMethodCallsDraftAndGetExecutionTables(
+                    sourceIndex).Modules.GetFeatureRange(1);
+        var sourceTables
+            = TrRmStructuralMetadataValidator
+                .ValidateGenericMethodCallsDraftAndGetExecutionTables(
+                    sourceIndex);
+        for (var sectionIndex = 0;
+            sectionIndex < sourceIndex.SectionCount;
+            sectionIndex++)
+        {
+            sourceIndex.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var count);
+            if (kind == 0x0066)
+            {
+                if (count != 0)
+                {
+                    throw new AssertionException(
+                        "The no-default TypeBindingViews fixture unexpectedly has a parameter surface.");
+                }
+
+                continue;
+            }
+
+            if (kind == 0x0004)
+            {
+                continue;
+            }
+
+            sections.Add(kind, new TrRmSection(kind, flags,
+                checked((uint)count), bytes.ToArray()));
+        }
+
+        for (var featureRow = sourceFeatureRange.First;
+            featureRow < sourceFeatureRange.First + sourceFeatureRange.Count;
+            featureRow++)
+        {
+            var feature = sourceTables.Features.GetFeature(featureRow);
+            if (!destinationSchema.UsesMethodParameterLabels()
+                && feature.FeatureId
+                    == TrRmFeatureTableReader.MethodParameterLabelsFeatureId)
+            {
+                continue;
+            }
+
+            featureRows.Add(feature);
+        }
+
+        featureRows.Sort(static (left, right) =>
+            left.FeatureId.CompareTo(right.FeatureId));
+        var featureBytes = featureRows.Count == 0 ? []
+            : TrRmFeatureTableWriter.Encode(featureRows, destinationSchema);
+        var moduleBytes = sections[0x0001].Bytes.ToArray();
+        Write(moduleBytes, 24, featureRows.Count == 0 ? 0u : 1u);
+        Write(moduleBytes, 28, checked((uint)featureRows.Count));
+        sections[0x0001] = new TrRmSection(0x0001, 0, 1, moduleBytes);
+        if (featureRows.Count != 0)
+        {
+            sections[0x0004] = new TrRmSection(0x0004, 0,
+                checked((uint)featureRows.Count), featureBytes);
+        }
+
+        var result = TrRmArtifactWriter.Encode(sections.Values.ToArray(),
+            destinationSchema,
+            standardSchemaIdentity: destinationSchemaIdentity);
+        _ = TrRmStructuralMetadataValidator
+            .ValidateGenericMethodCallsDraftAndGetExecutionTables(
+                new TrRmArtifactIndex(result, destinationSchema,
+                    standardSchemaIdentity: destinationSchemaIdentity));
+        return result;
+    }
+
+    private static byte[] AddC1M1ClassMethodInterfaceConstraint(
+        byte[] artifact, string methodExportKey, string classExportKey,
+        string interfaceExportKey, string schemaIdentity)
+    {
+        var schema = TrRmExecutableCompiler.GetForeignInvocationSchema(
+            schemaIdentity);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateGenericMethodCallsDraftAndGetExecutionTables(
+                new TrRmArtifactIndex(artifact, schema,
+                    standardSchemaIdentity: schemaIdentity));
+        if (!tables.Exports.TryGetDefinitionForKey(1, methodExportKey,
+                out var methodDefId)
+            || !tables.Exports.TryGetDefinitionForKey(1, classExportKey,
+                out var classTypeDefId)
+            || !tables.Exports.TryGetDefinitionForKey(1, interfaceExportKey,
+                out var interfaceTypeDefId)
+            || (methodDefId >> 24) != 0x16
+            || (classTypeDefId >> 24) != 0x13
+            || (interfaceTypeDefId >> 24) != 0x13)
+        {
+            throw new AssertionException(
+                "The generic interface constraint fixture has incomplete exported identities.");
+        }
+
+        var methodRow = checked((int)(methodDefId & 0x00FF_FFFF));
+        var interfaceTypeDefRow = checked((int)(
+            interfaceTypeDefId & 0x00FF_FFFF));
+        var signatureRow = tables.Methods.GetSignature(methodRow);
+        if (tables.Signatures.GetGenericRange(signatureRow).Count != 0)
+        {
+            throw new AssertionException(
+                "The generic interface constraint fixture must start with a nongeneric MethodDef.");
+        }
+
+        var sections = new SortedDictionary<ushort, TrRmSection>();
+        var index = new TrRmArtifactIndex(artifact, schema,
+            standardSchemaIdentity: schemaIdentity);
+        for (var sectionIndex = 0; sectionIndex < index.SectionCount;
+            sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var count);
+            sections.Add(kind, new TrRmSection(kind, flags,
+                checked((uint)count), bytes.ToArray()));
+        }
+
+        var stringSection = sections[0x0002];
+        var strings = new TrRmStringTableReader(stringSection.Bytes.Span,
+            checked((int)stringSection.RecordCount));
+        var stringRows = new List<(string Text, int Encoding)>(
+            strings.Count + 1);
+        var stringRowByText = new Dictionary<string, int>(
+            StringComparer.Ordinal);
+        for (var row = 1; row <= strings.Count; row++)
+        {
+            var text = strings.DecodeNamespace(row);
+            stringRows.Add((text, 1));
+            _ = stringRowByText.TryAdd(text, row);
+        }
+
+        if (!stringRowByText.TryGetValue("T", out var formalNameRow))
+        {
+            stringRows.Add(("T", 1));
+            formalNameRow = stringRows.Count;
+        }
+
+        var typeSpecRows = new List<ReadOnlyMemory<byte>>(
+            tables.TypeSpecs.Count + 3);
+        for (var row = 1; row <= tables.TypeSpecs.Count; row++)
+        {
+            typeSpecRows.Add(tables.TypeSpecs.GetRow(row).ToArray());
+        }
+
+        var genericParamCount = tables.GenericParams.Count;
+        var genericParamRow = genericParamCount + 1;
+        var formalTypeSpecRef = checked((uint)typeSpecRows.Count + 1);
+        typeSpecRows.Add(TrRmTypeSpecTableWriter.Reference(0x04,
+            checked((uint)genericParamRow)));
+        var interfaceTypeSpecRef = checked((uint)typeSpecRows.Count + 1);
+        typeSpecRows.Add(TrRmTypeSpecTableWriter.Reference(0x02,
+            checked((uint)interfaceTypeDefRow)));
+        var constraintTypeSpecRef = checked((uint)typeSpecRows.Count + 1);
+        typeSpecRows.Add(TrRmTypeSpecTableWriter.Constructed(
+            interfaceTypeSpecRef, [formalTypeSpecRef]));
+
+        var genericParamBytes = sections.TryGetValue(0x0019,
+                out var genericParamSection)
+            ? genericParamSection.Bytes.ToArray() : [];
+        if (genericParamBytes.Length != checked(genericParamCount * 32))
+        {
+            throw new AssertionException(
+                "The generic interface constraint fixture has a malformed GenericParam section.");
+        }
+
+        var genericParamOutput = new byte[
+            checked((genericParamCount + 1) * 32)];
+        genericParamBytes.CopyTo(genericParamOutput, 0);
+        var constraintCount = tables.Constraints.Count;
+        var constraintFirst = constraintCount + 1;
+        var constraintBytes = sections.TryGetValue(0x001A,
+                out var constraintSection)
+            ? constraintSection.Bytes.ToArray() : [];
+        if (constraintBytes.Length != checked(constraintCount * 12))
+        {
+            throw new AssertionException(
+                "The generic interface constraint fixture has a malformed Constraint section.");
+        }
+
+        var constraintOutput = new byte[
+            checked((constraintCount + 1) * 12)];
+        constraintBytes.CopyTo(constraintOutput, 0);
+        var constraintOffset = constraintCount * 12;
+        Write(constraintOutput, constraintOffset, checked((uint)genericParamRow));
+        BinaryPrimitives.WriteUInt16LittleEndian(
+            constraintOutput.AsSpan(constraintOffset + 4), 1);
+        Write(constraintOutput, constraintOffset + 8,
+            constraintTypeSpecRef);
+
+        var genericParamOffset = genericParamCount * 32;
+        Write(genericParamOutput, genericParamOffset, methodDefId);
+        Write(genericParamOutput, genericParamOffset + 4, 0);
+        Write(genericParamOutput, genericParamOffset + 8,
+            checked((uint)formalNameRow));
+        Write(genericParamOutput, genericParamOffset + 12,
+            checked((uint)constraintFirst));
+        Write(genericParamOutput, genericParamOffset + 16, 1);
+        genericParamOutput[genericParamOffset + 20] = 1;
+        genericParamOutput[genericParamOffset + 21] = 1;
+        genericParamOutput[genericParamOffset + 22] = 1;
+
+        var signatureBytes = sections[0x0017].Bytes.ToArray();
+        var signatureOffset = (signatureRow - 1) * 24;
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            signatureBytes.AsSpan(signatureOffset + 16),
+            checked((uint)genericParamRow));
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            signatureBytes.AsSpan(signatureOffset + 20), 1);
+
+        var featureRange = tables.Modules.GetFeatureRange(1);
+        var features = new List<TrRmFeatureRow>(featureRange.Count + 1);
+        for (var featureRow = featureRange.First;
+            featureRow < featureRange.First + featureRange.Count;
+            featureRow++)
+        {
+            features.Add(tables.Features.GetFeature(featureRow));
+        }
+        if (!features.Any(static feature => feature.FeatureId
+                == TrRmFeatureTableReader.GenericMethodCallsFeatureId))
+        {
+            features.Add(TrRmFeatureRow.GenericMethodCallsCandidate);
+        }
+        features.Sort(static (left, right) =>
+            left.FeatureId.CompareTo(right.FeatureId));
+        var featureBytes = TrRmFeatureTableWriter.Encode(features, schema);
+        var moduleBytes = sections[0x0001].Bytes.ToArray();
+        Write(moduleBytes, 24, features.Count == 0 ? 0u : 1u);
+        Write(moduleBytes, 28, checked((uint)features.Count));
+
+        var rewrittenStrings = TrRmStringTableWriter.EncodeTextRows(
+            stringRows);
+        var rewrittenTypeSpecs = TrRmTypeSpecTableWriter.Encode(
+            typeSpecRows, tables.TypeDefs.Count, tables.Imports.Count,
+            genericParamCount + 1,
+            tables.NativeFunctionPointerSignatures.Count, schema,
+            tables.Methods.Count);
+        sections[0x0001] = new TrRmSection(0x0001, 0, 1, moduleBytes);
+        sections[0x0002] = new TrRmSection(0x0002, 0,
+            checked((uint)stringRows.Count), rewrittenStrings);
+        sections[0x0004] = new TrRmSection(0x0004, 0,
+            checked((uint)features.Count), featureBytes);
+        sections[0x0011] = new TrRmSection(0x0011, 0,
+            checked((uint)typeSpecRows.Count), rewrittenTypeSpecs);
+        sections[0x0017] = new TrRmSection(0x0017, 0,
+            sections[0x0017].RecordCount, signatureBytes);
+        sections[0x0019] = new TrRmSection(0x0019, 0,
+            checked((uint)(genericParamCount + 1)), genericParamOutput);
+        sections[0x001A] = new TrRmSection(0x001A, 0,
+            checked((uint)(constraintCount + 1)), constraintOutput);
+        var result = TrRmArtifactWriter.Encode(sections.Values.ToArray(),
+            schema, standardSchemaIdentity: schemaIdentity);
+        _ = TrRmStructuralMetadataValidator
+            .ValidateGenericMethodCallsDraftAndGetExecutionTables(
+                new TrRmArtifactIndex(result, schema,
+                    standardSchemaIdentity: schemaIdentity));
+        return result;
+    }
+
+    private static byte[] AddCM1AR1GenericMethodViewsToRoot(
+        byte[] rootArtifact, byte[] providerArtifact,
+        string providerIdentity, string interfaceExportKey,
+        string associatedTypeExportKey, string schemaIdentity)
+    {
+        static void Write(byte[] bytes, int offset, uint value)
+            => BinaryPrimitives.WriteUInt32LittleEndian(
+                bytes.AsSpan(offset), value);
+
+        var schema = TrRmExecutableCompiler.GetForeignInvocationSchema(
+            schemaIdentity);
+        var rootIndex = new TrRmArtifactIndex(rootArtifact, schema,
+            standardSchemaIdentity: schemaIdentity);
+        var rootTables = TrRmStructuralMetadataValidator
+            .ValidateGenericMethodCallsDraftAndGetExecutionTables(rootIndex);
+        var providerTables = TrRmStructuralMetadataValidator
+            .ValidateGenericMethodCallsDraftAndGetExecutionTables(
+                new TrRmArtifactIndex(providerArtifact, schema,
+                    standardSchemaIdentity: schemaIdentity));
+        if (rootTables.TypeDefs.Count != 3
+            || rootTables.Methods.Count != 2
+            || rootTables.GenericParams.Count != 0
+            || rootTables.Constraints.Count != 0
+            || rootTables.Interfaces.Count != 0
+            || rootTables.AssociatedTypeDefs.Count != 0
+            || rootTables.AssociatedRelations.Count != 0)
+        {
+            throw new AssertionException(
+                "The two-view generic method root fixture has an unexpected starting shape.");
+        }
+
+        if (!providerTables.Exports.TryGetDefinitionForKey(1,
+                "Leaf.Read", out var providerMethodDefId)
+            || !providerTables.Exports.TryGetDefinitionForKey(1,
+                interfaceExportKey, out var providerInterfaceTypeDefId)
+            || !providerTables.Exports.TryGetDefinitionForKey(1,
+                associatedTypeExportKey, out var providerAssociatedTypeDefId)
+            || (providerMethodDefId >> 24) != 0x16
+            || (providerInterfaceTypeDefId >> 24) != 0x13
+            || (providerAssociatedTypeDefId >> 24) != 0x20)
+        {
+            throw new AssertionException(
+                "The provider method fixture has incomplete generic relation exports.");
+        }
+
+        var providerMethodRow = checked((int)(
+            providerMethodDefId & 0x00FF_FFFF));
+        var providerInterfaceTypeDefRow = checked((int)(
+            providerInterfaceTypeDefId & 0x00FF_FFFF));
+        var providerAssociatedTypeDefRow = checked((int)(
+            providerAssociatedTypeDefId & 0x00FF_FFFF));
+        var providerMethodSignature = providerTables.Methods
+            .GetSignature(providerMethodRow);
+        var (providerFormalFirst, providerFormalCount)
+            = providerTables.Signatures.GetGenericRange(
+                providerMethodSignature);
+        if (providerFormalCount != 2
+            || providerTables.Signatures.GetParamRange(
+                providerMethodSignature).Count != 1
+            || providerTables.AssociatedRelations.Count != 1)
+        {
+            throw new AssertionException(
+                "The provider method fixture does not have the selected two-formal associated-relation contract.");
+        }
+
+        var providerInterfaceDefRow
+            = providerTables.Interfaces.GetInterfaceDefForTypeDef(
+                providerInterfaceTypeDefRow);
+        var (providerInterfaceFormalFirst,
+            providerInterfaceFormalCount)
+            = providerTables.TypeDefs.GetGenericRange(
+                providerInterfaceTypeDefRow);
+        var (providerAssociatedTypeFirst,
+            providerAssociatedTypeCount)
+            = providerTables.Interfaces.GetAssociatedTypeRange(
+                providerInterfaceDefRow);
+        if (providerInterfaceDefRow == 0
+            || providerInterfaceFormalCount != 1
+            || providerAssociatedTypeCount != 1
+            || providerAssociatedTypeDefRow
+                != providerAssociatedTypeFirst)
+        {
+            throw new AssertionException(
+                "The provider interface fixture has an unexpected associated-type closure.");
+        }
+
+        var rootMethodRows = new List<int>(2);
+        for (var methodRow = 1; methodRow <= rootTables.Methods.Count;
+            methodRow++)
+        {
+            if (StringComparer.Ordinal.Equals(
+                    rootTables.Methods.GetName(methodRow), "Read"))
+            {
+                rootMethodRows.Add(methodRow);
+            }
+        }
+        if (rootMethodRows.Count != 2)
+        {
+            throw new AssertionException(
+                "The root fixture does not contain two expected Read MethodDefs.");
+        }
+
+        var rootSections = new SortedDictionary<ushort, TrRmSection>();
+        for (var sectionIndex = 0; sectionIndex < rootIndex.SectionCount;
+            sectionIndex++)
+        {
+            rootIndex.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var count);
+            rootSections.Add(kind, new TrRmSection(kind, flags,
+                checked((uint)count), bytes.ToArray()));
+        }
+
+        var rootStringSection = rootSections[0x0002];
+        var rootStrings = new TrRmStringTableReader(
+            rootStringSection.Bytes.Span,
+            checked((int)rootStringSection.RecordCount));
+        var stringRows = new List<(string Text, int Encoding)>(
+            rootStrings.Count + 8);
+        var stringRowByText = new Dictionary<string, int>(
+            StringComparer.Ordinal);
+        for (var row = 1; row <= rootStrings.Count; row++)
+        {
+            var text = rootStrings.DecodeNamespace(row);
+            stringRows.Add((text, 1));
+            _ = stringRowByText.TryAdd(text, row);
+        }
+
+        int GetStringRow(string value)
+        {
+            if (stringRowByText.TryGetValue(value, out var row))
+            {
+                return row;
+            }
+
+            stringRows.Add((value, 1));
+            row = stringRows.Count;
+            stringRowByText.Add(value, row);
+            return row;
+        }
+
+        var namespaceStringRow
+            = GetStringRow(providerTables.TypeDefs.GetNamespace(
+                providerInterfaceTypeDefRow));
+        var interfaceNameStringRow
+            = GetStringRow(providerTables.TypeDefs.GetName(
+                providerInterfaceTypeDefRow));
+        var associatedTypeNameStringRow
+            = GetStringRow(providerTables.Strings.DecodeName(
+                providerTables.AssociatedTypeDefs.GetNameStringRow(
+                    providerAssociatedTypeDefRow)));
+        var interfaceFormalNameStringRow
+            = GetStringRow(providerTables.Strings.DecodeName(
+                providerTables.GenericParams.GetNameStringRow(
+                    providerInterfaceFormalFirst)));
+        var providerFormalNames = new int[providerFormalCount];
+        for (var ordinal = 0; ordinal < providerFormalCount; ordinal++)
+        {
+            var providerFormalRow = providerFormalFirst + ordinal;
+            providerFormalNames[ordinal] = GetStringRow(
+                providerTables.Strings.DecodeName(
+                    providerTables.GenericParams.GetNameStringRow(
+                        providerFormalRow)));
+        }
+
+        var providerModuleRefRow = 0;
+        for (var moduleRefRow = 1;
+            moduleRefRow <= rootTables.ModuleRefs.Count;
+            moduleRefRow++)
+        {
+            if (StringComparer.Ordinal.Equals(
+                    rootTables.ModuleRefs.GetProducerIdentity(moduleRefRow),
+                    providerIdentity))
+            {
+                providerModuleRefRow = moduleRefRow;
+                break;
+            }
+        }
+        if (providerModuleRefRow == 0)
+        {
+            throw new AssertionException(
+                "The root fixture has no exact Provider ModuleRef.");
+        }
+
+        var importRows = new List<TrRmImportRow>(
+            rootTables.Imports.Count + 2);
+        for (var importRow = 1; importRow <= rootTables.Imports.Count;
+            importRow++)
+        {
+            importRows.Add(new TrRmImportRow(
+                rootTables.Imports.GetModuleRefForImportRow(importRow),
+                GetStringRow(rootTables.Imports
+                    .GetBindingForImportRow(importRow).ExportKey),
+                rootTables.Imports
+                    .GetExpectedDefinitionForImportRow(importRow)));
+        }
+
+        var rootInterfaceTypeDefRow = rootTables.TypeDefs.Count + 1;
+        var rootAssociatedTypeDefRow
+            = rootTables.AssociatedTypeDefs.Count + 1;
+        var interfaceImportRow = importRows.Count + 1;
+        importRows.Add(new TrRmImportRow(providerModuleRefRow,
+            GetStringRow(interfaceExportKey),
+            0x1300_0000u | checked((uint)rootInterfaceTypeDefRow)));
+        var associatedTypeImportRow = importRows.Count + 1;
+        importRows.Add(new TrRmImportRow(providerModuleRefRow,
+            GetStringRow(associatedTypeExportKey),
+            0x2000_0000u
+                | checked((uint)rootAssociatedTypeDefRow)));
+
+        var typeSpecRows = new List<ReadOnlyMemory<byte>>(
+            rootTables.TypeSpecs.Count + 8);
+        for (var row = 1; row <= rootTables.TypeSpecs.Count; row++)
+        {
+            typeSpecRows.Add(rootTables.TypeSpecs.GetRow(row).ToArray());
+        }
+
+        var rootInterfaceFormalRow = rootTables.GenericParams.Count + 1;
+        var rootMethodFormalFirst = rootInterfaceFormalRow + 1;
+        var interfaceImportTypeSpecRef
+            = checked((uint)typeSpecRows.Count + 1);
+        typeSpecRows.Add(TrRmTypeSpecTableWriter.Reference(0x03,
+            checked((uint)interfaceImportRow)));
+        var interfaceFormalTypeSpecRef
+            = checked((uint)typeSpecRows.Count + 1);
+        typeSpecRows.Add(TrRmTypeSpecTableWriter.Reference(0x04,
+            checked((uint)rootInterfaceFormalRow)));
+
+        var parameterSurfaceTypeSpecs = new List<(
+            int MethodRow, uint InterfaceConstraintTypeSpec,
+            uint RequiredTypeSpec)>(rootMethodRows.Count);
+        for (var ordinal = 0; ordinal < rootMethodRows.Count; ordinal++)
+        {
+            var methodRow = rootMethodRows[ordinal];
+            var methodFormalFirst
+                = rootMethodFormalFirst + (ordinal * providerFormalCount);
+            var typeFormalSpec
+                = checked((uint)typeSpecRows.Count + 1);
+            typeSpecRows.Add(TrRmTypeSpecTableWriter.Reference(0x04,
+                checked((uint)methodFormalFirst)));
+            var interfaceConstraintTypeSpec
+                = checked((uint)typeSpecRows.Count + 1);
+            typeSpecRows.Add(TrRmTypeSpecTableWriter.Constructed(
+                interfaceImportTypeSpecRef, [typeFormalSpec]));
+            var requiredTypeSpec
+                = checked((uint)typeSpecRows.Count + 1);
+            typeSpecRows.Add(TrRmTypeSpecTableWriter.Reference(0x04,
+                checked((uint)(methodFormalFirst + 1))));
+            parameterSurfaceTypeSpecs.Add((methodRow,
+                interfaceConstraintTypeSpec, requiredTypeSpec));
+        }
+
+        var genericParameterRows
+            = new List<TrRmGenericParamRow>(rootInterfaceFormalRow
+                + (rootMethodRows.Count * providerFormalCount));
+        var interfaceSelfFormal
+            = providerTables.Interfaces.GetSelfGenericParam(
+                providerInterfaceDefRow) == 0
+                ? 0 : rootInterfaceFormalRow;
+        genericParameterRows.Add(new TrRmGenericParamRow(
+            0x1300_0000u | checked((uint)rootInterfaceTypeDefRow), 0,
+            interfaceFormalNameStringRow, 0, 0,
+            providerTables.GenericParams.GetFormalKind(
+                providerInterfaceFormalFirst),
+            providerTables.GenericParams.GetOwnershipDomain(
+                providerInterfaceFormalFirst),
+            providerTables.GenericParams.GetNullabilityDomain(
+                providerInterfaceFormalFirst),
+            0, 0));
+        var constraintRows = new List<TrRmConstraintRow>(
+            rootTables.Constraints.Count
+                + (rootMethodRows.Count * 2));
+        var associatedRelationRows
+            = new List<TrRmAssociatedRelationRow>(
+                rootTables.AssociatedRelations.Count
+                    + rootMethodRows.Count);
+        for (var row = 1; row <= rootTables.AssociatedRelations.Count;
+            row++)
+        {
+            associatedRelationRows.Add(new TrRmAssociatedRelationRow(
+                rootTables.AssociatedRelations
+                    .GetDeclaringInterfaceTypeSpecRef(row),
+                rootTables.AssociatedRelations
+                    .GetAssociatedTypeDefReference(row),
+                rootTables.AssociatedRelations
+                    .GetRequiredTypeSpecRef(row)));
+        }
+        for (var row = 1; row <= rootTables.Constraints.Count; row++)
+        {
+            constraintRows.Add(new TrRmConstraintRow(
+                rootTables.Constraints.GetOwnerGenericParam(row),
+                rootTables.Constraints.GetKind(row),
+                rootTables.Constraints.GetPayload(row)));
+        }
+
+        var interfaceConstraintTypeSpecs
+            = parameterSurfaceTypeSpecs.ToDictionary(
+                static item => item.MethodRow,
+                static item => (item.InterfaceConstraintTypeSpec,
+                    item.RequiredTypeSpec));
+        foreach (var (methodOrdinal, methodRow) in rootMethodRows
+            .Select(static (row, ordinal) => (ordinal, row)))
+        {
+            var methodFormalFirst
+                = rootMethodFormalFirst
+                    + (methodOrdinal * providerFormalCount);
+            var methodDefId = 0x1600_0000u
+                | checked((uint)methodRow);
+            var (interfaceConstraintTypeSpec, requiredTypeSpec)
+                = interfaceConstraintTypeSpecs[methodRow];
+            var constraintFirst = constraintRows.Count + 1;
+            var relationRow
+                = checked((uint)associatedRelationRows.Count + 1);
+            constraintRows.Add(new TrRmConstraintRow(
+                methodFormalFirst, 1, interfaceConstraintTypeSpec));
+            constraintRows.Add(new TrRmConstraintRow(
+                methodFormalFirst, 3, relationRow));
+            var declaringInterfaceTypeSpec
+                = interfaceConstraintTypeSpec;
+            var associatedTypeDefReference = 0x1C00_0000u
+                | checked((uint)associatedTypeImportRow);
+            associatedRelationRows.Add(new TrRmAssociatedRelationRow(
+                declaringInterfaceTypeSpec,
+                associatedTypeDefReference, requiredTypeSpec));
+            for (var formalOrdinal = 0;
+                formalOrdinal < providerFormalCount;
+                formalOrdinal++)
+            {
+                var providerFormalRow
+                    = providerFormalFirst + formalOrdinal;
+                var genericParamRow = methodFormalFirst + formalOrdinal;
+                var hasConstraints = formalOrdinal == 0;
+                var formalConstraintFirst = hasConstraints
+                    ? constraintFirst : 0;
+                var formalConstraintCount = hasConstraints ? 2 : 0;
+                genericParameterRows.Add(new TrRmGenericParamRow(
+                    methodDefId, formalOrdinal,
+                    providerFormalNames[formalOrdinal],
+                    formalConstraintFirst, formalConstraintCount,
+                    providerTables.GenericParams.GetFormalKind(
+                        providerFormalRow),
+                    providerTables.GenericParams.GetOwnershipDomain(
+                        providerFormalRow),
+                    providerTables.GenericParams.GetNullabilityDomain(
+                        providerFormalRow), 0, 0));
+            }
+        }
+
+        var rootTypeDefBytes = new byte[checked(
+            (rootTables.TypeDefs.Count + 1) * 44)];
+        rootSections[0x0013].Bytes.Span.CopyTo(rootTypeDefBytes);
+        var newTypeDefOffset = rootTables.TypeDefs.Count * 44;
+        Write(rootTypeDefBytes, newTypeDefOffset,
+            checked((uint)namespaceStringRow));
+        Write(rootTypeDefBytes, newTypeDefOffset + 4,
+            checked((uint)interfaceNameStringRow));
+        Write(rootTypeDefBytes, newTypeDefOffset + 8,
+            providerTables.TypeDefs.GetFlags(providerInterfaceTypeDefRow));
+        Write(rootTypeDefBytes, newTypeDefOffset + 20,
+            checked((uint)rootInterfaceFormalRow));
+        Write(rootTypeDefBytes, newTypeDefOffset + 24, 1);
+
+        var moduleBytes = rootSections[0x0001].Bytes.ToArray();
+        var rootFeatureRows = new List<TrRmFeatureRow>();
+        var rootFeatureRange = rootTables.Modules.GetFeatureRange(1);
+        for (var featureRow = rootFeatureRange.First;
+            featureRow < rootFeatureRange.First + rootFeatureRange.Count;
+            featureRow++)
+        {
+            rootFeatureRows.Add(rootTables.Features.GetFeature(featureRow));
+        }
+        if (!rootFeatureRows.Any(static feature => feature.FeatureId
+                == TrRmFeatureTableReader.GenericMethodCallsFeatureId))
+        {
+            rootFeatureRows.Add(TrRmFeatureRow.GenericMethodCallsCandidate);
+        }
+        rootFeatureRows.Sort(static (left, right) =>
+            left.FeatureId.CompareTo(right.FeatureId));
+        var featureBytes = TrRmFeatureTableWriter.Encode(rootFeatureRows,
+            schema);
+        var finalStringBytes
+            = TrRmStringTableWriter.EncodeTextRows(stringRows);
+        var strings = new TrRmStringTableReader(finalStringBytes,
+            stringRows.Count);
+        Write(moduleBytes, 24, rootFeatureRows.Count == 0 ? 0u : 1u);
+        Write(moduleBytes, 28, checked((uint)rootFeatureRows.Count));
+        var moduleRefCount = rootTables.ModuleRefs.Count;
+        var rootTypeDefCount = rootTables.TypeDefs.Count + 1;
+        var methodCount = rootTables.Methods.Count;
+        var sourceFileCount
+            = rootIndex.TryGetSection(0x001F, out _, out var fileCount)
+                ? fileCount : 0;
+        var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
+            moduleRefCount, rootTypeDefCount, methodCount,
+            sourceFileCount, rootFeatureRows.Count);
+        var moduleRefBytes = rootSections[0x0010].Bytes.ToArray();
+        var moduleRefs = new TrRmModuleRefTableReader(moduleRefBytes,
+            moduleRefCount, strings, modules);
+        var typeDefReader = new TrRmTypeDefTableReader(rootTypeDefBytes,
+            rootTypeDefCount, strings, modules, rootTables.Fields.Count,
+            genericParameterRows.Count, rootTables.Layouts.Count,
+            rootTables.Contracts.Count, schema);
+        var typeSpecBytes = TrRmTypeSpecTableWriter.Encode(typeSpecRows,
+            rootTypeDefCount, importRows.Count,
+            genericParameterRows.Count,
+            rootTables.NativeFunctionPointerSignatures.Count, schema,
+            methodCount);
+        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes,
+            typeSpecRows.Count, rootTypeDefCount, importRows.Count,
+            genericParameterRows.Count,
+            rootTables.NativeFunctionPointerSignatures.Count, schema,
+            methodCount);
+
+        var targetProfileBytes = rootSections.TryGetValue(0x0048,
+            out var targetProfileSection)
+            ? targetProfileSection.Bytes.ToArray() : [];
+        var targetProfileCount = targetProfileSection.RecordCount;
+        var targetProfiles = new TrRmTargetProfileTableReader(
+            targetProfileBytes, checked((int)targetProfileCount), schema);
+        var layoutRows = new List<TrRmLayoutRow>(
+            rootTables.Layouts.Count);
+        for (var layoutRow = 1; layoutRow <= rootTables.Layouts.Count;
+            layoutRow++)
+        {
+            var (layoutFieldFirst, layoutFieldCount)
+                = rootTables.Layouts.GetLayoutFieldRange(layoutRow);
+            layoutRows.Add(new TrRmLayoutRow(
+                rootTables.Layouts.GetOwnerTypeDef(layoutRow),
+                rootTables.Layouts.GetTargetProfileRef(layoutRow),
+                rootTables.Layouts.GetLayoutKind(layoutRow),
+                rootTables.Layouts.GetFlags(layoutRow),
+                rootTables.Layouts.GetAlignment(layoutRow),
+                rootTables.Layouts.GetPack(layoutRow),
+                layoutFieldFirst, layoutFieldCount));
+        }
+        var layoutBytes = TrRmLayoutTableWriter.Encode(layoutRows,
+            typeDefReader, targetProfiles, rootTables.LayoutFields.Count);
+        var fieldRows = new List<TrRmFieldDefRow>(
+            rootTables.Fields.Count);
+        for (var fieldRow = 1; fieldRow <= rootTables.Fields.Count;
+            fieldRow++)
+        {
+            fieldRows.Add(new TrRmFieldDefRow(
+                rootTables.Fields.GetOwnerTypeDef(fieldRow),
+                GetStringRow(rootTables.Fields.GetName(fieldRow)),
+                rootTables.Fields.GetTypeSpecRef(fieldRow),
+                rootTables.Fields.GetFlags(fieldRow)));
+        }
+        var fieldBytes = rootTables.Fields.Count == 0 ? []
+            : TrRmFieldDefTableWriter.Encode(fieldRows, strings,
+                typeDefReader, typeSpecs);
+        var fields = rootTables.Fields.Count == 0 ? default
+            : new TrRmFieldDefTableReader(fieldBytes, fieldRows.Count,
+                strings, typeDefReader, typeSpecs);
+        var layoutFieldRows = new List<TrRmLayoutFieldRow>(
+            rootTables.LayoutFields.Count);
+        for (var layoutFieldRow = 1;
+            layoutFieldRow <= rootTables.LayoutFields.Count;
+            layoutFieldRow++)
+        {
+            layoutFieldRows.Add(new TrRmLayoutFieldRow(
+                rootTables.LayoutFields.GetOwnerLayout(layoutFieldRow),
+                rootTables.LayoutFields.GetOrdinal(layoutFieldRow),
+                rootTables.LayoutFields.GetFieldDef(layoutFieldRow)));
+        }
+        var layoutFieldBytes = rootTables.LayoutFields.Count == 0 ? []
+            : TrRmLayoutFieldTableWriter.Encode(layoutFieldRows,
+                new TrRmLayoutTableReader(layoutBytes, layoutRows.Count,
+                    typeDefReader, targetProfiles,
+                    rootTables.LayoutFields.Count),
+                typeDefReader, fields);
+
+        var methodSignatureRows
+            = new TrRmMethodSigRow[rootTables.Signatures.Count];
+        for (var signatureRow = 1;
+            signatureRow <= rootTables.Signatures.Count;
+            signatureRow++)
+        {
+            var (paramFirst, paramCount)
+                = rootTables.Signatures.GetParamRange(signatureRow);
+            var (genericFirst, genericCount)
+                = rootTables.Signatures.GetGenericRange(signatureRow);
+            if (genericCount == 0)
+            {
+                var matchingMethodRow = 0;
+                foreach (var methodRow in rootMethodRows)
+                {
+                    if (rootTables.Methods.GetSignature(methodRow)
+                        == signatureRow)
+                    {
+                        matchingMethodRow = methodRow;
+                        break;
+                    }
+                }
+                if (matchingMethodRow == 0)
+                {
+                    throw new AssertionException(
+                        "A method signature has no matching expected Read MethodDef.");
+                }
+
+                var methodOrdinal = rootMethodRows.IndexOf(
+                    matchingMethodRow);
+                genericFirst = rootMethodFormalFirst
+                    + (methodOrdinal * providerFormalCount);
+                genericCount = providerFormalCount;
+            }
+
+            methodSignatureRows[signatureRow - 1]
+                = new TrRmMethodSigRow(
+                    rootTables.Signatures.GetResultTypeSpec(signatureRow),
+                    rootTables.Signatures.GetReceiverTypeSpec(signatureRow),
+                    paramFirst, paramCount, genericFirst, genericCount);
+        }
+        var signatureBytes = TrRmMethodSigTableWriter.Encode(
+            methodSignatureRows, typeSpecs,
+            rootTables.Signatures.ParamCount,
+            genericParameterRows.Count);
+        var signatures = new TrRmMethodSigTableReader(signatureBytes,
+            methodSignatureRows.Length, typeSpecs,
+            rootTables.Signatures.ParamCount,
+            genericParameterRows.Count);
+        var methodBytes = rootSections[0x0016].Bytes.ToArray();
+        var methods = new TrRmMethodDefTableReader(methodBytes,
+            rootTables.Methods.Count, strings, modules, typeDefReader,
+            signatures, rootTables.Contracts.Count, rootTables.Bodies.Count,
+            schema);
+        var genericParamBytes = TrRmGenericParamTableWriter.Encode(
+            genericParameterRows, strings, typeDefReader, methods,
+            signatures, typeSpecs, constraintRows.Count,
+            rootTables.ConstantSources.Count);
+        var genericParams = new TrRmGenericParamTableReader(
+            genericParamBytes, genericParameterRows.Count, strings,
+            typeDefReader, methods, signatures, typeSpecs,
+            constraintRows.Count, rootTables.ConstantSources.Count);
+        var interfaceDefRow = new TrRmInterfaceDefRow(
+            rootInterfaceTypeDefRow, interfaceSelfFormal, 0, 0, 0, 0,
+            rootAssociatedTypeDefRow, 1, 0, 0, 0, 0);
+        var interfaceDefBytes = TrRmInterfaceDefTableWriter.Encode([
+            interfaceDefRow,
+        ], typeDefReader, genericParams, rootTables.InterfaceBases.Count,
+            rootTables.InterfaceMethods.Count,
+            rootAssociatedTypeDefRow,
+            rootTables.AssociatedConstDefs.Count,
+            rootTables.InterfaceConstDefs.Count);
+        var interfaces = new TrRmInterfaceDefTableReader(
+            interfaceDefBytes, 1, typeDefReader, genericParams,
+            rootTables.InterfaceBases.Count,
+            rootTables.InterfaceMethods.Count,
+            rootAssociatedTypeDefRow,
+            rootTables.AssociatedConstDefs.Count,
+            rootTables.InterfaceConstDefs.Count);
+        var associatedTypeRows = new[] {
+            new TrRmAssociatedTypeDefRow(1,
+                associatedTypeNameStringRow, interfaceFormalTypeSpecRef),
+        };
+        var associatedTypeBytes
+            = TrRmAssociatedTypeDefTableWriter.Encode(
+                associatedTypeRows, strings, typeSpecs, interfaces);
+        var associatedTypeDefs
+            = new TrRmAssociatedTypeDefTableReader(
+                associatedTypeBytes, associatedTypeRows.Length,
+                strings, typeSpecs, interfaces);
+        var features = new TrRmFeatureTableReader(featureBytes,
+            rootFeatureRows.Count, schema);
+        var importBytes = TrRmImportTableWriter.Encode(importRows, strings,
+            moduleRefs, typeDefReader, methods, default, interfaces,
+            associatedTypeDefs, fields, features, modules, schema);
+        var imports = new TrRmImportTableReader(importBytes,
+            importRows.Count, strings, moduleRefs, typeDefReader, methods,
+            default, interfaces, associatedTypeDefs, fields, features,
+            modules, schema);
+        var relationRows = new List<TrRmAssociatedRelationRow>(
+            associatedRelationRows);
+        var relationBytes = TrRmAssociatedRelationTableWriter.Encode(
+            relationRows, typeSpecs, associatedTypeDefs.Count, imports);
+        var relations = new TrRmAssociatedRelationTableReader(
+            relationBytes, relationRows.Count, typeSpecs,
+            associatedTypeDefs.Count, imports);
+        var constraintBytes = TrRmConstraintTableWriter.Encode(
+            constraintRows, genericParams, typeSpecs, relations);
+
+        rootSections[0x0001] = new TrRmSection(0x0001, 0, 1,
+            moduleBytes);
+        rootSections[0x0002] = new TrRmSection(0x0002, 0,
+            checked((uint)stringRows.Count),
+            finalStringBytes);
+        rootSections[0x0004] = new TrRmSection(0x0004, 0,
+            checked((uint)rootFeatureRows.Count), featureBytes);
+        rootSections[0x0011] = new TrRmSection(0x0011, 0,
+            checked((uint)typeSpecRows.Count), typeSpecBytes);
+        rootSections[0x0013] = new TrRmSection(0x0013, 0,
+            checked((uint)rootTypeDefCount), rootTypeDefBytes);
+        rootSections[0x0014] = new TrRmSection(0x0014, 0,
+            checked((uint)fieldRows.Count), fieldBytes);
+        rootSections[0x0015] = new TrRmSection(0x0015, 0,
+            checked((uint)rootTables.Layouts.Count), layoutBytes);
+        rootSections[0x0016] = new TrRmSection(0x0016, 0,
+            rootSections[0x0016].RecordCount, methodBytes);
+        rootSections[0x0017] = new TrRmSection(0x0017, 0,
+            checked((uint)methodSignatureRows.Length), signatureBytes);
+        rootSections[0x0018] = new TrRmSection(0x0018, 0,
+            checked((uint)rootTables.Parameters.Count),
+            rootSections[0x0018].Bytes.ToArray());
+        rootSections[0x0019] = new TrRmSection(0x0019, 0,
+            checked((uint)genericParameterRows.Count), genericParamBytes);
+        rootSections[0x001A] = new TrRmSection(0x001A, 0,
+            checked((uint)constraintRows.Count), constraintBytes);
+        rootSections[0x001C] = new TrRmSection(0x001C, 0,
+            checked((uint)importRows.Count), importBytes);
+        rootSections[0x0025] = new TrRmSection(0x0025, 0, 1,
+            interfaceDefBytes);
+        rootSections[0x0027] = new TrRmSection(0x0027, 0, 1,
+            associatedTypeBytes);
+        rootSections[0x0036] = new TrRmSection(0x0036, 0,
+            checked((uint)relationRows.Count), relationBytes);
+        rootSections[0x0023] = new TrRmSection(0x0023, 0,
+            checked((uint)layoutFieldRows.Count), layoutFieldBytes);
+        var result = TrRmArtifactWriter.Encode(rootSections.Values.ToArray(),
+            schema, standardSchemaIdentity: schemaIdentity);
+        _ = TrRmStructuralMetadataValidator
+            .ValidateGenericMethodCallsDraftAndGetExecutionTables(
+                new TrRmArtifactIndex(result, schema,
+                    standardSchemaIdentity: schemaIdentity));
+        return result;
+    }
+
+    private static byte[] CreateCM1AR1LeafMethodProvider(
+        string moduleIdentity, string schemaIdentity, bool includePrefix)
+    {
+        var prefixText = includePrefix
+            ? "public class Prefix {}" : string.Empty;
+        var tree = SyntaxTree.Parse($$"""
+            public interface ISource<T> { type Item = T; }
+            {{prefixText}}
+            public class Leaf {
+                public int32 Value;
+                public void Read(int32 value) { }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var declarations = tree.Root.Children.OfType<SyntaxNode>()
+            .Where(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration).ToArray();
+        var sourceInterface = program.Interfaces.Single();
+        var associatedType = sourceInterface.Members.Single();
+        var leafDeclaration = declarations.Single(static declaration =>
+            declaration.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Leaf"));
+        var fieldDeclaration = leafDeclaration.Children
+            .OfType<SyntaxNode>().Single(static node =>
+                node.Kind == SyntaxKind.FieldDeclaration);
+        var readDeclaration = leafDeclaration.Children
+            .OfType<SyntaxNode>().Single(static node =>
+                node.Kind == SyntaxKind.FunctionDeclaration);
+        var leafIndex = Enumerable.Range(0, program.Classes.Length)
+            .Single(index => program.Classes[index].Name == "Leaf");
+        var classExports
+            = new List<TrRmSourceClassExport>();
+        if (includePrefix)
+        {
+            var prefixDeclaration = declarations.Single(static declaration =>
+                declaration.Children.OfType<SyntaxTokenElement>().Any(
+                    static token => token.Token.Name == "Prefix"));
+            var prefixIndex = Enumerable.Range(0, program.Classes.Length)
+                .Single(index => program.Classes[index].Name == "Prefix");
+            classExports.Add(new TrRmSourceClassExport(program, prefixIndex,
+                prefixDeclaration.Span, "PrefixKey"));
+        }
+
+        classExports.Add(new TrRmSourceClassExport(program, leafIndex,
+            leafDeclaration.Span, "LeafKey", [
+                new TrRmSourceClassMemberExport(leafIndex,
+                    fieldDeclaration.Span, "Leaf.Value"),
+                new TrRmSourceClassMemberExport(leafIndex,
+                    readDeclaration.Span, "Leaf.Read"),
+                new TrRmSourceClassMemberExport(leafIndex,
+                    readDeclaration.Span, "Leaf.ReadAlias"),
+            ]));
+        classExports.Add(new TrRmSourceClassExport(program, leafIndex,
+            leafDeclaration.Span, "LeafAliasKey"));
+        var typeExport = new TrRmSourceTypeExport("",
+            "ISource", "ISource") {
+            GenericArity = sourceInterface.Formals.Length,
+            InterfaceMethodExports = [],
+            InterfaceAssociatedTypeExports = [
+                new TrRmSourceInterfaceAssociatedTypeExport(
+                    associatedType.SourceInputOrdinal,
+                    associatedType.SourceDeclarationSpan, "ISource.Item"),
+            ],
+        };
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            moduleIdentity, schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [typeExport], [], classExports);
+        return AddCM1AR1ClassMethodRelation(artifact, "Leaf.Read",
+            "LeafKey", "ISource", "ISource.Item",
+            schemaIdentity: schemaIdentity);
+    }
+
+    private static byte[] CreateCM1AR1ClassMethodProvider(
+        string moduleIdentity, bool includePrefix,
+        string schemaIdentity = CM1AR1SchemaIdentity)
+    {
+        var prefixText = includePrefix
+            ? "public class Prefix {}" : string.Empty;
+        var tree = SyntaxTree.Parse($$"""
+            namespace Example {
+                public interface ISource<T> { type Item = T; }
+                {{prefixText}}
+                public class Box {
+                    public static int32 Constrained<T, U>()
+                        where T : ISource<T>
+                        where T.via<ISource<T>>.Item is U {
+                        return 7;
+                    }
+                }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var namespaceDeclaration = tree.Root.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.NamespaceDeclaration);
+        var declarations = namespaceDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Where(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration).ToArray();
+        var sourceInterface = program.Interfaces.Single();
+        var associatedType = sourceInterface.Members.Single();
+        var boxDeclaration = declarations.Single(static declaration =>
+            declaration.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Name == "Box"));
+        var methodDeclaration = boxDeclaration.Children
+            .OfType<SyntaxNode>().Single(static node =>
+                node.Kind == SyntaxKind.FunctionDeclaration);
+        var boxIndex = Enumerable.Range(0, program.Classes.Length)
+            .Single(index => program.Classes[index].Name == "Box");
+        var classExports
+            = new List<TrRmSourceClassExport>();
+        if (includePrefix)
+        {
+            var prefixDeclaration = declarations.Single(static declaration =>
+                declaration.Children.OfType<SyntaxTokenElement>().Any(
+                    static token => token.Token.Name == "Prefix"));
+            var prefixIndex = Enumerable.Range(0, program.Classes.Length)
+                .Single(index => program.Classes[index].Name == "Prefix");
+            classExports.Add(new TrRmSourceClassExport(program, prefixIndex,
+                prefixDeclaration.Span, "example.class/Prefix"));
+        }
+
+        classExports.Add(new TrRmSourceClassExport(program, boxIndex,
+            boxDeclaration.Span, "example.class/Box", [
+                new TrRmSourceClassMemberExport(boxIndex,
+                    methodDeclaration.Span, "Box.Constrained"),
+            ]));
+        var typeExport = new TrRmSourceTypeExport("Example", "ISource",
+            "example.interface/ISource") {
+            GenericArity = sourceInterface.Formals.Length,
+            InterfaceMethodExports = [],
+            InterfaceAssociatedTypeExports = [
+                new TrRmSourceInterfaceAssociatedTypeExport(
+                    associatedType.SourceInputOrdinal,
+                    associatedType.SourceDeclarationSpan,
+                    "example.interface/ISource.Item"),
+            ],
+        };
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            moduleIdentity, schemaIdentity, 0, [typeExport], [],
+            classExports);
+        return AddCM1AR1ClassMethodRelation(artifact,
+            "Box.Constrained", "example.class/Box",
+            "example.interface/ISource",
+            "example.interface/ISource.Item",
+            schemaIdentity: schemaIdentity);
+    }
+
     private static byte[] AddCM1AR1ClassMethodRelation(byte[] artifact,
         string methodExportKey, string classExportKey,
         string interfaceExportKey, string associatedTypeExportKey,
-        string? requiredTypeExportKey = null)
+        string? requiredTypeExportKey = null,
+        string schemaIdentity = CM1AR1SchemaIdentity)
     {
-        var schema
-            = TrRmArtifactSchema
-                .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsDraft;
-        var index = new TrRmArtifactIndex(artifact, schema);
+        var schema = TrRmExecutableCompiler.GetForeignInvocationSchema(
+            schemaIdentity);
+        var index = new TrRmArtifactIndex(artifact, schema,
+            standardSchemaIdentity: schemaIdentity);
         var tables = TrRmStructuralMetadataValidator
             .ValidateGenericMethodCallsDraftAndGetExecutionTables(index);
         if (!tables.Exports.TryGetDefinitionForKey(1, methodExportKey,
@@ -11225,13 +13114,16 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             checked((uint)(constraintCount + 2)), constraintOutput);
         sections[0x0036] = new TrRmSection(0x0036, 0,
             checked((uint)relationRows.Count), relationBytes);
-        return TrRmArtifactWriter.Encode([.. sections.Values], schema);
+        return TrRmArtifactWriter.Encode([.. sections.Values], schema,
+            standardSchemaIdentity: schemaIdentity);
     }
 
     private static byte[] AddExportAlias(byte[] artifact,
-        TrRmArtifactSchema schema, uint localDefinitionId, string exportKey)
+        TrRmArtifactSchema schema, uint localDefinitionId, string exportKey,
+        string? standardSchemaIdentity = null)
     {
-        var index = new TrRmArtifactIndex(artifact, schema);
+        var index = new TrRmArtifactIndex(artifact, schema,
+            standardSchemaIdentity: standardSchemaIdentity);
         var sections = new SortedDictionary<ushort, TrRmSection>();
         ReadOnlyMemory<byte> stringBytes = default;
         ReadOnlyMemory<byte> exportBytes = default;
@@ -11280,7 +13172,8 @@ internal sealed class TrRmGenericMethodSourceWriterTests
             checked((uint)rows.Count), rewrittenStrings);
         sections[0x001D] = new TrRmSection(0x001D, 0,
             checked((uint)(exportCount + 1)), rewrittenExports);
-        return TrRmArtifactWriter.Encode(sections.Values.ToArray(), schema);
+        return TrRmArtifactWriter.Encode(sections.Values.ToArray(), schema,
+            standardSchemaIdentity: standardSchemaIdentity);
     }
 
     private static byte[] RemoveG1InterfaceExports(byte[] artifact)
