@@ -7217,13 +7217,17 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
             providerArtifact);
         var providerReference = TrRmExecutableCompiler.CreateStandardReference(
-            providerInput, "ContextualTypeProvider", [],
-            ["Read", "ReadAlias"], [
+            providerInput, "ContextualTypeProvider", [], [], [
                 new TrRmStandardExportKeySelection(
                     "ContextualTypeProvider", "type.leaf"),
             ], []);
         var methodRootCompilation = Compilation.CreateLibrary(
-            SyntaxTree.Parse(string.Empty), providerReference);
+            SyntaxTree.Parse("""
+                namespace Demo {
+                    public int32 Read(Leaf value) { return 7; }
+                    public int32 ReadAlias(Leaf value) { return 8; }
+                }
+                """), providerReference);
         Assert.That(methodRootCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine,
                 methodRootCompilation.Diagnostics));
@@ -7270,6 +7274,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 TrRmArtifactSchema.C1M1Construction2InitializerCopyEvidenceDraft,
                 null, standardSchemaIdentity: schemaIdentity));
         Assert.That(reemittedTables.TypeDefs.Count, Is.EqualTo(3));
+        Assert.That(reemittedTables.Bodies.Count, Is.EqualTo(2));
         Assert.That(reemittedTables.TypeDefBindingEqualities.Count,
             Is.EqualTo(2));
         Assert.That(reemittedTables.TypeDefBindingEqualities.GetOwnerModule(1),
@@ -7291,6 +7296,10 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         Assert.That(reloadedReference.Structures.Single()
                 .StandardTypeOrigin!.ContextualViewIndexes.Length,
             Is.EqualTo(3));
+        Assert.That(reloadedReference.Functions.Single(
+                static function => function.Name == "ReadAlias")
+                .Body.Statements,
+            Is.Not.Empty);
 
         var relocatedProviderCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
@@ -11774,7 +11783,6 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             || tables.Signatures.Count != 2
             || tables.Parameters.Count != 2
             || tables.GenericParams.Count != 0
-            || tables.Bodies.Count != 0
             || !index.TryGetSection(0x0016, out var methodSection,
                 out var methodCount)
             || !index.TryGetSection(0x0017, out _,
@@ -11786,7 +11794,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             || paramCount != tables.Parameters.Count)
         {
             throw new InvalidOperationException(
-                "The MethodSig permutation requires two bodyless nongeneric functions with one formal each.");
+                "The MethodSig permutation requires two nongeneric functions with one formal each.");
         }
 
         var newSignatureRowByOld = new int[methodSigCount + 1];
@@ -11994,6 +12002,17 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         {
             throw new InvalidOperationException(
                 "The standard Import permutation fixture requires multiple Imports and TypeSpecs.");
+        }
+
+        for (var bodyRow = 1; bodyRow <= tables.Bodies.Count; bodyRow++)
+        {
+            var body = tables.Bodies.GetRegisterBody(bodyRow,
+                tables.Contracts.Count);
+            if (body.FieldCount != 0 || body.MethodCount != 0)
+            {
+                throw new InvalidOperationException(
+                    "The standard Import permutation fixture does not remap FieldMap or MethodMap tokens.");
+            }
         }
 
         var newImportRowByOld = new int[importCount + 1];
