@@ -667,9 +667,14 @@ public static partial class TrRmExecutableCompiler
             structureMaps[referenceIndex] = map;
         }
 
-        var enumReferenceIndex = -1;
-        var enumDefinitionsResult
-            = ImmutableArray<BoundEnumDefinition>.Empty;
+        var enumDefinitionGroups = new List<(
+            BoundEnumDefinition Definition,
+            BoundStandardEnumOccurrence Occurrence,
+            List<string> ExportKeys,
+            List<string> SelectedExportKeys)>();
+        var enumGroupBySite = new Dictionary<(
+            string SchemaIdentity, string ModuleIdentity, int ModuleRow,
+            uint DefinitionId), int>();
         var enumMaps = new int[references.Length][];
         for (var referenceIndex = 0;
             referenceIndex < references.Length; referenceIndex++)
@@ -678,15 +683,16 @@ public static partial class TrRmExecutableCompiler
             var map = new int[sourceEnums.Length];
             if (!sourceEnums.IsEmpty)
             {
-                if (enumReferenceIndex >= 0
-                    || !BoundEnumTypes.IsValidTable(sourceEnums))
+                if (!BoundEnumTypes.IsValidTable(sourceEnums))
                 {
                     throw Unsupported(
-                        "Class reference composition currently requires one exact selected enum provider closure.");
+                        "A selected class reference contains an invalid enum closure.");
                 }
 
-                foreach (var definition in sourceEnums)
+                for (var enumIndex = 0;
+                    enumIndex < sourceEnums.Length; enumIndex++)
                 {
+                    var definition = sourceEnums[enumIndex];
                     if (definition.Identity
                             is not BoundEnumDeclarationIdentity.Standard
                                 standard
@@ -705,19 +711,89 @@ public static partial class TrRmExecutableCompiler
                         throw Unsupported(
                             "Class reference composition requires selected direct Standard enum TypeDefs from a class provider Module.");
                     }
-                }
 
-                enumReferenceIndex = referenceIndex;
-                enumDefinitionsResult = sourceEnums;
-                for (var enumIndex = 0;
-                    enumIndex < map.Length; enumIndex++)
-                {
-                    map[enumIndex] = enumIndex;
+                    var occurrence = standard.Value;
+                    var site = occurrence.Declaration.Site;
+                    var siteKey = (site.Snapshot.SchemaIdentity,
+                        site.Snapshot.ModuleIdentity,
+                        site.Snapshot.ModuleRow, site.DefinitionId);
+                    if (enumGroupBySite.TryGetValue(siteKey,
+                            out var enumGroupIndex))
+                    {
+                        var group = enumDefinitionGroups[enumGroupIndex];
+                        if (!BoundStandardEnumDeclarationContract
+                                .SnapshotsMatch(
+                                    group.Occurrence.Declaration.Site
+                                        .Snapshot,
+                                    site.Snapshot)
+                            || !BoundStandardEnumDeclarationContract
+                                .ContractMatches(
+                                    group.Occurrence.Declaration,
+                                    occurrence.Declaration)
+                            || !BoundEnumTypes.HasSameContractShape(
+                                group.Definition, definition))
+                        {
+                            throw Invalid(
+                                "Selected class references contain conflicting views of one enum TypeDef.");
+                        }
+
+                        AddDistinct(group.ExportKeys,
+                            occurrence.ExportKeys);
+                        AddDistinct(group.SelectedExportKeys,
+                            occurrence.SelectedExportKeys);
+                    }
+                    else
+                    {
+                        enumGroupIndex = enumDefinitionGroups.Count;
+                        enumGroupBySite.Add(siteKey, enumGroupIndex);
+                        enumDefinitionGroups.Add((definition, occurrence,
+                            [.. occurrence.ExportKeys],
+                            [.. occurrence.SelectedExportKeys]));
+                    }
+
+                    map[enumIndex] = enumGroupIndex;
                 }
             }
 
             enumMaps[referenceIndex] = map;
         }
+
+        var enumDefinitionsBuilder
+            = ImmutableArray.CreateBuilder<BoundEnumDefinition>(
+                enumDefinitionGroups.Count);
+        foreach (var group in enumDefinitionGroups)
+        {
+            var occurrence = new BoundStandardEnumOccurrence(
+                group.Occurrence.Declaration, [
+                    group.Occurrence.Declaration,
+                ], [], [.. group.ExportKeys],
+                [.. group.SelectedExportKeys]);
+            var identity
+                = new BoundEnumDeclarationIdentity.Standard(occurrence);
+            var members
+                = ImmutableArray.CreateBuilder<BoundEnumMemberDefinition>(
+                    group.Definition.Members.Length);
+            foreach (var member in group.Definition.Members)
+            {
+                if (member.DeclarationKey is not string declarationKey)
+                {
+                    throw Invalid(
+                        "A selected Standard enum member has no declaration key.");
+                }
+
+                members.Add(member with {
+                    Identity = new BoundEnumMemberIdentity.OwnerKey(
+                        identity, declarationKey),
+                    DeclaringEnum = identity,
+                });
+            }
+
+            enumDefinitionsBuilder.Add(group.Definition with {
+                Identity = identity,
+                Members = members.MoveToImmutable(),
+            });
+        }
+        var enumDefinitionsResult = enumDefinitionsBuilder.MoveToImmutable();
 
         PrimitiveType RemapClassFieldType(int referenceIndex,
             PrimitiveType type)
@@ -725,8 +801,8 @@ public static partial class TrRmExecutableCompiler
             if (BoundEnumTypes.IsType(type))
             {
                 var enumIndex = BoundEnumTypes.Index(type);
-                if (referenceIndex == enumReferenceIndex
-                    && (uint)enumIndex < (uint)enumMaps[referenceIndex].Length)
+                if ((uint)enumIndex
+                    < (uint)enumMaps[referenceIndex].Length)
                 {
                     return BoundEnumTypes.Type(
                         enumMaps[referenceIndex][enumIndex]);

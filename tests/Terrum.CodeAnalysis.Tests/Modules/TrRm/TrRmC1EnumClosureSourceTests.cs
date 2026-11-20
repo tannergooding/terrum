@@ -2899,12 +2899,23 @@ internal sealed class TrRmC1EnumClosureSourceTests
             alphaProgram, "AlphaEnumProvider", schemaIdentity,
             targetRequirement, [], [], [alphaClassExport],
             [alphaEnumExport]);
+        alphaArtifact = AddExportAlias(alphaArtifact, schemaIdentity,
+            "type.alpha", "type.alpha.alias");
+        alphaArtifact = AddExportAlias(alphaArtifact, schemaIdentity,
+            "type.shade", "type.shade.alias");
+        alphaArtifact = AddExportAlias(alphaArtifact, schemaIdentity,
+            "field.alpha.shade", "field.alpha.shade.alias");
         var alphaInput = new TrRmStandardArtifactInput(schemaIdentity,
             alphaArtifact);
         var alphaReference = TrRmExecutableCompiler.CreateStandardReference(
             alphaInput, "AlphaEnumProvider", [], [
                 "type.alpha", "type.shade",
             ], ["field.alpha.shade"]);
+        var alphaAliasReference
+            = TrRmExecutableCompiler.CreateStandardReference(alphaInput,
+                "AlphaEnumProvider", [], [
+                    "type.alpha.alias", "type.shade.alias",
+                ], ["field.alpha.shade.alias"]);
 
         var betaTree = SyntaxTree.Parse("""
             namespace Demo {
@@ -2941,9 +2952,13 @@ internal sealed class TrRmC1EnumClosureSourceTests
             betaInput, "BetaProvider", [], ["type.beta"],
             ["field.beta.value"]);
         var reference = TrRmExecutableCompiler.CreateStandardReferenceSet(
-            [alphaReference, betaReference]);
+            [alphaReference, alphaAliasReference, betaReference]);
 
         Assert.That(reference.EnumDefinitions, Has.Length.EqualTo(1));
+        Assert.That(((BoundEnumDeclarationIdentity.Standard)
+                reference.EnumDefinitions[0].Identity).Value
+                .SelectedExportKeys,
+            Is.EqualTo(["type.shade", "type.shade.alias"]));
         Assert.That(BoundEnumTypes.IsType(
             reference.StandardClassDeclarations.Single(
                 static declaration =>
