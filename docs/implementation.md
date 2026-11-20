@@ -174,9 +174,10 @@ Module 2 with TypeDef/FieldDef roots in Module 1; they remain unverified under
 the active hold. Manifest/source/output/provider alias collisions, including
 a Windows provider/output hard link, and existing/absent-output preservation
 on schema mismatch before malformed stdin source acquisition are also covered
-but unverified. Symlink/parent-link aliases, other hard-link role pairs,
-duplicate provider/source roles, other absent-output failures, broader
-source/provider isolation and CLI qualification remain open.
+but unverified. Duplicate provider paths, source/provider role aliases and
+absent-output preservation for malformed configurations are also covered.
+Symlink/parent-link aliases, other hard-link role pairs, other absent-output
+failures, broader source/provider isolation and CLI qualification remain open.
 The external-provider CLI output is source-free loaded, byte-for-byte
 re-emitted and reloaded against the same method/type provider chain; this
 regression is also unverified under the active hold.

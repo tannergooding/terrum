@@ -1034,6 +1034,31 @@ internal sealed partial class CliTests
                 .ConfigureAwait(true);
             await AssertAliasFailureAsync("-", providerSelections,
                 providerArtifact, providerArtifact).ConfigureAwait(true);
+            await File.WriteAllTextAsync(providerSelections,
+                JsonSerializer.Serialize(new {
+                    schemaVersion = 3,
+                    providers = new[] {
+                        new { schemaIdentity, path = providerArtifact },
+                        new { schemaIdentity, path = providerArtifact },
+                    },
+                    references = new[] {
+                        new {
+                            providerInputOrdinal = 0,
+                            moduleIdentity = providerIdentity,
+                            methodExportKeys = new[] { "Ping" },
+                            typeExportKeys = Array.Empty<object>(),
+                            fieldExportKeys = Array.Empty<object>(),
+                        },
+                    },
+                }), new UTF8Encoding(false)).ConfigureAwait(true);
+            await AssertAliasFailureAsync("-", providerSelections,
+                consumerArtifact, consumerArtifact).ConfigureAwait(true);
+            await File.WriteAllTextAsync(providerSelections,
+                providerConfiguration, new UTF8Encoding(false))
+                .ConfigureAwait(true);
+            await AssertAliasFailureAsync(providerArtifact, providerSelections,
+                consumerArtifact, consumerArtifact).ConfigureAwait(true);
+
             if (OperatingSystem.IsWindows())
             {
                 var caseVariantConfiguration = JsonSerializer.Serialize(new {
@@ -1189,6 +1214,32 @@ internal sealed partial class CliTests
                 Assert.That(await File.ReadAllBytesAsync(consumerArtifact)
                     .ConfigureAwait(true), Is.EqualTo(retained));
             }
+
+            await File.WriteAllTextAsync(providerSelections,
+                invalidConfigurations[0], new UTF8Encoding(false))
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(consumerArtifact)
+                .ConfigureAwait(true);
+            var (absentInvalidExit, absentInvalidResult,
+                absentInvalidError) = await RunAsync(
+                    Encoding.UTF8.GetBytes(
+                        "public void Forward() { Ping(); }"),
+                    "compile-trrm", "-", "--identity", consumerIdentity,
+                    "--trrm-schema", schemaIdentity,
+                    "--trrm-source-providers", providerSelections,
+                    "--library", "-o", consumerArtifact, "--runtime",
+                    "fail-fast", "--json").ConfigureAwait(false);
+            Assert.That(absentInvalidExit, Is.EqualTo(2),
+                $"{absentInvalidResult}{Environment.NewLine}{absentInvalidError}");
+            Assert.That(absentInvalidError, Is.Empty);
+            using (var document = JsonDocument.Parse(absentInvalidResult))
+            {
+                Assert.That(document.RootElement
+                        .GetProperty("diagnostic").GetProperty("code")
+                        .GetString(),
+                    Is.EqualTo("TRM2001"));
+            }
+            Assert.That(File.Exists(consumerArtifact), Is.False);
         }
         finally
         {
