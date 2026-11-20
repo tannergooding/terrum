@@ -983,8 +983,14 @@ public static partial class TrRmExecutableCompiler
             }
 
             void IncludeClassTypeSpecDependency(uint typeSpecReference,
-                BoundSourceTypeProviderSnapshot ownerProvider)
+                BoundSourceTypeProviderSnapshot ownerProvider, int depth = 0)
             {
+                if (depth > SemanticVerifier.MaximumDepth)
+                {
+                    throw Unsupported(
+                        "A composed struct TypeDef TypeSpec closure exceeds its nesting limit.");
+                }
+
                 var tables = GetClassTypeTables(ownerProvider);
                 var typeSpec = tables.TypeSpecs.GetTypeSpecRef(
                     typeSpecReference);
@@ -993,6 +999,28 @@ public static partial class TrRmExecutableCompiler
                     && TrRmConstantSourceValueValidator
                         .TryGetBoundScalarType(typeSpec.TypeCode, out _))
                 {
+                    return;
+                }
+
+                if (typeSpec.IsRow
+                    && (typeSpec.Form is >= 0x06 and <= 0x0C or 0x0E))
+                {
+                    var row = tables.TypeSpecs.GetRow(
+                        checked((int)typeSpec.Row));
+                    var childOffset = typeSpec.Form == 0x0C ? 3 : 2;
+                    if (row.Length < childOffset + sizeof(uint))
+                    {
+                        throw Invalid(
+                            "A composed struct TypeSpec wrapper is truncated.");
+                    }
+
+                    var childTypeSpecReference
+                        = System.Buffers.Binary.BinaryPrimitives
+                            .ReadUInt32LittleEndian(
+                                row.Slice(childOffset, sizeof(uint)));
+                    IncludeClassTypeSpecDependency(
+                        childTypeSpecReference, ownerProvider,
+                        checked(depth + 1));
                     return;
                 }
 
@@ -1227,6 +1255,87 @@ public static partial class TrRmExecutableCompiler
                     IncludeClassTypeSpecDependency(
                         tables.Fields.GetTypeSpecRef(fieldRow),
                         structProvider);
+                }
+
+                foreach (var expectation
+                    in structDefinition.ProviderExpectations)
+                {
+                    if (!SameA2SourceTypeProviderSnapshot(
+                            expectation.Provider, structProvider)
+                        || expectation.ProviderDefinitionId
+                            != structIdentity.DefinitionId
+                        || expectation.ImportRow <= 0)
+                    {
+                        throw Invalid(
+                            "A retained struct TypeDef expectation lost its exact provider Import.");
+                    }
+
+                    var expectedTables = GetClassTypeTables(
+                        expectation.UsingModule);
+                    var expectedTypeDefRow = checked((int)(
+                        expectation.ExpectedDefinitionId
+                        & 0x00FF_FFFF));
+                    var moduleRefRow = expectedTables.Imports
+                        .GetModuleRefForImportRow(expectation.ImportRow);
+                    var importBinding = expectedTables.Imports
+                        .GetBindingForImportRow(expectation.ImportRow);
+                    var requirements = expectedTables.ModuleRefs
+                        .GetRequirements(moduleRefRow);
+                    if (expectation.ExpectedDefinitionId >> 24 != 0x13
+                        || expectedTables.TypeDefs.GetOwnerModule(
+                            expectedTypeDefRow)
+                            != expectation.UsingModule.ModuleRow
+                        || expectedTables.TypeDefs.GetKind(
+                            expectedTypeDefRow) != 1
+                        || expectedTables.TypeDefs.GetGenericRange(
+                            expectedTypeDefRow).Count != 0
+                        || expectedTables.TypeDefs.GetContractRange(
+                            expectedTypeDefRow).Count != 0
+                        || expectedTables.Imports
+                            .GetExpectedDefinitionForImportRow(
+                                expectation.ImportRow)
+                            != expectation.ExpectedDefinitionId
+                        || expectedTables.ModuleRefs.GetOwnerModule(
+                            moduleRefRow)
+                            != expectation.UsingModule.ModuleRow
+                        || !StringComparer.Ordinal.Equals(
+                            importBinding.ExportKey,
+                            expectation.ExportKey)
+                        || !StringComparer.Ordinal.Equals(
+                            expectedTables.ModuleRefs
+                                .GetProducerIdentity(moduleRefRow),
+                            expectation.Provider.ModuleIdentity)
+                        || requirements
+                            != (expectation.Provider.TargetRequirement,
+                                expectation.Provider.RuntimePolicy)
+                        || !StringComparer.Ordinal.Equals(
+                            expectation.ProducerIdentity,
+                            expectation.Provider.ModuleIdentity)
+                        || expectation.TargetRequirement
+                            != expectation.Provider.TargetRequirement
+                        || expectation.RuntimePolicy
+                            != expectation.Provider.RuntimePolicy)
+                    {
+                        throw Invalid(
+                            "A retained struct TypeDef view no longer matches its exact owner and provider Import.");
+                    }
+
+                    var (expectedFieldStart, expectedFieldEnd)
+                        = expectedTables.TypeDefs.GetFieldRange(
+                            expectedTypeDefRow);
+                    for (var fieldRow = expectedFieldStart;
+                        fieldRow < expectedFieldEnd; fieldRow++)
+                    {
+                        if (--remainingClassTypeVisits < 0)
+                        {
+                            throw Unsupported(
+                                "The composed class/struct TypeDef field closure exceeds its traversal limit.");
+                        }
+
+                        IncludeClassTypeSpecDependency(
+                            expectedTables.Fields.GetTypeSpecRef(fieldRow),
+                            expectation.UsingModule);
+                    }
                 }
             }
         }
