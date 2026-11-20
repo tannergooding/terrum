@@ -5842,6 +5842,44 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 reemittedTables.Imports
                     .GetExpectedDefinitionForImportRow(importRow)
                     & 0x00FF_FFFF));
+            var exportKey = reemittedTables.Imports
+                .GetBindingForImportRow(importRow).ExportKey;
+            var sourceImportRow = importedMethodRows.Single(row =>
+                forwarderTables.Imports.GetBindingForImportRow(row)
+                    .ExportKey == exportKey);
+            var sourceMethodRow = checked((int)(
+                forwarderTables.Imports
+                    .GetExpectedDefinitionForImportRow(sourceImportRow)
+                    & 0x00FF_FFFF));
+            var hasSourceLabel = forwarderTables.MethodParameterLabels
+                .TryGetNameStringRow(sourceMethodRow, 0,
+                    out var sourceLabelRow);
+            var hasReemittedLabel = reemittedTables.MethodParameterLabels
+                .TryGetNameStringRow(importedMethodRow, 0,
+                    out var reemittedLabelRow);
+            Assert.That(hasReemittedLabel, Is.EqualTo(hasSourceLabel),
+                exportKey);
+            if (hasSourceLabel)
+            {
+                Assert.That(reemittedTables.Strings.DecodeName(
+                        reemittedLabelRow),
+                    Is.EqualTo(forwarderTables.Strings.DecodeName(
+                        sourceLabelRow)), exportKey);
+            }
+
+            var hasSourceDefault = forwarderTables.MethodParameterLabels
+                .TryGetDefaultConstantSourceRow(sourceMethodRow, 0,
+                    out var sourceDefaultRow);
+            var hasReemittedDefault = reemittedTables.MethodParameterLabels
+                .TryGetDefaultConstantSourceRow(importedMethodRow, 0,
+                    out var reemittedDefaultRow);
+            Assert.That(hasReemittedDefault,
+                Is.EqualTo(hasSourceDefault), exportKey);
+            if (hasSourceDefault)
+            {
+                Assert.That(sourceDefaultRow, Is.Zero, exportKey);
+                Assert.That(reemittedDefaultRow, Is.Zero, exportKey);
+            }
             Assert.That(reemittedTables.Contracts.GetEffectsMask(
                     importedMethodRow),
                 Is.EqualTo(4));
@@ -5883,6 +5921,32 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 functionKey, out var functionDefinition), Is.True);
             var functionMethodRow = checked((int)(
                 functionDefinition & 0x00FF_FFFF));
+            Assert.That(forwarderTables.Exports.TryGetDefinitionForKey(1,
+                functionKey, out var sourceFunctionDefinition), Is.True);
+            var sourceFunctionMethodRow = checked((int)(
+                sourceFunctionDefinition & 0x00FF_FFFF));
+            Assert.That(forwarderTables.MethodParameterLabels
+                    .TryGetNameStringRow(sourceFunctionMethodRow, 0,
+                        out var sourceFunctionLabelRow),
+                Is.True, functionKey);
+            Assert.That(reemittedTables.MethodParameterLabels
+                    .TryGetNameStringRow(functionMethodRow, 0,
+                        out var reemittedFunctionLabelRow),
+                Is.True, functionKey);
+            Assert.That(reemittedTables.Strings.DecodeName(
+                    reemittedFunctionLabelRow),
+                Is.EqualTo(forwarderTables.Strings.DecodeName(
+                    sourceFunctionLabelRow)), functionKey);
+            Assert.That(forwarderTables.MethodParameterLabels
+                    .TryGetDefaultConstantSourceRow(sourceFunctionMethodRow,
+                        0, out var sourceFunctionDefaultRow),
+                Is.True, functionKey);
+            Assert.That(sourceFunctionDefaultRow, Is.Zero, functionKey);
+            Assert.That(reemittedTables.MethodParameterLabels
+                    .TryGetDefaultConstantSourceRow(functionMethodRow, 0,
+                        out var reemittedFunctionDefaultRow),
+                Is.True, functionKey);
+            Assert.That(reemittedFunctionDefaultRow, Is.Zero, functionKey);
             Assert.That(reemittedTables.Contracts.GetDependencyContracts(
                     functionMethodRow),
                 Has.Length.EqualTo(1), functionKey);

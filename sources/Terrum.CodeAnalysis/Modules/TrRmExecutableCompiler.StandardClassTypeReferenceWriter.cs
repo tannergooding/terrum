@@ -11460,20 +11460,6 @@ public static partial class TrRmExecutableCompiler
                 = rootTables.Methods.GetSignature(oldMethodRow);
             var (parameterStart, parameterCount)
                 = rootTables.Signatures.GetParamRange(signatureRow);
-            for (var ordinal = 0; ordinal < parameterCount; ordinal++)
-            {
-                if (rootTables.MethodParameterLabels
-                        .TryGetNameStringRow(oldMethodRow,
-                            checked((uint)ordinal), out _)
-                    || rootTables.MethodParameterLabels
-                        .TryGetDefaultConstantSourceRow(oldMethodRow,
-                            checked((uint)ordinal), out _))
-                {
-                    throw Unsupported(
-                        "Top-level class-reference function re-emission does not retain parameter-label or default surfaces.");
-                }
-            }
-
             var effectsMask
                 = rootTables.Contracts.GetEffectsMask(oldMethodRow);
             var dependencyContractRows
@@ -11591,6 +11577,76 @@ public static partial class TrRmExecutableCompiler
                     depth: 0, genericParamRowMap: genericParamRowMap);
                 parameterRows.Add(new TrRmParamRow(signatureOutputRow,
                     ordinal, remappedTypeSpec, mode, flags));
+
+                var hasParameterLabel
+                    = rootTables.MethodParameterLabels
+                        .TryGetNameStringRow(oldMethodRow,
+                            checked((uint)ordinal),
+                            out var parameterNameStringRow);
+                uint defaultConstantSourceRow = 0;
+                var hasDefaultSurface
+                    = schema.UsesClassParameterDefaults()
+                        && rootTables.MethodParameterLabels
+                            .TryGetDefaultConstantSourceRow(oldMethodRow,
+                                checked((uint)ordinal),
+                                out defaultConstantSourceRow);
+                if (schema.UsesClassParameterDefaults()
+                    && hasParameterLabel != hasDefaultSurface)
+                {
+                    throw new InvalidDataException(
+                        "A retained top-level class-reference function has an incomplete CM1 parameter surface.");
+                }
+
+                if (schema.UsesClassParameterDefaults() && hasParameterLabel)
+                {
+                    uint remappedDefaultConstantSourceRow = 0;
+                    if (defaultConstantSourceRow != 0)
+                    {
+                        var defaultValue
+                            = TrRmConstantSourceValueValidator
+                                .MaterializeFrozenScalar(
+                                    checked((int)defaultConstantSourceRow),
+                                    typeSpecReference,
+                                    rootTables.Methods.GetOwnerModule(
+                                        oldMethodRow),
+                                    rootSnapshot.TargetRequirement,
+                                    rootTables.ConstantSources,
+                                    rootTables.FrozenValueNodes,
+                                    rootTables.Blobs, rootTables.TypeSpecs,
+                                    rootTables.Features, rootTables.Modules,
+                                    rootTables.A3LayoutResourceLedger);
+                        var frozenValue
+                            = frozenScalarValueBuilder.Add(defaultValue);
+                        if (frozenValue.TypeSpecRef != remappedTypeSpec)
+                        {
+                            throw new InvalidDataException(
+                                "A retained top-level class-reference parameter default changed its exact TypeSpec.");
+                        }
+
+                        remappedDefaultConstantSourceRow
+                            = frozenValue.ConstantSourceRow;
+                    }
+
+                    if (parameterSurfaceRows.Count >= 0xFF_FFFF)
+                    {
+                        throw Unsupported(
+                            "The C1M1 MethodParameterSurface table exceeds its row limit.");
+                    }
+
+                    parameterSurfaceRows.Add(
+                        new C1M1ParameterSurfaceRow(newMethodRow, ordinal,
+                            rootTables.Strings.DecodeName(
+                                parameterNameStringRow),
+                            remappedDefaultConstantSourceRow));
+                }
+                else if (schema.UsesMethodParameterLabels()
+                    && hasParameterLabel)
+                {
+                    methodParameterLabelRows.Add((
+                        newMethodRow, ordinal,
+                        rootTables.Strings.DecodeName(
+                            parameterNameStringRow)));
+                }
             }
 
             methodSignatureRows.Add(new TrRmMethodSigRow(
