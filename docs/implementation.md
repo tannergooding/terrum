@@ -171,8 +171,11 @@ same actual struct, through caller binding and source-free
 load/re-emission/reload; it remains unverified. Co-located provider Imports, deeper
 chains/diamonds, broader shared-expectation transformations, multiple
 expected TypeDef views within the selected method-root Module and distinct
-nested-provider contexts for one closure-only TypeDef, Import/Export/
-ModuleRef/Body map permutations, and runtime qualification remain open. The
+nested-provider contexts for one closure-only TypeDef remain open. A new
+regression reverses provider B/C Export rows and exercises consumer load and
+source-free re-emission/reload; it remains unverified under the active hold.
+Import/Export/ModuleRef/Body map permutations and runtime qualification remain
+open. The
 separate unapproved version-3
 `docs\proposals\standard-trrm-c1-method-type-source-provider-cli-transport.md`
 specifies the unapproved CLI shape and exact schema pairing. Its reader,

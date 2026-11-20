@@ -6420,6 +6420,30 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 importPermutedReemission),
             "StructMethodConsumer", providers);
 
+        var exportPermutedProviders = new[] {
+            new TrRmStandardArtifactInput(schemaIdentity,
+                ReverseStandardExportRows(providerBArtifact,
+                    TrRmArtifactSchema
+                        .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft)),
+            new TrRmStandardArtifactInput(schemaIdentity,
+                ReverseStandardExportRows(providerCArtifact,
+                    TrRmArtifactSchema
+                        .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft)),
+        };
+        var exportPermutedProgram = TrRmExecutableCompiler.LoadStandard(
+            consumerInput, "StructMethodConsumer", exportPermutedProviders);
+        Assert.That(exportPermutedProgram.Functions.Single(
+                static function => function.Name == "ReadNested")
+                .ReturnType,
+            Is.EqualTo(PrimitiveType.Int32));
+        var exportPermutedReemission = TrRmExecutableCompiler.EmitStandard(
+            exportPermutedProgram, "StructMethodConsumer", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        _ = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                exportPermutedReemission),
+            "StructMethodConsumer", exportPermutedProviders);
+
         var rootMethodCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
                 namespace Demo {
@@ -10525,6 +10549,47 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             };
             sections.Add(new TrRmSection(kind, flags,
                 checked((uint)recordCount), sectionBytes));
+        }
+
+        var result = TrRmArtifactWriter.Encode(sections, schema);
+        _ = TrRmStructuralMetadataValidator.ValidateC1AndGetExecutionTables(
+            new TrRmArtifactIndex(result, schema));
+        return result;
+    }
+
+    private static byte[] ReverseStandardExportRows(byte[] artifact,
+        TrRmArtifactSchema schema)
+    {
+        var index = new TrRmArtifactIndex(artifact, schema);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(index);
+        if (tables.Modules.Count != 1
+            || tables.Exports.Count < 2
+            || !index.TryGetSection(0x0016, out var exportSection,
+                out var exportCount)
+            || exportCount != tables.Exports.Count)
+        {
+            throw new InvalidOperationException(
+                "The Export permutation fixture requires one Module with multiple Export rows.");
+        }
+
+        var exportBytes = new byte[exportSection.Length];
+        for (var destination = 0; destination < exportCount; destination++)
+        {
+            var source = exportCount - destination - 1;
+            exportSection.Span.Slice(source * 8, 8).CopyTo(
+                exportBytes.AsSpan(destination * 8, 8));
+        }
+
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var sectionIndex = 0; sectionIndex < index.SectionCount;
+            sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var recordCount);
+            sections.Add(new TrRmSection(kind, flags,
+                checked((uint)recordCount),
+                kind == 0x0016 ? exportBytes : bytes.ToArray()));
         }
 
         var result = TrRmArtifactWriter.Encode(sections, schema);
