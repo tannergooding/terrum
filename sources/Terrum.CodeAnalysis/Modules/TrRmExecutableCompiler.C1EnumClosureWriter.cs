@@ -803,14 +803,9 @@ public static partial class TrRmExecutableCompiler
                     && (distinctEnumProviderIdentities.Length == 0
                         || classQueryRootProviderIdentities.Contains(
                             distinctEnumProviderIdentities[0]));
-            var queryDependencyProviderIdentities
-                = structureProviderIdentities
-                    .Concat(distinctEnumProviderIdentities)
-                    .Distinct(StringComparer.Ordinal).ToArray();
             var queryDependenciesFitRoots
                 = structureProvidersFitQueryRoots
-                    && enumProvidersFitQueryRoots
-                    && queryDependencyProviderIdentities.Length <= 1;
+                    && enumProvidersFitQueryRoots;
             allowMultipleClassQueryProviders
                 = classQueryRootIdentities.Count > 1
                     && program.Classes.IsEmpty
@@ -1279,13 +1274,14 @@ public static partial class TrRmExecutableCompiler
                 {
                     if (rootSnapshot is not null
                         && !BoundStandardEnumDeclarationContract
-                            .SnapshotsMatch(rootSnapshot, snapshot))
+                            .SnapshotsMatch(rootSnapshot, snapshot)
+                        && !allowMultipleClassQueryProviders)
                     {
                         throw Unsupported(
                             "EN1 source-free enum emission does not combine multiple root Modules.");
                     }
 
-                    rootSnapshot = snapshot;
+                    rootSnapshot ??= snapshot;
                 }
             }
 
@@ -3019,35 +3015,42 @@ public static partial class TrRmExecutableCompiler
             }
         }
         var enumIndexByRootTypeDefRow = new Dictionary<int, int>();
+        var enumIndexByProviderTypeDefRow
+            = new Dictionary<(string ModuleIdentity, int TypeDefRow), int>();
         var importRowByRootEnumImport = new Dictionary<int, int>();
-        if (standardClassRootTables is not null)
+        var importRowByProviderEnumImport
+            = new Dictionary<(string ModuleIdentity, int ImportRow), int>();
+        for (var enumIndex = 0;
+            enumIndex < program.EnumDefinitions.Length; enumIndex++)
         {
-            var selectedRootSnapshot = rootSnapshot!;
-            for (var enumIndex = 0;
-                enumIndex < program.EnumDefinitions.Length; enumIndex++)
+            var definition = program.EnumDefinitions[enumIndex];
+            if (definition.Identity
+                is not BoundEnumDeclarationIdentity.Standard standard)
             {
-                var definition = program.EnumDefinitions[enumIndex];
-                if (definition.Identity
-                    is not BoundEnumDeclarationIdentity.Standard standard)
-                {
-                    throw Invalid(
-                        "EN1 class re-emission requires retained Standard enum identities.");
-                }
+                throw Invalid(
+                    "EN1 class re-emission requires retained Standard enum identities.");
+            }
 
-                var occurrence = standard.Value;
-                var view = occurrence.Declaration;
-                if (BoundStandardEnumDeclarationContract.SnapshotsMatch(
-                        view.Site.Snapshot, selectedRootSnapshot))
-                {
-                    if ((view.Site.DefinitionId >> 24) != 0x13
-                        || !enumIndexByRootTypeDefRow.TryAdd(
-                            checked((int)(view.Site.DefinitionId
-                                & 0x00FF_FFFF)), enumIndex))
-                    {
-                        throw Invalid(
-                            "EN1 class re-emission found an invalid or duplicate root enum TypeDef identity.");
-                    }
-                }
+            var view = standard.Value.Declaration;
+            var typeDefId = view.Site.DefinitionId;
+            var typeDefRow = checked((int)(typeDefId & 0x00FF_FFFF));
+            if ((typeDefId >> 24) != 0x13 || typeDefRow == 0
+                || !enumIndexByProviderTypeDefRow.TryAdd((
+                    view.Site.Snapshot.ModuleIdentity, typeDefRow),
+                    enumIndex))
+            {
+                throw Invalid(
+                    "EN1 class re-emission found an invalid or duplicate enum provider TypeDef identity.");
+            }
+
+            if (rootSnapshot is not null
+                && BoundStandardEnumDeclarationContract.SnapshotsMatch(
+                    view.Site.Snapshot, rootSnapshot)
+                && !enumIndexByRootTypeDefRow.TryAdd(typeDefRow,
+                    enumIndex))
+            {
+                throw Invalid(
+                    "EN1 class re-emission found a duplicate root enum TypeDef identity.");
             }
         }
 
@@ -3063,19 +3066,26 @@ public static partial class TrRmExecutableCompiler
             return row;
         }
 
-        var standardClassTypeSpecRows = new Dictionary<uint, uint>();
-        var activeStandardClassTypeSpecs = new HashSet<uint>();
+        var standardClassTypeSpecRows
+            = new Dictionary<(string ModuleIdentity, uint TypeSpecRef), uint>();
+        var activeStandardClassTypeSpecs
+            = new HashSet<(string ModuleIdentity, uint TypeSpecRef)>();
         uint StandardClassFieldTypeSpecReference(
-            BoundStandardClassFieldDeclaration field)
+            BoundStandardClassFieldDeclaration field,
+            BoundSourceTypeProviderSnapshot provider)
             => NativeFunctionPointerTypes.IsType(field.Type)
                 ? FieldTypeSpecReference(field.Type)
                 : RemapStandardClassTypeSpecReference(
-                    field.TypeSpecReference, 0);
+                    field.TypeSpecReference, 0, provider);
 
         uint RemapStandardClassTypeSpecReference(uint sourceTypeSpec,
-            int depth)
+            int depth,
+            BoundSourceTypeProviderSnapshot? sourceProvider = null)
         {
-            if (standardClassRootTables is null)
+            sourceProvider ??= rootSnapshot;
+            if (sourceProvider is null
+                || !standardClassRootTablesByProvider.TryGetValue(
+                    sourceProvider.ModuleIdentity, out var sourceTables))
             {
                 throw new InvalidDataException(
                     "An EN1 Standard class FieldDef has no validated root artifact.");
@@ -3086,7 +3096,9 @@ public static partial class TrRmExecutableCompiler
                     "EN1 class TypeSpec remapping exceeds the checked nesting limit.");
             }
 
-            var type = standardClassRootTables.TypeSpecs.GetTypeSpecRef(
+            var typeSpecKey = (sourceProvider.ModuleIdentity,
+                sourceTypeSpec);
+            var type = sourceTables.TypeSpecs.GetTypeSpecRef(
                 sourceTypeSpec);
             if (type.Form == 0xF2 && type.Qualifiers == 0)
             {
@@ -3095,7 +3107,7 @@ public static partial class TrRmExecutableCompiler
             if (type.Form == 0x01 && type.TypeCode == 0x8C
                 && type.ArgumentCode == 0 && type.Qualifiers == 0)
             {
-                if (standardClassTypeSpecRows.TryGetValue(sourceTypeSpec,
+                if (standardClassTypeSpecRows.TryGetValue(typeSpecKey,
                         out var existingPointerTypeSpec))
                 {
                     return existingPointerTypeSpec;
@@ -3105,18 +3117,18 @@ public static partial class TrRmExecutableCompiler
                     = checked((uint)typeSpecRows.Count + 1);
                 typeSpecRows.Add(TrRmTypeSpecTableWriter.InlineFamily(
                     0x8C, 0));
-                standardClassTypeSpecRows.Add(sourceTypeSpec,
+                standardClassTypeSpecRows.Add(typeSpecKey,
                     pointerTypeSpec);
                 return pointerTypeSpec;
             }
             if (type.Form is 0x01 or 0x0C
                 && type.TypeCode == 0x8C
                 && (type.Qualifiers & ~0x01) == 0
-                && standardClassRootTables.TypeSpecs
+                && sourceTables.TypeSpecs
                     .TryGetNativePointerPointeeTypeSpecRef(
                         sourceTypeSpec, out var pointeeTypeSpecReference))
             {
-                var pointee = standardClassRootTables.TypeSpecs
+                var pointee = sourceTables.TypeSpecs
                     .GetTypeSpecRef(pointeeTypeSpecReference);
                 if (type.Form == 0x01
                     && (pointee.Form != 0xF2
@@ -3131,7 +3143,8 @@ public static partial class TrRmExecutableCompiler
 
                 var remappedPointeeTypeSpecReference = type.Form == 0x0C
                     ? RemapStandardClassTypeSpecReference(
-                        pointeeTypeSpecReference, depth + 1)
+                        pointeeTypeSpecReference, depth + 1,
+                        sourceProvider)
                     : pointeeTypeSpecReference;
                 var pointerTypeSpecRow
                     = checked((uint)typeSpecRows.Count + 1);
@@ -3140,29 +3153,29 @@ public static partial class TrRmExecutableCompiler
                         remappedPointeeTypeSpecReference, type.Qualifiers)
                     : TrRmTypeSpecTableWriter.InlineFamily(0x8C,
                         type.ArgumentCode, type.Qualifiers));
-                standardClassTypeSpecRows.Add(sourceTypeSpec,
+                standardClassTypeSpecRows.Add(typeSpecKey,
                     pointerTypeSpecRow);
                 return pointerTypeSpecRow;
             }
             if (type.Form == 0x0D && type.Qualifiers == 0)
             {
-                if (standardClassTypeSpecRows.TryGetValue(sourceTypeSpec,
+                if (standardClassTypeSpecRows.TryGetValue(typeSpecKey,
                         out var existingFunctionPointerTypeSpec))
                 {
                     return existingFunctionPointerTypeSpec;
                 }
 
-                var anchorMethodRow = standardClassRootTables
+                var anchorMethodRow = sourceTables
                     .NativeFunctionPointerAnchors
                     .GetAnchorMethodDefRow(type.Row);
                 var signatureRow = 0;
                 for (var candidateRow = 1;
                     candidateRow
-                        <= standardClassRootTables
+                        <= sourceTables
                             .NativeFunctionPointerSignatures.Count;
                     candidateRow++)
                 {
-                    if (standardClassRootTables
+                    if (sourceTables
                             .NativeFunctionPointerSignatures
                             .GetMethodDefRow(candidateRow)
                         == anchorMethodRow)
@@ -3178,8 +3191,8 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 var signature = DecodeEN1FieldFunctionPointer(
-                    standardClassRootTables, type.Row,
-                    rootSnapshot!.ModuleRow);
+                    sourceTables, type.Row,
+                    sourceProvider.ModuleRow);
                 var signatureIndex = -1;
                 for (var index = 0;
                     index < program.NativeFunctionPointerSignatures.Length;
@@ -3210,17 +3223,17 @@ public static partial class TrRmExecutableCompiler
                         (byte)signature.CallingConvention,
                         checked((uint)nativeFunctionPointerAnchorMethodRows[
                             signatureIndex])));
-                standardClassTypeSpecRows.Add(sourceTypeSpec,
+                standardClassTypeSpecRows.Add(typeSpecKey,
                     functionPointerTypeSpecRow);
                 return functionPointerTypeSpecRow;
             }
-            if (standardClassTypeSpecRows.TryGetValue(sourceTypeSpec,
+            if (standardClassTypeSpecRows.TryGetValue(typeSpecKey,
                     out var existingTypeSpec))
             {
                 return existingTypeSpec;
             }
             if (!type.IsRow || !activeStandardClassTypeSpecs.Add(
-                    sourceTypeSpec))
+                    typeSpecKey))
             {
                 throw Invalid(
                     "An EN1 class FieldDef contains a cyclic or non-row TypeSpec reference.");
@@ -3231,58 +3244,75 @@ public static partial class TrRmExecutableCompiler
                 uint encodedTypeSpec;
                 if (type.Form == 0x06 && type.Qualifiers == 0)
                 {
-                    var row = standardClassRootTables.TypeSpecs.GetRow(
+                    var row = sourceTables.TypeSpecs.GetRow(
                         type.Row);
                     var innerTypeSpec = BinaryPrimitives
                         .ReadUInt32LittleEndian(row[2..]);
                     encodedTypeSpec = checked((uint)typeSpecRows.Count + 1);
                     typeSpecRows.Add(TrRmTypeSpecTableWriter.Wrapped(
                         type.Form, RemapStandardClassTypeSpecReference(
-                            innerTypeSpec, depth + 1), type.Qualifiers));
+                            innerTypeSpec, depth + 1, sourceProvider),
+                        type.Qualifiers));
                 }
                 else if (type.Form is 0x02 or 0x03)
                 {
                     var oldReferenceRow = checked((int)type.Row);
                     uint newReferenceRow;
                     if (type.Form == 0x02
+                        && rootSnapshot is not null
+                        && SameA2SourceTypeProviderSnapshot(rootSnapshot,
+                            sourceProvider)
                         && typeDefRowByRootClassTypeDef.TryGetValue(
                             oldReferenceRow, out var classTypeDefRow))
                     {
                         newReferenceRow = checked((uint)classTypeDefRow);
                     }
                     else if (type.Form == 0x03
+                        && rootSnapshot is not null
+                        && SameA2SourceTypeProviderSnapshot(rootSnapshot,
+                            sourceProvider)
                         && importRowByRootClassImport.TryGetValue(
                             oldReferenceRow, out var classImportRow))
                     {
                         newReferenceRow = checked((uint)classImportRow);
                     }
                     else if (type.Form == 0x02 && type.Qualifiers == 0
-                        && enumIndexByRootTypeDefRow.TryGetValue(
-                            oldReferenceRow, out var enumIndex))
+                        && enumIndexByProviderTypeDefRow.TryGetValue(
+                            (sourceProvider.ModuleIdentity,
+                                oldReferenceRow),
+                            out var enumIndex))
                     {
                         encodedTypeSpec = FieldTypeSpecReference(
                             BoundEnumTypes.Type(enumIndex));
-                        standardClassTypeSpecRows.Add(sourceTypeSpec,
+                        standardClassTypeSpecRows.Add(typeSpecKey,
                             encodedTypeSpec);
                         return encodedTypeSpec;
                     }
                     else if (type.Form == 0x03 && type.Qualifiers == 0
-                        && importRowByRootEnumImport.TryGetValue(
-                            oldReferenceRow, out var enumImportRow))
+                        && importRowByProviderEnumImport.TryGetValue(
+                            (sourceProvider.ModuleIdentity,
+                                oldReferenceRow),
+                            out var enumImportRow))
                     {
                         newReferenceRow = checked((uint)enumImportRow);
                     }
                     else if (type.Form == 0x02 && type.Qualifiers == 0
+                        && rootSnapshot is not null
+                        && SameA2SourceTypeProviderSnapshot(rootSnapshot,
+                            sourceProvider)
                         && structureIndexByRootTypeDefRow.TryGetValue(
                             oldReferenceRow, out var structureIndex))
                     {
                         encodedTypeSpec = FieldTypeSpecReference(
                             (PrimitiveType)(100 + structureIndex));
-                        standardClassTypeSpecRows.Add(sourceTypeSpec,
+                        standardClassTypeSpecRows.Add(typeSpecKey,
                             encodedTypeSpec);
                         return encodedTypeSpec;
                     }
                     else if (type.Form == 0x03 && type.Qualifiers == 0
+                        && rootSnapshot is not null
+                        && SameA2SourceTypeProviderSnapshot(rootSnapshot,
+                            sourceProvider)
                         && importRowByRootStructureImport.TryGetValue(
                             oldReferenceRow,
                             out var structureImportRow))
@@ -3306,13 +3336,13 @@ public static partial class TrRmExecutableCompiler
                         "The bounded EN1 class re-emission supports scalar, wrapper and class/struct/enum TypeSpec forms only.");
                 }
 
-                standardClassTypeSpecRows.Add(sourceTypeSpec,
+                standardClassTypeSpecRows.Add(typeSpecKey,
                     encodedTypeSpec);
                 return encodedTypeSpec;
             }
             finally
             {
-                _ = activeStandardClassTypeSpecs.Remove(sourceTypeSpec);
+                _ = activeStandardClassTypeSpecs.Remove(typeSpecKey);
             }
         }
 
@@ -3671,18 +3701,42 @@ public static partial class TrRmExecutableCompiler
                         throw Invalid(
                             "An EN1 class field Import lost its exact root enum Import mapping.");
                     }
+                    if (!importRowByProviderEnumImport.TryAdd(
+                            (rootSnapshot!.ModuleIdentity,
+                                emittedEnum.RootImportRow),
+                            enumImportRow))
+                    {
+                        throw Invalid(
+                            "An EN1 class enum Import row is ambiguous in its provider Module.");
+                    }
 
                     var expectedEnumDefinition
                         = standardClassRootTables.Imports
                             .GetExpectedDefinitionForImportRow(
                                 emittedEnum.RootImportRow);
+                    var expectedEnumTypeDefRow = checked((int)(
+                        expectedEnumDefinition & 0x00FF_FFFF));
+                    var expectedEnumProviderTypeDefKey
+                        = (rootSnapshot!.ModuleIdentity,
+                            expectedEnumTypeDefRow);
+                    var hasExpectedEnumProviderTypeDef
+                        = enumIndexByProviderTypeDefRow.TryGetValue(
+                            expectedEnumProviderTypeDefKey,
+                            out var existingExpectedEnumIndex);
+                    if (!hasExpectedEnumProviderTypeDef)
+                    {
+                        _ = enumIndexByProviderTypeDefRow.TryAdd(
+                            expectedEnumProviderTypeDefKey,
+                            emittedEnum.DefinitionIndex);
+                    }
                     if ((expectedEnumDefinition >> 24) != 0x13
                         || standardClassRootTables.TypeDefs.GetKind(
-                            checked((int)(expectedEnumDefinition
-                                & 0x00FF_FFFF))) != 4
+                            expectedEnumTypeDefRow) != 4
+                        || (hasExpectedEnumProviderTypeDef
+                            && existingExpectedEnumIndex
+                                != emittedEnum.DefinitionIndex)
                         || !enumIndexByRootTypeDefRow.TryAdd(
-                            checked((int)(expectedEnumDefinition
-                                & 0x00FF_FFFF)),
+                            expectedEnumTypeDefRow,
                             emittedEnum.DefinitionIndex)
                         || !enumIndexByRootEnumImport.TryAdd(
                             emittedEnum.RootImportRow,
@@ -3702,20 +3756,37 @@ public static partial class TrRmExecutableCompiler
                             = occurrence.Declaration.Site.DefinitionId;
                     var providerTypeDefRow = checked((int)(
                             providerTypeDefId & 0x00FF_FFFF));
-                    if (standardClassRootTables is null
-                            || !BoundStandardEnumDeclarationContract
-                                .SnapshotsMatch(rootSnapshot!,
-                                    occurrence.Declaration.Site.Snapshot)
-                            || (providerTypeDefId >> 24) != 0x13
-                            || providerTypeDefRow == 0
-                            || standardClassRootTables.TypeDefs.GetKind(
-                                providerTypeDefRow) != 4
-                            || !enumIndexByRootTypeDefRow.TryAdd(
-                                providerTypeDefRow,
-                                emittedEnum.DefinitionIndex))
+                    var enumProviderSnapshot
+                        = occurrence.Declaration.Site.Snapshot;
+                    if (!standardClassRootTablesByProvider.TryGetValue(
+                            enumProviderSnapshot.ModuleIdentity,
+                            out var enumProviderTables)
+                        || !StringComparer.Ordinal.Equals(
+                            enumProviderSnapshot.ModuleIdentity,
+                            enumImport.ProducerIdentity)
+                        || (providerTypeDefId >> 24) != 0x13
+                        || providerTypeDefRow == 0
+                        || enumProviderTables.TypeDefs.GetKind(
+                            providerTypeDefRow) != 4
+                        || !enumIndexByProviderTypeDefRow.TryGetValue(
+                            (enumProviderSnapshot.ModuleIdentity,
+                                providerTypeDefRow),
+                            out var mappedEnumIndex)
+                        || mappedEnumIndex != emittedEnum.DefinitionIndex)
                     {
-                            throw Invalid(
-                                "An EN1 direct enum Import lost its provider TypeDef identity.");
+                        throw Invalid(
+                            "An EN1 direct enum Import lost its provider TypeDef identity.");
+                    }
+
+                    if (rootSnapshot is not null
+                        && BoundStandardEnumDeclarationContract.SnapshotsMatch(
+                            rootSnapshot, enumProviderSnapshot)
+                        && !enumIndexByRootTypeDefRow.TryAdd(
+                            providerTypeDefRow,
+                            emittedEnum.DefinitionIndex))
+                    {
+                        throw Invalid(
+                            "An EN1 direct enum Import duplicates a root TypeDef identity.");
                     }
                 }
                 _ = importRowByEnumIndex.TryAdd(
@@ -4113,7 +4184,8 @@ public static partial class TrRmExecutableCompiler
 
                 var fieldDefRow = checked(fieldRows.Count + 1);
                 fieldRows.Add(new TrRmFieldDefRow(typeDefRow, 0,
-                    StandardClassFieldTypeSpecReference(field),
+                    StandardClassFieldTypeSpecReference(field,
+                        classView.Provider),
                     field.Flags));
                 var classFieldIdentity
                     = (classView.Identity, field.DefinitionId);

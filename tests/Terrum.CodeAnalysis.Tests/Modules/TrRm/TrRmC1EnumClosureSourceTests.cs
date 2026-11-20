@@ -2775,8 +2775,9 @@ internal sealed class TrRmC1EnumClosureSourceTests
 
         var betaTree = SyntaxTree.Parse("""
             namespace Demo {
+                public enum Tone : int16 { Light = 1 }
                 public class Beta {
-                    public int32 Value;
+                    public Tone Value;
                 }
             }
             """);
@@ -2943,18 +2944,20 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 new TrRmSourceClassMemberExport(0, betaField.Span,
                     "field.beta.value"),
             ]);
+        var betaEnumExport = CreateExport(betaProgram, betaTree, 0,
+            "Tone", ["type.tone"], "tone");
         var betaArtifact = TrRmExecutableCompiler.EmitStandard(betaProgram,
             "BetaProvider", schemaIdentity, targetRequirement, [], [],
-            [betaClassExport], []);
+            [betaClassExport], [betaEnumExport]);
         var betaInput = new TrRmStandardArtifactInput(schemaIdentity,
             betaArtifact);
         var betaReference = TrRmExecutableCompiler.CreateStandardReference(
-            betaInput, "BetaProvider", [], ["type.beta"],
+            betaInput, "BetaProvider", [], ["type.beta", "type.tone"],
             ["field.beta.value"]);
         var reference = TrRmExecutableCompiler.CreateStandardReferenceSet(
             [alphaReference, alphaAliasReference, betaReference]);
 
-        Assert.That(reference.EnumDefinitions, Has.Length.EqualTo(1));
+        Assert.That(reference.EnumDefinitions, Has.Length.EqualTo(2));
         Assert.That(((BoundEnumDeclarationIdentity.Standard)
                 reference.EnumDefinitions[0].Identity).Value
                 .SelectedExportKeys,
@@ -2993,6 +2996,12 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 .Any(static binding =>
                     binding.ProducerIdentity == "AlphaEnumProvider"
                     && binding.ExportKey == "type.shade"),
+            Is.True);
+        Assert.That(Enumerable.Range(1, tables.Imports.Count)
+                .Select(tables.Imports.GetBindingForImportRow)
+                .Any(static binding =>
+                    binding.ProducerIdentity == "BetaProvider"
+                    && binding.ExportKey == "type.tone"),
             Is.True);
         var loaded = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(schemaIdentity, artifact),
