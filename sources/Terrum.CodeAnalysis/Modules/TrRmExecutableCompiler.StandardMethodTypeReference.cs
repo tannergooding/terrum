@@ -272,6 +272,21 @@ public static partial class TrRmExecutableCompiler
                 "The selected MethodDef origin map lost its root Module.");
         }
 
+        var typeBindingByExpectedType = new Dictionary<(
+            int ArtifactIndex, int ModuleRow, int TypeDefRow),
+            TrRmStandardTypeProviderBinding>();
+        foreach (var binding in classProviderValidation.TypeBindings)
+        {
+            if (!typeBindingByExpectedType.TryAdd((
+                    binding.ConsumerArtifactIndex,
+                    binding.ConsumerModuleRow,
+                    binding.ExpectedTypeDefRow), binding))
+            {
+                throw Invalid(
+                    "A contextual TypeDef endpoint has multiple Import bindings.");
+            }
+        }
+
         var (methodStart, methodEnd)
             = tables.Modules.GetMethodDefRange(moduleRow);
         var providerSnapshots = new Dictionary<
@@ -359,11 +374,41 @@ public static partial class TrRmExecutableCompiler
 
             var originKey = (origin.Provider.ModuleIdentity,
                 origin.DefinitionId);
-            if (!canonicalStructureByOrigin.TryAdd(originKey,
-                    structureIndex))
+            if (canonicalStructureByOrigin.TryGetValue(originKey,
+                    out var existingStructureIndex))
             {
-                throw Invalid(
-                    "The combined method/type reference has duplicate canonical struct origins.");
+                var existingOrigin = program.Structures[
+                    existingStructureIndex].StandardTypeOrigin
+                    ?? throw Invalid(
+                        "A canonical struct origin disappeared during projection.");
+                var existingIsActual
+                    = existingOrigin.Expectations.IsDefaultOrEmpty
+                        && existingOrigin.ReferenceRoot is
+                            BoundSourceTypeProviderSnapshot existingRoot
+                        && SameA2SourceTypeProviderSnapshot(existingRoot,
+                            existingOrigin.Provider);
+                var currentIsActual = origin.Expectations.IsDefaultOrEmpty
+                    && origin.ReferenceRoot is
+                        BoundSourceTypeProviderSnapshot currentRoot
+                    && SameA2SourceTypeProviderSnapshot(currentRoot,
+                        origin.Provider);
+                if (!SameA2SourceTypeProviderSnapshot(existingOrigin.Provider,
+                        origin.Provider)
+                    || existingOrigin.DefinitionId != origin.DefinitionId
+                    || (existingIsActual && currentIsActual))
+                {
+                    throw Invalid(
+                        "A provider TypeDef origin has no unique canonical local declaration.");
+                }
+
+                if (currentIsActual && !existingIsActual)
+                {
+                    canonicalStructureByOrigin[originKey] = structureIndex;
+                }
+            }
+            else
+            {
+                canonicalStructureByOrigin.Add(originKey, structureIndex);
             }
         }
 
@@ -671,10 +716,6 @@ public static partial class TrRmExecutableCompiler
 
         var selectedMethods = new List<(BoundFunction Function, string Key)>(
             methodExportKeys.Length);
-        var rootMethodTypeOrigins = new HashSet<(
-            string ModuleIdentity, uint DefinitionId)>();
-        var rootMethodExpectedTypeDefs = new Dictionary<(
-            string ModuleIdentity, uint DefinitionId), HashSet<uint>>();
         BoundSourceTypeProviderSnapshot? rootProviderSnapshot = null;
         foreach (var exportKey in methodExportKeys)
         {
@@ -752,47 +793,14 @@ public static partial class TrRmExecutableCompiler
                 var parameterType = RemapModuleType(rootProviderModule,
                     variable.Type);
                 var structureIndex = (int)parameterType - 100;
-                var typeOrigin = program.Structures[structureIndex]
-                    .StandardTypeOrigin
-                    ?? throw Invalid(
+                if (program.Structures[structureIndex].StandardTypeOrigin
+                    is null)
+                {
+                    throw Invalid(
                         "A selected method parameter lost its canonical struct origin.");
-                _ = rootMethodTypeOrigins.Add((
-                    typeOrigin.Provider.ModuleIdentity,
-                    typeOrigin.DefinitionId));
+                }
                 var methodProviderSnapshot
                     = rootProviderSnapshot ??= GetProviderSnapshot(rootModule);
-                var localStructureIndex = (int)variable.Type - 100;
-                if ((uint)localStructureIndex
-                    < (uint)rootProviderModule.Program.Structures.Length
-                    && rootProviderModule.Program.Structures[
-                        localStructureIndex].StandardTypeOrigin is
-                        BoundStandardTypeOrigin localTypeOrigin
-                    && !localTypeOrigin.Expectations.IsDefaultOrEmpty)
-                {
-                    var methodTypeOrigin = (
-                        typeOrigin.Provider.ModuleIdentity,
-                        typeOrigin.DefinitionId);
-                    if (!rootMethodExpectedTypeDefs.TryGetValue(
-                            methodTypeOrigin,
-                            out var expectedDefinitionIds))
-                    {
-                        expectedDefinitionIds = [];
-                        rootMethodExpectedTypeDefs.Add(methodTypeOrigin,
-                            expectedDefinitionIds);
-                    }
-
-                    foreach (var expectation in
-                        localTypeOrigin.Expectations)
-                    {
-                        if (SameA2SourceTypeProviderSnapshot(
-                                expectation.UsingModule,
-                                methodProviderSnapshot))
-                        {
-                            _ = expectedDefinitionIds.Add(
-                                expectation.ExpectedDefinitionId);
-                        }
-                    }
-                }
                 AddTypeImportContext(structureIndex,
                     methodProviderSnapshot);
                 _ = selectedStructures.Add(structureIndex);
@@ -960,6 +968,556 @@ public static partial class TrRmExecutableCompiler
             expectationsByImport.Add(key, expectation);
         }
 
+        var retainedFieldProviderEdges
+            = ImmutableArray.CreateBuilder<BoundStandardFieldProviderEdge>();
+        if (program.StandardQuerySourceAssociation is
+            BoundStandardQuerySourceAssociation fieldAssociation)
+        {
+            foreach (var closure in fieldAssociation.ProviderClosures)
+            {
+                retainedFieldProviderEdges.AddRange(closure.FieldEdges);
+            }
+        }
+        if (program.StandardFieldProviderClosure is
+                BoundStandardFieldProviderClosure retainedFieldClosure
+            && (program.StandardQuerySourceAssociation is not
+                    BoundStandardQuerySourceAssociation existingAssociation
+                || !existingAssociation.ProviderClosures.Any(closure =>
+                    ReferenceEquals(closure, retainedFieldClosure))))
+        {
+            retainedFieldProviderEdges.AddRange(
+                retainedFieldClosure.FieldEdges);
+        }
+        var retainedFieldEdges = retainedFieldProviderEdges.ToImmutable();
+
+        var contextualTypeViews = new List<BoundStandardTypeView>();
+        var contextualViewIndexByModuleType = new Dictionary<(
+            int ArtifactIndex, int ModuleRow, uint ExpectedDefinitionId,
+            int ImportRow), int>();
+        var contextualViewIndexesByStructure = new Dictionary<int, List<int>>();
+        var contextualViewsInProgress = new HashSet<(
+            int ArtifactIndex, int ModuleRow, uint ExpectedDefinitionId,
+            int ImportRow)>();
+        var methodTypeViews
+            = ImmutableArray.CreateBuilder<BoundStandardMethodTypeView>();
+
+        int GetOrAddTypeView(BoundStandardMethodProviderModule viewModule,
+            int localStructureIndex)
+        {
+            if (!moduleByLocation.TryGetValue((
+                    viewModule.ArtifactIndex, viewModule.ModuleRow),
+                    out var usingModule))
+            {
+                throw Invalid(
+                    "A contextual TypeDef view is outside the checked Module directory.");
+            }
+
+            var viewTables = GetTables(viewModule.ArtifactIndex);
+            var (viewTypeDefStart, viewTypeDefEnd)
+                = viewTables.Modules.GetTypeDefRange(viewModule.ModuleRow);
+            if (viewTypeDefEnd - viewTypeDefStart
+                    != viewModule.Program.Structures.Length
+                || (uint)localStructureIndex
+                    >= (uint)viewModule.Program.Structures.Length)
+            {
+                throw Invalid(
+                    "A contextual TypeDef view is outside its using Module.");
+            }
+
+            var localTypeDefRow = viewTypeDefStart + localStructureIndex;
+            var expectedDefinitionId = 0x1300_0000u
+                | checked((uint)localTypeDefRow);
+            var localStructure
+                = viewModule.Program.Structures[localStructureIndex];
+            var localOrigin = localStructure.StandardTypeOrigin;
+            var actualOrigin = localOrigin is null
+                ? (viewModule.Identity, expectedDefinitionId)
+                : (localOrigin.Provider.ModuleIdentity,
+                    localOrigin.DefinitionId);
+            if (!canonicalStructureByOrigin.TryGetValue(actualOrigin,
+                    out var canonicalStructureIndex)
+                || (uint)canonicalStructureIndex
+                    >= (uint)program.Structures.Length
+                || program.Structures[canonicalStructureIndex]
+                    .StandardTypeOrigin is not
+                        BoundStandardTypeOrigin actualOriginData
+                || !StringComparer.Ordinal.Equals(
+                    actualOriginData.Provider.ModuleIdentity,
+                    actualOrigin.Item1)
+                || actualOriginData.DefinitionId != actualOrigin.Item2)
+            {
+                throw Invalid(
+                    "A contextual TypeDef view has no canonical actual identity.");
+            }
+
+            var expectationsByImport = new Dictionary<(
+                string ModuleIdentity, int ModuleRow, int ImportRow,
+                uint ExpectedDefinitionId), BoundSourceTypeExpectation>();
+            if (typeExpectationsByOrigin.TryGetValue(actualOrigin,
+                    out var retainedExpectations))
+            {
+                foreach (var retainedExpectation in retainedExpectations)
+                {
+                    AddTypeExpectation(expectationsByImport,
+                        retainedExpectation);
+                }
+            }
+            if (localOrigin is not null
+                && !localOrigin.Expectations.IsDefaultOrEmpty)
+            {
+                foreach (var retainedExpectation in
+                    localOrigin.Expectations)
+                {
+                    AddTypeExpectation(expectationsByImport,
+                        retainedExpectation);
+                }
+            }
+
+            var expectationCandidates = expectationsByImport.Values
+                .Where(expectation =>
+                    expectation.ExpectedDefinitionId
+                        == expectedDefinitionId
+                    && SameA2SourceTypeProviderSnapshot(
+                        expectation.UsingModule,
+                        GetProviderSnapshot(usingModule)))
+                .ToArray();
+            if (expectationCandidates.Length > 1)
+            {
+                throw Invalid(
+                    "A contextual TypeDef view has multiple Imports for one expected TypeDef row.");
+            }
+
+            var expectation = expectationCandidates.Length == 0
+                ? null : expectationCandidates[0];
+            var isLocalActual
+                = StringComparer.Ordinal.Equals(
+                    actualOriginData.Provider.ModuleIdentity,
+                    viewModule.Identity)
+                    && actualOriginData.DefinitionId
+                        == expectedDefinitionId;
+            if (expectation is null && !isLocalActual)
+            {
+                throw Invalid(
+                    "A contextual TypeDef proxy lost its exact provider Import.");
+            }
+
+            var isLookupRoot = false;
+            string? exportKey = null;
+            if (expectation is not null)
+            {
+                if (!SameA2SourceTypeProviderSnapshot(
+                        expectation.Provider, actualOriginData.Provider)
+                    || expectation.ProviderDefinitionId
+                        != actualOriginData.DefinitionId)
+                {
+                    throw Invalid(
+                        "A contextual TypeDef Import targets a different actual declaration.");
+                }
+
+                exportKey = expectation.ExportKey;
+            }
+            else if (selectedTypeKeysByOrigin.TryGetValue(actualOrigin,
+                         out var selectedKeys)
+                     && selectedKeys.Count != 0)
+            {
+                isLookupRoot = true;
+                exportKey = selectedKeys[0];
+            }
+            else
+            {
+                throw new ArgumentException(
+                    "A closure-only local struct needs an explicit TypeDef ExportKey selection.",
+                    nameof(typeExportKeys));
+            }
+
+            var importRow = expectation?.ImportRow ?? 0;
+            var viewKey = (viewModule.ArtifactIndex, viewModule.ModuleRow,
+                expectedDefinitionId, importRow);
+            if (contextualViewIndexByModuleType.TryGetValue(viewKey,
+                    out var existingViewIndex))
+            {
+                if (contextualViewsInProgress.Contains(viewKey))
+                {
+                    throw Invalid(
+                        "The contextual TypeDef view graph contains an inline cycle.");
+                }
+
+                return existingViewIndex;
+            }
+
+            var viewIndex = contextualTypeViews.Count;
+            contextualViewIndexByModuleType.Add(viewKey, viewIndex);
+            contextualViewsInProgress.Add(viewKey);
+            if (!contextualViewIndexesByStructure.TryGetValue(
+                    canonicalStructureIndex, out var viewIndexes))
+            {
+                viewIndexes = [];
+                contextualViewIndexesByStructure.Add(
+                    canonicalStructureIndex, viewIndexes);
+            }
+            viewIndexes.Add(viewIndex);
+
+            if (!moduleByIdentity.TryGetValue(
+                    actualOriginData.Provider.ModuleIdentity,
+                    out var providerSelection))
+            {
+                throw Invalid(
+                    "A contextual TypeDef view references an unloaded provider Module.");
+            }
+            var providerTables = GetTables(providerSelection.ArtifactIndex);
+            var actualTypeDefRow = checked((int)(
+                actualOriginData.DefinitionId & 0x00FF_FFFF));
+            if (providerTables.TypeDefs.GetOwnerModule(actualTypeDefRow)
+                    != providerSelection.ModuleRow
+                || providerTables.TypeDefs.GetKind(actualTypeDefRow) != 1)
+            {
+                throw Invalid(
+                    "A contextual TypeDef view does not resolve to its provider-owned struct.");
+            }
+
+            PrimitiveType RemapViewType(PrimitiveType type)
+                => RemapCanonicalType(
+                    RemapModuleType(viewModule, type));
+            var expectedSource = localOrigin?.ExpectedDeclaration
+                ?? localStructure;
+            var sourceViewDeclaration = BoundTreeTraversal.RewriteTypes(
+                expectedSource, RemapViewType) with {
+                StandardTypeOrigin = null,
+                StandardLayoutOnly = false,
+            };
+            var (localFieldStart, localFieldEnd)
+                = viewTables.TypeDefs.GetFieldRange(localTypeDefRow);
+            if (localFieldEnd - localFieldStart
+                != sourceViewDeclaration.Fields.Length)
+            {
+                throw Invalid(
+                    "A contextual TypeDef view has an incomplete FieldDef range.");
+            }
+            var viewFields
+                = ImmutableArray.CreateBuilder<BoundStructField>(
+                    sourceViewDeclaration.Fields.Length);
+            var fieldEdges
+                = ImmutableArray.CreateBuilder<
+                    BoundStandardFieldProviderEdge?>(
+                        sourceViewDeclaration.Fields.Length);
+            for (var fieldOrdinal = 0;
+                fieldOrdinal < sourceViewDeclaration.Fields.Length;
+                fieldOrdinal++)
+            {
+                var field = sourceViewDeclaration.Fields[fieldOrdinal];
+                var expectedFieldDefinitionId = 0x1400_0000u
+                    | checked((uint)(localFieldStart + fieldOrdinal));
+                var matchingFieldEdges = retainedFieldEdges.Where(edge =>
+                        edge.ConsumerArtifactIndex
+                            == viewModule.ArtifactIndex
+                        && edge.ConsumerModuleRow == viewModule.ModuleRow
+                        && edge.ExpectedDefinitionId
+                            == expectedFieldDefinitionId
+                        && edge.ExpectedOwnerTypeDefRow == localTypeDefRow)
+                    .ToArray();
+                if (matchingFieldEdges.Length > 1)
+                {
+                    throw Invalid(
+                        "A contextual FieldDef view has multiple provider Imports.");
+                }
+
+                var fieldEdge = matchingFieldEdges.Length == 0
+                    ? null : matchingFieldEdges[0];
+                if (fieldEdge is not null)
+                {
+                    if ((fieldEdge.ActualDefinitionId >> 24) != 0x14
+                        || !moduleByLocation.TryGetValue((
+                            fieldEdge.ProviderArtifactIndex,
+                            fieldEdge.ProviderModuleRow),
+                            out var fieldProviderModule)
+                        || !StringComparer.Ordinal.Equals(
+                            fieldProviderModule.Identity,
+                            fieldEdge.ProducerIdentity))
+                    {
+                        throw Invalid(
+                            "A contextual FieldDef Import has an invalid provider identity.");
+                    }
+
+                    var fieldProviderSnapshot
+                        = GetProviderSnapshot(fieldProviderModule);
+                    var fieldProviderExports = GetExportKeys(
+                        fieldProviderModule, fieldEdge.ActualDefinitionId);
+                    if (!fieldProviderExports.Contains(fieldEdge.ExportKey,
+                            StringComparer.Ordinal))
+                    {
+                        throw Invalid(
+                            "A contextual FieldDef Import lost its selected ExportKey.");
+                    }
+                    var expectedField = field with {
+                        StandardFieldOrigin = null,
+                    };
+                    var fieldOrigin = field.StandardFieldOrigin
+                        ?? new BoundStandardFieldOrigin(
+                            fieldProviderSnapshot,
+                            fieldEdge.ActualDefinitionId,
+                            fieldProviderExports, false, expectedField);
+                    if (fieldOrigin.DefinitionId
+                            != fieldEdge.ActualDefinitionId
+                        || !SameA2SourceTypeProviderSnapshot(
+                            fieldOrigin.Provider,
+                            fieldProviderSnapshot))
+                    {
+                        throw Invalid(
+                            "A contextual FieldDef view conflicts with its retained Import edge.");
+                    }
+
+                    field = field with {
+                        StandardFieldOrigin = fieldOrigin with {
+                            ExportKeys = fieldProviderExports,
+                            IsLookupRoot = false,
+                            ExpectedDeclaration = expectedField,
+                            SelectedExportKeys = [],
+                        },
+                    };
+                }
+
+                viewFields.Add(field);
+                fieldEdges.Add(fieldEdge);
+            }
+
+            var viewDeclaration = sourceViewDeclaration with {
+                Fields = viewFields.MoveToImmutable(),
+            };
+            var remappedExpectedSource = BoundTreeTraversal.RewriteTypes(
+                expectedSource, RemapViewType);
+            var remappedExpected = remappedExpectedSource with {
+                Fields = [.. remappedExpectedSource.Fields.Select(
+                        static field => field with {
+                            StandardFieldOrigin = null,
+                        })],
+                StandardTypeOrigin = null,
+                StandardLayoutOnly = false,
+            };
+            contextualTypeViews.Add(new BoundStandardTypeView(
+                projectedIndexByStructure[canonicalStructureIndex],
+                GetProviderSnapshot(usingModule), expectation,
+                actualOriginData.Provider, actualOriginData.DefinitionId,
+                expectedDefinitionId, exportKey, isLookupRoot,
+                viewDeclaration, remappedExpected, [], []));
+
+            var fieldTypeViewIndexes = ImmutableArray.CreateBuilder<int>(
+                localStructure.Fields.Length);
+            foreach (var field in localStructure.Fields)
+            {
+                if (IsCombinedMethodScalarOrUnit(field.Type))
+                {
+                    fieldTypeViewIndexes.Add(-1);
+                    continue;
+                }
+
+                var childStructureIndex = (int)field.Type - 100;
+                if ((uint)childStructureIndex
+                    >= (uint)viewModule.Program.Structures.Length)
+                {
+                    throw Unsupported(
+                        "A contextual struct field uses an unsupported type family.");
+                }
+
+                fieldTypeViewIndexes.Add(GetOrAddTypeView(viewModule,
+                    childStructureIndex));
+            }
+
+            contextualTypeViews[viewIndex] = contextualTypeViews[viewIndex]
+                with {
+                    FieldTypeViewIndexes
+                        = fieldTypeViewIndexes.MoveToImmutable(),
+                    FieldEdges = fieldEdges.MoveToImmutable(),
+                };
+            _ = contextualViewsInProgress.Remove(viewKey);
+            return viewIndex;
+        }
+
+        foreach (var (origin, exportKeys) in selectedTypeKeysByOrigin)
+        {
+            if (!moduleByIdentity.TryGetValue(origin.ModuleIdentity,
+                    out var selectedModule)
+                || !typeProgramByLocation.TryGetValue((
+                    selectedModule.ArtifactIndex,
+                    selectedModule.ModuleRow), out var selectedProgram))
+            {
+                throw Invalid(
+                    "A selected TypeDef view has no loaded provider Module.");
+            }
+
+            var typeDefRow = checked((int)(origin.DefinitionId
+                & 0x00FF_FFFF));
+            var (typeDefStart, typeDefEnd)
+                = GetTables(selectedModule.ArtifactIndex).Modules
+                    .GetTypeDefRange(selectedModule.ModuleRow);
+            if (typeDefRow < typeDefStart || typeDefRow >= typeDefEnd)
+            {
+                throw Invalid(
+                    "A selected TypeDef view is outside its provider Module.");
+            }
+
+            if (exportKeys.Count == 0)
+            {
+                throw Invalid(
+                    "A selected TypeDef view has no retained ExportKey.");
+            }
+            _ = GetOrAddTypeView(selectedProgram,
+                typeDefRow - typeDefStart);
+        }
+
+        foreach (var (function, exportKey) in selectedMethods)
+        {
+            for (var ordinal = 0; ordinal < function.ParameterCount;
+                ordinal++)
+            {
+                var type = function.Variables[ordinal].Type;
+                if (IsCombinedMethodScalarOrUnit(type))
+                {
+                    continue;
+                }
+
+                var viewIndex = GetOrAddTypeView(rootProviderModule,
+                    (int)type - 100);
+                methodTypeViews.Add(new BoundStandardMethodTypeView(
+                    exportKey, ordinal, viewIndex));
+            }
+        }
+
+        var typeDefEqualityEdgesByOwner = new Dictionary<(
+            int ArtifactIndex, int OwnerModule),
+            List<(int LeftTypeDef, int RightTypeDef)>>();
+        for (var artifactIndex = 0;
+            artifactIndex < artifacts.Length; artifactIndex++)
+        {
+            var equalityTables = GetTables(artifactIndex);
+            var equalities = equalityTables.TypeDefBindingEqualities;
+            for (var row = 1; row <= equalities.Count; row++)
+            {
+                var ownerModule = checked((int)
+                    equalities.GetOwnerModule(row));
+                var key = (artifactIndex, ownerModule);
+                if (!typeDefEqualityEdgesByOwner.TryGetValue(key,
+                        out var edges))
+                {
+                    edges = [];
+                    typeDefEqualityEdgesByOwner.Add(key, edges);
+                }
+
+                edges.Add((
+                    checked((int)equalities.GetLeftTypeDef(row)),
+                    checked((int)equalities.GetRightTypeDef(row))));
+            }
+        }
+
+        foreach (var (owner, edges) in typeDefEqualityEdgesByOwner)
+        {
+            var adjacent = new Dictionary<int, HashSet<int>>();
+            foreach (var (left, right) in edges)
+            {
+                if (!adjacent.TryGetValue(left, out var leftNeighbors))
+                {
+                    leftNeighbors = [];
+                    adjacent.Add(left, leftNeighbors);
+                }
+                if (!adjacent.TryGetValue(right,
+                        out var rightNeighbors))
+                {
+                    rightNeighbors = [];
+                    adjacent.Add(right, rightNeighbors);
+                }
+
+                _ = leftNeighbors.Add(right);
+                _ = rightNeighbors.Add(left);
+            }
+
+            var visited = new HashSet<int>();
+            foreach (var start in adjacent.Keys)
+            {
+                if (!visited.Add(start))
+                {
+                    continue;
+                }
+
+                var component = new List<int>();
+                var pending = new Stack<int>();
+                pending.Push(start);
+                while (pending.TryPop(out var typeDefRow))
+                {
+                    component.Add(typeDefRow);
+                    foreach (var neighbor in adjacent[typeDefRow])
+                    {
+                        if (visited.Add(neighbor))
+                        {
+                            pending.Push(neighbor);
+                        }
+                    }
+                }
+
+                if (component.Count < 2)
+                {
+                    continue;
+                }
+
+                var componentHasRetainedView = false;
+                foreach (var typeDefRow in component)
+                {
+                    var typeTables = GetTables(owner.ArtifactIndex);
+                    var usingModule = typeTables.TypeDefs
+                        .GetOwnerModule(typeDefRow);
+                    var importRow
+                        = typeBindingByExpectedType.TryGetValue((
+                            owner.ArtifactIndex, usingModule, typeDefRow),
+                            out var binding)
+                            ? binding.ImportRow : 0;
+                    if (contextualViewIndexByModuleType.ContainsKey((
+                            owner.ArtifactIndex, usingModule,
+                            0x1300_0000u
+                                | checked((uint)typeDefRow), importRow))
+                    {
+                        componentHasRetainedView = true;
+                        break;
+                    }
+                }
+
+                if (!componentHasRetainedView)
+                {
+                    continue;
+                }
+
+                foreach (var typeDefRow in component)
+                {
+                    var typeTables = GetTables(owner.ArtifactIndex);
+                    var usingModule = typeTables.TypeDefs
+                        .GetOwnerModule(typeDefRow);
+                    if (!typeProgramByLocation.TryGetValue((
+                            owner.ArtifactIndex, usingModule),
+                            out var viewModule))
+                    {
+                        throw Invalid(
+                            "A retained TypeDef equality endpoint has no loaded Module view.");
+                    }
+
+                    var (typeDefStart, typeDefEnd)
+                        = typeTables.Modules.GetTypeDefRange(usingModule);
+                    if (typeDefRow < typeDefStart
+                        || typeDefRow >= typeDefEnd)
+                    {
+                        throw Invalid(
+                            "A retained TypeDef equality endpoint is outside its owning Module.");
+                    }
+
+                    var viewIndex = GetOrAddTypeView(viewModule,
+                        typeDefRow - typeDefStart);
+                    if (!selectedStructures.Contains(
+                            contextualTypeViews[viewIndex]
+                                .StructureIndex))
+                    {
+                        throw Invalid(
+                            "A retained TypeDef equality endpoint has no selected canonical actual type.");
+                    }
+                }
+            }
+        }
+
         var projectedStructures
             = ImmutableArray.CreateBuilder<BoundStruct>(
                 structureOrder.Length);
@@ -993,155 +1551,47 @@ public static partial class TrRmExecutableCompiler
                     out var selectedKeys)
                     ? ImmutableArray.Create(selectedKeys[0])
                     : ImmutableArray<string>.Empty;
-            var projectionSource = original;
-            BoundStandardMethodProviderModule? projectionModule = null;
-            var typeExpectations
-                = ImmutableArray<BoundSourceTypeExpectation>.Empty;
-            var referenceRoot = providerSnapshot;
-            var originExportKeys = GetExportKeys(providerModule,
-                originalTypeOrigin.DefinitionId);
-            if (selectedTypeKeys.IsEmpty)
+            if (!contextualViewIndexesByStructure.TryGetValue(
+                    structureIndex, out var structureViewIndexes)
+                || structureViewIndexes.Count == 0)
             {
-                var expectationsByImport = new Dictionary<(
-                    string ModuleIdentity, int ModuleRow, int ImportRow,
-                    uint ExpectedDefinitionId), BoundSourceTypeExpectation>();
-                if (!originalTypeOrigin.Expectations.IsDefaultOrEmpty)
-                {
-                    foreach (var expectation in
-                        originalTypeOrigin.Expectations)
-                    {
-                        AddTypeExpectation(expectationsByImport,
-                            expectation);
-                    }
-                }
-
-                if (typeExpectationsByOrigin.TryGetValue(typeOriginKey,
-                        out var retainedExpectations))
-                {
-                    foreach (var expectation in retainedExpectations)
-                    {
-                        AddTypeExpectation(expectationsByImport,
-                            expectation);
-                    }
-                }
-
-                typeExpectations
-                    = [.. expectationsByImport.Values];
-                if (!typeImportContextsByOrigin.TryGetValue(typeOriginKey,
-                        out var requiredContexts))
-                {
-                    throw new ArgumentException(
-                        "A closure-only struct needs an explicit TypeDef ExportKey selection.",
-                        nameof(typeExportKeys));
-                }
-
-                if (rootMethodTypeOrigins.Contains(typeOriginKey))
-                {
-                    referenceRoot = rootProviderSnapshot
-                        ?? throw Invalid(
-                            "A root method struct dependency lost its selected Module snapshot.");
-                    if (rootMethodExpectedTypeDefs.TryGetValue(
-                            typeOriginKey, out var expectedDefinitionIds)
-                        && expectedDefinitionIds.Count == 1)
-                    {
-                        var expectedDefinitionId
-                            = expectedDefinitionIds.Single();
-                        typeExpectations = [.. typeExpectations.Where(
-                            expectation => expectation
-                                .ExpectedDefinitionId
-                                == expectedDefinitionId)];
-                    }
-                }
-                else if (requiredContexts.Count == 1)
-                {
-                    referenceRoot = requiredContexts[0];
-                }
-                else
-                {
-                    throw new NotSupportedException(
-                        "A closure-only struct required from multiple using Modules needs contextual TypeDef cloning.");
-                }
-                typeExpectations
-                    = [.. typeExpectations.Where(expectation =>
-                        SameA2SourceTypeProviderSnapshot(
-                            expectation.UsingModule, referenceRoot))];
-                if (typeExpectations.IsEmpty)
-                {
-                    throw new ArgumentException(
-                        "A required local struct dependency needs an explicit TypeDef ExportKey selection.",
-                        nameof(typeExportKeys));
-                }
-
-                var firstExpectation = typeExpectations[0];
-                if (typeExpectations.Any(expectation =>
-                        !SameA2SourceTypeProviderSnapshot(
-                            expectation.UsingModule,
-                            firstExpectation.UsingModule)
-                        || expectation.ExpectedDefinitionId
-                            != firstExpectation.ExpectedDefinitionId
-                        || !SameA2SourceTypeProviderSnapshot(
-                            expectation.Provider, providerSnapshot)
-                        || expectation.ProviderDefinitionId
-                            != originalTypeOrigin.DefinitionId))
-                {
-                    throw new NotSupportedException(
-                        "A closure-only struct with multiple using-Module or expected-TypeDef contexts requires contextual TypeDef cloning.");
-                }
-
-                if (!moduleByIdentity.TryGetValue(
-                        firstExpectation.UsingModule.ModuleIdentity,
-                        out var expectationModule)
-                    || expectationModule.ModuleRow
-                        != firstExpectation.UsingModule.ModuleRow
-                    || !typeProgramByLocation.TryGetValue((
-                        expectationModule.ArtifactIndex,
-                        expectationModule.ModuleRow),
-                        out projectionModule))
-                {
-                    throw Invalid(
-                        "A retained struct TypeDef expectation has no loaded using Module.");
-                }
-
-                var expectedTypeDefRow = checked((int)(
-                    firstExpectation.ExpectedDefinitionId & 0x00FF_FFFF));
-                var expectationTables = GetTables(
-                    expectationModule.ArtifactIndex);
-                var (expectedTypeDefStart, expectedTypeDefEnd)
-                    = expectationTables.Modules.GetTypeDefRange(
-                        expectationModule.ModuleRow);
-                if ((firstExpectation.ExpectedDefinitionId >> 24) != 0x13
-                    || expectedTypeDefRow < expectedTypeDefStart
-                    || expectedTypeDefRow >= expectedTypeDefEnd
-                    || expectedTypeDefEnd - expectedTypeDefStart
-                        != projectionModule.Program.Structures.Length)
-                {
-                    throw Invalid(
-                        "A retained struct TypeDef expectation is outside its using Module.");
-                }
-
-                var expectedStructure = projectionModule.Program.Structures[
-                    expectedTypeDefRow - expectedTypeDefStart];
-                var expectedOrigin = expectedStructure.StandardTypeOrigin;
-                if (expectedOrigin is null
-                    || expectedOrigin.DefinitionId
-                        != originalTypeOrigin.DefinitionId
-                    || !SameA2SourceTypeProviderSnapshot(
-                        expectedOrigin.Provider, providerSnapshot))
-                {
-                    throw Invalid(
-                        "A retained struct TypeDef expectation does not map to the canonical provider identity.");
-                }
-
-                projectionSource
-                    = expectedOrigin.ExpectedDeclaration
-                        ?? expectedStructure;
-                referenceRoot = firstExpectation.UsingModule;
-                originExportKeys = [
-                    .. typeExpectations.Select(static expectation =>
-                            expectation.ExportKey)
-                        .Distinct(StringComparer.Ordinal),
-                ];
+                throw Invalid(
+                    "A selected struct has no retained contextual TypeDef view.");
             }
+
+            var contextualViewIndexes = structureViewIndexes.ToImmutableArray();
+            var contextualViews = contextualViewIndexes.Select(
+                viewIndex => contextualTypeViews[viewIndex]).ToArray();
+            var primaryViewIndex = contextualViewIndexes[0];
+            if (!selectedTypeKeys.IsEmpty)
+            {
+                var selectedViewIndexes = contextualViewIndexes.Where(
+                    viewIndex =>
+                    contextualTypeViews[viewIndex].IsLookupRoot
+                    && StringComparer.Ordinal.Equals(
+                        contextualTypeViews[viewIndex].ExportKey,
+                        selectedTypeKeys[0])).ToArray();
+                if (selectedViewIndexes.Length == 0)
+                {
+                    throw Invalid(
+                        "A selected TypeDef root has no matching contextual view.");
+                }
+
+                primaryViewIndex = selectedViewIndexes[0];
+            }
+            var primaryView = contextualTypeViews[primaryViewIndex];
+            var projectionSource = primaryView.ViewDeclaration;
+            ImmutableArray<BoundSourceTypeExpectation> typeExpectations
+                = [.. contextualViews
+                    .Where(static view => view.Expectation is not null)
+                    .Select(static view => view.Expectation!)];
+            var referenceRoot = primaryView.UsingModule;
+            var originExportKeys = selectedTypeKeys.IsEmpty
+                ? [.. contextualViews.Select(static view => view.ExportKey)
+                    .OfType<string>()
+                    .Distinct(StringComparer.Ordinal)]
+                : GetExportKeys(providerModule,
+                    originalTypeOrigin.DefinitionId);
 
             if ((originalTypeOrigin.DefinitionId >> 24) != 0x13
                 || typeDefRow < typeDefStart || typeDefRow >= typeDefEnd
@@ -1158,9 +1608,7 @@ public static partial class TrRmExecutableCompiler
             }
 
             PrimitiveType RemapProjectionType(PrimitiveType type)
-                => projectionModule is null
-                    ? RemapCanonicalType(type)
-                    : RemapModuleType(projectionModule, type);
+                => type;
 
             var remappedFields = ImmutableArray.CreateBuilder<
                 BoundStructField>(projectionSource.Fields.Length);
@@ -1277,9 +1725,23 @@ public static partial class TrRmExecutableCompiler
                 })],
                 StandardTypeOrigin = null,
                 StandardLayoutOnly = false,
-                DeclaredCopyEvidence = declaredCopyEvidence,
             };
-            projectedStructures.Add(projectionSource with {
+            var orderedContextualViewIndexes
+                = ImmutableArray.Create(primaryViewIndex).AddRange(
+                    contextualViewIndexes.Where(viewIndex =>
+                        viewIndex != primaryViewIndex));
+            var additionalExpectedDeclarations
+                = orderedContextualViewIndexes
+                    .Where(viewIndex => viewIndex != primaryViewIndex)
+                    .Select(viewIndex =>
+                        contextualTypeViews[viewIndex].ExpectedDeclaration);
+            if (!originalTypeOrigin.AdditionalExpectedDeclarations.IsDefaultOrEmpty)
+            {
+                additionalExpectedDeclarations
+                    = originalTypeOrigin.AdditionalExpectedDeclarations
+                        .Concat(additionalExpectedDeclarations);
+            }
+            var projectedStructure = projectionSource with {
                 Fields = remappedFields.MoveToImmutable(),
                 StandardTypeOrigin = originalTypeOrigin with {
                     Expectations = typeExpectations,
@@ -1289,11 +1751,21 @@ public static partial class TrRmExecutableCompiler
                     ExpectedDeclaration = expectedDeclaration,
                     SelectedExportKeys = selectedTypeKeys,
                     AdditionalExpectedDeclarations
-                        = originalTypeOrigin.AdditionalExpectedDeclarations,
+                        = [.. additionalExpectedDeclarations],
+                    ContextualViewIndexes = orderedContextualViewIndexes,
                 },
                 StandardLayoutOnly = true,
                 DeclaredCopyEvidence = declaredCopyEvidence,
-            });
+            };
+            contextualTypeViews[primaryViewIndex]
+                = contextualTypeViews[primaryViewIndex] with {
+                    ViewDeclaration = projectedStructure with {
+                        StandardTypeOrigin = null,
+                        StandardLayoutOnly = false,
+                    },
+                    ExpectedDeclaration = expectedDeclaration,
+                };
+            projectedStructures.Add(projectedStructure);
         }
 
         var structures = projectedStructures.MoveToImmutable();
@@ -1348,13 +1820,179 @@ public static partial class TrRmExecutableCompiler
 
         var standardQuerySourceAssociation
             = sourceProviderClosures.Count == 0
+                && contextualTypeViews.Count == 0
                 ? null
                 : new BoundStandardQuerySourceAssociation(
-                    sourceProviderClosures.ToImmutable());
+                    sourceProviderClosures.ToImmutable(),
+                    [.. contextualTypeViews],
+                    methodTypeViews.ToImmutable());
         return new CompilationReference(structures, functions,
             (BoundRuntimePolicy)runtimePolicy,
             standardQuerySourceAssociation:
                 standardQuerySourceAssociation);
+    }
+
+    private static List<StandardSourceImportMapping>
+        CreateC1M1MethodTypeSourceImportMappings(BoundProgram program,
+            int[] typeDefStructureIndexes,
+            int[] typeDefStructureViewIndexes,
+            Dictionary<int, int> typeDefRowByContextualView,
+            int[] structureFieldFirst,
+            List<(string Text, int Encoding)> names)
+    {
+        if (program.StandardQuerySourceAssociation
+            is not BoundStandardQuerySourceAssociation association
+            || association.TypeViews.IsDefaultOrEmpty
+            || typeDefStructureIndexes.Length
+                != typeDefStructureViewIndexes.Length)
+        {
+            throw Invalid(
+                "The contextual TypeDef Import writer has no complete view association.");
+        }
+
+        var mappings = new List<StandardSourceImportMapping>();
+        var seen = new HashSet<(uint DefinitionId, string ProducerIdentity,
+            string ExportKey)>();
+        for (var typeDefIndex = 0;
+            typeDefIndex < typeDefStructureIndexes.Length; typeDefIndex++)
+        {
+            var structureIndex = typeDefStructureIndexes[typeDefIndex];
+            var typeViewIndex = typeDefStructureViewIndexes[typeDefIndex];
+            if (typeViewIndex < 0
+                || (uint)typeViewIndex >= (uint)association.TypeViews.Length
+                || !typeDefRowByContextualView.TryGetValue(typeViewIndex,
+                    out var typeDefRow)
+                || typeDefRow != typeDefIndex + 1
+                || (uint)structureIndex >= (uint)program.Structures.Length)
+            {
+                throw Invalid(
+                    "A contextual TypeDef Import has no exact destination view.");
+            }
+
+            var view = association.TypeViews[typeViewIndex];
+            var origin = program.Structures[structureIndex]
+                .StandardTypeOrigin;
+            var key = view.Expectation?.ExportKey ?? view.ExportKey;
+            if (view.StructureIndex != structureIndex
+                || origin is null
+                || !SameA2SourceTypeProviderSnapshot(origin.Provider,
+                    view.Provider)
+                || origin.DefinitionId != view.ProviderDefinitionId
+                || (view.ProviderDefinitionId >> 24) != 0x13
+                || (view.ExpectedDefinitionId >> 24) != 0x13
+                || string.IsNullOrEmpty(key)
+                || !BoundEnumTypes.IsValidModuleDeclarationKey(key)
+                || !origin.ExportKeys.Contains(key,
+                    StringComparer.Ordinal))
+            {
+                throw Invalid(
+                    "A contextual TypeDef Import lost its complete provider and ExportKey identity.");
+            }
+
+            if (view.Expectation is BoundSourceTypeExpectation expectation
+                && (expectation.ExpectedDefinitionId
+                        != view.ExpectedDefinitionId
+                    || expectation.ProviderDefinitionId
+                        != view.ProviderDefinitionId
+                    || !StringComparer.Ordinal.Equals(
+                        expectation.ProducerIdentity,
+                        view.Provider.ModuleIdentity)
+                    || !StringComparer.Ordinal.Equals(
+                        expectation.ExportKey, key)
+                    || !SameA2SourceTypeProviderSnapshot(
+                        expectation.Provider, view.Provider)))
+            {
+                throw Invalid(
+                    "A contextual TypeDef Import no longer matches its original expectation.");
+            }
+            if (view.Expectation is null && !view.IsLookupRoot)
+            {
+                throw Invalid(
+                    "A contextual TypeDef without an original Import is not an explicitly selected lookup root.");
+            }
+
+            var expectedTypeDefId = 0x1300_0000u
+                | checked((uint)typeDefRow);
+            Add(view.Provider.ModuleIdentity, key, expectedTypeDefId,
+                view.Provider);
+
+            if (view.FieldTypeViewIndexes.Length
+                    != view.ViewDeclaration.Fields.Length
+                || view.FieldEdges.Length
+                    != view.ViewDeclaration.Fields.Length)
+            {
+                throw Invalid(
+                    "A contextual TypeDef view has incomplete field edge maps.");
+            }
+
+            for (var fieldOrdinal = 0;
+                fieldOrdinal < view.FieldEdges.Length; fieldOrdinal++)
+            {
+                var fieldEdge = view.FieldEdges[fieldOrdinal];
+                if (fieldEdge is null)
+                {
+                    continue;
+                }
+
+                var field = view.ViewDeclaration.Fields[fieldOrdinal];
+                var fieldOrigin = field.StandardFieldOrigin;
+                var fieldRow = structureFieldFirst[typeDefIndex] == 0
+                    ? 0
+                    : checked(structureFieldFirst[typeDefIndex]
+                        + fieldOrdinal);
+                var producer = fieldOrigin?.Provider;
+                if (fieldRow == 0
+                    || fieldOrigin is null
+                    || producer is null
+                    || (fieldEdge.ExpectedDefinitionId >> 24) != 0x14
+                    || fieldEdge.ExpectedOwnerTypeDefRow
+                        != checked((int)(view.ExpectedDefinitionId
+                            & 0x00FF_FFFF))
+                    || fieldEdge.ActualDefinitionId
+                        != fieldOrigin.DefinitionId
+                    || !StringComparer.Ordinal.Equals(
+                        fieldEdge.ProducerIdentity,
+                        producer.ModuleIdentity)
+                    || !SameA2SourceTypeProviderSnapshot(producer,
+                        view.Provider)
+                    || fieldEdge.ProviderTypeDefRow
+                        != checked((int)(view.ProviderDefinitionId
+                            & 0x00FF_FFFF))
+                    || !fieldOrigin.ExportKeys.Contains(
+                        fieldEdge.ExportKey, StringComparer.Ordinal))
+                {
+                    throw Invalid(
+                        "A contextual FieldDef Import lost its exact owning TypeDef provider edge.");
+                }
+
+                var expectedFieldDefId = 0x1400_0000u
+                    | checked((uint)fieldRow);
+                Add(fieldEdge.ProducerIdentity, fieldEdge.ExportKey,
+                    expectedFieldDefId, producer);
+            }
+        }
+
+        return mappings;
+
+        void Add(string producerIdentity, string exportKey,
+            uint expectedDefinitionId,
+            BoundSourceTypeProviderSnapshot provider)
+        {
+            if (!StringComparer.Ordinal.Equals(provider.ModuleIdentity,
+                    producerIdentity)
+                || !seen.Add((expectedDefinitionId, producerIdentity,
+                    exportKey)))
+            {
+                throw Invalid(
+                    "A contextual Import has a conflicting provider or duplicate expected definition.");
+            }
+
+            var exportKeyStringRow = names.Count + 1;
+            names.Add((exportKey, 1));
+            mappings.Add(new StandardSourceImportMapping(
+                producerIdentity, exportKey, expectedDefinitionId,
+                exportKeyStringRow, provider));
+        }
     }
 
     private static bool IsCombinedMethodScalarOrUnit(PrimitiveType type)

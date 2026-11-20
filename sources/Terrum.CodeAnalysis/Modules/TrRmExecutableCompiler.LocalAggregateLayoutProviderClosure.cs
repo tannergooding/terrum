@@ -127,7 +127,9 @@ public static partial class TrRmExecutableCompiler
                         schemaIdentities[0])
                     || StandardGenericMethodSchema
                         .IsCM1ClassParameterDefaults(
-                            schemaIdentities[0]))
+                            schemaIdentities[0])
+                    || IsC1M1MethodTypeSchemaIdentity(
+                        schemaIdentities[0]))
                 || !GetForeignInvocationSchema(schemaIdentities[0])
                     .UsesObjectConstruction()))
         {
@@ -667,6 +669,37 @@ public static partial class TrRmExecutableCompiler
                     import.ProviderModuleRow));
         }
 
+        for (var artifactIndex = 0;
+            artifactIndex < artifacts.Length; artifactIndex++)
+        {
+            var equalityIndex = CreateForeignInvocationIndex(
+                artifacts[artifactIndex],
+                schemaIdentities[artifactIndex]);
+            var equalityTables = ValidateForeignInvocationArtifact(
+                equalityIndex, schemaIdentities[artifactIndex],
+                createA3ResourceLedger: false);
+            var equalityReader
+                = equalityTables.TypeDefBindingEqualities;
+            for (var row = 1; row <= equalityReader.Count; row++)
+            {
+                var ownerModule = checked((int)
+                    equalityReader.GetOwnerModule(row));
+                var leftModule = equalityTables.TypeDefs.GetOwnerModule(
+                    checked((int)equalityReader.GetLeftTypeDef(row)));
+                var rightModule = equalityTables.TypeDefs.GetOwnerModule(
+                    checked((int)equalityReader.GetRightTypeDef(row)));
+                if (!moduleEdges.TryGetValue((artifactIndex, ownerModule),
+                        out var ownerEdges))
+                {
+                    throw Invalid(
+                        "A TypeDef equality obligation is owned by an unselected Module.");
+                }
+
+                ownerEdges.Add((artifactIndex, leftModule));
+                ownerEdges.Add((artifactIndex, rightModule));
+            }
+        }
+
         var reachableModules = new HashSet<(int ArtifactIndex, int ModuleRow)>();
         var pendingModules = new Queue<(int ArtifactIndex, int ModuleRow)>();
         var rootLocation = (ArtifactIndex: 0,
@@ -956,6 +989,86 @@ public static partial class TrRmExecutableCompiler
             }
 
             functionIndexByMethodRow[methodRow] = functionIndex;
+        }
+
+        if (GetForeignInvocationSchema(schemaIdentity)
+            .UsesClassParameterDefaults())
+        {
+            var functions = program.Functions.ToBuilder();
+            for (var methodRow = module.MethodDefStart;
+                methodRow < module.MethodDefEnd; methodRow++)
+            {
+                var functionIndex = functionIndexByMethodRow[methodRow];
+                if (functionIndex < 0)
+                {
+                    continue;
+                }
+
+                var function = functions[functionIndex];
+                var signatureRow = tables.Methods.GetSignature(methodRow);
+                var (parameterStart, parameterCount)
+                    = tables.Signatures.GetParamRange(signatureRow);
+                if (parameterCount != function.ParameterCount
+                    || parameterCount > function.Variables.Length)
+                {
+                    throw Invalid(
+                        "A CM1 MethodDef parameter surface does not match its reconstructed function.");
+                }
+
+                var variables = function.Variables.ToBuilder();
+                var defaults
+                    = ImmutableArray.CreateBuilder<
+                        BoundOrdinaryParameterDefault>();
+                for (var ordinal = 0; ordinal < parameterCount; ordinal++)
+                {
+                    if (!tables.MethodParameterLabels.TryGetNameStringRow(
+                            methodRow, checked((uint)ordinal),
+                            out var nameStringRow)
+                        || !tables.MethodParameterLabels
+                            .TryGetDefaultConstantSourceRow(methodRow,
+                                checked((uint)ordinal),
+                                out var defaultConstantSourceRow))
+                    {
+                        throw Invalid(
+                            "A CM1 MethodDef has an incomplete parameter surface.");
+                    }
+
+                    variables[ordinal] = variables[ordinal] with {
+                        Name = tables.Strings.DecodeName(nameStringRow),
+                    };
+                    if (defaultConstantSourceRow == 0)
+                    {
+                        continue;
+                    }
+
+                    var parameterRow = parameterStart + ordinal;
+                    var defaultValue
+                        = TrRmConstantSourceValueValidator
+                            .MaterializeFrozenScalar(
+                                checked((int)defaultConstantSourceRow),
+                                tables.Parameters.GetTypeSpec(parameterRow),
+                                module.ModuleRow, module.TargetRequirement,
+                                tables.ConstantSources,
+                                tables.FrozenValueNodes, tables.Blobs,
+                                tables.TypeSpecs, tables.Features,
+                                tables.Modules,
+                                tables.A3LayoutResourceLedger);
+                    defaults.Add(new BoundOrdinaryParameterDefault(ordinal,
+                        defaultValue, null, -1, default,
+                        IsPending: false));
+                }
+
+                functions[functionIndex] = function with {
+                    Variables = variables.MoveToImmutable(),
+                    OrdinaryParameterDefaults
+                        = defaults.MoveToImmutable(),
+                    HasOrdinaryParameterDefaultSurface = true,
+                };
+            }
+
+            program = program with {
+                Functions = functions.MoveToImmutable(),
+            };
         }
 
         var functionIndexByImportRow = new int[tables.Imports.Count + 1];

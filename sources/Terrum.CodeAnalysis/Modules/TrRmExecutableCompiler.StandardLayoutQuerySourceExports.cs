@@ -27,7 +27,8 @@ public static partial class TrRmExecutableCompiler
         Dictionary<int, int> structureTypeDefRows,
         int[] structureFieldFirst,
         List<(string Text, int Encoding)> names,
-        List<TrRmExportRow> exportRows)
+        List<TrRmExportRow> exportRows,
+        bool requireDeclaredCopyEvidence = false)
     {
         if (typeExports is null || typeExports.Count == 0)
         {
@@ -132,6 +133,10 @@ public static partial class TrRmExecutableCompiler
                 || structure.SourceGenericTypeDefinitionIndex >= 0
                 || structure.BlittableTargetRequirement
                     != FixedLayoutStorage.WindowsX64TargetRequirement
+                || (requireDeclaredCopyEvidence
+                    && (structure.StandardTypeOrigin is null
+                        ? structure.IsUnique
+                        : structure.DeclaredCopyEvidence != true))
                 || (requireSequentialOrTransparentCopy
                     && !structure.IsSequential && !structure.IsTransparent)
                 || !structureTypeDefRows.TryGetValue(

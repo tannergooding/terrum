@@ -179,13 +179,41 @@ public static partial class TrRmExecutableCompiler
         BoundProgram program, string moduleIdentity,
         uint moduleTargetRequirement, SourceClassExports sourceClassExports,
         out TrRmFrozenScalarValueBuilder frozenScalarValueBuilder,
-        TrRmArtifactSchema schema = TrRmArtifactSchema.C1M1Draft)
+        TrRmArtifactSchema schema = TrRmArtifactSchema.C1M1Draft,
+        string? standardSchemaIdentity = null)
     {
         var emitsConstruction2 = schema.UsesObjectConstruction();
         if (schema != TrRmArtifactSchema.C1M1Draft
             && !emitsConstruction2)
         {
             throw new ArgumentOutOfRangeException(nameof(schema));
+        }
+
+        var typeViews = program.StandardQuerySourceAssociation
+            is BoundStandardQuerySourceAssociation typeViewAssociation
+            && !typeViewAssociation.TypeViews.IsDefault
+                ? typeViewAssociation.TypeViews
+                : ImmutableArray<BoundStandardTypeView>.Empty;
+        var hasTypeBindingEqualityGroups = program.Structures.Any(
+            static structure =>
+                structure.StandardTypeOrigin is
+                    BoundStandardTypeOrigin origin
+                && origin.ContextualViewIndexes.Length > 1);
+        var hasTypeOnlyContext = typeViews.Length != 0
+            && program.Classes.IsEmpty
+            && sourceClassExports.Exports.IsEmpty;
+        if (hasTypeBindingEqualityGroups
+            && !IsSelectedTypeDefBindingEqualitySchemaIdentity(
+                standardSchemaIdentity))
+        {
+            throw Unsupported(
+                "Distinct contextual TypeDef expectations require an exact TypeBindingViews schema.");
+        }
+        if (hasTypeBindingEqualityGroups
+            && typeViews.IsEmpty)
+        {
+            throw new InvalidDataException(
+                "A contextual TypeDef equality group has no retained view graph.");
         }
 
         SemanticVerifier.VerifyLibraryReferences(program);
@@ -259,28 +287,31 @@ public static partial class TrRmExecutableCompiler
             exportKeys.Add(export.ExportKey);
         }
 
-        if (exportKeysByClass.Count == 0
+        if ((exportKeysByClass.Count == 0 && !hasTypeOnlyContext)
             || exportKeysByClass.Count > ManagedClassTypes.OptionalFirst
                 - ManagedClassTypes.First)
         {
             throw Unsupported(
-                "C1M1 source declaration emission requires at least one captured class within the local class limit.");
+                "C1M1 source declaration emission requires captured class declarations or an exact contextual type-only reference.");
         }
 
         var sourceClassProgram = program.SourceClassProgramAssociation;
-        if (sourceClassProgram is null)
+        if (sourceClassProgram is null
+            && (!program.Classes.IsEmpty
+                || !sourceClassExports.Exports.IsEmpty))
         {
             throw new InvalidDataException(
                 "Captured C1M1 class exports have no compiler-owned source class association.");
         }
 
-        var localClassIndexes = sourceClassProgram.Declarations
+        var sourceClassDeclarations = sourceClassProgram?.Declarations ?? [];
+        var localClassIndexes = sourceClassDeclarations
             .Select(static declaration => declaration.ClassIndex)
             .ToHashSet();
         var pendingTypeDefinitions = new Queue<(bool IsClass, int Index)>(
             exportKeysByClass.Keys.Select(static classIndex =>
                 (IsClass: true, classIndex)));
-        foreach (var declaration in sourceClassProgram.Declarations)
+        foreach (var declaration in sourceClassDeclarations)
         {
             if (exportKeysByClass.TryAdd(declaration.ClassIndex, []))
             {
@@ -298,6 +329,19 @@ public static partial class TrRmExecutableCompiler
         }
 
         var retainedStructureIndexes = new HashSet<int>();
+        if (hasTypeOnlyContext)
+        {
+            for (var structureIndex = 0;
+                structureIndex < program.Structures.Length;
+                structureIndex++)
+            {
+                if (retainedStructureIndexes.Add(structureIndex))
+                {
+                    pendingTypeDefinitions.Enqueue((false,
+                        structureIndex));
+                }
+            }
+        }
         if (exportKeysByClass.Count
             > ManagedClassTypes.OptionalFirst - ManagedClassTypes.First)
         {
@@ -432,12 +476,13 @@ public static partial class TrRmExecutableCompiler
         var layoutRows = new List<TrRmLayoutRow>(
             exportKeysByClass.Count
                 + program.StandardClassDeclarations.Length
-                + retainedStructureIndexes.Count);
+                + structureTypeDefViews.Count);
         var layoutFieldRows = new List<TrRmLayoutFieldRow>();
         var typeSpecRows = new List<ReadOnlyMemory<byte>>();
         var typeSpecRowByClassType = new Dictionary<
             (int ClassIndex, bool IsWritable, bool IsOptional), uint>();
         var typeSpecRowByStructure = new Dictionary<int, uint>();
+        var typeSpecRowByTypeView = new Dictionary<int, uint>();
         var exportRows = new List<(uint DefinitionId, string Key)>();
         var methodRows = new List<TrRmMethodDefRow>();
         var methodNames = new List<string>();
@@ -454,7 +499,8 @@ public static partial class TrRmExecutableCompiler
         var construction2SourceMethods
             = new List<C1M1Construction2SourceMethod>();
         var methodDefRowByFunctionIndex = new Dictionary<int, int>();
-        var sourceNames = new HashSet<(string Namespace, string Name)>();
+        var sourceNames = new Dictionary<
+            (string Namespace, string Name), (int Kind, int Index)>();
         var typeDefRowByClass = exportKeysByClass.Keys
             .Select(static (classIndex, ordinal) =>
                 (classIndex, typeDefRow: ordinal + 1))
@@ -468,6 +514,8 @@ public static partial class TrRmExecutableCompiler
             (int StandardClassIndex, int FieldIndex), int>();
         var fieldDefRowByStructureAndIndex = new Dictionary<
             (int StructureIndex, int FieldIndex), int>();
+        var fieldDefRowByTypeViewAndIndex = new Dictionary<
+            (int TypeViewIndex, int FieldIndex), int>();
         var standardClassIndexes = Enumerable.Range(0,
             program.StandardClassDeclarations.Length).ToHashSet();
         var typeDefRowByStandardClass = standardClassIndexes
@@ -477,18 +525,62 @@ public static partial class TrRmExecutableCompiler
                     typeDefRow: ordinal + 1))
             .ToDictionary(static item => item.standardClassIndex,
                 item => item.typeDefRow + exportKeysByClass.Count);
-        var typeDefRowByStructure = retainedStructureIndexes
-            .Order()
-            .Select(static (structureIndex, ordinal) =>
-                (structureIndex, typeDefRow: ordinal + 1))
-            .ToDictionary(static item => item.structureIndex,
-                item => item.typeDefRow + exportKeysByClass.Count
-                    + standardClassIndexes.Count);
+        var contextualTypeViews = typeViews;
+        var structureTypeDefViews = new List<(int StructureIndex,
+            int TypeViewIndex)>();
+        foreach (var structureIndex in retainedStructureIndexes.Order())
+        {
+            var origin = program.Structures[structureIndex]
+                .StandardTypeOrigin;
+            if (origin is null
+                || origin.ContextualViewIndexes.IsDefaultOrEmpty)
+            {
+                structureTypeDefViews.Add((structureIndex, -1));
+                continue;
+            }
+
+            foreach (var typeViewIndex in origin.ContextualViewIndexes)
+            {
+                if ((uint)typeViewIndex >= (uint)contextualTypeViews.Length
+                    || contextualTypeViews[typeViewIndex].StructureIndex
+                        != structureIndex)
+                {
+                    throw new InvalidDataException(
+                        "A retained struct has an invalid contextual TypeDef view map.");
+                }
+
+                structureTypeDefViews.Add((structureIndex, typeViewIndex));
+            }
+        }
+
+        var typeDefRowByStructure
+            = new Dictionary<int, int>(retainedStructureIndexes.Count);
+        var typeDefRowByTypeView = new Dictionary<int, int>(
+            contextualTypeViews.Length);
+        for (var index = 0; index < structureTypeDefViews.Count; index++)
+        {
+            var (structureIndex, typeViewIndex)
+                = structureTypeDefViews[index];
+            var typeDefRow = exportKeysByClass.Count
+                + standardClassIndexes.Count + index + 1;
+            _ = typeDefRowByStructure.TryAdd(structureIndex, typeDefRow);
+            if (typeViewIndex >= 0)
+            {
+                if (!typeDefRowByTypeView.TryAdd(typeViewIndex, typeDefRow))
+                {
+                    throw new InvalidDataException(
+                        "A contextual TypeDef view was emitted more than once.");
+                }
+            }
+        }
         var typeImportRowByStandardClass = new Dictionary<int, int>();
         var typeImportPlanByStandardClass
             = new Dictionary<int, C1M1ImportedClassImportPlan>();
         var typeImportRowByStructure = new Dictionary<int, int>();
         var typeImportPlanByStructure
+            = new Dictionary<int, C1M1ImportedStructImportPlan>();
+        var typeImportRowByTypeView = new Dictionary<int, int>();
+        var typeImportPlanByTypeView
             = new Dictionary<int, C1M1ImportedStructImportPlan>();
         var typeSpecRowByStandardClassType = new Dictionary<int, uint>();
         var moduleReferences = new List<(
@@ -535,6 +627,33 @@ public static partial class TrRmExecutableCompiler
             return importRow;
         }
 
+        C1M1ImportedStructImportPlan GetContextualStructImportPlan(
+            int structureIndex, int typeViewIndex)
+        {
+            var origin = program.Structures[structureIndex]
+                .StandardTypeOrigin
+                ?? throw new InvalidDataException(
+                    "A contextual struct view has no canonical provider origin.");
+            var view = contextualTypeViews[typeViewIndex];
+            if (view.StructureIndex != structureIndex
+                || !SameA2SourceTypeProviderSnapshot(view.Provider,
+                    origin.Provider)
+                || view.ProviderDefinitionId != origin.DefinitionId
+                || string.IsNullOrEmpty(view.ExportKey)
+                || !BoundEnumTypes.IsValidModuleDeclarationKey(
+                    view.ExportKey)
+                || !origin.ExportKeys.Contains(view.ExportKey,
+                    StringComparer.Ordinal))
+            {
+                throw new InvalidDataException(
+                    "A contextual struct view has no exact provider ExportKey.");
+            }
+
+            return new C1M1ImportedStructImportPlan(view.Provider, [
+                view.ExportKey,
+            ]);
+        }
+
         foreach (var standardClassIndex in standardClassIndexes.Order())
         {
             var declaration
@@ -557,7 +676,8 @@ public static partial class TrRmExecutableCompiler
                 imports.Count - importPlan.ExportKeys.Length + 1);
         }
 
-        foreach (var structureIndex in retainedStructureIndexes.Order())
+        foreach (var (structureIndex, typeViewIndex)
+                 in structureTypeDefViews)
         {
             var structure = program.Structures[structureIndex];
             if (structure.StandardTypeOrigin is not
@@ -566,29 +686,54 @@ public static partial class TrRmExecutableCompiler
                 continue;
             }
 
-            var typeDefRow = typeDefRowByStructure[structureIndex];
-            var importPlan = GetC1M1ImportedStructImportPlan(origin);
-            typeImportPlanByStructure.Add(structureIndex, importPlan);
-            foreach (var exportKey in importPlan.ExportKeys)
+            var typeDefRow = typeViewIndex < 0
+                ? typeDefRowByStructure[structureIndex]
+                : typeDefRowByTypeView[typeViewIndex];
+            var importPlan = typeViewIndex < 0
+                ? GetC1M1ImportedStructImportPlan(origin)
+                : GetContextualStructImportPlan(structureIndex,
+                    typeViewIndex);
+            if (typeViewIndex < 0)
             {
-                AddImport(importPlan.Provider.ModuleIdentity,
-                    importPlan.Provider.TargetRequirement,
-                    importPlan.Provider.RuntimePolicy, exportKey,
-                    0x1300_0000u | checked((uint)typeDefRow));
+                typeImportPlanByStructure.Add(structureIndex, importPlan);
+                foreach (var exportKey in importPlan.ExportKeys)
+                {
+                    AddImport(importPlan.Provider.ModuleIdentity,
+                        importPlan.Provider.TargetRequirement,
+                        importPlan.Provider.RuntimePolicy, exportKey,
+                        0x1300_0000u | checked((uint)typeDefRow));
+                }
+
+                typeImportRowByStructure.Add(structureIndex,
+                    imports.Count - importPlan.ExportKeys.Length + 1);
+                continue;
             }
 
-            typeImportRowByStructure.Add(structureIndex,
-                imports.Count - importPlan.ExportKeys.Length + 1);
+            var typeView = contextualTypeViews[typeViewIndex];
+            var importRow = AddImport(importPlan.Provider.ModuleIdentity,
+                importPlan.Provider.TargetRequirement,
+                importPlan.Provider.RuntimePolicy,
+                importPlan.ExportKeys[0],
+                0x1300_0000u | checked((uint)typeDefRow));
+            typeImportPlanByTypeView.Add(typeViewIndex, importPlan);
+            typeImportRowByTypeView.Add(typeViewIndex, importRow);
+            if (typeDefRowByStructure[structureIndex] == typeDefRow)
+            {
+                typeImportPlanByStructure.Add(structureIndex, importPlan);
+                typeImportRowByStructure.Add(structureIndex, importRow);
+            }
         }
 
         var typeDefOrder = exportKeysByClass.Keys
-            .Select(static classIndex => (Kind: 0, Index: classIndex))
+            .Select(static classIndex =>
+                (Kind: 0, Index: classIndex, TypeViewIndex: -1))
             .Concat(standardClassIndexes.Order().Select(
                 static standardClassIndex => (Kind: 1,
-                    Index: standardClassIndex)))
-            .Concat(retainedStructureIndexes.Order().Select(
-                static structureIndex => (Kind: 2,
-                    Index: structureIndex)));
+                    Index: standardClassIndex, TypeViewIndex: -1)))
+            .Concat(structureTypeDefViews.Select(
+                static view => (Kind: 2,
+                    Index: view.StructureIndex,
+                    TypeViewIndex: view.TypeViewIndex)));
 
         uint ImportedClassTypeSpecReference(
             int standardClassIndex, int instanceIndex)
@@ -699,6 +844,73 @@ public static partial class TrRmExecutableCompiler
             }
 
             return GetC1M1SourceScalarTypeSpecReference(type);
+        }
+
+        uint ContextualFieldTypeSpecReference(PrimitiveType type,
+            int typeViewIndex)
+        {
+            if (!TryGetC1M1SourceStructFieldType(type,
+                    sourceStructDeclarations, out var structureIndex))
+            {
+                return FieldTypeSpecReference(type);
+            }
+
+            if (typeViewIndex < 0
+                || (uint)typeViewIndex
+                    >= (uint)contextualTypeViews.Length
+                || !typeDefRowByTypeView.ContainsKey(typeViewIndex)
+                || !typeImportRowByTypeView.TryGetValue(typeViewIndex,
+                    out var importRow)
+                || contextualTypeViews[typeViewIndex].StructureIndex
+                    != structureIndex)
+            {
+                throw new InvalidDataException(
+                    "A contextual FieldDef type has no matching retained TypeDef view.");
+            }
+
+            if (!typeSpecRowByTypeView.TryGetValue(typeViewIndex,
+                    out var typeSpecRow))
+            {
+                typeSpecRow = checked((uint)typeSpecRows.Count + 1);
+                typeSpecRows.Add(TrRmTypeSpecTableWriter.Reference(0x03,
+                    checked((uint)importRow)));
+                typeSpecRowByTypeView.Add(typeViewIndex, typeSpecRow);
+            }
+
+            return typeSpecRow;
+        }
+
+        int GetMethodSignatureTypeViewIndex(BoundFunction function,
+            int parameterOrdinal, PrimitiveType type)
+        {
+            if (function.ModuleImport is not BoundModuleImport methodImport
+                || program.StandardQuerySourceAssociation
+                    is not BoundStandardQuerySourceAssociation association
+                || association.MethodTypeViews.IsDefaultOrEmpty)
+            {
+                return -1;
+            }
+
+            var matches = association.MethodTypeViews.Where(view =>
+                    StringComparer.Ordinal.Equals(
+                        view.MethodExportKey, methodImport.ExportKey)
+                    && view.SignaturePosition == parameterOrdinal)
+                .ToArray();
+            if (matches.Length == 0)
+            {
+                return -1;
+            }
+            if (matches.Length != 1
+                || (uint)matches[0].TypeViewIndex
+                    >= (uint)contextualTypeViews.Length
+                || contextualTypeViews[matches[0].TypeViewIndex]
+                    .StructureIndex != (int)type - 100)
+            {
+                throw new InvalidDataException(
+                    "A MethodDef signature has an invalid contextual TypeDef view.");
+            }
+
+            return matches[0].TypeViewIndex;
         }
 
         uint MethodTypeSpecReference(PrimitiveType type)
@@ -889,7 +1101,7 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        foreach (var (typeKind, sourceIndex) in typeDefOrder)
+        foreach (var (typeKind, sourceIndex, typeViewIndex) in typeDefOrder)
         {
             var isClass = typeKind == 0;
             var isStandardClass = typeKind == 1;
@@ -911,11 +1123,17 @@ public static partial class TrRmExecutableCompiler
             var standardClassView = isStandardClass
                 ? program.StandardClassDeclarations[sourceIndex].Declaration
                 : null;
+            var isContextualTypeView = typeKind == 2 && typeViewIndex >= 0;
+            var sourceStructure = typeKind == 2
+                ? isContextualTypeView
+                    ? contextualTypeViews[typeViewIndex].ViewDeclaration
+                    : program.Structures[sourceIndex]
+                : null;
             var declarationName = isClass
                 ? program.Classes[sourceIndex].Name
                 : isStandardClass
                 ? standardClassView!.Name
-                : program.Structures[sourceIndex].Name;
+                : sourceStructure!.Name;
             var exportKeys = isClass
                 ? exportKeysByClass[sourceIndex] : [];
             var typeDefFlags = isClass
@@ -928,26 +1146,36 @@ public static partial class TrRmExecutableCompiler
                     | (program.Classes[sourceIndex].IsMutable ? 0x80u : 0u)
                 : isStandardClass
                 ? standardClassView!.TypeDefFlags
-                : (program.Structures[sourceIndex].IsPrivate ? 0u
-                    : program.Structures[sourceIndex].IsInternal ? 1u : 2u)
-                    | 0x04u;
+                : (sourceStructure!.IsPrivate ? 0u
+                    : sourceStructure.IsInternal ? 1u : 2u)
+                    | 0x04u
+                    | (schema.UsesConstructionInitializerCopyEvidence()
+                        && (sourceStructure.StandardTypeOrigin is null
+                            ? !sourceStructure.IsUnique
+                            : sourceStructure.DeclaredCopyEvidence == true)
+                            ? TrRmTypeDefTableReader.DeclaredCopyFlag : 0u);
             var typeFieldCount = isClass
                 ? program.Classes[sourceIndex].Fields.Length
                 : isStandardClass
                 ? standardClassView!.Fields.Length
-                : program.Structures[sourceIndex].Fields.Length;
+                : sourceStructure!.Fields.Length;
             var typeFieldsAreDefault = isClass
                 ? program.Classes[sourceIndex].Fields.IsDefault
                 : isStandardClass
                 ? standardClassView!.Fields.IsDefault
-                : program.Structures[sourceIndex].Fields.IsDefault;
+                : sourceStructure!.Fields.IsDefault;
             var typeDefRow = isClass
                 ? typeDefRowByClass[sourceIndex]
                 : isStandardClass
                 ? typeDefRowByStandardClass[sourceIndex]
-                : typeDefRowByStructure[sourceIndex];
+                : isContextualTypeView
+                    ? typeDefRowByTypeView[typeViewIndex]
+                    : typeDefRowByStructure[sourceIndex];
             if (typeDefRow != typeDefRows.Count + 1
                 || typeFieldsAreDefault
+                || (isContextualTypeView
+                    && contextualTypeViews[typeViewIndex]
+                        .FieldTypeViewIndexes.Length != typeFieldCount)
                 || (isClass && typeFieldCount == 0)
                 || (isClass && exportKeys.Count != 0
                     && program.Classes[sourceIndex].IsInternal))
@@ -959,21 +1187,31 @@ public static partial class TrRmExecutableCompiler
             var namespaceName = isStandardClass
                 ? standardClassView!.Namespace
                 : !isClass
-                ? sourceStructDeclarations[sourceIndex].Namespace
+                ? isContextualTypeView
+                    ? separator < 0 ? string.Empty
+                        : declarationName[..separator]
+                    : sourceStructDeclarations[sourceIndex].Namespace
                 : separator < 0 ? string.Empty
                     : declarationName[..separator];
             var typeName = isStandardClass
                 ? standardClassView!.Name
                 : !isClass
-                ? sourceStructDeclarations[sourceIndex].Name
+                ? isContextualTypeView
+                    ? separator < 0 ? declarationName
+                        : declarationName[(separator + 1)..]
+                    : sourceStructDeclarations[sourceIndex].Name
                 : separator < 0 ? declarationName
                     : declarationName[(separator + 1)..];
+            var sourceName = (namespaceName, typeName);
             if (typeName.Length == 0
-                || !sourceNames.Add((namespaceName, typeName)))
+                || sourceNames.TryGetValue(sourceName,
+                    out var existingSourceName)
+                    && existingSourceName != (typeKind, sourceIndex))
             {
                 throw new InvalidDataException(
                     "Captured source class names are empty or duplicated.");
             }
+            sourceNames[sourceName] = (typeKind, sourceIndex);
 
             var fieldFirst = fieldRows.Count + 1;
             var layoutFieldFirst = layoutFieldRows.Count + 1;
@@ -1005,8 +1243,7 @@ public static partial class TrRmExecutableCompiler
                 {
                     var field = isClass
                         ? program.Classes[sourceIndex].Fields[fieldOrdinal]
-                        : program.Structures[sourceIndex]
-                            .Fields[fieldOrdinal];
+                        : sourceStructure!.Fields[fieldOrdinal];
                     if (field is null || (field.IsPrivate && field.IsInternal)
                         || field.RequiresUnsafeCaller)
                     {
@@ -1024,7 +1261,12 @@ public static partial class TrRmExecutableCompiler
 
                 var fieldDefRow = fieldRows.Count + 1;
                 fieldRows.Add(new TrRmFieldDefRow(typeDefRow, 0,
-                    FieldTypeSpecReference(fieldType), fieldFlags));
+                    isContextualTypeView
+                        ? ContextualFieldTypeSpecReference(fieldType,
+                            contextualTypeViews[typeViewIndex]
+                                .FieldTypeViewIndexes[fieldOrdinal])
+                        : FieldTypeSpecReference(fieldType),
+                    fieldFlags));
                 fieldNames.Add(fieldName);
                 if (isClass)
                 {
@@ -1038,8 +1280,22 @@ public static partial class TrRmExecutableCompiler
                 }
                 else
                 {
-                    fieldDefRowByStructureAndIndex.Add(
-                        (sourceIndex, fieldOrdinal), fieldDefRow);
+                    if (isContextualTypeView)
+                    {
+                        fieldDefRowByTypeViewAndIndex.Add(
+                            (typeViewIndex, fieldOrdinal), fieldDefRow);
+                        if (typeDefRowByStructure[sourceIndex]
+                            == typeDefRow)
+                        {
+                            fieldDefRowByStructureAndIndex.Add(
+                                (sourceIndex, fieldOrdinal), fieldDefRow);
+                        }
+                    }
+                    else
+                    {
+                        fieldDefRowByStructureAndIndex.Add(
+                            (sourceIndex, fieldOrdinal), fieldDefRow);
+                    }
                 }
 
                 layoutFieldRows.Add(new TrRmLayoutFieldRow(
@@ -1065,7 +1321,8 @@ public static partial class TrRmExecutableCompiler
                 typeFieldCount));
         }
 
-        foreach (var structureIndex in retainedStructureIndexes.Order())
+        foreach (var (structureIndex, typeViewIndex)
+                 in structureTypeDefViews)
         {
             var structure = program.Structures[structureIndex];
             if (structure.StandardTypeOrigin is not
@@ -1073,46 +1330,85 @@ public static partial class TrRmExecutableCompiler
             {
                 continue;
             }
+            var viewStructure = typeViewIndex < 0
+                ? structure
+                : contextualTypeViews[typeViewIndex].ViewDeclaration;
+            var importPlan = typeViewIndex < 0
+                ? typeImportPlanByStructure[structureIndex]
+                : typeImportPlanByTypeView[typeViewIndex];
 
             for (var fieldIndex = 0;
-                fieldIndex < structure.Fields.Length; fieldIndex++)
+                fieldIndex < viewStructure.Fields.Length; fieldIndex++)
             {
-                var field = structure.Fields[fieldIndex];
+                var field = viewStructure.Fields[fieldIndex];
                 if (field.StandardFieldOrigin is not
                     BoundStandardFieldOrigin fieldOrigin)
                 {
                     continue;
                 }
 
-                if (!fieldOrigin.ExportKeys.IsDefaultOrEmpty)
+                var fieldEdge = typeViewIndex >= 0
+                    ? contextualTypeViews[typeViewIndex]
+                        .FieldEdges[fieldIndex]
+                    : null;
+                if (fieldEdge is not null
+                    || !fieldOrigin.SelectedExportKeys.IsDefaultOrEmpty
+                    || typeViewIndex < 0
+                        && !fieldOrigin.ExportKeys.IsDefaultOrEmpty)
                 {
-                    if (!typeImportPlanByStructure.TryGetValue(
-                            structureIndex, out var importPlan)
-                        || !IsC1M1ImportedStructFieldImportable(structure,
+                    if (!IsC1M1ImportedStructFieldImportable(structure,
                             field, importPlan))
                     {
                         throw Unsupported(
                             "C1M1 class source emission requires selected public FieldDef exports from the exact imported struct provider.");
                     }
 
-                    if (!fieldDefRowByStructureAndIndex.TryGetValue((
-                            structureIndex, fieldIndex), out var fieldDefRow))
+                    var fieldDefRow = 0;
+                    var hasFieldRow = typeViewIndex < 0
+                        ? fieldDefRowByStructureAndIndex.TryGetValue((
+                            structureIndex, fieldIndex),
+                            out fieldDefRow)
+                        : fieldDefRowByTypeViewAndIndex.TryGetValue((
+                            typeViewIndex, fieldIndex),
+                            out fieldDefRow);
+                    if (!hasFieldRow)
                     {
                         throw new InvalidDataException(
                             "A selected imported struct FieldDef has no local expected stub.");
                     }
 
-                    var importKeys
-                        = fieldOrigin.SelectedExportKeys.IsDefaultOrEmpty
-                            ? fieldOrigin.ExportKeys
-                            : fieldOrigin.SelectedExportKeys;
-                    foreach (var exportKey in importKeys)
+                    if (fieldEdge is not null)
                     {
-                        AddImport(fieldOrigin.Provider.ModuleIdentity,
-                            fieldOrigin.Provider.TargetRequirement,
-                            fieldOrigin.Provider.RuntimePolicy, exportKey,
+                        if (!StringComparer.Ordinal.Equals(
+                                fieldOrigin.Provider.ModuleIdentity,
+                                fieldEdge.ProducerIdentity)
+                            || fieldOrigin.DefinitionId
+                                != fieldEdge.ActualDefinitionId)
+                        {
+                            throw new InvalidDataException(
+                                "A contextual FieldDef Import changed its provider edge.");
+                        }
+
+                        AddImport(fieldEdge.ProducerIdentity,
+                            fieldEdge.TargetRequirement,
+                            fieldEdge.RuntimePolicy, fieldEdge.ExportKey,
                             0x1400_0000u
                                 | checked((uint)fieldDefRow));
+                    }
+                    else
+                    {
+                        var importKeys
+                            = fieldOrigin.SelectedExportKeys.IsDefaultOrEmpty
+                                ? fieldOrigin.ExportKeys
+                                : fieldOrigin.SelectedExportKeys;
+                        foreach (var exportKey in importKeys)
+                        {
+                            AddImport(fieldOrigin.Provider.ModuleIdentity,
+                                fieldOrigin.Provider.TargetRequirement,
+                                fieldOrigin.Provider.RuntimePolicy, exportKey,
+                                0x1400_0000u
+                                    | checked((uint)fieldDefRow));
+                        }
                     }
                 }
             }
@@ -1192,7 +1488,7 @@ public static partial class TrRmExecutableCompiler
         if (emitsConstruction2)
         {
             var sourceClassDeclarationsByIndex
-                = sourceClassProgram.Declarations.ToDictionary(
+                = sourceClassDeclarations.ToDictionary(
                     static declaration => declaration.ClassIndex);
             var constructorFunctionsBySourceDeclaration
                 = program.Functions
@@ -2222,6 +2518,113 @@ public static partial class TrRmExecutableCompiler
 
         }
 
+        if (hasTypeOnlyContext)
+        {
+            if (program.Functions.Any(static function =>
+                    function.ModuleImport is null
+                    || !function.IsExternal
+                    || !function.IsModuleReference
+                    || function.IsPrivate || function.IsInternal
+                    || function.IsClassConstructor
+                    || function.IsConstructor
+                    || function.DirectNativeImport is not null
+                    || function.NativeVTableMethod is not null
+                    || function.NativeFunctionPointerType is not null
+                    || function.NativeCallableConvention is not null
+                    || function.ParameterCount != function.Variables.Length
+                    || function.ParameterCount
+                        > SemanticVerifier.MaximumArguments))
+            {
+                throw Unsupported(
+                    "Contextual method/type references support only bodyless imported top-level MethodDefs with bounded by-value signatures.");
+            }
+
+            for (var functionIndex = 0;
+                functionIndex < program.Functions.Length;
+                functionIndex++)
+            {
+                var function = program.Functions[functionIndex];
+                var moduleImport = function.ModuleImport!;
+                if (moduleImport.ExportKey != function.Name
+                    || moduleImport.TargetRequirement
+                        != TrRmModuleTableReader
+                            .WindowsX64NativeTargetRequirement
+                    || moduleImport.RuntimePolicy != 0
+                    || function.ReturnType != PrimitiveType.Void
+                        && !TryGetC1M1SourceScalarTypeSpecReference(
+                            function.ReturnType, out _))
+                {
+                    throw Unsupported(
+                        "A contextual method Import has an unsupported identity, requirement or result type.");
+                }
+
+                var methodDefRow = methodRows.Count + 1;
+                var signatureRow = methodSignatureRows.Count + 1;
+                var firstParameter = parameterRows.Count + 1;
+                for (var ordinal = 0;
+                    ordinal < function.ParameterCount; ordinal++)
+                {
+                    var variable = function.Variables[ordinal];
+                    if (variable.IsOut || variable.IsInit
+                        || variable.IsMutable || variable.IsImplicitRef
+                        || variable.IsCanonicalImplicitReference
+                        || variable.IsInitializationLocal)
+                    {
+                        throw Unsupported(
+                            "Contextual method Imports support only ordinary immutable by-value parameters.");
+                    }
+
+                    uint typeSpecReference;
+                    if (TryGetC1M1SourceStructFieldType(variable.Type,
+                            sourceStructDeclarations, out _))
+                    {
+                        var typeViewIndex
+                            = GetMethodSignatureTypeViewIndex(function,
+                                ordinal, variable.Type);
+                        typeSpecReference
+                            = ContextualFieldTypeSpecReference(
+                                variable.Type, typeViewIndex);
+                    }
+                    else
+                    {
+                        if (variable.Type != PrimitiveType.Void
+                            && !TryGetC1M1SourceScalarTypeSpecReference(
+                                variable.Type, out _))
+                        {
+                            throw Unsupported(
+                                "Contextual method Imports support only scalar, unit or selected struct parameters.");
+                        }
+
+                        typeSpecReference
+                            = Construction2ValueTypeSpecReference(
+                                variable.Type);
+                    }
+
+                    parameterRows.Add(new TrRmParamRow(signatureRow,
+                        ordinal, typeSpecReference, 0, 0));
+                }
+
+                var returnTypeSpecReference
+                    = function.ReturnType == PrimitiveType.Void
+                        ? 0xF200_0000u
+                        : Construction2ValueTypeSpecReference(
+                            function.ReturnType);
+                methodSignatureRows.Add(new TrRmMethodSigRow(
+                    returnTypeSpecReference, 0,
+                    function.ParameterCount == 0 ? 0 : firstParameter,
+                    function.ParameterCount, 0, 0));
+                methodRows.Add(new TrRmMethodDefRow(0, 0, signatureRow,
+                    2, 0, 0, 0));
+                methodNames.Add(function.Name);
+                methodDefRowByFunctionIndex.Add(functionIndex,
+                    methodDefRow);
+                _ = AddImport(moduleImport.ProducerIdentity,
+                    moduleImport.TargetRequirement,
+                    moduleImport.RuntimePolicy, moduleImport.ExportKey,
+                    0x1600_0000u | checked((uint)methodDefRow));
+            }
+        }
+
         var totalRows = (long)typeDefRows.Count + fieldRows.Count
             + layoutRows.Count + layoutFieldRows.Count
             + typeSpecRows.Count + exportRows.Count
@@ -2446,6 +2849,48 @@ public static partial class TrRmExecutableCompiler
             layoutFieldRows, layouts, typeDefs, fields);
         var exportBytes = EncodeC1M1Exports(exportRows,
             stringRows);
+        var typeDefBindingEqualityRows
+            = new List<TrRmTypeDefBindingEqualityRow>();
+        if (IsSelectedTypeDefBindingEqualitySchemaIdentity(
+                standardSchemaIdentity))
+        {
+            foreach (var structureIndex in retainedStructureIndexes.Order())
+            {
+                var origin = program.Structures[structureIndex]
+                    .StandardTypeOrigin;
+                if (origin is null
+                    || origin.ContextualViewIndexes.Length < 2)
+                {
+                    continue;
+                }
+
+                var typeDefRowsForViews
+                    = origin.ContextualViewIndexes
+                        .Select(typeViewIndex =>
+                            typeDefRowByTypeView.TryGetValue(
+                                typeViewIndex, out var typeDefRow)
+                                ? typeDefRow
+                                : throw new InvalidDataException(
+                                    "A contextual TypeDef equality endpoint was not emitted."))
+                        .Order().ToArray();
+                if (typeDefRowsForViews.Distinct().Count()
+                    != typeDefRowsForViews.Length)
+                {
+                    throw new InvalidDataException(
+                        "A contextual TypeDef equality group contains duplicate destination rows.");
+                }
+
+                var leftTypeDef = checked((uint)typeDefRowsForViews[0]);
+                for (var index = 1;
+                    index < typeDefRowsForViews.Length; index++)
+                {
+                    typeDefBindingEqualityRows.Add(
+                        new TrRmTypeDefBindingEqualityRow(1,
+                            leftTypeDef,
+                            checked((uint)typeDefRowsForViews[index])));
+                }
+            }
+        }
 
         var sections = new List<TrRmSection> {
             new TrRmSection(0x0001, 0, 1, moduleBytes),
@@ -2527,16 +2972,25 @@ public static partial class TrRmExecutableCompiler
                 checked((uint)parameterSurfaceRows.Count),
                 parameterSurfaceBytes));
         }
+        if (typeDefBindingEqualityRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x0067, 0,
+                checked((uint)typeDefBindingEqualityRows.Count),
+                TrRmTypeDefBindingEqualityTableWriter.Encode(
+                    typeDefBindingEqualityRows, modules, typeDefs)));
+        }
 
         sections.Sort(static (left, right) =>
             left.Kind.CompareTo(right.Kind));
         var artifact = TrRmArtifactWriter.Encode(sections,
-            schema);
+            schema, standardSchemaIdentity: standardSchemaIdentity);
         if (!schema.UsesClassParameterDefaults())
         {
             _ = TrRmStructuralMetadataValidator
                 .ValidateC1AndGetExecutionTables(
-                    new TrRmArtifactIndex(artifact, schema));
+                    new TrRmArtifactIndex(artifact, schema,
+                        standardSchemaIdentity:
+                            standardSchemaIdentity));
         }
 
         return artifact;
@@ -11851,6 +12305,12 @@ public static partial class TrRmExecutableCompiler
                     = rootTables.Parameters.GetTypeSpec(parameterRow);
                 var mode = rootTables.Parameters.GetMode(parameterRow);
                 var flags = rootTables.Parameters.GetFlags(parameterRow);
+                var contextualTypeViewIndex
+                    = function is BoundFunction moduleParameterFunction
+                        ? GetMethodSignatureTypeViewIndex(
+                            moduleParameterFunction, ordinal,
+                            moduleParameterFunction.Variables[ordinal].Type)
+                        : -1;
                 if (mode != 0 || flags > 1
                     || (function is BoundFunction moduleFunction
                         && (moduleFunction.Variables[ordinal].IsMutable
@@ -11868,10 +12328,16 @@ public static partial class TrRmExecutableCompiler
                         "A retained top-level class-reference parameter differs from its checked Param row.");
                 }
 
-                var remappedTypeSpec = RemapC1M1ClassTypeSpec(rootTables,
-                    typeSpecReference, typeDefRowMap, importRowMap,
-                    outputTypeSpecRows, typeSpecRowMap, activeTypeSpecRows,
-                    depth: 0, genericParamRowMap: genericParamRowMap);
+                var remappedTypeSpec = contextualTypeViewIndex >= 0
+                    && function is BoundFunction contextualFunction
+                    ? ContextualFieldTypeSpecReference(
+                        contextualFunction.Variables[ordinal].Type,
+                        contextualTypeViewIndex)
+                    : RemapC1M1ClassTypeSpec(rootTables,
+                        typeSpecReference, typeDefRowMap, importRowMap,
+                        outputTypeSpecRows, typeSpecRowMap,
+                        activeTypeSpecRows, depth: 0,
+                        genericParamRowMap: genericParamRowMap);
                 parameterRows.Add(new TrRmParamRow(signatureOutputRow,
                     ordinal, remappedTypeSpec, mode, flags));
 

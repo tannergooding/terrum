@@ -2380,6 +2380,7 @@ public static partial class TrRmExecutableCompiler
                 StandardLayoutQueriesSchemaIdentity)
             && !StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardInitReferenceBodiesNestedFieldDestinationsSchemaIdentity)
+            && !IsC1M1MethodTypeSchemaIdentity(schemaIdentity)
             && !IsSelectedC1ClassInstanceLayoutSchemaIdentity(
                 schemaIdentity))
         {

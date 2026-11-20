@@ -72,6 +72,12 @@ public static partial class TrRmExecutableCompiler
 
         var artifacts = SnapshotStandardInputs(input, providers);
         var schemaIdentities = GetStandardSchemaIdentities(input, providers);
+        if (schemaIdentities.Any(
+                IsSelectedTypeDefBindingEqualitySchemaIdentity))
+        {
+            throw Unsupported(
+                "TypeDefBindingEquality is selected only by the combined method/type reference operation.");
+        }
         if (StringComparer.Ordinal.Equals(schemaIdentities[0],
                 StandardLayoutQueriesSchemaIdentity))
         {
@@ -203,6 +209,12 @@ public static partial class TrRmExecutableCompiler
             nameof(fieldExportKeys), requireOne: false);
         var artifacts = SnapshotStandardInputs(input, providers);
         var schemaIdentities = GetStandardSchemaIdentities(input, providers);
+        if (schemaIdentities.Any(
+                IsSelectedTypeDefBindingEqualitySchemaIdentity))
+        {
+            throw Unsupported(
+                "TypeDefBindingEquality is selected only by the combined method/type reference operation.");
+        }
         if (schemaIdentities.All(static schemaIdentity =>
                 StringComparer.Ordinal.Equals(schemaIdentity,
                     StandardLayoutQueriesSchemaIdentity)))
@@ -6571,7 +6583,9 @@ public static partial class TrRmExecutableCompiler
     {
         if ((uint)consumerArtifactIndex >= (uint)artifacts.Length
             || consumerArtifactIndex >= schemaIdentities.Length
-            || !(StringComparer.Ordinal.Equals(
+            || !(IsC1M1MethodTypeSchemaIdentity(
+                    schemaIdentities[consumerArtifactIndex])
+                || StringComparer.Ordinal.Equals(
                     schemaIdentities[consumerArtifactIndex],
                 StandardForeignInvocationStorageFixedArraySchemaIdentity)
             || StringComparer.Ordinal.Equals(
@@ -6611,6 +6625,9 @@ public static partial class TrRmExecutableCompiler
                 or TrRmArtifactSchema.LocalAggregateLayoutDraft
                 or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
                 or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft
+                or TrRmArtifactSchema.C1M1Construction2InitializerCopyEvidenceDraft
+                or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft
+                or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidenceDraft
                 or TrRmArtifactSchema.Standard)
             || (!retainExecutableTypes
                 && (program.EntryPoint != -1
@@ -6658,7 +6675,8 @@ public static partial class TrRmExecutableCompiler
                     or StandardLocalAggregateLayoutSchemaIdentity
                     or StandardInitReferenceBodiesLocalFieldLayoutSchemaIdentity
                     or StandardInitReferenceBodiesNestedFieldDestinationsSchemaIdentity
-                    or StandardLayoutQueriesSchemaIdentity))
+                    or StandardLayoutQueriesSchemaIdentity)
+                && !IsC1M1MethodTypeSchemaIdentity(schemaIdentity))
             {
                 throw Unsupported(
                     "Loaded A2 type origins require A2, A2E or A2EU provider snapshots.");
@@ -6695,6 +6713,32 @@ public static partial class TrRmExecutableCompiler
             bindings.Add(binding);
         }
 
+        var isMethodTypeSchema = IsC1M1MethodTypeSchemaIdentity(
+            schemaIdentities[consumerArtifactIndex]);
+        var localTypeExportKeys = new Dictionary<int, List<string>>();
+        if (isMethodTypeSchema)
+        {
+            foreach (var (definition, exportKey) in
+                tables.Exports.GetExportsForModule(moduleRow))
+            {
+                if ((definition >> 24) != 0x13)
+                {
+                    continue;
+                }
+
+                var typeDefRow = checked((int)(
+                    definition & 0x00FF_FFFF));
+                if (!localTypeExportKeys.TryGetValue(typeDefRow,
+                        out var keys))
+                {
+                    keys = [];
+                    localTypeExportKeys.Add(typeDefRow, keys);
+                }
+
+                keys.Add(exportKey);
+            }
+        }
+
         var structures = ImmutableArray.CreateBuilder<BoundStruct>(
             program.Structures.Length);
         for (var structureIndex = 0;
@@ -6705,7 +6749,44 @@ public static partial class TrRmExecutableCompiler
             if (!bindingsByExpectedTypeDef.TryGetValue(typeDefRow,
                     out var bindings))
             {
-                structures.Add(structure);
+                if (!isMethodTypeSchema)
+                {
+                    structures.Add(structure);
+                    continue;
+                }
+
+                var definitionId = 0x1300_0000u
+                    | checked((uint)typeDefRow);
+                var expectedDeclaration = structure with {
+                    StandardTypeOrigin = null,
+                    StandardLayoutOnly = false,
+                    DeclaredCopyEvidence
+                        = tables.TypeDefs.HasDeclaredCopy(typeDefRow),
+                    Fields = [.. structure.Fields.Select(
+                        static field => field with {
+                            StandardFieldOrigin = null,
+                        })],
+                };
+                var localExportKeys
+                    = localTypeExportKeys.TryGetValue(typeDefRow,
+                        out var keysForType)
+                        ? keysForType.ToImmutableArray()
+                        : ImmutableArray<string>.Empty;
+                structures.Add(structure with {
+                    StandardTypeOrigin = new BoundStandardTypeOrigin(
+                        rootSnapshot, definitionId, localExportKeys, false,
+                        ReferenceRoot: rootSnapshot,
+                        ExpectedDeclaration: expectedDeclaration,
+                        ExpectedFixedArrayTypes:
+                            program.NativeFixedArrayTypes,
+                        ExpectedNativePointerTypes:
+                            program.NativePointerTypes) {
+                        SelectedExportKeys = [],
+                    },
+                    StandardLayoutOnly = true,
+                    DeclaredCopyEvidence
+                        = tables.TypeDefs.HasDeclaredCopy(typeDefRow),
+                });
                 continue;
             }
 
@@ -6775,6 +6856,12 @@ public static partial class TrRmExecutableCompiler
                 .Distinct(StringComparer.Ordinal).ToImmutableArray();
             var expectedDeclaration = structure with {
                 StandardTypeOrigin = null,
+                StandardLayoutOnly = false,
+                DeclaredCopyEvidence
+                    = tables.TypeDefs.HasDeclaredCopy(typeDefRow),
+                Fields = [.. structure.Fields.Select(static field => field with {
+                    StandardFieldOrigin = null,
+                })],
             };
             structures.Add(structure with {
                 StandardTypeOrigin = new BoundStandardTypeOrigin(
@@ -6785,7 +6872,17 @@ public static partial class TrRmExecutableCompiler
                     rootSnapshot, expectedDeclaration,
                     program.NativeFixedArrayTypes,
                     program.NativePointerTypes),
+                StandardLayoutOnly = true,
+                DeclaredCopyEvidence
+                    = tables.TypeDefs.HasDeclaredCopy(typeDefRow),
             });
+        }
+
+        if (isMethodTypeSchema)
+        {
+            return program with {
+                Structures = structures.MoveToImmutable(),
+            };
         }
 
         var exportsByStructure = new List<string>?[

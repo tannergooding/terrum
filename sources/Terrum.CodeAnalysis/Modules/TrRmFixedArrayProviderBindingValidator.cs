@@ -934,7 +934,151 @@ internal static class TrRmFixedArrayProviderBindingValidator
                     static binding => binding.ConsumerArtifactIndex)
                     .ThenBy(static binding => binding.ConsumerModuleRow)
                     .ThenBy(static binding => binding.ImportRow)];
+            ValidateTypeDefBindingEqualities(orderedBindings);
             return [.. orderedBindings];
+        }
+
+        private void ValidateTypeDefBindingEqualities(
+            IReadOnlyList<TrRmStandardTypeProviderBinding> typeBindings)
+        {
+            var bindingsByExpected = new Dictionary<(
+                int ArtifactIndex, int ModuleRow, int TypeDefRow),
+                TrRmStandardTypeProviderBinding>();
+            foreach (var binding in typeBindings)
+            {
+                if (!bindingsByExpected.TryAdd((
+                        binding.ConsumerArtifactIndex,
+                        binding.ConsumerModuleRow,
+                        binding.ExpectedTypeDefRow), binding))
+                {
+                    throw InvalidBinding();
+                }
+            }
+
+            var selectedModulesByLocation = new Dictionary<(
+                int ArtifactIndex, int ModuleRow), TrRmStandardModuleSelection>(
+                _modules.Length);
+            foreach (var module in _modules)
+            {
+                if (!selectedModulesByLocation.TryAdd((
+                        module.ArtifactIndex, module.ModuleRow), module))
+                {
+                    throw InvalidBinding();
+                }
+            }
+            var importedTypeDefs = new HashSet<(
+                int ArtifactIndex, int ModuleRow, int TypeDefRow)>();
+            var processedArtifacts = new HashSet<int>();
+            foreach (var module in _modules)
+            {
+                if (!processedArtifacts.Add(module.ArtifactIndex))
+                {
+                    continue;
+                }
+
+                var tables = GetTables(module.ArtifactIndex);
+                for (var importRow = 1;
+                    importRow <= tables.Imports.Count; importRow++)
+                {
+                    ConsumeWork();
+                    var expectedDefinition
+                        = tables.Imports
+                            .GetExpectedDefinitionForImportRow(importRow);
+                    if ((expectedDefinition >> 24) != 0x13)
+                    {
+                        continue;
+                    }
+
+                    var moduleRefRow
+                        = tables.Imports.GetModuleRefForImportRow(
+                            importRow);
+                    var ownerModule
+                        = tables.ModuleRefs.GetOwnerModule(moduleRefRow);
+                    importedTypeDefs.Add((module.ArtifactIndex, ownerModule,
+                        checked((int)(expectedDefinition
+                            & 0x00FF_FFFF))));
+                }
+
+                var equalityTable = tables.TypeDefBindingEqualities;
+                for (var equalityRow = 1;
+                    equalityRow <= equalityTable.Count; equalityRow++)
+                {
+                    ConsumeWork();
+                    if (!TrRmExecutableCompiler
+                        .IsSelectedTypeDefBindingEqualitySchemaIdentity(
+                            _schemaIdentities[module.ArtifactIndex]))
+                    {
+                        throw InvalidBinding();
+                    }
+                    var equalityOwnerModule
+                        = checked((int)equalityTable.GetOwnerModule(
+                            equalityRow));
+                    if (!selectedModulesByLocation.ContainsKey((
+                            module.ArtifactIndex, equalityOwnerModule)))
+                    {
+                        throw InvalidBinding();
+                    }
+
+                    var leftTypeDef = checked((int)equalityTable
+                        .GetLeftTypeDef(equalityRow));
+                    var rightTypeDef = checked((int)equalityTable
+                        .GetRightTypeDef(equalityRow));
+                    var leftActual = ResolveActualTypeDef(
+                        module.ArtifactIndex, tables, leftTypeDef);
+                    var rightActual = ResolveActualTypeDef(
+                        module.ArtifactIndex, tables, rightTypeDef);
+                    if (leftActual != rightActual)
+                    {
+                        throw InvalidBinding();
+                    }
+                }
+            }
+
+            (int ArtifactIndex, int ModuleRow, int TypeDefRow)
+                ResolveActualTypeDef(int artifactIndex,
+                    TrRmStructuralMetadataValidator
+                        .ValidatedExecutionTables tables,
+                    int expectedTypeDefRow)
+            {
+                if (tables.TypeDefs.GetKind(expectedTypeDefRow) != 1
+                    || !tables.TypeDefs.HasDeclaredCopy(expectedTypeDefRow)
+                    || tables.TypeDefs.HasDeclaredUnique(expectedTypeDefRow)
+                    || tables.TypeDefs
+                        .GetGenericRange(expectedTypeDefRow).Count != 0
+                    || !tables.Layouts.HasBlittableLayout(
+                        expectedTypeDefRow,
+                        TrRmTargetProfileTableReader
+                            .WindowsX64NativeProfileId,
+                        TrRmTargetProfileTableReader
+                            .WindowsX64NativeProfileRuleRevision))
+                {
+                    throw InvalidBinding();
+                }
+
+                var ownerModule
+                    = tables.TypeDefs.GetOwnerModule(expectedTypeDefRow);
+                var key = (artifactIndex, ownerModule,
+                    expectedTypeDefRow);
+                if (bindingsByExpected.TryGetValue(key, out var binding))
+                {
+                    return (binding.ProviderArtifactIndex,
+                        binding.ProviderModuleRow,
+                        binding.ProviderTypeDefRow);
+                }
+
+                if (importedTypeDefs.Contains(key))
+                {
+                    throw InvalidBinding();
+                }
+
+                if (!selectedModulesByLocation.ContainsKey((
+                        artifactIndex, ownerModule)))
+                {
+                    throw InvalidBinding();
+                }
+
+                return key;
+            }
         }
 
         private ImmutableArray<TrRmStandardMethodProviderBinding>

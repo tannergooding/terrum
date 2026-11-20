@@ -203,6 +203,8 @@ public static partial class TrRmExecutableCompiler
             || StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardC1M1Construction2InitializerCopyEvidenceSchemaIdentity)
             || StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardC1M1Construction2TypeBindingViewsSchemaIdentity)
+            || StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardC1L1R1SchemaIdentity)
             || StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardC1M1L1R1SchemaIdentity)
@@ -214,6 +216,8 @@ public static partial class TrRmExecutableCompiler
                 StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsSchemaIdentity)
             || StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceSchemaIdentity)
+            || StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsTypeBindingViewsSchemaIdentity)
             || StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardCM1AR1SchemaIdentity)
             || StringComparer.Ordinal.Equals(schemaIdentity,
@@ -460,6 +464,7 @@ public static partial class TrRmExecutableCompiler
                 StandardLayoutQueriesSchemaIdentity)
             && !StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardInitReferenceBodiesNestedFieldDestinationsSchemaIdentity)
+            && !IsC1M1MethodTypeSchemaIdentity(schemaIdentity)
             && typeExportSnapshot.Any(static export =>
                 !export.FieldExports.IsDefaultOrEmpty))
         {
@@ -497,6 +502,28 @@ public static partial class TrRmExecutableCompiler
 
             return EmitStandardCore(program, moduleIdentity, schemaIdentity,
                 moduleTargetRequirement, typeExportSnapshot);
+        }
+
+        if (IsC1M1MethodTypeSchemaIdentity(schemaIdentity))
+        {
+            if (program.EntryPoint != -1
+                || !program.Classes.IsEmpty
+                || !program.StandardClassDeclarations.IsEmpty
+                || !program.Interfaces.IsEmpty
+                || !program.GenericNominalTypeDefinitions.IsEmpty
+                || !program.GenericNominalTypeInstances.IsEmpty
+                || !program.GenericMethodDefinitions.IsEmpty
+                || !program.GenericMethodSignatures.IsEmpty
+                || program.Structures.IsEmpty)
+            {
+                throw Unsupported(
+                    "Explicit Construction-2 TypeDef exports require a classless nongeneric source module with struct declarations.");
+            }
+
+            return EmitStandardCore(program, moduleIdentity,
+                schemaIdentity, moduleTargetRequirement,
+                typeExportSnapshot, sourceClassExports:
+                    new SourceClassExports(program, []));
         }
 
         var initializationReferenceLocalFieldLayout
@@ -651,13 +678,19 @@ public static partial class TrRmExecutableCompiler
             && !StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardC1M1Construction2InitializerCopyEvidenceSchemaIdentity)
             && !StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardC1M1Construction2TypeBindingViewsSchemaIdentity)
+            && !StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsSchemaIdentity)
             && !StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceSchemaIdentity)
             && !StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsTypeBindingViewsSchemaIdentity)
+            && !StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardCM1AR1SchemaIdentity)
             && !StringComparer.Ordinal.Equals(schemaIdentity,
-                StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidenceSchemaIdentity))
+                StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidenceSchemaIdentity)
+            && !StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsTypeBindingViewsSchemaIdentity))
         {
             throw new ArgumentException(
                 "The seven-argument source class route requires an exact C1M1, Construction-1, Construction-2 or CM1 identity.",
@@ -955,10 +988,34 @@ public static partial class TrRmExecutableCompiler
                 || StringComparer.Ordinal.Equals(schemaIdentity,
                     StandardCM1AR1SchemaIdentity)
                 || StringComparer.Ordinal.Equals(schemaIdentity,
-                    StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidenceSchemaIdentity);
+                    StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidenceSchemaIdentity)
+                || StringComparer.Ordinal.Equals(schemaIdentity,
+                    StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsTypeBindingViewsSchemaIdentity);
+        var hasContextualTypeViews
+            = program.StandardQuerySourceAssociation
+                is BoundStandardQuerySourceAssociation typeViewAssociation
+                && !typeViewAssociation.TypeViews.IsDefaultOrEmpty;
+        var hasTopLevelMethodImports = program.Functions.Any(
+            static function => function.ModuleImport is not null);
+        var hasSupportedModuleImports = program.Functions.All(
+            static function => function.ModuleImport is null
+                || (function.IsExternal && function.IsModuleReference
+                    && function.DeclaringStruct is null
+                    && function.DirectNativeImport is null
+                    && function.NativeVTableMethod is null
+                    && function.NativeFunctionPointerType is null));
+        var isMethodTypeReference
+            = IsC1M1MethodTypeSchemaIdentity(schemaIdentity)
+                && program.Classes.IsEmpty
+                && program.StandardClassDeclarations.IsEmpty
+                && hasSupportedModuleImports
+                && (hasContextualTypeViews || hasTopLevelMethodImports
+                    || IsSelectedTypeDefBindingEqualitySchemaIdentity(
+                        schemaIdentity));
         if ((requiresSourceClassExports && sourceClassExports is null
                 && program.StandardClassDeclarations.IsEmpty
-                && program.StandardFieldProviderClosure is null)
+                && program.StandardFieldProviderClosure is null
+                && !isMethodTypeReference)
             || (sourceClassExports is not null
                 && !StringComparer.Ordinal.Equals(schemaIdentity,
                     StandardC1M1SchemaIdentity)
@@ -1232,13 +1289,15 @@ public static partial class TrRmExecutableCompiler
                     moduleTargetRequirement, sourceTypeExports,
                     sourceGenericMethodExports,
                     TrRmArtifactSchema.C1M1Construction2InitializerCopyEvidenceDraft,
-                    sourceClassExports),
+                    sourceClassExports,
+                    standardSchemaIdentity: schemaIdentity),
             StandardC1M1Construction2TypeBindingViewsSchemaIdentity
                 => EmitC1M1Construction2(program, moduleIdentity,
                     moduleTargetRequirement, sourceTypeExports,
                     sourceGenericMethodExports,
                     TrRmArtifactSchema.C1M1Construction2InitializerCopyEvidenceDraft,
-                    sourceClassExports),
+                    sourceClassExports,
+                    standardSchemaIdentity: schemaIdentity),
             StandardC1M1Construction2L1R1SchemaIdentity
                 => EmitC1M1Construction2(program, moduleIdentity,
                     moduleTargetRequirement, sourceTypeExports,
@@ -1258,14 +1317,16 @@ public static partial class TrRmExecutableCompiler
                     sourceGenericMethodExports,
                     TrRmArtifactSchema
                         .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft,
-                    sourceClassExports),
+                    sourceClassExports,
+                    standardSchemaIdentity: schemaIdentity),
             StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsTypeBindingViewsSchemaIdentity
                 => EmitC1M1Construction2(program, moduleIdentity,
                     moduleTargetRequirement, sourceTypeExports,
                     sourceGenericMethodExports,
                     TrRmArtifactSchema
                         .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft,
-                    sourceClassExports),
+                    sourceClassExports,
+                    standardSchemaIdentity: schemaIdentity),
             StandardCM1AR1SchemaIdentity
                 => EmitC1M1Construction2(program, moduleIdentity,
                     moduleTargetRequirement, sourceTypeExports,
@@ -1279,14 +1340,16 @@ public static partial class TrRmExecutableCompiler
                     sourceGenericMethodExports,
                     TrRmArtifactSchema
                         .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidenceDraft,
-                    sourceClassExports),
+                    sourceClassExports,
+                    standardSchemaIdentity: schemaIdentity),
             StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsTypeBindingViewsSchemaIdentity
                 => EmitC1M1Construction2(program, moduleIdentity,
                     moduleTargetRequirement, sourceTypeExports,
                     sourceGenericMethodExports,
                     TrRmArtifactSchema
                         .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidenceDraft,
-                    sourceClassExports),
+                    sourceClassExports,
+                    standardSchemaIdentity: schemaIdentity),
             StandardNominalEnumsSchemaIdentity
                 => EmitNominalEnumsDraftSource(program, moduleIdentity,
                     moduleTargetRequirement, sourceTypeExports),
@@ -1492,14 +1555,62 @@ public static partial class TrRmExecutableCompiler
         SourceGenericMethodExports? sourceGenericMethodExports,
         TrRmArtifactSchema schema
             = TrRmArtifactSchema.C1M1Construction2Draft,
-        SourceClassExports? sourceClassExports = null)
+        SourceClassExports? sourceClassExports = null,
+        string? standardSchemaIdentity = null)
     {
+        var hasContextualTypeViews
+            = program.StandardQuerySourceAssociation
+                is BoundStandardQuerySourceAssociation association
+                && !association.TypeViews.IsDefaultOrEmpty;
+        var hasTopLevelMethodImports = program.Functions.Any(
+            static function => function.ModuleImport is not null);
+        var hasSupportedModuleImports = program.Functions.All(
+            static function => function.ModuleImport is null
+                || (function.IsExternal && function.IsModuleReference
+                    && function.DeclaringStruct is null
+                    && function.DirectNativeImport is null
+                    && function.NativeVTableMethod is null
+                    && function.NativeFunctionPointerType is null));
+        var isMethodTypeReference
+            = IsC1M1MethodTypeSchemaIdentity(
+                standardSchemaIdentity ?? string.Empty)
+                && program.Classes.IsEmpty
+                && program.StandardClassDeclarations.IsEmpty
+                && hasSupportedModuleImports
+                && (hasContextualTypeViews || hasTopLevelMethodImports
+                    || IsSelectedTypeDefBindingEqualitySchemaIdentity(
+                        standardSchemaIdentity));
+        if (hasContextualTypeViews
+            && (!program.Classes.IsEmpty
+                || !program.StandardClassDeclarations.IsEmpty
+                || sourceClassExports is not null))
+        {
+            throw Unsupported(
+                "The provisional contextual TypeDef profile is limited to classless method/type references.");
+        }
+
         if (sourceClassExports is not null)
         {
             if (!ReferenceEquals(sourceClassExports.Program, program))
             {
                 throw Unsupported(
                     "The construction-2 source class route requires its captured local declarations.");
+            }
+
+            if (sourceClassExports.Exports.IsEmpty
+                && program.Classes.IsEmpty
+                && program.StandardClassDeclarations.IsEmpty
+                && program.Interfaces.IsEmpty
+                && program.GenericNominalTypeDefinitions.IsEmpty
+                && program.GenericNominalTypeInstances.IsEmpty
+                && program.GenericMethodDefinitions.IsEmpty
+                && program.GenericMethodSignatures.IsEmpty
+                && sourceGenericMethodExports?.Exports.IsEmpty != false)
+            {
+                return EmitDevelopment(program, moduleIdentity, schema,
+                    moduleTargetRequirement, sourceTypeExports,
+                    standardInitializationReferenceBodies: true,
+                    standardSchemaIdentity: standardSchemaIdentity);
             }
 
             if (schema.UsesClassParameterDefaults()
@@ -1521,7 +1632,8 @@ public static partial class TrRmExecutableCompiler
 
             var classArtifact = EmitC1M1SourceClassDeclarations(program,
                 moduleIdentity, moduleTargetRequirement, sourceClassExports,
-                out var frozenScalarValueBuilder, schema);
+                out var frozenScalarValueBuilder, schema,
+                standardSchemaIdentity);
             if (schema.UsesClassParameterDefaults())
             {
                 return EmitGenericMethodCallsDraftSource(program,
@@ -1566,6 +1678,14 @@ public static partial class TrRmExecutableCompiler
                     : "The construction-2 source route does not yet emit class, witness, generic nominal or generic-method declaration closure.");
         }
 
+        if (isMethodTypeReference)
+        {
+            return EmitDevelopment(program, moduleIdentity, schema,
+                moduleTargetRequirement,
+                standardInitializationReferenceBodies: true,
+                standardSchemaIdentity: standardSchemaIdentity);
+        }
+
         if (supportsL1)
         {
             return EmitGenericMethodCallsDraftSource(program, moduleIdentity,
@@ -1578,7 +1698,8 @@ public static partial class TrRmExecutableCompiler
         return EmitDevelopment(program, moduleIdentity,
             schema,
             moduleTargetRequirement,
-            standardInitializationReferenceBodies: true);
+            standardInitializationReferenceBodies: true,
+            standardSchemaIdentity: standardSchemaIdentity);
     }
 
     internal static byte[] EmitDevelopmentFunctionPointerEffectsDraft(
@@ -1650,7 +1771,8 @@ public static partial class TrRmExecutableCompiler
         IReadOnlyList<TrRmSourceTypeExport>? sourceTypeExports = null,
         bool standardInitializationReferenceBodies = false,
         bool standardNativePointerLoads = false,
-        bool allowGenericMethodNominalTypeTables = false)
+        bool allowGenericMethodNominalTypeTables = false,
+        string? standardSchemaIdentity = null)
     {
         ArgumentNullException.ThrowIfNull(program);
         if (BoundEnumTypes.HasStandardDeclarations(
@@ -1674,6 +1796,9 @@ public static partial class TrRmExecutableCompiler
                 or TrRmArtifactSchema.C1M1ConstructionParameterLabelsReceiverAccessDraft
                 or TrRmArtifactSchema.C1M1Construction2Draft
                 or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessDraft
+                or TrRmArtifactSchema.C1M1Construction2InitializerCopyEvidenceDraft
+                or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft
+                or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidenceDraft
                 or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft
                 or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsDraft
                 or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft
@@ -1969,13 +2094,108 @@ public static partial class TrRmExecutableCompiler
                         schema.UsesInitializationReferenceLocalFieldLayout()));
         }
 
+        if (sourceTypeExports is { Count: > 0 })
+        {
+            if (program.SourceTypeDeclarations.IsDefault)
+            {
+                throw Unsupported(
+                    "Explicit source TypeDef exports require retained source declaration identities.");
+            }
+
+            var sourceDeclarations = program.SourceTypeDeclarations
+                .ToDictionary(static declaration =>
+                    (declaration.Namespace, declaration.Name));
+            var pendingSourceStructures = new Stack<int>();
+            foreach (var export in sourceTypeExports)
+            {
+                if (export is null
+                    || !sourceDeclarations.TryGetValue(
+                        (export.Namespace, export.Name),
+                        out var declaration))
+                {
+                    throw new ArgumentException(
+                        "A source TypeDef ExportKey does not select a checked declaration.",
+                        nameof(sourceTypeExports));
+                }
+
+                pendingSourceStructures.Push(
+                    declaration.StructureIndex);
+            }
+
+            while (pendingSourceStructures.TryPop(
+                out var sourceStructureIndex))
+            {
+                if ((uint)sourceStructureIndex
+                    >= (uint)program.Structures.Length)
+                {
+                    throw Invalid(
+                        "A source TypeDef export has an invalid structure identity.");
+                }
+                if (!emittedBlittableStructureIndexSet.Add(
+                        sourceStructureIndex))
+                {
+                    continue;
+                }
+
+                if (emittedBlittableStructureIndexSet.Count
+                    > SemanticVerifier.MaximumVariables)
+                {
+                    throw Unsupported(
+                        "The source TypeDef closure exceeds the checked structure limit.");
+                }
+
+                foreach (var field in program.Structures[
+                        sourceStructureIndex].Fields)
+                {
+                    var nestedStructureIndex = (int)field.Type - 100;
+                    if ((uint)nestedStructureIndex
+                        < (uint)program.Structures.Length)
+                    {
+                        pendingSourceStructures.Push(
+                            nestedStructureIndex);
+                    }
+                }
+            }
+        }
+
         var emittedBlittableStructureIndexes
             = emittedBlittableStructureIndexSet
                 .OrderBy(static index => index).ToArray();
+        var contextualTypeViews
+            = program.StandardQuerySourceAssociation
+                is BoundStandardQuerySourceAssociation typeViewAssociation
+                && !typeViewAssociation.TypeViews.IsDefault
+                    ? typeViewAssociation.TypeViews
+                    : ImmutableArray<BoundStandardTypeView>.Empty;
+        var hasContextualTypeViews = !contextualTypeViews.IsEmpty;
+        if (hasContextualTypeViews
+            && !IsC1M1MethodTypeSchemaIdentity(
+                standardSchemaIdentity ?? string.Empty))
+        {
+            throw Unsupported(
+                "Contextual TypeDef views require an exact Construction-2 method/type schema.");
+        }
+        if (hasContextualTypeViews
+            && program.Structures.Any(static structure =>
+                structure.StandardTypeOrigin is
+                    BoundStandardTypeOrigin origin
+                && origin.ContextualViewIndexes.Length > 1)
+            && !IsSelectedTypeDefBindingEqualitySchemaIdentity(
+                standardSchemaIdentity))
+        {
+            throw Unsupported(
+                "Distinct contextual TypeDef expectations require an exact TypeBindingViews schema.");
+        }
+
         var typeDefStructureIndexSet
             = emittedBlittableStructureIndexSet.ToHashSet();
         typeDefStructureIndexSet.UnionWith(
             standardInitializationFieldStructureIndexes);
+        if (hasContextualTypeViews)
+        {
+            typeDefStructureIndexSet.UnionWith(
+                Enumerable.Range(0, program.Structures.Length));
+        }
 
         var typeDefStructureIndexes = typeDefStructureIndexSet
             .OrderBy(static index => index).ToArray();
@@ -1984,6 +2204,51 @@ public static partial class TrRmExecutableCompiler
             typeDefStructureIndexes = [
                 .. Enumerable.Range(0, program.Structures.Length),
             ];
+        }
+        var typeDefStructureViewIndexes
+            = Enumerable.Repeat(-1, typeDefStructureIndexes.Length)
+                .ToArray();
+        if (hasContextualTypeViews)
+        {
+            var structureViews = new List<(int StructureIndex,
+                int TypeViewIndex)>();
+            foreach (var structureIndex in typeDefStructureIndexes)
+            {
+                var origin = program.Structures[structureIndex]
+                    .StandardTypeOrigin;
+                if (origin is null
+                    || origin.ContextualViewIndexes.IsDefaultOrEmpty)
+                {
+                    throw Invalid(
+                        "A retained contextual TypeDef has no complete view-index map.");
+                }
+
+                foreach (var typeViewIndex in origin.ContextualViewIndexes)
+                {
+                    if ((uint)typeViewIndex
+                            >= (uint)contextualTypeViews.Length
+                        || contextualTypeViews[typeViewIndex]
+                            .StructureIndex != structureIndex)
+                    {
+                        throw Invalid(
+                            "A contextual TypeDef view does not map to its canonical structure.");
+                    }
+
+                    structureViews.Add((structureIndex, typeViewIndex));
+                }
+            }
+
+            if (structureViews.Select(static view => view.TypeViewIndex)
+                    .Distinct().Count() != contextualTypeViews.Length)
+            {
+                throw Invalid(
+                    "The selected contextual TypeDef views do not have a one-to-one emitted destination.");
+            }
+
+            typeDefStructureIndexes = [.. structureViews.Select(
+                static view => view.StructureIndex)];
+            typeDefStructureViewIndexes = [.. structureViews.Select(
+                static view => view.TypeViewIndex)];
         }
         if (typeDefStructureIndexes.Any(index =>
                 program.Structures[index].SourceGenericTypeDefinitionIndex
@@ -2162,15 +2427,20 @@ public static partial class TrRmExecutableCompiler
         void AddStandardProviderSnapshot(
             BoundSourceTypeProviderSnapshot provider)
         {
-            var expectedSchemaIdentity = schema
+            var isMethodTypeSchema = IsC1M1MethodTypeSchemaIdentity(
+                standardSchemaIdentity ?? string.Empty);
+            var expectedSchemaIdentity = isMethodTypeSchema
+                ? standardSchemaIdentity!
+                : schema
                     .UsesNestedInitializationReferenceFieldDestinations()
                 ? StandardInitReferenceBodiesNestedFieldDestinationsSchemaIdentity
                 : schema.UsesInitializationReferenceLocalFieldLayout()
                     ? StandardInitReferenceBodiesLocalFieldLayoutSchemaIdentity
                     : StandardLayoutQueriesSchemaIdentity;
-            if (schema is not (TrRmArtifactSchema.Standard
+            if ((!isMethodTypeSchema
+                    && schema is not (TrRmArtifactSchema.Standard
                     or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
-                    or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft)
+                    or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft))
                 || !StringComparer.Ordinal.Equals(provider.SchemaIdentity,
                     expectedSchemaIdentity)
                 || string.IsNullOrEmpty(provider.ModuleIdentity))
@@ -2226,7 +2496,7 @@ public static partial class TrRmExecutableCompiler
             var sourceAssociation
                 = program.StandardQuerySourceAssociation
                     ?? throw Unsupported(
-                        "A Standard LayoutQueries source Import has no retained provider association.");
+                        "A Standard source TypeDef/FieldDef Import has no retained provider association.");
             var retainedProviderModules
                 = ValidateStandardQueryProviderClosures(
                     sourceAssociation.ProviderClosures);
@@ -2274,20 +2544,70 @@ public static partial class TrRmExecutableCompiler
         var structureNamespaceRows = new int[typeDefStructureIndexes.Length];
         var structureNameRows = new int[typeDefStructureIndexes.Length];
         var structureFieldNameRows = new int[typeDefStructureIndexes.Length][];
+        var typeDefRowByContextualView = new Dictionary<int, int>(
+            contextualTypeViews.Length);
+        BoundStruct TypeDefStructure(int typeDefIndex)
+        {
+            var structureIndex = typeDefStructureIndexes[typeDefIndex];
+            var typeViewIndex = typeDefStructureViewIndexes[typeDefIndex];
+            return typeViewIndex < 0
+                ? program.Structures[structureIndex]
+                : contextualTypeViews[typeViewIndex].ViewDeclaration;
+        }
+
+        bool IsConstruction2CopyValueType(PrimitiveType type)
+        {
+            if (!schema.UsesConstructionInitializerCopyEvidence()
+                || BoundEnumTypes.IsType(type))
+            {
+                return false;
+            }
+
+            var structureIndex = (int)type - 100;
+            if ((uint)structureIndex
+                    >= (uint)program.Structures.Length
+                || !typeDefStructureIndexSet.Contains(structureIndex))
+            {
+                return false;
+            }
+
+            var structure = program.Structures[structureIndex];
+            return (structure.StandardTypeOrigin is null
+                    ? !structure.IsUnique
+                    : structure.DeclaredCopyEvidence == true)
+                && structure.BlittableTargetRequirement
+                    == FixedLayoutStorage.WindowsX64TargetRequirement
+                && !structure.IsUnique
+                && structure.CleanupMethod is null
+                && (structure.IsSequential || structure.IsTransparent);
+        }
+
         for (var index = 0; index < typeDefStructureIndexes.Length; index++)
         {
             var structureIndex = typeDefStructureIndexes[index];
-            var structure = program.Structures[structureIndex];
+            var structure = TypeDefStructure(index);
             var separator = structure.Name.LastIndexOf('.', StringComparison.Ordinal);
             var typeNamespace = separator < 0 ? "" : structure.Name[..separator];
             var typeName = separator < 0 ? structure.Name : structure.Name[(separator + 1)..];
             if (typeName.Length == 0
-                || !structureTypeDefRows.TryAdd(structureIndex, index + 1)
-                || !structureIndexByName.TryAdd(structure.Name,
-                    structureIndex))
+                || !structureTypeDefRows.ContainsKey(structureIndex)
+                    && !structureTypeDefRows.TryAdd(structureIndex,
+                        index + 1)
+                || structureIndexByName.TryGetValue(structure.Name,
+                    out var existingStructureIndex)
+                    && existingStructureIndex != structureIndex)
             {
                 throw Unsupported($"Native Blittable structure identity '{structure.Name}' cannot be represented in TRRM.");
             }
+            if (typeDefStructureViewIndexes[index] >= 0
+                && !typeDefRowByContextualView.TryAdd(
+                    typeDefStructureViewIndexes[index], index + 1))
+            {
+                throw Invalid(
+                    "A contextual TypeDef view has multiple destination rows.");
+            }
+            _ = structureIndexByName.TryAdd(structure.Name,
+                structureIndex);
             structureNamespaceRows[index] = names.Count + 1;
             names.Add((typeNamespace, 1));
             structureNameRows[index] = names.Count + 1;
@@ -2315,6 +2635,8 @@ public static partial class TrRmExecutableCompiler
         var registeredQueryBodyCount = 0;
         var signatures = new List<TrRmMethodSigRow>(program.Functions.Length);
         var parameters = new List<TrRmParamRow>(parameterCount);
+        var methodParameterSurfaceRows
+            = new List<C1M1ParameterSurfaceRow>();
         var methods = new List<TrRmMethodDefRow>(
             program.Functions.Length + program.NativeFunctionPointerSignatures.Length);
         var contracts = new List<TrRmContractRow>(
@@ -2397,8 +2719,7 @@ public static partial class TrRmExecutableCompiler
         var fieldRowCount = 0;
         for (var index = 0; index < typeDefStructureIndexes.Length; index++)
         {
-            var fieldCount = program.Structures[
-                typeDefStructureIndexes[index]].Fields.Length;
+            var fieldCount = TypeDefStructure(index).Fields.Length;
             structureFieldFirst[index] = fieldCount == 0
                 ? 0 : checked(fieldRowCount + 1);
             fieldRowCount = checked(fieldRowCount + fieldCount);
@@ -3018,8 +3339,11 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        var standardSourceImportMappings
-            = CreateStandardLayoutQuerySourceImportMappings(program,
+        var standardSourceImportMappings = hasContextualTypeViews
+            ? CreateC1M1MethodTypeSourceImportMappings(program,
+                typeDefStructureIndexes, typeDefStructureViewIndexes,
+                typeDefRowByContextualView, structureFieldFirst, names)
+            : CreateStandardLayoutQuerySourceImportMappings(program,
                 schema.UsesNestedInitializationReferenceFieldDestinations()
                     ? StandardInitReferenceBodiesNestedFieldDestinationsSchemaIdentity
                     : schema.UsesInitializationReferenceLocalFieldLayout()
@@ -3294,9 +3618,36 @@ public static partial class TrRmExecutableCompiler
             return 0x1600_0000u | checked((uint)(functionIndex + 1));
         }
 
-        for (var structureIndex = 0;
-            structureIndex < program.Structures.Length; structureIndex++)
+        for (var typeDefIndex = 0;
+            typeDefIndex < typeDefStructureIndexes.Length; typeDefIndex++)
         {
+            var structureIndex = typeDefStructureIndexes[typeDefIndex];
+            var typeViewIndex = typeDefStructureViewIndexes[typeDefIndex];
+            if (typeViewIndex >= 0)
+            {
+                var typeDefRow = typeDefIndex + 1;
+                var view = contextualTypeViews[typeViewIndex];
+                var key = view.Expectation?.ExportKey ?? view.ExportKey
+                    ?? throw Invalid(
+                        "A contextual TypeDef TypeSpec has no retained ExportKey.");
+                var expectedDefinition = 0x1300_0000u
+                    | checked((uint)typeDefRow);
+                if (!standardTypeImportRows.TryGetValue(
+                        (expectedDefinition, view.Provider.ModuleIdentity,
+                            key), out var importRow))
+                {
+                    throw Unsupported(
+                        "A contextual TypeDef has no matching TypeDef Import row.");
+                }
+
+                var contextualTypeSpecRow = typeRowsList.Count + 1;
+                typeRowsList.Add(TrRmTypeSpecTableWriter.Reference(0x03,
+                    checked((uint)importRow)));
+                typeDefTypeSpecRows.Add(typeDefRow,
+                    contextualTypeSpecRow);
+                continue;
+            }
+
             var origin = program.Structures[structureIndex]
                 .StandardTypeOrigin;
             if (origin is null)
@@ -3324,6 +3675,83 @@ public static partial class TrRmExecutableCompiler
             typeDefTypeSpecRows.Add(typeDefRow, typeSpecRow);
         }
 
+        int ContextualTypeSpecRowForView(int typeViewIndex)
+        {
+            if (!typeDefRowByContextualView.TryGetValue(typeViewIndex,
+                    out var typeDefRow)
+                || (uint)typeViewIndex
+                    >= (uint)contextualTypeViews.Length)
+            {
+                throw Invalid(
+                    "A contextual type occurrence has no emitted TypeDef view.");
+            }
+
+            if (typeDefTypeSpecRows.TryGetValue(typeDefRow,
+                    out var existingRow))
+            {
+                return existingRow;
+            }
+
+            var view = contextualTypeViews[typeViewIndex];
+            var key = view.Expectation?.ExportKey ?? view.ExportKey
+                ?? throw Invalid(
+                    "A contextual TypeDef TypeSpec has no retained ExportKey.");
+            var expectedDefinition = 0x1300_0000u
+                | checked((uint)typeDefRow);
+            if (!standardTypeImportRows.TryGetValue(
+                    (expectedDefinition, view.Provider.ModuleIdentity, key),
+                    out var importRow))
+            {
+                throw Unsupported(
+                    "A contextual type occurrence has no matching TypeDef Import row.");
+            }
+
+            var typeSpecRow = typeRowsList.Count + 1;
+            typeRowsList.Add(TrRmTypeSpecTableWriter.Reference(0x03,
+                checked((uint)importRow)));
+            typeDefTypeSpecRows.Add(typeDefRow, typeSpecRow);
+            return typeSpecRow;
+        }
+
+        int ContextualMethodTypeSpecRow(int functionIndex,
+            int parameterOrdinal, PrimitiveType type)
+        {
+            var structureIndex = (int)type - 100;
+            if ((uint)structureIndex >= (uint)program.Structures.Length
+                || !hasContextualTypeViews)
+            {
+                return 0;
+            }
+
+            var function = program.Functions[functionIndex];
+            if (function.ModuleImport is not BoundModuleImport methodImport
+                || program.StandardQuerySourceAssociation
+                    is not BoundStandardQuerySourceAssociation association
+                || association.MethodTypeViews.IsDefaultOrEmpty)
+            {
+                throw Invalid(
+                    "A struct-valued MethodDef Import has no retained contextual signature view.");
+            }
+
+            var matchingViews = association.MethodTypeViews.Where(view =>
+                    StringComparer.Ordinal.Equals(
+                        view.MethodExportKey, methodImport.ExportKey)
+                    && view.SignaturePosition == parameterOrdinal)
+                .ToArray();
+            if (matchingViews.Length != 1
+                || (uint)matchingViews[0].TypeViewIndex
+                    >= (uint)contextualTypeViews.Length
+                || contextualTypeViews[matchingViews[0].TypeViewIndex]
+                    .StructureIndex != structureIndex)
+            {
+                throw Invalid(
+                    "A struct-valued MethodDef Import has an ambiguous or mismatched contextual type view.");
+            }
+
+            return ContextualTypeSpecRowForView(
+                matchingViews[0].TypeViewIndex);
+        }
+
         _ = blittableStructureIndexSet.Count == 0
             ? [] : FixedLayoutStorage.Validate(program.Structures,
                 program.NativeFixedArrayTypes,
@@ -3331,23 +3759,31 @@ public static partial class TrRmExecutableCompiler
         for (var index = 0; index < typeDefStructureIndexes.Length; index++)
         {
             var structureIndex = typeDefStructureIndexes[index];
-            var structure = program.Structures[structureIndex];
+            var structure = TypeDefStructure(index);
             for (var field = 0; field < structure.Fields.Length; field++)
             {
                 var fieldDefinition = structure.Fields[field];
-                var fieldTypeRow = blittableStructureIndexSet.Contains(
-                        structureIndex)
-                    ? NativeBlittableFieldTypeRow(typeRowsList,
-                        typeDefTypeSpecRows, structureTypeDefRows,
-                        fieldDefinition.Type, nativeRawPointerTypeRow,
-                        nativeFunctionPointerTypeRows, nativePointerTypeRows,
-                        program.NativePointerTypes, TypeSpecRowFor)
-                    : NativeValueTypeRow(fieldDefinition.Type,
-                        nativeRawPointerTypeRow,
-                        nativeFunctionPointerTypeRows, typeRowsList,
-                        nativePointerTypeRows, program.NativePointerTypes,
-                        structureTypeDefRows, typeDefTypeSpecRows,
-                        TypeSpecRowFor);
+                var typeViewIndex = typeDefStructureViewIndexes[index];
+                var fieldTypeViewIndex = typeViewIndex < 0
+                    ? -1
+                    : contextualTypeViews[typeViewIndex]
+                        .FieldTypeViewIndexes[field];
+                var fieldTypeRow = fieldTypeViewIndex >= 0
+                    ? ContextualTypeSpecRowForView(fieldTypeViewIndex)
+                    : blittableStructureIndexSet.Contains(structureIndex)
+                        ? NativeBlittableFieldTypeRow(typeRowsList,
+                            typeDefTypeSpecRows, structureTypeDefRows,
+                            fieldDefinition.Type, nativeRawPointerTypeRow,
+                            nativeFunctionPointerTypeRows,
+                            nativePointerTypeRows,
+                            program.NativePointerTypes, TypeSpecRowFor)
+                        : NativeValueTypeRow(fieldDefinition.Type,
+                            nativeRawPointerTypeRow,
+                            nativeFunctionPointerTypeRows, typeRowsList,
+                            nativePointerTypeRows,
+                            program.NativePointerTypes,
+                            structureTypeDefRows, typeDefTypeSpecRows,
+                            TypeSpecRowFor);
                 var visibility = fieldDefinition.IsPrivate ? 0u
                     : fieldDefinition.IsInternal ? 1u : 2u;
                 var fieldFlags = visibility | (fieldDefinition.IsMutable ? 4u : 0u);
@@ -3476,9 +3912,48 @@ public static partial class TrRmExecutableCompiler
             }
 
             var first = function.ParameterCount == 0 ? 0 : parameters.Count + 1;
+            var defaultsByOrdinal
+                = new Dictionary<int, BoundOrdinaryParameterDefault>();
+            if (schema.UsesClassParameterDefaults())
+            {
+                if (!function.HasOrdinaryParameterDefaultSurface
+                    || function.OrdinaryParameterDefaults.IsDefault)
+                {
+                    throw Unsupported(
+                        "CM1 MethodDef emission requires the checked parameter-label and default surface.");
+                }
+
+                var previousDefaultOrdinal = -1;
+                foreach (var parameterDefault
+                    in function.OrdinaryParameterDefaults)
+                {
+                    if (parameterDefault is null
+                        || parameterDefault.ParameterOrdinal
+                            <= previousDefaultOrdinal
+                        || parameterDefault.ParameterOrdinal
+                            >= function.ParameterCount
+                        || parameterDefault.IsPending
+                        || parameterDefault.Value is not BoundConstant
+                        || parameterDefault.Expression is not null
+                        || !defaultsByOrdinal.TryAdd(
+                            parameterDefault.ParameterOrdinal,
+                            parameterDefault))
+                    {
+                        throw Unsupported(
+                            "CM1 MethodDef defaults require unique closed scalar values at valid formal ordinals.");
+                    }
+
+                    previousDefaultOrdinal
+                        = parameterDefault.ParameterOrdinal;
+                }
+            }
+
             for (var parameter = 0; parameter < function.ParameterCount; parameter++)
             {
                 var variable = function.Variables[parameter];
+                var isContextualMethodImport
+                    = hasContextualTypeViews
+                        && function.ModuleImport is not null;
                 var nativeOutput = DirectNativeImportContract.OutputForParameter(function, parameter)
                     ?? NativeVTableCallContract.OutputForParameter(function, parameter);
                 var nativeParameter = function.NativeVTableMethod is not null
@@ -3498,22 +3973,60 @@ public static partial class TrRmExecutableCompiler
                     = standardInitializationReferenceBodies
                         && IsStandardInitializationReferenceParameter(
                             variable, program);
-                var parameterType = isNativeOutput
-                    ? NativeOutputTypeRow(typeRowsList, nativeOutputTypeRows, nativeOutput!.PointeeType)
-                    : nativeParameter is not null
-                        ? NativeValueTypeRow(variable.Type, nativeRawPointerTypeRow,
-                            nativeFunctionPointerTypeRows, typeRowsList, nativePointerTypeRows,
-                            program.NativePointerTypes, structureTypeDefRows,
-                            typeDefTypeSpecRows, TypeSpecRowFor)
-                        : NativeValueTypeRow(variable.Type, nativeRawPointerTypeRow,
-                            nativeFunctionPointerTypeRows, typeRowsList, nativePointerTypeRows,
-                            program.NativePointerTypes, structureTypeDefRows,
-                            typeDefTypeSpecRows, TypeSpecRowFor);
-                if (variable.Type == PrimitiveType.Void || variable.IsInitializationLocal
+                var contextualParameterTypeRow
+                    = ContextualMethodTypeSpecRow(index, parameter,
+                        variable.Type);
+                uint parameterType;
+                if (contextualParameterTypeRow != 0)
+                {
+                    parameterType
+                        = checked((uint)contextualParameterTypeRow);
+                }
+                else if (isContextualMethodImport
+                    && (variable.Type == PrimitiveType.Void
+                        || TryGetC1M1SourceScalarTypeSpecReference(
+                            variable.Type, out _)))
+                {
+                    parameterType
+                        = variable.Type == PrimitiveType.Void
+                            ? 0xF200_0000u
+                            : GetC1M1SourceScalarTypeSpecReference(
+                                variable.Type);
+                }
+                else if (schema.UsesClassParameterDefaults()
+                    && TryGetC1M1SourceScalarTypeSpecReference(
+                        variable.Type, out _))
+                {
+                    parameterType = GetC1M1SourceScalarTypeSpecReference(
+                        variable.Type);
+                }
+                else
+                {
+                    var parameterTypeRow = isNativeOutput
+                        ? NativeOutputTypeRow(typeRowsList,
+                            nativeOutputTypeRows,
+                            nativeOutput!.PointeeType)
+                        : NativeValueTypeRow(variable.Type,
+                            nativeRawPointerTypeRow,
+                            nativeFunctionPointerTypeRows, typeRowsList,
+                            nativePointerTypeRows, program.NativePointerTypes,
+                            structureTypeDefRows, typeDefTypeSpecRows,
+                            TypeSpecRowFor);
+                    parameterType = checked((uint)parameterTypeRow);
+                }
+
+                if ((variable.Type == PrimitiveType.Void
+                        && !isContextualMethodImport)
+                    || variable.IsInitializationLocal
                     || (function.DirectNativeImport is null && !hasNativeVTable
                         && !outputFeatures[index]
                         && !initializationReferenceParameter
-                            && ((!IsScalarValueType(variable.Type) && !hasRegisteredQueryBody
+                            && ((!IsScalarValueType(variable.Type)
+                                    && variable.Type != PrimitiveType.Void
+                                    && !IsConstruction2CopyValueType(
+                                        variable.Type)
+                                    && contextualParameterTypeRow == 0
+                                    && !hasRegisteredQueryBody
                                     && !isNativeCallableValue
                                 && !isNativeFunctionPointerValue && !isNativePointerValue)
                             || variable.IsOut != variable.IsInit
@@ -3544,19 +4057,82 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 parameters.Add(new TrRmParamRow(index + 1, parameter,
-                    checked((uint)parameterType),
+                    parameterType,
                     variable.IsInit && function.DirectNativeImport is null
                         && !initializationReferenceParameter ? (byte)2 : (byte)0));
+                if (schema.UsesClassParameterDefaults())
+                {
+                    var defaultConstantSourceRow = 0u;
+                    if (defaultsByOrdinal.TryGetValue(parameter,
+                            out var parameterDefault))
+                    {
+                        var value = (BoundConstant)parameterDefault.Value!;
+                        if (value.Type != variable.Type
+                            || value.RepresentationType != variable.Type
+                            || variable.Type is PrimitiveType.Void
+                                or PrimitiveType.NativeInt
+                                or PrimitiveType.NativeUInt
+                            || !value.Bits.IsCanonicalFor(variable.Type)
+                            || !TryGetC1M1SourceScalarTypeSpecReference(
+                                variable.Type, out _))
+                        {
+                            throw Unsupported(
+                                "CM1 MethodDef defaults require exact fixed-width scalar values.");
+                        }
+
+                        var frozenValue
+                            = predicateFrozenScalarValues.Add(value);
+                        if (frozenValue.TypeSpecRef != parameterType)
+                        {
+                            throw Unsupported(
+                                "A CM1 default must retain the exact MethodSig parameter TypeSpecRef.");
+                        }
+
+                        defaultConstantSourceRow
+                            = frozenValue.ConstantSourceRow;
+                    }
+
+                    methodParameterSurfaceRows.Add(
+                        new C1M1ParameterSurfaceRow(index + 1,
+                            parameter, variable.Name,
+                            defaultConstantSourceRow));
+                }
             }
 
-            var resultTypeRow = function.DirectNativeImport is not null
-                && function.ReturnType == PrimitiveType.NativeRawPointer
-                    ? NativeParameterTypeRow(typeRowsList, nativeParameterTypeRows, PrimitiveType.Void)
-                : NativeValueTypeRow(function.ReturnType, nativeRawPointerTypeRow,
-                    nativeFunctionPointerTypeRows, typeRowsList, nativePointerTypeRows,
-                    program.NativePointerTypes, structureTypeDefRows,
-                    typeDefTypeSpecRows, TypeSpecRowFor);
-            signatures.Add(new TrRmMethodSigRow(checked((uint)resultTypeRow), 0,
+            var isContextualMethodImport
+                = hasContextualTypeViews
+                    && function.ModuleImport is not null;
+            uint resultTypeSpecRef;
+            if ((isContextualMethodImport
+                    || schema.UsesClassParameterDefaults())
+                && function.ReturnType == PrimitiveType.Void)
+            {
+                resultTypeSpecRef = 0xF200_0000u;
+            }
+            else if ((isContextualMethodImport
+                    || schema.UsesClassParameterDefaults())
+                && TryGetC1M1SourceScalarTypeSpecReference(
+                    function.ReturnType, out _))
+            {
+                resultTypeSpecRef = GetC1M1SourceScalarTypeSpecReference(
+                    function.ReturnType);
+            }
+            else
+            {
+                var resultTypeRow = function.DirectNativeImport is not null
+                    && function.ReturnType == PrimitiveType.NativeRawPointer
+                        ? NativeParameterTypeRow(typeRowsList,
+                            nativeParameterTypeRows, PrimitiveType.Void)
+                        : NativeValueTypeRow(function.ReturnType,
+                            nativeRawPointerTypeRow,
+                            nativeFunctionPointerTypeRows, typeRowsList,
+                            nativePointerTypeRows,
+                            program.NativePointerTypes,
+                            structureTypeDefRows, typeDefTypeSpecRows,
+                            TypeSpecRowFor);
+                resultTypeSpecRef = checked((uint)resultTypeRow);
+            }
+            signatures.Add(new TrRmMethodSigRow(resultTypeSpecRef, 0,
                 first, function.ParameterCount, 0, 0));
             var bodyRow = 0;
             if (!function.IsExternal && !hasNativeVTable)
@@ -3833,8 +4409,26 @@ public static partial class TrRmExecutableCompiler
         }
 
         AddStandardLayoutQuerySourceExports(program, sourceTypeExports,
-            schema.UsesInitializationReferenceLocalFieldLayout(),
-            structureTypeDefRows, structureFieldFirst, names, exports);
+            schema.UsesInitializationReferenceLocalFieldLayout()
+                || schema.UsesConstructionInitializerCopyEvidence(),
+            structureTypeDefRows, structureFieldFirst, names, exports,
+            requireDeclaredCopyEvidence:
+                schema.UsesConstructionInitializerCopyEvidence());
+        var methodParameterSurfaceStringRows = new Dictionary<(
+            int MethodDefRow, int Ordinal), int>();
+        foreach (var parameterSurface in methodParameterSurfaceRows)
+        {
+            var nameStringRow = names.Count + 1;
+            names.Add((parameterSurface.Name, 1));
+            if (!methodParameterSurfaceStringRows.TryAdd((
+                    parameterSurface.MethodDefRow,
+                    parameterSurface.Ordinal), nameStringRow))
+            {
+                throw Invalid(
+                    "A MethodParameterSurface contains duplicate formal rows.");
+            }
+        }
+
         var stringsBytes = names.Any(static name => name.Text.Length == 0)
             ? TrRmStringTableWriter.EncodeTextRows(names)
             : TrRmStringTableWriter.EncodeNames(names);
@@ -4092,6 +4686,11 @@ public static partial class TrRmExecutableCompiler
             {
                 generalFeatures.Add(TrRmFeatureRow.TypedFrozenValues);
             }
+            if (methodParameterSurfaceRows.Count != 0)
+            {
+                generalFeatures.Add(
+                    TrRmFeatureRow.MethodParameterLabelsCandidate);
+            }
             if (predicateGraphs.Count != 0)
             {
                 generalFeatures.Add(TrRmFeatureRow.PublishedPredicates);
@@ -4190,13 +4789,40 @@ public static partial class TrRmExecutableCompiler
         var paramBytes = parameters.Count == 0 ? []
             : TrRmParamTableWriter.Encode(parameters, sigs, types,
                 schema);
+        var methodParameterSurfaceBytes
+            = new byte[checked(methodParameterSurfaceRows.Count * 16)];
+        for (var surfaceIndex = 0;
+            surfaceIndex < methodParameterSurfaceRows.Count;
+            surfaceIndex++)
+        {
+            var surface = methodParameterSurfaceRows[surfaceIndex];
+            var offset = surfaceIndex * 16;
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                methodParameterSurfaceBytes.AsSpan(offset, 4),
+                checked((uint)surface.MethodDefRow));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                methodParameterSurfaceBytes.AsSpan(offset + 4, 4),
+                checked((uint)surface.Ordinal));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                methodParameterSurfaceBytes.AsSpan(offset + 8, 4),
+                checked((uint)methodParameterSurfaceStringRows[(
+                    surface.MethodDefRow, surface.Ordinal)]));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                methodParameterSurfaceBytes.AsSpan(offset + 12, 4),
+                surface.DefaultConstantSourceRow);
+        }
         var typeDefRows = new TrRmTypeDefRow[typeDefCount];
         for (var type = 0; type < typeDefStructureIndexes.Length; type++)
         {
-            var structure = program.Structures[typeDefStructureIndexes[type]];
+            var structure = TypeDefStructure(type);
             var visibility = structure.IsPrivate ? 0u : structure.IsInternal ? 1u : 2u;
             var declaredCopy
-                = schema.UsesInitializationReferenceLocalFieldLayout()
+                = schema.UsesConstructionInitializerCopyEvidence()
+                    && (structure.StandardTypeOrigin is null
+                        ? !structure.IsUnique
+                        : structure.DeclaredCopyEvidence == true)
+                ? TrRmTypeDefTableReader.DeclaredCopyFlag
+                : schema.UsesInitializationReferenceLocalFieldLayout()
                 && structure.BlittableTargetRequirement
                     == FixedLayoutStorage.WindowsX64TargetRequirement
                 && !structure.IsUnique && structure.CleanupMethod is null
@@ -4213,6 +4839,46 @@ public static partial class TrRmExecutableCompiler
         var typeDefs = new TrRmTypeDefTableReader(typeDefBytes, typeDefRows.Length,
             strings, modules, fieldRows.Count, 0, layoutRows.Count, contracts.Count,
             schema);
+        var typeDefBindingEqualityRows
+            = new List<TrRmTypeDefBindingEqualityRow>();
+        if (IsSelectedTypeDefBindingEqualitySchemaIdentity(
+                standardSchemaIdentity))
+        {
+            foreach (var structureIndex in typeDefStructureIndexSet.Order())
+            {
+                var origin = program.Structures[structureIndex]
+                    .StandardTypeOrigin;
+                if (origin is null
+                    || origin.ContextualViewIndexes.Length < 2)
+                {
+                    continue;
+                }
+
+                var destinationRows = origin.ContextualViewIndexes
+                    .Select(typeViewIndex =>
+                        typeDefRowByContextualView.TryGetValue(
+                            typeViewIndex, out var typeDefRow)
+                            ? typeDefRow
+                            : throw Invalid(
+                                "A contextual TypeDef equality endpoint has no emitted row."))
+                    .Order().ToArray();
+                if (destinationRows.Distinct().Count()
+                    != destinationRows.Length)
+                {
+                    throw Invalid(
+                        "A contextual TypeDef equality group maps multiple views to one destination row.");
+                }
+
+                var leftTypeDef = checked((uint)destinationRows[0]);
+                for (var index = 1; index < destinationRows.Length; index++)
+                {
+                    typeDefBindingEqualityRows.Add(
+                        new TrRmTypeDefBindingEqualityRow(1,
+                            leftTypeDef,
+                            checked((uint)destinationRows[index])));
+                }
+            }
+        }
         var targetProfileBytes = layoutRows.Count == 0 ? []
             : TrRmTargetProfileTableWriter.Encode([new TrRmTargetProfileRow(1, 1)]);
         var targetProfiles = new TrRmTargetProfileTableReader(targetProfileBytes,
@@ -4505,11 +5171,15 @@ public static partial class TrRmExecutableCompiler
         sectionCount += nativeExportTableRows.Count != 0 ? 1 : 0;
         sectionCount += fieldPathRows.Count != 0 ? 1 : 0;
         sectionCount += predicateFrozenScalarTables.BlobCount != 0 ? 1 : 0;
+        sectionCount += predicateFrozenScalarTables.ConstantSourceCount
+            != 0 ? 1 : 0;
         sectionCount += predicateFrozenScalarTables.FrozenValueNodeCount
             != 0 ? 1 : 0;
         sectionCount += predicateGraphs.Count == 0 ? 0 : 5;
         sectionCount += predicateChildEdges.Count == 0 ? 0 : 1;
         sectionCount += predicateOperations.Count == 0 ? 0 : 1;
+        sectionCount += methodParameterSurfaceRows.Count == 0 ? 0 : 1;
+        sectionCount += typeDefBindingEqualityRows.Count == 0 ? 0 : 1;
         var sections = new List<TrRmSection>(sectionCount)
         {
             new(1, 0, 1, moduleBytes),
@@ -4584,6 +5254,19 @@ public static partial class TrRmExecutableCompiler
             sections.Add(new(nativeImportSectionId, 0,
                 (uint)nativeImportCount, nativeImportBytes));
         }
+        if (predicateFrozenScalarTables.ConstantSourceCount != 0)
+        {
+            if (nativeImportCount != 0
+                && nativeImportSectionId == 0x0030)
+            {
+                throw Unsupported(
+                    "CM1 parameter defaults cannot share the ConstantSource section with NativeImports.");
+            }
+
+            sections.Add(new(0x0030, 0,
+                (uint)predicateFrozenScalarTables.ConstantSourceCount,
+                predicateFrozenScalarTables.ConstantSourceSection));
+        }
         if (nativeCallableRows.Count != 0)
         {
             sections.Add(new(0x31, 0, (uint)nativeCallableRows.Count, nativeCallableBytes));
@@ -4615,18 +5298,18 @@ public static partial class TrRmExecutableCompiler
                     (uint)predicateChildEdges.Count,
                     predicateChildEdgeBytes));
             }
-            if (predicateFrozenScalarTables.FrozenValueNodeCount != 0)
-            {
-                sections.Add(new(0x003F, 0,
-                    (uint)predicateFrozenScalarTables.FrozenValueNodeCount,
-                    predicateFrozenScalarTables.FrozenValueNodeSection));
-            }
             if (predicateOperations.Count != 0)
             {
                 sections.Add(new(0x004D, 0,
                     (uint)predicateOperations.Count,
                     predicateOperationBytes));
             }
+        }
+        if (predicateFrozenScalarTables.FrozenValueNodeCount != 0)
+        {
+            sections.Add(new(0x003F, 0,
+                (uint)predicateFrozenScalarTables.FrozenValueNodeCount,
+                predicateFrozenScalarTables.FrozenValueNodeSection));
         }
         if (targetProfiles.Count != 0)
         {
@@ -4637,7 +5320,25 @@ public static partial class TrRmExecutableCompiler
             sections.Add(new(0x4B, 0, (uint)fieldPathRows.Count,
                 fieldPathBytes));
         }
-        var artifact = TrRmArtifactWriter.Encode(sections, schema);
+        if (methodParameterSurfaceRows.Count != 0)
+        {
+            sections.Add(new(0x0066, 0,
+                (uint)methodParameterSurfaceRows.Count,
+                methodParameterSurfaceBytes));
+        }
+        if (typeDefBindingEqualityRows.Count != 0)
+        {
+            sections.Add(new(0x0067, 0,
+                (uint)typeDefBindingEqualityRows.Count,
+                TrRmTypeDefBindingEqualityTableWriter.Encode(
+                    typeDefBindingEqualityRows, modules, typeDefs)));
+        }
+        var artifactSchemaIdentity
+            = IsSelectedTypeDefBindingEqualitySchemaIdentity(
+                standardSchemaIdentity)
+                ? standardSchemaIdentity : null;
+        var artifact = TrRmArtifactWriter.Encode(sections, schema,
+            standardSchemaIdentity: artifactSchemaIdentity);
         if (schema.UsesDevelopmentNativeConventions())
         {
             _ = LoadDevelopmentNativeConventionsDraft(artifact);
@@ -4690,7 +5391,9 @@ public static partial class TrRmExecutableCompiler
         {
             _ = TrRmStructuralMetadataValidator
                 .ValidateC1AndGetExecutionTables(
-                    new TrRmArtifactIndex(artifact, schema));
+                    new TrRmArtifactIndex(artifact, schema,
+                        standardSchemaIdentity:
+                            artifactSchemaIdentity));
         }
         else if (schema.UsesGeneralPredicateGraphs())
         {
@@ -4769,7 +5472,9 @@ public static partial class TrRmExecutableCompiler
                 && (IsSelectedC1ClassConstructionSchemaIdentity(
                         construction2Schema)
                     || StandardGenericMethodSchema
-                        .IsCM1ClassParameterDefaults(construction2Schema))
+                        .IsCM1ClassParameterDefaults(construction2Schema)
+                    || IsC1M1MethodTypeSchemaIdentity(
+                        construction2Schema))
                 && GetForeignInvocationSchema(construction2Schema)
                     .UsesObjectConstruction()
                 && !IsSelectedC1ClassInstanceLayoutSchemaIdentity(
@@ -4857,8 +5562,10 @@ public static partial class TrRmExecutableCompiler
                 _ => throw new ArgumentOutOfRangeException(nameof(schema)),
             }
             : standardSchemaIdentity is { } selectedSchemaIdentity
-                && IsSelectedC1ClassInstanceLayoutSchemaIdentity(
-                    selectedSchemaIdentity)
+                && (IsSelectedC1ClassInstanceLayoutSchemaIdentity(
+                        selectedSchemaIdentity)
+                    || IsSelectedTypeDefBindingEqualitySchemaIdentity(
+                        selectedSchemaIdentity))
                     ? new TrRmArtifactIndex(artifact, schema, null,
                         usesNativePointerLoads: false,
                         standardSchemaIdentity: selectedSchemaIdentity)

@@ -1239,6 +1239,20 @@ internal sealed record BoundSourceTypeExpectation(
     uint TargetRequirement, uint RuntimePolicy,
     BoundSourceTypeProviderSnapshot Provider, uint ProviderDefinitionId);
 
+internal sealed record BoundStandardTypeView(
+    int StructureIndex,
+    BoundSourceTypeProviderSnapshot UsingModule,
+    BoundSourceTypeExpectation? Expectation,
+    BoundSourceTypeProviderSnapshot Provider,
+    uint ProviderDefinitionId, uint ExpectedDefinitionId,
+    string? ExportKey, bool IsLookupRoot,
+    BoundStruct ViewDeclaration, BoundStruct ExpectedDeclaration,
+    ImmutableArray<int> FieldTypeViewIndexes,
+    ImmutableArray<BoundStandardFieldProviderEdge?> FieldEdges);
+
+internal readonly record struct BoundStandardMethodTypeView(
+    string MethodExportKey, int SignaturePosition, int TypeViewIndex);
+
 internal sealed record BoundStandardTypeOrigin(
     BoundSourceTypeProviderSnapshot Provider, uint DefinitionId,
     ImmutableArray<string> ExportKeys, bool IsLookupRoot,
@@ -1254,6 +1268,8 @@ internal sealed record BoundStandardTypeOrigin(
     {
         get; init;
     }
+
+    internal ImmutableArray<int> ContextualViewIndexes { get; init; }
 }
 
 internal sealed record BoundStandardFieldOrigin(
@@ -1284,7 +1300,9 @@ internal sealed record BoundStandardFieldProviderClosure(
     BoundProgram OriginalProgram);
 
 internal sealed record BoundStandardQuerySourceAssociation(
-    ImmutableArray<BoundStandardFieldProviderClosure> ProviderClosures);
+    ImmutableArray<BoundStandardFieldProviderClosure> ProviderClosures,
+    ImmutableArray<BoundStandardTypeView> TypeViews = default,
+    ImmutableArray<BoundStandardMethodTypeView> MethodTypeViews = default);
 
 internal sealed record BoundStandardFieldProviderArtifact(
     int ArtifactIndex, string SchemaIdentity,

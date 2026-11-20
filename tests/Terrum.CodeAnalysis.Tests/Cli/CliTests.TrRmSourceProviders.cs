@@ -646,9 +646,15 @@ internal sealed partial class CliTests
     [TestCase(
         "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-initializer-copy-evidence-1")]
     [TestCase(
+        "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-initializer-copy-evidence-1-type-binding-views-1")]
+    [TestCase(
         "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-class-parameter-defaults-1-initializer-copy-evidence-1")]
     [TestCase(
+        "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-class-parameter-defaults-1-initializer-copy-evidence-1-type-binding-views-1")]
+    [TestCase(
         "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-class-parameter-defaults-1-associated-relation-constraints-1-initializer-copy-evidence-1")]
+    [TestCase(
+        "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-class-parameter-defaults-1-associated-relation-constraints-1-initializer-copy-evidence-1-type-binding-views-1")]
     public async Task CompileTrRmBindsVersionThreeCombinedMethodTypeSourceProviderAsync(
         string schemaIdentity)
     {
@@ -1016,6 +1022,51 @@ internal sealed partial class CliTests
                 $"{wrongOutputSchemaOutput}{Environment.NewLine}{wrongOutputSchemaError}");
             Assert.That(wrongOutputSchemaError, Is.Empty);
             using (var document = JsonDocument.Parse(wrongOutputSchemaOutput))
+            {
+                Assert.That(document.RootElement
+                        .GetProperty("diagnostic").GetProperty("code")
+                        .GetString(),
+                    Is.EqualTo("TRM2000"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(consumerArtifact)
+                .ConfigureAwait(true), Is.EqualTo(retained));
+
+            var mixedProviderConfiguration = JsonSerializer.Serialize(new {
+                schemaVersion = 3,
+                providers = new[] {
+                    new {
+                        schemaIdentity
+                            = C1M1Construction2ClassParameterDefaultsCopyEvidenceSchemaIdentity,
+                        path = methodProviderArtifact,
+                    },
+                },
+                references = new[] {
+                    new {
+                        providerInputOrdinal = 0,
+                        moduleIdentity = methodProviderIdentity,
+                        methodExportKeys = new[] { "Read" },
+                        typeExportKeys = Array.Empty<object>(),
+                        fieldExportKeys = Array.Empty<object>(),
+                    },
+                },
+            });
+            await File.WriteAllTextAsync(providerSelections,
+                mixedProviderConfiguration, new UTF8Encoding(false))
+                .ConfigureAwait(true);
+            await File.WriteAllBytesAsync(consumerArtifact, retained)
+                .ConfigureAwait(true);
+            var (mixedSchemaExit, mixedSchemaOutput,
+                mixedSchemaError) = await RunAsync(
+                    Encoding.UTF8.GetBytes("invalid Terrum source"),
+                    "compile-trrm", "-", "--identity", consumerIdentity,
+                    "--trrm-schema", schemaIdentity,
+                    "--trrm-source-providers", providerSelections,
+                    "--library", "-o", consumerArtifact, "--runtime",
+                    "fail-fast", "--json").ConfigureAwait(false);
+            Assert.That(mixedSchemaExit, Is.EqualTo(2),
+                $"{mixedSchemaOutput}{Environment.NewLine}{mixedSchemaError}");
+            Assert.That(mixedSchemaError, Is.Empty);
+            using (var document = JsonDocument.Parse(mixedSchemaOutput))
             {
                 Assert.That(document.RootElement
                         .GetProperty("diagnostic").GetProperty("code")
