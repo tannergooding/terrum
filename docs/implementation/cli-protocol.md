@@ -121,6 +121,8 @@ and single-call dispatch are implemented. End-to-end CLI regressions cover all
 three schemas, an external type provider, a method provider at nonzero
 providerInputOrdinal, scalar-only empty selections and a non-first
 co-located method Module; they remain unverified under the active hold.
+Manifest/source/output/provider alias collision regressions are also added
+but remain unverified.
 Versions 1 and 2, the
 publication manifests and artifact-command provider whitelist are unchanged.
 Artifact commands accept exact per-artifact schema identities and a root

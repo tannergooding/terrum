@@ -171,7 +171,9 @@ pairing and dispatch are implemented. Regressions cover all three pairings,
 nonzero providerInputOrdinal, scalar-only empty selections, malformed v3
 shapes, schema-mismatch output preservation, and a co-located method root in
 Module 2 with TypeDef/FieldDef roots in Module 1; they remain unverified under
-the active hold. Path/source isolation and CLI qualification remain open.
+the active hold. Manifest/source/output/provider alias collisions are also
+covered but unverified; absent-output preservation, broader source/provider
+isolation and CLI qualification remain open.
 The loader still requires the whole validated Module-set TypeDef/method
 closure to fit its bounded Blittable-struct path. Snapshot-preserving
 source-free emission does not establish general row remapping under provider

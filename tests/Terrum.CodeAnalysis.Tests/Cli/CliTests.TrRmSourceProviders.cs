@@ -886,6 +886,9 @@ internal sealed partial class CliTests
             $"source-provider-cli-scalar-method-{Guid.NewGuid():N}.trrm");
         var consumerArtifact = Path.Combine(TestArtifactPaths.DirectoryPath,
             $"source-provider-cli-scalar-method-{Guid.NewGuid():N}.trrm");
+        var manifestOutputAlias = Path.Combine(
+            TestArtifactPaths.DirectoryPath,
+            $"source-provider-cli-scalar-manifest-{Guid.NewGuid():N}.trrm");
         try
         {
             var providerCompilation = Compilation.CreateLibrary(
@@ -943,6 +946,47 @@ internal sealed partial class CliTests
             Assert.That(tables.ModuleRefs.GetProducerIdentity(
                     tables.Imports.GetModuleRefForImportRow(1)),
                 Is.EqualTo(providerIdentity));
+
+            await File.WriteAllBytesAsync(manifestOutputAlias,
+                await File.ReadAllBytesAsync(providerSelections)
+                    .ConfigureAwait(true)).ConfigureAwait(true);
+            await File.WriteAllBytesAsync(consumerArtifact, retained)
+                .ConfigureAwait(true);
+
+            async Task AssertAliasFailureAsync(string sourcePath,
+                string configurationPath, string outputPath,
+                string preservedPath)
+            {
+                var before = await File.ReadAllBytesAsync(preservedPath)
+                    .ConfigureAwait(true);
+                var (aliasExit, aliasOutput, aliasError) = await RunAsync([],
+                    "compile-trrm", sourcePath, "--identity", consumerIdentity,
+                    "--trrm-schema", schemaIdentity, "--trrm-source-providers",
+                    configurationPath, "--library", "-o", outputPath,
+                    "--runtime", "fail-fast", "--json")
+                    .ConfigureAwait(false);
+                Assert.That(aliasExit, Is.EqualTo(2),
+                    $"{aliasOutput}{Environment.NewLine}{aliasError}");
+                Assert.That(aliasError, Is.Empty);
+                using (var document = JsonDocument.Parse(aliasOutput))
+                {
+                    Assert.That(document.RootElement
+                            .GetProperty("diagnostic").GetProperty("code")
+                            .GetString(),
+                        Is.EqualTo("TRM2002"));
+                }
+                Assert.That(await File.ReadAllBytesAsync(preservedPath)
+                    .ConfigureAwait(true), Is.EqualTo(before));
+            }
+
+            await AssertAliasFailureAsync("-", manifestOutputAlias,
+                manifestOutputAlias, manifestOutputAlias)
+                .ConfigureAwait(true);
+            await AssertAliasFailureAsync(providerSelections,
+                providerSelections, consumerArtifact, consumerArtifact)
+                .ConfigureAwait(true);
+            await AssertAliasFailureAsync("-", providerSelections,
+                providerArtifact, providerArtifact).ConfigureAwait(true);
 
             var invalidConfigurations = new[] {
                 JsonSerializer.Serialize(new {
@@ -1056,6 +1100,8 @@ internal sealed partial class CliTests
         finally
         {
             await TestFileCleanup.DeleteWithRetryAsync(providerSelections)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(manifestOutputAlias)
                 .ConfigureAwait(true);
             await TestFileCleanup.DeleteWithRetryAsync(providerArtifact)
                 .ConfigureAwait(true);
