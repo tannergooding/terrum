@@ -187,13 +187,18 @@ contextual TypeDef expectations plus a consumer-owned `0067`
 Exact schema identity admission and the bounded equality-row codec/structural
 checks are implemented, with a focused table-level regression still
 unverified. Contextual view propagation, binding/replacement and source-free
-emission remain unimplemented. The CLI schema pairing is a separate decision.
+emission remain unimplemented. A second unapproved proposal recommends
+extending version 3 to the three exact successor identities without changing
+the manifest shape; that gate remains unimplemented.
 Import/Export/ModuleRef/Body map permutations and runtime qualification remain
 open. The
 separate unapproved version-3
 `docs\proposals\standard-trrm-c1-method-type-source-provider-cli-transport.md`
-specifies the unapproved CLI shape and exact schema pairing. Its reader,
-pairing and dispatch are implemented. Regressions cover all three pairings,
+specifies the unapproved CLI shape and exact base-schema pairing. Its reader,
+pairing and dispatch are implemented. The separate
+`docs\proposals\standard-trrm-c1-contextual-type-binding-views-cli-pairing.md`
+provisionally recommends the three exact schema successors; the CLI gate is
+not yet extended. Regressions cover all three base pairings,
 nonzero providerInputOrdinal, scalar-only empty selections, malformed v3
 shapes, schema-mismatch output preservation, and a co-located method root in
 Module 2 with TypeDef/FieldDef roots in Module 1; they remain unverified under
