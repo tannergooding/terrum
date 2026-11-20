@@ -2578,13 +2578,13 @@ internal sealed class TrRmC1EnumClosureSourceTests
         static (TrRmStandardArtifactInput Input,
             CompilationReference Reference) CreateProviderReference(
             string moduleIdentity, string className, string typeExportKey,
-            string fieldExportKey, string schemaIdentity,
+            string fieldExportKey, string fieldType, string schemaIdentity,
             uint targetRequirement, CompilationOptions options)
         {
             var tree = SyntaxTree.Parse($$"""
                 namespace Demo {
                     public class {{className}} {
-                        public int32 Value;
+                        public {{fieldType}} Value;
                     }
                 }
                 """);
@@ -2618,10 +2618,10 @@ internal sealed class TrRmC1EnumClosureSourceTests
         }
 
         var alpha = CreateProviderReference("AlphaProvider",
-            "Alpha", "type.alpha", "field.alpha.value", schemaIdentity,
-            targetRequirement, options);
+            "Alpha", "type.alpha", "field.alpha.value", "int32",
+            schemaIdentity, targetRequirement, options);
         var beta = CreateProviderReference("BetaProvider", "Beta",
-            "type.beta", "field.beta.value", schemaIdentity,
+            "type.beta", "field.beta.value", "int32", schemaIdentity,
             targetRequirement, options);
         var reference = TrRmExecutableCompiler.CreateStandardReferenceSet(
             [alpha.Reference, beta.Reference]);
@@ -2635,6 +2635,13 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 static declaration =>
                     !declaration.Declaration.Layouts.IsEmpty),
             Is.True);
+        var incompatibleAlpha = CreateProviderReference("AlphaProvider",
+            "Alpha", "type.alpha", "field.alpha.value", "int64",
+            schemaIdentity, targetRequirement, options);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReferenceSet([
+                alpha.Reference, incompatibleAlpha.Reference,
+            ]));
 
         var alphaConsumer = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
