@@ -2567,6 +2567,90 @@ internal sealed class TrRmC1EnumClosureSourceTests
     }
 
     [Test]
+    public void ComposesClassLayoutReferencesFromDistinctProviders()
+    {
+        var schemaIdentity
+            = $"{s_schemaIdentities[0]}-class-instance-layout-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        var options = new CompilationOptions();
+
+        static CompilationReference CreateProviderReference(
+            string moduleIdentity, string className, string typeExportKey,
+            string fieldExportKey, string schemaIdentity,
+            uint targetRequirement, CompilationOptions options)
+        {
+            var tree = SyntaxTree.Parse($$"""
+                namespace Demo {
+                    public class {{className}} {
+                        public int32 Value;
+                    }
+                }
+                """);
+            var compilation = Compilation.CreateLibrary(tree, options);
+            Assert.That(compilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            var program = (BoundProgram)compilation.Program!;
+            var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+                .Single(static node =>
+                    node.Kind == SyntaxKind.ClassDeclaration);
+            var fieldDeclaration = classDeclaration.Children
+                .OfType<SyntaxNode>()
+                .Single(static node =>
+                    node.Kind == SyntaxKind.FieldDeclaration);
+            var classIndex = program.SourceClassProgramAssociation!
+                .Declarations.Single(declaration =>
+                    declaration.Span == classDeclaration.Span).ClassIndex;
+            var classExport = new TrRmSourceClassExport(program, classIndex,
+                classDeclaration.Span, typeExportKey, [
+                    new TrRmSourceClassMemberExport(0,
+                        fieldDeclaration.Span, fieldExportKey),
+                ]);
+            var artifact = TrRmExecutableCompiler.EmitStandard(program,
+                moduleIdentity, schemaIdentity, targetRequirement, [], [],
+                [classExport], []);
+            return TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, artifact),
+                moduleIdentity, [], [typeExportKey], [fieldExportKey]);
+        }
+
+        var alphaReference = CreateProviderReference("AlphaProvider",
+            "Alpha", "type.alpha", "field.alpha.value", schemaIdentity,
+            targetRequirement, options);
+        var betaReference = CreateProviderReference("BetaProvider", "Beta",
+            "type.beta", "field.beta.value", schemaIdentity,
+            targetRequirement, options);
+        var reference = TrRmExecutableCompiler.CreateStandardReferenceSet(
+            [alphaReference, betaReference]);
+
+        Assert.That(reference.StandardClassDeclarations, Has.Length.EqualTo(2));
+        Assert.That(reference.StandardClassDeclarations
+                .Select(static declaration =>
+                    declaration.Declaration.Provider.ModuleIdentity),
+            Is.EquivalentTo(["AlphaProvider", "BetaProvider"]));
+        Assert.That(reference.StandardClassDeclarations.All(
+                static declaration =>
+                    !declaration.Declaration.Layouts.IsEmpty),
+            Is.True);
+
+        var consumer = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Demo;
+                nint AlphaOffset() {
+                    return unsafe(offsetof(Alpha, Value));
+                }
+                nint BetaOffset() {
+                    return unsafe(offsetof(Beta, Value));
+                }
+                """), reference, new CompilationOptions {
+                LayoutCoreRegistration
+                    = LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
+    }
+
+    [Test]
     public void UsesFirstExplicitAliasesForEN1ClassQueryBodies()
     {
         var schemaIdentity

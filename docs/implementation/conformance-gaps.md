@@ -90,6 +90,12 @@ authorized and remain labeled provisional.
 | Standard pointer-load and NativeParameter composition ([proposal](../proposals/standard-native-pointer-load-native-parameter-composition.md)) | Unapproved; provisional work authorized | Exact B+I+P+F16/B+I+G+P+F16 selectors and `000E`/Feature 16/1 producer path are implemented; bounded provider re-emission and native execution cover both successors. **Open:** broader nominal type remapping, pointer provenance/CFG and dependent runtime routes. |
 | Windows x64 local exception-object transport ([proposal](../proposals/windows-x64-local-exception-object-transport.md)) | Unapproved; provisional work authorized | Private Terrum object-event path, distinct from scalar reason records and foreign `NativeExceptionUnwind`; no Standard TRRM encoding. |
 
+**Class-layout reference composition:** The bounded type-only Standard
+composer now preserves exact class target-layout variants across disjoint
+provider Modules and binds queries against both roots in memory. The regression
+is unverified under the active hold. Multi-provider consumer artifact
+emission/reload remains open.
+
 Other proposals remain unapproved unless their owner and approval status say
 otherwise; see the [proposal index](../proposals/README.md).
 

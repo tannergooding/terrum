@@ -728,11 +728,10 @@ public static partial class TrRmExecutableCompiler
                     || declaration.ExportKeys.IsDefaultOrEmpty
                     || view.Fields.Any(field =>
                         !IsStandardClassTypeOnlyComposedFieldType(field.Type))
-                    || !view.Layouts.IsEmpty
                     || !view.Methods.IsEmpty)
                 {
                     throw Unsupported(
-                        "Type-only class composition currently requires selected class roots with primitive fields and without layouts, methods, or imported expectations.");
+                        "Type-only class composition currently requires selected class roots with primitive fields and without methods or imported expectations.");
                 }
 
                 AddProviderSnapshot(view.Provider);
@@ -751,6 +750,8 @@ public static partial class TrRmExecutableCompiler
                         || existingView.TypeDefFlags != view.TypeDefFlags
                         || existingView.Fields.Length
                             != view.Fields.Length
+                        || existingView.Layouts.Length
+                            != view.Layouts.Length
                         || !existing.ExportKeys.AsSpan().SequenceEqual(
                             declaration.ExportKeys.AsSpan()))
                     {
@@ -789,6 +790,36 @@ public static partial class TrRmExecutableCompiler
                         mergedFields.Add(existingField with {
                             SelectedExportKeys = [.. selectedFieldKeys],
                         });
+                    }
+
+                    for (var layoutIndex = 0;
+                        layoutIndex < existingView.Layouts.Length;
+                        layoutIndex++)
+                    {
+                        var existingLayout
+                            = existingView.Layouts[layoutIndex];
+                        var layout = view.Layouts[layoutIndex];
+                        if (existingLayout.Row != layout.Row
+                            || existingLayout.OwnerDefinitionId
+                                != layout.OwnerDefinitionId
+                            || existingLayout.TargetProfileReference
+                                != layout.TargetProfileReference
+                            || existingLayout.TargetProfileId
+                                != layout.TargetProfileId
+                            || existingLayout.TargetProfileRuleRevision
+                                != layout.TargetProfileRuleRevision
+                            || existingLayout.Kind != layout.Kind
+                            || existingLayout.Flags != layout.Flags
+                            || existingLayout.Alignment
+                                != layout.Alignment
+                            || existingLayout.Pack != layout.Pack
+                            || !existingLayout.FieldDefinitionIds.AsSpan()
+                                .SequenceEqual(
+                                    layout.FieldDefinitionIds.AsSpan()))
+                        {
+                            throw Invalid(
+                                "Views of one Standard class TypeDef disagree on a target layout variant.");
+                        }
                     }
 
                     var selectedKeys = new List<string>(
