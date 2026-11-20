@@ -5,8 +5,11 @@ missing-contract workflow, pending later review.** Recommend extending the
 existing candidate `0067 TypeDefBindingEquality` semantics to class-bearing
 declaration graphs through three distinct exact successors. This selects
 neither normative adoption nor compiler conformance or qualification.
-Implementation and validation remain outstanding; the evidence below is
-static inspection of contracts, code and active test sources.
+Implementation is in progress: class/struct equality carriers, provider
+binding, class/struct reference composition, and same-Module direct struct
+re-emission are implemented with focused regressions. Validation remains held;
+multi-owner source-free remapping, broader closure/acceptance coverage, and
+final qualification are outstanding.
 
 ## Finding, owners and scope
 
@@ -89,9 +92,11 @@ roles, signatures, contracts, parameter surfaces and actual Bodies are
 selection, not permission to strip required members. A missing inherited
 codec refuses complete publication; it does not create a field-only facade.
 
-## Verified source boundaries
+## Pre-implementation source boundary
 
-These are current source facts, not executed outcomes:
+The following source findings establish the gap this proposal addresses; they
+are not claims about the current in-progress implementation or executed
+outcomes.
 
 | Evidence | Consequence |
 |---|---|
