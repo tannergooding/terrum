@@ -4194,9 +4194,13 @@ internal sealed class TrRmC1EnumClosureSourceTests
         };
         var leafTree = SyntaxTree.Parse("""
             namespace Demo {
-                public struct Leaf {
+                public struct LeafA {
                     public int32 Id;
                     public uint8 Tail;
+                }
+                public struct LeafB {
+                    public int64 Id;
+                    public uint16 Tail;
                 }
             }
             """);
@@ -4205,27 +4209,36 @@ internal sealed class TrRmC1EnumClosureSourceTests
         Assert.That(leafCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, leafCompilation.Diagnostics));
         var leafProgram = (BoundProgram)leafCompilation.Program!;
-        var leafExport = new TrRmSourceTypeExport("Demo", "Leaf",
-            "type.leaf") {
+        var leafAExport = new TrRmSourceTypeExport("Demo", "LeafA",
+            "type.leaf.a") {
             FieldExports = [
-                new TrRmSourceFieldExport("Id", "field.leaf.id"),
-                new TrRmSourceFieldExport("Tail", "field.leaf.tail"),
+                new TrRmSourceFieldExport("Id", "field.leaf.a.id"),
+                new TrRmSourceFieldExport("Tail", "field.leaf.a.tail"),
+            ],
+        };
+        var leafBExport = new TrRmSourceTypeExport("Demo", "LeafB",
+            "type.leaf.b") {
+            FieldExports = [
+                new TrRmSourceFieldExport("Id", "field.leaf.b.id"),
+                new TrRmSourceFieldExport("Tail", "field.leaf.b.tail"),
             ],
         };
         var leafArtifact = TrRmExecutableCompiler.EmitStandard(leafProgram,
             "LeafProvider", schemaIdentity, targetRequirement,
-            [leafExport], [], [], []);
+            [leafAExport, leafBExport], [], [], []);
         var leafInput = new TrRmStandardArtifactInput(schemaIdentity,
             leafArtifact);
         var leafReference = TrRmExecutableCompiler.CreateStandardReference(
-            leafInput, "LeafProvider", [], ["type.leaf"], [
-                "field.leaf.id", "field.leaf.tail",
+            leafInput, "LeafProvider", [],
+            ["type.leaf.a", "type.leaf.b"], [
+                "field.leaf.a.id", "field.leaf.a.tail",
+                "field.leaf.b.id", "field.leaf.b.tail",
             ]);
 
         var alphaTree = SyntaxTree.Parse("""
             namespace Demo {
                 public struct Wrapper {
-                    public Leaf Child;
+                    public LeafA Child;
                 }
                 public class Alpha {
                     public Wrapper Data;
@@ -4271,17 +4284,21 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 "type.alpha", "type.wrapper",
             ], ["field.alpha.data", "field.wrapper.child"]);
         Assert.That(alphaReference.Structures.Single(
-                static structure => structure.Name == "Demo.Leaf")
+                static structure => structure.Name == "Demo.LeafA")
                 .StandardTypeOrigin!.Expectations, Has.Length.EqualTo(1));
 
         var betaTree = SyntaxTree.Parse("""
             namespace Demo {
+                public struct WrapperBeta {
+                    public LeafB Child;
+                }
                 public class Beta {
-                    public int32 Value;
+                    public WrapperBeta Data;
                 }
             }
             """);
-        var betaCompilation = Compilation.CreateLibrary(betaTree);
+        var betaCompilation = Compilation.CreateLibrary(betaTree,
+            leafReference, layoutOptions);
         Assert.That(betaCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, betaCompilation.Diagnostics));
         var betaProgram = (BoundProgram)betaCompilation.Program!;
@@ -4299,25 +4316,40 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var betaClassExport = new TrRmSourceClassExport(betaProgram,
             betaClassIndex, betaClassDeclaration.Span, "type.beta", [
                 new TrRmSourceClassMemberExport(0, betaField.Span,
-                    "field.beta.value"),
+                    "field.beta.data"),
             ]);
+        var wrapperBetaExport = new TrRmSourceTypeExport("Demo",
+            "WrapperBeta", "type.wrapper.beta") {
+            FieldExports = [
+                new TrRmSourceFieldExport("Child",
+                    "field.wrapper.beta.child"),
+            ],
+        };
         var betaArtifact = TrRmExecutableCompiler.EmitStandard(betaProgram,
-            "BetaProvider", schemaIdentity, targetRequirement, [], [],
+            "BetaProvider", schemaIdentity, targetRequirement,
+            [wrapperBetaExport], [],
             [betaClassExport], []);
         var betaInput = new TrRmStandardArtifactInput(schemaIdentity,
             betaArtifact);
         var betaReference = TrRmExecutableCompiler.CreateStandardReference(
-            betaInput, "BetaProvider", [], ["type.beta"],
-            ["field.beta.value"]);
+            betaInput, "BetaProvider", [leafInput], [
+                "type.beta", "type.wrapper.beta",
+            ], ["field.beta.data", "field.wrapper.beta.child"]);
         var reference = TrRmExecutableCompiler.CreateStandardReferenceSet(
             [alphaReference, betaReference]);
+        Assert.That(reference.Structures.Single(
+                static structure => structure.Name == "Demo.LeafA")
+                .StandardTypeOrigin!.Expectations, Has.Length.EqualTo(1));
+        Assert.That(reference.Structures.Single(
+                static structure => structure.Name == "Demo.LeafB")
+                .StandardTypeOrigin!.Expectations, Has.Length.EqualTo(1));
 
         var consumer = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
                 using Demo;
                 nint CombinedOffset() {
                     return unsafe(offsetof(Alpha, Data.Child.Tail))
-                        + unsafe(offsetof(Beta, Value));
+                        + unsafe(offsetof(Beta, Data.Child.Tail));
                 }
                 """), reference, layoutOptions);
         Assert.That(consumer.HasErrors, Is.False,
@@ -4333,20 +4365,32 @@ internal sealed class TrRmC1EnumClosureSourceTests
         Assert.That(tables.TargetLayoutDependencies.Count,
             Is.EqualTo(2));
         Assert.That(tables.TargetLayoutDependencyFields.Count,
-            Is.EqualTo(4));
+            Is.EqualTo(6));
         var imports = Enumerable.Range(1, tables.Imports.Count)
             .Select(tables.Imports.GetBindingForImportRow).ToArray();
         Assert.That(imports.Any(static binding =>
                 binding.ProducerIdentity == "LeafProvider"
-                && binding.ExportKey == "type.leaf"),
+                && binding.ExportKey == "type.leaf.a"),
             Is.True);
         Assert.That(imports.Any(static binding =>
                 binding.ProducerIdentity == "LeafProvider"
-                && binding.ExportKey == "field.leaf.tail"),
+                && binding.ExportKey == "type.leaf.b"),
+            Is.True);
+        Assert.That(imports.Any(static binding =>
+                binding.ProducerIdentity == "LeafProvider"
+                && binding.ExportKey == "field.leaf.a.tail"),
+            Is.True);
+        Assert.That(imports.Any(static binding =>
+                binding.ProducerIdentity == "LeafProvider"
+                && binding.ExportKey == "field.leaf.b.tail"),
             Is.True);
         Assert.That(imports.Any(static binding =>
                 binding.ProducerIdentity == "AlphaProvider"
                 && binding.ExportKey == "field.wrapper.child"),
+            Is.True);
+        Assert.That(imports.Any(static binding =>
+                binding.ProducerIdentity == "BetaProvider"
+                && binding.ExportKey == "field.wrapper.beta.child"),
             Is.True);
         var loaded = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(schemaIdentity, artifact),

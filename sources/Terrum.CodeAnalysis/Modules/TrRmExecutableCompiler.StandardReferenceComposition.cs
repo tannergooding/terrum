@@ -776,6 +776,26 @@ public static partial class TrRmExecutableCompiler
             standardQuerySourceAssociation
                 = structureReferenceSet?.StandardQuerySourceAssociation;
         }
+        if (structureReferences.Count > 1
+            && !directStructureComposition)
+        {
+            if (structureReferences.Any(static reference =>
+                    reference.Structures.Any(static structure =>
+                        structure.Fields.Any(static field =>
+                            BoundEnumTypes.IsType(field.Type)))))
+            {
+                throw Unsupported(
+                    "Multi-provider imported struct composition does not yet admit inline enum fields.");
+            }
+
+            if (isClassInstanceLayoutReference)
+            {
+                structuresResult = [.. structuresResult.Select(
+                    static structure => structure with {
+                        StandardLayoutOnly = true,
+                    })];
+            }
+        }
         var structureIndexByProviderIdentity = new Dictionary<(
             string ModuleIdentity, uint DefinitionId), int>();
         var structureDefinitionIdentities
