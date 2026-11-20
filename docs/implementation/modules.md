@@ -283,6 +283,9 @@ source-free FieldMap/FieldPath remapping, CLI selection and runtime
 qualification remain open. The current loader still requires the whole
 single-Module TypeDef/method closure to fit its bounded Blittable-struct path;
 selected-root-only loading for unrelated declarations remains open.
+Construction-2 method loading also retains validated TypeDef/FieldDef
+provider edges so an unchanged source-free emission can preserve the original
+artifact; this is not row remapping for provider replacement.
 Compiler-owned source-class anchors and explicit member-key capture are
 implemented, but complete bodyful
 local class member/MethodDef closure, provider

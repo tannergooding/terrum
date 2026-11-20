@@ -147,7 +147,10 @@ FieldDef keys and local nested Copy structs. Its regressions remain
 unverified; multiple Modules, provider Imports, source-free FieldMap/FieldPath
 remapping, CLI selection, and runtime qualification remain open. The loader
 still requires the whole single-Module TypeDef/method closure to fit its
-bounded Blittable-struct path.
+bounded Blittable-struct path. Construction-2 method loading now retains
+validated TypeDef/FieldDef provider edges for unchanged source-free artifact
+re-emission; this snapshot-preserving path does not establish row remapping
+under provider replacement.
 Exact Construction-2 source-free re-emission now
 preserves bodyful exported nongeneric top-level MethodDefs whose Bodies fit
 the existing C1M1 remapper (kinds 01-05), including TypeSpec, Effects,

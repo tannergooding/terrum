@@ -6101,6 +6101,9 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     public int32 Forward(Record value, Other unused) {
                         return Read(value);
                     }
+                    public int32 ReadNested(Record value) {
+                        return value.Nested.Value;
+                    }
                 }
                 """), providerReference);
         Assert.That(consumerCompilation.HasErrors, Is.False,
@@ -6123,6 +6126,26 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         Assert.That(read.IsExternal, Is.False);
         Assert.That(call.Arguments[0].Type, Is.EqualTo(recordType));
         Assert.That(read.Variables[0].Type, Is.EqualTo(recordType));
+        var readNested = linkedProgram.Functions.Single(
+            static function => function.Name == "ReadNested");
+        var readNestedReturn
+            = (BoundReturn)readNested.Body.Statements.Single();
+        Assert.That(readNestedReturn.Value!.Type,
+            Is.EqualTo(PrimitiveType.Int32));
+        var reemittedConsumerArtifact
+            = TrRmExecutableCompiler.EmitStandard(linkedProgram,
+                "StructMethodConsumer", schemaIdentity,
+                TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        Assert.That(reemittedConsumerArtifact,
+            Is.EqualTo(consumerArtifact));
+        var reloadedProgram = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                reemittedConsumerArtifact),
+            "StructMethodConsumer", [providerInput]);
+        Assert.That(reloadedProgram.Functions.Single(
+                static function => function.Name == "ReadNested")
+                .ReturnType,
+            Is.EqualTo(PrimitiveType.Int32));
         Assert.That((int)recordType, Is.GreaterThanOrEqualTo(100));
         var record = linkedProgram.Structures[(int)recordType - 100];
         Assert.That(record.Fields, Has.Length.EqualTo(2));

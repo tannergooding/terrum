@@ -1078,27 +1078,34 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        if (construction2MethodLinking && methodImportRows.Count != 0)
+        BoundProgram LoadConstruction2MethodProviderProgram()
         {
             var fieldProviderBindings
                 = standardFieldProviderValidation.FieldBindings.AddRange(
                     classProviderValidation.FieldBindings)
                     .Distinct().ToImmutableArray();
-            return LoadLocalAggregateLayoutProviderClosure(artifacts,
-                schemaIdentities, moduleIdentity, moduleValidation,
-                allTypeProviderBindings, fieldProviderBindings,
+            var linkedProgram = LoadLocalAggregateLayoutProviderClosure(
+                artifacts, schemaIdentities, moduleIdentity,
+                moduleValidation, allTypeProviderBindings,
+                fieldProviderBindings,
                 construction2MethodLinking: true);
+            var fieldProviderValidation
+                = new TrRmStandardFieldProviderValidation(
+                    allTypeProviderBindings, fieldProviderBindings,
+                    classProviderValidation.MethodBindings);
+            return RetainStandardFieldProviderClosure(linkedProgram,
+                fieldProviderValidation, artifacts, schemaIdentities,
+                moduleValidation.Modules, rootModuleRow, moduleIdentity);
+        }
+
+        if (construction2MethodLinking && methodImportRows.Count != 0)
+        {
+            return LoadConstruction2MethodProviderProgram();
         }
 
         if (construction2MethodLinking && tables.Methods.Count != 0)
         {
-            return LoadLocalAggregateLayoutProviderClosure(artifacts,
-                schemaIdentities, moduleIdentity, moduleValidation,
-                allTypeProviderBindings,
-                standardFieldProviderValidation.FieldBindings.AddRange(
-                    classProviderValidation.FieldBindings)
-                    .Distinct().ToImmutableArray(),
-                construction2MethodLinking: true);
+            return LoadConstruction2MethodProviderProgram();
         }
 
         if (includesInitializationReferenceBodies)
