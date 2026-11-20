@@ -5723,7 +5723,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     public Payload(int32 value) { Value = value; }
                 }
                 public void Ping() {}
-                public int32 Answer() { return 42; }
+                public int32 Answer(int32 value) { return value; }
             }
             """);
         var providerCompilation = Compilation.CreateLibrary(providerTree);
@@ -5747,7 +5747,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     public Box(int32 value) { Value = value; }
                 }
                 public void Forward() { Ping(); }
-                public int32 ForwardAnswer() { return Answer(); }
+                public int32 ForwardAnswer() { return Answer(42); }
             }
             """);
         var forwarderCompilation = Compilation.CreateLibrary(forwarderTree,
@@ -5806,6 +5806,17 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 forwardAnswerBody.MethodMap),
             Is.EqualTo(0x1600_0000u
                 | checked((uint)answerExpectedMethodRow)));
+        Assert.That(forwardAnswerBody.ConstantMap.Length,
+            Is.EqualTo(2 * sizeof(uint)));
+        var forwardAnswerConstantSourceRow = checked((int)
+            BinaryPrimitives.ReadUInt32LittleEndian(
+                forwardAnswerBody.ConstantMap[sizeof(uint)..]));
+        var forwardAnswerValueNodeRow = checked((int)
+            forwarderTables.ConstantSources.GetPayloadReference(
+                forwardAnswerConstantSourceRow));
+        Assert.That(forwarderTables.FrozenValueNodes.GetScalarPayload(
+                forwardAnswerValueNodeRow, forwarderTables.Blobs).ToArray(),
+            Is.EqualTo(new byte[] { 42, 0, 0, 0 }));
 
         var forwarderReference
             = TrRmExecutableCompiler.CreateStandardReference(
@@ -5867,6 +5878,17 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 reemittedForwardAnswerBody.MethodMap),
             Is.EqualTo(0x1600_0000u
                 | checked((uint)reemittedAnswerMethodRow)));
+        Assert.That(reemittedForwardAnswerBody.ConstantMap.Length,
+            Is.EqualTo(2 * sizeof(uint)));
+        var reemittedAnswerConstantSourceRow = checked((int)
+            BinaryPrimitives.ReadUInt32LittleEndian(
+                reemittedForwardAnswerBody.ConstantMap[sizeof(uint)..]));
+        var reemittedAnswerValueNodeRow = checked((int)
+            reemittedTables.ConstantSources.GetPayloadReference(
+                reemittedAnswerConstantSourceRow));
+        Assert.That(reemittedTables.FrozenValueNodes.GetScalarPayload(
+                reemittedAnswerValueNodeRow, reemittedTables.Blobs).ToArray(),
+            Is.EqualTo(new byte[] { 42, 0, 0, 0 }));
 
         var downstream = Compilation.CreateLibrary(SyntaxTree.Parse("""
             public void InvokeForward() { Forward(); }
