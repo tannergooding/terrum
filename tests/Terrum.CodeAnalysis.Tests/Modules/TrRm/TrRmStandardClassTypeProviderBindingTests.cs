@@ -373,6 +373,48 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
         StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsClassTypeBindingViews)]
     [TestCase(
         StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsClassTypeBindingViews)]
+    public void ComposesImportedStructViewWithItsDirectProviderView(
+        string schemaIdentity)
+    {
+        var provider = CreateArtifact("Provider", "Leaf", "LeafKey", 0,
+            schemaIdentity, null, null, null,
+            layoutKind: 0, pack: 0,
+            localDependencyTypeName: "Inner",
+            localDependencyExportKey: "InnerKey");
+        SetTypeDefFlags(provider, 0x06, typeDefRow: 2);
+        var root = CreateRootArtifactWithNestedStructExpectation("Root",
+            "Provider", "LeafKey", "InnerKey", "BoxKey", schemaIdentity);
+        var classReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, root), "Root",
+            [new TrRmStandardArtifactInput(schemaIdentity, provider)],
+            ["BoxKey"]);
+        var structReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, provider),
+            "Provider", [], ["InnerKey"]);
+
+        var composed = TrRmExecutableCompiler.CreateStandardReferenceSet(
+            [classReference, structReference]);
+        var inner = composed.GenericNominalTypeDefinitions.Single(
+            static definition => definition.Name == "Inner");
+        Assert.That(inner.NominalKind, Is.EqualTo(1));
+        Assert.That(inner.ProviderExpectations, Has.Length.EqualTo(1));
+        Assert.That(inner.SelectedExportKeys, Is.EqualTo(["InnerKey"]));
+        Assert.That(inner.TypeDefBindingEqualityGroups,
+            Has.Length.EqualTo(1));
+        Assert.That(inner.TypeDefBindingEqualityGroups[0].Endpoints,
+            Has.Length.EqualTo(2));
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public void Use(Box box, Inner inner) {}"), composed);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsClassTypeBindingViews)]
     public void ReemitsSelectedDirectStructRootsWithClassViews(
         string schemaIdentity)
     {
@@ -3156,6 +3198,125 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
         sections.Sort(static (left, right) =>
             left.Kind.CompareTo(right.Kind));
         var artifact = TrRmArtifactWriter.Encode(sections, schema,
+            standardSchemaIdentity: schemaIdentity);
+        _ = ReadTables(artifact, schemaIdentity);
+        return artifact;
+    }
+
+    private static byte[] CreateRootArtifactWithNestedStructExpectation(
+        string moduleIdentity, string providerIdentity,
+        string leafExportKey, string innerExportKey, string exportKey,
+        string schemaIdentity)
+    {
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        var seedArtifact = CreateClassArtifact("SeedProvider", "Seed",
+            "SeedKey", 0xF200_0008, schemaIdentity);
+        var seedTables = ReadTables(seedArtifact, schemaIdentity);
+        var featureSection = GetSection(seedArtifact, schemaIdentity, 0x0004);
+        var featureRange = seedTables.Modules.GetFeatureRange(1);
+        var featureCount = featureRange.Count;
+        var names = new (string Text, int Encoding)[] {
+            (moduleIdentity, 1),
+            ("", 1),
+            ("Box", 1),
+            ("Leaf", 1),
+            ("Inner", 1),
+            ("Value", 1),
+            (providerIdentity, 1),
+            (leafExportKey, 1),
+            (innerExportKey, 1),
+            (exportKey, 1),
+        };
+        var stringBytes = TrRmStringTableWriter.EncodeTextRows(names);
+        var strings = new TrRmStringTableReader(stringBytes, names.Length);
+        var typeSpecRows = new ReadOnlyMemory<byte>[] {
+            TrRmTypeSpecTableWriter.Reference(0x03, 1),
+            TrRmTypeSpecTableWriter.Reference(0x03, 2),
+        };
+        var typeSpecBytes = TrRmTypeSpecTableWriter.Encode(typeSpecRows,
+            3, 2, 0);
+        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes,
+            typeSpecRows.Length, 3, 2, 0);
+        var moduleBytes = TrRmModuleTableWriter.Encode([
+            new TrRmModuleRow(1, targetRequirement, 0, 0, 1, 1, 1, 1,
+                featureRange.First, featureCount,
+                seedTables.Modules.GetGoverningRuleEdition(1)),
+        ], strings, moduleRefCount: 1, typeDefCount: 3, methodDefCount: 0,
+            sourceFileCount: 0, featureCount: featureCount);
+        var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
+            1, 3, 0, 0, featureCount);
+        var typeDefRows = new[] {
+            new TrRmTypeDefRow(2, 3, 0x0A, 1, 1, 0, 0, 1, 1, 0, 0),
+            new TrRmTypeDefRow(2, 4, 0x0A, 2, 1, 0, 0, 2, 1, 0, 0),
+            new TrRmTypeDefRow(2, 5, 0x06, 3, 1, 0, 0, 3, 1, 0, 0),
+        };
+        var typeDefBytes = TrRmTypeDefTableWriter.Encode(typeDefRows,
+            strings, modules, fieldCount: 3, genericParamCount: 0,
+            layoutCount: 3, contractCount: 0,
+            schema: TrRmExecutableCompiler.GetForeignInvocationSchema(
+                schemaIdentity));
+        var typeDefs = new TrRmTypeDefTableReader(typeDefBytes, 3, strings,
+            modules, 3, 0, 3, 0);
+        var fieldRows = new[] {
+            new TrRmFieldDefRow(1, 6, 1, 2),
+            new TrRmFieldDefRow(2, 6, 2, 2),
+            new TrRmFieldDefRow(3, 6, 0xF200_0008, 2),
+        };
+        var fieldBytes = TrRmFieldDefTableWriter.Encode(fieldRows, strings,
+            typeDefs, typeSpecs);
+        var fields = new TrRmFieldDefTableReader(fieldBytes, 3, strings,
+            typeDefs, typeSpecs);
+        var targetProfiles = new TrRmTargetProfileTableReader([], 0);
+        var layoutRows = new[] {
+            new TrRmLayoutRow(1, 0, 0, 0, 0, 0, 1, 1),
+            new TrRmLayoutRow(2, 0, 0, 0, 0, 0, 2, 1),
+            new TrRmLayoutRow(3, 0, 0, 0, 0, 0, 3, 1),
+        };
+        var layoutBytes = TrRmLayoutTableWriter.Encode(layoutRows, typeDefs,
+            targetProfiles, layoutFieldCount: 3);
+        var layouts = new TrRmLayoutTableReader(layoutBytes, 3, typeDefs,
+            targetProfiles, 3);
+        var layoutFieldRows = new[] {
+            new TrRmLayoutFieldRow(1, 0, 1),
+            new TrRmLayoutFieldRow(2, 0, 2),
+            new TrRmLayoutFieldRow(3, 0, 3),
+        };
+        var layoutFieldBytes = TrRmLayoutFieldTableWriter.Encode(
+            layoutFieldRows, layouts, typeDefs, fields);
+        var moduleRefBytes = new byte[12];
+        Write(moduleRefBytes, 0, 7);
+        Write(moduleRefBytes, 4, targetRequirement);
+        var importBytes = new byte[24];
+        Write(importBytes, 0, 1);
+        Write(importBytes, 4, 8);
+        Write(importBytes, 8, 0x1300_0002);
+        Write(importBytes, 12, 1);
+        Write(importBytes, 16, 9);
+        Write(importBytes, 20, 0x1300_0003);
+        var exportBytes = new byte[8];
+        Write(exportBytes, 0, 0x1300_0001);
+        Write(exportBytes, 4, 10);
+        var sections = new List<TrRmSection> {
+            new(0x0001, 0, 1, moduleBytes),
+            new(0x0002, 0, checked((uint)names.Length), stringBytes),
+            featureSection,
+            new(0x0010, 0, 1, moduleRefBytes),
+            new(0x0011, 0, checked((uint)typeSpecRows.Length),
+                typeSpecBytes),
+            new(0x0013, 0, 3, typeDefBytes),
+            new(0x0014, 0, 3, fieldBytes),
+            new(0x0015, 0, 3, layoutBytes),
+            new(0x001C, 0, 2, importBytes),
+            new(0x001D, 0, 1, exportBytes),
+            new(0x0023, 0, 3, layoutFieldBytes),
+        };
+        sections.Sort(static (left, right) =>
+            left.Kind.CompareTo(right.Kind));
+        var artifactSchema
+            = TrRmExecutableCompiler.GetForeignInvocationSchema(
+                schemaIdentity);
+        var artifact = TrRmArtifactWriter.Encode(sections, artifactSchema,
             standardSchemaIdentity: schemaIdentity);
         _ = ReadTables(artifact, schemaIdentity);
         return artifact;
