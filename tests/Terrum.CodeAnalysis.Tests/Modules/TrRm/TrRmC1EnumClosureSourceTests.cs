@@ -1795,6 +1795,48 @@ internal sealed class TrRmC1EnumClosureSourceTests
                         new TrRmStandardArtifactInput(schemaIdentity,
                             missingCopyProvider),
                     ], ["type.owner"]));
+
+            var incompatibleProviderTree = SyntaxTree.Parse("""
+                namespace Demo {
+                    public struct Payload { public int64 Value; }
+                    public class Anchor {
+                        public int32 Value;
+                        public Anchor(int32 value) { Value = value; }
+                    }
+                }
+                """);
+            var incompatibleProviderCompilation
+                = Compilation.CreateLibrary(incompatibleProviderTree);
+            Assert.That(incompatibleProviderCompilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    incompatibleProviderCompilation.Diagnostics));
+            var incompatibleProviderProgram
+                = (BoundProgram)incompatibleProviderCompilation.Program!;
+            var incompatiblePayloadExport
+                = new TrRmSourceTypeExport("Demo", "Payload",
+                    "type.payload") {
+                    FieldExports = [
+                        new TrRmSourceFieldExport("Value",
+                            "field.payload.value"),
+                    ],
+                };
+            var incompatibleAnchorExport = CreateSourceClassExport(
+                incompatibleProviderProgram, incompatibleProviderTree,
+                "Anchor", "type.anchor", "constructor.anchor",
+                (0, "field.anchor.value"));
+            var incompatibleProviderArtifact
+                = TrRmExecutableCompiler.EmitStandard(
+                    incompatibleProviderProgram, "CopyProvider",
+                    schemaIdentity, 1, [incompatiblePayloadExport], [],
+                    [incompatibleAnchorExport]);
+            Assert.Throws<InvalidDataException>(() =>
+                TrRmExecutableCompiler.CreateStandardReference(
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        consumerArtifact),
+                    "CopyConsumer", [
+                        new TrRmStandardArtifactInput(schemaIdentity,
+                            incompatibleProviderArtifact),
+                    ], ["type.owner"]));
         }
     }
 
