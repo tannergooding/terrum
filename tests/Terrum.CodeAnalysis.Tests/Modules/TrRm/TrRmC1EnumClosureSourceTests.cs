@@ -1849,6 +1849,37 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 (0, "field.owner.child"));
             var consumerArtifact = EmitClassArtifact(consumerProgram,
                 "OwnerConsumer", schemaIdentity, [ownerExport]);
+            var consumerTables = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                    consumerArtifact, SchemaFor(schemaIdentity)));
+            var ownerTypeDefRow = Enumerable.Range(1,
+                    consumerTables.TypeDefs.Count)
+                .Single(row => consumerTables.TypeDefs.GetName(row)
+                    == "Owner");
+            var ownerInitializerRow = Enumerable.Range(1,
+                    consumerTables.Methods.Count)
+                .Single(row => consumerTables.Methods.GetOwnerType(row)
+                        == ownerTypeDefRow
+                    && consumerTables.Contracts
+                        .HasConstructionClause(row)
+                    && consumerTables.Contracts.GetConstructionClause(row)
+                        .RoleTag == 1);
+            var ownerInitializerBodyRow = consumerTables.Methods
+                .GetBodyRow(ownerInitializerRow);
+            var ownerInitializerBody = consumerTables.Bodies.GetRegisterBody(
+                ownerInitializerBodyRow, consumerTables.Contracts.Count);
+            Assert.That(ownerInitializerBody.FieldCount,
+                Is.GreaterThan(0), schemaIdentity);
+            var malformedFieldMap = ReplaceFirstBodyFieldMapToken(
+                consumerArtifact, schemaIdentity, ownerInitializerBodyRow,
+                0x1400_0000u
+                    | checked((uint)(consumerTables.Fields.Count + 1)));
+            Assert.Throws<InvalidDataException>(() =>
+                TrRmStructuralMetadataValidator
+                    .ValidateC1AndGetExecutionTables(
+                        new TrRmArtifactIndex(malformedFieldMap,
+                            SchemaFor(schemaIdentity))));
+
             var consumerInput = new TrRmStandardArtifactInput(schemaIdentity,
                 consumerArtifact);
             var reference = TrRmExecutableCompiler.CreateStandardReference(
@@ -6301,6 +6332,110 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 result, schema, null, usesNativePointerLoads: false,
                 standardSchemaIdentity: schemaIdentity));
         return result;
+    }
+
+    private static byte[] ReplaceFirstBodyFieldMapToken(byte[] artifact,
+        string schemaIdentity, int bodyRow, uint replacement)
+    {
+        var schema = SchemaFor(schemaIdentity);
+        var index = new TrRmArtifactIndex(artifact, schema);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(index);
+        var body = tables.Bodies.GetRegisterBody(bodyRow,
+            tables.Contracts.Count);
+        var fieldMap = body.FieldMap.ToArray();
+        if (fieldMap.Length < sizeof(uint))
+        {
+            throw new InvalidOperationException(
+                "The selected constructor Body has no FieldMap token.");
+        }
+
+        BinaryPrimitives.WriteUInt32LittleEndian(fieldMap, replacement);
+        var blocks = new TrRmRegisterBodyBlock[body.BlockCount];
+        for (var blockIndex = 0; blockIndex < body.BlockCount;
+            blockIndex++)
+        {
+            var block = body.GetBlock(blockIndex);
+            blocks[blockIndex] = new TrRmRegisterBodyBlock(
+                BinaryPrimitives.ReadUInt32LittleEndian(block),
+                BinaryPrimitives.ReadUInt32LittleEndian(block[4..]),
+                BinaryPrimitives.ReadUInt16LittleEndian(block[8..]));
+        }
+
+        var records = new ReadOnlyMemory<byte>[body.RecordCount];
+        for (var recordIndex = 0; recordIndex < body.RecordCount;
+            recordIndex++)
+        {
+            records[recordIndex] = body.GetRecord(recordIndex).ToArray();
+        }
+
+        var replacementBody = TrRmRegisterBodyWriter.Encode(
+            body.HomeMap.ToArray(), body.TypeMap.ToArray(),
+            body.MethodMap.ToArray(), fieldMap,
+            body.ConstantMap.ToArray(), blocks, records,
+            body.Code.ToArray(), tables.Contracts.Count, schema);
+        return ReplaceBodyRow(artifact, schema, bodyRow, replacementBody);
+    }
+
+    private static byte[] ReplaceBodyRow(byte[] artifact,
+        TrRmArtifactSchema schema, int bodyRow, byte[] replacementBody)
+    {
+        var index = new TrRmArtifactIndex(artifact, schema);
+        if (!index.TryGetSection(0x0020, out var bodySection,
+                out var bodyCount)
+            || bodyRow <= 0 || bodyRow > bodyCount)
+        {
+            throw new InvalidOperationException(
+                "The test artifact has no selected Body row.");
+        }
+
+        var offsetBytes = checked((bodyCount + 1) * sizeof(uint));
+        var bodyRows = new byte[bodyCount][];
+        var bodyDataLength = 0;
+        for (var row = 1; row <= bodyCount; row++)
+        {
+            var start = checked((int)BinaryPrimitives
+                .ReadUInt32LittleEndian(bodySection[((row - 1)
+                    * sizeof(uint))..]));
+            var end = checked((int)BinaryPrimitives
+                .ReadUInt32LittleEndian(bodySection[(row
+                    * sizeof(uint))..]));
+            var rowBytes = row == bodyRow
+                ? (byte[])replacementBody.Clone()
+                : bodySection.Slice(offsetBytes + start,
+                    end - start).ToArray();
+            bodyRows[row - 1] = rowBytes;
+            bodyDataLength = checked(bodyDataLength + rowBytes.Length);
+        }
+
+        var newBodySection = new byte[checked(offsetBytes
+            + bodyDataLength)];
+        var nextOffset = 0;
+        for (var rowIndex = 0; rowIndex < bodyRows.Length; rowIndex++)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                newBodySection.AsSpan(rowIndex * sizeof(uint)),
+                checked((uint)nextOffset));
+            var rowBytes = bodyRows[rowIndex];
+            rowBytes.CopyTo(newBodySection, offsetBytes + nextOffset);
+            nextOffset = checked(nextOffset + rowBytes.Length);
+        }
+
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            newBodySection.AsSpan(bodyCount * sizeof(uint)),
+            checked((uint)nextOffset));
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var sectionIndex = 0;
+            sectionIndex < index.SectionCount; sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var section, out var recordCount);
+            sections.Add(new TrRmSection(kind, flags,
+                checked((uint)recordCount),
+                kind == 0x0020 ? newBodySection : section.ToArray()));
+        }
+
+        return TrRmArtifactWriter.Encode(sections, schema);
     }
 
     private static void SetTypeDefFlags(byte[] artifact, int typeDefRow,
