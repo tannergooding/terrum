@@ -33,6 +33,13 @@ internal readonly record struct TrRmStandardMethodProviderBinding(
     string ProducerIdentity, string ExportKey, uint TargetRequirement,
     uint RuntimePolicy);
 
+internal readonly record struct TrRmStandardTopLevelMethodProviderBinding(
+    int ConsumerArtifactIndex, int ConsumerModuleRow, int ImportRow,
+    int ModuleRefRow, int ExpectedMethodDefRow, int ProviderArtifactIndex,
+    int ProviderModuleRow, int ProviderMethodDefRow, int ExportRow,
+    string ProducerIdentity, string ExportKey, uint TargetRequirement,
+    uint RuntimePolicy);
+
 internal readonly record struct TrRmStandardFieldProviderValidation(
     ImmutableArray<TrRmStandardTypeProviderBinding> TypeBindings,
     ImmutableArray<TrRmStandardFieldProviderBinding> FieldBindings,
@@ -41,7 +48,9 @@ internal readonly record struct TrRmStandardFieldProviderValidation(
 internal readonly record struct TrRmStandardClassProviderValidation(
     ImmutableArray<TrRmStandardTypeProviderBinding> TypeBindings,
     ImmutableArray<TrRmStandardFieldProviderBinding> FieldBindings,
-    ImmutableArray<TrRmStandardMethodProviderBinding> MethodBindings);
+    ImmutableArray<TrRmStandardMethodProviderBinding> MethodBindings,
+    ImmutableArray<TrRmStandardTopLevelMethodProviderBinding>
+        TopLevelMethodBindings);
 
 internal readonly record struct TrRmStandardMethodTypeSpecPair(
     int ExpectedArtifactIndex, int ExpectedModuleRow,
@@ -320,7 +329,8 @@ internal static class TrRmFixedArrayProviderBindingValidator
             nestedFieldDestinations: false,
             allowC1M1MethodImports: true);
         return new TrRmStandardClassProviderValidation(typeBindings,
-            fieldValidation.FieldBindings, context.MethodProviderBindings);
+            fieldValidation.FieldBindings, context.MethodProviderBindings,
+            context.TopLevelMethodProviderBindings);
     }
 
     internal static TrRmStandardTypeProviderBinding
@@ -411,6 +421,8 @@ internal static class TrRmFixedArrayProviderBindingValidator
             int RightArtifact, int RightMethod)> _activeAnchorPairs;
         internal ImmutableArray<TrRmStandardMethodProviderBinding>
             MethodProviderBindings { get; private set; }
+        internal ImmutableArray<TrRmStandardTopLevelMethodProviderBinding>
+            TopLevelMethodProviderBindings { get; private set; }
         private TrRmStructuralMetadataValidator.ValidatedExecutionTables
             _cachedProviderTables;
         private int _cachedProviderArtifactIndex;
@@ -436,6 +448,7 @@ internal static class TrRmFixedArrayProviderBindingValidator
             _visitedTypePairs = [];
             _activeAnchorPairs = [];
             MethodProviderBindings = [];
+            TopLevelMethodProviderBindings = [];
             _cachedProviderTables = default;
             _cachedProviderArtifactIndex = -1;
             _hasCachedProviderTables = false;
@@ -914,6 +927,11 @@ internal static class TrRmFixedArrayProviderBindingValidator
             });
             MethodProviderBindings = ValidateC1M1MethodDefImports(
                 rootModuleRow);
+            TopLevelMethodProviderBindings
+                = [.. topLevelMethodBindings.OrderBy(
+                    static binding => binding.ConsumerArtifactIndex)
+                    .ThenBy(static binding => binding.ConsumerModuleRow)
+                    .ThenBy(static binding => binding.ImportRow)];
             return [.. orderedBindings];
         }
 
@@ -939,6 +957,8 @@ internal static class TrRmFixedArrayProviderBindingValidator
                 (int ArtifactIndex, int ExpectedMethodDefRow),
                 (int ProviderArtifactIndex, int ProviderModuleRow,
                     int ProviderMethodRow)>();
+            var topLevelMethodBindings
+                = new List<TrRmStandardTopLevelMethodProviderBinding>();
             foreach (var ownerResolution in _imports.Values)
             {
                 var expectedTables = GetTables(
@@ -1108,6 +1128,14 @@ internal static class TrRmFixedArrayProviderBindingValidator
 
                         var providerMethodRow = checked((int)(
                             providerDefinition & 0x00FF_FFFF));
+                        if (!provider.Exports.TryGetExportRowForKey(
+                                selected.ModuleRow,
+                                importBinding.ExportKey,
+                                out var providerExportRow))
+                        {
+                            throw InvalidBinding();
+                        }
+
                         if (provider.Methods.GetOwnerModule(
                                 providerMethodRow) != selected.ModuleRow
                             || provider.Methods.GetOwnerType(
@@ -1153,6 +1181,16 @@ internal static class TrRmFixedArrayProviderBindingValidator
                             topLevelMethodTargets.Add(expectedTargetKey,
                                 target);
                         }
+                        topLevelMethodBindings.Add(
+                            new TrRmStandardTopLevelMethodProviderBinding(
+                                module.ArtifactIndex, module.ModuleRow,
+                                importRow, moduleRefRow, expectedMethodRow,
+                                selected.ArtifactIndex, selected.ModuleRow,
+                                providerMethodRow, providerExportRow,
+                                importBinding.ProducerIdentity,
+                                importBinding.ExportKey,
+                                importBinding.TargetRequirement,
+                                importBinding.RuntimePolicy));
 
                         var methodContext = this;
                         if (!MethodDeclarationTypesMatch(

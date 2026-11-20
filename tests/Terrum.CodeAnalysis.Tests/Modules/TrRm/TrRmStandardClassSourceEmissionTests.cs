@@ -8,6 +8,7 @@ using System.IO;
 using System.Linq;
 using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
+using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
@@ -5826,6 +5827,87 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         Assert.That(sourceFreeTables.FrozenValueNodes.GetScalarPayload(
                 sourceFreeConstantNodeRow, sourceFreeTables.Blobs).ToArray(),
             Is.EqualTo(new byte[] { 7, 0, 0, 0 }));
+    }
+
+    [Test]
+    public void LinksTopLevelConstruction2MethodImportsForStandardExecution()
+    {
+        var schemaIdentity
+            = C1M1Construction2ClassParameterDefaultsCopyEvidenceSchemaIdentity;
+        var providerTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public int32 Get() { return 42; }
+            }
+            """);
+        var providerCompilation = Compilation.CreateLibrary(providerTree);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var providerProgram = (BoundProgram)providerCompilation.Program!;
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, "MethodRuntimeProvider", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var providerReference
+            = TrRmExecutableCompiler.CreateStandardReference(providerInput,
+                "MethodRuntimeProvider", []);
+
+        var consumerTree = SyntaxTree.Parse("""
+            namespace Demo {
+                int32 Main() { return Get(); }
+            }
+            """);
+        var consumerCompilation = Compilation.Create(consumerTree,
+            providerReference);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerProgram = (BoundProgram)consumerCompilation.Program!;
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            consumerProgram, "MethodRuntimeConsumer", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var consumerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            consumerArtifact);
+        var providers = new[] { providerInput };
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(consumerInput,
+            "MethodRuntimeConsumer", providers);
+        Assert.That(loaded.EntryPoint, Is.GreaterThanOrEqualTo(0));
+        Assert.That(loaded.Functions, Has.Length.EqualTo(2));
+        Assert.That(loaded.Functions.Any(static function =>
+                function.IsExternal || function.IsModuleReference),
+            Is.False);
+        Assert.That(NativeModuleCompiler.ExecuteStandard(consumerInput,
+            "MethodRuntimeConsumer", providers,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(42));
+        var nativeImage = NativeModuleCompiler.EmitStandardExecutable(
+            consumerInput, "MethodRuntimeConsumer", providers,
+            NativeRuntimePolicy.FailFast);
+        Assert.That(nativeImage.AsSpan(0, 2).ToArray(),
+            Is.EqualTo(new byte[] { (byte)'M', (byte)'Z' }));
+
+        var incompatibleProviderTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public int32 Get(int32 value) { return value; }
+            }
+            """);
+        var incompatibleProviderCompilation
+            = Compilation.CreateLibrary(incompatibleProviderTree);
+        Assert.That(incompatibleProviderCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                incompatibleProviderCompilation.Diagnostics));
+        var incompatibleProviderProgram
+            = (BoundProgram)incompatibleProviderCompilation.Program!;
+        var incompatibleProviderArtifact
+            = TrRmExecutableCompiler.EmitStandard(
+                incompatibleProviderProgram, "MethodRuntimeProvider",
+                schemaIdentity,
+                TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(consumerInput,
+                "MethodRuntimeConsumer",
+                [new TrRmStandardArtifactInput(schemaIdentity,
+                    incompatibleProviderArtifact)]));
     }
 
     [Test]

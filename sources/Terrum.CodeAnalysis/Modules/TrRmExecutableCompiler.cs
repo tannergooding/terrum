@@ -4720,12 +4720,31 @@ public static partial class TrRmExecutableCompiler
         ImmutableArray<CoreContractFailureIdentitySelection>
             coreContractFailureIdentitySelections = default,
         int selectedModuleRow = 0,
-        BoundProgram? standardClassQueryProgram = null)
+        BoundProgram? standardClassQueryProgram = null,
+        bool standardConstruction2MethodLinking = false)
     {
         var standardInitializationReferenceBodies
             = standardSchemaIdentity is not null
                 && IsSelectedInitializationReferenceSchemaIdentity(
                     standardSchemaIdentity);
+        var standardConstruction2MethodLinkingProfile
+            = standardConstruction2MethodLinking
+                && standardSchemaIdentity is { } construction2Schema
+                && (IsSelectedC1ClassConstructionSchemaIdentity(
+                        construction2Schema)
+                    || StandardGenericMethodSchema
+                        .IsCM1ClassParameterDefaults(construction2Schema))
+                && GetForeignInvocationSchema(construction2Schema)
+                    .UsesObjectConstruction()
+                && !IsSelectedC1ClassInstanceLayoutSchemaIdentity(
+                    construction2Schema);
+        if (standardConstruction2MethodLinking
+            && !standardConstruction2MethodLinkingProfile)
+        {
+            throw new ArgumentException(
+                "The selected Construction-2 Method linking profile is invalid.",
+                nameof(standardConstruction2MethodLinking));
+        }
         var generalPredicateGraphsInitializationReferenceBodies
             = standardSchemaIdentity is not null
                 && IsSelectedGeneralPredicateGraphsSchemaIdentity(
@@ -4737,8 +4756,12 @@ public static partial class TrRmExecutableCompiler
         var standardNativeParameterProfile
             = standardNativePointerLoads
                 && schema.UsesNativeParameterContracts();
+        var standardRegisterBodies
+            = standardInitializationReferenceBodies
+                || standardConstruction2MethodLinkingProfile;
         if (standardSchemaIdentity is not null
-            && (!standardInitializationReferenceBodies
+            && (!(standardInitializationReferenceBodies
+                    || standardConstruction2MethodLinkingProfile)
                 || schema != GetForeignInvocationSchema(
                     standardSchemaIdentity)))
         {
@@ -4747,10 +4770,11 @@ public static partial class TrRmExecutableCompiler
                 nameof(standardSchemaIdentity));
         }
         if (selectedModuleImports is not null
-            && !standardInitializationReferenceBodies)
+            && !(standardInitializationReferenceBodies
+                || standardConstruction2MethodLinkingProfile))
         {
             throw new ArgumentException(
-                "Selected source-method imports require the Standard initialization-reference Body profile.",
+                "Selected source-method imports require an assigned Standard Body profile.",
                 nameof(selectedModuleImports));
         }
 
@@ -5192,6 +5216,10 @@ public static partial class TrRmExecutableCompiler
                 = standardInitializationReferenceBodies && importDefinition
                     && !isNativeImport && !isNativeCallable
                     && !isNativeVTable;
+            var isImportedConstruction2Method
+                = standardConstruction2MethodLinkingProfile
+                    && importDefinition && !isNativeImport
+                    && !isNativeCallable && !isNativeVTable;
             importedNativeCallableCount += isImportedNativeCallable ? 1 : 0;
             importedNativeVTableCount += isImportedNativeVTable ? 1 : 0;
             importedNativeParameterMethodCount
@@ -5202,9 +5230,11 @@ public static partial class TrRmExecutableCompiler
                 || (importDefinition && !isImportedNativeCallable
                     && !isImportedNativeVTable
                     && !isImportedNativeParameterMethod
-                    && !isImportedInitializationReferenceMethod)
+                    && !isImportedInitializationReferenceMethod
+                    && !isImportedConstruction2Method)
                 || (isNativeImport || isNativeVTable || isImportedNativeCallable
-                    || isImportedInitializationReferenceMethod)
+                    || isImportedInitializationReferenceMethod
+                    || isImportedConstruction2Method)
                     != (defs.GetBodyRow(row) == 0)
                 || sigs.GetReceiverTypeSpec(signature) != 0
                 || sigs.GetGenericCount(signature) != 0
@@ -5432,14 +5462,15 @@ public static partial class TrRmExecutableCompiler
                     importBinding.ExportKey, importBinding.TargetRequirement,
                     importBinding.RuntimePolicy);
             }
-            else if (isImportedInitializationReferenceMethod)
+            else if (isImportedInitializationReferenceMethod
+                || isImportedConstruction2Method)
             {
                 if (selectedModuleImports is null
                     || !selectedModuleImports.TryGetValue(row,
                         out var selectedModuleImport))
                 {
                     throw Invalid(
-                        "A Standard initialization-reference MethodDef Import has no validated provider binding.");
+                        "A selected Standard MethodDef Import has no validated provider binding.");
                 }
 
                 moduleImport = selectedModuleImport;
@@ -5464,12 +5495,19 @@ public static partial class TrRmExecutableCompiler
                 RequiresUnsafeCaller = requiresUnsafeCaller,
                 DeclaredRequiresUnsafeCaller = declaredRequiresUnsafeCaller,
                 IsExternal = isNativeImport || isImportedNativeCallable
-                    || isImportedInitializationReferenceMethod,
+                    || isImportedInitializationReferenceMethod
+                    || isImportedConstruction2Method,
                 IsModuleReference = isImportedNativeParameterMethod
-                    || isImportedInitializationReferenceMethod,
+                    || isImportedInitializationReferenceMethod
+                    || isImportedConstruction2Method,
                 Intrinsic = isNativeVTable ? BoundIntrinsic.NativeVTableCall : BoundIntrinsic.None,
                 DirectNativeImport = directNativeImport,
                 ModuleImport = moduleImport,
+                DependencyContracts = standardConstruction2MethodLinkingProfile
+                    ? DecodeC1M1ClassMethodDependencyContracts(
+                        contractTable.GetDependencyContracts(row), count,
+                        hasReceiver: false)
+                    : [],
                 NativeVTableMethod = nativeVTableMethod,
                 NativeFunctionPointerType = nativeCallableTypeByMethod[row],
                 NativeCallableConvention = schema.UsesDevelopmentNativeConventions()
@@ -5539,6 +5577,26 @@ public static partial class TrRmExecutableCompiler
         if (importedNativeCallableCount + importedNativeVTableCount
                 + importedNativeParameterMethodCount
                 + importedInitializationReferenceMethodCount
+                + (standardConstruction2MethodLinkingProfile
+                    ? selectedImportRows.Count(importRow => {
+                        var definition = imports
+                            .GetExpectedDefinitionForImportRow(importRow);
+                        if ((definition >> 24) != 0x16)
+                        {
+                            return false;
+                        }
+
+                        var methodRow = checked((int)(
+                            definition & 0x00FF_FFFF));
+                        return !standardNativeImports
+                                .HasImportForMethod(methodRow)
+                            && !nativeImports
+                                .HasImportForMethod(methodRow)
+                            && !nativeCallables
+                                .HasCallableForMethod(methodRow)
+                            && !nativeVTables
+                                .HasVTableForMethod(methodRow);
+                    }) : 0)
                 + initializationReferenceTypeImportCount
                 + layoutQueryImportCount != selectedImportRows.Count)
         {
@@ -5648,11 +5706,54 @@ public static partial class TrRmExecutableCompiler
                 variables = declaration.Variables.ToBuilder();
                 statements = [];
                 var registeredQueryBody = false;
-                if (standardInitializationReferenceBodies)
+                if (standardRegisterBodies)
                 {
                     var registerBody = bodies.GetRegisterBody(
                         defs.GetBodyRow(row), contractTable.Count,
                         generalPredicateGraphsInitializationReferenceBodies);
+                    var scalarConstants
+                        = ImmutableArray<BoundConstant>.Empty;
+                    if (standardConstruction2MethodLinkingProfile
+                        && registerBody.ConstantCount != 0)
+                    {
+                        var constants
+                            = ImmutableArray.CreateBuilder<BoundConstant>(
+                                registerBody.ConstantCount);
+                        var targetRequirement = modules.GetRequirements(
+                            selectedModuleRow).TargetRequirement;
+                        for (var constantIndex = 0;
+                            constantIndex < registerBody.ConstantCount;
+                            constantIndex++)
+                        {
+                            var constantOffset = constantIndex
+                                * (sizeof(uint) * 2);
+                            var typeSpecReference
+                                = BinaryPrimitives.ReadUInt32LittleEndian(
+                                    registerBody.ConstantMap.Slice(
+                                        constantOffset));
+                            var constantSourceRow = checked((int)
+                                BinaryPrimitives.ReadUInt32LittleEndian(
+                                    registerBody.ConstantMap.Slice(
+                                        constantOffset + sizeof(uint))));
+                            constants.Add(
+                                TrRmConstantSourceValueValidator
+                                    .MaterializeFrozenScalar(
+                                        constantSourceRow,
+                                        typeSpecReference,
+                                        selectedModuleRow,
+                                        targetRequirement,
+                                        validatedTables.ConstantSources,
+                                        validatedTables.FrozenValueNodes,
+                                        validatedTables.Blobs,
+                                        validatedTables.TypeSpecs,
+                                        validatedTables.Features,
+                                        validatedTables.Modules,
+                                        validatedTables.A3LayoutResourceLedger));
+                        }
+
+                        scalarConstants = constants.MoveToImmutable();
+                    }
+
                     if (standardSchemaIdentity is { } classQuerySchema
                         && IsSelectedC1ClassInstanceLayoutSchemaIdentity(
                             classQuerySchema)
@@ -5678,7 +5779,10 @@ public static partial class TrRmExecutableCompiler
                                 checkedReferenceTypeIndexes,
                                 nativePointerTypeDefinitions,
                                 structureTypeByTypeDef, structures,
-                                functions, functionIndexByMethodRow);
+                                functions, functionIndexByMethodRow,
+                                construction2MethodLinking:
+                                    standardConstruction2MethodLinkingProfile,
+                                scalarConstants: scalarConstants);
                     }
 
                     registeredQueryBody = true;

@@ -3492,10 +3492,16 @@ public static partial class TrRmExecutableCompiler
             int[] structureTypeByTypeDef,
             ImmutableArray<BoundStruct> structures,
             ImmutableArray<BoundFunction>.Builder functions,
-            int[] functionIndexByMethodRow)
+            int[] functionIndexByMethodRow,
+            bool construction2MethodLinking = false,
+            ImmutableArray<BoundConstant> scalarConstants = default)
     {
         if (body.BlockCount is not (1 or 3) || body.HasExceptionDirectory
-            || body.FieldCount != 0 || body.ConstantCount != 0
+            || body.FieldCount != 0
+            || (!construction2MethodLinking && body.ConstantCount != 0)
+            || (construction2MethodLinking
+                && (scalarConstants.IsDefault
+                    || scalarConstants.Length != body.ConstantCount))
             || body.HomeCount < function.ParameterCount
             || (body.UsesNativePointerLoads
                 ? body.HomeCount > SemanticVerifier.MaximumVariables
@@ -3631,6 +3637,32 @@ public static partial class TrRmExecutableCompiler
 
                     valueByRegister[destinationRegister] = new BoundRead(
                         formalOrdinal, variables[formalOrdinal].Type, default);
+                    break;
+                }
+                case 0xD4:
+                {
+                    if (!construction2MethodLinking
+                        || instruction[1] >= 14
+                        || BinaryPrimitives.ReadUInt16LittleEndian(
+                            instruction[2..]) >= scalarConstants.Length)
+                    {
+                        throw Invalid(
+                            "A Construction-2 scalar constant load has an invalid register or ConstantMap index.");
+                    }
+
+                    var constantIndex
+                        = BinaryPrimitives.ReadUInt16LittleEndian(
+                            instruction[2..]);
+                    var constant = scalarConstants[constantIndex];
+                    if (!TryGetC1M1SourceScalarTypeSpecReference(
+                            constant.Type, out _)
+                        || !constant.Bits.IsCanonicalFor(constant.Type)
+                        || !valueByRegister.TryAdd(instruction[1],
+                            constant))
+                    {
+                        throw Invalid(
+                            "A Construction-2 scalar constant load does not match its checked ConstantMap entry.");
+                    }
                     break;
                 }
                 case 0x14:
@@ -3868,8 +3900,13 @@ public static partial class TrRmExecutableCompiler
                     break;
                 }
                 case 0x90:
+                case 0xE0:
                 {
-                    var record = body.GetRecord(instruction[1]);
+                    var recordIndex = opcode == 0xE0
+                        ? BinaryPrimitives.ReadUInt16LittleEndian(
+                            instruction[2..])
+                        : instruction[1];
+                    var record = body.GetRecord(recordIndex);
                     var resultKind = record[5];
                     var resultIndex
                         = BinaryPrimitives.ReadUInt16LittleEndian(record[10..]);
@@ -3952,6 +3989,96 @@ public static partial class TrRmExecutableCompiler
                                     IsUnsafeAuthorized =
                                         nativeTarget.RequiresUnsafeCaller,
                                 }, default));
+                        calls++;
+                        break;
+                    }
+
+                    if (resultKind == 1
+                        && construction2MethodLinking)
+                    {
+                        if (record[4] != 1
+                            || resultIndex >= 14
+                            || preparationCount != 0
+                            || targetMethodMapIndex >= body.MethodCount)
+                        {
+                            throw Unsupported(
+                                "A Construction-2 Method CallSite requires an unprepared register result.");
+                        }
+
+                        var methodToken
+                            = BinaryPrimitives.ReadUInt32LittleEndian(
+                                body.MethodMap[(targetMethodMapIndex
+                                    * sizeof(uint))..]);
+                        var targetFunction
+                            = ResolveStandardInitializationBodyMethodMapFunction(
+                                methodToken, imports,
+                                functionIndexByMethodRow, functions);
+                        var target = functions[targetFunction];
+                        if (target.ReturnType == PrimitiveType.Void
+                            || !TryGetC1M1SourceScalarTypeSpecReference(
+                                target.ReturnType, out _)
+                            || inputCount
+                                != (uint)target.ParameterCount)
+                        {
+                            throw Invalid(
+                                "A Construction-2 Method CallSite result does not match its target signature.");
+                        }
+
+                        var arguments
+                            = ImmutableArray.CreateBuilder<BoundExpression>(
+                                target.ParameterCount);
+                        var inputOffset = 20;
+                        for (var formal = 0;
+                            formal < target.ParameterCount; formal++)
+                        {
+                            var selectorKind = record[inputOffset];
+                            var sourceUse = record[inputOffset + 1];
+                            var selectorIndex
+                                = BinaryPrimitives.ReadUInt16LittleEndian(
+                                    record[(inputOffset + 2)..]);
+                            var parameter = target.Variables[formal];
+                            if (selectorKind == 1 && sourceUse == 1
+                                && selectorIndex < 14
+                                && valueByRegister.TryGetValue(
+                                    selectorIndex, out var registerValue)
+                                && registerValue.Type == parameter.Type)
+                            {
+                                arguments.Add(registerValue);
+                            }
+                            else if (selectorKind == 2 && sourceUse == 1
+                                && selectorIndex < homeVariables.Length
+                                && homeRoles[selectorIndex] == 2
+                                && homeVariables[selectorIndex] >= 0
+                                && variables[homeVariables[
+                                    selectorIndex]].Type == parameter.Type
+                                && !parameter.IsOut && !parameter.IsInit
+                                && !parameter.IsImplicitRef
+                                && !parameter.IsInitializationLocal)
+                            {
+                                arguments.Add(new BoundRead(
+                                    homeVariables[selectorIndex],
+                                    parameter.Type, default));
+                            }
+                            else
+                            {
+                                throw Unsupported(
+                                    "A Construction-2 Method CallSite input must select a fixed-scalar register or formal Home.");
+                            }
+
+                            inputOffset += 4;
+                        }
+
+                        if (!valueByRegister.TryAdd(resultIndex,
+                                new BoundCall(targetFunction,
+                                    arguments.MoveToImmutable(),
+                                    target.ReturnType, default) {
+                                    IsUnsafeAuthorized =
+                                        target.RequiresUnsafeCaller,
+                                }))
+                        {
+                            throw Invalid(
+                                "A Construction-2 Method CallSite overwrites an existing value register.");
+                        }
                         calls++;
                         break;
                     }
@@ -4050,7 +4177,8 @@ public static partial class TrRmExecutableCompiler
                             methodToken, imports, functionIndexByMethodRow,
                             functions);
                     var target = functions[targetFunction];
-                    if (target.RequiresUnsafeCaller
+                    if ((target.RequiresUnsafeCaller
+                            && !construction2MethodLinking)
                         || target.ReturnType != PrimitiveType.Void
                         || inputCount != (uint)target.ParameterCount)
                     {
@@ -4139,7 +4267,11 @@ public static partial class TrRmExecutableCompiler
 
                     statements.Add(new BoundExpressionStatement(new BoundCall(
                         targetFunction, arguments.MoveToImmutable(),
-                        PrimitiveType.Void, default), default));
+                        PrimitiveType.Void, default) {
+                            IsUnsafeAuthorized =
+                                construction2MethodLinking
+                                && target.RequiresUnsafeCaller,
+                        }, default));
                     calls++;
                     break;
                 }

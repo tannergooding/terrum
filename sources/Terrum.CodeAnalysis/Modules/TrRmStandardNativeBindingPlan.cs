@@ -264,6 +264,9 @@ internal sealed partial class TrRmStandardNativeBindingPlan
                 StringComparer.Ordinal);
         var isLocalAggregateLayoutSchemaSet
             = IsExactLocalAggregateLayoutSchemaSet(_schemaIdentities);
+        var isConstruction2MethodLinkSchemaSet
+            = _schemaIdentities.Count != 0
+                && _schemaIdentities.All(IsConstruction2MethodLinkSchemaIdentity);
         if (includesLocalAggregateLayoutSchema
             && !isLocalAggregateLayoutSchemaSet)
         {
@@ -726,7 +729,8 @@ internal sealed partial class TrRmStandardNativeBindingPlan
         }
 
         if (nativeBindings.Count == 0
-            && !isLocalAggregateLayoutSchemaSet)
+            && !isLocalAggregateLayoutSchemaSet
+            && !isConstruction2MethodLinkSchemaSet)
         {
             var exception = new NotSupportedException(
                 "The Standard native binding plan contains no direct NativeImport.");
@@ -772,10 +776,33 @@ internal sealed partial class TrRmStandardNativeBindingPlan
                 InitializationReferencePointerLoadsNativeParameterSchemaIdentity)
             || AreEqualOrdinal(schemaIdentity,
                 InitializationReferenceGeneralPredicateGraphsPointerLoadsNativeParameterSchemaIdentity)
+            || IsConstruction2MethodLinkSchemaIdentity(schemaIdentity)
             || (schemaIdentity is not null
                 && TrRmExecutableCompiler
                     .IsSelectedC1ClassInstanceLayoutSchemaIdentity(
                         schemaIdentity));
+
+    private static bool IsConstruction2MethodLinkSchemaIdentity(
+        string? schemaIdentity)
+    {
+        if (schemaIdentity is null
+            || !(TrRmExecutableCompiler
+                    .IsSelectedC1ClassConstructionSchemaIdentity(
+                        schemaIdentity)
+                || StandardGenericMethodSchema
+                    .IsCM1ClassParameterDefaults(schemaIdentity)))
+        {
+            return false;
+        }
+
+        var schema
+            = TrRmExecutableCompiler.GetForeignInvocationSchema(
+                schemaIdentity);
+        return schema.UsesObjectConstruction()
+            && !TrRmExecutableCompiler
+                .IsSelectedC1ClassInstanceLayoutSchemaIdentity(
+                    schemaIdentity);
+    }
 
     private static bool IsExactLocalAggregateLayoutSchemaSet(
         IReadOnlyList<string> schemaIdentities)

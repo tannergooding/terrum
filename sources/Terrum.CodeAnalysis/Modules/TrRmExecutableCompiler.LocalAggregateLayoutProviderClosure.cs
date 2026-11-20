@@ -91,7 +91,8 @@ public static partial class TrRmExecutableCompiler
         bool nestedInitializationReferenceFieldDestinations = false,
         bool generalPredicateGraphsInitializationReferenceBodies = false,
         bool standardNativePointerLoads = false,
-        bool nativeParameterContracts = false)
+        bool nativeParameterContracts = false,
+        bool construction2MethodLinking = false)
     {
         if (nativeParameterContracts && !standardNativePointerLoads)
         {
@@ -110,8 +111,27 @@ public static partial class TrRmExecutableCompiler
                 || generalPredicateGraphsInitializationReferenceBodies
                 || standardNativePointerLoads
                 || nativeParameterContracts;
+        if (construction2MethodLinking
+            && (initializationReferenceBodyProfile
+                || schemaIdentities.Length == 0
+                || schemaIdentities.Any(schemaIdentity =>
+                    !StringComparer.Ordinal.Equals(schemaIdentity,
+                        schemaIdentities[0]))
+                || !(IsSelectedC1ClassConstructionSchemaIdentity(
+                        schemaIdentities[0])
+                    || StandardGenericMethodSchema
+                        .IsCM1ClassParameterDefaults(
+                            schemaIdentities[0]))
+                || !GetForeignInvocationSchema(schemaIdentities[0])
+                    .UsesObjectConstruction()))
+        {
+            throw Unsupported(
+                "The method-linking provider closure requires one exact Construction-2 class-reference profile.");
+        }
         var requiredSchemaIdentity
-            = initializationReferenceLocalFieldLayout
+            = construction2MethodLinking
+                ? schemaIdentities[0]
+            : initializationReferenceLocalFieldLayout
                 ? nestedInitializationReferenceFieldDestinations
                     ? StandardInitReferenceBodiesNestedFieldDestinationsSchemaIdentity
                     : StandardInitReferenceBodiesLocalFieldLayoutSchemaIdentity
@@ -392,8 +412,11 @@ public static partial class TrRmExecutableCompiler
 
                 var expectedMethodRow = checked((int)(expectedDefinition
                     & 0x00FF_FFFF));
+                var allowMethodContracts
+                    = initializationReferenceBodyProfile
+                        || construction2MethodLinking;
                 ValidateExpectedMethod(tables, module, expectedMethodRow,
-                    initializationReferenceBodyProfile);
+                    allowMethodContracts);
                 var (expectedTypeSpecs, expectedParameterFlags)
                     = CaptureExpectedMethodSignature(tables,
                         expectedMethodRow);
@@ -584,7 +607,8 @@ public static partial class TrRmExecutableCompiler
                 {
                     ValidateActualMethod(providerTables, providerModule,
                         actualMethodRow,
-                        initializationReferenceBodyProfile);
+                        initializationReferenceBodyProfile
+                            || construction2MethodLinking);
                 }
                 AppendMethodSignatureTypePairs(import, providerTables,
                     actualMethodRow, methodTypeSpecPairs);
@@ -701,7 +725,11 @@ public static partial class TrRmExecutableCompiler
                 var selectedImports
                     = moduleImports[(module.ArtifactIndex,
                         module.ModuleRow)];
-                var loadedModule = initializationReferenceBodyProfile
+                var loadedModule = construction2MethodLinking
+                    ? LoadConstruction2MethodLinkModule(
+                        artifacts[artifactIndex], moduleTables, module,
+                        selectedImports, schemaIdentities[artifactIndex])
+                : initializationReferenceBodyProfile
                     ? LoadInitializationReferenceLocalFieldLayoutModule(
                         artifacts[artifactIndex], moduleTables, module,
                         selectedImports,
@@ -826,6 +854,91 @@ public static partial class TrRmExecutableCompiler
     }
 
     private static LocalAggregateLayoutLoadedModule
+        LoadConstruction2MethodLinkModule(
+        byte[] artifact,
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+        TrRmStandardModuleSelection module,
+        IReadOnlyDictionary<int, BoundModuleImport> selectedImports,
+        string schemaIdentity)
+    {
+        var selectedMethodImports
+            = new Dictionary<int, BoundModuleImport>();
+        foreach (var importRow in selectedImports.Keys)
+        {
+            var expectedDefinition = tables.Imports
+                .GetExpectedDefinitionForImportRow(importRow);
+            if ((expectedDefinition >> 24) != 0x16)
+            {
+                throw Unsupported(
+                    "Construction-2 Method linking initially requires top-level MethodDef Imports without type or field Imports.");
+            }
+
+            var expectedMethodRow = checked((int)(
+                expectedDefinition & 0x00FF_FFFF));
+            if (!selectedMethodImports.ContainsKey(expectedMethodRow))
+            {
+                selectedMethodImports.Add(expectedMethodRow,
+                    selectedImports[importRow]);
+            }
+        }
+
+        var program = LoadDevelopment(artifact,
+            GetForeignInvocationSchema(schemaIdentity),
+            standardSchemaIdentity: schemaIdentity,
+            selectedModuleImports: selectedMethodImports,
+            selectedModuleRow: module.ModuleRow,
+            standardConstruction2MethodLinking: true);
+        if (program.Functions.Length
+            != module.MethodDefEnd - module.MethodDefStart)
+        {
+            throw Invalid(
+                "The Construction-2 Method loader lost a selected Module's MethodDef range.");
+        }
+
+        var functionIndexByMethodRow = new int[tables.Methods.Count + 1];
+        Array.Fill(functionIndexByMethodRow, -1);
+        var functionIndexByName = program.Functions
+            .Select((function, index) => (function.Name, index))
+            .ToDictionary(static item => item.Name,
+                static item => item.index, StringComparer.Ordinal);
+        for (var methodRow = module.MethodDefStart;
+            methodRow < module.MethodDefEnd; methodRow++)
+        {
+            if (!functionIndexByName.TryGetValue(
+                    tables.Methods.GetName(methodRow),
+                    out var functionIndex))
+            {
+                throw Invalid(
+                    "The Construction-2 Method loader lost a selected MethodDef identity.");
+            }
+
+            functionIndexByMethodRow[methodRow] = functionIndex;
+        }
+
+        var functionIndexByImportRow = new int[tables.Imports.Count + 1];
+        Array.Fill(functionIndexByImportRow, -1);
+        foreach (var importRow in selectedImports.Keys)
+        {
+            var expectedDefinition = tables.Imports
+                .GetExpectedDefinitionForImportRow(importRow);
+            var expectedMethodRow = checked((int)(
+                expectedDefinition & 0x00FF_FFFF));
+            var functionIndex = functionIndexByMethodRow[
+                expectedMethodRow];
+            if (functionIndex < 0)
+            {
+                throw Invalid(
+                    "A Construction-2 Method Import has no reconstructed function.");
+            }
+
+            functionIndexByImportRow[importRow] = functionIndex;
+        }
+
+        return new LocalAggregateLayoutLoadedModule(program,
+            functionIndexByMethodRow, functionIndexByImportRow);
+    }
+
+    private static LocalAggregateLayoutLoadedModule
         LoadInitializationReferenceLocalFieldLayoutModule(
         byte[] artifact,
         TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
@@ -946,7 +1059,7 @@ public static partial class TrRmExecutableCompiler
     private static void ValidateExpectedMethod(
         TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
         TrRmStandardModuleSelection module, int methodRow,
-        bool initializationReferenceLocalFieldLayout)
+        bool allowMethodContracts)
     {
         var methodStart = module.MethodDefStart;
         var methodEnd = module.MethodDefEnd;
@@ -962,18 +1075,18 @@ public static partial class TrRmExecutableCompiler
                 "An L1 imported MethodDef expectation is not a bodyless local top-level declaration.");
         }
 
-        if (!initializationReferenceLocalFieldLayout
+        if (!allowMethodContracts
             && tables.Methods.GetContractRange(methodRow).Count != 0)
         {
             throw Unsupported(
-                "L1 MethodDef provider binding does not admit MethodDef contract rows.");
+                "This MethodDef provider binding profile does not admit MethodDef contract rows.");
         }
     }
 
     private static void ValidateActualMethod(
         TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
         TrRmStandardModuleSelection module, int methodRow,
-        bool initializationReferenceLocalFieldLayout)
+        bool allowMethodContracts)
     {
         if (methodRow < module.MethodDefStart
             || methodRow >= module.MethodDefEnd
@@ -988,11 +1101,11 @@ public static partial class TrRmExecutableCompiler
                 "An L1 MethodDef Export must select a public provider-owned local MethodDef with one Body.");
         }
 
-        if (!initializationReferenceLocalFieldLayout
+        if (!allowMethodContracts
             && tables.Methods.GetContractRange(methodRow).Count != 0)
         {
             throw Unsupported(
-                "L1 MethodDef provider binding does not admit MethodDef contract rows.");
+                "This MethodDef provider binding profile does not admit MethodDef contract rows.");
         }
     }
 

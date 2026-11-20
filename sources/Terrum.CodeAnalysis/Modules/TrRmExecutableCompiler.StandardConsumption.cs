@@ -692,6 +692,19 @@ public static partial class TrRmExecutableCompiler
             schemaIdentities, moduleIdentity, a3LayoutResourceLedger,
             coreContractFailureIdentitySelections);
         var rootModuleRow = moduleValidation.RootModuleRow;
+        var construction2MethodLinking
+            = schemaIdentities.Length != 0
+                && schemaIdentities.All(schemaIdentity =>
+                    StringComparer.Ordinal.Equals(schemaIdentity,
+                        schemaIdentities[0]))
+                && (IsSelectedC1ClassConstructionSchemaIdentity(
+                        schemaIdentities[0])
+                    || StandardGenericMethodSchema
+                        .IsCM1ClassParameterDefaults(schemaIdentities[0]))
+                && GetForeignInvocationSchema(schemaIdentities[0])
+                    .UsesObjectConstruction()
+                && !IsSelectedC1ClassInstanceLayoutSchemaIdentity(
+                    schemaIdentities[0]);
         var includesInitializationReferenceNestedFieldDestinations
             = schemaIdentities.Length != 0
                 && schemaIdentities.All(schemaIdentity =>
@@ -731,6 +744,12 @@ public static partial class TrRmExecutableCompiler
         var tables = ValidateForeignInvocationArtifact(index,
             schemaIdentities[0], a3LayoutResourceLedger,
             createA3ResourceLedger: false);
+        var classProviderValidation = construction2MethodLinking
+            ? TrRmFixedArrayProviderBindingValidator
+                .ValidateC1M1ClassImports(tables, artifacts,
+                    schemaIdentities, moduleValidation.Modules,
+                    rootModuleRow)
+            : new TrRmStandardClassProviderValidation([], [], [], []);
         if (StringComparer.Ordinal.Equals(schemaIdentities[0],
                 StandardRegisterExceptionRegionsSchemaIdentity))
         {
@@ -769,7 +788,11 @@ public static partial class TrRmExecutableCompiler
                 selectedCoreExceptionIdentitySelections);
         }
 
-        if (schemaIdentities[0] is
+        if (construction2MethodLinking)
+        {
+            typeProviderBindings = classProviderValidation.TypeBindings;
+        }
+        else if (schemaIdentities[0] is
             StandardForeignInvocationStorageFixedArraySchemaIdentity
             or StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity
             or StandardForeignInvocationStorageFixedArrayEmptyUnitInitializationSchemaIdentity
@@ -935,6 +958,14 @@ public static partial class TrRmExecutableCompiler
                 && binding.ConsumerModuleRow == rootModuleRow)
             .Select(static binding => binding.ImportRow)
             .ToHashSet();
+        foreach (var binding in classProviderValidation.FieldBindings)
+        {
+            if (binding.ConsumerArtifactIndex == 0
+                && binding.ConsumerModuleRow == rootModuleRow)
+            {
+                _ = boundFieldImports.Add(binding.ImportRow);
+            }
+        }
         var methodImportRows = new List<int>();
         var importedMethodRows = new HashSet<int>();
         var moduleRefsUsed = new bool[tables.ModuleRefs.Count + 1];
@@ -981,6 +1012,24 @@ public static partial class TrRmExecutableCompiler
                             "A Standard initialization-reference MethodDef has multiple Imports.");
                     }
                 }
+                else if (construction2MethodLinking)
+                {
+                    if (tables.Methods.GetOwnerType(targetMethodRow) != 0
+                        || !classProviderValidation.TopLevelMethodBindings
+                            .Any(binding =>
+                                binding.ConsumerArtifactIndex == 0
+                                && binding.ConsumerModuleRow
+                                    == rootModuleRow
+                                && binding.ImportRow == importRow
+                                && binding.ExpectedMethodDefRow
+                                    == targetMethodRow))
+                    {
+                        throw Invalid(
+                            "A Construction-2 runtime Method Import has no validated top-level provider binding.");
+                    }
+
+                    _ = importedMethodRows.Add(targetMethodRow);
+                }
                 else if (!tables.StandardNativeImports.HasImportForMethod(
                         targetMethodRow)
                     || !importedMethodRows.Add(targetMethodRow))
@@ -1010,7 +1059,8 @@ public static partial class TrRmExecutableCompiler
         if (methodImportRows.Count > 1
             && !StringComparer.Ordinal.Equals(schemaIdentities[0],
                 StandardForeignInvocationSchemaIdentity)
-            && !includesInitializationReferenceBodies)
+            && !includesInitializationReferenceBodies
+            && !construction2MethodLinking)
         {
             throw Unsupported(
                 "Multiple root MethodDef Imports are supported only by the exact F schema.");
@@ -1026,6 +1076,37 @@ public static partial class TrRmExecutableCompiler
                 throw Invalid(
                     "The selected root Module has an unconsumed ModuleRef.");
             }
+        }
+
+        if (construction2MethodLinking && methodImportRows.Count != 0)
+        {
+            var fieldProviderBindings
+                = standardFieldProviderValidation.FieldBindings.AddRange(
+                    classProviderValidation.FieldBindings)
+                    .Distinct().ToImmutableArray();
+            return LoadLocalAggregateLayoutProviderClosure(artifacts,
+                schemaIdentities, moduleIdentity, moduleValidation,
+                allTypeProviderBindings, fieldProviderBindings,
+                construction2MethodLinking: true);
+        }
+
+        if (construction2MethodLinking && tables.Methods.Count != 0)
+        {
+            if (artifacts.Length != 1
+                || moduleValidation.Modules.Length != 1)
+            {
+                throw Invalid(
+                    "A Construction-2 Method module without imports cannot consume unreferenced provider artifacts.");
+            }
+
+            var loadedModule = LoadConstruction2MethodLinkModule(
+                artifacts[0], tables,
+                moduleValidation.Modules.Single(module =>
+                    module.ArtifactIndex == 0
+                    && module.ModuleRow == rootModuleRow),
+                new Dictionary<int, BoundModuleImport>(),
+                schemaIdentities[0]);
+            return loadedModule.Program;
         }
 
         if (includesInitializationReferenceBodies)
