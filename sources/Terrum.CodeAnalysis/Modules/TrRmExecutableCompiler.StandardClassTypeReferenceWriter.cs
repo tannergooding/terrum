@@ -11094,6 +11094,12 @@ public static partial class TrRmExecutableCompiler
                         => statementCall,
                     _ => null,
                 };
+                var directConstant
+                    = function.Body.Statements is [
+                        BoundReturn {
+                            Value: BoundConstant returnedConstant,
+                        },
+                    ] ? returnedConstant : null;
                 var unitReturnHasNoWork
                     = function.Body.Statements.IsEmpty
                         || function.Body.Statements is [
@@ -11129,14 +11135,23 @@ public static partial class TrRmExecutableCompiler
                         != function.Variables.Length
                     || function.ParameterCount
                         > SemanticVerifier.MaximumArguments
-                    || (!isNoOpUnitFunction && directCall is null)
+                    || (!isNoOpUnitFunction && directCall is null
+                        && directConstant is null)
                     || (directCall is not null
                         && directCall.Type != function.ReturnType)
+                    || (directConstant is not null
+                        && (directConstant.Type != function.ReturnType
+                            || directConstant.RepresentationType
+                                != function.ReturnType
+                            || !directConstant.Bits.IsCanonicalFor(
+                                function.ReturnType)
+                            || function.ReturnType is PrimitiveType.NativeInt
+                                or PrimitiveType.NativeUInt))
                     || !function.Body.RetiredManagedLocals.IsEmpty
                     || (function.IsPrivate && function.IsInternal))
                 {
                     throw Unsupported(
-                        "A local class-reference function must be an ordinary unit no-op or a direct class-method call return.");
+                        "A local class-reference function must be an ordinary unit no-op, fixed-scalar constant return, or direct class-method call return.");
                 }
 
                 var signatureRow = methodSignatureRows.Count + 1;
@@ -11199,7 +11214,23 @@ public static partial class TrRmExecutableCompiler
 
                 var newMethodDefRow = methodRows.Count + 1;
                 var bodyRow = bodyRows.Count + 1;
-                if (directCall is null)
+                if (directConstant is not null)
+                {
+                    if (!schema.UsesObjectConstruction()
+                        || !TryGetC1M1SourceScalarTypeSpecReference(
+                            function.ReturnType, out _))
+                    {
+                        throw Unsupported(
+                            "A local class-reference constant return requires an exact Construction-2 fixed-scalar result.");
+                    }
+
+                    bodyRows.Add(
+                        EncodeC1M1MetadataClassConstantReturnBody(
+                            directConstant,
+                            SourceFunctionTypeSpecReference,
+                            frozenScalarValueBuilder, schema));
+                }
+                else if (directCall is null)
                 {
                     bodyRows.Add(
                         EncodeC1M1MetadataClassNoOpUnitBody(schema));
@@ -12597,6 +12628,54 @@ public static partial class TrRmExecutableCompiler
             [new TrRmRegisterBodyBlock(0,
                 checked((uint)code.Length), 0)],
             records, code, contractCount: 0, schema: schema,
+            generalPredicateGraphsInitializationReferenceBodies
+                : schema.UsesGeneralPredicateGraphs());
+    }
+
+    private static byte[] EncodeC1M1MetadataClassConstantReturnBody(
+        BoundConstant constant,
+        Func<PrimitiveType, uint> typeSpecReferenceFor,
+        TrRmFrozenScalarValueBuilder frozenScalarValueBuilder,
+        TrRmArtifactSchema schema)
+    {
+        if (!schema.UsesObjectConstruction()
+            || constant.Type is PrimitiveType.NativeInt
+                or PrimitiveType.NativeUInt
+            || constant.RepresentationType != constant.Type
+            || !constant.Bits.IsCanonicalFor(constant.Type)
+            || !TryGetC1M1SourceScalarTypeSpecReference(
+                constant.Type, out _))
+        {
+            throw Unsupported(
+                "A local class-reference constant return requires an exact fixed-scalar Construction-2 value.");
+        }
+
+        var typeSpecReference
+            = typeSpecReferenceFor(constant.Type);
+        var frozenValue = frozenScalarValueBuilder.Add(constant);
+        if (frozenValue.TypeSpecRef != typeSpecReference)
+        {
+            throw Invalid(
+                "A local class-reference constant return changed its exact TypeSpec.");
+        }
+
+        var constantMap = new byte[8];
+        BinaryPrimitives.WriteUInt32LittleEndian(constantMap,
+            frozenValue.TypeSpecRef);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            constantMap.AsSpan(sizeof(uint)),
+            frozenValue.ConstantSourceRow);
+        var maps = TrRmRegisterBodyMapBuilder.Create(
+            Array.Empty<uint>(), []);
+        ReadOnlyMemory<byte>[] records = [
+            new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 },
+        ];
+        var code = new byte[] { 0xD4, 0, 0, 0, 0x17, 0 };
+        return TrRmRegisterBodyWriter.Encode(default, maps.TypeMap,
+            default, default, constantMap, [
+                new TrRmRegisterBodyBlock(0,
+                    checked((uint)code.Length), 0),
+            ], records, code, contractCount: 0, schema: schema,
             generalPredicateGraphsInitializationReferenceBodies
                 : schema.UsesGeneralPredicateGraphs());
     }

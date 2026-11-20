@@ -5723,7 +5723,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     public Payload(int32 value) { Value = value; }
                 }
                 public void Ping() {}
-                public int32 Answer(int32 value) { return value; }
+                public int32 Answer(int32 value) { return 42; }
             }
             """);
         var providerCompilation = Compilation.CreateLibrary(providerTree);
