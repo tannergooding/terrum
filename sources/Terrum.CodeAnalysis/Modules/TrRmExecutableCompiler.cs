@@ -4964,20 +4964,24 @@ public static partial class TrRmExecutableCompiler
                 pendingImport.ExpectedDefinitionId));
         }
         var importBytes = moduleImportRows.Count == 0 ? []
-            : schema is TrRmArtifactSchema.Standard
+            : (schema is (TrRmArtifactSchema.Standard
                 or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
                 or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft
-                or TrRmArtifactSchema.InitializationReferencePointerLoadNativeParameterDraft
+                or TrRmArtifactSchema.InitializationReferencePointerLoadNativeParameterDraft)
+                || IsC1M1MethodTypeSchemaIdentity(
+                    standardSchemaIdentity ?? string.Empty))
                 ? TrRmImportTableWriter.Encode(moduleImportRows, strings,
                     moduleRefs, typeDefs, defs, default, default, default,
                     fields, standardFeatureTable, modules, schema)
                 : TrRmImportTableWriter.Encode(moduleImportRows, strings,
                     moduleRefs, typeDefs, defs, default);
         var imports = moduleImportRows.Count == 0 ? default
-            : schema is TrRmArtifactSchema.Standard
+            : (schema is (TrRmArtifactSchema.Standard
                 or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
                 or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft
-                or TrRmArtifactSchema.InitializationReferencePointerLoadNativeParameterDraft
+                or TrRmArtifactSchema.InitializationReferencePointerLoadNativeParameterDraft)
+                || IsC1M1MethodTypeSchemaIdentity(
+                    standardSchemaIdentity ?? string.Empty))
                 ? new TrRmImportTableReader(importBytes,
                     moduleImportRows.Count, strings, moduleRefs, typeDefs,
                     defs, default, default, default, fields,
@@ -4990,6 +4994,8 @@ public static partial class TrRmExecutableCompiler
                 imports);
         var exportBytes = exports.Count == 0 ? []
             : schema == TrRmArtifactSchema.Standard
+                || IsC1M1MethodTypeSchemaIdentity(
+                    standardSchemaIdentity ?? string.Empty)
                 ? TrRmExportTableWriter.Encode(exports, strings, typeDefs, defs,
                     default, imports, default, default, fields,
                     standardFeatureTable, modules, schema)
