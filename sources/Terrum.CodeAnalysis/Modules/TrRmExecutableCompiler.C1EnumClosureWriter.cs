@@ -776,11 +776,45 @@ public static partial class TrRmExecutableCompiler
                     && (structureProviderIdentities.Length == 0
                         || classQueryRootProviderIdentities.Contains(
                             structureProviderIdentities[0]));
+            var enumProviderIdentities = program.EnumDefinitions
+                .Select(definition =>
+                    definition.Identity
+                        is BoundEnumDeclarationIdentity.Standard standard
+                        ? standard.Value.Declaration.Site.Snapshot
+                            .ModuleIdentity
+                        : null)
+                .ToArray();
+            var enumProvidersAreDirect
+                = program.EnumDefinitions.All(static definition =>
+                    definition.Identity
+                        is BoundEnumDeclarationIdentity.Standard standard
+                    && standard.Value.IsLookupRoot
+                    && !standard.Value.SelectedExportKeys.IsDefaultOrEmpty
+                    && standard.Value.Expectations.IsEmpty
+                    && BoundStandardEnumDeclarationContract
+                        .IsValidDefinition(standard.Value, definition));
+            var distinctEnumProviderIdentities = enumProviderIdentities
+                .Where(static identity => identity is not null)
+                .Select(static identity => identity!)
+                .Distinct(StringComparer.Ordinal).ToArray();
+            var enumProvidersFitQueryRoots
+                = enumProvidersAreDirect
+                    && distinctEnumProviderIdentities.Length <= 1
+                    && (distinctEnumProviderIdentities.Length == 0
+                        || classQueryRootProviderIdentities.Contains(
+                            distinctEnumProviderIdentities[0]));
+            var queryDependencyProviderIdentities
+                = structureProviderIdentities
+                    .Concat(distinctEnumProviderIdentities)
+                    .Distinct(StringComparer.Ordinal).ToArray();
+            var queryDependenciesFitRoots
+                = structureProvidersFitQueryRoots
+                    && enumProvidersFitQueryRoots
+                    && queryDependencyProviderIdentities.Length <= 1;
             allowMultipleClassQueryProviders
                 = classQueryRootIdentities.Count > 1
-                    && program.EnumDefinitions.IsEmpty
                     && program.Classes.IsEmpty
-                    && structureProvidersFitQueryRoots
+                    && queryDependenciesFitRoots
                     && standardClassDeclarations.Where(declaration =>
                             classQueryRootIdentities.Contains(
                                 declaration.Declaration.Identity))
@@ -791,6 +825,15 @@ public static partial class TrRmExecutableCompiler
             {
                 rootSnapshot = program.Structures[0].StandardTypeOrigin!
                     .Provider;
+            }
+            else if (allowMultipleClassQueryProviders
+                && !program.EnumDefinitions.IsEmpty)
+            {
+                var enumOccurrence
+                    = (BoundEnumDeclarationIdentity.Standard)
+                        program.EnumDefinitions[0].Identity;
+                rootSnapshot
+                    = enumOccurrence.Value.Declaration.Site.Snapshot;
             }
 
             var classRootProviders
@@ -1273,9 +1316,30 @@ public static partial class TrRmExecutableCompiler
                             "EN1 source-free enum emission cannot re-own a declaration from another Module.");
                     }
 
-                    emittedEnums.Add(CreateStandardEmission(
-                        definitionIndex, occurrence.Declaration,
-                        occurrence.ExportKeys, null));
+                    if (!StringComparer.Ordinal.Equals(
+                            snapshot.ModuleIdentity, moduleIdentity))
+                    {
+                        if (!occurrence.IsLookupRoot
+                            || occurrence.SelectedExportKeys.IsDefaultOrEmpty)
+                        {
+                            throw Unsupported(
+                                "An EN1 foreign enum dependency requires an exact selected TypeDef ExportKey.");
+                        }
+
+                        emittedEnums.Add(CreateStandardEmission(
+                            definitionIndex, occurrence.Declaration, [],
+                            new C1EnumClosureImport(
+                                snapshot.ModuleIdentity,
+                                occurrence.SelectedExportKeys[0],
+                                snapshot.TargetRequirement,
+                                snapshot.RuntimePolicy)));
+                    }
+                    else
+                    {
+                        emittedEnums.Add(CreateStandardEmission(
+                            definitionIndex, occurrence.Declaration,
+                            occurrence.ExportKeys, null));
+                    }
                     continue;
                 }
 
@@ -3626,6 +3690,32 @@ public static partial class TrRmExecutableCompiler
                     {
                         throw Invalid(
                             "An EN1 class enum Import has an invalid or duplicate expected TypeDef identity.");
+                    }
+                }
+                else
+                {
+                    var occurrence
+                            = ((BoundEnumDeclarationIdentity.Standard)
+                                program.EnumDefinitions[
+                                    emittedEnum.DefinitionIndex].Identity).Value;
+                    var providerTypeDefId
+                            = occurrence.Declaration.Site.DefinitionId;
+                    var providerTypeDefRow = checked((int)(
+                            providerTypeDefId & 0x00FF_FFFF));
+                    if (standardClassRootTables is null
+                            || !BoundStandardEnumDeclarationContract
+                                .SnapshotsMatch(rootSnapshot!,
+                                    occurrence.Declaration.Site.Snapshot)
+                            || (providerTypeDefId >> 24) != 0x13
+                            || providerTypeDefRow == 0
+                            || standardClassRootTables.TypeDefs.GetKind(
+                                providerTypeDefRow) != 4
+                            || !enumIndexByRootTypeDefRow.TryAdd(
+                                providerTypeDefRow,
+                                emittedEnum.DefinitionIndex))
+                    {
+                            throw Invalid(
+                                "An EN1 direct enum Import lost its provider TypeDef identity.");
                     }
                 }
                 _ = importRowByEnumIndex.TryAdd(

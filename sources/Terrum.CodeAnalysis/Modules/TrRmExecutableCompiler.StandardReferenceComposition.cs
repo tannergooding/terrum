@@ -667,11 +667,76 @@ public static partial class TrRmExecutableCompiler
             structureMaps[referenceIndex] = map;
         }
 
+        var enumReferenceIndex = -1;
+        var enumDefinitionsResult
+            = ImmutableArray<BoundEnumDefinition>.Empty;
+        var enumMaps = new int[references.Length][];
+        for (var referenceIndex = 0;
+            referenceIndex < references.Length; referenceIndex++)
+        {
+            var sourceEnums = references[referenceIndex].EnumDefinitions;
+            var map = new int[sourceEnums.Length];
+            if (!sourceEnums.IsEmpty)
+            {
+                if (enumReferenceIndex >= 0
+                    || !BoundEnumTypes.IsValidTable(sourceEnums))
+                {
+                    throw Unsupported(
+                        "Class reference composition currently requires one exact selected enum provider closure.");
+                }
+
+                foreach (var definition in sourceEnums)
+                {
+                    if (definition.Identity
+                            is not BoundEnumDeclarationIdentity.Standard
+                                standard
+                        || definition.ModuleImport is not null
+                        || !BoundStandardEnumDeclarationContract
+                            .IsValidDefinition(standard.Value, definition)
+                        || !standard.Value.IsLookupRoot
+                        || standard.Value.SelectedExportKeys.IsDefaultOrEmpty
+                        || !standard.Value.Expectations.IsEmpty
+                        || !references[referenceIndex]
+                            .StandardClassDeclarations.Any(declaration =>
+                            BoundStandardEnumDeclarationContract.SnapshotsMatch(
+                                declaration.Declaration.Provider,
+                                standard.Value.Declaration.Site.Snapshot)))
+                    {
+                        throw Unsupported(
+                            "Class reference composition requires selected direct Standard enum TypeDefs from a class provider Module.");
+                    }
+                }
+
+                enumReferenceIndex = referenceIndex;
+                enumDefinitionsResult = sourceEnums;
+                for (var enumIndex = 0;
+                    enumIndex < map.Length; enumIndex++)
+                {
+                    map[enumIndex] = enumIndex;
+                }
+            }
+
+            enumMaps[referenceIndex] = map;
+        }
+
         PrimitiveType RemapClassFieldType(int referenceIndex,
             PrimitiveType type)
         {
-            if (BoundEnumTypes.IsType(type)
-                || BoundGenericNominalTypeTypes.IsType(type)
+            if (BoundEnumTypes.IsType(type))
+            {
+                var enumIndex = BoundEnumTypes.Index(type);
+                if (referenceIndex == enumReferenceIndex
+                    && (uint)enumIndex < (uint)enumMaps[referenceIndex].Length)
+                {
+                    return BoundEnumTypes.Type(
+                        enumMaps[referenceIndex][enumIndex]);
+                }
+
+                throw Unsupported(
+                    "A class FieldDef enum type is outside the selected enum provider closure.");
+            }
+
+            if (BoundGenericNominalTypeTypes.IsType(type)
                 || BoundSpanTypeTypes.IsType(type)
                 || ManagedClassTypes.IsClass(type)
                 || NativePointerTypes.IsType(type)
@@ -680,7 +745,7 @@ public static partial class TrRmExecutableCompiler
                 || CheckedReferenceTypes.IsType(type))
             {
                 throw Unsupported(
-                    "Class reference composition does not yet admit enum, class, pointer or other non-inline-struct field identities.");
+                    "Class reference composition does not yet admit class, pointer or other non-inline-struct field identities.");
             }
 
             var structureIndex = (int)type - 100;
@@ -742,7 +807,6 @@ public static partial class TrRmExecutableCompiler
                 || (reference.Structures.IsEmpty
                     && !reference.NativePointerTypes.IsEmpty)
                 || !reference.NativeFixedArrayTypes.IsEmpty
-                || !reference.EnumDefinitions.IsEmpty
                 || !reference.CheckedReferenceTypes.IsEmpty
                 || !reference.Interfaces.IsEmpty
                 || !reference.PrivateNominalTypeOrigins.IsEmpty
@@ -1031,6 +1095,7 @@ public static partial class TrRmExecutableCompiler
             RuntimePolicy = runtimePolicy,
             Structures = structuresResult,
             NativePointerTypes = nativePointerTypesResult,
+            EnumDefinitions = enumDefinitionsResult,
             GenericNominalTypeDefinitions = definitionTable,
             GenericNominalTypeInstances = instanceTable,
             StandardClassDeclarations = declarationTable,
@@ -1043,9 +1108,15 @@ public static partial class TrRmExecutableCompiler
             throw Invalid(
                 "The composed Standard class/struct type closure is invalid.");
         }
+        if (!BoundEnumTypes.IsValidTable(enumDefinitionsResult))
+        {
+            throw Invalid(
+                "The composed Standard class enum type closure is invalid.");
+        }
         SemanticVerifier.VerifyLibraryReferences(mergedProgram);
         return new CompilationReference(structuresResult, [], runtimePolicy,
             nativePointerTypes: nativePointerTypesResult,
+            enumDefinitions: enumDefinitionsResult,
             genericNominalTypeDefinitions: definitionTable,
             genericNominalTypeInstances: instanceTable,
             standardClassDeclarations: declarationTable,

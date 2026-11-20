@@ -96,9 +96,10 @@ provider Modules and binds queries against both roots in memory. The EN1
 declaration emitter can emit and reload one bounded query function whose
 primitive class layout roots span distinct providers. Reference composition
 also remaps a direct inline-struct field dependency, and EN1 emission retains
-its selected TypeDef/FieldDef Imports from that provider. The regression is
-unverified under the active hold. Multiple struct providers, enum/class-valued
-fields and broader multi-function/provider dependency closure remain open.
+selected TypeDef/FieldDef Imports from that provider. Direct selected enum
+fields likewise retain their typed provider Import. Regressions are unverified
+under the active hold. Multiple struct/enum providers, class-valued fields and
+broader multi-function/provider dependency closure remain open.
 
 Other proposals remain unapproved unless their owner and approval status say
 otherwise; see the [proposal index](../proposals/README.md).

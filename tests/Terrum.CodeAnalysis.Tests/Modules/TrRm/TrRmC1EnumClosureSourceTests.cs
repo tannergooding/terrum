@@ -2852,6 +2852,134 @@ internal sealed class TrRmC1EnumClosureSourceTests
     }
 
     [Test]
+    public void ComposesClassLayoutReferencesWithEnumFields()
+    {
+        var schemaIdentity
+            = $"{s_schemaIdentities[0]}-class-instance-layout-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        var alphaTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public enum Shade : int8 { Dark = -1 }
+                public class Alpha {
+                    public Shade ShadeValue;
+                }
+            }
+            """);
+        var alphaCompilation = Compilation.CreateLibrary(alphaTree);
+        Assert.That(alphaCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, alphaCompilation.Diagnostics));
+        var alphaProgram = (BoundProgram)alphaCompilation.Program!;
+        var alphaClassDeclaration = alphaTree.Root.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var alphaField = alphaClassDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.FieldDeclaration);
+        var alphaClassIndex = alphaProgram.SourceClassProgramAssociation!
+            .Declarations.Single(declaration =>
+                declaration.Span == alphaClassDeclaration.Span).ClassIndex;
+        var alphaClassExport = new TrRmSourceClassExport(alphaProgram,
+            alphaClassIndex, alphaClassDeclaration.Span, "type.alpha", [
+                new TrRmSourceClassMemberExport(0, alphaField.Span,
+                    "field.alpha.shade"),
+            ]);
+        var alphaEnumExport = CreateExport(alphaProgram, alphaTree, 0,
+            "Shade", ["type.shade"], "shade");
+        var alphaArtifact = TrRmExecutableCompiler.EmitStandard(
+            alphaProgram, "AlphaEnumProvider", schemaIdentity,
+            targetRequirement, [], [], [alphaClassExport],
+            [alphaEnumExport]);
+        var alphaInput = new TrRmStandardArtifactInput(schemaIdentity,
+            alphaArtifact);
+        var alphaReference = TrRmExecutableCompiler.CreateStandardReference(
+            alphaInput, "AlphaEnumProvider", [], [
+                "type.alpha", "type.shade",
+            ], ["field.alpha.shade"]);
+
+        var betaTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public class Beta {
+                    public int32 Value;
+                }
+            }
+            """);
+        var betaCompilation = Compilation.CreateLibrary(betaTree);
+        Assert.That(betaCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, betaCompilation.Diagnostics));
+        var betaProgram = (BoundProgram)betaCompilation.Program!;
+        var betaClassDeclaration = betaTree.Root.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var betaField = betaClassDeclaration.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.FieldDeclaration);
+        var betaClassIndex = betaProgram.SourceClassProgramAssociation!
+            .Declarations.Single(declaration =>
+                declaration.Span == betaClassDeclaration.Span).ClassIndex;
+        var betaClassExport = new TrRmSourceClassExport(betaProgram,
+            betaClassIndex, betaClassDeclaration.Span, "type.beta", [
+                new TrRmSourceClassMemberExport(0, betaField.Span,
+                    "field.beta.value"),
+            ]);
+        var betaArtifact = TrRmExecutableCompiler.EmitStandard(betaProgram,
+            "BetaProvider", schemaIdentity, targetRequirement, [], [],
+            [betaClassExport], []);
+        var betaInput = new TrRmStandardArtifactInput(schemaIdentity,
+            betaArtifact);
+        var betaReference = TrRmExecutableCompiler.CreateStandardReference(
+            betaInput, "BetaProvider", [], ["type.beta"],
+            ["field.beta.value"]);
+        var reference = TrRmExecutableCompiler.CreateStandardReferenceSet(
+            [alphaReference, betaReference]);
+
+        Assert.That(reference.EnumDefinitions, Has.Length.EqualTo(1));
+        Assert.That(BoundEnumTypes.IsType(
+            reference.StandardClassDeclarations.Single(
+                static declaration =>
+                    declaration.Declaration.Name == "Alpha")
+                .Declaration.Fields.Single().Type), Is.True);
+
+        var consumer = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Demo;
+                nint CombinedOffset() {
+                    return unsafe(offsetof(Alpha, ShadeValue))
+                        + unsafe(offsetof(Beta, Value));
+                }
+                """), reference, new CompilationOptions {
+                LayoutCoreRegistration
+                    = LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            consumer.Program!, "EnumLayoutConsumer", schemaIdentity,
+            targetRequirement);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                artifact, SchemaFor(schemaIdentity), null,
+                usesNativePointerLoads: false,
+                standardSchemaIdentity: schemaIdentity));
+        Assert.That(tables.TargetLayoutDependencies.Count,
+            Is.EqualTo(2));
+        Assert.That(Enumerable.Range(1, tables.Imports.Count)
+                .Select(tables.Imports.GetBindingForImportRow)
+                .Any(static binding =>
+                    binding.ProducerIdentity == "AlphaEnumProvider"
+                    && binding.ExportKey == "type.shade"),
+            Is.True);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "EnumLayoutConsumer", [alphaInput, betaInput]);
+        Assert.That(loaded.Functions.Single().Name,
+            Is.EqualTo("CombinedOffset"));
+    }
+
+    [Test]
     public void UsesFirstExplicitAliasesForEN1ClassQueryBodies()
     {
         var schemaIdentity
