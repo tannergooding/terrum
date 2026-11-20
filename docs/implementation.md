@@ -172,8 +172,11 @@ load/re-emission/reload; it remains unverified. Co-located provider Imports, dee
 chains/diamonds, broader shared-expectation transformations, multiple
 expected TypeDef views within the selected method-root Module and distinct
 nested-provider contexts for one closure-only TypeDef remain open. A new
+Packet -> Wrapper/WrapperTwin -> Leaf provider-diamond regression exercises
+both nested method routes through caller binding and source-free
+load/re-emission/reload; it remains unverified under the active hold. Another
 regression reverses provider B/C Export rows and exercises consumer load and
-source-free re-emission/reload; it remains unverified under the active hold.
+source-free re-emission/reload; it also remains unverified.
 Import/Export/ModuleRef/Body map permutations and runtime qualification remain
 open. The
 separate unapproved version-3

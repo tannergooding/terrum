@@ -6775,6 +6775,185 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
+    public void LinksConstruction2MethodAcrossProviderDiamond()
+    {
+        var schemaIdentity
+            = C1M1Construction2ClassParameterDefaultsCopyEvidenceSchemaIdentity;
+        var layoutOptions = new CompilationOptions {
+            LayoutCoreRegistration
+                = LayoutCoreRegistrationTestData.Create(),
+        };
+        var leafCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            namespace Demo {
+                [Blittable] [Layout(LayoutKind.Sequential)]
+                public struct Leaf {
+                    public int32 Value;
+                }
+            }
+            """), layoutOptions);
+        Assert.That(leafCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, leafCompilation.Diagnostics));
+        var leafArtifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)leafCompilation.Program!, "StructDiamondLeaf",
+            schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement, [
+                new TrRmSourceTypeExport("Demo", "Leaf", "type.leaf") {
+                    FieldExports = [
+                        new TrRmSourceFieldExport("Value",
+                            "field.leaf.value"),
+                    ],
+                },
+            ], [], []);
+        var leafInput = new TrRmStandardArtifactInput(schemaIdentity,
+            leafArtifact);
+        var leafReference = TrRmExecutableCompiler.CreateStandardReference(
+            leafInput, "StructDiamondLeaf", [], ["type.leaf"],
+            ["field.leaf.value"]);
+
+        var wrapperCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                namespace Demo {
+                    [Blittable] [Layout(LayoutKind.Sequential)]
+                    public struct Wrapper {
+                        public Leaf Data;
+                    }
+                    [Blittable] [Layout(LayoutKind.Sequential)]
+                    public struct WrapperTwin {
+                        public Leaf Data;
+                    }
+                }
+                """), leafReference, layoutOptions);
+        Assert.That(wrapperCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                wrapperCompilation.Diagnostics));
+        var wrapperArtifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)wrapperCompilation.Program!, "StructDiamondWrapper",
+            schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement, [
+                new TrRmSourceTypeExport("Demo", "Wrapper",
+                    "type.wrapper") {
+                    FieldExports = [
+                        new TrRmSourceFieldExport("Data",
+                            "field.wrapper.data"),
+                    ],
+                },
+                new TrRmSourceTypeExport("Demo", "WrapperTwin",
+                    "type.wrapper.twin") {
+                    FieldExports = [
+                        new TrRmSourceFieldExport("Data",
+                            "field.wrapper.twin.data"),
+                    ],
+                },
+            ], [], []);
+        var wrapperInput = new TrRmStandardArtifactInput(schemaIdentity,
+            wrapperArtifact);
+        var wrapperReference = TrRmExecutableCompiler.CreateStandardReference(
+            wrapperInput, "StructDiamondWrapper", [leafInput], [],
+            ["type.wrapper", "type.wrapper.twin", "type.leaf"], [
+                "field.wrapper.data", "field.wrapper.twin.data",
+                "field.leaf.value",
+            ]);
+
+        var packetCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                namespace Demo {
+                    [Blittable] [Layout(LayoutKind.Sequential)]
+                    public struct Packet {
+                        public Wrapper Left;
+                        public WrapperTwin Right;
+                    }
+                    public int32 ReadLeft(Packet value) {
+                        return value.Left.Data.Value;
+                    }
+                    public int32 ReadRight(Packet value) {
+                        return value.Right.Data.Value;
+                    }
+                }
+                """), wrapperReference, layoutOptions);
+        Assert.That(packetCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                packetCompilation.Diagnostics));
+        var packetArtifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)packetCompilation.Program!, "StructDiamondPacket",
+            schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement, [
+                new TrRmSourceTypeExport("Demo", "Packet", "type.packet") {
+                    FieldExports = [
+                        new TrRmSourceFieldExport("Left",
+                            "field.packet.left"),
+                        new TrRmSourceFieldExport("Right",
+                            "field.packet.right"),
+                    ],
+                },
+            ], [], []);
+        var packetInput = new TrRmStandardArtifactInput(schemaIdentity,
+            packetArtifact);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            packetInput, "StructDiamondPacket", [wrapperInput, leafInput],
+            ["ReadLeft", "ReadRight"], [
+                new TrRmStandardExportKeySelection("StructDiamondPacket",
+                    "type.packet"),
+                new TrRmStandardExportKeySelection("StructDiamondWrapper",
+                    "type.wrapper"),
+                new TrRmStandardExportKeySelection("StructDiamondWrapper",
+                    "type.wrapper.twin"),
+                new TrRmStandardExportKeySelection("StructDiamondLeaf",
+                    "type.leaf"),
+            ], [
+                new TrRmStandardExportKeySelection("StructDiamondPacket",
+                    "field.packet.left"),
+                new TrRmStandardExportKeySelection("StructDiamondPacket",
+                    "field.packet.right"),
+                new TrRmStandardExportKeySelection("StructDiamondWrapper",
+                    "field.wrapper.data"),
+                new TrRmStandardExportKeySelection("StructDiamondWrapper",
+                    "field.wrapper.twin.data"),
+                new TrRmStandardExportKeySelection("StructDiamondLeaf",
+                    "field.leaf.value"),
+            ]);
+        var consumerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                namespace Demo {
+                    public int32 ForwardLeft(Packet value) {
+                        return ReadLeft(value);
+                    }
+                    public int32 ForwardRight(Packet value) {
+                        return ReadRight(value);
+                    }
+                    public int32 ReadLeftNested(Packet value) {
+                        return value.Left.Data.Value;
+                    }
+                    public int32 ReadRightNested(Packet value) {
+                        return value.Right.Data.Value;
+                    }
+                }
+                """), reference);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)consumerCompilation.Program!,
+            "StructDiamondConsumer", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], []);
+        var providers = new[] { packetInput, wrapperInput, leafInput };
+        var linkedProgram = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
+            "StructDiamondConsumer", providers);
+        Assert.That(linkedProgram.Functions.Single(
+                static function => function.Name == "ReadRightNested")
+                .ReturnType,
+            Is.EqualTo(PrimitiveType.Int32));
+        var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(
+            linkedProgram, "StructDiamondConsumer", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        _ = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                reemittedArtifact),
+            "StructDiamondConsumer", providers);
+    }
+
+    [Test]
     public void SelectsTypesFromNonRootCoLocatedConstruction2Modules()
     {
         var schemaIdentity
