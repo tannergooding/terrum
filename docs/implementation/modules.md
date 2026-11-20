@@ -297,12 +297,17 @@ consumer and intermediate provider by ExportKey, then source-free re-emits and
 reloads the consumer against the relocated provider; it too remains
 unverified. A separate API case confirms that a disconnected supplied method
 provider importing the same actual struct does not override the selected
-root method's retained TypeDef Import context; it remains unverified too.
+root method's retained TypeDef Import context through caller binding and
+source-free load/re-emission/reload; it remains unverified too.
+A nested closure-only struct case also preserves the owning provider's
+TypeDef Import context despite an unrelated Module importing the same actual
+struct; it checks caller binding and source-free load/re-emission/reload and
+remains unverified.
 Co-located provider Imports, deeper chains/diamonds, broader
 shared-expectation transformations, multiple expected TypeDef views within
-the selected method-root Module and distinct nested-provider contexts for one
-closure-only TypeDef, and full Import/Export/ModuleRef/Body map permutations
-remain open.
+the selected method-root Module and distinct required parent-provider
+contexts for the same closure-only TypeDef, and full
+Import/Export/ModuleRef/Body map permutations remain open.
 The loader still requires the whole validated Module-set
 TypeDef/method closure to fit its bounded Blittable-struct path;
 selected-root-only loading for unrelated declarations remains open.

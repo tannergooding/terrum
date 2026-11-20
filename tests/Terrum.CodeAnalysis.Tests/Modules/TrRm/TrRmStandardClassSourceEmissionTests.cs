@@ -6453,6 +6453,67 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             Is.EqualTo(closureOnlyCaller.Program!.Functions.Single()
                 .Variables[0].Type));
 
+        var unrelatedNestedMethodCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                namespace Demo {
+                    public int32 Other(Leaf value) {
+                        return value.Value;
+                    }
+                }
+                """), providerCReference);
+        Assert.That(unrelatedNestedMethodCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                unrelatedNestedMethodCompilation.Diagnostics));
+        var unrelatedNestedMethodArtifact
+            = TrRmExecutableCompiler.EmitStandard(
+                (BoundProgram)unrelatedNestedMethodCompilation.Program!,
+                "StructMethodNestedUnrelated", schemaIdentity,
+                TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+                [], [], []);
+        var unrelatedNestedMethodInput
+            = new TrRmStandardArtifactInput(schemaIdentity,
+                unrelatedNestedMethodArtifact);
+        var nestedClosureReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                providerBInput, "StructMethodProviderB", [
+                    unrelatedNestedMethodInput, providerCInput,
+                ], ["Read"], [
+                    new TrRmStandardExportKeySelection(
+                        "StructMethodProviderB", "type.record"),
+                ], []);
+        var nestedClosureCaller = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                namespace Demo {
+                    public int32 Forward(Record value) {
+                        return Read(value);
+                    }
+                }
+                """), nestedClosureReference);
+        Assert.That(nestedClosureCaller.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                nestedClosureCaller.Diagnostics));
+        var nestedClosureArtifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)nestedClosureCaller.Program!,
+            "StructMethodNestedClosureConsumer", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], []);
+        var nestedClosureProviders = new[] {
+            providerBInput, unrelatedNestedMethodInput, providerCInput,
+        };
+        var linkedNestedClosure = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                nestedClosureArtifact),
+            "StructMethodNestedClosureConsumer", nestedClosureProviders);
+        var reemittedNestedClosure = TrRmExecutableCompiler.EmitStandard(
+            linkedNestedClosure, "StructMethodNestedClosureConsumer",
+            schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        Assert.That(reemittedNestedClosure, Is.EqualTo(nestedClosureArtifact));
+        _ = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                reemittedNestedClosure),
+            "StructMethodNestedClosureConsumer", nestedClosureProviders);
+
         var relocatedProviderCTree = SyntaxTree.Parse("""
             namespace Demo {
                 [Blittable] [Layout(LayoutKind.Sequential)]

@@ -630,6 +630,36 @@ public static partial class TrRmExecutableCompiler
                     "A method struct TypeSpec is outside the checked provider closure.");
         }
 
+        var typeImportContextsByOrigin = new Dictionary<
+            (string ModuleIdentity, uint DefinitionId),
+            List<BoundSourceTypeProviderSnapshot>>();
+        void AddTypeImportContext(int structureIndex,
+            BoundSourceTypeProviderSnapshot usingModule)
+        {
+            if ((uint)structureIndex >= (uint)program.Structures.Length
+                || program.Structures[structureIndex].StandardTypeOrigin
+                    is not BoundStandardTypeOrigin typeOrigin)
+            {
+                throw Invalid(
+                    "A required struct TypeDef context has no canonical provider origin.");
+            }
+
+            var origin = (typeOrigin.Provider.ModuleIdentity,
+                typeOrigin.DefinitionId);
+            if (!typeImportContextsByOrigin.TryGetValue(origin,
+                    out var contexts))
+            {
+                contexts = [];
+                typeImportContextsByOrigin.Add(origin, contexts);
+            }
+
+            if (!contexts.Any(context =>
+                    SameA2SourceTypeProviderSnapshot(context, usingModule)))
+            {
+                contexts.Add(usingModule);
+            }
+        }
+
         var selectedStructures = new HashSet<int>();
         var pendingStructures = new Stack<int>();
         foreach (var origin in selectedTypeKeysByOrigin.Keys)
@@ -643,6 +673,9 @@ public static partial class TrRmExecutableCompiler
             methodExportKeys.Length);
         var rootMethodTypeOrigins = new HashSet<(
             string ModuleIdentity, uint DefinitionId)>();
+        var rootMethodExpectedTypeDefs = new Dictionary<(
+            string ModuleIdentity, uint DefinitionId), HashSet<uint>>();
+        BoundSourceTypeProviderSnapshot? rootProviderSnapshot = null;
         foreach (var exportKey in methodExportKeys)
         {
             if (!tables.Exports.TryGetDefinitionForKey(moduleRow, exportKey,
@@ -726,6 +759,42 @@ public static partial class TrRmExecutableCompiler
                 _ = rootMethodTypeOrigins.Add((
                     typeOrigin.Provider.ModuleIdentity,
                     typeOrigin.DefinitionId));
+                var methodProviderSnapshot
+                    = rootProviderSnapshot ??= GetProviderSnapshot(rootModule);
+                var localStructureIndex = (int)variable.Type - 100;
+                if ((uint)localStructureIndex
+                    < (uint)rootProviderModule.Program.Structures.Length
+                    && rootProviderModule.Program.Structures[
+                        localStructureIndex].StandardTypeOrigin is
+                        BoundStandardTypeOrigin localTypeOrigin
+                    && !localTypeOrigin.Expectations.IsDefaultOrEmpty)
+                {
+                    var methodTypeOrigin = (
+                        typeOrigin.Provider.ModuleIdentity,
+                        typeOrigin.DefinitionId);
+                    if (!rootMethodExpectedTypeDefs.TryGetValue(
+                            methodTypeOrigin,
+                            out var expectedDefinitionIds))
+                    {
+                        expectedDefinitionIds = [];
+                        rootMethodExpectedTypeDefs.Add(methodTypeOrigin,
+                            expectedDefinitionIds);
+                    }
+
+                    foreach (var expectation in
+                        localTypeOrigin.Expectations)
+                    {
+                        if (SameA2SourceTypeProviderSnapshot(
+                                expectation.UsingModule,
+                                methodProviderSnapshot))
+                        {
+                            _ = expectedDefinitionIds.Add(
+                                expectation.ExpectedDefinitionId);
+                        }
+                    }
+                }
+                AddTypeImportContext(structureIndex,
+                    methodProviderSnapshot);
                 _ = selectedStructures.Add(structureIndex);
                 pendingStructures.Push(structureIndex);
             }
@@ -760,8 +829,24 @@ public static partial class TrRmExecutableCompiler
                     "A selected struct has no retained provider TypeDef origin.");
             var originKey = (origin.Provider.ModuleIdentity,
                 origin.DefinitionId);
-            if (!selectedTypeKeysByOrigin.ContainsKey(originKey)
-                && !typeExpectationsByOrigin.ContainsKey(originKey))
+            var hasSelectedTypeKey
+                = selectedTypeKeysByOrigin.ContainsKey(originKey);
+            var hasRetainedExpectationForContext = false;
+            if (!hasSelectedTypeKey
+                && typeExpectationsByOrigin.TryGetValue(originKey,
+                    out var retainedTypeExpectations)
+                && typeImportContextsByOrigin.TryGetValue(originKey,
+                    out var requiredContexts))
+            {
+                hasRetainedExpectationForContext
+                    = retainedTypeExpectations.Any(expectation =>
+                        requiredContexts.Any(context =>
+                            SameA2SourceTypeProviderSnapshot(
+                                expectation.UsingModule, context)));
+            }
+
+            if (!hasSelectedTypeKey
+                && !hasRetainedExpectationForContext)
             {
                 throw new ArgumentException(
                     "Every provider-local method and nested struct dependency that requires a new Import needs an explicit TypeDef ExportKey selection.",
@@ -787,6 +872,16 @@ public static partial class TrRmExecutableCompiler
                 {
                     pendingStructures.Push(nestedStructureIndex);
                 }
+                if (!moduleByIdentity.TryGetValue(
+                        origin.Provider.ModuleIdentity,
+                        out var ownerProviderModule))
+                {
+                    throw Invalid(
+                        "A selected struct field owner is outside the checked Module directory.");
+                }
+
+                AddTypeImportContext(nestedStructureIndex,
+                    GetProviderSnapshot(ownerProviderModule));
             }
         }
 
@@ -932,25 +1027,49 @@ public static partial class TrRmExecutableCompiler
 
                 typeExpectations
                     = [.. expectationsByImport.Values];
+                if (!typeImportContextsByOrigin.TryGetValue(typeOriginKey,
+                        out var requiredContexts))
+                {
+                    throw new ArgumentException(
+                        "A closure-only struct needs an explicit TypeDef ExportKey selection.",
+                        nameof(typeExportKeys));
+                }
+
                 if (rootMethodTypeOrigins.Contains(typeOriginKey))
                 {
-                    var rootProviderSnapshot
-                        = GetProviderSnapshot(rootModule);
-                    typeExpectations = [.. typeExpectations.Where(
-                        expectation => SameA2SourceTypeProviderSnapshot(
-                            expectation.UsingModule,
-                            rootProviderSnapshot))];
-                    if (typeExpectations.IsEmpty)
+                    referenceRoot = rootProviderSnapshot
+                        ?? throw Invalid(
+                            "A root method struct dependency lost its selected Module snapshot.");
+                    if (rootMethodExpectedTypeDefs.TryGetValue(
+                            typeOriginKey, out var expectedDefinitionIds)
+                        && expectedDefinitionIds.Count == 1)
                     {
-                        throw new ArgumentException(
-                            "A root method's local struct dependency needs an explicit TypeDef ExportKey selection.",
-                            nameof(typeExportKeys));
+                        var expectedDefinitionId
+                            = expectedDefinitionIds.Single();
+                        typeExpectations = [.. typeExpectations.Where(
+                            expectation => expectation
+                                .ExpectedDefinitionId
+                                == expectedDefinitionId)];
                     }
                 }
-                if (typeExpectations.IsEmpty)
+                else if (requiredContexts.Count == 1)
+                {
+                    referenceRoot = requiredContexts[0];
+                }
+                else
                 {
                     throw new NotSupportedException(
-                        "A closure-only imported struct requires retained TypeDef Import expectations.");
+                        "A closure-only struct required from multiple using Modules needs contextual TypeDef cloning.");
+                }
+                typeExpectations
+                    = [.. typeExpectations.Where(expectation =>
+                        SameA2SourceTypeProviderSnapshot(
+                            expectation.UsingModule, referenceRoot))];
+                if (typeExpectations.IsEmpty)
+                {
+                    throw new ArgumentException(
+                        "A required local struct dependency needs an explicit TypeDef ExportKey selection.",
+                        nameof(typeExportKeys));
                 }
 
                 var firstExpectation = typeExpectations[0];

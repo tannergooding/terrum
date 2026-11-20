@@ -163,7 +163,10 @@ re-emits and reloads the consumer against the relocated provider. All remain
 unverified under the active hold. Another API regression checks that a
 disconnected supplied method provider importing the same actual struct does
 not override the selected root method's TypeDef Import context; it too remains
-unverified. Co-located provider Imports, deeper
+unverified. A nested closure-only struct case also retains the owning
+provider's TypeDef Import context despite an unrelated provider importing the
+same actual struct, through caller binding and source-free
+load/re-emission/reload; it remains unverified. Co-located provider Imports, deeper
 chains/diamonds, broader shared-expectation transformations, multiple
 expected TypeDef views within the selected method-root Module and distinct
 nested-provider contexts for one closure-only TypeDef, Import/Export/
