@@ -387,6 +387,14 @@ internal sealed partial class TrRmStandardNativeBindingPlan
                         methodRow < module.MethodDefEnd; methodRow++)
                     {
                         var index = module.FunctionIndexByMethodRow[methodRow];
+                        if (_construction2MethodLinking
+                            && (index < 0
+                                || tables.Methods.GetOwnerType(methodRow)
+                                    != 0))
+                        {
+                            continue;
+                        }
+
                         var function = module.Program.Functions[index];
                         if (!function.IsExternal)
                         {

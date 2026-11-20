@@ -891,7 +891,7 @@ public static partial class TrRmExecutableCompiler
             if ((expectedDefinition >> 24) != 0x16)
             {
                 throw Unsupported(
-                    "Construction-2 Method linking initially requires top-level MethodDef Imports without type or field Import calls.");
+                    "A Construction-2 method-link edge does not select a MethodDef Import.");
             }
 
             var expectedMethodRow = checked((int)(
@@ -912,8 +912,18 @@ public static partial class TrRmExecutableCompiler
             standardConstruction2MethodLinking: true,
             nominalClassTypesByTypeSpecReference:
                 nominalClassTypesByTypeSpecReference);
-        if (program.Functions.Length
-            != module.MethodDefEnd - module.MethodDefStart)
+        var expectedFunctionCount = 0;
+        for (var methodRow = module.MethodDefStart;
+            methodRow < module.MethodDefEnd; methodRow++)
+        {
+            if (tables.Methods.GetOwnerType(methodRow) == 0
+                && !tables.NativeFunctionPointerAnchors
+                    .IsAnchorMethodDef(methodRow))
+            {
+                expectedFunctionCount++;
+            }
+        }
+        if (program.Functions.Length != expectedFunctionCount)
         {
             throw Invalid(
                 "The Construction-2 Method loader lost a selected Module's MethodDef range.");
@@ -928,6 +938,13 @@ public static partial class TrRmExecutableCompiler
         for (var methodRow = module.MethodDefStart;
             methodRow < module.MethodDefEnd; methodRow++)
         {
+            if (tables.Methods.GetOwnerType(methodRow) != 0
+                || tables.NativeFunctionPointerAnchors
+                    .IsAnchorMethodDef(methodRow))
+            {
+                continue;
+            }
+
             if (!functionIndexByName.TryGetValue(
                     tables.Methods.GetName(methodRow),
                     out var functionIndex))
@@ -1281,8 +1298,18 @@ public static partial class TrRmExecutableCompiler
             standardConstruction2MethodLinking: true,
             nominalClassTypesByTypeSpecReference:
                 nominalClassTypesByTypeSpecReference);
-        if (program.Functions.Length
-            != module.MethodDefEnd - module.MethodDefStart)
+        var expectedFunctionCount = 0;
+        for (var methodRow = module.MethodDefStart;
+            methodRow < module.MethodDefEnd; methodRow++)
+        {
+            if (tables.Methods.GetOwnerType(methodRow) == 0
+                && !tables.NativeFunctionPointerAnchors
+                    .IsAnchorMethodDef(methodRow))
+            {
+                expectedFunctionCount++;
+            }
+        }
+        if (program.Functions.Length != expectedFunctionCount)
         {
             throw Invalid(
                 "The Construction-2 Method loader lost a selected Module's MethodDef range.");
@@ -1297,6 +1324,13 @@ public static partial class TrRmExecutableCompiler
         for (var methodRow = module.MethodDefStart;
             methodRow < module.MethodDefEnd; methodRow++)
         {
+            if (tables.Methods.GetOwnerType(methodRow) != 0
+                || tables.NativeFunctionPointerAnchors
+                    .IsAnchorMethodDef(methodRow))
+            {
+                continue;
+            }
+
             if (!functionIndexByName.TryGetValue(
                     tables.Methods.GetName(methodRow),
                     out var functionIndex))

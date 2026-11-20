@@ -5232,6 +5232,24 @@ public static partial class TrRmExecutableCompiler
                 += isImportedNativeParameterMethod ? 1 : 0;
             importedInitializationReferenceMethodCount
                 += isImportedInitializationReferenceMethod ? 1 : 0;
+            if (standardConstruction2MethodLinkingProfile
+                && defs.GetOwnerType(row) != 0)
+            {
+                if (importDefinition)
+                {
+                    throw Unsupported(
+                        "Construction-2 runtime linking initially requires local class Methods; imported class-owned MethodDefs remain outside this route.");
+                }
+
+                if (!usedSignatures[signature])
+                {
+                    usedSignatures[signature] = true;
+                    usedSignatureCount++;
+                }
+
+                continue;
+            }
+
             if (defs.GetOwnerType(row) != 0
                 || (importDefinition && !isImportedNativeCallable
                     && !isImportedNativeVTable
@@ -5652,6 +5670,11 @@ public static partial class TrRmExecutableCompiler
         for (var row = methodStart; row < methodEnd; row++)
         {
             var functionIndex = functionIndexByMethodRow[row];
+            if (standardConstruction2MethodLinkingProfile
+                && functionIndex < 0 && defs.GetOwnerType(row) != 0)
+            {
+                continue;
+            }
             if (functionIndex < 0)
             {
                 continue;
