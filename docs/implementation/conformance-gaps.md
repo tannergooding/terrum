@@ -93,10 +93,10 @@ authorized and remain labeled provisional.
 **Class-layout reference composition:** The bounded type-only Standard
 composer now preserves exact class target-layout variants across disjoint
 provider Modules and binds queries against both roots in memory. The EN1
-declaration emitter can project a single class-query function to its referenced
-root and re-emit/reload against that provider. The regression is unverified
-under the active hold. One consumer artifact spanning multiple provider roots
-remains open.
+declaration emitter can emit and reload one bounded query function whose
+primitive class layout roots span distinct providers. The regression is
+unverified under the active hold. Broader multi-function/provider dependency
+closure remains open.
 
 Other proposals remain unapproved unless their owner and approval status say
 otherwise; see the [proposal index](../proposals/README.md).

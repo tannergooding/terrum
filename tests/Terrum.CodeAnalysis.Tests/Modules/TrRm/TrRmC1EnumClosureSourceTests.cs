@@ -2677,6 +2677,36 @@ internal sealed class TrRmC1EnumClosureSourceTests
             "BetaConsumer", [beta.Input]);
         Assert.That(betaLoaded.Functions.Single().Name,
             Is.EqualTo("BetaOffset"));
+
+        var combinedConsumer = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Demo;
+                nint CombinedOffset() {
+                    return unsafe(offsetof(Alpha, Value))
+                        + unsafe(offsetof(Beta, Value));
+                }
+                """), reference, new CompilationOptions {
+                LayoutCoreRegistration
+                    = LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(combinedConsumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, combinedConsumer.Diagnostics));
+        var combinedArtifact = TrRmExecutableCompiler.EmitStandard(
+            combinedConsumer.Program!, "CombinedConsumer", schemaIdentity,
+            targetRequirement);
+        var combinedTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                combinedArtifact, SchemaFor(schemaIdentity), null,
+                usesNativePointerLoads: false,
+                standardSchemaIdentity: schemaIdentity));
+        Assert.That(combinedTables.TargetLayoutDependencies.Count,
+            Is.EqualTo(2));
+        Assert.That(combinedTables.ModuleRefs.Count, Is.EqualTo(2));
+        var combinedLoaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, combinedArtifact),
+            "CombinedConsumer", [alpha.Input, beta.Input]);
+        Assert.That(combinedLoaded.Functions.Single().Name,
+            Is.EqualTo("CombinedOffset"));
     }
 
     [Test]
