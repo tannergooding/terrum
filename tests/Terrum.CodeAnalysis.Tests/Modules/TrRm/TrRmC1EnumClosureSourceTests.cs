@@ -2575,7 +2575,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
             = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
         var options = new CompilationOptions();
 
-        static CompilationReference CreateProviderReference(
+        static (TrRmStandardArtifactInput Input,
+            CompilationReference Reference) CreateProviderReference(
             string moduleIdentity, string className, string typeExportKey,
             string fieldExportKey, string schemaIdentity,
             uint targetRequirement, CompilationOptions options)
@@ -2609,19 +2610,21 @@ internal sealed class TrRmC1EnumClosureSourceTests
             var artifact = TrRmExecutableCompiler.EmitStandard(program,
                 moduleIdentity, schemaIdentity, targetRequirement, [], [],
                 [classExport], []);
-            return TrRmExecutableCompiler.CreateStandardReference(
-                new TrRmStandardArtifactInput(schemaIdentity, artifact),
-                moduleIdentity, [], [typeExportKey], [fieldExportKey]);
+            var input = new TrRmStandardArtifactInput(schemaIdentity,
+                artifact);
+            return (input,
+                TrRmExecutableCompiler.CreateStandardReference(input,
+                    moduleIdentity, [], [typeExportKey], [fieldExportKey]));
         }
 
-        var alphaReference = CreateProviderReference("AlphaProvider",
+        var alpha = CreateProviderReference("AlphaProvider",
             "Alpha", "type.alpha", "field.alpha.value", schemaIdentity,
             targetRequirement, options);
-        var betaReference = CreateProviderReference("BetaProvider", "Beta",
+        var beta = CreateProviderReference("BetaProvider", "Beta",
             "type.beta", "field.beta.value", schemaIdentity,
             targetRequirement, options);
         var reference = TrRmExecutableCompiler.CreateStandardReferenceSet(
-            [alphaReference, betaReference]);
+            [alpha.Reference, beta.Reference]);
 
         Assert.That(reference.StandardClassDeclarations, Has.Length.EqualTo(2));
         Assert.That(reference.StandardClassDeclarations
@@ -2633,12 +2636,30 @@ internal sealed class TrRmC1EnumClosureSourceTests
                     !declaration.Declaration.Layouts.IsEmpty),
             Is.True);
 
-        var consumer = Compilation.CreateLibrary(
+        var alphaConsumer = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
                 using Demo;
                 nint AlphaOffset() {
                     return unsafe(offsetof(Alpha, Value));
                 }
+                """), reference, new CompilationOptions {
+                LayoutCoreRegistration
+                    = LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(alphaConsumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, alphaConsumer.Diagnostics));
+        var alphaArtifact = TrRmExecutableCompiler.EmitStandard(
+            alphaConsumer.Program!, "AlphaConsumer", schemaIdentity,
+            targetRequirement);
+        var alphaLoaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, alphaArtifact),
+            "AlphaConsumer", [alpha.Input]);
+        Assert.That(alphaLoaded.Functions.Single().Name,
+            Is.EqualTo("AlphaOffset"));
+
+        var betaConsumer = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Demo;
                 nint BetaOffset() {
                     return unsafe(offsetof(Beta, Value));
                 }
@@ -2646,8 +2667,16 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 LayoutCoreRegistration
                     = LayoutCoreRegistrationTestData.Create(),
             });
-        Assert.That(consumer.HasErrors, Is.False,
-            string.Join(Environment.NewLine, consumer.Diagnostics));
+        Assert.That(betaConsumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, betaConsumer.Diagnostics));
+        var betaArtifact = TrRmExecutableCompiler.EmitStandard(
+            betaConsumer.Program!, "BetaConsumer", schemaIdentity,
+            targetRequirement);
+        var betaLoaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, betaArtifact),
+            "BetaConsumer", [beta.Input]);
+        Assert.That(betaLoaded.Functions.Single().Name,
+            Is.EqualTo("BetaOffset"));
     }
 
     [Test]

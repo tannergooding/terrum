@@ -754,8 +754,29 @@ public static partial class TrRmExecutableCompiler
 
             var classRootProviders
                 = new List<BoundSourceTypeProviderSnapshot>();
+            BoundGenericNominalTypeIdentity? classQueryRootIdentity = null;
+            if (classQueryFunction is not null)
+            {
+                var classQueryRootType
+                    = GetEN1ClassLayoutQueries(classQueryFunction)[0]
+                        .Subject.FieldPath!.RootType;
+                var classQueryRootInstance
+                    = program.GenericNominalTypeInstances[
+                        BoundGenericNominalTypeTypes.Index(
+                            classQueryRootType)];
+                classQueryRootIdentity
+                    = classQueryRootInstance.Definition;
+            }
+
             foreach (var declaration in standardClassDeclarations)
             {
+                if (classQueryRootIdentity is
+                        BoundGenericNominalTypeIdentity selectedRoot
+                    && declaration.Declaration.Identity != selectedRoot)
+                {
+                    continue;
+                }
+
                 if (declaration.Expectations.IsEmpty)
                 {
                     if (!declaration.SelectedExportKeys.IsEmpty
