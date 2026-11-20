@@ -236,6 +236,31 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
     }
 
     [Test]
+    public void BindsClassSchemaStructEqualityWithoutCopyOrBlittableProof()
+    {
+        var schemaIdentity
+            = StandardGenericMethodSchema
+                .C1M1Construction2ClassTypeBindingViews;
+        var provider = CreateRelocatedClassProvider("Provider",
+            schemaIdentity, "LeafAliasKey");
+        SetTypeDefFlags(provider, 0x06, typeDefRow: 2);
+        var consumer = CreateRootArtifactWithTwoClassImports("Root",
+            "Provider", "BoxKey", "LeafKey", "LeafAliasKey",
+            schemaIdentity, useStructLeaves: true,
+            includeEquality: true);
+
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, consumer),
+            "Root",
+            [new TrRmStandardArtifactInput(schemaIdentity, provider)],
+            ["BoxKey"]);
+        var leaf = reference.GenericNominalTypeDefinitions.Single(
+            static definition => definition.Name == "Leaf");
+        Assert.That(leaf.NominalKind, Is.EqualTo(1));
+        Assert.That(leaf.ProviderExpectations, Has.Length.EqualTo(2));
+    }
+
+    [Test]
     public void BindsImportedClassDeclarationsWithoutExecutableClassLayout()
     {
         var provider = CreateClassArtifact("Provider", "Leaf", "LeafKey",
@@ -2542,7 +2567,8 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
     private static byte[] CreateRootArtifactWithTwoClassImports(
         string moduleIdentity, string providerIdentity, string exportKey,
         string firstProviderExportKey, string secondProviderExportKey,
-        string schemaIdentity)
+        string schemaIdentity, bool useStructLeaves = false,
+        bool includeEquality = false)
     {
         const uint targetRequirement
             = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
@@ -2589,10 +2615,11 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
         var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes,
             typeSpecRows.Length, 3, 2, 0);
 
+        var leafFlags = useStructLeaves ? 0x06u : 0x0Au;
         var typeDefRows = new[] {
             new TrRmTypeDefRow(2, 3, 0x0A, 1, 2, 0, 0, 1, 1, 0, 0),
-            new TrRmTypeDefRow(2, 4, 0x0A, 3, 1, 0, 0, 2, 1, 0, 0),
-            new TrRmTypeDefRow(2, 4, 0x0A, 4, 1, 0, 0, 3, 1, 0, 0),
+            new TrRmTypeDefRow(2, 4, leafFlags, 3, 1, 0, 0, 2, 1, 0, 0),
+            new TrRmTypeDefRow(2, 4, leafFlags, 4, 1, 0, 0, 3, 1, 0, 0),
         };
         var typeDefBytes = TrRmTypeDefTableWriter.Encode(typeDefRows,
             strings, modules, fieldCount: 4, genericParamCount: 0,
@@ -2655,6 +2682,14 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
             new(0x001D, 0, 1, exportBytes),
             new(0x0023, 0, 4, layoutFieldBytes),
         };
+        if (includeEquality)
+        {
+            var equalityBytes = new byte[12];
+            Write(equalityBytes, 0, 1);
+            Write(equalityBytes, 4, 2);
+            Write(equalityBytes, 8, 3);
+            sections.Add(new TrRmSection(0x0067, 0, 1, equalityBytes));
+        }
         sections.Sort(static (left, right) =>
             left.Kind.CompareTo(right.Kind));
         var artifact = TrRmArtifactWriter.Encode(sections, schema,
