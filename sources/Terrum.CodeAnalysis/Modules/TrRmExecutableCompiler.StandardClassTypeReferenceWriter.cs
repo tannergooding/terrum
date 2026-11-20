@@ -11111,7 +11111,6 @@ public static partial class TrRmExecutableCompiler
                     || function.IsCleanup
                     || function.NoFailureProof
                     || function.HasPureEvaluationForm
-                    || function.RequiresUnsafeCaller
                     || function.DoesNotReturn
                     || function.HasNativeExport
                     || function.NativeExportEntryName is not null
@@ -11124,7 +11123,6 @@ public static partial class TrRmExecutableCompiler
                     || function.NativeCallableConvention is not null
                     || function.IndexedBody is not null
                     || !function.OrdinaryParameterDefaults.IsDefaultOrEmpty
-                    || !function.DependencyContracts.IsEmpty
                     || !function.DeclarationContractClauses.IsDefaultOrEmpty
                     || !function.FriendTargets.IsDefaultOrEmpty
                     || function.ParameterCount
@@ -11255,9 +11253,21 @@ public static partial class TrRmExecutableCompiler
                         var targetSignatureRow
                             = rootTables.Methods.GetSignature(
                                 oldTargetMethodRow);
+                        var (targetParameterStart,
+                            targetParameterCount)
+                            = rootTables.Signatures.GetParamRange(
+                                targetSignatureRow);
                         var targetResultTypeSpecReference
                             = rootTables.Signatures.GetResultTypeSpec(
                                 targetSignatureRow);
+                        var targetEffectsMask
+                            = rootTables.Contracts.GetEffectsMask(
+                                oldTargetMethodRow);
+                        var targetDependencyContracts
+                            = DecodeC1M1ClassMethodDependencyContracts(
+                                rootTables.Contracts.GetDependencyContracts(
+                                    oldTargetMethodRow),
+                                targetParameterCount, hasReceiver: false);
                         var targetResultMatches
                             = targetFunction.ReturnType
                                 == PrimitiveType.Void
@@ -11270,13 +11280,20 @@ public static partial class TrRmExecutableCompiler
                                         == targetFunction.ReturnType;
                         if (targetFunction.ReturnType
                                 != function.ReturnType
-                            || targetFunction.ParameterCount != 0
-                            || !targetFunction.Variables.IsEmpty
+                            || targetFunction.ParameterCount
+                                != targetParameterCount
+                            || targetFunction.Variables.Length
+                                != targetParameterCount
                             || !targetFunction.IsModuleReference
                             || !targetFunction.IsExternal
-                            || targetFunction.RequiresUnsafeCaller
                             || targetFunction.DoesNotReturn
-                            || !targetFunction.DependencyContracts.IsEmpty
+                            || targetFunction.RequiresUnsafeCaller
+                                != ((targetEffectsMask & 4) != 0)
+                            || targetFunction.DoesNotReturn
+                                != ((targetEffectsMask & 2) != 0)
+                            || !C1M1DependencyContractsEqual(
+                                targetFunction.DependencyContracts,
+                                targetDependencyContracts)
                             || targetFunction.DirectNativeImport is not null
                             || targetFunction.NativeVTableMethod is not null
                             || targetFunction.NativeFunctionPointerType
@@ -11286,14 +11303,15 @@ public static partial class TrRmExecutableCompiler
                             || targetFunction.NativeCallableConvention
                                 is not null
                             || targetFunction.HasNativeExport
-                            || !directCall.Arguments.IsEmpty
                             || !directCall.DefaultedArguments.IsDefaultOrEmpty
                             || directCall.Type != function.ReturnType
                             || !targetResultMatches
+                            || (targetFunction.RequiresUnsafeCaller
+                                && !directCall.IsUnsafeAuthorized)
+                            || (targetEffectsMask & ~6u) != 0
                             || directCall.InterfaceCallIdentity is not null
                             || directCall.GenericMethodCall is not null
                             || directCall.ImportedGenericMethodCall is not null
-                            || directCall.IsUnsafeAuthorized
                             || rootTables.Methods.GetOwnerModule(
                                 oldTargetMethodRow) != rootModuleRow
                             || rootTables.Methods.GetOwnerType(
@@ -11306,10 +11324,6 @@ public static partial class TrRmExecutableCompiler
                                 .GetReceiverTypeSpec(targetSignatureRow) != 0
                             || rootTables.Signatures.GetGenericCount(
                                 targetSignatureRow) != 0
-                            || rootTables.Signatures.GetParamRange(
-                                targetSignatureRow).Count != 0
-                            || rootTables.Contracts.GetEffectsMask(
-                                oldTargetMethodRow) != 0
                             || rootTables.Contracts.HasConstructionClause(
                                 oldTargetMethodRow)
                             || !rootTables.Contracts
@@ -11328,20 +11342,20 @@ public static partial class TrRmExecutableCompiler
                                     oldTargetMethodRow)
                             || rootTables.NativeVTables
                                 .HasVTableForMethod(oldTargetMethodRow)
-                            || !rootTables.Contracts
-                                .GetDependencyContracts(oldTargetMethodRow)
-                                .IsEmpty
                             || rootTables.StandardNativeImports
                                 .HasImportForMethod(oldTargetMethodRow))
                         {
                             throw Unsupported(
-                                "A local class-reference function can call only a safe, zero-argument, unit- or fixed-scalar-returning forwarded top-level MethodDef.");
+                                "A local class-reference function can call only a forwarded nongeneric top-level MethodDef with the bounded ordinary value signature and effects.");
                         }
 
                         bodyRows.Add(
                             EncodeC1M1MetadataClassDirectModuleCallBody(
-                                targetMethodRow, function.ReturnType,
-                                schema));
+                                function, directCall, targetFunction,
+                                rootTables, oldTargetMethodRow,
+                                targetMethodRow, program,
+                                SourceFunctionTypeSpecReference,
+                                ModuleFunctionTypeMatches, schema));
                     }
                     else
                     {
@@ -11419,10 +11433,77 @@ public static partial class TrRmExecutableCompiler
                     }
                 }
 
+                var methodContractFirst = 0;
+                var methodContractCount = 0;
+                var methodEffectsMask
+                    = function.RequiresUnsafeCaller ? 4u : 0u;
+                if (methodEffectsMask != 0)
+                {
+                    methodContractFirst = contractRows.Count + 1;
+                    contractRows.Add(new TrRmContractRow(
+                        0x1600_0000u
+                            | checked((uint)newMethodDefRow),
+                        1, s_effectPayloads[methodEffectsMask]));
+                    methodContractCount++;
+                }
+
+                foreach (var dependency in function.DependencyContracts)
+                {
+                    if (dependency.Destination
+                            != BoundDependencyDestination.Result
+                        || dependency.DestinationOrdinal is not null
+                        || dependency.Sources.IsDefaultOrEmpty)
+                    {
+                        throw Unsupported(
+                            "A forwarded module-call function can retain only normal-result dependencies on formal values.");
+                    }
+
+                    var relationship = dependency.Relation switch {
+                        BoundDependencyRelation.BorrowSourceStorage => 1,
+                        BoundDependencyRelation.ForwardsBacking => 2,
+                        BoundDependencyRelation.DependsOn => 3,
+                        _ => throw Unsupported(
+                            "A forwarded module-call function has an unsupported result dependency relationship."),
+                    };
+                    foreach (var source in dependency.Sources
+                        .OrderBy(static source => source.Kind)
+                        .ThenBy(static source => source.FormalOrdinal ?? -1))
+                    {
+                        if (source.Kind
+                                != BoundDependencySourceKind.Formal
+                            || source.FormalOrdinal is not int sourceOrdinal
+                            || (uint)sourceOrdinal
+                                >= (uint)function.ParameterCount)
+                        {
+                            throw Unsupported(
+                                "A forwarded module-call dependency must name a caller formal.");
+                        }
+
+                        if (methodContractFirst == 0)
+                        {
+                            methodContractFirst = contractRows.Count + 1;
+                        }
+
+                        var payload = new byte[12];
+                        payload[0] = 1;
+                        payload[1] = 1;
+                        payload[2] = checked((byte)relationship);
+                        payload[3] = 1;
+                        BinaryPrimitives.WriteUInt32LittleEndian(
+                            payload.AsSpan(8),
+                            checked((uint)sourceOrdinal));
+                        contractRows.Add(new TrRmContractRow(
+                            0x1600_0000u
+                                | checked((uint)newMethodDefRow),
+                            4, payload));
+                        methodContractCount++;
+                    }
+                }
+
                 methodRows.Add(new TrRmMethodDefRow(0, 0, signatureRow,
                     function.IsPrivate ? 0u
                         : function.IsInternal ? 1u : 2u,
-                    0, 0, bodyRow));
+                    methodContractFirst, methodContractCount, bodyRow));
                 methodNames.Add(function.Name);
                 if (!function.IsPrivate && !function.IsInternal)
                 {
@@ -11645,8 +11726,9 @@ public static partial class TrRmExecutableCompiler
                 || function.HasOrdinaryParameterDefaultSurface
                 || !function.OrdinaryParameterDefaults.IsEmpty
                 || !function.DeclarationContractClauses.IsDefaultOrEmpty
-                || !function.DependencyContracts.AsSpan().SequenceEqual(
-                    dependencyContracts.AsSpan())
+                || !C1M1DependencyContractsEqual(
+                    function.DependencyContracts,
+                    dependencyContracts)
                 || function.RequiresUnsafeCaller
                     != ((effectsMask & 4) != 0)
                 || function.DeclaredRequiresUnsafeCaller
@@ -12519,28 +12601,221 @@ public static partial class TrRmExecutableCompiler
     }
 
     private static byte[] EncodeC1M1MetadataClassDirectModuleCallBody(
-        int targetMethodDefRow, PrimitiveType resultType,
+        BoundFunction function, BoundCall call,
+        BoundFunction targetFunction,
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables
+            rootTables,
+        int oldTargetMethodRow, int targetMethodDefRow,
+        BoundProgram program,
+        Func<PrimitiveType, uint> typeSpecReferenceFor,
+        Func<uint, PrimitiveType, bool> methodTypeMatches,
         TrRmArtifactSchema schema)
     {
         if (!schema.UsesObjectConstruction()
             || targetMethodDefRow is <= 0 or > 0xFF_FFFF
-            || (resultType != PrimitiveType.Void
+            || (function.ReturnType != PrimitiveType.Void
                 && !TryGetC1M1SourceScalarTypeSpecReference(
-                    resultType, out _)))
+                    function.ReturnType, out _))
+            || call.Type != function.ReturnType
+            || targetFunction.ReturnType != function.ReturnType
+            || targetFunction.ParameterCount
+                != targetFunction.Variables.Length
+            || targetFunction.ParameterCount
+                != call.Arguments.Length
+            || call.InterfaceCallIdentity is not null
+            || call.GenericMethodCall is not null
+            || call.ImportedGenericMethodCall is not null
+            || !call.DefaultedArguments.IsDefaultOrEmpty
+            || targetFunction.IsConstructor
+            || targetFunction.IsClassConstructor
+            || targetFunction.IsCleanup || targetFunction.IsOperator
+            || targetFunction.Intrinsic != BoundIntrinsic.None
+            || targetFunction.DoesNotReturn)
         {
             throw Unsupported(
-                "A forwarded module-call Body requires a Construction-2 unit or fixed-scalar result.");
+                "A forwarded module-call Body requires a direct Construction-2 unit or scalar call.");
+        }
+
+        var targetSignatureRow = rootTables.Methods.GetSignature(
+            oldTargetMethodRow);
+        var (targetParameterStart, targetParameterCount)
+            = rootTables.Signatures.GetParamRange(targetSignatureRow);
+        var targetResultTypeSpecReference
+            = rootTables.Signatures.GetResultTypeSpec(targetSignatureRow);
+        if (targetParameterCount != targetFunction.ParameterCount
+            || rootTables.Signatures.GetReceiverTypeSpec(
+                targetSignatureRow) != 0
+            || rootTables.Signatures.GetGenericCount(targetSignatureRow) != 0
+            || !methodTypeMatches(targetResultTypeSpecReference,
+                targetFunction.ReturnType))
+        {
+            throw Unsupported(
+                "A forwarded module-call Body requires the exact nongeneric top-level MethodSig.");
+        }
+
+        for (var ordinal = 0; ordinal < targetParameterCount; ordinal++)
+        {
+            var parameterRow = targetParameterStart + ordinal;
+            var targetVariable = targetFunction.Variables[ordinal];
+            if (rootTables.Parameters.GetMode(parameterRow) != 0
+                || rootTables.Parameters.GetFlags(parameterRow) != 0
+                || targetVariable.IsMutable || targetVariable.IsOut
+                || targetVariable.IsInit
+                || targetVariable.IsImplicitRef
+                || targetVariable.IsInitializationLocal
+                || !methodTypeMatches(
+                    rootTables.Parameters.GetTypeSpec(parameterRow),
+                    targetVariable.Type))
+            {
+                throw Unsupported(
+                    "A forwarded module-call Body requires ordinary by-value MethodSig parameters.");
+            }
+        }
+
+        var typeTokens = new List<uint>(function.ParameterCount);
+        var homeIndexByVariable = new int[function.ParameterCount];
+        Array.Fill(homeIndexByVariable, -1);
+        for (var parameter = 0; parameter < function.ParameterCount;
+            parameter++)
+        {
+            var variable = function.Variables[parameter];
+            if (variable.IsMutable || variable.IsOut || variable.IsInit
+                || variable.IsImplicitRef
+                || variable.IsInitializationLocal)
+            {
+                throw Unsupported(
+                    "A forwarded module-call Body requires immutable value formals.");
+            }
+
+            if (variable.Type == PrimitiveType.Void)
+            {
+                continue;
+            }
+
+            var typeToken = CreateStandardBodyTypeMapToken(
+                typeSpecReferenceFor(variable.Type));
+            homeIndexByVariable[parameter] = typeTokens.Count;
+            typeTokens.Add(typeToken);
+        }
+
+        var inputSeen = new bool[targetParameterCount];
+        var callInputs = new TrRmRegisterBodyCallInput[targetParameterCount];
+        for (var argumentIndex = 0;
+            argumentIndex < call.Arguments.Length; argumentIndex++)
+        {
+            var formalOrdinal = call.ParameterIndex(argumentIndex);
+            if ((uint)formalOrdinal >= (uint)targetParameterCount
+                || inputSeen[formalOrdinal]
+                || call.ImplicitReferenceTemporary(argumentIndex) != -1)
+            {
+                throw Unsupported(
+                    "A forwarded module-call Body requires one direct value actual per MethodSig formal.");
+            }
+
+            var targetVariable
+                = targetFunction.Variables[formalOrdinal];
+            var argument = call.Arguments[argumentIndex];
+            if (targetVariable.Type == PrimitiveType.Void)
+            {
+                var isUnitActual = argument is BoundConstant {
+                    Type: PrimitiveType.Void,
+                    RepresentationType: PrimitiveType.Void,
+                } || argument is BoundRead unitRead
+                    && (uint)unitRead.Variable
+                        < (uint)function.ParameterCount
+                    && unitRead.Type == PrimitiveType.Void
+                    && function.Variables[unitRead.Variable].Type
+                        == PrimitiveType.Void
+                    && !function.Variables[unitRead.Variable].IsOut
+                    && !function.Variables[unitRead.Variable].IsInit
+                    && !function.Variables[unitRead.Variable]
+                        .IsImplicitRef
+                    && !function.Variables[unitRead.Variable]
+                        .IsInitializationLocal;
+                if (!isUnitActual)
+                {
+                    throw Unsupported(
+                        "A unit module-call formal requires a direct unit actual.");
+                }
+
+                callInputs[formalOrdinal] = new(0, 0, 0);
+                inputSeen[formalOrdinal] = true;
+                continue;
+            }
+
+            if (argument is not BoundRead read
+                || (uint)read.Variable >= (uint)function.ParameterCount
+                || read.Type != function.Variables[read.Variable].Type)
+            {
+                throw Unsupported(
+                    "A forwarded module-call Body requires direct value-formal actuals.");
+            }
+
+            var sourceVariable = function.Variables[read.Variable];
+            if (sourceVariable.IsMutable || sourceVariable.IsOut
+                || sourceVariable.IsInit || sourceVariable.IsImplicitRef
+                || sourceVariable.IsInitializationLocal
+                || targetVariable.IsOut || targetVariable.IsInit
+                || targetVariable.IsImplicitRef
+                || targetVariable.IsInitializationLocal
+                || !AreC1M1MethodSignatureTypesEquivalent(
+                    sourceVariable.Type, function, program,
+                    targetVariable.Type, targetFunction))
+            {
+                throw Unsupported(
+                    "A forwarded module-call Body actual differs from its selected value formal.");
+            }
+
+            var sourceHomeIndex = homeIndexByVariable[read.Variable];
+            if (sourceHomeIndex < 0)
+            {
+                throw Unsupported(
+                    "A forwarded non-unit module-call input has no formal Home.");
+            }
+
+            callInputs[formalOrdinal] = new(2, 1,
+                checked((ushort)sourceHomeIndex));
+            inputSeen[formalOrdinal] = true;
+        }
+
+        if (inputSeen.Any(static seen => !seen))
+        {
+            throw Unsupported(
+                "A forwarded module-call Body omits a selected MethodSig input.");
+        }
+
+        var homeMap = new byte[checked(typeTokens.Count * 8)];
+        for (var parameter = 0; parameter < function.ParameterCount;
+            parameter++)
+        {
+            var homeIndex = homeIndexByVariable[parameter];
+            if (homeIndex < 0)
+            {
+                continue;
+            }
+
+            var offset = homeIndex * 8;
+            homeMap[offset] = 2;
+            BinaryPrimitives.WriteUInt16LittleEndian(homeMap.AsSpan(
+                offset + 4, 2), checked((ushort)parameter));
         }
 
         var targetMethodToken
             = 0x1600_0000u | checked((uint)targetMethodDefRow);
-        var maps = TrRmRegisterBodyMapBuilder.Create([], [
-            targetMethodToken,
-        ]);
-        var isUnitResult = resultType == PrimitiveType.Void;
+        var maps = TrRmRegisterBodyMapBuilder.Create(typeTokens,
+            [targetMethodToken]);
+        for (var homeIndex = 0; homeIndex < typeTokens.Count; homeIndex++)
+        {
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                homeMap.AsSpan(homeIndex * 8 + 2, 2),
+                checked((ushort)maps.GetTypeMapIndex(
+                    typeTokens[homeIndex])));
+        }
+
+        var isUnitResult = function.ReturnType == PrimitiveType.Void;
         var callSite = TrRmRegisterBodyRecordWriter.EncodeCallSite(1,
             isUnitResult ? (byte)0 : (byte)1,
-            maps.GetMethodMapIndex(targetMethodToken), 0, [], [],
+            maps.GetMethodMapIndex(targetMethodToken), 0, callInputs, [],
             schema: schema);
         ReadOnlyMemory<byte>[] records = [
             new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 },
@@ -12550,13 +12825,43 @@ public static partial class TrRmExecutableCompiler
             0xE0, 0, 1, 0,
             isUnitResult ? (byte)0x18 : (byte)0x17, 0,
         };
-        return TrRmRegisterBodyWriter.Encode(default, maps.TypeMap,
+        return TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
             maps.MethodMap, default, default, [
                 new TrRmRegisterBodyBlock(0,
                     checked((uint)code.Length), 0),
             ], records, code, contractCount: 0, schema: schema,
             generalPredicateGraphsInitializationReferenceBodies
                 : schema.UsesGeneralPredicateGraphs());
+    }
+
+    private static bool C1M1DependencyContractsEqual(
+        ImmutableArray<BoundDependencyContract> left,
+        ImmutableArray<BoundDependencyContract> right)
+    {
+        if (left.IsDefault || right.IsDefault
+            || left.Length != right.Length)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < left.Length; index++)
+        {
+            var leftContract = left[index];
+            var rightContract = right[index];
+            if (leftContract.Relation != rightContract.Relation
+                || leftContract.Destination != rightContract.Destination
+                || leftContract.DestinationOrdinal
+                    != rightContract.DestinationOrdinal
+                || leftContract.Sources.IsDefault
+                || rightContract.Sources.IsDefault
+                || !leftContract.Sources.AsSpan().SequenceEqual(
+                    rightContract.Sources.AsSpan()))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static byte[] EncodeC1M1MetadataClassDirectCallBody(
