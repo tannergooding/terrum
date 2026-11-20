@@ -7556,7 +7556,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
-    public void ReemitsEqualityBetweenDirectAndImportedTypeDefViews()
+    public void ReemitsEqualityAcrossDirectAndImportedTypeDefModules()
     {
         var schemaIdentity
             = C1M1Construction2TypeBindingViewsSchemaIdentity;
@@ -7621,6 +7621,46 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             "ContextualDirectReference", [directProviderInput],
             ["Read", "ReadAlias"], [], []);
         Assert.That(reloadedReference.Structures.Single()
+                .StandardTypeOrigin!.ContextualViewIndexes.Length,
+            Is.EqualTo(2));
+
+        var crossModuleProviderArtifact
+            = MoveSelfImportedTypeDefEqualityToMethodModule(
+                directProviderArtifact, schemaIdentity,
+                "ContextualDirectMethodRoot");
+        var crossModuleProviderInput = new TrRmStandardArtifactInput(
+            schemaIdentity, crossModuleProviderArtifact);
+        var crossModuleReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                crossModuleProviderInput, "ContextualDirectMethodRoot", [],
+                ["Read", "ReadAlias"], [
+                    new TrRmStandardExportKeySelection(
+                        "ContextualDirectProvider", "type.leaf"),
+                ], []);
+        Assert.That(crossModuleReference.Structures.Single(
+                static structure => structure.Name == "Demo.Leaf")
+                .StandardTypeOrigin!.ContextualViewIndexes.Length,
+            Is.EqualTo(2));
+        var crossModuleCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), crossModuleReference);
+        Assert.That(crossModuleCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                crossModuleCompilation.Diagnostics));
+        var crossModuleArtifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)crossModuleCompilation.Program!,
+            "ContextualCrossModuleReference", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var reloadedCrossModuleReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    crossModuleArtifact),
+                "ContextualCrossModuleReference",
+                [crossModuleProviderInput], ["Read", "ReadAlias"], [
+                    new TrRmStandardExportKeySelection(
+                        "ContextualDirectProvider", "type.leaf"),
+                ], []);
+        Assert.That(reloadedCrossModuleReference.Structures.Single(
+                static structure => structure.Name == "Demo.Leaf")
                 .StandardTypeOrigin!.ContextualViewIndexes.Length,
             Is.EqualTo(2));
     }
@@ -12284,6 +12324,132 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         sections.Add(new TrRmSection(0x0067, 0, 1, equalityBytes));
         sections.Sort(static (left, right) =>
             left.Kind.CompareTo(right.Kind));
+        var result = TrRmArtifactWriter.Encode(sections, schema,
+            standardSchemaIdentity: schemaIdentity);
+        _ = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                new TrRmArtifactIndex(result, schema, null,
+                    standardSchemaIdentity: schemaIdentity));
+        return result;
+    }
+
+    private static byte[] MoveSelfImportedTypeDefEqualityToMethodModule(
+        byte[] artifact, string schemaIdentity,
+        string methodModuleIdentity)
+    {
+        var schema = TrRmArtifactSchema
+            .C1M1Construction2InitializerCopyEvidenceDraft;
+        var index = new TrRmArtifactIndex(artifact, schema, null,
+            standardSchemaIdentity: schemaIdentity);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(index);
+        if (tables.Modules.Count != 1
+            || tables.TypeDefs.Count != 2
+            || tables.Imports.Count != 1
+            || tables.ModuleRefs.Count != 1
+            || tables.TypeDefBindingEqualities.Count != 1
+            || !index.TryGetSection(0x0001, out var moduleSection,
+                out var moduleCount)
+            || !index.TryGetSection(0x0011, out _, out var typeSpecCount)
+            || !index.TryGetSection(0x0067, out var equalitySection,
+                out var equalityCount)
+            || moduleCount != 1 || typeSpecCount == 0
+            || typeSpecCount != tables.TypeSpecs.Count
+            || equalityCount != 1
+            || tables.Modules.GetEntryMethod(1) != 0
+            || !StringComparer.Ordinal.Equals(
+                tables.ModuleRefs.GetProducerIdentity(1),
+                tables.Modules.GetIdentity(1))
+            || tables.Imports.GetExpectedDefinitionForImportRow(1)
+                != 0x1300_0002u)
+        {
+            throw new InvalidOperationException(
+                "The cross-Module fixture requires a self-imported contextual TypeDef group with a library method root.");
+        }
+
+        var textRows = new List<(string Text, int Encoding)>(
+            tables.Strings.Count + 1);
+        for (var row = 1; row <= tables.Strings.Count; row++)
+        {
+            textRows.Add((tables.Strings.DecodeNamespace(row), 1));
+        }
+
+        textRows.Add((methodModuleIdentity, 1));
+        var stringBytes = TrRmStringTableWriter.EncodeTextRows(textRows);
+        var strings = new TrRmStringTableReader(stringBytes, textRows.Count);
+        var moduleIdentityStringRow = checked((int)
+            BinaryPrimitives.ReadUInt32LittleEndian(moduleSection.Span));
+        var (targetRequirement, runtimePolicy)
+            = tables.Modules.GetRequirements(1);
+        var (sourceFileStart, _) = tables.Modules.GetSourceFileRange(1);
+        var (featureStart, featureCount)
+            = tables.Modules.GetFeatureRange(1);
+        var moduleRows = new[] {
+            new TrRmModuleRow(moduleIdentityStringRow,
+                targetRequirement, runtimePolicy, 0, 1, 1, 1,
+                sourceFileStart, 0, 0,
+                tables.Modules.GetGoverningRuleEdition(1)),
+            new TrRmModuleRow(textRows.Count, targetRequirement,
+                runtimePolicy, 0, 1, 2, 1, sourceFileStart,
+                featureStart, featureCount,
+                tables.Modules.GetGoverningRuleEdition(1)),
+        };
+        var featureSectionCount = index.TryGetSection(0x0004, out _,
+            out var existingFeatureCount) ? existingFeatureCount : 0;
+        var moduleBytes = TrRmModuleTableWriter.Encode(moduleRows, strings,
+            tables.ModuleRefs.Count, tables.TypeDefs.Count,
+            tables.Methods.Count, tables.Modules.SourceFileCount,
+            featureSectionCount);
+
+        var typeSpecRows
+            = new ReadOnlyMemory<byte>[tables.TypeSpecs.Count];
+        var remappedTypeSpecCount = 0;
+        for (var row = 1; row <= tables.TypeSpecs.Count; row++)
+        {
+            var typeSpec = tables.TypeSpecs.GetRow(row).ToArray();
+            if (typeSpec[0] == 0x02
+                && BinaryPrimitives.ReadUInt32LittleEndian(
+                    typeSpec.AsSpan(2)) == 1)
+            {
+                typeSpec = TrRmTypeSpecTableWriter.Reference(0x03, 1,
+                    typeSpec[1]);
+                remappedTypeSpecCount++;
+            }
+
+            typeSpecRows[row - 1] = typeSpec;
+        }
+
+        if (remappedTypeSpecCount == 0)
+        {
+            throw new InvalidOperationException(
+                "The cross-Module fixture requires a direct TypeDef TypeSpec to remap into the method Module.");
+        }
+
+        var typeSpecBytes = TrRmTypeSpecTableWriter.Encode(typeSpecRows, 2,
+            tables.Imports.Count, tables.GenericParams.Count,
+            tables.NativeFunctionPointerSignatures.Count, schema,
+            methodDefCount: tables.Methods.Count);
+        var equalityBytes = equalitySection.ToArray();
+        BinaryPrimitives.WriteUInt32LittleEndian(equalityBytes, 2);
+
+        var sections = new List<TrRmSection>(index.SectionCount + 1);
+        for (var sectionIndex = 0;
+            sectionIndex < index.SectionCount; sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var recordCount);
+            sections.Add(kind switch {
+                0x0001 => new TrRmSection(kind, flags, 2, moduleBytes),
+                0x0002 => new TrRmSection(kind, flags,
+                    checked((uint)textRows.Count), stringBytes),
+                0x0011 => new TrRmSection(kind, flags,
+                    checked((uint)typeSpecCount), typeSpecBytes),
+                0x0067 => new TrRmSection(kind, flags, 1, equalityBytes),
+                _ => new TrRmSection(kind, flags,
+                    checked((uint)recordCount), bytes.ToArray()),
+            });
+        }
+
         var result = TrRmArtifactWriter.Encode(sections, schema,
             standardSchemaIdentity: schemaIdentity);
         _ = TrRmStructuralMetadataValidator
