@@ -4196,6 +4196,9 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 public class Parent {
                     public Child Value;
                 }
+                public class Other {
+                    public int32 Id;
+                }
             }
             """);
         var compilation = Compilation.CreateLibrary(tree);
@@ -4229,9 +4232,11 @@ internal sealed class TrRmC1EnumClosureSourceTests
             "field.child.id");
         var parentExport = CreateClassExport("Parent", "type.parent",
             "field.parent.value");
+        var otherExport = CreateClassExport("Other", "type.other",
+            "field.other.id");
         var artifact = TrRmExecutableCompiler.EmitStandard(program,
             "ClassHandleProvider", schemaIdentity, targetRequirement, [],
-            [], [childExport, parentExport], []);
+            [], [childExport, parentExport, otherExport], []);
         var input = new TrRmStandardArtifactInput(schemaIdentity, artifact);
         var parentReference
             = TrRmExecutableCompiler.CreateStandardReference(input,
@@ -4300,6 +4305,14 @@ internal sealed class TrRmC1EnumClosureSourceTests
             "ClassHandleConsumer", [input]);
         Assert.That(loaded.Functions.Single().Name,
             Is.EqualTo("CombinedOffset"));
+
+        var otherReference
+            = TrRmExecutableCompiler.CreateStandardReference(input,
+                "ClassHandleProvider", [], ["type.other"],
+                ["field.other.id"]);
+        Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.CreateStandardReferenceSet(
+                [parentReference, otherReference]));
     }
 
     [Test]

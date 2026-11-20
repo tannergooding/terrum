@@ -1591,7 +1591,7 @@ public static partial class TrRmExecutableCompiler
                     || !view.Methods.IsEmpty)
                 {
                     throw Unsupported(
-                        "Type-only class composition requires selected class roots with scalar or inline-struct fields and without methods or imported expectations.");
+                        "Type-only class composition requires selected class roots with scalar, inline-struct or retained class-handle fields and without methods or imported class roots.");
                 }
 
                 AddProviderSnapshot(view.Provider);
