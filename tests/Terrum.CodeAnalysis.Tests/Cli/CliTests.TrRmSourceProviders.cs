@@ -930,6 +930,9 @@ internal sealed partial class CliTests
             $"source-provider-cli-scalar-method-{Guid.NewGuid():N}.json");
         var providerArtifact = Path.Combine(TestArtifactPaths.DirectoryPath,
             $"source-provider-cli-scalar-method-{Guid.NewGuid():N}.trrm");
+        var duplicateProviderArtifact = Path.Combine(
+            TestArtifactPaths.DirectoryPath,
+            $"source-provider-cli-scalar-method-copy-{Guid.NewGuid():N}.trrm");
         var consumerArtifact = Path.Combine(TestArtifactPaths.DirectoryPath,
             $"source-provider-cli-scalar-method-{Guid.NewGuid():N}.trrm");
         var manifestOutputAlias = Path.Combine(
@@ -1049,6 +1052,55 @@ internal sealed partial class CliTests
                 Assert.That(await File.ReadAllBytesAsync(preservedPath)
                     .ConfigureAwait(true), Is.EqualTo(before));
             }
+
+            await File.WriteAllBytesAsync(duplicateProviderArtifact,
+                await File.ReadAllBytesAsync(providerArtifact)
+                    .ConfigureAwait(true)).ConfigureAwait(true);
+            await File.WriteAllBytesAsync(consumerArtifact, retained)
+                .ConfigureAwait(true);
+            await File.WriteAllTextAsync(providerSelections,
+                JsonSerializer.Serialize(new {
+                    schemaVersion = 3,
+                    providers = new[] {
+                        new { schemaIdentity, path = providerArtifact },
+                        new {
+                            schemaIdentity,
+                            path = duplicateProviderArtifact,
+                        },
+                    },
+                    references = new[] {
+                        new {
+                            providerInputOrdinal = 0,
+                            moduleIdentity = providerIdentity,
+                            methodExportKeys = new[] { "Ping" },
+                            typeExportKeys = Array.Empty<object>(),
+                            fieldExportKeys = Array.Empty<object>(),
+                        },
+                    },
+                }), new UTF8Encoding(false)).ConfigureAwait(true);
+            var (duplicateModuleExit, duplicateModuleOutput,
+                duplicateModuleError) = await RunAsync(
+                    Encoding.UTF8.GetBytes("invalid Terrum source"),
+                    "compile-trrm", "-", "--identity", consumerIdentity,
+                    "--trrm-schema", schemaIdentity,
+                    "--trrm-source-providers", providerSelections,
+                    "--library", "-o", consumerArtifact, "--runtime",
+                    "fail-fast", "--json").ConfigureAwait(false);
+            Assert.That(duplicateModuleExit, Is.EqualTo(1),
+                $"{duplicateModuleOutput}{Environment.NewLine}{duplicateModuleError}");
+            Assert.That(duplicateModuleError, Is.Empty);
+            using (var document = JsonDocument.Parse(duplicateModuleOutput))
+            {
+                Assert.That(document.RootElement
+                        .GetProperty("diagnostic").GetProperty("code")
+                        .GetString(),
+                    Is.EqualTo("TRM5001"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(consumerArtifact)
+                .ConfigureAwait(true), Is.EqualTo(retained));
+            await File.WriteAllTextAsync(providerSelections,
+                providerConfiguration, new UTF8Encoding(false))
+                .ConfigureAwait(true);
 
             await AssertAliasFailureAsync("-", manifestOutputAlias,
                 manifestOutputAlias, manifestOutputAlias)
@@ -1278,6 +1330,8 @@ internal sealed partial class CliTests
             }
             await TestFileCleanup.DeleteWithRetryAsync(providerArtifact)
                 .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(
+                duplicateProviderArtifact).ConfigureAwait(true);
             await TestFileCleanup.DeleteWithRetryAsync(consumerArtifact)
                 .ConfigureAwait(true);
         }
