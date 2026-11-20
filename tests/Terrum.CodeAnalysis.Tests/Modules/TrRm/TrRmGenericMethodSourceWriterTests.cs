@@ -621,6 +621,103 @@ internal sealed class TrRmGenericMethodSourceWriterTests
     }
 
     [Test]
+    public void ReemitsGarbageCollectedConstructedNominalTypeArguments()
+    {
+        const string providerIdentity = "gc-nominal.method-provider";
+        const string outputIdentity = "gc-nominal.reemitted";
+        var typeProviderArtifact = CreateConstructedNominalSourceProvider();
+        var typeProviderInput = new TrRmStandardArtifactInput(
+            GenericMethodCallsSchemaIdentity, typeProviderArtifact);
+        var typeProviderReference
+            = TrRmExecutableCompiler.CreateGenericMethodCallsDraftReference(
+                typeProviderArtifact, "constructed-source.provider");
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            using Example;
+            public Box<gc ref<T>> Nested<T>(Box<gc ref<T>> value) {
+                return move value;
+            }
+            """), typeProviderReference);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        var definition = program.GenericMethodDefinitions.Single();
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(program,
+            providerIdentity, GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), [
+                new TrRmSourceGenericMethodExport(program,
+                    definition.SourceInputOrdinal, definition.Span, "Nested"),
+            ]);
+        var providerInput = new TrRmStandardArtifactInput(
+            GenericMethodCallsSchemaIdentity, providerArtifact);
+        var providerReference = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, providerIdentity, [typeProviderInput]);
+        var sourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), providerReference);
+        Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceFreeCompilation.Diagnostics));
+        var sourceFreeProgram = sourceFreeCompilation.Program!;
+        var selection = new TrRmRetainedGenericMethodExport(
+            sourceFreeProgram, providerIdentity,
+            GenericMethodCallsSchemaIdentity,
+            ImmutableArray.CreateRange(
+                System.Security.Cryptography.SHA256.HashData(providerArtifact)),
+            GetExportedMethodDefId(providerArtifact, "Nested"),
+            "Nested", "NestedCopy");
+        var reemitted = TrRmExecutableCompiler
+            .EmitStandardReemittingGenericMethods(sourceFreeProgram,
+                outputIdentity, GenericMethodCallsSchemaIdentity, 0,
+                [selection]);
+        var relocatedTypeProviderInput = new TrRmStandardArtifactInput(
+            GenericMethodCallsSchemaIdentity,
+            RelocateConstructedNominalProviderTypeDef(typeProviderArtifact));
+        var reemittedReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(GenericMethodCallsSchemaIdentity,
+                reemitted), outputIdentity, [relocatedTypeProviderInput]);
+        Assert.That(reemittedReference.GenericMethodImports.Single()
+                .Origin.ExportKey,
+            Is.EqualTo("NestedCopy"));
+
+        var reemittedIndex = TrRmArtifactIndex
+            .ForGenericMethodCallsParameterLabelsDraft(reemitted);
+        var reemittedTables = TrRmStructuralMetadataValidator
+            .ValidateGenericMethodCallsDraftAndGetExecutionTables(
+                reemittedIndex);
+        var methodDefId = GetExportedMethodDefId(reemitted, "NestedCopy");
+        var methodRow = checked((int)(methodDefId & 0x00FF_FFFF));
+        var signature = reemittedTables.Methods.GetSignature(methodRow);
+        var (parameterFirst, parameterCount)
+            = reemittedTables.Signatures.GetParamRange(signature);
+        Assert.That(parameterCount, Is.EqualTo(1));
+        var constructedTypeSpecRef = reemittedTables.Parameters
+            .GetTypeSpec(parameterFirst);
+        Assert.That(reemittedTables.TypeSpecs
+            .GetTypeSpecRef(constructedTypeSpecRef).Form,
+            Is.EqualTo((byte)0x05));
+        var gcReferenceTypeSpecRef = BinaryPrimitives
+            .ReadUInt32LittleEndian(reemittedTables.TypeSpecs.GetRow(
+                checked((int)constructedTypeSpecRef)).Slice(6, 4));
+        var gcReferenceTypeSpec = reemittedTables.TypeSpecs.GetRow(
+            checked((int)gcReferenceTypeSpecRef));
+        Assert.That(gcReferenceTypeSpec[0], Is.EqualTo((byte)0x07));
+        Assert.That(gcReferenceTypeSpec[1], Is.EqualTo((byte)0x02));
+        var formalTypeSpecRef = BinaryPrimitives.ReadUInt32LittleEndian(
+            gcReferenceTypeSpec.Slice(2, 4));
+        Assert.That(reemittedTables.TypeSpecs
+            .GetTypeSpecRef(formalTypeSpecRef).Form,
+            Is.EqualTo((byte)0x04));
+
+        var consumer = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            using Example;
+            public Box<gc ref<T>> Use<T>(Box<gc ref<T>> value) {
+                return Nested<T>(move value);
+            }
+            """), reemittedReference);
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
+    }
+
+    [Test]
     public void ReemitsRetainedGenericReferenceResultDependency()
     {
         const string providerIdentity = "retained-reference.provider";
