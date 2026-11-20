@@ -7202,7 +7202,9 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                         public int32 Value;
                     }
                     public int32 Read(Leaf value) { return 7; }
-                        public int32 ReadAlias(Leaf value) { return 8; }
+                    public int32 IdentityScalar(int32 value) {
+                        return value;
+                    }
                 }
                 """), options);
         Assert.That(providerCompilation.HasErrors, Is.False,
@@ -7217,15 +7219,20 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
             providerArtifact);
         var providerReference = TrRmExecutableCompiler.CreateStandardReference(
-            providerInput, "ContextualTypeProvider", [], [], [
+            providerInput, "ContextualTypeProvider", [],
+            ["IdentityScalar"], [
                 new TrRmStandardExportKeySelection(
                     "ContextualTypeProvider", "type.leaf"),
             ], []);
         var methodRootCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
                 namespace Demo {
-                    public int32 Read(Leaf value) { return 7; }
-                    public int32 ReadAlias(Leaf value) { return 8; }
+                    public int32 Read(Leaf value) {
+                        return IdentityScalar(7);
+                    }
+                    public int32 ReadAlias(Leaf value) {
+                        return IdentityScalar(Read(value));
+                    }
                 }
                 """), providerReference);
         Assert.That(methodRootCompilation.HasErrors, Is.False,
@@ -7241,6 +7248,8 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             methodRootArtifact, schemaIdentity);
         methodRootArtifact = ReverseContextualMethodSignatureAndParamRows(
             methodRootArtifact, schemaIdentity);
+        methodRootArtifact = ReverseContextualBodyRows(methodRootArtifact,
+            schemaIdentity);
         methodRootArtifact = AddNoncanonicalTypeDefBindingEqualityEdges(
             methodRootArtifact, schemaIdentity);
         methodRootArtifact = ReverseContextualTypeDefRows(
@@ -7287,19 +7296,87 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             Is.EqualTo(1u));
         Assert.That(reemittedTables.TypeDefBindingEqualities.GetRightTypeDef(2),
             Is.EqualTo(3u));
+        var reemittedReadAliasRow = 0;
+        for (var methodRow = 1;
+            methodRow <= reemittedTables.Methods.Count; methodRow++)
+        {
+            if (StringComparer.Ordinal.Equals(
+                    reemittedTables.Methods.GetName(methodRow), "ReadAlias"))
+            {
+                reemittedReadAliasRow = methodRow;
+                break;
+            }
+        }
+
+        if (reemittedReadAliasRow == 0)
+        {
+            throw new InvalidOperationException(
+                "The source-free contextual fixture lost ReadAlias.");
+        }
+
+        var reemittedReadAliasBodyRow
+            = reemittedTables.Methods.GetBodyRow(reemittedReadAliasRow);
+        var reemittedReadAliasBody = reemittedTables.Bodies
+            .GetRegisterBody(reemittedReadAliasBodyRow,
+                reemittedTables.Contracts.Count);
+        var bodyUsesLeafImport = false;
+        for (var offset = 0;
+            offset < reemittedReadAliasBody.TypeMap.Length;
+            offset += sizeof(uint))
+        {
+            var token = BinaryPrimitives.ReadUInt32LittleEndian(
+                reemittedReadAliasBody.TypeMap[offset..]);
+            if ((token >> 24) != 0x11)
+            {
+                continue;
+            }
+
+            var typeSpec = reemittedTables.TypeSpecs.GetRow(
+                checked((int)(token & 0x00FF_FFFF)));
+            if (typeSpec[0] != 0x03)
+            {
+                continue;
+            }
+
+            var importRow = checked((int)
+                BinaryPrimitives.ReadUInt32LittleEndian(
+                    typeSpec.Slice(2, 4)));
+            bodyUsesLeafImport
+                |= (reemittedTables.Imports
+                        .GetExpectedDefinitionForImportRow(importRow) >> 24)
+                    == 0x13
+                    && StringComparer.Ordinal.Equals(
+                        reemittedTables.Imports
+                            .GetBindingForImportRow(importRow).ExportKey,
+                        "type.leaf");
+        }
+        Assert.That(bodyUsesLeafImport, Is.True);
 
         var reloadedReference = TrRmExecutableCompiler.CreateStandardReference(
             new TrRmStandardArtifactInput(schemaIdentity,
                 reemittedArtifact),
             "ContextualMethodRootReemitted", [providerInput],
             ["Read", "ReadAlias"], [], []);
+        var reloadedRead = reloadedReference.Functions.Single(
+            static function => function.Name == "Read");
+        var reloadedReadAlias = reloadedReference.Functions.Single(
+            static function => function.Name == "ReadAlias");
+        Assert.That(((BoundConstant)((BoundReturn)reloadedRead.Body
+                .Statements.Single()).Value!).Value,
+            Is.EqualTo(7));
+        Assert.That(((BoundReturn)reloadedReadAlias.Body.Statements.Single())
+                .Value,
+            Is.InstanceOf<BoundCall>());
+        var identityCall = (BoundCall)((BoundReturn)reloadedReadAlias.Body
+            .Statements.Single()).Value!;
+        Assert.That(reloadedReference.Functions[identityCall.Function].Name,
+            Is.EqualTo("IdentityScalar"));
+        var readCall = (BoundCall)identityCall.Arguments.Single();
+        Assert.That(reloadedReference.Functions[readCall.Function].Name,
+            Is.EqualTo("Read"));
         Assert.That(reloadedReference.Structures.Single()
                 .StandardTypeOrigin!.ContextualViewIndexes.Length,
             Is.EqualTo(3));
-        Assert.That(reloadedReference.Functions.Single(
-                static function => function.Name == "ReadAlias")
-                .Body.Statements,
-            Is.Not.Empty);
 
         var relocatedProviderCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
@@ -7313,7 +7390,9 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                         public int32 Value;
                     }
                     public int32 Read(Leaf value) { return 7; }
-                    public int32 ReadAlias(Leaf value) { return 8; }
+                    public int32 IdentityScalar(int32 value) {
+                        return value;
+                    }
                 }
                 """), options);
         Assert.That(relocatedProviderCompilation.HasErrors, Is.False,
@@ -11769,6 +11848,77 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             TrRmArtifactSchema
                 .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft);
 
+    private static byte[] ReverseContextualBodyRows(byte[] artifact,
+        string schemaIdentity)
+    {
+        var schema = TrRmArtifactSchema
+            .C1M1Construction2InitializerCopyEvidenceDraft;
+        var index = new TrRmArtifactIndex(artifact, schema, null,
+            standardSchemaIdentity: schemaIdentity);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(index);
+        if (tables.Modules.Count != 1
+            || tables.Bodies.Count != 2
+            || tables.Methods.Count != 3
+            || !index.TryGetSection(0x0016, out var methodSection,
+                out var methodCount)
+            || !index.TryGetSection(0x0020, out _, out var bodyCount)
+            || methodCount != tables.Methods.Count
+            || bodyCount != tables.Bodies.Count)
+        {
+            throw new InvalidOperationException(
+                "The Body permutation requires two method-owned Bodies in one Module.");
+        }
+
+        var newBodyRowByOld = new int[bodyCount + 1];
+        var bodyRows = new ReadOnlyMemory<byte>[bodyCount];
+        for (var oldBodyRow = 1; oldBodyRow <= bodyCount; oldBodyRow++)
+        {
+            var newBodyRow = bodyCount - oldBodyRow + 1;
+            newBodyRowByOld[oldBodyRow] = newBodyRow;
+            bodyRows[newBodyRow - 1]
+                = tables.Bodies.GetRow(oldBodyRow).ToArray();
+        }
+
+        var bodyBytes = TrRmVariableTableWriter.EncodeBlobs(bodyRows);
+        var methodBytes = methodSection.ToArray();
+        for (var methodRow = 1; methodRow <= methodCount; methodRow++)
+        {
+            var oldBodyRow = tables.Methods.GetBodyRow(methodRow);
+            if (oldBodyRow == 0)
+            {
+                continue;
+            }
+
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                methodBytes.AsSpan((methodRow - 1) * 28 + 24, 4),
+                checked((uint)newBodyRowByOld[oldBodyRow]));
+        }
+
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var sectionIndex = 0;
+            sectionIndex < index.SectionCount; sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var recordCount);
+            var sectionBytes = kind switch {
+                0x0016 => methodBytes,
+                0x0020 => bodyBytes,
+                _ => bytes.ToArray(),
+            };
+            sections.Add(new TrRmSection(kind, flags,
+                checked((uint)recordCount), sectionBytes));
+        }
+
+        var result = TrRmArtifactWriter.Encode(sections, schema,
+            standardSchemaIdentity: schemaIdentity);
+        _ = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                new TrRmArtifactIndex(result, schema, null,
+                    standardSchemaIdentity: schemaIdentity));
+        return result;
+    }
+
     private static byte[] ReverseContextualMethodSignatureAndParamRows(
         byte[] artifact, string schemaIdentity)
     {
@@ -11779,9 +11929,9 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         var tables = TrRmStructuralMetadataValidator
             .ValidateC1AndGetExecutionTables(index);
         if (tables.Modules.Count != 1
-            || tables.Methods.Count != 2
-            || tables.Signatures.Count != 2
-            || tables.Parameters.Count != 2
+            || tables.Methods.Count != 3
+            || tables.Signatures.Count != 3
+            || tables.Parameters.Count != 3
             || tables.GenericParams.Count != 0
             || !index.TryGetSection(0x0016, out var methodSection,
                 out var methodCount)
@@ -11794,7 +11944,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             || paramCount != tables.Parameters.Count)
         {
             throw new InvalidOperationException(
-                "The MethodSig permutation requires two nongeneric functions with one formal each.");
+                "The MethodSig permutation requires three nongeneric MethodDefs with one formal each.");
         }
 
         var newSignatureRowByOld = new int[methodSigCount + 1];
@@ -11991,12 +12141,16 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             standardSchemaIdentity: schemaIdentity);
         var tables = TrRmStructuralMetadataValidator
             .ValidateC1AndGetExecutionTables(index);
+        var hasBodySection = index.TryGetSection(0x0020,
+            out _, out var bodyCount);
         if (tables.Imports.Count < 2
             || tables.TypeSpecs.Count == 0
             || !index.TryGetSection(0x0011, out var typeSpecSection,
                 out var typeSpecCount)
             || !index.TryGetSection(0x001C, out var importSection,
                 out var importCount)
+            || bodyCount != tables.Bodies.Count
+            || (bodyCount != 0 && !hasBodySection)
             || importCount != tables.Imports.Count
             || typeSpecCount != tables.TypeSpecs.Count)
         {
@@ -12042,6 +12196,71 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             typeSpecRows[row - 1] = typeSpec;
         }
 
+        byte[]? bodyBytes = null;
+        if (bodyCount != 0)
+        {
+            var bodyRows = new ReadOnlyMemory<byte>[bodyCount];
+            for (var bodyRow = 1; bodyRow <= bodyCount; bodyRow++)
+            {
+                var body = tables.Bodies.GetRegisterBody(bodyRow,
+                    tables.Contracts.Count);
+                var bodyBytesForRow = tables.Bodies.GetRow(bodyRow)
+                    .ToArray();
+                var position = 5;
+                for (var map = 0; map < 5; map++)
+                {
+                    if ((body.MapMask & (1 << map)) != 0)
+                    {
+                        position += sizeof(uint);
+                    }
+                }
+
+                position += 3 * sizeof(uint);
+                position += (body.HomeCount * 8)
+                    + (body.TypeCount * sizeof(uint));
+                for (var methodMapIndex = 0;
+                    methodMapIndex < body.MethodCount; methodMapIndex++)
+                {
+                    var tokenOffset = position
+                        + (methodMapIndex * sizeof(uint));
+                    var token = BinaryPrimitives.ReadUInt32LittleEndian(
+                        bodyBytesForRow.AsSpan(tokenOffset));
+                    if ((token >> 24) == 0x1C)
+                    {
+                        var oldImportRow = checked((int)(
+                            token & 0x00FF_FFFF));
+                        BinaryPrimitives.WriteUInt32LittleEndian(
+                            bodyBytesForRow.AsSpan(tokenOffset),
+                            0x1C00_0000u | checked((uint)
+                                newImportRowByOld[oldImportRow]));
+                    }
+                }
+
+                position += body.MethodCount * sizeof(uint);
+                for (var fieldMapIndex = 0;
+                    fieldMapIndex < body.FieldCount; fieldMapIndex++)
+                {
+                    var tokenOffset = position
+                        + (fieldMapIndex * sizeof(uint));
+                    var token = BinaryPrimitives.ReadUInt32LittleEndian(
+                        bodyBytesForRow.AsSpan(tokenOffset));
+                    if ((token >> 24) == 0x1C)
+                    {
+                        var oldImportRow = checked((int)(
+                            token & 0x00FF_FFFF));
+                        BinaryPrimitives.WriteUInt32LittleEndian(
+                            bodyBytesForRow.AsSpan(tokenOffset),
+                            0x1C00_0000u | checked((uint)
+                                newImportRowByOld[oldImportRow]));
+                    }
+                }
+
+                bodyRows[bodyRow - 1] = bodyBytesForRow;
+            }
+
+            bodyBytes = TrRmVariableTableWriter.EncodeBlobs(bodyRows);
+        }
+
         var typeSpecBytes
             = TrRmVariableTableWriter.EncodeBlobs(typeSpecRows);
         var sections = new List<TrRmSection>(index.SectionCount);
@@ -12055,6 +12274,9 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     checked((uint)typeSpecCount), typeSpecBytes),
                 0x001C => new TrRmSection(kind, flags,
                     checked((uint)importCount), importBytes),
+                0x0020 when bodyBytes is not null
+                    => new TrRmSection(kind, flags,
+                        checked((uint)bodyCount), bodyBytes),
                 _ => new TrRmSection(kind, flags,
                     checked((uint)recordCount), bytes.ToArray()),
             });
