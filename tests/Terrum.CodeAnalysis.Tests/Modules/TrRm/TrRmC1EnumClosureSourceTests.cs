@@ -1799,6 +1799,155 @@ internal sealed class TrRmC1EnumClosureSourceTests
     }
 
     [Test]
+    public void ReemitsImportedConstructorMethodExpectations()
+    {
+        foreach (var schemaIdentity in s_initializerCopyEvidenceSchemaIdentities
+            .Skip(4))
+        {
+            var providerTree = SyntaxTree.Parse("""
+                namespace Demo {
+                    public class Child {
+                        public int32 Value;
+                        public Child(int32 value) { Value = value; }
+                    }
+                }
+                """);
+            var providerCompilation = Compilation.CreateLibrary(providerTree);
+            Assert.That(providerCompilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    providerCompilation.Diagnostics));
+            var providerProgram = (BoundProgram)providerCompilation.Program!;
+            var providerClassExport
+                = CreateSourceClassExportWithProjection(providerProgram,
+                    providerTree, "Child", "type.child",
+                    "constructor.child", "constructor.child.project",
+                    (0, "field.child.value"));
+            var providerArtifact = EmitClassArtifact(providerProgram,
+                "ChildProvider", schemaIdentity, [providerClassExport]);
+            var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+                providerArtifact);
+            var providerReference
+                = TrRmExecutableCompiler.CreateStandardReference(
+                    providerInput, "ChildProvider", [], ["type.child"]);
+
+            var consumerTree = SyntaxTree.Parse("""
+                namespace Demo {
+                    public class Owner {
+                        public Child Value;
+                        public Owner(Child value) { Value = value; }
+                    }
+                }
+                """);
+            var consumerCompilation = Compilation.CreateLibrary(
+                consumerTree, providerReference);
+            Assert.That(consumerCompilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    consumerCompilation.Diagnostics));
+            var consumerProgram = (BoundProgram)consumerCompilation.Program!;
+            var ownerExport = CreateSourceClassExport(consumerProgram,
+                consumerTree, "Owner", "type.owner", "constructor.owner",
+                (0, "field.owner.child"));
+            var consumerArtifact = EmitClassArtifact(consumerProgram,
+                "OwnerConsumer", schemaIdentity, [ownerExport]);
+            var consumerInput = new TrRmStandardArtifactInput(schemaIdentity,
+                consumerArtifact);
+            var reference = TrRmExecutableCompiler.CreateStandardReference(
+                consumerInput, "OwnerConsumer", [providerInput],
+                ["type.owner"]);
+            var childDeclaration = reference.StandardClassDeclarations.Single(
+                static declaration =>
+                    declaration.Declaration.Name == "Child"
+                    && !declaration.Expectations.IsEmpty);
+            Assert.That(childDeclaration.Expectations.Single()
+                .MethodExpectations, Has.Length.EqualTo(2),
+                schemaIdentity);
+            var incompatibleProviderTree = SyntaxTree.Parse("""
+                namespace Demo {
+                    public class Child {
+                        public int32 Value;
+                        public Child(int64 value) { Value = 0; }
+                    }
+                }
+                """);
+            var incompatibleProviderCompilation
+                = Compilation.CreateLibrary(incompatibleProviderTree);
+            Assert.That(incompatibleProviderCompilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    incompatibleProviderCompilation.Diagnostics));
+            var incompatibleProviderProgram
+                = (BoundProgram)incompatibleProviderCompilation.Program!;
+            var incompatibleProviderClassExport
+                = CreateSourceClassExportWithProjection(
+                    incompatibleProviderProgram, incompatibleProviderTree,
+                    "Child", "type.child", "constructor.child",
+                    "constructor.child.project", (0, "field.child.value"));
+            var incompatibleProviderArtifact = EmitClassArtifact(
+                incompatibleProviderProgram, "ChildProvider",
+                schemaIdentity, [incompatibleProviderClassExport]);
+            Assert.Throws<InvalidDataException>(() =>
+                TrRmExecutableCompiler.CreateStandardReference(
+                    consumerInput, "OwnerConsumer", [
+                        new TrRmStandardArtifactInput(schemaIdentity,
+                            incompatibleProviderArtifact),
+                    ], ["type.owner"]));
+
+            var sourceFreeCompilation = Compilation.CreateLibrary(
+                SyntaxTree.Parse(string.Empty), reference);
+            Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    sourceFreeCompilation.Diagnostics));
+            var reemitted = TrRmExecutableCompiler.EmitStandard(
+                sourceFreeCompilation.Program!, "OwnerConsumer",
+                schemaIdentity, 1);
+            var reemittedTables = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                    reemitted, SchemaFor(schemaIdentity)));
+            var childTypeDefRow = Enumerable.Range(1,
+                    reemittedTables.TypeDefs.Count)
+                .Single(row => reemittedTables.TypeDefs.GetName(row)
+                    == "Child");
+            var childMethodRows = Enumerable.Range(1,
+                    reemittedTables.Methods.Count)
+                .Where(row => reemittedTables.Methods.GetOwnerType(row)
+                    == childTypeDefRow)
+                .ToArray();
+            Assert.That(childMethodRows, Has.Length.EqualTo(2),
+                schemaIdentity);
+            var childMethodRoles = new List<byte>(childMethodRows.Length);
+            foreach (var methodRow in childMethodRows)
+            {
+                Assert.That(reemittedTables.Methods.GetBodyRow(methodRow),
+                    Is.Zero, schemaIdentity);
+                Assert.That(reemittedTables.Imports.IsExpectedDefinition(
+                    0x1600_0000u | checked((uint)methodRow)),
+                    Is.True, schemaIdentity);
+                Assert.That(reemittedTables.Contracts.HasConstructionClause(
+                    methodRow), Is.True, schemaIdentity);
+                childMethodRoles.Add(reemittedTables.Contracts
+                    .GetConstructionClause(methodRow).RoleTag);
+            }
+
+            Assert.That(childMethodRoles.OrderBy(static role => role),
+                Is.EqualTo(new byte[] { 1, 2 }), schemaIdentity);
+            var initializerRow = childMethodRows.Single(methodRow =>
+                reemittedTables.Contracts.GetConstructionClause(methodRow)
+                    .RoleTag == 1);
+            var initializedField = reemittedTables.Contracts
+                .GetConstructionClause(initializerRow)
+                .InitializedMemberDefIds.Single();
+            Assert.That(initializedField >> 24, Is.EqualTo(0x14u),
+                schemaIdentity);
+            Assert.That(reemittedTables.Imports.IsExpectedDefinition(
+                initializedField), Is.True, schemaIdentity);
+            Assert.That(reemittedTables.Contracts
+                .GetConstructionClause(childMethodRows.Single(methodRow =>
+                    reemittedTables.Contracts.GetConstructionClause(
+                        methodRow).RoleTag == 2)).InitializerMethodDefRow,
+                Is.EqualTo((uint)initializerRow), schemaIdentity);
+        }
+    }
+
+    [Test]
     public void BindsEN1ClassFieldOffsetOnlyWithExactFieldSelection()
     {
         var schemaIdentity = s_schemaIdentities[0];
@@ -5230,6 +5379,26 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 constructorExportKey));
         return new TrRmSourceClassExport(program, classIndex,
             declaration.Span, exportKey, memberExports);
+    }
+
+    private static TrRmSourceClassExport
+        CreateSourceClassExportWithProjection(
+            BoundProgram program, SyntaxTree tree, string name,
+            string exportKey, string constructorExportKey,
+            string projectionExportKey,
+            params (int FieldOrdinal, string ExportKey)[] fieldExports)
+    {
+        var export = CreateSourceClassExport(program, tree, name, exportKey,
+            constructorExportKey, fieldExports);
+        var constructorExportIndex = export.MemberExports.Length - 1;
+        var constructorExport = export.MemberExports[
+            constructorExportIndex] with {
+            ConstructionProjectionExportKey = projectionExportKey,
+        };
+        return export with {
+            MemberExports = export.MemberExports.SetItem(
+                constructorExportIndex, constructorExport),
+        };
     }
 
     private static BigInteger ReadEnumValue(

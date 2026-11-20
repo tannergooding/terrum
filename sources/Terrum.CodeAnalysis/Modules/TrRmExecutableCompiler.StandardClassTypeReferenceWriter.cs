@@ -8791,34 +8791,57 @@ public static partial class TrRmExecutableCompiler
         BoundProgram program,
         BoundStandardClassDeclaration declaration)
     {
-        foreach (var methodExpectation in declaration.Expectations
-            .SelectMany(static expectation =>
-                expectation.MethodExpectations))
+        foreach (var expectation in declaration.Expectations)
         {
-            var matches = program.RetainedGenericMethodRoots.Where(root =>
-                    root.Origin.MethodDefId
-                        == methodExpectation.ProviderDefinitionId
-                    && StringComparer.Ordinal.Equals(
-                        root.Origin.ProviderIdentity,
-                        methodExpectation.Provider.ModuleIdentity)
-                    && StringComparer.Ordinal.Equals(root.Origin.ExportKey,
-                        methodExpectation.ExportKey)
-                    && root.Origin.ClassOwner
-                        is BoundGenericMethodClassOwner owner
-                    && owner.ExpectedDefinitionId
-                        == methodExpectation.ExpectedOwnerDefinitionId)
-                .ToArray();
-            if (matches.Length != 1
-                || matches[0].Formals.IsDefaultOrEmpty
-                || matches[0].Signature.FormalOrder.IsDefault
-                || matches[0].Signature.FormalOrder.Any(
-                    static slot =>
-                        slot.Kind != BoundGenericMethodFormalKind.Type)
-                || matches[0].Formals.Any(static formal =>
-                    formal.InterfaceConstraints.IsDefault
-                    || formal.AssociatedRelations.IsDefault))
+            foreach (var methodExpectation in expectation.MethodExpectations)
             {
-                return false;
+                if (expectation.ExpectedDeclaration.Identity.DefinitionId
+                    != methodExpectation.ExpectedOwnerDefinitionId)
+                {
+                    return false;
+                }
+
+                var expectedMethods = expectation.ExpectedDeclaration.Methods
+                    .Where(method => method.DefinitionId
+                        == methodExpectation.ExpectedDefinitionId)
+                    .ToArray();
+                if (expectedMethods.Length != 1)
+                {
+                    return false;
+                }
+
+                var expectedMethod = expectedMethods[0];
+                if (expectedMethod.GenericParameterCount == 0
+                    && expectedMethod.GenericParameters.IsEmpty)
+                {
+                    continue;
+                }
+
+                var matches = program.RetainedGenericMethodRoots.Where(root =>
+                        root.Origin.MethodDefId
+                            == methodExpectation.ProviderDefinitionId
+                        && StringComparer.Ordinal.Equals(
+                            root.Origin.ProviderIdentity,
+                            methodExpectation.Provider.ModuleIdentity)
+                        && StringComparer.Ordinal.Equals(root.Origin.ExportKey,
+                            methodExpectation.ExportKey)
+                        && root.Origin.ClassOwner
+                            is BoundGenericMethodClassOwner owner
+                        && owner.ExpectedDefinitionId
+                            == methodExpectation.ExpectedOwnerDefinitionId)
+                    .ToArray();
+                if (matches.Length != 1
+                    || matches[0].Formals.IsDefaultOrEmpty
+                    || matches[0].Signature.FormalOrder.IsDefault
+                    || matches[0].Signature.FormalOrder.Any(
+                        static slot =>
+                            slot.Kind != BoundGenericMethodFormalKind.Type)
+                    || matches[0].Formals.Any(static formal =>
+                        formal.InterfaceConstraints.IsDefault
+                        || formal.AssociatedRelations.IsDefault))
+                {
+                    return false;
+                }
             }
         }
 
