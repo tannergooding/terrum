@@ -7122,6 +7122,12 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
         methodRootArtifact = AddUncalledTypeDefBindingEqualityView(
             methodRootArtifact, schemaIdentity);
+        methodRootArtifact = ReverseStandardImportRows(
+            methodRootArtifact, schemaIdentity);
+        methodRootArtifact = ReverseTypeDefBindingEqualityRows(
+            methodRootArtifact, schemaIdentity);
+        methodRootArtifact = ReverseContextualTypeDefRows(
+            methodRootArtifact, schemaIdentity);
         var methodRootInput = new TrRmStandardArtifactInput(schemaIdentity,
             methodRootArtifact);
 
@@ -11393,6 +11399,289 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         => AddExportAlias(artifact, originalExportKey, aliasExportKey,
             TrRmArtifactSchema
                 .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft);
+
+    private static byte[] ReverseStandardImportRows(
+        byte[] artifact, string schemaIdentity)
+    {
+        var schema = TrRmArtifactSchema
+            .C1M1Construction2InitializerCopyEvidenceDraft;
+        var index = new TrRmArtifactIndex(artifact, schema, null,
+            standardSchemaIdentity: schemaIdentity);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(index);
+        if (tables.Imports.Count < 2
+            || tables.TypeSpecs.Count == 0
+            || !index.TryGetSection(0x0011, out var typeSpecSection,
+                out var typeSpecCount)
+            || !index.TryGetSection(0x001C, out var importSection,
+                out var importCount)
+            || importCount != tables.Imports.Count
+            || typeSpecCount != tables.TypeSpecs.Count)
+        {
+            throw new InvalidOperationException(
+                "The standard Import permutation fixture requires multiple Imports and TypeSpecs.");
+        }
+
+        var newImportRowByOld = new int[importCount + 1];
+        var importBytes = new byte[importSection.Length];
+        for (var oldRow = 1; oldRow <= importCount; oldRow++)
+        {
+            var newRow = importCount - oldRow + 1;
+            newImportRowByOld[oldRow] = newRow;
+            importSection.Span.Slice((oldRow - 1) * 12, 12).CopyTo(
+                importBytes.AsSpan((newRow - 1) * 12, 12));
+        }
+
+        var typeSpecRows = new ReadOnlyMemory<byte>[typeSpecCount];
+        for (var row = 1; row <= typeSpecCount; row++)
+        {
+            var typeSpec = tables.TypeSpecs.GetRow(row).ToArray();
+            if (typeSpec[0] == 0x03)
+            {
+                var oldImportRow = checked((int)
+                    BinaryPrimitives.ReadUInt32LittleEndian(
+                        typeSpec.AsSpan(2)));
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    typeSpec.AsSpan(2),
+                    checked((uint)newImportRowByOld[oldImportRow]));
+            }
+
+            typeSpecRows[row - 1] = typeSpec;
+        }
+
+        var typeSpecBytes
+            = TrRmVariableTableWriter.EncodeBlobs(typeSpecRows);
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var sectionIndex = 0;
+            sectionIndex < index.SectionCount; sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var recordCount);
+            sections.Add(kind switch {
+                0x0011 => new TrRmSection(kind, flags,
+                    checked((uint)typeSpecCount), typeSpecBytes),
+                0x001C => new TrRmSection(kind, flags,
+                    checked((uint)importCount), importBytes),
+                _ => new TrRmSection(kind, flags,
+                    checked((uint)recordCount), bytes.ToArray()),
+            });
+        }
+
+        var result = TrRmArtifactWriter.Encode(sections, schema,
+            standardSchemaIdentity: schemaIdentity);
+        _ = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                new TrRmArtifactIndex(result, schema, null,
+                    standardSchemaIdentity: schemaIdentity));
+        return result;
+    }
+
+    private static byte[] ReverseTypeDefBindingEqualityRows(
+        byte[] artifact, string schemaIdentity)
+    {
+        var schema = TrRmArtifactSchema
+            .C1M1Construction2InitializerCopyEvidenceDraft;
+        var index = new TrRmArtifactIndex(artifact, schema, null,
+            standardSchemaIdentity: schemaIdentity);
+        if (!index.TryGetSection(0x0067, out var equalitySection,
+                out var equalityCount)
+            || equalityCount != 2)
+        {
+            throw new InvalidOperationException(
+                "The equality row permutation requires a two-edge group.");
+        }
+
+        var equalityBytes = equalitySection.ToArray();
+        var firstRow = equalityBytes.AsSpan(0, 12).ToArray();
+        equalityBytes.AsSpan(12, 12).CopyTo(equalityBytes);
+        firstRow.CopyTo(equalityBytes, 12);
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var sectionIndex = 0;
+            sectionIndex < index.SectionCount; sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var recordCount);
+            sections.Add(kind == 0x0067
+                ? new TrRmSection(kind, flags, 2, equalityBytes)
+                : new TrRmSection(kind, flags,
+                    checked((uint)recordCount), bytes.ToArray()));
+        }
+
+        var result = TrRmArtifactWriter.Encode(sections, schema,
+            standardSchemaIdentity: schemaIdentity);
+        _ = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                new TrRmArtifactIndex(result, schema, null,
+                    standardSchemaIdentity: schemaIdentity));
+        return result;
+    }
+
+    private static byte[] ReverseContextualTypeDefRows(
+        byte[] artifact, string schemaIdentity)
+    {
+        var schema = TrRmArtifactSchema
+            .C1M1Construction2InitializerCopyEvidenceDraft;
+        var index = new TrRmArtifactIndex(artifact, schema, null,
+            standardSchemaIdentity: schemaIdentity);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(index);
+        if (tables.Modules.Count != 1
+            || tables.TypeDefs.Count != 3
+            || tables.Fields.Count != 3
+            || tables.Layouts.Count != 3
+            || tables.LayoutFields.Count != 3
+            || !index.TryGetSection(0x0013, out var typeDefSection,
+                out var typeDefCount)
+            || !index.TryGetSection(0x0014, out var fieldSection,
+                out var fieldCount)
+            || !index.TryGetSection(0x0015, out var layoutSection,
+                out var layoutCount)
+            || !index.TryGetSection(0x001C, out var importSection,
+                out var importCount)
+            || !index.TryGetSection(0x0023, out var layoutFieldSection,
+                out var layoutFieldCount)
+            || !index.TryGetSection(0x0067, out var equalitySection,
+                out var equalityCount)
+            || typeDefCount != 3 || fieldCount != 3 || layoutCount != 3
+            || importCount != tables.Imports.Count
+            || layoutFieldCount != 3 || equalityCount != 2
+            || tables.Exports.GetExportsForModule(1).Any(
+                static export => export.Definition >> 24 == 0x13))
+        {
+            throw new InvalidOperationException(
+                "The contextual TypeDef permutation requires three one-field TypeDefs without TypeDef exports.");
+        }
+
+        for (var typeDefRow = 1; typeDefRow <= 3; typeDefRow++)
+        {
+            var (fieldStart, fieldEnd)
+                = tables.TypeDefs.GetFieldRange(typeDefRow);
+            var (layoutStart, layoutEnd)
+                = tables.TypeDefs.GetLayoutRange(typeDefRow);
+            if (fieldEnd - fieldStart != 1
+                || fieldStart != typeDefRow
+                || layoutEnd - layoutStart != 1
+                || layoutStart != typeDefRow)
+            {
+                throw new InvalidOperationException(
+                    "The contextual TypeDef permutation requires aligned one-row field and layout ranges.");
+            }
+
+            var (layoutFieldStart, layoutFieldCount)
+                = tables.Layouts.GetLayoutFieldRange(layoutStart);
+            if (layoutFieldCount != 1
+                || layoutFieldStart != typeDefRow
+                || tables.LayoutFields.GetFieldDef(layoutFieldStart)
+                    != typeDefRow)
+            {
+                throw new InvalidOperationException(
+                    "The contextual TypeDef permutation requires aligned LayoutField rows.");
+            }
+        }
+
+        var typeDefBytes = new byte[typeDefSection.Length];
+        var fieldBytes = new byte[fieldSection.Length];
+        var layoutBytes = new byte[layoutSection.Length];
+        var layoutFieldBytes = new byte[layoutFieldSection.Length];
+        for (var oldRow = 1; oldRow <= 3; oldRow++)
+        {
+            var newRow = 4 - oldRow;
+            var typeDefOffset = (oldRow - 1) * 44;
+            var newTypeDefOffset = (newRow - 1) * 44;
+            typeDefSection.Span.Slice(typeDefOffset, 44).CopyTo(
+                typeDefBytes.AsSpan(newTypeDefOffset, 44));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                typeDefBytes.AsSpan(newTypeDefOffset + 12, 4),
+                checked((uint)newRow));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                typeDefBytes.AsSpan(newTypeDefOffset + 28, 4),
+                checked((uint)newRow));
+
+            fieldSection.Span.Slice((oldRow - 1) * 16, 16).CopyTo(
+                fieldBytes.AsSpan((newRow - 1) * 16, 16));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                fieldBytes.AsSpan((newRow - 1) * 16, 4),
+                checked((uint)newRow));
+
+            layoutSection.Span.Slice((oldRow - 1) * 28, 28).CopyTo(
+                layoutBytes.AsSpan((newRow - 1) * 28, 28));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                layoutBytes.AsSpan((newRow - 1) * 28, 4),
+                checked((uint)newRow));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                layoutBytes.AsSpan((newRow - 1) * 28 + 20, 4),
+                checked((uint)newRow));
+
+            layoutFieldSection.Span.Slice((oldRow - 1) * 12, 12).CopyTo(
+                layoutFieldBytes.AsSpan((newRow - 1) * 12, 12));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                layoutFieldBytes.AsSpan((newRow - 1) * 12, 4),
+                checked((uint)newRow));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                layoutFieldBytes.AsSpan((newRow - 1) * 12 + 8, 4),
+                checked((uint)newRow));
+        }
+
+        var importBytes = importSection.ToArray();
+        for (var importRow = 1; importRow <= importCount; importRow++)
+        {
+            var offset = (importRow - 1) * 12 + 8;
+            var expectedDefinition = BinaryPrimitives
+                .ReadUInt32LittleEndian(importBytes.AsSpan(offset, 4));
+            if (expectedDefinition >> 24 == 0x13)
+            {
+                var newTypeDefRow = 4
+                    - checked((int)(expectedDefinition & 0x00FF_FFFF));
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    importBytes.AsSpan(offset, 4),
+                    0x1300_0000u | checked((uint)newTypeDefRow));
+            }
+        }
+
+        var equalityBytes = equalitySection.ToArray();
+        for (var row = 1; row <= equalityCount; row++)
+        {
+            var offset = (row - 1) * 12;
+            for (var endpointIndex = 0; endpointIndex < 2;
+                endpointIndex++)
+            {
+                var endpointOffset = 4 + (endpointIndex * 4);
+                var endpoint = checked((int)
+                    BinaryPrimitives.ReadUInt32LittleEndian(
+                        equalityBytes.AsSpan(offset + endpointOffset, 4)));
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    equalityBytes.AsSpan(offset + endpointOffset, 4),
+                    checked((uint)(4 - endpoint)));
+            }
+        }
+
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var sectionIndex = 0;
+            sectionIndex < index.SectionCount; sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var recordCount);
+            var sectionBytes = kind switch {
+                0x0013 => typeDefBytes,
+                0x0014 => fieldBytes,
+                0x0015 => layoutBytes,
+                0x001C => importBytes,
+                0x0023 => layoutFieldBytes,
+                0x0067 => equalityBytes,
+                _ => bytes.ToArray(),
+            };
+            sections.Add(new TrRmSection(kind, flags,
+                checked((uint)recordCount), sectionBytes));
+        }
+
+        var result = TrRmArtifactWriter.Encode(sections, schema,
+            standardSchemaIdentity: schemaIdentity);
+        _ = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                new TrRmArtifactIndex(result, schema, null,
+                    standardSchemaIdentity: schemaIdentity));
+        return result;
+    }
 
     private static byte[] AddSelfImportedTypeDefBindingEqualityView(
         byte[] artifact, string schemaIdentity, string exportKey)
