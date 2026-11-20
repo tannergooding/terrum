@@ -1831,9 +1831,10 @@ Module ranges, with source-free direct TypeSpec binding and row remapping.
 Private/transitive-child query, load and re-emission coverage plus mismatched
 Module and duplicate-identity rejection cases are added but unverified under
 the hold. The packed path now retains class TypeDef Import expectations and
-owner-scoped ModuleRefs, with imported-class query/re-emission coverage added
-but unverified. Non-class/struct Imports, class Methods, and class handles
-nested through inline-struct fields remain open.
+selected FieldDef alias Imports in their owning Module, with imported-class
+query/re-emission coverage added but unverified. Non-class/struct Imports,
+class Methods, and class handles nested through inline-struct fields remain
+open.
 Provisional EN1 type+field-key reference selection now retains selected local
 class fields and fields in the selected inline-struct closure, preserving
 caller key order so new query imports use the first explicit alias while

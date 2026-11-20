@@ -4534,14 +4534,13 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var childProgram = (BoundProgram)childCompilation.Program!;
         var childExport = CreateClassExport(childProgram, childTree,
             "Child", "type.child", "field.child.id");
-        var childArtifact = TrRmExecutableCompiler.EmitStandard(
+        var childArtifactWithoutAlias = TrRmExecutableCompiler.EmitStandard(
             childProgram, childModuleIdentity, schemaIdentity,
             targetRequirement, [], [], [childExport], []);
+        var childArtifact = AddExportAlias(childArtifactWithoutAlias,
+            schemaIdentity, "field.child.id", "field.child.id.alias");
         var childInput = new TrRmStandardArtifactInput(schemaIdentity,
             childArtifact);
-        var childReference = TrRmExecutableCompiler.CreateStandardReference(
-            childInput, childModuleIdentity, [], ["type.child"],
-            ["field.child.id"]);
 
         var parentTree = SyntaxTree.Parse("""
             namespace Demo {
@@ -4549,13 +4548,15 @@ internal sealed class TrRmC1EnumClosureSourceTests
                     public Child Value;
                     public Node Hidden;
                 }
+                public class Child {
+                    public int32 Id;
+                }
                 public class Node {
                     public int32 Id;
                 }
             }
             """);
-        var parentCompilation = Compilation.CreateLibrary(parentTree,
-            childReference);
+        var parentCompilation = Compilation.CreateLibrary(parentTree);
         Assert.That(parentCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine,
                 parentCompilation.Diagnostics));
@@ -4565,11 +4566,39 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var parentArtifact = TrRmExecutableCompiler.EmitStandard(
             parentProgram, parentModuleIdentity, schemaIdentity,
             targetRequirement, [], [], [parentExport], []);
+        var parentTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                parentArtifact, SchemaFor(schemaIdentity)));
+        var parentTypeDefRow = Enumerable.Range(
+                1, parentTables.TypeDefs.Count)
+            .Single(row =>
+                parentTables.TypeDefs.GetName(row) == "Parent");
+        var expectedChildTypeDefRow = Enumerable.Range(
+                1, parentTables.TypeDefs.Count)
+            .Single(row =>
+                parentTables.TypeDefs.GetName(row) == "Child");
+        var parentFieldRange
+            = parentTables.TypeDefs.GetFieldRange(parentTypeDefRow);
+        var parentValueFieldRow = Enumerable.Range(parentFieldRange.Start,
+                parentFieldRange.End - parentFieldRange.Start)
+            .Single(row => parentTables.Fields.GetName(row) == "Value");
+        var childFieldRange = parentTables.TypeDefs.GetFieldRange(
+            expectedChildTypeDefRow);
+        var expectedChildFieldRow = childFieldRange.Start;
+        parentArtifact = AddTypeDefImport(parentArtifact, schemaIdentity,
+            childModuleIdentity, "type.child",
+            0x1300_0000u | checked((uint)expectedChildTypeDefRow),
+            "field.child.id",
+            0x1400_0000u | checked((uint)expectedChildFieldRow),
+            "field.child.id.alias");
+        parentArtifact = RewriteFieldTypeSpecAsImport(parentArtifact,
+            schemaIdentity, parentValueFieldRow, 1);
         var parentInput = new TrRmStandardArtifactInput(schemaIdentity,
             parentArtifact);
         var parentReference = TrRmExecutableCompiler.CreateStandardReference(
             parentInput, parentModuleIdentity, [childInput], ["type.parent"],
-            ["field.parent.value"]);
+            ["field.parent.value", "field.child.id",
+                "field.child.id.alias"]);
         var reference = TrRmExecutableCompiler.CreateStandardReferenceSet(
             [parentReference]);
         var queryCompilation = Compilation.CreateLibrary(
@@ -4633,6 +4662,28 @@ internal sealed class TrRmC1EnumClosureSourceTests
             Is.EqualTo(parentModuleIdentity));
         Assert.That(packedTables.ModuleRefs.GetProducerIdentity(
                 childModuleRefRow), Is.EqualTo(childModuleIdentity));
+        var childFieldImportRow = Enumerable.Range(1,
+                packedTables.Imports.Count)
+            .Single(row =>
+                packedTables.Imports.GetBindingForImportRow(row)
+                    .ExportKey == "field.child.id");
+        var childFieldModuleRefRow = packedTables.Imports
+            .GetModuleRefForImportRow(childFieldImportRow);
+        Assert.That(packedTables.Modules.GetIdentity(
+                packedTables.ModuleRefs.GetOwnerModule(
+                    childFieldModuleRefRow)),
+            Is.EqualTo(parentModuleIdentity));
+        Assert.That(packedTables.ModuleRefs.GetProducerIdentity(
+                childFieldModuleRefRow), Is.EqualTo(childModuleIdentity));
+        Assert.That(Enumerable.Range(1, packedTables.Imports.Count)
+            .Select(packedTables.Imports.GetBindingForImportRow)
+            .Where(static binding =>
+                binding.ExportKey.StartsWith("field.child.id",
+                    StringComparison.Ordinal))
+            .Select(static binding => binding.ExportKey),
+            Is.EquivalentTo([
+                "field.child.id", "field.child.id.alias",
+            ]));
 
         var loaded = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(schemaIdentity, packedArtifact),
@@ -4655,6 +4706,15 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 reemittedTables.ModuleRefs.GetOwnerModule(
                     reemittedChildModuleRefRow)),
             Is.EqualTo(parentModuleIdentity));
+        Assert.That(Enumerable.Range(1, reemittedTables.Imports.Count)
+            .Select(reemittedTables.Imports.GetBindingForImportRow)
+            .Where(static binding =>
+                binding.ExportKey.StartsWith("field.child.id",
+                    StringComparison.Ordinal))
+            .Select(static binding => binding.ExportKey),
+            Is.EquivalentTo([
+                "field.child.id", "field.child.id.alias",
+            ]));
         var reloaded = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(schemaIdentity,
                 reemittedArtifact), consumerModuleIdentity, []);
