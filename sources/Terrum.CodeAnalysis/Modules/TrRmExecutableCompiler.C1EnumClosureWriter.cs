@@ -774,29 +774,62 @@ public static partial class TrRmExecutableCompiler
                     structure.StandardTypeOrigin is not null)
                     && structureProviderIdentities.All(
                         classQueryRootProviderIdentities.Contains);
-            var enumProviderIdentities = program.EnumDefinitions
-                .Select(definition =>
-                    definition.Identity
-                        is BoundEnumDeclarationIdentity.Standard standard
-                        ? standard.Value.Declaration.Site.Snapshot
-                            .ModuleIdentity
-                        : null)
-                .ToArray();
-            var enumProvidersAreDirect
-                = program.EnumDefinitions.All(static definition =>
-                    definition.Identity
-                        is BoundEnumDeclarationIdentity.Standard standard
-                    && standard.Value.IsLookupRoot
-                    && !standard.Value.SelectedExportKeys.IsDefaultOrEmpty
-                    && standard.Value.Expectations.IsEmpty
-                    && BoundStandardEnumDeclarationContract
-                        .IsValidDefinition(standard.Value, definition));
-            var enumProvidersFitQueryRoots
-                = enumProvidersAreDirect
-                    && enumProviderIdentities.All(identity =>
-                        identity is not null
-                        && classQueryRootProviderIdentities.Contains(
-                            identity));
+            BoundSourceTypeProviderSnapshot? importedEnumRootProvider
+                = null;
+            var enumProvidersFitQueryRoots = true;
+            foreach (var definition in program.EnumDefinitions)
+            {
+                if (definition.Identity
+                        is not BoundEnumDeclarationIdentity.Standard standard
+                    || !BoundStandardEnumDeclarationContract.IsValidDefinition(
+                        standard.Value, definition))
+                {
+                    enumProvidersFitQueryRoots = false;
+                    break;
+                }
+
+                var occurrence = standard.Value;
+                if (occurrence.IsLookupRoot
+                    && !occurrence.SelectedExportKeys.IsDefaultOrEmpty
+                    && occurrence.Expectations.IsEmpty)
+                {
+                    enumProvidersFitQueryRoots
+                        = classQueryRootProviderIdentities.Contains(
+                            occurrence.Declaration.Site.Snapshot
+                                .ModuleIdentity);
+                }
+                else if (!occurrence.IsLookupRoot
+                    && occurrence.SelectedExportKeys.IsEmpty
+                    && !occurrence.Expectations.IsDefaultOrEmpty)
+                {
+                    foreach (var expectation in occurrence.Expectations)
+                    {
+                        var usingModule = expectation.Binding.UsingModule;
+                        if (!classQueryRootProviderIdentities.Contains(
+                                usingModule.ModuleIdentity)
+                            || (importedEnumRootProvider is not null
+                                && !BoundStandardEnumDeclarationContract
+                                    .SnapshotsMatch(
+                                        importedEnumRootProvider,
+                                        usingModule)))
+                        {
+                            enumProvidersFitQueryRoots = false;
+                            break;
+                        }
+
+                        importedEnumRootProvider ??= usingModule;
+                    }
+                }
+                else
+                {
+                    enumProvidersFitQueryRoots = false;
+                }
+
+                if (!enumProvidersFitQueryRoots)
+                {
+                    break;
+                }
+            }
             var queryDependenciesFitRoots
                 = structureProvidersFitQueryRoots
                     && enumProvidersFitQueryRoots;
@@ -810,6 +843,11 @@ public static partial class TrRmExecutableCompiler
                         .All(static declaration =>
                             declaration.Expectations.IsEmpty);
             if (allowMultipleClassQueryProviders
+                && importedEnumRootProvider is not null)
+            {
+                rootSnapshot = importedEnumRootProvider;
+            }
+            else if (allowMultipleClassQueryProviders
                 && !program.Structures.IsEmpty)
             {
                 rootSnapshot = program.Structures[0].StandardTypeOrigin!

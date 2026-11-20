@@ -607,14 +607,32 @@ public static partial class TrRmExecutableCompiler
                 var enumIndex = BoundEnumTypes.Index(type);
                 var enumDefinitions
                     = references[referenceIndex].EnumDefinitions;
-                return (uint)enumIndex < (uint)enumDefinitions.Length
-                    && enumDefinitions[enumIndex].ModuleImport is null
-                    && enumDefinitions[enumIndex].Identity
-                        is BoundEnumDeclarationIdentity.Standard standard
-                    && standard.Value.IsLookupRoot
-                    && standard.Value.Expectations.IsEmpty
-                    && SameA2SourceTypeProviderSnapshot(ownerProvider,
-                        standard.Value.Declaration.Site.Snapshot);
+                if ((uint)enumIndex >= (uint)enumDefinitions.Length
+                    || enumDefinitions[enumIndex].ModuleImport is not null
+                    || enumDefinitions[enumIndex].Identity
+                        is not BoundEnumDeclarationIdentity.Standard standard
+                    || !BoundStandardEnumDeclarationContract
+                        .IsValidDefinition(standard.Value,
+                            enumDefinitions[enumIndex]))
+                {
+                    return false;
+                }
+
+                var occurrence = standard.Value;
+                var provider = occurrence.Declaration.Site.Snapshot;
+                return occurrence.IsLookupRoot
+                    ? occurrence.Expectations.IsEmpty
+                        && SameA2SourceTypeProviderSnapshot(ownerProvider,
+                            provider)
+                    : occurrence.SelectedExportKeys.IsEmpty
+                        && !occurrence.Expectations.IsDefaultOrEmpty
+                        && occurrence.Expectations.All(expectation =>
+                            SameA2SourceTypeProviderSnapshot(ownerProvider,
+                                expectation.Binding.UsingModule)
+                            && SameA2SourceTypeProviderSnapshot(provider,
+                                expectation.Binding.Provider)
+                            && expectation.Binding.ProviderDefinitionId
+                                == occurrence.Declaration.Site.DefinitionId);
             }
 
             if (BoundGenericNominalTypeTypes.IsType(type)
@@ -933,12 +951,64 @@ public static partial class TrRmExecutableCompiler
         var enumDefinitionGroups = new List<(
             BoundEnumDefinition Definition,
             BoundStandardEnumOccurrence Occurrence,
+            List<BoundStandardEnumView> OriginalDeclarations,
+            List<BoundStandardEnumExpectation> Expectations,
             List<string> ExportKeys,
             List<string> SelectedExportKeys)>();
         var enumGroupBySite = new Dictionary<(
             string SchemaIdentity, string ModuleIdentity, int ModuleRow,
             uint DefinitionId), int>();
         var enumMaps = new int[references.Length][];
+        bool IsSelectedClassProvider(int referenceIndex,
+            BoundSourceTypeProviderSnapshot provider)
+            => references[referenceIndex].StandardClassDeclarations.Any(
+                declaration => declaration.Expectations.IsEmpty
+                    && !declaration.SelectedExportKeys.IsDefaultOrEmpty
+                    && BoundStandardEnumDeclarationContract.SnapshotsMatch(
+                        declaration.Declaration.Provider, provider));
+
+        static bool SameEnumSite(BoundStandardEnumTypeSite left,
+            BoundStandardEnumTypeSite right)
+            => left.DefinitionId == right.DefinitionId
+                && BoundStandardEnumDeclarationContract.SnapshotsMatch(
+                    left.Snapshot, right.Snapshot);
+
+        static bool SameEnumExpectationKey(
+            BoundStandardEnumExpectation left,
+            BoundStandardEnumExpectation right)
+            => left.Binding.ImportRow == right.Binding.ImportRow
+                && BoundStandardEnumDeclarationContract.SnapshotsMatch(
+                    left.Binding.UsingModule, right.Binding.UsingModule);
+
+        static bool SameEnumExpectation(
+            BoundStandardEnumExpectation left,
+            BoundStandardEnumExpectation right)
+        {
+            var leftBinding = left.Binding;
+            var rightBinding = right.Binding;
+            return SameEnumExpectationKey(left, right)
+                && leftBinding.ExpectedDefinitionId
+                    == rightBinding.ExpectedDefinitionId
+                && StringComparer.Ordinal.Equals(
+                    leftBinding.ProducerIdentity,
+                    rightBinding.ProducerIdentity)
+                && StringComparer.Ordinal.Equals(leftBinding.ExportKey,
+                    rightBinding.ExportKey)
+                && leftBinding.TargetRequirement
+                    == rightBinding.TargetRequirement
+                && leftBinding.RuntimePolicy
+                    == rightBinding.RuntimePolicy
+                && leftBinding.ProviderDefinitionId
+                    == rightBinding.ProviderDefinitionId
+                && BoundStandardEnumDeclarationContract.SnapshotsMatch(
+                    leftBinding.Provider, rightBinding.Provider)
+                && SameEnumSite(left.ExpectedDeclaration.Site,
+                    right.ExpectedDeclaration.Site)
+                && BoundStandardEnumDeclarationContract.ContractMatches(
+                    left.ExpectedDeclaration,
+                    right.ExpectedDeclaration);
+        }
+
         for (var referenceIndex = 0;
             referenceIndex < references.Length; referenceIndex++)
         {
@@ -962,20 +1032,38 @@ public static partial class TrRmExecutableCompiler
                         || definition.ModuleImport is not null
                         || !BoundStandardEnumDeclarationContract
                             .IsValidDefinition(standard.Value, definition)
-                        || !standard.Value.IsLookupRoot
-                        || standard.Value.SelectedExportKeys.IsDefaultOrEmpty
-                        || !standard.Value.Expectations.IsEmpty
-                        || !references[referenceIndex]
-                            .StandardClassDeclarations.Any(declaration =>
-                            BoundStandardEnumDeclarationContract.SnapshotsMatch(
-                                declaration.Declaration.Provider,
-                                standard.Value.Declaration.Site.Snapshot)))
+                        || !StringComparer.Ordinal.Equals(
+                            standard.Value.Declaration.Site.Snapshot
+                                .SchemaIdentity, classSchemaIdentity))
                     {
                         throw Unsupported(
-                            "Class reference composition requires selected direct Standard enum TypeDefs from a class provider Module.");
+                            "Class reference composition requires exact selected-schema Standard enum declarations.");
                     }
 
                     var occurrence = standard.Value;
+                    var isSelectedRoot = occurrence.IsLookupRoot
+                        && !occurrence.SelectedExportKeys.IsDefaultOrEmpty
+                        && occurrence.Expectations.IsEmpty
+                        && IsSelectedClassProvider(referenceIndex,
+                            occurrence.Declaration.Site.Snapshot);
+                    var isImportedDependency = !occurrence.IsLookupRoot
+                        && occurrence.SelectedExportKeys.IsEmpty
+                        && !occurrence.Expectations.IsDefaultOrEmpty
+                        && occurrence.Expectations.All(expectation =>
+                            IsSelectedClassProvider(referenceIndex,
+                                expectation.Binding.UsingModule)
+                            && BoundStandardEnumDeclarationContract
+                                .SnapshotsMatch(
+                                    expectation.Binding.Provider,
+                                    occurrence.Declaration.Site.Snapshot)
+                            && expectation.Binding.ProviderDefinitionId
+                                == occurrence.Declaration.Site.DefinitionId);
+                    if (!isSelectedRoot && !isImportedDependency)
+                    {
+                        throw Unsupported(
+                            "Class reference composition requires selected direct enum roots or enum imports owned by a selected class root.");
+                    }
+
                     var site = occurrence.Declaration.Site;
                     var siteKey = (site.Snapshot.SchemaIdentity,
                         site.Snapshot.ModuleIdentity,
@@ -1000,6 +1088,32 @@ public static partial class TrRmExecutableCompiler
                                 "Selected class references contain conflicting views of one enum TypeDef.");
                         }
 
+                        foreach (var original in occurrence.OriginalDeclarations)
+                        {
+                            if (!group.OriginalDeclarations.Any(existing =>
+                                    SameEnumSite(existing.Site,
+                                        original.Site)))
+                            {
+                                group.OriginalDeclarations.Add(original);
+                            }
+                        }
+                        foreach (var expectation in occurrence.Expectations)
+                        {
+                            var existing = group.Expectations.FirstOrDefault(
+                                candidate => SameEnumExpectationKey(candidate,
+                                    expectation));
+                            if (existing is null)
+                            {
+                                group.Expectations.Add(expectation);
+                            }
+                            else if (!SameEnumExpectation(existing,
+                                         expectation))
+                            {
+                                throw Invalid(
+                                    "Selected class references contain conflicting expectations for one enum Import.");
+                            }
+                        }
+
                         AddDistinct(group.ExportKeys,
                             occurrence.ExportKeys);
                         AddDistinct(group.SelectedExportKeys,
@@ -1010,6 +1124,8 @@ public static partial class TrRmExecutableCompiler
                         enumGroupIndex = enumDefinitionGroups.Count;
                         enumGroupBySite.Add(siteKey, enumGroupIndex);
                         enumDefinitionGroups.Add((definition, occurrence,
+                            [.. occurrence.OriginalDeclarations],
+                            [.. occurrence.Expectations],
                             [.. occurrence.ExportKeys],
                             [.. occurrence.SelectedExportKeys]));
                     }
@@ -1027,10 +1143,15 @@ public static partial class TrRmExecutableCompiler
         foreach (var group in enumDefinitionGroups)
         {
             var occurrence = new BoundStandardEnumOccurrence(
-                group.Occurrence.Declaration, [
-                    group.Occurrence.Declaration,
-                ], [], [.. group.ExportKeys],
+                group.Occurrence.Declaration,
+                [.. group.OriginalDeclarations],
+                [.. group.Expectations], [.. group.ExportKeys],
                 [.. group.SelectedExportKeys]);
+            if (!occurrence.IsValid)
+            {
+                throw Invalid(
+                    "A composed class enum view lost its provider or Import expectations.");
+            }
             var identity
                 = new BoundEnumDeclarationIdentity.Standard(occurrence);
             var members
