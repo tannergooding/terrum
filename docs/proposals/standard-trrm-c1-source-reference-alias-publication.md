@@ -219,7 +219,7 @@ provider chain, source-free remapping, and a type/field alias selection whose
 nonrepresentative keys split under replacement while the selected keys and
 method views remain intact. They remain unverified under the active hold.
 Alias removal, invalid nonrepresentative selections, pre-existing shared
-expectation groups, co-located non-first Modules, deeper chains/diamonds, and
+expectation groups, co-located provider Imports, deeper chains/diamonds, and
 multiple using-Module contexts for one expected TypeDef remain open. Emitting
 all selected type/field aliases into one expected DefId is not a valid
 workaround for current C2 admission.
@@ -257,7 +257,7 @@ These are future checks through public APIs, not results from this draft:
 | Replacement: used dependencies | Remove a retained callable/representative key, lose Copy, change nested nominal signature/layout/pack/alignment, unsafe contract or field owner/ordinal: reject without substituting a surviving alias. Independently keyed method aliases may split only while every retained contract and type correspondence passes. |
 | Retained equality | Supply an admitted common-expected-MethodDef alias group; re-emit/remap it, then split its provider targets. Reject before affected use. Separate expected rows alone do not add a group. Unsupported shared TypeDef/FieldDef input still refuses rather than being “repaired” by this policy. |
 | Re-encoding | Permute consumer/provider definitions, Export/Import rows and Body maps; source-free re-emit/reload and pack. Retain chosen keys, original expectations, existing shared proxies, FieldPath/owner contexts and source locations. Never choose a representative again from output row order. |
-| Cross-provider | Exercise the implemented supplied-provider chain and nested FieldMap loading, then add chains/diamonds and co-located non-first Modules. New selections use their exact declaring Module; provider-owned Imports retain their own keys and all old obligations. The current regression is unverified under the active hold. |
+| Cross-provider | Public regressions cover the supplied-provider chain with nested FieldMap loading and explicit TypeDef/FieldDef selection from a non-first co-located Module. Add co-located provider Imports and chains/diamonds. New selections use their exact declaring Module; provider-owned Imports retain their own keys and all old obligations. The current regressions are unverified under the active hold. |
 | Cross-feature/boundary | Cover all three exact agreements, scalar-only methods, unit/nested Copy-struct fields, CM1 labels/defaults and caller-unsafety where admitted. Preserve conditional Features and CM1AR1 closure; reject wrong/mixed schemas and unsupported required facts. Exercise existing checked row/map capacity boundaries without adding a limit or truncation. |
 | Lowering | Separately qualify headless JIT and supervised AOT with final compiler/configuration/input identity. Emission or source-free loading alone establishes neither execution nor safe native replacement. |
 

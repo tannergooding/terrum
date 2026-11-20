@@ -6399,6 +6399,118 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
+    public void SelectsTypesFromNonRootCoLocatedConstruction2Modules()
+    {
+        var schemaIdentity
+            = C1M1Construction2ClassParameterDefaultsCopyEvidenceSchemaIdentity;
+        var options = new CompilationOptions {
+            LayoutCoreRegistration
+                = LayoutCoreRegistrationTestData.Create(),
+        };
+        var tree = SyntaxTree.Parse("""
+            namespace Demo {
+                [Blittable] [Layout(LayoutKind.Sequential)]
+                public struct Record {
+                    public int32 Data;
+                }
+                public int32 Read() { return 42; }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree, options);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(program,
+            "MethodTypeRoot", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement, [
+                new TrRmSourceTypeExport("Demo", "Record", "type.record") {
+                    FieldExports = [
+                        new TrRmSourceFieldExport("Data",
+                            "field.record.data"),
+                    ],
+                },
+            ], [], []);
+        providerArtifact = MoveTypeDefsToSecondModule(providerArtifact,
+            "CoLocatedStructs");
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, "MethodTypeRoot", [], ["Read"], [
+                new TrRmStandardExportKeySelection("CoLocatedStructs",
+                    "type.record"),
+            ], [
+                new TrRmStandardExportKeySelection("CoLocatedStructs",
+                    "field.record.data"),
+            ]);
+
+        var consumerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                namespace Demo {
+                    public int32 Forward() { return Read(); }
+                    public int32 ReadData(Record value) {
+                        return value.Data;
+                    }
+                }
+                """), reference);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerProgram = (BoundProgram)consumerCompilation.Program!;
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            consumerProgram, "CoLocatedConsumer", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], []);
+        var consumerTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                consumerArtifact,
+                TrRmArtifactSchema
+                    .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft));
+        Assert.That(consumerTables.Modules.Count, Is.EqualTo(1));
+        var typeImportRow = Enumerable.Range(1, consumerTables.Imports.Count)
+            .Single(row => consumerTables.Imports
+                .GetExpectedDefinitionForImportRow(row) >> 24 == 0x13);
+        var fieldImportRow = Enumerable.Range(1, consumerTables.Imports.Count)
+            .Single(row => consumerTables.Imports
+                .GetExpectedDefinitionForImportRow(row) >> 24 == 0x14);
+        var methodImportRow = Enumerable.Range(1, consumerTables.Imports.Count)
+            .Single(row => consumerTables.Imports
+                .GetExpectedDefinitionForImportRow(row) >> 24 == 0x16);
+        Assert.That(consumerTables.ModuleRefs.GetProducerIdentity(
+                consumerTables.Imports
+                    .GetModuleRefForImportRow(typeImportRow)),
+            Is.EqualTo("CoLocatedStructs"));
+        Assert.That(consumerTables.ModuleRefs.GetProducerIdentity(
+                consumerTables.Imports
+                    .GetModuleRefForImportRow(fieldImportRow)),
+            Is.EqualTo("CoLocatedStructs"));
+        Assert.That(consumerTables.ModuleRefs.GetProducerIdentity(
+                consumerTables.Imports
+                    .GetModuleRefForImportRow(methodImportRow)),
+            Is.EqualTo("MethodTypeRoot"));
+
+        var consumerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            consumerArtifact);
+        var linkedProgram = TrRmExecutableCompiler.LoadStandard(consumerInput,
+            "CoLocatedConsumer", [providerInput]);
+        var readData = linkedProgram.Functions.Single(
+            static function => function.Name == "ReadData");
+        Assert.That(((BoundReturn)readData.Body.Statements.Single())
+                .Value!.Type,
+            Is.EqualTo(PrimitiveType.Int32));
+        var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(
+            linkedProgram, "CoLocatedConsumer", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        Assert.That(reemittedArtifact, Is.EqualTo(consumerArtifact));
+        var reloadedProgram = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, reemittedArtifact),
+            "CoLocatedConsumer", [providerInput]);
+        Assert.That(reloadedProgram.Functions.Single(
+                static function => function.Name == "ReadData")
+                .ReturnType,
+            Is.EqualTo(PrimitiveType.Int32));
+    }
+
+    [Test]
     public void PublishesFirstTypeAndFieldAliasesAsNewDependencies()
     {
         var schemaIdentity
@@ -9891,6 +10003,88 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         => AddExportAlias(artifact, originalExportKey, aliasExportKey,
             TrRmArtifactSchema
                 .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft);
+
+    private static byte[] MoveTypeDefsToSecondModule(byte[] artifact,
+        string moduleIdentity)
+    {
+        var schema = TrRmArtifactSchema
+            .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft;
+        var index = new TrRmArtifactIndex(artifact, schema);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(index);
+        if (tables.Modules.Count != 1
+            || tables.ModuleRefs.Count != 0
+            || tables.Imports.Count != 0
+            || tables.TypeDefs.Count == 0
+            || tables.Methods.Count == 0
+            || tables.Modules.GetEntryMethod(1) != 0
+            || !index.TryGetSection(0x0001, out var moduleSection,
+                out _))
+        {
+            throw new InvalidOperationException(
+                "The co-located fixture requires one import-free library Module with methods and TypeDefs.");
+        }
+
+        var textRows = new List<(string Text, int Encoding)>(
+            tables.Strings.Count + 1);
+        for (var row = 1; row <= tables.Strings.Count; row++)
+        {
+            textRows.Add((tables.Strings.DecodeNamespace(row), 1));
+        }
+        textRows.Add((moduleIdentity, 1));
+        var stringsBytes = TrRmStringTableWriter.EncodeTextRows(textRows);
+        var strings = new TrRmStringTableReader(stringsBytes, textRows.Count);
+        var originalIdentityStringRow = checked((int)
+            BinaryPrimitives.ReadUInt32LittleEndian(moduleSection.Span));
+        var (targetRequirement, runtimePolicy)
+            = tables.Modules.GetRequirements(1);
+        var (moduleRefStart, moduleRefEnd)
+            = tables.Modules.GetModuleRefRange(1);
+        var (typeDefStart, _) = tables.Modules.GetTypeDefRange(1);
+        var (methodDefStart, methodDefEnd)
+            = tables.Modules.GetMethodDefRange(1);
+        var (sourceFileStart, sourceFileEnd)
+            = tables.Modules.GetSourceFileRange(1);
+        var (featureStart, featureCount)
+            = tables.Modules.GetFeatureRange(1);
+        var moduleRows = new[] {
+            new TrRmModuleRow(originalIdentityStringRow,
+                targetRequirement, runtimePolicy, 0, moduleRefStart,
+                typeDefStart, methodDefStart, sourceFileStart, featureStart,
+                featureCount,
+                tables.Modules.GetGoverningRuleEdition(1)),
+            new TrRmModuleRow(textRows.Count, targetRequirement,
+                runtimePolicy, 0, moduleRefEnd, typeDefStart, methodDefEnd,
+                sourceFileEnd, featureStart, featureCount,
+                tables.Modules.GetGoverningRuleEdition(1)),
+        };
+        var featureSectionCount = index.TryGetSection(0x0004, out _,
+            out var existingFeatureCount) ? existingFeatureCount : 0;
+        var moduleBytes = TrRmModuleTableWriter.Encode(moduleRows, strings,
+            tables.ModuleRefs.Count, tables.TypeDefs.Count,
+            tables.Methods.Count, tables.Modules.SourceFileCount,
+            featureSectionCount);
+
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var sectionIndex = 0; sectionIndex < index.SectionCount;
+            sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var section, out var recordCount);
+            sections.Add(kind switch {
+                0x0001 => new TrRmSection(kind, flags, 2, moduleBytes),
+                0x0002 => new TrRmSection(kind, flags,
+                    checked((uint)textRows.Count), stringsBytes),
+                _ => new TrRmSection(kind, flags,
+                    checked((uint)recordCount), section.ToArray()),
+            });
+        }
+
+        var result = TrRmArtifactWriter.Encode(sections, schema);
+        _ = TrRmStructuralMetadataValidator.ValidateC1AndGetExecutionTables(
+            new TrRmArtifactIndex(result, schema));
+        return result;
+    }
 
     private static byte[] AddExportAlias(byte[] artifact,
         string originalExportKey, string aliasExportKey,

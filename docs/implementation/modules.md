@@ -286,13 +286,15 @@ nested FieldMap loading and unchanged source-free artifact retention/reload.
 A second regression covers first-list type/field alias representatives,
 independent method-view keys, source-free re-emission and provider replacement
 that splits omitted aliases. Both remain unverified under the active hold.
-Co-located non-first Modules, deeper chains/diamonds, alias removal and
-retained shared-expectation groups, multiple using-Module contexts for one
-expected TypeDef, source-free row remapping under provider replacement, CLI
-selection and runtime qualification remain open. The loader still requires the whole
-validated Module-set TypeDef/method closure to fit its bounded
-Blittable-struct path; selected-root-only loading for unrelated declarations
-remains open. Snapshot-preserving source-free emission does not establish row
+A third regression selects TypeDef/FieldDef roots from a non-first
+co-located Module and checks consumer ModuleRefs plus source-free reload; it
+also remains unverified. Co-located provider Imports, deeper chains/diamonds,
+alias removal and retained shared-expectation groups, multiple using-Module
+contexts for one expected TypeDef, source-free row remapping under provider
+replacement, CLI selection and runtime qualification remain open. The loader
+still requires the whole validated Module-set TypeDef/method closure to fit
+its bounded Blittable-struct path; selected-root-only loading for unrelated
+declarations remains open. Snapshot-preserving source-free emission does not establish row
 remapping for provider replacement.
 Compiler-owned source-class anchors and explicit member-key capture are
 implemented, but complete bodyful
