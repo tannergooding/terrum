@@ -304,8 +304,9 @@ selected-root-only loading for unrelated declarations remains open.
 Snapshot-preserving source-free emission does not establish general row
 remapping for provider replacement.
 The separate unapproved version-3 method/type source-provider CLI proposal is
-indexed; its reader, exact pairing, dispatch, regressions and qualification
-remain unimplemented.
+indexed. Its strict reader, exact pairing and combined-API dispatch are
+implemented; focused CLI regressions are added but remain unverified under
+the active hold, and broader qualification remains open.
 Compiler-owned source-class anchors and explicit member-key capture are
 implemented, but complete bodyful
 local class member/MethodDef closure, provider

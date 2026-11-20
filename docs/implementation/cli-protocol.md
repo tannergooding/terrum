@@ -114,6 +114,12 @@ class-valued fields/member/provider-expectation views, PI1 and other EN1 schema
 variants, mixed class/type composition and composition with the separate
 class-source publication file remain open; the candidate schema gate alone
 does not establish those routes.
+The separate unapproved [Construction-2 method/type transport proposal](../proposals/standard-trrm-c1-method-type-source-provider-cli-transport.md)
+specifies version 3 for one classless combined method/type/field reference
+under the exact three Copy-evidence schemas. Its strict reader, schema pairing
+and single-call dispatch are implemented; end-to-end CLI regressions were
+added but remain unverified under the active hold. Versions 1 and 2, the
+publication manifests and artifact-command provider whitelist are unchanged.
 Artifact commands accept exact per-artifact schema identities and a root
 Module identity, plus repeatable explicitly selected provider schema/path
 pairs. The current whitelist includes F/F+S, A2/A2E/A2EU/A2EU+SF1,

@@ -166,8 +166,9 @@ multiple using-Module contexts for one expected TypeDef, Import/Export/
 ModuleRef/Body map permutations, and runtime qualification remain open. The
 separate unapproved version-3
 `docs\proposals\standard-trrm-c1-method-type-source-provider-cli-transport.md`
-now proposes the CLI shape and exact schema pairing; reader/dispatch,
-regressions and CLI qualification remain unimplemented.
+specifies the unapproved CLI shape and exact schema pairing. Its reader,
+pairing and dispatch are implemented; regressions are added but remain
+unverified, and CLI qualification remains open.
 The loader still requires the whole validated Module-set TypeDef/method
 closure to fit its bounded Blittable-struct path. Snapshot-preserving
 source-free emission does not establish general row remapping under provider
@@ -195,7 +196,11 @@ TypeSpec qualifiers and `sourceUse=4` without a MethodDef receiver flag.
 imported I/P expectations, broader Bodies, field use, multi-provider output,
 source-free re-emission of top-level functions and ordinary EN1 class
 consumers remain open. The label-free Construction-2 source-provider CLI
-pairing remains unselected.
+pairing now has a separate unapproved version-3 proposal for one combined
+method/type/field reference under the three Copy-evidence schemas. The strict
+reader, schema pairing and single-call dispatch are implemented; end-to-end
+CLI regressions remain unverified under the active hold. Existing source
+provider versions and artifact-command provider gates are unchanged.
 The Construction-2 source-class producer also emits direct selected Standard
 class TypeDef/FieldDef/layout stubs and remaps readonly class-handle TypeSpecs
 in method signatures, including root-owned imported TypeDef expectations.

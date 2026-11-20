@@ -22,7 +22,19 @@ internal sealed record TrRmSourceProviderArtifact(
 internal sealed record TrRmSourceProviderReference(
     int ProviderInputOrdinal, string ModuleIdentity,
     ImmutableArray<string> TypeExportKeys,
-    ImmutableArray<string> FieldExportKeys);
+    ImmutableArray<string> FieldExportKeys)
+{
+    internal ImmutableArray<string> MethodExportKeys { get; init; }
+
+    internal ImmutableArray<TrRmSourceProviderExportKeySelection>
+        ModuleQualifiedTypeExportKeys { get; init; }
+
+    internal ImmutableArray<TrRmSourceProviderExportKeySelection>
+        ModuleQualifiedFieldExportKeys { get; init; }
+}
+
+internal sealed record TrRmSourceProviderExportKeySelection(
+    string ModuleIdentity, string ExportKey);
 
 internal static class TrRmSourceProvidersReader
 {
@@ -107,6 +119,11 @@ internal static class TrRmSourceProvidersReader
                 throw Invalid(path, "$.references",
                     "expected a nonempty array");
             }
+            if (version == 3 && referenceArray.GetArrayLength() != 1)
+            {
+                throw Invalid(path, "$.references",
+                    "version 3 requires exactly one combined reference");
+            }
 
             var references = ImmutableArray.CreateBuilder<
                 TrRmSourceProviderReference>(
@@ -116,9 +133,14 @@ internal static class TrRmSourceProvidersReader
             foreach (var referenceElement in referenceArray.EnumerateArray())
             {
                 var referencePath = $"$.references[{referenceIndex}]";
-                var reference = RequireObject(referenceElement, path,
-                    referencePath, "providerInputOrdinal", "moduleIdentity",
-                    "typeExportKeys", "fieldExportKeys");
+                var reference = version == 3
+                    ? RequireObject(referenceElement, path, referencePath,
+                        "providerInputOrdinal", "moduleIdentity",
+                        "methodExportKeys", "typeExportKeys",
+                        "fieldExportKeys")
+                    : RequireObject(referenceElement, path, referencePath,
+                        "providerInputOrdinal", "moduleIdentity",
+                        "typeExportKeys", "fieldExportKeys");
                 var providerOrdinal = ReadOrdinal(Property(reference,
                     "providerInputOrdinal", path, referencePath), path,
                     referencePath + ".providerInputOrdinal");
@@ -131,24 +153,54 @@ internal static class TrRmSourceProvidersReader
 
                 var moduleIdentity = ReadText(Property(reference,
                     "moduleIdentity", path, referencePath), path,
-                    referencePath + ".moduleIdentity");
+                    referencePath + ".moduleIdentity",
+                    maximumUtf8Bytes: version == 3
+                        ? 0xFF_FFFF : int.MaxValue);
                 if (!selectors.Add((providerOrdinal, moduleIdentity)))
                 {
                     throw Invalid(path, referencePath,
                         "duplicate provider Module selection");
                 }
 
-                var keys = new HashSet<string>(StringComparer.Ordinal);
-                var typeKeys = ReadKeys(Property(reference, "typeExportKeys",
-                    path, referencePath), path,
-                    referencePath + ".typeExportKeys", allowEmpty: false,
-                    seenKeys: keys);
-                var fieldKeys = ReadKeys(Property(reference,
-                    "fieldExportKeys", path, referencePath), path,
-                    referencePath + ".fieldExportKeys", allowEmpty: true,
-                    seenKeys: keys);
-                references.Add(new TrRmSourceProviderReference(
-                    providerOrdinal, moduleIdentity, typeKeys, fieldKeys));
+                if (version == 3)
+                {
+                    var methodKeys = ReadKeys(Property(reference,
+                        "methodExportKeys", path, referencePath), path,
+                        referencePath + ".methodExportKeys",
+                        allowEmpty: false,
+                        seenKeys: new HashSet<string>(StringComparer.Ordinal));
+                    var selectedPairs = new HashSet<(string ModuleIdentity,
+                        string ExportKey)>();
+                    var typeSelections = ReadExportKeySelections(
+                        Property(reference, "typeExportKeys", path,
+                            referencePath), path,
+                        referencePath + ".typeExportKeys", selectedPairs);
+                    var fieldSelections = ReadExportKeySelections(
+                        Property(reference, "fieldExportKeys", path,
+                            referencePath), path,
+                        referencePath + ".fieldExportKeys", selectedPairs);
+                    references.Add(new TrRmSourceProviderReference(
+                        providerOrdinal, moduleIdentity, [], []) {
+                        MethodExportKeys = methodKeys,
+                        ModuleQualifiedTypeExportKeys = typeSelections,
+                        ModuleQualifiedFieldExportKeys = fieldSelections,
+                    });
+                }
+                else
+                {
+                    var keys = new HashSet<string>(StringComparer.Ordinal);
+                    var typeKeys = ReadKeys(Property(reference,
+                        "typeExportKeys", path, referencePath), path,
+                        referencePath + ".typeExportKeys", allowEmpty: false,
+                        seenKeys: keys);
+                    var fieldKeys = ReadKeys(Property(reference,
+                        "fieldExportKeys", path, referencePath), path,
+                        referencePath + ".fieldExportKeys", allowEmpty: true,
+                        seenKeys: keys);
+                    references.Add(new TrRmSourceProviderReference(
+                        providerOrdinal, moduleIdentity, typeKeys,
+                        fieldKeys));
+                }
                 referenceIndex++;
             }
 
@@ -230,6 +282,46 @@ internal static class TrRmSourceProvidersReader
         return keys.MoveToImmutable();
     }
 
+    private static ImmutableArray<TrRmSourceProviderExportKeySelection>
+        ReadExportKeySelections(JsonElement element, string path,
+            string jsonPath,
+            HashSet<(string ModuleIdentity, string ExportKey)> selectedPairs)
+    {
+        if (element.ValueKind != JsonValueKind.Array)
+        {
+            throw Invalid(path, jsonPath, "expected an array");
+        }
+
+        var selections = ImmutableArray.CreateBuilder<
+            TrRmSourceProviderExportKeySelection>(
+                element.GetArrayLength());
+        var index = 0;
+        foreach (var item in element.EnumerateArray())
+        {
+            var selectionPath = jsonPath + "["
+                + index.ToString(CultureInfo.InvariantCulture) + "]";
+            var selection = RequireObject(item, path, selectionPath,
+                "moduleIdentity", "exportKey");
+            var moduleIdentity = ReadText(Property(selection,
+                "moduleIdentity", path, selectionPath), path,
+                selectionPath + ".moduleIdentity",
+                maximumUtf8Bytes: 0xFF_FFFF);
+            var exportKey = ReadText(Property(selection, "exportKey", path,
+                selectionPath), path, selectionPath + ".exportKey",
+                maximumUtf8Bytes: 0xFF_FFFF);
+            if (!selectedPairs.Add((moduleIdentity, exportKey)))
+            {
+                throw Invalid(path, selectionPath,
+                    "duplicate Module/ExportKey selection");
+            }
+
+            selections.Add(new TrRmSourceProviderExportKeySelection(
+                moduleIdentity, exportKey));
+            index++;
+        }
+        return selections.MoveToImmutable();
+    }
+
     private static string ReadText(JsonElement element, string path,
         string jsonPath, int maximumUtf8Bytes = int.MaxValue)
     {
@@ -280,12 +372,16 @@ internal static class TrRmSourceProvidersReader
     {
         var token = element.ValueKind == JsonValueKind.Number
             ? element.GetRawText() : "";
-        if (token is not ("1" or "2"))
+        if (token is not ("1" or "2" or "3"))
         {
             throw Invalid(path, jsonPath,
-                "only exact version tokens 1 and 2 are supported");
+                "only exact version tokens 1, 2 and 3 are supported");
         }
-        return token == "1" ? 1 : 2;
+        return token switch {
+            "1" => 1,
+            "2" => 2,
+            _ => 3,
+        };
     }
 
     private static void ValidateJsonText(JsonElement element, string path,

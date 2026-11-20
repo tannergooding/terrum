@@ -641,6 +641,428 @@ internal sealed partial class CliTests
         }
     }
 
+    [Test]
+    [TestCase(
+        "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-initializer-copy-evidence-1")]
+    [TestCase(
+        "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-class-parameter-defaults-1-initializer-copy-evidence-1")]
+    [TestCase(
+        "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-class-parameter-defaults-1-associated-relation-constraints-1-initializer-copy-evidence-1")]
+    public async Task CompileTrRmBindsVersionThreeCombinedMethodTypeSourceProviderAsync(
+        string schemaIdentity)
+    {
+        const string methodProviderIdentity
+            = "source-provider-cli-method-type-methods";
+        const string typeProviderIdentity
+            = "source-provider-cli-method-type-types";
+        const string consumerIdentity = "source-provider-cli-method-type-consumer";
+        const string consumerSource = """
+            public int32 Forward(Record value) { return Read(value); }
+            public int32 ReadData(Record value) { return value.Data; }
+            """;
+        var providerSelections = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"source-provider-cli-method-type-{Guid.NewGuid():N}.json");
+        var methodProviderArtifact = Path.Combine(
+            TestArtifactPaths.DirectoryPath,
+            $"source-provider-cli-method-type-methods-{Guid.NewGuid():N}.trrm");
+        var typeProviderArtifact = Path.Combine(
+            TestArtifactPaths.DirectoryPath,
+            $"source-provider-cli-method-type-types-{Guid.NewGuid():N}.trrm");
+        var consumerArtifact = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"source-provider-cli-method-type-{Guid.NewGuid():N}.trrm");
+        byte[] retained = [0xA5, 0x5A];
+        try
+        {
+            var typeProviderTree = SyntaxTree.Parse("""
+                [Blittable] [Layout(LayoutKind.Sequential)]
+                public struct Record {
+                    public int32 Data;
+                }
+                """);
+            var typeProviderCompilation = Compilation.CreateLibrary(
+                typeProviderTree,
+                new CompilationOptions {
+                    LayoutCoreRegistration
+                        = LayoutCoreRegistrationTestData.Create(),
+                });
+            Assert.That(typeProviderCompilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    typeProviderCompilation.Diagnostics));
+            var typeProviderProgram
+                = (BoundProgram)typeProviderCompilation.Program!;
+            var typeProviderArtifactBytes
+                = TrRmExecutableCompiler.EmitStandard(
+                typeProviderProgram, typeProviderIdentity, schemaIdentity,
+                TrRmModuleTableReader.WindowsX64NativeTargetRequirement, [
+                    new TrRmSourceTypeExport("", "Record", "type.record") {
+                        FieldExports = [
+                            new TrRmSourceFieldExport("Data",
+                                "field.record.data"),
+                        ],
+                    },
+                ], [], []);
+            await File.WriteAllBytesAsync(typeProviderArtifact,
+                typeProviderArtifactBytes).ConfigureAwait(true);
+            var typeProviderInput = new TrRmStandardArtifactInput(
+                schemaIdentity, typeProviderArtifactBytes);
+            var typeProviderReference
+                = TrRmExecutableCompiler.CreateStandardReference(
+                    typeProviderInput, typeProviderIdentity, [],
+                    ["type.record"], ["field.record.data"]);
+
+            var methodProviderTree = SyntaxTree.Parse("""
+                public int32 Read(Record value) { return value.Data; }
+                """);
+            var methodProviderCompilation = Compilation.CreateLibrary(
+                methodProviderTree, typeProviderReference);
+            Assert.That(methodProviderCompilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    methodProviderCompilation.Diagnostics));
+            var methodProviderProgram
+                = (BoundProgram)methodProviderCompilation.Program!;
+            var methodProviderArtifactBytes
+                = TrRmExecutableCompiler.EmitStandard(
+                    methodProviderProgram, methodProviderIdentity,
+                    schemaIdentity,
+                    TrRmModuleTableReader
+                        .WindowsX64NativeTargetRequirement,
+                    [], [], []);
+            await File.WriteAllBytesAsync(methodProviderArtifact,
+                methodProviderArtifactBytes).ConfigureAwait(true);
+
+            var providerConfiguration = JsonSerializer.Serialize(new {
+                schemaVersion = 3,
+                providers = new[] {
+                    new { schemaIdentity, path = typeProviderArtifact },
+                    new { schemaIdentity, path = methodProviderArtifact },
+                },
+                references = new[] {
+                    new {
+                        providerInputOrdinal = 1,
+                        moduleIdentity = methodProviderIdentity,
+                        methodExportKeys = new[] { "Read" },
+                        typeExportKeys = new[] {
+                            new {
+                                moduleIdentity = typeProviderIdentity,
+                                exportKey = "type.record",
+                            },
+                        },
+                        fieldExportKeys = new[] {
+                            new {
+                                moduleIdentity = typeProviderIdentity,
+                                exportKey = "field.record.data",
+                            },
+                        },
+                    },
+                },
+            });
+            await File.WriteAllTextAsync(providerSelections,
+                providerConfiguration, new UTF8Encoding(false))
+                .ConfigureAwait(true);
+
+            var (compileExit, compileOutput, compileError)
+                = await RunAsync(Encoding.UTF8.GetBytes(consumerSource),
+                    "compile-trrm", "-", "--identity", consumerIdentity,
+                    "--trrm-schema", schemaIdentity,
+                    "--trrm-source-providers", providerSelections,
+                    "--library", "-o", consumerArtifact, "--runtime",
+                    "fail-fast", "--json").ConfigureAwait(false);
+            Assert.That(compileExit, Is.Zero,
+                $"{compileOutput}{Environment.NewLine}{compileError}");
+            Assert.That(compileError, Is.Empty);
+
+            var consumerTables = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(
+                    new TrRmArtifactIndex(
+                        File.ReadAllBytes(consumerArtifact),
+                        TrRmArtifactSchema
+                            .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft));
+            var importRows = Enumerable.Range(1,
+                    consumerTables.Imports.Count)
+                .Select(row => (
+                    Kind: consumerTables.Imports
+                        .GetExpectedDefinitionForImportRow(row) >> 24,
+                    ExportKey: consumerTables.Imports
+                        .GetBindingForImportRow(row).ExportKey,
+                    ProducerIdentity:
+                        consumerTables.ModuleRefs.GetProducerIdentity(
+                            consumerTables.Imports
+                                .GetModuleRefForImportRow(row))))
+                .ToArray();
+            Assert.That(importRows.Where(static import =>
+                    import.Kind == 0x13)
+                .Select(static import => import.ExportKey),
+                Is.EqualTo(["type.record"]));
+            Assert.That(importRows.Where(static import =>
+                    import.Kind == 0x14)
+                .Select(static import => import.ExportKey),
+                Is.EqualTo(["field.record.data"]));
+            Assert.That(importRows.Where(static import =>
+                    import.Kind == 0x16)
+                .Select(static import => import.ExportKey),
+                Is.EqualTo(["Read"]));
+            Assert.That(importRows.Where(static import =>
+                    import.Kind == 0x13 || import.Kind == 0x14)
+                .Select(static import => import.ProducerIdentity).Distinct(),
+                Is.EquivalentTo([typeProviderIdentity]));
+            Assert.That(importRows.Where(static import => import.Kind == 0x16)
+                .Select(static import => import.ProducerIdentity).Distinct(),
+                Is.EquivalentTo([methodProviderIdentity]));
+
+            await File.WriteAllBytesAsync(consumerArtifact, retained)
+                .ConfigureAwait(true);
+            var mismatchedProviderConfiguration
+                = JsonSerializer.Serialize(new {
+                    schemaVersion = 3,
+                    providers = new[] {
+                        new {
+                            schemaIdentity =
+                                "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-class-parameter-defaults-1",
+                            path = typeProviderArtifact,
+                        },
+                        new {
+                            schemaIdentity,
+                            path = methodProviderArtifact,
+                        },
+                    },
+                    references = new[] {
+                        new {
+                            providerInputOrdinal = 1,
+                            moduleIdentity = methodProviderIdentity,
+                            methodExportKeys = new[] { "Read" },
+                            typeExportKeys = Array.Empty<object>(),
+                            fieldExportKeys = Array.Empty<object>(),
+                        },
+                    },
+                });
+            await File.WriteAllTextAsync(providerSelections,
+                mismatchedProviderConfiguration, new UTF8Encoding(false))
+                .ConfigureAwait(true);
+            var (mismatchExit, mismatchOutput, mismatchError)
+                = await RunAsync(
+                    Encoding.UTF8.GetBytes(consumerSource), "compile-trrm",
+                    "-", "--identity", consumerIdentity, "--trrm-schema",
+                    schemaIdentity, "--trrm-source-providers",
+                    providerSelections, "--library", "-o", consumerArtifact,
+                    "--runtime", "fail-fast", "--json")
+                    .ConfigureAwait(false);
+            Assert.That(mismatchExit, Is.EqualTo(2),
+                $"{mismatchOutput}{Environment.NewLine}{mismatchError}");
+            Assert.That(mismatchError, Is.Empty);
+            using (var document = JsonDocument.Parse(mismatchOutput))
+            {
+                Assert.That(document.RootElement
+                        .GetProperty("diagnostic").GetProperty("code")
+                        .GetString(),
+                    Is.EqualTo("TRM2000"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(consumerArtifact)
+                .ConfigureAwait(true), Is.EqualTo(retained));
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(providerSelections)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(methodProviderArtifact)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(typeProviderArtifact)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(consumerArtifact)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public async Task CompileTrRmBindsVersionThreeScalarOnlySourceProviderAsync()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-initializer-copy-evidence-1";
+        const string providerIdentity = "source-provider-cli-scalar-method";
+        const string consumerIdentity = "source-provider-cli-scalar-consumer";
+        var providerSelections = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"source-provider-cli-scalar-method-{Guid.NewGuid():N}.json");
+        var providerArtifact = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"source-provider-cli-scalar-method-{Guid.NewGuid():N}.trrm");
+        var consumerArtifact = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"source-provider-cli-scalar-method-{Guid.NewGuid():N}.trrm");
+        try
+        {
+            var providerCompilation = Compilation.CreateLibrary(
+                SyntaxTree.Parse("public void Ping() {}"));
+            Assert.That(providerCompilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    providerCompilation.Diagnostics));
+            var providerArtifactBytes = TrRmExecutableCompiler.EmitStandard(
+                (BoundProgram)providerCompilation.Program!, providerIdentity,
+                schemaIdentity,
+                TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+            await File.WriteAllBytesAsync(providerArtifact,
+                providerArtifactBytes).ConfigureAwait(true);
+            var providerConfiguration = JsonSerializer.Serialize(new {
+                schemaVersion = 3,
+                providers = new[] {
+                    new { schemaIdentity, path = providerArtifact },
+                },
+                references = new[] {
+                    new {
+                        providerInputOrdinal = 0,
+                        moduleIdentity = providerIdentity,
+                        methodExportKeys = new[] { "Ping" },
+                        typeExportKeys = Array.Empty<object>(),
+                        fieldExportKeys = Array.Empty<object>(),
+                    },
+                },
+            });
+            await File.WriteAllTextAsync(providerSelections,
+                providerConfiguration, new UTF8Encoding(false))
+                .ConfigureAwait(true);
+
+            var (exit, result, error) = await RunAsync(
+                Encoding.UTF8.GetBytes("public void Forward() { Ping(); }"),
+                "compile-trrm", "-", "--identity", consumerIdentity,
+                "--trrm-schema", schemaIdentity, "--trrm-source-providers",
+                providerSelections, "--library", "-o", consumerArtifact,
+                "--runtime", "fail-fast", "--json")
+                .ConfigureAwait(false);
+            Assert.That(exit, Is.Zero,
+                $"{result}{Environment.NewLine}{error}");
+            Assert.That(error, Is.Empty);
+
+            var tables = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                    File.ReadAllBytes(consumerArtifact),
+                    TrRmArtifactSchema
+                        .C1M1Construction2InitializerCopyEvidenceDraft));
+            Assert.That(tables.Imports.Count, Is.EqualTo(1));
+            Assert.That(tables.Imports.GetExpectedDefinitionForImportRow(1)
+                    >> 24,
+                Is.EqualTo(0x16u));
+            Assert.That(tables.Imports.GetBindingForImportRow(1).ExportKey,
+                Is.EqualTo("Ping"));
+            Assert.That(tables.ModuleRefs.GetProducerIdentity(
+                    tables.Imports.GetModuleRefForImportRow(1)),
+                Is.EqualTo(providerIdentity));
+
+            var invalidConfigurations = new[] {
+                JsonSerializer.Serialize(new {
+                    schemaVersion = 3,
+                    providers = new[] {
+                        new { schemaIdentity, path = providerArtifact },
+                    },
+                    references = new[] {
+                        new {
+                            providerInputOrdinal = 0,
+                            moduleIdentity = providerIdentity,
+                            typeExportKeys = Array.Empty<object>(),
+                            fieldExportKeys = Array.Empty<object>(),
+                        },
+                    },
+                }),
+                JsonSerializer.Serialize(new {
+                    schemaVersion = 3,
+                    providers = new[] {
+                        new { schemaIdentity, path = providerArtifact },
+                    },
+                    references = new[] {
+                        new {
+                            providerInputOrdinal = 0,
+                            moduleIdentity = providerIdentity,
+                            methodExportKeys = new[] { "Ping" },
+                            typeExportKeys = Array.Empty<object>(),
+                            fieldExportKeys = Array.Empty<object>(),
+                        },
+                        new {
+                            providerInputOrdinal = 0,
+                            moduleIdentity = providerIdentity,
+                            methodExportKeys = new[] { "Ping" },
+                            typeExportKeys = Array.Empty<object>(),
+                            fieldExportKeys = Array.Empty<object>(),
+                        },
+                    },
+                }),
+                JsonSerializer.Serialize(new {
+                    schemaVersion = 3,
+                    providers = new[] {
+                        new { schemaIdentity, path = providerArtifact },
+                    },
+                    references = new[] {
+                        new {
+                            providerInputOrdinal = 0,
+                            moduleIdentity = providerIdentity,
+                            methodExportKeys = new[] { "Ping" },
+                            typeExportKeys = new[] {
+                                new {
+                                    moduleIdentity = providerIdentity,
+                                    exportKey = "same.key",
+                                },
+                            },
+                            fieldExportKeys = new[] {
+                                new {
+                                    moduleIdentity = providerIdentity,
+                                    exportKey = "same.key",
+                                },
+                            },
+                        },
+                    },
+                }),
+                $$"""
+                    {
+                      "schemaVersion": 3.0,
+                      "providers": [{
+                        "schemaIdentity": {{JsonSerializer.Serialize(schemaIdentity)}},
+                        "path": {{JsonSerializer.Serialize(providerArtifact)}}
+                      }],
+                      "references": [{
+                        "providerInputOrdinal": 0,
+                        "moduleIdentity": {{JsonSerializer.Serialize(providerIdentity)}},
+                        "methodExportKeys": ["Ping"],
+                        "typeExportKeys": [],
+                        "fieldExportKeys": []
+                      }]
+                    }
+                    """,
+            };
+            foreach (var invalidConfiguration in invalidConfigurations)
+            {
+                await File.WriteAllBytesAsync(consumerArtifact, retained)
+                    .ConfigureAwait(true);
+                await File.WriteAllTextAsync(providerSelections,
+                    invalidConfiguration, new UTF8Encoding(false))
+                    .ConfigureAwait(true);
+                var (invalidExit, invalidResult, invalidError)
+                    = await RunAsync(
+                        Encoding.UTF8.GetBytes(
+                            "public void Forward() { Ping(); }"),
+                        "compile-trrm", "-", "--identity", consumerIdentity,
+                        "--trrm-schema", schemaIdentity,
+                        "--trrm-source-providers", providerSelections,
+                        "--library", "-o", consumerArtifact, "--runtime",
+                        "fail-fast", "--json").ConfigureAwait(false);
+                Assert.That(invalidExit, Is.EqualTo(2),
+                    $"{invalidResult}{Environment.NewLine}{invalidError}");
+                Assert.That(invalidError, Is.Empty);
+                using (var document = JsonDocument.Parse(invalidResult))
+                {
+                    Assert.That(document.RootElement
+                            .GetProperty("diagnostic").GetProperty("code")
+                            .GetString(),
+                        Is.EqualTo("TRM2001"));
+                }
+                Assert.That(await File.ReadAllBytesAsync(consumerArtifact)
+                    .ConfigureAwait(true), Is.EqualTo(retained));
+            }
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(providerSelections)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(providerArtifact)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(consumerArtifact)
+                .ConfigureAwait(true);
+        }
+    }
+
     [TestCase(
         "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-class-parameter-defaults-1")]
     [TestCase(
