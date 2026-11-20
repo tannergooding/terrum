@@ -577,10 +577,69 @@ public static partial class TrRmExecutableCompiler
             .ToHashSet();
         var classHandleTypeDependencies
             = new HashSet<BoundGenericNominalTypeIdentity>();
+        var classTypeBindingEqualityEndpointsByActualType
+            = new Dictionary<BoundGenericNominalTypeIdentity,
+                List<BoundStandardClassTypeDefBindingEqualityEndpoint>>();
+        var createsClassTypeBindingEquality
+            = StandardGenericMethodSchema.IsClassTypeBindingViews(
+                classSchemaIdentity);
+        void AddClassTypeBindingEqualityEndpoint(
+            BoundGenericNominalTypeIdentity actualIdentity,
+            BoundStandardClassTypeDefBindingEqualityEndpoint endpoint)
+        {
+            if (!createsClassTypeBindingEquality)
+            {
+                return;
+            }
+
+            if (!classTypeBindingEqualityEndpointsByActualType.TryGetValue(
+                    actualIdentity, out var endpoints))
+            {
+                endpoints = [];
+                classTypeBindingEqualityEndpointsByActualType.Add(
+                    actualIdentity, endpoints);
+            }
+
+            if (!endpoints.Any(candidate =>
+                    candidate.TypeDefDefinitionId
+                        == endpoint.TypeDefDefinitionId
+                    && candidate.ImportRow == endpoint.ImportRow
+                    && StringComparer.Ordinal.Equals(candidate.ExportKey,
+                        endpoint.ExportKey)
+                    && SameA2SourceTypeProviderSnapshot(
+                        candidate.OwnerModule, endpoint.OwnerModule)))
+            {
+                endpoints.Add(endpoint);
+            }
+        }
+
         for (var referenceIndex = 0;
             referenceIndex < references.Length; referenceIndex++)
         {
             var reference = references[referenceIndex];
+            foreach (var declaration in reference.StandardClassDeclarations)
+            {
+                if (!declaration.SelectedExportKeys.IsDefaultOrEmpty)
+                {
+                    AddClassTypeBindingEqualityEndpoint(
+                        declaration.Declaration.Identity,
+                        new BoundStandardClassTypeDefBindingEqualityEndpoint(
+                            declaration.Declaration.Provider,
+                            declaration.Declaration.Identity.DefinitionId,
+                            0, null));
+                }
+
+                foreach (var group
+                    in declaration.TypeDefBindingEqualityGroups)
+                {
+                    foreach (var endpoint in group.Endpoints)
+                    {
+                        AddClassTypeBindingEqualityEndpoint(
+                            declaration.Declaration.Identity, endpoint);
+                    }
+                }
+            }
+
             var pendingClassIdentities
                 = new Queue<BoundGenericNominalTypeIdentity>(
                     reference.StandardClassDeclarations
@@ -626,6 +685,55 @@ public static partial class TrRmExecutableCompiler
                             definition.Identity);
                         pendingClassIdentities.Enqueue(
                             definition.Identity);
+
+                        var classDeclaration
+                            = reference.StandardClassDeclarations
+                                .SingleOrDefault(candidate =>
+                                    candidate.Declaration.Identity
+                                        == definition.Identity)
+                            ?? throw Invalid(
+                                "A selected class handle field lost its declaration view.");
+                        if (instance.TypeSpecForm == 0x03
+                            && instance.TypeSpecReference != 0
+                            && instance.TypeSpecProviderIdentity
+                                is string usingModuleIdentity)
+                        {
+                            var importRow = checked((int)
+                                instance.TypeSpecReference);
+                            var expectation
+                                = classDeclaration.Expectations
+                                    .SingleOrDefault(candidate =>
+                                        candidate.Binding.ImportRow
+                                            == importRow
+                                        && StringComparer.Ordinal.Equals(
+                                            candidate.Binding.UsingModule
+                                                .ModuleIdentity,
+                                            usingModuleIdentity)
+                                        && candidate.Binding
+                                            .ExpectedDefinitionId
+                                            == definition.Identity
+                                                .DefinitionId);
+                            if (expectation is not null)
+                            {
+                                AddClassTypeBindingEqualityEndpoint(
+                                    definition.Identity,
+                                    new BoundStandardClassTypeDefBindingEqualityEndpoint(
+                                        expectation.Binding.UsingModule,
+                                        expectation.Binding
+                                            .ExpectedDefinitionId,
+                                        expectation.Binding.ImportRow,
+                                        expectation.Binding.ExportKey));
+                            }
+                        }
+                        else if (instance.TypeSpecForm is 0 or 0x02)
+                        {
+                            AddClassTypeBindingEqualityEndpoint(
+                                definition.Identity,
+                                new BoundStandardClassTypeDefBindingEqualityEndpoint(
+                                    classDeclaration.Declaration.Provider,
+                                    definition.Identity.DefinitionId, 0,
+                                    null));
+                        }
                     }
 
                     return;
@@ -2243,6 +2351,29 @@ public static partial class TrRmExecutableCompiler
             }
 
             structuresResult = remappedStructures.MoveToImmutable();
+        }
+
+        if (createsClassTypeBindingEquality)
+        {
+            for (var declarationIndex = 0;
+                declarationIndex < declarations.Count; declarationIndex++)
+            {
+                var declaration = declarations[declarationIndex];
+                if (!classTypeBindingEqualityEndpointsByActualType.TryGetValue(
+                        declaration.Declaration.Identity,
+                        out var endpoints)
+                    || endpoints.Count < 2)
+                {
+                    continue;
+                }
+
+                declarations[declarationIndex] = declaration with {
+                    TypeDefBindingEqualityGroups = [
+                        new BoundStandardClassTypeDefBindingEqualityGroup(
+                            [.. endpoints]),
+                    ],
+                };
+            }
         }
 
         var definitionTable = definitions.ToImmutable();

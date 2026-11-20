@@ -167,6 +167,13 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
                 static expectation =>
                     expectation.Binding.ImportRow),
             Is.All.EqualTo(1));
+        Assert.That(leaf.TypeDefBindingEqualityGroups,
+            Has.Length.EqualTo(1));
+        Assert.That(leaf.TypeDefBindingEqualityGroups[0].Endpoints,
+            Has.Length.EqualTo(2));
+        Assert.That(leaf.TypeDefBindingEqualityGroups[0].Endpoints.Select(
+                static endpoint => endpoint.OwnerModule.ModuleIdentity),
+            Is.EquivalentTo(["RootA", "RootB"]));
     }
 
     [Test]

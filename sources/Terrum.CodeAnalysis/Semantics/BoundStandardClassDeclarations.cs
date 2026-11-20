@@ -112,6 +112,15 @@ internal sealed record BoundStandardClassExpectation(
         MethodExpectations { get; init; } = [];
 }
 
+internal readonly record struct
+    BoundStandardClassTypeDefBindingEqualityEndpoint(
+        BoundSourceTypeProviderSnapshot OwnerModule,
+        uint TypeDefDefinitionId, int ImportRow, string? ExportKey);
+
+internal sealed record BoundStandardClassTypeDefBindingEqualityGroup(
+    ImmutableArray<BoundStandardClassTypeDefBindingEqualityEndpoint>
+        Endpoints);
+
 internal sealed record BoundStandardClassFieldExpectation(
     int ImportRow, int OwnerImportRow, uint ExpectedDefinitionId,
     uint ExpectedOwnerDefinitionId, uint ProviderDefinitionId,
@@ -130,6 +139,8 @@ internal sealed record BoundStandardClassDeclaration(
     ImmutableArray<BoundStandardClassExpectation> Expectations)
 {
     internal ImmutableArray<string> SelectedExportKeys { get; init; } = [];
+    internal ImmutableArray<BoundStandardClassTypeDefBindingEqualityGroup>
+        TypeDefBindingEqualityGroups { get; init; } = [];
 }
 
 internal static class BoundStandardClassDeclarationContract
@@ -243,6 +254,7 @@ internal static class BoundStandardClassDeclarationContract
                 || declaration.ExportKeys.IsDefault
                 || declaration.Expectations.IsDefault
                 || declaration.SelectedExportKeys.IsDefault
+                || declaration.TypeDefBindingEqualityGroups.IsDefault
                 || !identities.Add(declaration.Declaration.Identity)
                 || !definitions.TryGetValue(declaration.Declaration.Identity,
                     out var definition)
@@ -487,6 +499,84 @@ internal static class BoundStandardClassDeclarationContract
                     }
                 }
 
+            }
+
+            foreach (var group in declaration.TypeDefBindingEqualityGroups)
+            {
+                if (group is null || group.Endpoints.IsDefault
+                    || group.Endpoints.Length < 2
+                    || !StandardGenericMethodSchema
+                        .IsClassTypeBindingViews(
+                            declaration.Declaration.Provider.SchemaIdentity))
+                {
+                    return false;
+                }
+                totalRows += group.Endpoints.Length;
+                if (totalRows > SemanticVerifier.MaximumAnalysisVisits)
+                {
+                    return false;
+                }
+
+                var previousEndpoints
+                    = new List<BoundStandardClassTypeDefBindingEqualityEndpoint>();
+                foreach (var endpoint in group.Endpoints)
+                {
+                    if (endpoint.OwnerModule is null
+                        || !IsValidSnapshot(endpoint.OwnerModule)
+                        || !StringComparer.Ordinal.Equals(
+                            endpoint.OwnerModule.SchemaIdentity,
+                            declaration.Declaration.Provider.SchemaIdentity)
+                        || endpoint.TypeDefDefinitionId >> 24 != 0x13
+                        || (endpoint.TypeDefDefinitionId & 0x00FF_FFFF) == 0)
+                    {
+                        return false;
+                    }
+
+                    if (previousEndpoints.Any(previous =>
+                            previous.TypeDefDefinitionId
+                                == endpoint.TypeDefDefinitionId
+                            && previous.ImportRow == endpoint.ImportRow
+                            && StringComparer.Ordinal.Equals(
+                                previous.ExportKey, endpoint.ExportKey)
+                            && SnapshotsMatch(previous.OwnerModule,
+                                endpoint.OwnerModule)))
+                    {
+                        return false;
+                    }
+                    previousEndpoints.Add(endpoint);
+
+                    if (endpoint.ImportRow == 0)
+                    {
+                        if (endpoint.ExportKey is not null
+                            || endpoint.TypeDefDefinitionId
+                                != declaration.Declaration.Identity
+                                    .DefinitionId
+                            || !SnapshotsMatch(endpoint.OwnerModule,
+                                declaration.Declaration.Provider))
+                        {
+                            return false;
+                        }
+                        continue;
+                    }
+
+                    if (endpoint.ImportRow < 0
+                        || endpoint.ExportKey is not string exportKey
+                        || !IsValidText(exportKey)
+                        || !declaration.Expectations.Any(expectation =>
+                            expectation.Binding.ImportRow
+                                == endpoint.ImportRow
+                            && expectation.Binding.ExpectedDefinitionId
+                                == endpoint.TypeDefDefinitionId
+                            && StringComparer.Ordinal.Equals(
+                                expectation.Binding.ExportKey,
+                                exportKey)
+                            && SnapshotsMatch(
+                                expectation.Binding.UsingModule,
+                                endpoint.OwnerModule)))
+                    {
+                        return false;
+                    }
+                }
             }
         }
 
