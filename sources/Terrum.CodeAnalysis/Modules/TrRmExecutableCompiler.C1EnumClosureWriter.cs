@@ -25,23 +25,28 @@ public static partial class TrRmExecutableCompiler
     {
         internal ImmutableArray<C1EnumClosureImport> AdditionalImports
             { get; init; } = [];
+        internal ImmutableArray<BoundStandardClassMethodExpectation>
+            MethodExpectations { get; init; } = [];
     }
 
     private static BoundFunction? GetEN1ClassLayoutQueryFunction(
         BoundProgram program, string schemaIdentity)
     {
-        if (program.Functions.IsEmpty)
+        var moduleFunctions = program.Functions
+            .Where(static function => function.DeclaringStruct is null)
+            .ToArray();
+        if (moduleFunctions.Length == 0)
         {
             return null;
         }
         if (!IsSelectedC1ClassInstanceLayoutSchemaIdentity(schemaIdentity)
-            || program.Functions.Length != 1)
+            || moduleFunctions.Length != 1)
         {
             throw Unsupported(
                 "The bounded EN1 Body route accepts one parameterless nint method with authorized class-root OffsetOfType queries.");
         }
 
-        var function = program.Functions[0];
+        var function = moduleFunctions[0];
         if (function.ReturnType != PrimitiveType.NativeInt
             || function.ParameterCount != 0
             || function.IsExternal || function.IsConstructor
@@ -254,6 +259,12 @@ public static partial class TrRmExecutableCompiler
         ImmutableArray<string> ExportKeys,
         C1EnumClosureImport? Import, int RootImportRow = 0);
 
+    private sealed record C1EnumClosureSourceConstructorPlan(
+        int ClassIndex, BoundFunction Function, int FunctionIndex,
+        ImmutableArray<BoundFieldAssignment> FieldAssignments,
+        uint ClassTypeSpecReference,
+        ImmutableArray<SourceClassMemberExport> MemberExports);
+
     private static byte[] EmitC1EnumClosureDeclarationLibrary(
         BoundProgram program, string moduleIdentity, string schemaIdentity,
         uint moduleTargetRequirement, TrRmArtifactSchema schema,
@@ -347,6 +358,28 @@ public static partial class TrRmExecutableCompiler
                         expectation.ExpectedDefinitionId));
             }
         }
+        bool IsSupportedClassConstructorMethod(
+            BoundStandardClassMethodDeclaration method)
+            => schema.UsesConstructionContracts()
+                && method.ConstructionRole is 1 or 2
+                && (method.ConstructionRole != 2
+                    || schema.UsesObjectConstruction())
+                && method.ConstructionPropertyDefinitionId == 0
+                && method.GenericParameterCount == 0
+                && method.GenericParameters.IsEmpty
+                && method.DependencyClauses.IsEmpty
+                && (method.EffectsMask & ~6u) == 0
+                && (method.ConstructionRole == 1
+                    ? method.InitializerMethodDefinitionId == 0
+                        && !method.InitializedMemberDefinitionIds.IsDefault
+                    : (method.InitializerMethodDefinitionId >> 24) == 0x16
+                        && (method.InitializerMethodDefinitionId
+                            & 0x00FF_FFFF) != 0
+                        && method.InitializedMemberDefinitionIds
+                            .IsDefaultOrEmpty)
+                && method.Parameters.All(static parameter =>
+                    parameter.Mode == 0 && parameter.Flags == 0
+                    && parameter.DefaultValue is null);
         var standardClassClosureIsValid
             = standardClassDeclarations.IsEmpty
                 ? program.GenericNominalTypeDefinitions.IsEmpty
@@ -354,10 +387,18 @@ public static partial class TrRmExecutableCompiler
                         standardClassDeclarations,
                         program.GenericNominalTypeDefinitions)
                     && standardClassDeclarations.All(declaration =>
-                        declaration.Declaration.Methods.IsEmpty
+                        declaration.Declaration.Methods.All(
+                            IsSupportedClassConstructorMethod)
                         && declaration.Expectations.All(expectation =>
                             expectation.ExpectedDeclaration.Methods
-                                .IsEmpty))
+                                .All(IsSupportedClassConstructorMethod)
+                            && expectation.MethodExpectations.All(
+                                methodExpectation =>
+                                    expectation.ExpectedDeclaration.Methods
+                                        .Any(method =>
+                                            method.DefinitionId
+                                                == methodExpectation
+                                                    .ExpectedDefinitionId))))
                     && program.GenericNominalTypeDefinitions.All(
                         definition =>
                             definition.Formals.IsEmpty
@@ -403,7 +444,12 @@ public static partial class TrRmExecutableCompiler
                     || hasSourceTypeExports))
             || program.EntryPoint != -1
             || (!program.Functions.IsEmpty
+                && program.Functions.Any(static function =>
+                    function.DeclaringStruct is null)
                 && classQueryFunction is null)
+            || program.Functions.Any(static function =>
+                function.DeclaringStruct is not null
+                && !function.IsClassConstructor)
             || (!program.Structures.IsEmpty && !hasSourceTypeExports
                 && !hasStandardStructViews
                 && sourceClassExports?.Exports.IsEmpty != false)
@@ -812,7 +858,10 @@ public static partial class TrRmExecutableCompiler
                                 binding.ImportRow),
                             checked((int)(binding.ExpectedDefinitionId
                                 & 0x00FF_FFFF),
-                            expectation.FieldExpectations));
+                            expectation.FieldExpectations) {
+                            MethodExpectations
+                                = expectation.MethodExpectations,
+                        });
                 }
             }
 
@@ -1149,6 +1198,9 @@ public static partial class TrRmExecutableCompiler
             = new SortedDictionary<int, List<string>>();
         var sourceClassFieldExportsByIndex = new Dictionary<
             (int ClassIndex, int FieldIndex), List<string>>();
+        var sourceClassConstructorExportsByIndex = new Dictionary<
+            (int ClassIndex, int FunctionIndex),
+            List<SourceClassMemberExport>>();
         var retainedClassIndexes = new SortedSet<int>();
         var sourceClassAssociation = program.SourceClassProgramAssociation;
         var localClassIndexes = sourceClassAssociation is null
@@ -1195,10 +1247,48 @@ public static partial class TrRmExecutableCompiler
 
                 foreach (var memberExport in classExport.MemberExports)
                 {
+                    if (memberExport.Kind == SourceClassMemberKind.Constructor)
+                    {
+                        if (!schema.UsesConstructionContracts()
+                            || (memberExport.ConstructionProjectionExportKey
+                                is not null
+                                && !schema.UsesObjectConstruction())
+                            || (uint)memberExport.FunctionIndex
+                                >= (uint)program.Functions.Length)
+                        {
+                            throw Unsupported(
+                                "The selected EN1 agreement cannot emit this constructor or its construction projection.");
+                        }
+
+                        var constructor
+                            = program.Functions[memberExport.FunctionIndex];
+                        if (!constructor.IsClassConstructor
+                            || constructor.DeclaringStruct
+                                != program.Classes[classIndex].Name)
+                        {
+                            throw new ArgumentException(
+                                "An EN1 constructor ExportKey must select the checked initializer of its declaring class.",
+                                nameof(sourceClassExports));
+                        }
+
+                        if (!sourceClassConstructorExportsByIndex.TryGetValue(
+                                (classIndex, memberExport.FunctionIndex),
+                                out var constructorExports))
+                        {
+                            constructorExports = [];
+                            sourceClassConstructorExportsByIndex.Add(
+                                (classIndex, memberExport.FunctionIndex),
+                                constructorExports);
+                        }
+
+                        constructorExports.Add(memberExport);
+                        continue;
+                    }
+
                     if (memberExport.Kind != SourceClassMemberKind.Field)
                     {
                         throw Unsupported(
-                            "The bounded EN1 class route emits FieldDefs only; constructors, methods and properties require their complete Body closure.");
+                            "The bounded EN1 class route emits FieldDefs and constructor initializers only; methods and properties require their complete Body closure.");
                     }
 
                     var fields = program.Classes[classIndex].Fields;
@@ -2432,6 +2522,9 @@ public static partial class TrRmExecutableCompiler
 
         var parameterRows = new List<TrRmParamRow>();
         var bodyRows = new List<ReadOnlyMemory<byte>>();
+        var methodParameterLabelRows
+            = new List<(int MethodDefRow, int Ordinal, string Name)>();
+        var contractRows = new List<TrRmContractRow>();
         var typeDefNames = new List<(string Namespace, string Name)>(
             emittedEnums.Count + retainedClassIndexes.Count
                 + standardClassDeclarationsByTypeDef.Length
@@ -2443,7 +2536,11 @@ public static partial class TrRmExecutableCompiler
                 + retainedStructureIndexes.Count));
         var fieldRows = new List<TrRmFieldDefRow>();
         var fieldNames = new List<string>();
+        var fieldDefRowByClassAndIndex
+            = new Dictionary<(int ClassIndex, int FieldIndex), int>();
         var layoutFieldRows = new List<TrRmLayoutFieldRow>();
+        var sourceClassConstructorPlans
+            = new List<C1EnumClosureSourceConstructorPlan>();
         var enumRows = new List<TrRmEnumDefRow>(
             emittedEnums.Count);
         var enumMemberRows = new List<TrRmTypedEnumMemberDefRow>();
@@ -3296,6 +3393,22 @@ public static partial class TrRmExecutableCompiler
             var typeDefFlags = (classExportKeys.Count != 0 ? 2u
                 : @class.IsInternal ? 1u : 2u) | 0x08u
                     | (@class.IsMutable ? 0x80u : 0u);
+            if (schema.UsesConstructionInitializerCopyEvidence())
+            {
+                if (@class.HasCleanup == true
+                    || @class.CleanupMethod is not null
+                    || @class.IsUnique is not bool isUnique)
+                {
+                    throw Unsupported(
+                        "Initializer Copy evidence requires a retained total class-uniqueness fact without an unrepresented class Cleanup.");
+                }
+
+                if (isUnique)
+                {
+                    typeDefFlags
+                        |= TrRmTypeDefTableReader.DeclaredUniqueFlag;
+                }
+            }
             var fieldFirst = fieldRows.Count + 1;
             var layoutFieldFirst = layoutFieldRows.Count + 1;
             var fieldNamesForClass = new HashSet<string>(
@@ -3321,6 +3434,8 @@ public static partial class TrRmExecutableCompiler
                 fieldRows.Add(new TrRmFieldDefRow(typeDefRow, 0,
                     FieldTypeSpecReference(field.Type), fieldFlags));
                 fieldNames.Add(field.Name);
+                fieldDefRowByClassAndIndex.Add(
+                    (classIndex, fieldOrdinal), fieldDefRow);
                 layoutFieldRows.Add(new TrRmLayoutFieldRow(
                     layoutRows.Count + 1, fieldOrdinal, fieldDefRow));
                 if (sourceClassFieldExportsByIndex.TryGetValue(
@@ -3334,6 +3449,94 @@ public static partial class TrRmExecutableCompiler
                             AddString(exportKey)));
                     }
                 }
+            }
+
+            if (!schema.UsesConstructionContracts())
+            {
+                throw Unsupported(
+                    "EN1 class source publication requires its exact Construction successor.");
+            }
+
+            var constructorFunctions = program.Functions
+                .Select(static (function, functionIndex) =>
+                    (Function: function, FunctionIndex: functionIndex))
+                .Where(item => item.Function.IsClassConstructor
+                    && StringComparer.Ordinal.Equals(
+                        item.Function.DeclaringStruct, @class.Name))
+                .OrderBy(static item => item.FunctionIndex)
+                .ToArray();
+            if (constructorFunctions.Length == 0)
+            {
+                throw new InvalidDataException(
+                    "A retained EN1 source class has no checked constructor initializer.");
+            }
+
+            foreach (var (function, functionIndex) in constructorFunctions)
+            {
+                var memberExports
+                    = sourceClassConstructorExportsByIndex.TryGetValue(
+                        (classIndex, functionIndex), out var mappedExports)
+                        ? mappedExports.ToImmutableArray()
+                        : ImmutableArray<SourceClassMemberExport>.Empty;
+                if (memberExports.Any(static member =>
+                        member.Kind != SourceClassMemberKind.Constructor)
+                    || (classExportKeys.Count != 0
+                        && !function.IsPrivate && !function.IsInternal
+                        && memberExports.IsEmpty)
+                    || (!schema.UsesObjectConstruction()
+                        && memberExports.Any(static member =>
+                            member.ConstructionProjectionExportKey
+                                is not null)))
+                {
+                    throw new InvalidDataException(
+                        "An EN1 class constructor mapping does not preserve its selected initializer and supported projection keys.");
+                }
+
+                var receiverType = function.Variables.IsEmpty
+                    ? PrimitiveType.Void : function.Variables[0].Type;
+                if (!function.IsClassConstructor || function.IsConstructor
+                    || function.IsStatic || function.IsExternal
+                    || function.Intrinsic != BoundIntrinsic.None
+                    || function.ClassConstructor != -1
+                    || function.DeclaringStruct != @class.Name
+                    || function.ReturnType != PrimitiveType.Void
+                    || function.ParameterCount < 1
+                    || function.ParameterCount
+                        != function.Variables.Length
+                    || function.ParameterCount
+                        > SemanticVerifier.MaximumArguments
+                    || function.DoesNotReturn || function.NoFailureProof
+                    || !function.CapturedParameters.IsEmpty
+                    || !function.DeclarationContractClauses.IsEmpty
+                    || function.ModuleImport is not null
+                    || function.GenericMethodInstantiation is not null
+                    || function.IsPartialConstructor
+                    || function.HasPureEvaluationForm
+                    || function.IsCleanup
+                    || !function.OrdinaryParameterDefaults.IsEmpty
+                    || function.IsPrivate && function.IsInternal
+                    || !ManagedClassTypes.IsClass(receiverType)
+                    || ManagedClassTypes.ClassIndex(receiverType)
+                        != classIndex
+                    || ManagedClassTypes.IsOptional(receiverType)
+                    || ManagedClassTypes.IsWritable(receiverType)
+                        != @class.IsMutable)
+                {
+                    throw Unsupported(
+                        "The bounded EN1 class constructor path cannot discard source ownership, signature, access, effect or completion facts.");
+                }
+
+                var fieldAssignments
+                    = GetC1M1Construction2FieldAssignments(program,
+                        function, @class, sourceStructDeclarationsByIndex,
+                        schema, schemaIdentity);
+                var classTypeSpecReference
+                    = FieldTypeSpecReference(receiverType);
+                sourceClassConstructorPlans.Add(
+                    new C1EnumClosureSourceConstructorPlan(
+                        classIndex, function, functionIndex,
+                        fieldAssignments, classTypeSpecReference,
+                        memberExports));
             }
 
             typeDefRows.Add(new TrRmTypeDefRow(0, 0, typeDefFlags,
@@ -3535,6 +3738,21 @@ public static partial class TrRmExecutableCompiler
             var typeDefRow = typeDefRowByStructure[structureIndex];
             var typeDefFlags = (structure.IsPrivate ? 0u
                 : structure.IsInternal ? 1u : 2u) | 0x04u;
+            if (schema.UsesConstructionInitializerCopyEvidence())
+            {
+                var declaresCopy = structure.StandardTypeOrigin is not null
+                    ? structure.DeclaredCopyEvidence == true
+                    : IsC1M1Construction2SourceCopyType(
+                        (PrimitiveType)(100 + structureIndex), program,
+                        schema, schemaIdentity,
+                        sourceStructDeclarationsByIndex);
+                if (declaresCopy)
+                {
+                    typeDefFlags
+                        |= TrRmTypeDefTableReader.DeclaredCopyFlag;
+                }
+            }
+
             var fieldFirst = structure.Fields.IsEmpty
                 ? 0 : fieldRows.Count + 1;
             var layoutFieldFirst = structure.Fields.IsEmpty
@@ -3708,6 +3926,215 @@ public static partial class TrRmExecutableCompiler
 
                 methodRows.Add(new TrRmMethodDefRow(0,
                     AddString(anchorName), methodSignatureRow, 0, 0, 0, 0));
+            }
+        }
+
+        foreach (var constructorPlan in sourceClassConstructorPlans)
+        {
+            var classIndex = constructorPlan.ClassIndex;
+            var function = constructorPlan.Function;
+            var initializerMethodDefRow = methodRows.Count + 1;
+            var initializerSignatureRow
+                = methodSignatureRows.Count + 1;
+            var initializerParamCount = function.ParameterCount - 1;
+            var initializerParamFirst = initializerParamCount == 0
+                ? 0 : parameterRows.Count + 1;
+            for (var ordinal = 0; ordinal < initializerParamCount; ordinal++)
+            {
+                var parameter = function.Variables[ordinal + 1];
+                if (parameter.IsMutable || parameter.IsOut
+                    || parameter.IsInit || parameter.IsImplicitRef
+                    || parameter.IsInitializationLocal)
+                {
+                    throw Unsupported(
+                        "The bounded EN1 class initializer supports ordinary immutable value parameters.");
+                }
+
+                parameterRows.Add(new TrRmParamRow(
+                    initializerSignatureRow, ordinal,
+                    FieldTypeSpecReference(parameter.Type), 0, 0));
+                if (schema.UsesMethodParameterLabels())
+                {
+                    methodParameterLabelRows.Add((
+                        initializerMethodDefRow, ordinal, parameter.Name));
+                    _ = AddString(parameter.Name);
+                }
+            }
+
+            methodSignatureRows.Add(new TrRmMethodSigRow(
+                0xF200_0000u,
+                constructorPlan.ClassTypeSpecReference,
+                initializerParamFirst, initializerParamCount, 0, 0));
+
+            var effectsMask
+                = (function.DoesNotReturn ? 2u : 0u)
+                    | (function.RequiresUnsafeCaller ? 4u : 0u);
+            if (function.DoesNotReturn
+                || function.DeclaredRequiresUnsafeCaller
+                    != function.RequiresUnsafeCaller
+                || function.NoFailureProof
+                || function.HasPureEvaluationForm
+                || function.HasOrdinaryParameterDefaultSurface
+                    && !function.OrdinaryParameterDefaults.IsEmpty
+                || !function.DependencyContracts.IsEmpty
+                || !function.DeclarationContractClauses.IsEmpty)
+            {
+                throw Unsupported(
+                    "The bounded EN1 constructor initializer cannot discard its completion, dependency, graph or default obligations.");
+            }
+
+            var initializerContractFirst = 0;
+            var initializerContractCount = 0;
+            if (effectsMask != 0)
+            {
+                initializerContractFirst = contractRows.Count + 1;
+                contractRows.Add(new TrRmContractRow(
+                    0x1600_0000u
+                        | checked((uint)initializerMethodDefRow),
+                    1, s_effectPayloads[effectsMask]));
+                initializerContractCount++;
+            }
+
+            var constructionPayload
+                = EncodeC1M1Construction2InitializerContract(
+                    constructorPlan.FieldAssignments,
+                    fieldDefRowByClassAndIndex, classIndex);
+            if (initializerContractFirst == 0)
+            {
+                initializerContractFirst = contractRows.Count + 1;
+            }
+            contractRows.Add(new TrRmContractRow(
+                0x1600_0000u
+                    | checked((uint)initializerMethodDefRow),
+                0x0003, constructionPayload));
+            initializerContractCount++;
+
+            var visibility = function.IsPrivate ? 0u
+                : function.IsInternal ? 1u : 2u;
+            var initializer = new C1M1Construction2SourceInitializer(
+                classIndex, function,
+                constructorPlan.ClassTypeSpecReference,
+                constructorPlan.FieldAssignments,
+                initializerMethodDefRow, 0);
+            var initializerBody = EncodeC1M1Construction2InitializerBody(
+                program, initializer, fieldDefRowByClassAndIndex,
+                FieldTypeSpecReference, valueBuilder, contractRows.Count,
+                schema);
+            var initializerBodyRow = bodyRows.Count + 1;
+            bodyRows.Add(initializerBody);
+            methodRows.Add(new TrRmMethodDefRow(
+                typeDefRowByClass[classIndex],
+                AddString(function.Name), initializerSignatureRow,
+                visibility, initializerContractFirst,
+                initializerContractCount, initializerBodyRow));
+
+            foreach (var memberExport in constructorPlan.MemberExports)
+            {
+                exportRows.Add(new TrRmExportRow(
+                    0x1600_0000u
+                        | checked((uint)initializerMethodDefRow),
+                    AddString(memberExport.ExportKey)));
+            }
+
+            var projectionExportKeys = constructorPlan.MemberExports
+                .Where(static member =>
+                    member.ConstructionProjectionExportKey is not null)
+                .Select(static member =>
+                    member.ConstructionProjectionExportKey!)
+                .ToArray();
+            if (!schema.UsesObjectConstruction())
+            {
+                continue;
+            }
+
+            if (constructorPlan.FieldAssignments.Length
+                != program.Classes[classIndex].Fields.Length)
+            {
+                if (projectionExportKeys.Length != 0)
+                {
+                    throw Unsupported(
+                        "A Construction-2 projection ExportKey requires a constructor that initializes every class field.");
+                }
+
+                continue;
+            }
+
+            if (!function.DependencyContracts.IsEmpty)
+            {
+                if (projectionExportKeys.Length != 0)
+                {
+                    throw Unsupported(
+                        "A Construction-2 projection ExportKey requires a checked result-dependency mapping for its initializer.");
+                }
+
+                continue;
+            }
+
+            var projectionMethodDefRow = methodRows.Count + 1;
+            var projectionSignatureRow = methodSignatureRows.Count + 1;
+            var projectionParamFirst = initializerParamCount == 0
+                ? 0 : parameterRows.Count + 1;
+            for (var ordinal = 0; ordinal < initializerParamCount; ordinal++)
+            {
+                var parameter = function.Variables[ordinal + 1];
+                var parameterTypeSpecReference
+                    = FieldTypeSpecReference(parameter.Type);
+                parameterRows.Add(new TrRmParamRow(projectionSignatureRow,
+                    ordinal, parameterTypeSpecReference, 0, 0));
+                if (schema.UsesMethodParameterLabels())
+                {
+                    methodParameterLabelRows.Add((
+                        projectionMethodDefRow, ordinal, parameter.Name));
+                }
+            }
+
+            methodSignatureRows.Add(new TrRmMethodSigRow(
+                constructorPlan.ClassTypeSpecReference, 0,
+                projectionParamFirst, initializerParamCount, 0, 0));
+            var projectionContractFirst = contractRows.Count + 1;
+            var projectionContractCount = 0;
+            if (effectsMask != 0)
+            {
+                contractRows.Add(new TrRmContractRow(
+                    0x1600_0000u
+                        | checked((uint)projectionMethodDefRow),
+                    1, s_effectPayloads[effectsMask]));
+                projectionContractCount++;
+            }
+
+            if (projectionContractCount == 0)
+            {
+                projectionContractFirst = contractRows.Count + 1;
+            }
+            contractRows.Add(new TrRmContractRow(
+                0x1600_0000u | checked((uint)projectionMethodDefRow),
+                0x0003,
+                EncodeC1M1Construction2ProjectionContract(
+                    initializerMethodDefRow)));
+            projectionContractCount++;
+            var projectionVisibility = projectionExportKeys.Length == 0
+                ? 0u : 2u;
+            var projection = new C1M1Construction2SourceInitializer(
+                classIndex, function,
+                constructorPlan.ClassTypeSpecReference,
+                constructorPlan.FieldAssignments,
+                initializerMethodDefRow, projectionMethodDefRow);
+            var projectionBody = EncodeC1M1Construction2ProjectionBody(
+                projection, FieldTypeSpecReference, contractRows.Count,
+                schema);
+            var projectionBodyRow = bodyRows.Count + 1;
+            bodyRows.Add(projectionBody);
+            methodRows.Add(new TrRmMethodDefRow(
+                typeDefRowByClass[classIndex],
+                AddString(function.Name), projectionSignatureRow,
+                projectionVisibility, projectionContractFirst,
+                projectionContractCount,
+                projectionBodyRow));
+            foreach (var exportKey in projectionExportKeys)
+            {
+                exportRows.Add(new TrRmExportRow(
+                    0x1600_0000u | checked((uint)projectionMethodDefRow),
+                    AddString(exportKey)));
             }
         }
 
@@ -3941,6 +4368,20 @@ public static partial class TrRmExecutableCompiler
             featureRows.Add(TrRmFeatureRow.TypedFrozenValues);
             featureRows.Add(new TrRmFeatureRow(18, 1));
         }
+        else if (valueBuilder.ConstantSourceCount != 0)
+        {
+            featureRows.Add(TrRmFeatureRow.TypedFrozenValues);
+        }
+        if (schema.UsesObjectConstruction()
+            && sourceClassConstructorPlans.Count != 0)
+        {
+            featureRows.Add(TrRmFeatureRow.ClassConstructionBodiesCandidate);
+        }
+        if (methodParameterLabelRows.Count != 0)
+        {
+            featureRows.Add(
+                TrRmFeatureRow.MethodParameterLabelsCandidate);
+        }
         if (classQueryFunction is not null
             || sourceClassFieldExportsByIndex.Count != 0
             || standardClassFieldExportKeysByDefinition.Count != 0
@@ -3968,6 +4409,7 @@ public static partial class TrRmExecutableCompiler
             + fieldPathRows.Count + targetLayoutDependencyRows.Count
             + targetLayoutDependencyFieldReferences.Count + enumRows.Count
             + enumMemberRows.Count + typeSpecRows.Count + exportRows.Count
+            + methodParameterLabelRows.Count + contractRows.Count
             + featureRows.Count + targetProfileCount + valueBuilder.BlobCount
             + valueBuilder.ConstantSourceCount
             + valueBuilder.FrozenValueNodeCount;
@@ -3989,6 +4431,8 @@ public static partial class TrRmExecutableCompiler
             || enumMemberRows.Count > 0xFF_FFFF
             || typeSpecRows.Count > 0xFF_FFFF
             || exportRows.Count > 0xFF_FFFF
+            || methodParameterLabelRows.Count > 0xFF_FFFF
+            || contractRows.Count > 0xFF_FFFF
             || featureRows.Count > 0xFF_FFFF
             || totalRows > SemanticVerifier.MaximumAnalysisVisits)
         {
@@ -4069,11 +4513,12 @@ public static partial class TrRmExecutableCompiler
                 typeDefs, fields);
         var methodBytes = methodRows.Count == 0 ? []
             : TrRmMethodDefTableWriter.Encode(methodRows, strings, modules,
-                typeDefs, methodSignatures, 0, bodyRows.Count, schema);
+                typeDefs, methodSignatures, contractRows.Count,
+                bodyRows.Count, schema);
         var methods = methodRows.Count == 0 ? default
             : new TrRmMethodDefTableReader(methodBytes, methodRows.Count,
-                strings, modules, typeDefs, methodSignatures, 0,
-                bodyRows.Count, schema);
+                strings, modules, typeDefs, methodSignatures,
+                contractRows.Count, bodyRows.Count, schema);
         var importBytes = importRows.Count == 0 ? []
             : TrRmImportTableWriter.Encode(importRows, strings, moduleRefs,
                 typeDefs, methods, default, default, default, fields,
@@ -4096,6 +4541,12 @@ public static partial class TrRmExecutableCompiler
                 targetLayoutDependencyFieldReferences.Count);
         var bodyBytes = bodyRows.Count == 0 ? []
             : TrRmVariableTableWriter.EncodeBodies(bodyRows);
+        var contractBytes = contractRows.Count == 0 ? []
+            : TrRmContractTableWriter
+                .EncodeConstructionDraftForSchema(contractRows, typeDefs,
+                    methods, methodSignatures, parameters, typeSpecs,
+                    fields, default, imports, features, modules,
+                    predicateGraphCount: 0, schema: schema);
         var enumMemberBytes = enumMemberRows.Count == 0 ? []
             : TrRmEnumTablesWriter.EncodeTypedEnumMemberValues(
                 enumMemberRows, strings, typeDefs,
@@ -4115,6 +4566,28 @@ public static partial class TrRmExecutableCompiler
             : TrRmExportTableWriter.Encode(exportRows, strings, typeDefs,
                 methods, default, imports, default, default, fields,
                 features, modules, schema);
+        var orderedMethodParameterLabelRows = methodParameterLabelRows
+            .OrderBy(static row => row.MethodDefRow)
+            .ThenBy(static row => row.Ordinal)
+            .ToArray();
+        var methodParameterLabelBytes
+            = new byte[checked(
+                orderedMethodParameterLabelRows.Length * 12)];
+        for (var index = 0;
+            index < orderedMethodParameterLabelRows.Length; index++)
+        {
+            var label = orderedMethodParameterLabelRows[index];
+            var offset = index * 12;
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                methodParameterLabelBytes.AsSpan(offset),
+                checked((uint)label.MethodDefRow));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                methodParameterLabelBytes.AsSpan(offset + 4),
+                checked((uint)label.Ordinal));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                methodParameterLabelBytes.AsSpan(offset + 8),
+                checked((uint)stringRowsByText[label.Name]));
+        }
 
         var sections = new List<TrRmSection> {
             new(0x0001, 0, 1, moduleBytes),
@@ -4180,6 +4653,17 @@ public static partial class TrRmExecutableCompiler
         {
             sections.Add(new TrRmSection(0x0020, 0,
                 checked((uint)bodyRows.Count), bodyBytes));
+        }
+        if (contractRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x001B, 0,
+                checked((uint)contractRows.Count), contractBytes));
+        }
+        if (orderedMethodParameterLabelRows.Length != 0)
+        {
+            sections.Add(new TrRmSection(0x0066, 0,
+                checked((uint)orderedMethodParameterLabelRows.Length),
+                methodParameterLabelBytes));
         }
         if (exportRows.Count != 0)
         {

@@ -60,6 +60,14 @@ internal static class TrRmFixedArrayProviderBindingValidator
     private const string CM1AR1SchemaIdentity
         = StandardGenericMethodSchema
             .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraints;
+    private const string C2InitializerCopyEvidenceSchemaIdentity
+        = StandardGenericMethodSchema.C1M1Construction2InitializerCopyEvidence;
+    private const string CM1InitializerCopyEvidenceSchemaIdentity
+        = StandardGenericMethodSchema
+            .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidence;
+    private const string CM1AR1InitializerCopyEvidenceSchemaIdentity
+        = StandardGenericMethodSchema
+            .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidence;
     private const string FixedArraySchemaIdentity
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
     private const string FixedArrayEmptyInitializationSchemaIdentity
@@ -87,7 +95,13 @@ internal static class TrRmFixedArrayProviderBindingValidator
             || StringComparer.Ordinal.Equals(schemaIdentity,
                 CM1SchemaIdentity)
             || StringComparer.Ordinal.Equals(schemaIdentity,
-                CM1AR1SchemaIdentity);
+                CM1AR1SchemaIdentity)
+            || StringComparer.Ordinal.Equals(schemaIdentity,
+                C2InitializerCopyEvidenceSchemaIdentity)
+            || StringComparer.Ordinal.Equals(schemaIdentity,
+                CM1InitializerCopyEvidenceSchemaIdentity)
+            || StringComparer.Ordinal.Equals(schemaIdentity,
+                CM1AR1InitializerCopyEvidenceSchemaIdentity);
 
     private static bool IsInitializationReferenceLocalFieldLayoutSchemaIdentity(
         string schemaIdentity)
@@ -186,7 +200,13 @@ internal static class TrRmFixedArrayProviderBindingValidator
                 or TrRmArtifactSchema
                     .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft
                 or TrRmArtifactSchema
-                    .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsDraft)
+                    .C1M1Construction2InitializerCopyEvidenceDraft
+                or TrRmArtifactSchema
+                    .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft
+                or TrRmArtifactSchema
+                    .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsDraft
+                or TrRmArtifactSchema
+                    .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidenceDraft)
             && !(consumer.Schema.UsesC1EnumClosure()
                 && isEN1ProviderSchema)
             || artifacts.Length != schemaIdentities.Length
@@ -263,7 +283,13 @@ internal static class TrRmFixedArrayProviderBindingValidator
                 or TrRmArtifactSchema
                     .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft
                 or TrRmArtifactSchema
-                    .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsDraft;
+                    .C1M1Construction2InitializerCopyEvidenceDraft
+                or TrRmArtifactSchema
+                    .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft
+                or TrRmArtifactSchema
+                    .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsDraft
+                or TrRmArtifactSchema
+                    .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidenceDraft;
         if ((!isC1M1ConsumerSchema
                 && (!consumer.Schema.UsesC1EnumClosure()
                     || !isEN1ProviderSchema))
@@ -3511,7 +3537,9 @@ internal static class TrRmFixedArrayProviderBindingValidator
             var expectedGenericCount
                 = consumer.TypeDefs.GetGenericRange(expectedTypeDefRow).Count;
             var expectedRequiresGenericSchema = expectedGenericCount != 0
-                || consumer.TypeDefs.HasDeclaredUnique(expectedTypeDefRow);
+                || (consumer.TypeDefs.GetKind(expectedTypeDefRow) == 1
+                    && consumer.TypeDefs.HasDeclaredUnique(
+                        expectedTypeDefRow));
             var expectedModule
                 = consumer.TypeDefs.GetOwnerModule(expectedTypeDefRow);
             var moduleRefRow
@@ -3567,11 +3595,28 @@ internal static class TrRmFixedArrayProviderBindingValidator
                 || providerTypeDefRow > provider.TypeDefs.Count
                 || provider.TypeDefs.GetOwnerModule(providerTypeDefRow)
                     != selected.ModuleRow
+                || consumer.TypeDefs.GetKind(expectedTypeDefRow)
+                    != provider.TypeDefs.GetKind(providerTypeDefRow)
+                || (consumer.Schema.SupportsDeclaredCopyEvidence()
+                    && consumer.TypeDefs.GetKind(expectedTypeDefRow) == 1
+                    && consumer.TypeDefs.HasDeclaredCopy(expectedTypeDefRow)
+                        != provider.TypeDefs.HasDeclaredCopy(
+                            providerTypeDefRow))
+                || (consumer.Schema.UsesConstructionInitializerCopyEvidence()
+                    && consumer.TypeDefs.GetKind(expectedTypeDefRow) == 2
+                    && consumer.TypeDefs.HasDeclaredUnique(
+                        expectedTypeDefRow)
+                        != provider.TypeDefs.HasDeclaredUnique(
+                            providerTypeDefRow))
                 || ((expectedGenericCount != 0
                     || provider.TypeDefs.GetGenericRange(
                         providerTypeDefRow).Count != 0
-                    || consumer.TypeDefs.HasDeclaredUnique(expectedTypeDefRow)
-                    || provider.TypeDefs.HasDeclaredUnique(providerTypeDefRow))
+                    || (consumer.TypeDefs.GetKind(expectedTypeDefRow) == 1
+                        && consumer.TypeDefs.HasDeclaredUnique(
+                            expectedTypeDefRow))
+                    || (provider.TypeDefs.GetKind(providerTypeDefRow) == 1
+                        && provider.TypeDefs.HasDeclaredUnique(
+                            providerTypeDefRow)))
                     && (!IsGenericTypeProviderSchemaIdentity(
                             _schemaIdentities[artifactIndex])
                         || !IsGenericTypeProviderSchemaIdentity(

@@ -98,7 +98,10 @@ public readonly ref struct TrRmTypeDefTableReader
                 || ((flags & DeclaredCopyFlag) != 0
                     && (!schema.SupportsDeclaredCopyEvidence() || kind != 1))
                 || ((flags & DeclaredUniqueFlag) != 0
-                    && (!schema.SupportsDeclaredUniqueEvidence() || kind != 1))
+                    && (!schema.SupportsDeclaredUniqueEvidence()
+                        || kind != (schema
+                            .UsesConstructionInitializerCopyEvidence()
+                                ? 2u : 1u)))
                 || ((flags & 0x80) != 0
                     && (!schema.SupportsClassDeclarationMutability()
                         || kind != 2))

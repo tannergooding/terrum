@@ -234,9 +234,11 @@ public static partial class TrRmExecutableCompiler
                 providers);
         if (coreExceptionIdentitySelections.IsDefaultOrEmpty
             && coreContractFailureIdentitySelections.IsDefaultOrEmpty
-            && schemaIdentities.All(static schemaIdentity =>
+            && IsSelectedConstruction2SchemaIdentity(
+                schemaIdentities[0])
+            && schemaIdentities.All(schemaIdentity =>
                 StringComparer.Ordinal.Equals(schemaIdentity,
-                    StandardC1M1Construction2SchemaIdentity)))
+                    schemaIdentities[0])))
         {
             var classModuleIndex = CreateForeignInvocationIndex(
                 artifacts[0], schemaIdentities[0],
@@ -342,8 +344,8 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        if (StringComparer.Ordinal.Equals(schemaIdentities[0],
-                StandardC1M1Construction2L1R1ClassParameterDefaultsSchemaIdentity))
+        if (StandardGenericMethodSchema.IsCM1ClassParameterDefaults(
+                schemaIdentities[0]))
         {
             if (!coreExceptionIdentitySelections.IsDefaultOrEmpty
                 || !coreContractFailureIdentitySelections.IsDefaultOrEmpty)
@@ -354,7 +356,7 @@ public static partial class TrRmExecutableCompiler
 
             if (schemaIdentities.Any(schemaIdentity =>
                     !StringComparer.Ordinal.Equals(schemaIdentity,
-                        StandardC1M1Construction2L1R1ClassParameterDefaultsSchemaIdentity)))
+                        schemaIdentities[0])))
             {
                 throw Unsupported(
                     "The CM1 class source reference requires exact CM1 selections for every provider.");
@@ -3885,6 +3887,27 @@ public static partial class TrRmExecutableCompiler
                 resourceLedger)
             || IsSelectedStandardSchemaIdentity(identity,
                 StandardC1M1Construction2SchemaIdentity,
+                resourceLedger)
+            || IsSelectedStandardSchemaIdentity(identity,
+                StandardC1M1Construction2InitializerCopyEvidenceSchemaIdentity,
+                resourceLedger)
+            || IsSelectedStandardSchemaIdentity(identity,
+                StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceSchemaIdentity,
+                resourceLedger)
+            || IsSelectedStandardSchemaIdentity(identity,
+                StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidenceSchemaIdentity,
+                resourceLedger)
+            || IsSelectedStandardSchemaIdentity(identity,
+                StandardC1M1ConstructionL1R1EnumClosureInitializerCopyEvidenceSchemaIdentity,
+                resourceLedger)
+            || IsSelectedStandardSchemaIdentity(identity,
+                StandardC1M1Construction2L1R1EnumClosureInitializerCopyEvidenceSchemaIdentity,
+                resourceLedger)
+            || IsSelectedStandardSchemaIdentity(identity,
+                StandardC1M1ConstructionL1R1ClassInstanceLayoutInitializerCopyEvidenceSchemaIdentity,
+                resourceLedger)
+            || IsSelectedStandardSchemaIdentity(identity,
+                StandardC1M1Construction2L1R1ClassInstanceLayoutInitializerCopyEvidenceSchemaIdentity,
                 resourceLedger);
 
     private static bool IsSelectedStandardSchemaIdentity(string identity,
@@ -3946,21 +3969,27 @@ public static partial class TrRmExecutableCompiler
             or StandardC1M1SchemaIdentity
             or StandardC1M1ConstructionSchemaIdentity
             or StandardC1M1Construction2SchemaIdentity
+            or StandardC1M1Construction2InitializerCopyEvidenceSchemaIdentity
             or StandardGenericMethodCallsParameterLabelsSchemaIdentity
             or StandardGenericMethodCallsParameterLabelsReceiverAccessSchemaIdentity
             or StandardC1L1R1SchemaIdentity
             or StandardC1M1L1R1SchemaIdentity
             or StandardC1M1ConstructionL1R1SchemaIdentity
             or StandardC1M1Construction2L1R1SchemaIdentity
-            or StandardC1M1Construction2L1R1ClassParameterDefaultsSchemaIdentity
             or StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsSchemaIdentity
+            or StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceSchemaIdentity
             or StandardCM1AR1SchemaIdentity
+            or StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidenceSchemaIdentity
             or StandardC1M1ConstructionL1R1PropertyInitializedStateSchemaIdentity
             or StandardC1M1Construction2L1R1PropertyInitializedStateSchemaIdentity
             or StandardC1M1ConstructionL1R1EnumClosureSchemaIdentity
             or StandardC1M1Construction2L1R1EnumClosureSchemaIdentity
             or StandardC1M1ConstructionL1R1PropertyInitializedStateEnumClosureSchemaIdentity
             or StandardC1M1Construction2L1R1PropertyInitializedStateEnumClosureSchemaIdentity
+            or StandardC1M1ConstructionL1R1EnumClosureInitializerCopyEvidenceSchemaIdentity
+            or StandardC1M1Construction2L1R1EnumClosureInitializerCopyEvidenceSchemaIdentity
+            or StandardC1M1ConstructionL1R1ClassInstanceLayoutInitializerCopyEvidenceSchemaIdentity
+            or StandardC1M1Construction2L1R1ClassInstanceLayoutInitializerCopyEvidenceSchemaIdentity
             or StandardC1M1ConstructionL1R1ClassInstanceLayoutSchemaIdentity
             or StandardC1M1Construction2L1R1ClassInstanceLayoutSchemaIdentity
             or StandardC1M1ConstructionL1R1PropertyInitializedStateClassInstanceLayoutSchemaIdentity
@@ -4048,15 +4077,20 @@ public static partial class TrRmExecutableCompiler
             or StandardC1M1L1R1SchemaIdentity
             or StandardC1M1ConstructionL1R1SchemaIdentity
             or StandardC1M1Construction2L1R1SchemaIdentity
-            or StandardC1M1Construction2L1R1ClassParameterDefaultsSchemaIdentity
             or StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsSchemaIdentity
+            or StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceSchemaIdentity
             or StandardCM1AR1SchemaIdentity
+            or StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidenceSchemaIdentity
             or StandardC1M1ConstructionL1R1PropertyInitializedStateSchemaIdentity
             or StandardC1M1Construction2L1R1PropertyInitializedStateSchemaIdentity
             or StandardC1M1ConstructionL1R1EnumClosureSchemaIdentity
             or StandardC1M1Construction2L1R1EnumClosureSchemaIdentity
             or StandardC1M1ConstructionL1R1PropertyInitializedStateEnumClosureSchemaIdentity
             or StandardC1M1Construction2L1R1PropertyInitializedStateEnumClosureSchemaIdentity
+            or StandardC1M1ConstructionL1R1EnumClosureInitializerCopyEvidenceSchemaIdentity
+            or StandardC1M1Construction2L1R1EnumClosureInitializerCopyEvidenceSchemaIdentity
+            or StandardC1M1ConstructionL1R1ClassInstanceLayoutInitializerCopyEvidenceSchemaIdentity
+            or StandardC1M1Construction2L1R1ClassInstanceLayoutInitializerCopyEvidenceSchemaIdentity
             or StandardC1M1ConstructionL1R1ClassInstanceLayoutSchemaIdentity
             or StandardC1M1Construction2L1R1ClassInstanceLayoutSchemaIdentity
             or StandardC1M1ConstructionL1R1PropertyInitializedStateClassInstanceLayoutSchemaIdentity
@@ -4122,6 +4156,8 @@ public static partial class TrRmExecutableCompiler
                 => TrRmArtifactSchema.C1M1ConstructionDraft,
             StandardC1M1Construction2SchemaIdentity
                 => TrRmArtifactSchema.C1M1Construction2Draft,
+            StandardC1M1Construction2InitializerCopyEvidenceSchemaIdentity
+                => TrRmArtifactSchema.C1M1Construction2InitializerCopyEvidenceDraft,
             StandardC1L1R1SchemaIdentity
                 => TrRmArtifactSchema.C1ParameterLabelsReceiverAccessDraft,
             StandardC1M1L1R1SchemaIdentity
@@ -4130,15 +4166,18 @@ public static partial class TrRmExecutableCompiler
                 => TrRmArtifactSchema.C1M1ConstructionParameterLabelsReceiverAccessDraft,
             StandardC1M1Construction2L1R1SchemaIdentity
                 => TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessDraft,
-            StandardC1M1Construction2L1R1ClassParameterDefaultsSchemaIdentity
-                => TrRmArtifactSchema
-                    .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft,
             StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsSchemaIdentity
                 => TrRmArtifactSchema
                     .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft,
+            StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceSchemaIdentity
+                => TrRmArtifactSchema
+                    .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft,
             StandardCM1AR1SchemaIdentity
                 => TrRmArtifactSchema
                     .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsDraft,
+            StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidenceSchemaIdentity
+                => TrRmArtifactSchema
+                    .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidenceDraft,
             StandardC1M1ConstructionL1R1PropertyInitializedStateSchemaIdentity
                 => TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft,
             StandardC1M1Construction2L1R1PropertyInitializedStateSchemaIdentity
@@ -4151,6 +4190,14 @@ public static partial class TrRmExecutableCompiler
                 => TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft,
             StandardC1M1Construction2L1R1PropertyInitializedStateEnumClosureSchemaIdentity
                 => TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft,
+            StandardC1M1ConstructionL1R1EnumClosureInitializerCopyEvidenceSchemaIdentity
+                => TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureInitializerCopyEvidenceDraft,
+            StandardC1M1Construction2L1R1EnumClosureInitializerCopyEvidenceSchemaIdentity
+                => TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureInitializerCopyEvidenceDraft,
+            StandardC1M1ConstructionL1R1ClassInstanceLayoutInitializerCopyEvidenceSchemaIdentity
+                => TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureClassInstanceLayoutInitializerCopyEvidenceDraft,
+            StandardC1M1Construction2L1R1ClassInstanceLayoutInitializerCopyEvidenceSchemaIdentity
+                => TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureClassInstanceLayoutInitializerCopyEvidenceDraft,
             StandardC1M1ConstructionL1R1ClassInstanceLayoutSchemaIdentity
                 => TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft,
             StandardC1M1Construction2L1R1ClassInstanceLayoutSchemaIdentity
@@ -4361,6 +4408,10 @@ public static partial class TrRmExecutableCompiler
                     or TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft
                     or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft
                     or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft
+                    or TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureInitializerCopyEvidenceDraft
+                    or TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureInitializerCopyEvidenceDraft
+                    or TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureClassInstanceLayoutInitializerCopyEvidenceDraft
+                    or TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureClassInstanceLayoutInitializerCopyEvidenceDraft
             ? TrRmStructuralMetadataValidator
                 .ValidateC1AndGetExecutionTables(index)
             : GetForeignInvocationSchema(schemaIdentity)
@@ -4827,13 +4878,17 @@ public static partial class TrRmExecutableCompiler
     private static bool IsSelectedConstruction2SchemaIdentity(
         string schemaIdentity)
         => schemaIdentity is StandardC1M1Construction2SchemaIdentity
+            or StandardC1M1Construction2InitializerCopyEvidenceSchemaIdentity
             or StandardC1M1Construction2L1R1SchemaIdentity
-            or StandardC1M1Construction2L1R1ClassParameterDefaultsSchemaIdentity
             or StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsSchemaIdentity
+            or StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceSchemaIdentity
             or StandardCM1AR1SchemaIdentity
+            or StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidenceSchemaIdentity
             or StandardC1M1Construction2L1R1PropertyInitializedStateSchemaIdentity
             or StandardC1M1Construction2L1R1EnumClosureSchemaIdentity
-            or StandardC1M1Construction2L1R1PropertyInitializedStateEnumClosureSchemaIdentity;
+            or StandardC1M1Construction2L1R1PropertyInitializedStateEnumClosureSchemaIdentity
+            or StandardC1M1Construction2L1R1EnumClosureInitializerCopyEvidenceSchemaIdentity
+            or StandardC1M1Construction2L1R1ClassInstanceLayoutInitializerCopyEvidenceSchemaIdentity;
 
     private static int FindModuleRow(TrRmModuleTableReader modules,
         string moduleIdentity)

@@ -23,6 +23,15 @@ internal sealed class TrRmC1EnumClosureSourceTests
         "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-1-parameter-labels-1-receiver-access-1-property-initialized-state-1-enum-closure-1",
         "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-property-initialized-state-1-enum-closure-1",
     ];
+    private static readonly string[] s_initializerCopyEvidenceSchemaIdentities = [
+        "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-1-parameter-labels-1-receiver-access-1-enum-closure-1-initializer-copy-evidence-1",
+        "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-enum-closure-1-initializer-copy-evidence-1",
+        "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-1-parameter-labels-1-receiver-access-1-enum-closure-1-class-instance-layout-1-initializer-copy-evidence-1",
+        "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-enum-closure-1-class-instance-layout-1-initializer-copy-evidence-1",
+        "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-initializer-copy-evidence-1",
+        "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-class-parameter-defaults-1-initializer-copy-evidence-1",
+        "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-class-parameter-defaults-1-associated-relation-constraints-1-initializer-copy-evidence-1",
+    ];
 
     [Test]
     public void EmitsExactSourceEnumClosureUnderEachEN1Identity()
@@ -1227,8 +1236,17 @@ internal sealed class TrRmC1EnumClosureSourceTests
                     public Shade ShadeValue;
                     public Shelf ShelfValue;
                     public int32 Id;
+                    public Palette(Shade shade, int32 id) {
+                        ShadeValue = shade;
+                        Id = id;
+                    }
                 }
-                public class Shelf { public Shade ShelfShade; }
+                public class Shelf {
+                    public Shade ShelfShade;
+                    public Shelf(Shade shelfShade) {
+                        ShelfShade = shelfShade;
+                    }
+                }
             }
             """);
         var compilation = Compilation.CreateLibrary(tree);
@@ -1253,6 +1271,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
                     fieldDeclarations[1].Span, "field.palette.shelf"),
                 new TrRmSourceClassMemberExport(0,
                     fieldDeclarations[2].Span, "field.palette.id"),
+                CreateSourceClassConstructorExport(classDeclaration,
+                    "constructor.palette"),
             ]);
         var enumExport = CreateExport(program, tree, 0, "Shade",
             ["type.shade"], "shade");
@@ -1344,12 +1364,16 @@ internal sealed class TrRmC1EnumClosureSourceTests
     }
 
     [Test]
-    public void BindsEN1ClassFieldOffsetOnlyWithExactFieldSelection()
+    public void EmitsEN1ConstructorBodyWithNominalEnumConstant()
     {
         var schemaIdentity = s_schemaIdentities[0];
         var tree = SyntaxTree.Parse("""
             namespace Demo {
-                public class Box { public int32 Value; }
+                public enum Shade : int8 { Dark = -1 }
+                public class Box {
+                    public Shade Value;
+                    public Box() { Value = Shade.Dark; }
+                }
             }
             """);
         var compilation = Compilation.CreateLibrary(tree);
@@ -1370,6 +1394,442 @@ internal sealed class TrRmC1EnumClosureSourceTests
             classDeclaration.Span, "type.box", [
                 new TrRmSourceClassMemberExport(0,
                     fieldDeclaration.Span, "field.box.value"),
+                CreateSourceClassConstructorExport(classDeclaration,
+                    "constructor.box"),
+            ]);
+        var enumExport = CreateExport(program, tree, 0, "Shade",
+            ["type.shade"], "shade");
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "EnumConstructor", schemaIdentity, 1, [], [], [classExport],
+            [enumExport]);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                artifact, SchemaFor(schemaIdentity)));
+        var classTypeDefRow = Enumerable.Range(1, tables.TypeDefs.Count)
+            .Single(row => tables.TypeDefs.GetName(row) == "Box");
+        var initializerMethodRow = Enumerable.Range(1,
+                tables.Methods.Count)
+            .Single(row => tables.Methods.GetOwnerType(row)
+                    == classTypeDefRow
+                && tables.Contracts.HasConstructionClause(row)
+                && tables.Contracts.GetConstructionClause(row).RoleTag == 1);
+        var initializerBody = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(initializerMethodRow),
+            tables.Contracts.Count);
+
+        Assert.That(initializerBody.ConstantCount, Is.EqualTo(1));
+        Assert.That(Enumerable.Range(1, tables.Features.Count)
+                .Select(row => tables.Features.GetFeature(row).FeatureId),
+            Does.Contain(11u));
+    }
+
+    [Test]
+    public void DoesNotEmitConstruction2ProjectionForIncompleteInitializer()
+    {
+        var schemaIdentity = s_schemaIdentities[1];
+        var tree = SyntaxTree.Parse("""
+            namespace Demo {
+                public class Box {
+                    public int32 Value;
+                    public int32 Remaining;
+                    public Box(int32 value) { Value = value; }
+                }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var classIndex = program.SourceClassProgramAssociation!
+            .Declarations.Single(declaration =>
+                declaration.Span == classDeclaration.Span).ClassIndex;
+        var constructorDeclaration = classDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ConstructorDeclaration);
+        var fields = classDeclaration.Children.OfType<SyntaxNode>()
+            .Where(static node => node.Kind == SyntaxKind.FieldDeclaration)
+            .ToArray();
+        var classExport = new TrRmSourceClassExport(program, classIndex,
+            classDeclaration.Span, "type.box", [
+                new TrRmSourceClassMemberExport(0, fields[0].Span,
+                    "field.box.value"),
+                new TrRmSourceClassMemberExport(0, fields[1].Span,
+                    "field.box.remaining"),
+                new TrRmSourceClassMemberExport(0,
+                    constructorDeclaration.Span, "constructor.box"),
+            ]);
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "IncompleteBox", schemaIdentity, 1, [], [], [classExport], []);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                artifact, SchemaFor(schemaIdentity)));
+        Assert.That(tables.Methods.Count, Is.EqualTo(1));
+        var initializerMethod = Enumerable.Range(1, tables.Methods.Count)
+            .Single(row =>
+                tables.Contracts.HasConstructionClause(row)
+                && tables.Contracts.GetConstructionClause(row).RoleTag
+                    == 1);
+        Assert.That(tables.Contracts.GetConstructionClause(
+                initializerMethod).InitializedMemberDefIds,
+            Has.Length.EqualTo(1));
+
+        var constructorExport = classExport.MemberExports[^1] with {
+            ConstructionProjectionExportKey = "constructor.box.create",
+        };
+        var projectionClassExport = classExport with {
+            MemberExports = classExport.MemberExports.SetItem(
+                classExport.MemberExports.Length - 1, constructorExport),
+        };
+        Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.EmitStandard(program, "IncompleteBox",
+                schemaIdentity, 1, [], [], [projectionClassExport], []));
+    }
+
+    [Test]
+    public void EmitsInitializerCopyEvidenceForNormalClassHandleFields()
+    {
+        var tree = SyntaxTree.Parse("""
+            namespace Demo {
+                public class Child {
+                    public int32 Value;
+                    public Child(int32 value) { Value = value; }
+                }
+                public class Owner {
+                    public Child ChildValue;
+                    public Owner(Child child) { ChildValue = child; }
+                }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classExports = ImmutableArray.Create(
+            CreateSourceClassExport(program, tree, "Child",
+                "type.child", "constructor.child", (0, "field.child.value")),
+            CreateSourceClassExport(program, tree, "Owner",
+                "type.owner", "constructor.owner", (0, "field.owner.child")));
+        foreach (var schemaIdentity in s_initializerCopyEvidenceSchemaIdentities)
+        {
+            var providerArtifact = EmitClassArtifact(program,
+                "ClassHandleCopyProvider", schemaIdentity, classExports);
+            var tables = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                    providerArtifact, SchemaFor(schemaIdentity)));
+            var childTypeDefRow = Enumerable.Range(1, tables.TypeDefs.Count)
+                .Single(row => tables.TypeDefs.GetName(row) == "Child");
+            var ownerTypeDefRow = Enumerable.Range(1, tables.TypeDefs.Count)
+                .Single(row => tables.TypeDefs.GetName(row) == "Owner");
+            var childFieldRow = Enumerable.Range(1, tables.Fields.Count)
+                .Single(row => tables.Fields.GetOwnerTypeDef(row)
+                        == ownerTypeDefRow
+                    && tables.Fields.GetName(row) == "ChildValue");
+            var childTypeSpec = tables.TypeSpecs.GetTypeSpecRef(
+                tables.Fields.GetTypeSpecRef(childFieldRow));
+
+            Assert.That((tables.TypeDefs.GetFlags(childTypeDefRow) & 0x40u),
+                Is.Zero, schemaIdentity);
+            Assert.That(childTypeSpec.Form, Is.EqualTo((byte)0x02),
+                schemaIdentity);
+            Assert.That(childTypeSpec.Row, Is.EqualTo(childTypeDefRow),
+                schemaIdentity);
+            var uniqueChildArtifact = providerArtifact.ToArray();
+            SetTypeDefFlags(uniqueChildArtifact, childTypeDefRow,
+                tables.TypeDefs.GetFlags(childTypeDefRow) | 0x40u);
+            Assert.Throws<InvalidDataException>(() =>
+                TrRmStructuralMetadataValidator
+                    .ValidateC1AndGetExecutionTables(
+                        new TrRmArtifactIndex(uniqueChildArtifact,
+                            SchemaFor(schemaIdentity))));
+
+            var reference = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    providerArtifact),
+                "ClassHandleCopyProvider", [], [
+                    "type.child", "type.owner",
+                ]);
+            var sourceFreeCompilation = Compilation.CreateLibrary(
+                SyntaxTree.Parse(string.Empty), reference);
+            Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    sourceFreeCompilation.Diagnostics));
+            var reemitted = TrRmExecutableCompiler.EmitStandard(
+                sourceFreeCompilation.Program!,
+                "ClassHandleCopyProvider", schemaIdentity, 1);
+            var reemittedTables = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                    reemitted, SchemaFor(schemaIdentity)));
+            Assert.That(reemittedTables.Methods.Count,
+                Is.GreaterThan(0), schemaIdentity);
+            Assert.That(reemittedTables.Bodies.Count,
+                Is.GreaterThan(0), schemaIdentity);
+        }
+    }
+
+    [Test]
+    public void EmitsDeclaredUniqueEvidenceForInitializerCopySchemas()
+    {
+        var tree = SyntaxTree.Parse("""
+            namespace Demo {
+                public unique class Child {
+                    public int32 Value;
+                    public Child(int32 value) { Value = value; }
+                }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classExport = CreateSourceClassExport(program, tree, "Child",
+            "type.child", "constructor.child", (0, "field.child.value"));
+        foreach (var schemaIdentity in s_initializerCopyEvidenceSchemaIdentities)
+        {
+            var artifact = EmitClassArtifact(program, "UniqueClassProvider",
+                schemaIdentity, [classExport]);
+            var tables = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                    artifact, SchemaFor(schemaIdentity)));
+            var childTypeDefRow = Enumerable.Range(1, tables.TypeDefs.Count)
+                .Single(row => tables.TypeDefs.GetName(row) == "Child");
+
+            Assert.That((tables.TypeDefs.GetFlags(childTypeDefRow) & 0x40u),
+                Is.Not.Zero, schemaIdentity);
+            var reference = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, artifact),
+                "UniqueClassProvider", [], ["type.child"]);
+            var sourceFreeCompilation = Compilation.CreateLibrary(
+                SyntaxTree.Parse(string.Empty), reference);
+            Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    sourceFreeCompilation.Diagnostics));
+            var reemitted = TrRmExecutableCompiler.EmitStandard(
+                sourceFreeCompilation.Program!, "UniqueClassProvider",
+                schemaIdentity, 1);
+            var reemittedTables = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                    reemitted, SchemaFor(schemaIdentity)));
+            var reemittedChildTypeDefRow = Enumerable.Range(1,
+                    reemittedTables.TypeDefs.Count)
+                .Single(row => reemittedTables.TypeDefs.GetName(row)
+                    == "Child");
+            Assert.That((reemittedTables.TypeDefs.GetFlags(
+                    reemittedChildTypeDefRow) & 0x40u),
+                Is.Not.Zero, schemaIdentity);
+        }
+    }
+
+    [Test]
+    public void EmitsDeclaredCopyEvidenceForInitializerStructFields()
+    {
+        var tree = SyntaxTree.Parse("""
+            namespace Demo {
+                public struct Payload { public int32 Value; }
+                public class Owner {
+                    public Payload PayloadValue;
+                    public Owner(Payload payload) {
+                        PayloadValue = payload;
+                    }
+                }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classExports = ImmutableArray.Create(
+            CreateSourceClassExport(program, tree, "Owner",
+                "type.owner", "constructor.owner",
+                (0, "field.owner.payload")));
+        foreach (var schemaIdentity in s_initializerCopyEvidenceSchemaIdentities)
+        {
+            var artifact = EmitClassArtifact(program, "StructCopyProvider",
+                schemaIdentity, classExports);
+            var tables = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                    artifact, SchemaFor(schemaIdentity)));
+            var payloadTypeDefRow = Enumerable.Range(1, tables.TypeDefs.Count)
+                .Single(row => tables.TypeDefs.GetName(row) == "Payload");
+            var ownerTypeDefRow = Enumerable.Range(1, tables.TypeDefs.Count)
+                .Single(row => tables.TypeDefs.GetName(row) == "Owner");
+            var payloadFieldRow = Enumerable.Range(1, tables.Fields.Count)
+                .Single(row => tables.Fields.GetOwnerTypeDef(row)
+                        == ownerTypeDefRow
+                    && tables.Fields.GetName(row) == "PayloadValue");
+            var payloadTypeSpec = tables.TypeSpecs.GetTypeSpecRef(
+                tables.Fields.GetTypeSpecRef(payloadFieldRow));
+
+            Assert.That((tables.TypeDefs.GetFlags(payloadTypeDefRow) & 0x20u),
+                Is.Not.Zero, schemaIdentity);
+            Assert.That(payloadTypeSpec.Form, Is.EqualTo((byte)0x02),
+                schemaIdentity);
+            Assert.That(payloadTypeSpec.Row, Is.EqualTo(payloadTypeDefRow),
+                schemaIdentity);
+            var nonCopyPayloadArtifact = artifact.ToArray();
+            SetTypeDefFlags(nonCopyPayloadArtifact, payloadTypeDefRow,
+                tables.TypeDefs.GetFlags(payloadTypeDefRow) & ~0x20u);
+            Assert.Throws<InvalidDataException>(() =>
+                TrRmStructuralMetadataValidator
+                    .ValidateC1AndGetExecutionTables(
+                        new TrRmArtifactIndex(nonCopyPayloadArtifact,
+                            SchemaFor(schemaIdentity))));
+
+            var reference = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, artifact),
+                "StructCopyProvider", [], ["type.owner"]);
+            var sourceFreeCompilation = Compilation.CreateLibrary(
+                SyntaxTree.Parse(string.Empty), reference);
+            Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    sourceFreeCompilation.Diagnostics));
+            var reemitted = TrRmExecutableCompiler.EmitStandard(
+                sourceFreeCompilation.Program!, "StructCopyProvider",
+                schemaIdentity, 1);
+            var reemittedTables = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                    reemitted, SchemaFor(schemaIdentity)));
+            var reemittedPayloadRow = Enumerable.Range(1,
+                    reemittedTables.TypeDefs.Count)
+                .Single(row => reemittedTables.TypeDefs.GetName(row)
+                    == "Payload");
+            Assert.That((reemittedTables.TypeDefs.GetFlags(
+                    reemittedPayloadRow) & 0x20u),
+                Is.Not.Zero, schemaIdentity);
+        }
+    }
+
+    [Test]
+    public void RequiresMatchingImportedStructCopyEvidence()
+    {
+        foreach (var schemaIdentity in s_initializerCopyEvidenceSchemaIdentities
+            .Skip(5))
+        {
+            var providerTree = SyntaxTree.Parse("""
+                namespace Demo {
+                    public struct Payload { public int32 Value; }
+                    public class Anchor {
+                        public int32 Value;
+                        public Anchor(int32 value) { Value = value; }
+                    }
+                }
+                """);
+            var providerCompilation = Compilation.CreateLibrary(providerTree);
+            Assert.That(providerCompilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    providerCompilation.Diagnostics));
+            var providerProgram = (BoundProgram)providerCompilation.Program!;
+            var payloadExport = new TrRmSourceTypeExport("Demo", "Payload",
+                "type.payload") {
+                FieldExports = [
+                    new TrRmSourceFieldExport("Value",
+                        "field.payload.value"),
+                ],
+            };
+            var anchorExport = CreateSourceClassExport(providerProgram,
+                providerTree, "Anchor", "type.anchor", "constructor.anchor",
+                (0, "field.anchor.value"));
+            var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+                providerProgram, "CopyProvider", schemaIdentity, 1,
+                [payloadExport], [], [anchorExport]);
+            var providerTables = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                    providerArtifact, SchemaFor(schemaIdentity)));
+            var payloadTypeDefRow = Enumerable.Range(1,
+                    providerTables.TypeDefs.Count)
+                .Single(row => providerTables.TypeDefs.GetName(row)
+                    == "Payload");
+            Assert.That((providerTables.TypeDefs.GetFlags(
+                    payloadTypeDefRow) & 0x20u),
+                Is.Not.Zero, schemaIdentity);
+
+            var providerReference
+                = TrRmExecutableCompiler.CreateStandardReference(
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        providerArtifact),
+                    "CopyProvider", [], ["type.payload", "type.anchor"]);
+            var consumerTree = SyntaxTree.Parse("""
+                namespace Demo {
+                    public class Owner {
+                        public Payload Value;
+                        public Owner(Payload value) { Value = value; }
+                    }
+                }
+                """);
+            var consumerCompilation = Compilation.CreateLibrary(
+                consumerTree, providerReference);
+            Assert.That(consumerCompilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    consumerCompilation.Diagnostics));
+            var consumerProgram = (BoundProgram)consumerCompilation.Program!;
+            var ownerExport = CreateSourceClassExport(consumerProgram,
+                consumerTree, "Owner", "type.owner", "constructor.owner",
+                (0, "field.owner.payload"));
+            var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+                consumerProgram, "CopyConsumer", schemaIdentity, 1, [], [],
+                [ownerExport]);
+
+            var reference = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    consumerArtifact),
+                "CopyConsumer", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        providerArtifact),
+                ], ["type.owner"]);
+            Assert.That(reference.Structures.Single(
+                    static structure => structure.Name == "Demo.Payload")
+                    .DeclaredCopyEvidence,
+                Is.True, schemaIdentity);
+
+            var missingCopyProvider = providerArtifact.ToArray();
+            SetTypeDefFlags(missingCopyProvider, payloadTypeDefRow,
+                providerTables.TypeDefs.GetFlags(payloadTypeDefRow) & ~0x20u);
+            Assert.Throws<InvalidDataException>(() =>
+                TrRmExecutableCompiler.CreateStandardReference(
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        consumerArtifact),
+                    "CopyConsumer", [
+                        new TrRmStandardArtifactInput(schemaIdentity,
+                            missingCopyProvider),
+                    ], ["type.owner"]));
+        }
+    }
+
+    [Test]
+    public void BindsEN1ClassFieldOffsetOnlyWithExactFieldSelection()
+    {
+        var schemaIdentity = s_schemaIdentities[0];
+        var tree = SyntaxTree.Parse("""
+            namespace Demo {
+                public class Box {
+                    public int32 Value;
+                    public Box(int32 value) { Value = value; }
+                }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var fieldDeclaration = classDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.FieldDeclaration);
+        var classIndex = program.SourceClassProgramAssociation!
+            .Declarations.Single(declaration =>
+                declaration.Span == classDeclaration.Span).ClassIndex;
+        var classExport = new TrRmSourceClassExport(program, classIndex,
+            classDeclaration.Span, "type.box", [
+                new TrRmSourceClassMemberExport(0,
+                    fieldDeclaration.Span, "field.box.value"),
+                CreateSourceClassConstructorExport(classDeclaration,
+                    "constructor.box"),
             ]);
         var artifact = TrRmExecutableCompiler.EmitStandard(program,
             "ClassQuery", schemaIdentity, 1, [], [], [classExport], []);
@@ -1457,7 +1917,10 @@ internal sealed class TrRmC1EnumClosureSourceTests
     {
         var sourceTree = SyntaxTree.Parse("""
             namespace Demo {
-                public class Box { public int32 Value; }
+                public class Box {
+                    public int32 Value;
+                    public Box(int32 value) { Value = value; }
+                }
             }
             """);
         var sourceCompilation = Compilation.CreateLibrary(sourceTree);
@@ -1480,10 +1943,15 @@ internal sealed class TrRmC1EnumClosureSourceTests
             classDeclaration.Span, "type.box", [
                 new TrRmSourceClassMemberExport(0,
                     fieldDeclaration.Span, "field.box.value"),
+                CreateSourceClassConstructorExport(classDeclaration,
+                    "constructor.box"),
             ]);
         var changedProviderTree = SyntaxTree.Parse("""
             namespace Demo {
-                public class Box { public int64 Value; }
+                public class Box {
+                    public int64 Value;
+                    public Box(int64 value) { Value = value; }
+                }
             }
             """);
         var changedProviderCompilation
@@ -1511,6 +1979,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
             changedClassDeclaration.Span, "type.box", [
                 new TrRmSourceClassMemberExport(0,
                     changedFieldDeclaration.Span, "field.box.value"),
+                CreateSourceClassConstructorExport(
+                    changedClassDeclaration, "constructor.box"),
             ]);
 
         foreach (var baseSchemaIdentity in s_schemaIdentities)
@@ -1674,7 +2144,10 @@ internal sealed class TrRmC1EnumClosureSourceTests
             = $"{s_schemaIdentities[0]}-class-instance-layout-1";
         var providerTree = SyntaxTree.Parse("""
             namespace Demo {
-                public class Box { public int32 Value; }
+                public class Box {
+                    public int32 Value;
+                    public Box(int32 value) { Value = value; }
+                }
             }
             """);
         var providerCompilation = Compilation.CreateLibrary(providerTree);
@@ -1696,6 +2169,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
             classIndex, classDeclaration.Span, "type.box", [
                 new TrRmSourceClassMemberExport(0,
                     fieldDeclaration.Span, "field.box.value"),
+                CreateSourceClassConstructorExport(classDeclaration,
+                    "constructor.box"),
             ]);
         var providerArtifact = TrRmExecutableCompiler.EmitStandard(
             providerProgram, "ClassLayoutProvider", schemaIdentity, 1,
@@ -1793,6 +2268,10 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 public class Box {
                     public uint8 Prefix;
                     public int32 Value;
+                    public Box(uint8 prefix, int32 value) {
+                        Prefix = prefix;
+                        Value = value;
+                    }
                 }
             }
             """);
@@ -1817,6 +2296,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
                     fieldDeclarations[0].Span, "field.box.prefix"),
                 new TrRmSourceClassMemberExport(0,
                     fieldDeclarations[1].Span, "field.box.value"),
+                CreateSourceClassConstructorExport(classDeclaration,
+                    "constructor.box"),
             ]);
         var providerArtifact = TrRmExecutableCompiler.EmitStandard(
             providerProgram, "ClassLayoutProvider", schemaIdentity, 1,
@@ -1934,7 +2415,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
 
         TrRmSourceClassExport CreateRelocatedClassExport(
             BoundProgram program, SyntaxTree tree, string name,
-            string typeKey, params string[] fieldKeys)
+            string typeKey, string constructorKey,
+            params string[] fieldKeys)
         {
             var declaration = tree.Root.Children.OfType<SyntaxNode>()
                 .Single(node => node.Kind == SyntaxKind.ClassDeclaration
@@ -1956,17 +2438,26 @@ internal sealed class TrRmC1EnumClosureSourceTests
             var memberExports = fields.Select((field, index) =>
                     new TrRmSourceClassMemberExport(0, field.Span,
                         fieldKeys[index]))
-                .ToImmutableArray();
+                .ToImmutableArray()
+                .Add(CreateSourceClassConstructorExport(declaration,
+                    constructorKey));
             return new TrRmSourceClassExport(program, classIndex,
                 declaration.Span, typeKey, memberExports);
         }
 
         var relocatedProviderTree = SyntaxTree.Parse("""
             namespace Demo {
-                public class Padding { public int32 Unused; }
+                public class Padding {
+                    public int32 Unused;
+                    public Padding(int32 unused) { Unused = unused; }
+                }
                 public class Box {
                     public uint8 Prefix;
                     public int32 Value;
+                    public Box(uint8 prefix, int32 value) {
+                        Prefix = prefix;
+                        Value = value;
+                    }
                 }
             }
             """);
@@ -1983,10 +2474,12 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 schemaIdentity, 1, [], [], [
                     CreateRelocatedClassExport(relocatedProviderProgram,
                         relocatedProviderTree, "Padding",
-                        "type.padding", "field.padding.unused"),
+                        "type.padding", "constructor.padding",
+                        "field.padding.unused"),
                     CreateRelocatedClassExport(relocatedProviderProgram,
                         relocatedProviderTree, "Box", "type.box",
-                        "field.box.prefix", "field.box.value"),
+                        "constructor.box", "field.box.prefix",
+                        "field.box.value"),
                 ], []);
         relocatedProviderArtifact = AddExactClassLayoutVariant(
             relocatedProviderArtifact, SchemaFor(schemaIdentity), 1, 1);
@@ -2128,13 +2621,19 @@ internal sealed class TrRmC1EnumClosureSourceTests
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
 
         var schemaIdentity
-            = $"{s_schemaIdentities[0]}-class-instance-layout-1";
+            = s_initializerCopyEvidenceSchemaIdentities[2];
         var providerTree = SyntaxTree.Parse("""
             namespace Demo {
-                public class Leaf { public int32 Id; }
+                public class Leaf {
+                    public int32 Id;
+                    public Leaf(int32 id) { Id = id; }
+                }
                 public class Box {
                     public int32 Value;
                     public Leaf Tail;
+                    public Box(int32 value, Leaf tail) {
+                        Value = value;
+                    }
                 }
             }
             """);
@@ -2143,7 +2642,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
             string.Join(Environment.NewLine, providerCompilation.Diagnostics));
         var providerProgram = (BoundProgram)providerCompilation.Program!;
         TrRmSourceClassExport CreateClassExport(string name,
-            string typeKey, params string[] fieldKeys)
+            string typeKey, string constructorKey,
+            params string[] fieldKeys)
         {
             var declaration = providerTree.Root.Children
                 .OfType<SyntaxNode>()
@@ -2166,7 +2666,9 @@ internal sealed class TrRmC1EnumClosureSourceTests
             var memberExports = fields.Select((field, index) =>
                     new TrRmSourceClassMemberExport(0, field.Span,
                         fieldKeys[index]))
-                .ToImmutableArray();
+                .ToImmutableArray()
+                .Add(CreateSourceClassConstructorExport(declaration,
+                    constructorKey));
             return new TrRmSourceClassExport(providerProgram, classIndex,
                 declaration.Span, typeKey, memberExports);
         }
@@ -2174,8 +2676,10 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var providerArtifact = TrRmExecutableCompiler.EmitStandard(
             providerProgram, "ClassLayoutProvider", schemaIdentity, 1, [],
             [], [
-                CreateClassExport("Leaf", "type.leaf", "field.leaf.id"),
-                CreateClassExport("Box", "type.box", "field.box.value",
+                CreateClassExport("Leaf", "type.leaf",
+                    "constructor.leaf", "field.leaf.id"),
+                CreateClassExport("Box", "type.box", "constructor.box",
+                    "field.box.value",
                     "field.box.tail"),
             ], []);
         var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
@@ -2231,6 +2735,9 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 public class Box {
                     public uint8 Prefix;
                     public Payload Data;
+                    public Box(uint8 prefix) {
+                        Prefix = prefix;
+                    }
                 }
             }
             """);
@@ -2256,6 +2763,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
                     classFields[0].Span, "field.box.prefix"),
                 new TrRmSourceClassMemberExport(0,
                     classFields[1].Span, "field.box.data"),
+                CreateSourceClassConstructorExport(classDeclaration,
+                    "constructor.box"),
             ]);
         var providerArtifact = TrRmExecutableCompiler.EmitStandard(
             providerProgram, "ClassLayoutProvider", schemaIdentity, 1, [
@@ -2375,7 +2884,7 @@ internal sealed class TrRmC1EnumClosureSourceTests
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
 
         var schemaIdentity
-            = $"{s_schemaIdentities[0]}-class-instance-layout-1";
+            = s_initializerCopyEvidenceSchemaIdentities[2];
         var layoutOptions = new CompilationOptions {
             LayoutCoreRegistration
                 = LayoutCoreRegistrationTestData.Create(),
@@ -2451,6 +2960,10 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 public class Box {
                     public uint8 Prefix;
                     public Wrapper Value;
+                    public Box(uint8 prefix, Wrapper value) {
+                        Prefix = prefix;
+                        Value = value;
+                    }
                 }
             }
             """);
@@ -2462,7 +2975,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var boxArtifact = TrRmExecutableCompiler.EmitStandard(boxProgram,
             "ClassLayoutProvider", schemaIdentity, 1, [], [], [
                 CreateSourceClassExport(boxProgram, boxTree, "Box",
-                    "type.box", (0, "field.box.prefix"),
+                    "type.box", "constructor.box",
+                    (0, "field.box.prefix"),
                     (1, "field.box.value")),
             ], []);
         var boxInput = new TrRmStandardArtifactInput(schemaIdentity,
@@ -2610,6 +3124,11 @@ internal sealed class TrRmC1EnumClosureSourceTests
                     private uint8 Hidden;
                     public uint8 Prefix;
                     public int32 Value;
+                    public Box(uint8 hidden, uint8 prefix, int32 value) {
+                        Hidden = hidden;
+                        Prefix = prefix;
+                        Value = value;
+                    }
                 }
             }
             """);
@@ -2631,6 +3150,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
             classIndex, classDeclaration.Span, "type.box", [
                 new TrRmSourceClassMemberExport(0,
                     fields[2].Span, "field.box.value"),
+                CreateSourceClassConstructorExport(classDeclaration,
+                    "constructor.box"),
             ]);
         var providerArtifact = TrRmExecutableCompiler.EmitStandard(
             providerProgram, "ClassLayoutProvider", schemaIdentity, 1, [],
@@ -2719,6 +3240,10 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 public class Box {
                     public uint8 Prefix;
                     public Marker Value;
+                    public Box(uint8 prefix, Marker value) {
+                        Prefix = prefix;
+                        Value = value;
+                    }
                 }
             }
             """);
@@ -2742,6 +3267,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
                     "field.box.prefix"),
                 new TrRmSourceClassMemberExport(0, fields[1].Span,
                     "field.box.value"),
+                CreateSourceClassConstructorExport(classDeclaration,
+                    "constructor.box"),
             ]);
         var enumExport = CreateExport(providerProgram, providerTree, 0,
             "Marker", ["type.marker"], "marker");
@@ -2808,6 +3335,10 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 public class Box {
                     public uint8 Prefix;
                     public ptr<void> Value;
+                    public Box(uint8 prefix, ptr<void> value) {
+                        Prefix = prefix;
+                        Value = value;
+                    }
                 }
             }
             """);
@@ -2831,6 +3362,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
                     "field.box.prefix"),
                 new TrRmSourceClassMemberExport(0, fields[1].Span,
                     "field.box.value"),
+                CreateSourceClassConstructorExport(classDeclaration,
+                    "constructor.box"),
             ]);
         var targetMismatch = Assert.Throws<NotSupportedException>(() =>
             TrRmExecutableCompiler.EmitStandard(providerProgram,
@@ -2934,6 +3467,10 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 public class Box {
                     public uint8 Prefix;
                     public ptr<uint8> Value;
+                    public Box(uint8 prefix, ptr<uint8> value) {
+                        Prefix = prefix;
+                        Value = value;
+                    }
                 }
             }
             """);
@@ -2957,6 +3494,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
                     "field.box.prefix"),
                 new TrRmSourceClassMemberExport(0, fields[1].Span,
                     "field.box.value"),
+                CreateSourceClassConstructorExport(classDeclaration,
+                    "constructor.box"),
             ]);
         var targetMismatch = Assert.Throws<NotSupportedException>(() =>
             TrRmExecutableCompiler.EmitStandard(providerProgram,
@@ -3040,6 +3579,12 @@ internal sealed class TrRmC1EnumClosureSourceTests
                     public uint8 Prefix;
                     public ptr<Payload> Address;
                     public ptr<Marker> EnumAddress;
+                    public Box(uint8 prefix, ptr<Payload> address,
+                        ptr<Marker> enumAddress) {
+                        Prefix = prefix;
+                        Address = address;
+                        EnumAddress = enumAddress;
+                    }
                 }
             }
             """);
@@ -3066,6 +3611,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
                     classFields[1].Span, "field.box.address"),
                 new TrRmSourceClassMemberExport(0,
                     classFields[2].Span, "field.box.enum-address"),
+                CreateSourceClassConstructorExport(classDeclaration,
+                    "constructor.box"),
             ]);
         var markerExport = CreateExport(providerProgram, providerTree, 0,
             "Marker", ["type.marker"], "marker");
@@ -3187,6 +3734,12 @@ internal sealed class TrRmC1EnumClosureSourceTests
                     public uint8 Prefix;
                     public ptr<Payload> Address;
                     public ptr<Marker> EnumAddress;
+                    public Box(uint8 prefix, ptr<Payload> address,
+                        ptr<Marker> enumAddress) {
+                        Prefix = prefix;
+                        Address = address;
+                        EnumAddress = enumAddress;
+                    }
                 }
             }
             """);
@@ -3220,6 +3773,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
                     relocatedClassFields[1].Span, "field.box.address"),
                 new TrRmSourceClassMemberExport(0,
                     relocatedClassFields[2].Span, "field.box.enum-address"),
+                CreateSourceClassConstructorExport(
+                    relocatedClassDeclaration, "constructor.box"),
             ]);
         var relocatedExtraMarkerExport = CreateExport(
             relocatedProviderProgram, relocatedProviderTree, 0,
@@ -3331,6 +3886,12 @@ internal sealed class TrRmC1EnumClosureSourceTests
                     public uint8 Prefix;
                     public [NativeCallConv(NativeCallingConvention.Cdecl)]
                         fnptr<int32> Callback;
+                    public Box(uint8 prefix,
+                        [NativeCallConv(NativeCallingConvention.Cdecl)]
+                        fnptr<int32> callback) {
+                        Prefix = prefix;
+                        Callback = callback;
+                    }
                 }
             }
             """);
@@ -3356,6 +3917,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
                     classFields[0].Span, "field.box.prefix"),
                 new TrRmSourceClassMemberExport(0,
                     classFields[1].Span, "field.box.callback"),
+                CreateSourceClassConstructorExport(classDeclaration,
+                    "constructor.box"),
             ]);
         var providerArtifact = TrRmExecutableCompiler.EmitStandard(
             providerProgram, "ClassLayoutProvider", schemaIdentity, 1, [],
@@ -3459,10 +4022,17 @@ internal sealed class TrRmC1EnumClosureSourceTests
             = $"{s_schemaIdentities[0]}-class-instance-layout-1";
         var providerTree = SyntaxTree.Parse("""
             namespace Demo {
-                public class Target { public int32 Value; }
+                public class Target {
+                    public int32 Value;
+                    public Target(int32 value) { Value = value; }
+                }
                 public class Box {
                     public uint8 Prefix;
                     public ptr<Target> Address;
+                    public Box(uint8 prefix, ptr<Target> address) {
+                        Prefix = prefix;
+                        Address = address;
+                    }
                 }
             }
             """);
@@ -3474,9 +4044,10 @@ internal sealed class TrRmC1EnumClosureSourceTests
             providerProgram, "ClassPointerProvider", schemaIdentity, 1, [], [],
             [
                 CreateSourceClassExport(providerProgram, providerTree,
-                    "Target", "type.target"),
+                    "Target", "type.target", "constructor.target"),
                 CreateSourceClassExport(providerProgram, providerTree,
-                    "Box", "type.box", (0, "field.box.prefix"),
+                    "Box", "type.box", "constructor.box",
+                    (0, "field.box.prefix"),
                     (1, "field.box.address")),
             ], []);
         var providerTables
@@ -3608,11 +4179,21 @@ internal sealed class TrRmC1EnumClosureSourceTests
 
         var relocatedProviderTree = SyntaxTree.Parse("""
             namespace Demo {
-                public class Padding { public int32 Value; }
-                public class Target { public int32 Value; }
+                public class Padding {
+                    public int32 Value;
+                    public Padding(int32 value) { Value = value; }
+                }
+                public class Target {
+                    public int32 Value;
+                    public Target(int32 value) { Value = value; }
+                }
                 public class Box {
                     public uint8 Prefix;
                     public ptr<Target> Address;
+                    public Box(uint8 prefix, ptr<Target> address) {
+                        Prefix = prefix;
+                        Address = address;
+                    }
                 }
             }
             """);
@@ -3627,11 +4208,14 @@ internal sealed class TrRmC1EnumClosureSourceTests
             relocatedProviderProgram, "ClassPointerProvider",
             schemaIdentity, 1, [], [], [
                 CreateSourceClassExport(relocatedProviderProgram,
-                    relocatedProviderTree, "Padding", "type.padding"),
+                    relocatedProviderTree, "Padding", "type.padding",
+                    "constructor.padding"),
                 CreateSourceClassExport(relocatedProviderProgram,
-                    relocatedProviderTree, "Target", "type.target"),
+                    relocatedProviderTree, "Target", "type.target",
+                    "constructor.target"),
                 CreateSourceClassExport(relocatedProviderProgram,
                     relocatedProviderTree, "Box", "type.box",
+                    "constructor.box",
                     (0, "field.box.prefix"),
                     (1, "field.box.address")),
             ], []);
@@ -3701,7 +4285,10 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var providerTree = SyntaxTree.Parse("""
             namespace Demo {
                 public enum Marker : int32 { Value = 1 }
-                public class Shelf { public int32 Id; }
+                public class Shelf {
+                    public int32 Id;
+                    public Shelf(int32 id) { Id = id; }
+                }
             }
             """);
         var providerCompilation = Compilation.CreateLibrary(providerTree);
@@ -3724,6 +4311,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
             providerClassDeclaration.Span, "type.shelf", [
                 new TrRmSourceClassMemberExport(0, providerField.Span,
                     "field.shelf.id"),
+                CreateSourceClassConstructorExport(
+                    providerClassDeclaration, "constructor.shelf"),
             ]);
         var providerEnumExport = CreateExport(providerProgram,
             providerTree, 0, "Marker", ["type.marker"], "marker");
@@ -3748,8 +4337,14 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 public class Palette {
                     public Shelf ShelfValue;
                     public Shade ShadeValue;
+                    public Palette(Shade shade) {
+                        ShadeValue = shade;
+                    }
                 }
-                public class Shelf { public int32 Id; }
+                public class Shelf {
+                    public int32 Id;
+                    public Shelf(int32 id) { Id = id; }
+                }
             }
             """);
         var consumerCompilation = Compilation.CreateLibrary(consumerTree);
@@ -3775,6 +4370,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
                     consumerFields[0].Span, "field.palette.shelf"),
                 new TrRmSourceClassMemberExport(0,
                     consumerFields[1].Span, "field.palette.shade"),
+                CreateSourceClassConstructorExport(
+                    consumerClassDeclaration, "constructor.palette"),
             ]);
         var consumerEnumExport = CreateExport(consumerProgram,
             consumerTree, 0, "Shade", ["type.shade"], "shade");
@@ -3949,7 +4546,10 @@ internal sealed class TrRmC1EnumClosureSourceTests
 
         var incompatibleProviderTree = SyntaxTree.Parse("""
             namespace Demo {
-                public class Shelf { public int32 Id; }
+                public class Shelf {
+                    public int32 Id;
+                    public Shelf(int32 id) { Id = id; }
+                }
             }
             """);
         var incompatibleProviderCompilation
@@ -3977,6 +4577,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
             incompatibleClassDeclaration.Span, "type.shelf", [
                 new TrRmSourceClassMemberExport(0,
                     incompatibleField.Span, "field.shelf.other"),
+                CreateSourceClassConstructorExport(
+                    incompatibleClassDeclaration, "constructor.shelf"),
             ]);
         var incompatibleProviderArtifact
             = TrRmExecutableCompiler.EmitStandard(
@@ -3998,7 +4600,10 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var schemaIdentity = s_schemaIdentities[0];
         var providerTree = SyntaxTree.Parse("""
             namespace Demo {
-                public class Shelf { public int32 Id; }
+                public class Shelf {
+                    public int32 Id;
+                    public Shelf(int32 id) { Id = id; }
+                }
             }
             """);
         var providerCompilation = Compilation.CreateLibrary(providerTree);
@@ -4021,6 +4626,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
             providerClassDeclaration.Span, "type.shelf", [
                 new TrRmSourceClassMemberExport(0, providerField.Span,
                     "field.shelf.id"),
+                CreateSourceClassConstructorExport(
+                    providerClassDeclaration, "constructor.shelf"),
             ]);
         var providerArtifact = TrRmExecutableCompiler.EmitStandard(
             providerProgram, "ShelfProvider", schemaIdentity, 1,
@@ -4035,9 +4642,18 @@ internal sealed class TrRmC1EnumClosureSourceTests
 
         var consumerTree = SyntaxTree.Parse("""
             namespace Demo {
-                public class Palette { public Shelf ShelfValue; }
-                public class Shelf { public int32 Id; }
-                public class LocalShelf { public int32 Value; }
+                public class Palette {
+                    public Shelf ShelfValue;
+                    public Palette(Shelf shelf) { }
+                }
+                public class Shelf {
+                    public int32 Id;
+                    public Shelf(int32 id) { Id = id; }
+                }
+                public class LocalShelf {
+                    public int32 Value;
+                    public LocalShelf(int32 value) { Value = value; }
+                }
                 public struct Payload {
                     public int64 LocalValue;
                     public uint64 ImportedValue;
@@ -4065,6 +4681,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
             consumerClassDeclaration.Span, "type.palette", [
                 new TrRmSourceClassMemberExport(0,
                     consumerClassField.Span, "field.palette.shelf"),
+                CreateSourceClassConstructorExport(
+                    consumerClassDeclaration, "constructor.palette"),
             ]);
         var localClassDeclaration = consumerTree.Root.Children
             .OfType<SyntaxNode>()
@@ -4082,6 +4700,8 @@ internal sealed class TrRmC1EnumClosureSourceTests
             localClassDeclaration.Span, "type.local-shelf", [
                 new TrRmSourceClassMemberExport(0, localClassField.Span,
                     "field.local-shelf.value"),
+                CreateSourceClassConstructorExport(
+                    localClassDeclaration, "constructor.local-shelf"),
             ]);
         var packetExport = new TrRmSourceTypeExport("Demo", "Packet",
             "type.packet") {
@@ -4239,7 +4859,9 @@ internal sealed class TrRmC1EnumClosureSourceTests
                     }
                 }
                 """), reloadedReference);
-        Assert.That(ownershipSensitiveUse.HasErrors, Is.True);
+        Assert.That(ownershipSensitiveUse.HasErrors,
+            Is.EqualTo(!SchemaFor(schemaIdentity)
+                .UsesConstructionInitializerCopyEvidence()));
     }
 
     [Test]
@@ -4566,8 +5188,20 @@ internal sealed class TrRmC1EnumClosureSourceTests
             sourceInputOrdinal, declaration.Span, exportKeys, memberKeys);
     }
 
+    private static TrRmSourceClassMemberExport
+        CreateSourceClassConstructorExport(SyntaxNode declaration,
+            string exportKey)
+    {
+        var constructor = declaration.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ConstructorDeclaration);
+        return new TrRmSourceClassMemberExport(0, constructor.Span,
+            exportKey);
+    }
+
     private static TrRmSourceClassExport CreateSourceClassExport(
         BoundProgram program, SyntaxTree tree, string name, string exportKey,
+        string constructorExportKey,
         params (int FieldOrdinal, string ExportKey)[] fieldExports)
     {
         var declaration = tree.Root.DescendantNodes().Single(node =>
@@ -4591,7 +5225,9 @@ internal sealed class TrRmC1EnumClosureSourceTests
             return new TrRmSourceClassMemberExport(0,
                 fields[fieldExport.FieldOrdinal].Span,
                 fieldExport.ExportKey);
-        }).ToImmutableArray();
+        }).ToImmutableArray()
+            .Add(CreateSourceClassConstructorExport(declaration,
+                constructorExportKey));
         return new TrRmSourceClassExport(program, classIndex,
             declaration.Span, exportKey, memberExports);
     }
@@ -5498,12 +6134,52 @@ internal sealed class TrRmC1EnumClosureSourceTests
         return result;
     }
 
+    private static void SetTypeDefFlags(byte[] artifact, int typeDefRow,
+        uint flags)
+    {
+        var sectionCount = checked((int)
+            BinaryPrimitives.ReadUInt32LittleEndian(artifact.AsSpan(12)));
+        for (var sectionIndex = 0; sectionIndex < sectionCount;
+            sectionIndex++)
+        {
+            var directoryOffset = 32 + (sectionIndex * 16);
+            if (BinaryPrimitives.ReadUInt16LittleEndian(
+                    artifact.AsSpan(directoryOffset)) != 0x0013)
+            {
+                continue;
+            }
+
+            var sectionOffset = checked((int)
+                BinaryPrimitives.ReadUInt32LittleEndian(
+                    artifact.AsSpan(directoryOffset + 8)));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                artifact.AsSpan(sectionOffset
+                    + ((typeDefRow - 1) * 44) + 8), flags);
+            return;
+        }
+
+        throw new InvalidDataException("The TypeDef section is missing.");
+    }
+
+    private static byte[] EmitClassArtifact(BoundProgram program,
+        string moduleIdentity, string schemaIdentity,
+        IReadOnlyList<TrRmSourceClassExport> classExports)
+        => SchemaFor(schemaIdentity).UsesC1EnumClosure()
+            ? TrRmExecutableCompiler.EmitStandard(program, moduleIdentity,
+                schemaIdentity, 1, [], [], classExports, [])
+            : TrRmExecutableCompiler.EmitStandard(program, moduleIdentity,
+                schemaIdentity, 1, [], [], classExports);
+
     private static TrRmArtifactSchema SchemaFor(string schemaIdentity)
         => schemaIdentity switch {
             "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-1-parameter-labels-1-receiver-access-1-enum-closure-1"
                 => TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft,
             "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-enum-closure-1"
                 => TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft,
+            "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-1-parameter-labels-1-receiver-access-1-enum-closure-1-initializer-copy-evidence-1"
+                => TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureInitializerCopyEvidenceDraft,
+            "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-enum-closure-1-initializer-copy-evidence-1"
+                => TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureInitializerCopyEvidenceDraft,
             "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-1-parameter-labels-1-receiver-access-1-property-initialized-state-1-enum-closure-1"
                 => TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft,
             "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-property-initialized-state-1-enum-closure-1"
@@ -5512,6 +6188,16 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 => TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft,
             "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-enum-closure-1-class-instance-layout-1"
                 => TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft,
+            "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-1-parameter-labels-1-receiver-access-1-enum-closure-1-class-instance-layout-1-initializer-copy-evidence-1"
+                => TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureClassInstanceLayoutInitializerCopyEvidenceDraft,
+            "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-enum-closure-1-class-instance-layout-1-initializer-copy-evidence-1"
+                => TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureClassInstanceLayoutInitializerCopyEvidenceDraft,
+            "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-initializer-copy-evidence-1"
+                => TrRmArtifactSchema.C1M1Construction2InitializerCopyEvidenceDraft,
+            "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-class-parameter-defaults-1-initializer-copy-evidence-1"
+                => TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft,
+            "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-class-parameter-defaults-1-associated-relation-constraints-1-initializer-copy-evidence-1"
+                => TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidenceDraft,
             "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-1-parameter-labels-1-receiver-access-1-property-initialized-state-1-enum-closure-1-class-instance-layout-1"
                 => TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft,
             "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-property-initialized-state-1-enum-closure-1-class-instance-layout-1"

@@ -318,16 +318,19 @@ public static class TrRmStructuralMetadataValidator
                     or TrRmArtifactSchema.C1M1ConstructionParameterLabelsReceiverAccessDraft
                     or TrRmArtifactSchema.C1M1Construction2Draft
                     or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessDraft
+                    or TrRmArtifactSchema.C1M1Construction2InitializerCopyEvidenceDraft
                     or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft
+                    or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft
                     or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsDraft
+                    or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidenceDraft
                     or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft
-                    or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateDraft)
+                    or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateDraft
                     or TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft
                     or TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft
-                    or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft
-                    or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft)
-                    or TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft
-                    or TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft
+                    or TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureInitializerCopyEvidenceDraft
+                    or TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureInitializerCopyEvidenceDraft
+                    or TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureClassInstanceLayoutInitializerCopyEvidenceDraft
+                    or TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureClassInstanceLayoutInitializerCopyEvidenceDraft
                     or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft
                     or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft)
                 || methodDefRow <= 0 || methodDefRow > Methods.Count)

@@ -107,11 +107,15 @@ public static partial class TrRmExecutableCompiler
                 && !StringComparer.Ordinal.Equals(schemaIdentities[0],
                     StandardC1M1Construction2SchemaIdentity)
                 && !StringComparer.Ordinal.Equals(schemaIdentities[0],
+                    StandardC1M1Construction2InitializerCopyEvidenceSchemaIdentity)
+                && !StringComparer.Ordinal.Equals(schemaIdentities[0],
                     StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsSchemaIdentity)
+                && !StringComparer.Ordinal.Equals(schemaIdentities[0],
+                    StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceSchemaIdentity)
                 && !StringComparer.Ordinal.Equals(schemaIdentities[0],
                     StandardCM1AR1SchemaIdentity)
                 && !StringComparer.Ordinal.Equals(schemaIdentities[0],
-                    StandardC1M1Construction2L1R1ClassParameterDefaultsSchemaIdentity)
+                    StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidenceSchemaIdentity)
                 && !StringComparer.Ordinal.Equals(schemaIdentities[0],
                     StandardC1M1ConstructionL1R1SchemaIdentity)
                 && !StringComparer.Ordinal.Equals(schemaIdentities[0],
@@ -211,6 +215,8 @@ public static partial class TrRmExecutableCompiler
                     StandardC1M1SchemaIdentity)
                 || StringComparer.Ordinal.Equals(schemaIdentity,
                     StandardC1M1Construction2SchemaIdentity)
+                || StringComparer.Ordinal.Equals(schemaIdentity,
+                    StandardC1M1Construction2InitializerCopyEvidenceSchemaIdentity)
                 || StringComparer.Ordinal.Equals(schemaIdentity,
                     StandardC1M1ConstructionL1R1SchemaIdentity)
                 || StringComparer.Ordinal.Equals(schemaIdentity,
@@ -330,8 +336,7 @@ public static partial class TrRmExecutableCompiler
             = !isEN1 && GetC1M1ClassMetadataSchema(
                 schemaIdentities[0]).UsesMethodReceiverAccess();
         var usesConstruction2ReceiverAccess
-            = StringComparer.Ordinal.Equals(schemaIdentities[0],
-                StandardC1M1Construction2SchemaIdentity);
+            = rootTables.Schema.UsesObjectConstruction();
         if (isEN1 && rootTables.Schema.UsesPropertyInitializedState())
         {
             throw Unsupported(
@@ -1685,8 +1690,7 @@ public static partial class TrRmExecutableCompiler
 
         if (includeModuleFunctions)
         {
-            if (!StringComparer.Ordinal.Equals(schemaIdentities[0],
-                    StandardC1M1Construction2SchemaIdentity))
+            if (!rootTables.Schema.UsesObjectConstruction())
             {
                 throw Unsupported(
                     "The bounded full-module class reference retains top-level functions only for exact Construction-2.");
@@ -2648,10 +2652,15 @@ public static partial class TrRmExecutableCompiler
         string schemaIdentity)
         => schemaIdentity is
             StandardC1M1Construction2SchemaIdentity
+            or StandardC1M1Construction2InitializerCopyEvidenceSchemaIdentity
             or StandardC1M1ConstructionL1R1SchemaIdentity
             or StandardC1M1Construction2L1R1SchemaIdentity
             or StandardC1M1ConstructionL1R1EnumClosureSchemaIdentity
             or StandardC1M1Construction2L1R1EnumClosureSchemaIdentity
+            or StandardC1M1ConstructionL1R1EnumClosureInitializerCopyEvidenceSchemaIdentity
+            or StandardC1M1Construction2L1R1EnumClosureInitializerCopyEvidenceSchemaIdentity
+            or StandardC1M1ConstructionL1R1ClassInstanceLayoutInitializerCopyEvidenceSchemaIdentity
+            or StandardC1M1Construction2L1R1ClassInstanceLayoutInitializerCopyEvidenceSchemaIdentity
             or StandardC1M1ConstructionL1R1ClassInstanceLayoutSchemaIdentity
             or StandardC1M1Construction2L1R1ClassInstanceLayoutSchemaIdentity;
 
@@ -4614,6 +4623,10 @@ public static partial class TrRmExecutableCompiler
                 IsInternal = (typeDefFlags & 3) == 1,
                 StandardTypeOrigin = origin,
                 StandardLayoutOnly = true,
+                DeclaredCopyEvidence
+                    = tables.Schema.SupportsDeclaredCopyEvidence()
+                        ? tables.TypeDefs.HasDeclaredCopy(typeDefRow)
+                        : null,
             });
         }
 

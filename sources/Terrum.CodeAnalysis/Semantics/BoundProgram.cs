@@ -1057,6 +1057,12 @@ internal static class StandardGenericMethodSchema
         = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-class-parameter-defaults-1";
     internal const string C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraints
         = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-class-parameter-defaults-1-associated-relation-constraints-1";
+    internal const string C1M1Construction2InitializerCopyEvidence
+        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-initializer-copy-evidence-1";
+    internal const string C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidence
+        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-class-parameter-defaults-1-initializer-copy-evidence-1";
+    internal const string C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidence
+        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-class-parameter-defaults-1-associated-relation-constraints-1-initializer-copy-evidence-1";
 
     internal static bool IsGenericMethodCalls(string? schemaIdentity)
         => StringComparer.Ordinal.Equals(schemaIdentity,
@@ -1068,15 +1074,23 @@ internal static class StandardGenericMethodSchema
             || StringComparer.Ordinal.Equals(schemaIdentity,
                 C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaults)
             || StringComparer.Ordinal.Equals(schemaIdentity,
-                C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraints);
+                C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraints)
+            || StringComparer.Ordinal.Equals(schemaIdentity,
+                C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidence)
+            || StringComparer.Ordinal.Equals(schemaIdentity,
+                C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidence);
 
     internal static bool IsCM1AR1(string? schemaIdentity)
         => StringComparer.Ordinal.Equals(schemaIdentity,
-            C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraints);
+                C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraints)
+            || StringComparer.Ordinal.Equals(schemaIdentity,
+                C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidence);
 
     internal static bool IsCM1ClassParameterDefaults(string? schemaIdentity)
         => StringComparer.Ordinal.Equals(schemaIdentity,
                 C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaults)
+            || StringComparer.Ordinal.Equals(schemaIdentity,
+                C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidence)
             || IsCM1AR1(schemaIdentity);
 }
 
@@ -1330,6 +1344,7 @@ public sealed record BoundStruct(string Name, ImmutableArray<BoundStructField> F
     internal BoundStandardTypeOrigin? StandardTypeOrigin { get; init; }
     internal int SourceGenericTypeDefinitionIndex { get; init; } = -1;
     internal bool StandardLayoutOnly { get; init; }
+    internal bool? DeclaredCopyEvidence { get; init; }
 
     /// <summary>Whether the value requests declaration-order natural layout; a public commitment also requires <see cref="BlittableTargetRequirement"/>.</summary>
     public bool IsSequential { get; init; }

@@ -594,7 +594,7 @@ internal static class TrRmRegisterBodyMapValidator
         var receiverType = signatures.GetReceiverTypeSpec(signature);
         var hasReceiver = receiverType != 0;
         var isConstructionInitializer
-            = body.Schema.UsesObjectConstruction()
+            = body.Schema.UsesConstructionContracts()
                 && contracts.HasConstructionClause(methodDefRow)
                 && contracts.GetConstructionClause(methodDefRow).RoleTag
                     == 1;
@@ -3352,6 +3352,8 @@ internal static class TrRmRegisterBodyMapValidator
 
         var hasReceiver = receiverTypeSpec != 0
             && (body.Schema.UsesObjectConstruction()
+                || (body.Schema.UsesConstructionContracts()
+                    && targetConstructionRole == 1)
                 || body.Schema.UsesMethodReceiverAccess()
                 || isGenericInterfaceRequirement);
         if (inputCount != (uint)(parameterCount
@@ -6199,7 +6201,13 @@ internal static class TrRmRegisterBodyMapValidator
         TrRmNativeFunctionPointerAnchorTableReader
             nativeFunctionPointerAnchors)
     {
-        if (!body.Schema.UsesObjectConstruction()
+        var constructionRole
+            = contracts.HasConstructionClause(methodDefRow)
+                ? contracts.GetConstructionClause(methodDefRow).RoleTag
+                : (byte)0;
+        if ((!body.Schema.UsesObjectConstruction()
+                && !(body.Schema.UsesConstructionContracts()
+                    && constructionRole == 1))
             || store.Length != 16
             || ReadByte(body, store, 0) != 1)
         {
@@ -6367,8 +6375,9 @@ internal static class TrRmRegisterBodyMapValidator
             || ReadUInt16(body, store, 14) != 0
             || !typeSpecs.AreEquivalentTypeSpecRefs(
                 sourceTypeSpecRef, fieldTypeSpecRef)
-            || !IsCopyableRegisterValueType(typeSpecs, sourceTypeSpecRef,
-                constantValues, body.Schema)
+            || !IsConstructionInitializerCopyValueType(typeSpecs,
+                sourceTypeSpecRef, types, imports, constantValues,
+                body.Schema)
             || !typeSpecs.AreEquivalentTypeSpecRefs(
                 fieldTypeSpecRef,
                 GetTypeMapTypeSpecRef(body,
@@ -6400,6 +6409,46 @@ internal static class TrRmRegisterBodyMapValidator
         }
 
         return true;
+    }
+
+    private static bool IsConstructionInitializerCopyValueType(
+        TrRmTypeSpecTableReader typeSpecs, uint typeSpecRef,
+        TrRmTypeDefTableReader types, TrRmImportTableReader imports,
+        ConstantSourceValueContext constantValues,
+        TrRmArtifactSchema schema)
+    {
+        if (IsCopyableRegisterValueType(typeSpecs, typeSpecRef,
+                constantValues, schema))
+        {
+            return true;
+        }
+
+        if (!schema.UsesConstructionInitializerCopyEvidence()
+            || !schema.SupportsDeclaredCopyEvidence()
+            || !schema.SupportsDeclaredUniqueEvidence())
+        {
+            return false;
+        }
+
+        var type = typeSpecs.GetTypeSpecRef(typeSpecRef);
+        if (!type.IsRow || type.Form is not (0x02 or 0x03))
+        {
+            return false;
+        }
+
+        var typeDefRow = typeSpecs.GetNominalTypeDefRow(typeSpecRef,
+            types, imports);
+        if (types.GetKind(typeDefRow) == 1)
+        {
+            return type.Qualifiers == 0
+                && types.HasDeclaredCopy(typeDefRow);
+        }
+
+        return types.GetKind(typeDefRow) == 2
+            && TryGetNormalClassHandleTypeSpec(typeSpecRef, types,
+                typeSpecs, imports, out var classTypeDefRow, out _)
+            && classTypeDefRow == typeDefRow
+            && !types.HasDeclaredUnique(typeDefRow);
     }
 
     private static bool ValidateConstructionClassFieldCopyStore(
@@ -7237,8 +7286,12 @@ internal static class TrRmRegisterBodyMapValidator
             ? contracts.GetConstructionClause(methodDefRow) : default;
         var isPropertyInitializedState
             = body.Schema.UsesPropertyInitializedState();
+        var isConstructionInitializer
+            = body.Schema.UsesConstructionContracts()
+                && construction.RoleTag == 1;
         if ((!body.Schema.UsesObjectConstruction()
-                && !body.Schema.UsesPropertyInitializedState())
+                && !body.Schema.UsesPropertyInitializedState()
+                && !isConstructionInitializer)
             || payload.Length != 20 || accessKind is not (1 or 2 or 3)
             || destinationKind != 1 || destinationIndex != destination
             || destination >= 14 || baseKind is not (1 or 2)
@@ -8473,7 +8526,7 @@ internal static class TrRmRegisterBodyMapValidator
         InitializationReferenceTypeMap initializationReferenceTypes)
     {
         var isConstructionInitializer
-            = body.Schema.UsesObjectConstruction()
+            = body.Schema.UsesConstructionContracts()
                 && contracts.HasConstructionClause(methodDefRow)
                 && contracts.GetConstructionClause(methodDefRow).RoleTag
                     == 1;
@@ -8544,6 +8597,8 @@ internal static class TrRmRegisterBodyMapValidator
 
                         var hasReceiver = receiverTypeSpec != 0
                             && (body.Schema.UsesObjectConstruction()
+                                || (body.Schema.UsesConstructionContracts()
+                                    && targetConstructionRole == 1)
                                 || body.Schema.UsesMethodReceiverAccess()
                                 || isGenericInterfaceRequirement);
                         if (ReadUInt32(body, payload, 8)

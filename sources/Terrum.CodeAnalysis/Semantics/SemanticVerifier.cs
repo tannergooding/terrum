@@ -34392,10 +34392,19 @@ public static partial class SemanticVerifier
         return contains;
     }
 
-    private static bool IsCopyStruct(BoundProgram program, PrimitiveType type) =>
-        IsStructType(type, program)
-            && !program.Structures[(int)type - 100].IsUnique
-            && !IsClassOwnershipUnknown(type, program);
+    private static bool IsCopyStruct(BoundProgram program, PrimitiveType type)
+    {
+        if (!IsStructType(type, program))
+        {
+            return false;
+        }
+
+        var structure = program.Structures[(int)type - 100];
+        return !structure.IsUnique
+            && !IsClassOwnershipUnknown(type, program)
+            && (structure.StandardTypeOrigin is null
+                || structure.DeclaredCopyEvidence == true);
+    }
 
     private static void VerifyClassFactory(BoundProgram program, BoundFunction function, int index)
     {
