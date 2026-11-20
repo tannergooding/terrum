@@ -6360,6 +6360,43 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 static function => function.Name == "ReadNested")
                 .ReturnType,
             Is.EqualTo(PrimitiveType.Int32));
+        var moduleRefPermutedConsumer = ReverseStandardModuleRefRows(
+            consumerArtifact,
+            TrRmArtifactSchema
+                .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft);
+        var originalConsumerTables
+            = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                    consumerArtifact,
+                    TrRmArtifactSchema
+                        .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft));
+        var permutedConsumerTables
+            = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                    moduleRefPermutedConsumer,
+                    TrRmArtifactSchema
+                        .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft));
+        Assert.That(permutedConsumerTables.ModuleRefs
+                .GetProducerIdentity(1),
+            Is.EqualTo(originalConsumerTables.ModuleRefs
+                .GetProducerIdentity(originalConsumerTables.ModuleRefs.Count)));
+        var moduleRefPermutedProgram = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                moduleRefPermutedConsumer),
+            "StructMethodConsumer", providers);
+        Assert.That(moduleRefPermutedProgram.Functions.Single(
+                static function => function.Name == "ReadNested")
+                .ReturnType,
+            Is.EqualTo(PrimitiveType.Int32));
+        var moduleRefPermutedReemission
+            = TrRmExecutableCompiler.EmitStandard(
+                moduleRefPermutedProgram, "StructMethodConsumer",
+                schemaIdentity,
+                TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        _ = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                moduleRefPermutedReemission),
+            "StructMethodConsumer", providers);
 
         var rootMethodCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
@@ -10334,6 +10371,67 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             C1M1Construction2ClassParameterDefaultsSchemaIdentity,
             TrRmModuleTableReader.WindowsX64NativeTargetRequirement, [], [],
             classExports);
+    }
+
+    private static byte[] ReverseStandardModuleRefRows(byte[] artifact,
+        TrRmArtifactSchema schema)
+    {
+        var index = new TrRmArtifactIndex(artifact, schema);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(index);
+        if (tables.ModuleRefs.Count < 2
+            || !index.TryGetSection(0x0010, out var moduleRefSection,
+                out var moduleRefCount)
+            || !index.TryGetSection(0x001C, out var importSection,
+                out var importCount)
+            || moduleRefCount != tables.ModuleRefs.Count
+            || importCount != tables.Imports.Count)
+        {
+            throw new InvalidOperationException(
+                "The ModuleRef permutation requires multiple retained provider references.");
+        }
+
+        var moduleRefBytes = moduleRefSection.ToArray();
+        for (var destination = 0;
+            destination < moduleRefCount; destination++)
+        {
+            var source = moduleRefCount - destination - 1;
+            moduleRefSection.Span.Slice(source * 12, 12).CopyTo(
+                moduleRefBytes.AsSpan(destination * 12, 12));
+        }
+
+        var importBytes = importSection.ToArray();
+        for (var row = 1; row <= importCount; row++)
+        {
+            var offset = (row - 1) * 12;
+            var oldModuleRefRow
+                = BinaryPrimitives.ReadUInt32LittleEndian(
+                    importBytes.AsSpan(offset));
+            var newModuleRefRow
+                = checked((uint)moduleRefCount + 1u - oldModuleRefRow);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                importBytes.AsSpan(offset), newModuleRefRow);
+        }
+
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var sectionIndex = 0; sectionIndex < index.SectionCount;
+            sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var recordCount);
+            var sectionBytes = kind switch {
+                0x0010 => moduleRefBytes,
+                0x001C => importBytes,
+                _ => bytes.ToArray(),
+            };
+            sections.Add(new TrRmSection(kind, flags,
+                checked((uint)recordCount), sectionBytes));
+        }
+
+        var result = TrRmArtifactWriter.Encode(sections, schema);
+        _ = TrRmStructuralMetadataValidator.ValidateC1AndGetExecutionTables(
+            new TrRmArtifactIndex(result, schema));
+        return result;
     }
 
     private static byte[] AddMethodExportAlias(byte[] artifact,
