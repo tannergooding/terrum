@@ -149,7 +149,9 @@ TypeDef/FieldDef edges are retained, and new type/field uses select the first
 explicit key under the separate unapproved alias-publication proposal. A
 public regression now covers a consumer-to-method-provider-to-nested-struct
 provider chain, nested FieldMap loading, unchanged source-free artifact
-retention/reload, and incompatible replacement. A second regression covers
+retention/reload, and incompatible replacement. A negative case rejects a
+provider-local method signature when its required TypeDef key is omitted.
+A second regression covers
 first-list type/field alias representatives, independent method-view keys,
 source-free re-emission, split/removed omitted aliases, and invalid
 nonrepresentative keys. A separate case preserves a shared expected MethodDef

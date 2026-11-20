@@ -6283,6 +6283,9 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             ], [], []);
         var providerBInput = new TrRmStandardArtifactInput(schemaIdentity,
             providerBArtifact);
+        Assert.Throws<ArgumentException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(providerBInput,
+                "StructMethodProviderB", [providerCInput], ["Read"], [], []));
         var providerBReference = TrRmExecutableCompiler
             .CreateStandardReference(providerBInput,
                 "StructMethodProviderB", [providerCInput], ["Read"], [
