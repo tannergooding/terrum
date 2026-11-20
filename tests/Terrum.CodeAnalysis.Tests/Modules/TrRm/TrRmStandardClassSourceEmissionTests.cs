@@ -6482,6 +6482,35 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                         ],
                     },
                 ], [], []);
+        var originalIncompatibleProviderCTables
+            = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(
+                    new TrRmArtifactIndex(providerCArtifact,
+                        TrRmArtifactSchema
+                            .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft));
+        var relocatedIncompatibleProviderCTables
+            = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(
+                    new TrRmArtifactIndex(
+                        relocatedIncompatibleProviderCArtifact,
+                        TrRmArtifactSchema
+                            .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft));
+        Assert.That(originalIncompatibleProviderCTables.Exports
+            .TryGetDefinitionForKey(1, "type.leaf",
+                out var originalIncompatibleLeafType), Is.True);
+        Assert.That(relocatedIncompatibleProviderCTables.Exports
+            .TryGetDefinitionForKey(1, "type.leaf",
+                out var relocatedIncompatibleLeafType), Is.True);
+        Assert.That(originalIncompatibleLeafType & 0x00FF_FFFFu,
+            Is.Not.EqualTo(relocatedIncompatibleLeafType & 0x00FF_FFFFu));
+        Assert.That(originalIncompatibleProviderCTables.Exports
+            .TryGetDefinitionForKey(1, "field.leaf.value",
+                out var originalIncompatibleLeafField), Is.True);
+        Assert.That(relocatedIncompatibleProviderCTables.Exports
+            .TryGetDefinitionForKey(1, "field.leaf.value",
+                out var relocatedIncompatibleLeafField), Is.True);
+        Assert.That(originalIncompatibleLeafField & 0x00FF_FFFFu,
+            Is.Not.EqualTo(relocatedIncompatibleLeafField & 0x00FF_FFFFu));
         Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.LoadStandard(consumerInput,
                 "StructMethodConsumer", [
