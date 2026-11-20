@@ -160,9 +160,13 @@ ModuleRefs plus source-free reload. A fourth regression relocates selected
 TypeDef/FieldDef rows by prepending an unrelated provider struct, loads the
 unchanged consumer and intermediate provider by ExportKey, then source-free
 re-emits and reloads the consumer against the relocated provider. All remain
-unverified under the active hold. Co-located provider Imports, deeper
-chains/diamonds, broader shared-expectation transformations,
-multiple using-Module contexts for one expected TypeDef, Import/Export/
+unverified under the active hold. Another API regression checks that a
+disconnected supplied method provider importing the same actual struct does
+not override the selected root method's TypeDef Import context; it too remains
+unverified. Co-located provider Imports, deeper
+chains/diamonds, broader shared-expectation transformations, multiple
+expected TypeDef views within the selected method-root Module and distinct
+nested-provider contexts for one closure-only TypeDef, Import/Export/
 ModuleRef/Body map permutations, and runtime qualification remain open. The
 separate unapproved version-3
 `docs\proposals\standard-trrm-c1-method-type-source-provider-cli-transport.md`

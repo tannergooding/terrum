@@ -6361,6 +6361,98 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 .ReturnType,
             Is.EqualTo(PrimitiveType.Int32));
 
+        var rootMethodCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                namespace Demo {
+                    public int32 Read(Leaf value) {
+                        return value.Value;
+                    }
+                }
+                """), providerCReference);
+        Assert.That(rootMethodCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                rootMethodCompilation.Diagnostics));
+        var rootMethodArtifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)rootMethodCompilation.Program!,
+            "StructMethodRootModule", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], []);
+        var rootMethodInput = new TrRmStandardArtifactInput(schemaIdentity,
+            rootMethodArtifact);
+        var unrelatedMethodCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                namespace Demo {
+                    public int32 Other(Leaf value) {
+                        return value.Value + 1;
+                    }
+                }
+                """), providerCReference);
+        Assert.That(unrelatedMethodCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                unrelatedMethodCompilation.Diagnostics));
+        var unrelatedMethodArtifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)unrelatedMethodCompilation.Program!,
+            "StructMethodUnrelatedModule", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], []);
+        var unrelatedMethodInput = new TrRmStandardArtifactInput(
+            schemaIdentity, unrelatedMethodArtifact);
+        var closureOnlyReference = TrRmExecutableCompiler
+            .CreateStandardReference(rootMethodInput,
+                "StructMethodRootModule",
+                [unrelatedMethodInput, providerCInput], ["Read"], [], []);
+        var closureOnlyCaller = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                namespace Demo {
+                    public int32 Forward(Leaf value) {
+                        return Read(value);
+                    }
+                }
+                """), closureOnlyReference);
+        Assert.That(closureOnlyCaller.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                closureOnlyCaller.Diagnostics));
+        Assert.That(closureOnlyReference.Functions
+            .Single(static function => function.Name == "Read")
+            .Variables[0].Type,
+            Is.EqualTo(closureOnlyCaller.Program!.Functions.Single()
+                .Variables[0].Type));
+        var closureOnlyConsumerProgram
+            = (BoundProgram)closureOnlyCaller.Program!;
+        var closureOnlyConsumerArtifact
+            = TrRmExecutableCompiler.EmitStandard(
+                closureOnlyConsumerProgram, "ClosureOnlyConsumer",
+                schemaIdentity,
+                TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+                [], [], []);
+        var closureOnlyConsumerInput
+            = new TrRmStandardArtifactInput(schemaIdentity,
+                closureOnlyConsumerArtifact);
+        var closureOnlyProviders = new[] {
+            rootMethodInput, unrelatedMethodInput, providerCInput,
+        };
+        var linkedClosureOnlyProgram
+            = TrRmExecutableCompiler.LoadStandard(
+                closureOnlyConsumerInput, "ClosureOnlyConsumer",
+                closureOnlyProviders);
+        var reemittedClosureOnlyArtifact
+            = TrRmExecutableCompiler.EmitStandard(
+                linkedClosureOnlyProgram, "ClosureOnlyConsumer",
+                schemaIdentity,
+                TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        Assert.That(reemittedClosureOnlyArtifact,
+            Is.EqualTo(closureOnlyConsumerArtifact));
+        var reloadedClosureOnlyProgram
+            = TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    reemittedClosureOnlyArtifact),
+                "ClosureOnlyConsumer", closureOnlyProviders);
+        Assert.That(reloadedClosureOnlyProgram.Functions.Single(
+                static function => function.Name == "Forward")
+                .Variables[0].Type,
+            Is.EqualTo(closureOnlyCaller.Program!.Functions.Single()
+                .Variables[0].Type));
+
         var relocatedProviderCTree = SyntaxTree.Parse("""
             namespace Demo {
                 [Blittable] [Layout(LayoutKind.Sequential)]

@@ -994,6 +994,30 @@ internal sealed partial class CliTests
                     tables.Imports.GetModuleRefForImportRow(1)),
                 Is.EqualTo(providerIdentity));
 
+            await File.WriteAllBytesAsync(consumerArtifact, retained)
+                .ConfigureAwait(true);
+            var (wrongOutputSchemaExit, wrongOutputSchemaOutput,
+                wrongOutputSchemaError) = await RunAsync(
+                    Encoding.UTF8.GetBytes("invalid Terrum source"),
+                    "compile-trrm", "-", "--identity", consumerIdentity,
+                    "--trrm-schema",
+                    "trrm/1-draft-init-reference-bodies-local-field-layout-2",
+                    "--trrm-source-providers", providerSelections,
+                    "--library", "-o", consumerArtifact, "--runtime",
+                    "fail-fast", "--json").ConfigureAwait(false);
+            Assert.That(wrongOutputSchemaExit, Is.EqualTo(2),
+                $"{wrongOutputSchemaOutput}{Environment.NewLine}{wrongOutputSchemaError}");
+            Assert.That(wrongOutputSchemaError, Is.Empty);
+            using (var document = JsonDocument.Parse(wrongOutputSchemaOutput))
+            {
+                Assert.That(document.RootElement
+                        .GetProperty("diagnostic").GetProperty("code")
+                        .GetString(),
+                    Is.EqualTo("TRM2000"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(consumerArtifact)
+                .ConfigureAwait(true), Is.EqualTo(retained));
+
             await File.WriteAllBytesAsync(manifestOutputAlias,
                 await File.ReadAllBytesAsync(providerSelections)
                     .ConfigureAwait(true)).ConfigureAwait(true);

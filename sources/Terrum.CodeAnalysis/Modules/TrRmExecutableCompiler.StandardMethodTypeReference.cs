@@ -641,6 +641,8 @@ public static partial class TrRmExecutableCompiler
 
         var selectedMethods = new List<(BoundFunction Function, string Key)>(
             methodExportKeys.Length);
+        var rootMethodTypeOrigins = new HashSet<(
+            string ModuleIdentity, uint DefinitionId)>();
         foreach (var exportKey in methodExportKeys)
         {
             if (!tables.Exports.TryGetDefinitionForKey(moduleRow, exportKey,
@@ -717,6 +719,13 @@ public static partial class TrRmExecutableCompiler
                 var parameterType = RemapModuleType(rootProviderModule,
                     variable.Type);
                 var structureIndex = (int)parameterType - 100;
+                var typeOrigin = program.Structures[structureIndex]
+                    .StandardTypeOrigin
+                    ?? throw Invalid(
+                        "A selected method parameter lost its canonical struct origin.");
+                _ = rootMethodTypeOrigins.Add((
+                    typeOrigin.Provider.ModuleIdentity,
+                    typeOrigin.DefinitionId));
                 _ = selectedStructures.Add(structureIndex);
                 pendingStructures.Push(structureIndex);
             }
@@ -923,6 +932,21 @@ public static partial class TrRmExecutableCompiler
 
                 typeExpectations
                     = [.. expectationsByImport.Values];
+                if (rootMethodTypeOrigins.Contains(typeOriginKey))
+                {
+                    var rootProviderSnapshot
+                        = GetProviderSnapshot(rootModule);
+                    typeExpectations = [.. typeExpectations.Where(
+                        expectation => SameA2SourceTypeProviderSnapshot(
+                            expectation.UsingModule,
+                            rootProviderSnapshot))];
+                    if (typeExpectations.IsEmpty)
+                    {
+                        throw new ArgumentException(
+                            "A root method's local struct dependency needs an explicit TypeDef ExportKey selection.",
+                            nameof(typeExportKeys));
+                    }
+                }
                 if (typeExpectations.IsEmpty)
                 {
                     throw new NotSupportedException(

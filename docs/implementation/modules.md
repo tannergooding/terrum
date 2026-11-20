@@ -295,9 +295,14 @@ also remains unverified. A fourth regression relocates selected TypeDef/
 FieldDef rows by prepending an unrelated provider struct, loads the unchanged
 consumer and intermediate provider by ExportKey, then source-free re-emits and
 reloads the consumer against the relocated provider; it too remains
-unverified. Co-located provider Imports, deeper chains/diamonds, broader
-shared-expectation transformations, multiple using-Module contexts for one
-expected TypeDef, and full Import/Export/ModuleRef/Body map permutations remain open.
+unverified. A separate API case confirms that a disconnected supplied method
+provider importing the same actual struct does not override the selected
+root method's retained TypeDef Import context; it remains unverified too.
+Co-located provider Imports, deeper chains/diamonds, broader
+shared-expectation transformations, multiple expected TypeDef views within
+the selected method-root Module and distinct nested-provider contexts for one
+closure-only TypeDef, and full Import/Export/ModuleRef/Body map permutations
+remain open.
 The loader still requires the whole validated Module-set
 TypeDef/method closure to fit its bounded Blittable-struct path;
 selected-root-only loading for unrelated declarations remains open.
