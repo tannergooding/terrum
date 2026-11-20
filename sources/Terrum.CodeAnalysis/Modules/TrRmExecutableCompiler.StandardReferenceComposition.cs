@@ -1166,6 +1166,21 @@ public static partial class TrRmExecutableCompiler
                         IncludeClassHandleType(field.Type,
                             declaration.Declaration.Provider);
                     }
+                    foreach (var expectation in declaration.Expectations)
+                    {
+                        foreach (var field
+                            in expectation.ExpectedDeclaration.Fields)
+                        {
+                            if (--remainingClassTypeVisits < 0)
+                            {
+                                throw Unsupported(
+                                    "The composed class/struct TypeDef field closure exceeds its traversal limit.");
+                            }
+
+                            IncludeClassHandleType(field.Type,
+                                expectation.ExpectedDeclaration.Provider);
+                        }
+                    }
 
                     continue;
                 }
