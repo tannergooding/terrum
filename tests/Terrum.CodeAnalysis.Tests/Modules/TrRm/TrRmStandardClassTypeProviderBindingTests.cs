@@ -415,6 +415,67 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
             Is.EqualTo("RootReemitted"));
     }
 
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsClassTypeBindingViews)]
+    public void PreservesProviderOwnedEqualityGroupsAcrossClassReemission(
+        string schemaIdentity)
+    {
+        var provider = CreateRootArtifactWithTwoClassImports("Provider",
+            "LeafProvider", "BoxKey", "LeafKey", "LeafAliasKey",
+            schemaIdentity, includeEquality: true,
+            uncalledEqualityImports: true);
+        var leafProvider = CreateRelocatedClassProvider("LeafProvider",
+            schemaIdentity, "LeafAliasKey");
+        var root = CreateArtifact("Root", "Holder", "HolderKey",
+            0xF200_0008, schemaIdentity, "Provider", "BoxKey",
+            TrRmTypeSpecTableWriter.Reference(0x03, 1),
+            layoutKind: 0, pack: 0, useRequestedLayoutForImports: true,
+            importedTypeName: "Box");
+
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, root), "Root", [
+                new TrRmStandardArtifactInput(schemaIdentity, provider),
+                new TrRmStandardArtifactInput(schemaIdentity, leafProvider),
+            ], ["HolderKey"]);
+        var leaf = reference.StandardClassDeclarations.Single(
+            static declaration =>
+                declaration.Declaration.Name == "Leaf");
+        Assert.That(leaf.TypeDefBindingEqualityGroups,
+            Has.Length.EqualTo(1));
+        Assert.That(leaf.TypeDefBindingEqualityGroups[0].OwnerModule?
+                .ModuleIdentity,
+            Is.EqualTo("Provider"));
+
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public void Use(Holder value) {}"), reference);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)compilation.Program!, "RootReemitted",
+            schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var reloadedReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, artifact),
+                "RootReemitted", [
+                    new TrRmStandardArtifactInput(schemaIdentity, provider),
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        leafProvider),
+                ], ["HolderKey"]);
+        var reloadedLeaf = reloadedReference.StandardClassDeclarations
+            .Single(static declaration =>
+                declaration.Declaration.Name == "Leaf");
+        Assert.That(reloadedLeaf.TypeDefBindingEqualityGroups,
+            Has.Length.EqualTo(1));
+        Assert.That(reloadedLeaf.TypeDefBindingEqualityGroups[0]
+                .OwnerModule?.ModuleIdentity,
+            Is.EqualTo("Provider"));
+    }
+
     [Test]
     public void BindsClassSchemaStructEqualityWithoutCopyOrBlittableProof()
     {
@@ -2784,7 +2845,8 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
         string moduleIdentity, string providerIdentity, string exportKey,
         string firstProviderExportKey, string secondProviderExportKey,
         string schemaIdentity, bool useStructLeaves = false,
-        bool includeEquality = false)
+        bool includeEquality = false,
+        bool uncalledEqualityImports = false)
     {
         const uint targetRequirement
             = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
@@ -2833,42 +2895,67 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
             typeSpecRows.Length, 3, 2, 0);
 
         var leafFlags = useStructLeaves ? 0x06u : 0x0Au;
-        var typeDefRows = new[] {
-            new TrRmTypeDefRow(2, 3, 0x0A, 1, 2, 0, 0, 1, 1, 0, 0),
-            new TrRmTypeDefRow(2, 4, leafFlags, 3, 1, 0, 0, 2, 1, 0, 0),
-            new TrRmTypeDefRow(2, 4, leafFlags, 4, 1, 0, 0, 3, 1, 0, 0),
-        };
+        var typeDefRows = uncalledEqualityImports
+            ? new[] {
+                new TrRmTypeDefRow(2, 3, 0x0A, 1, 1, 0, 0, 1, 1, 0, 0),
+                new TrRmTypeDefRow(2, 4, leafFlags, 2, 1, 0, 0, 2, 1, 0, 0),
+                new TrRmTypeDefRow(2, 4, leafFlags, 3, 1, 0, 0, 3, 1, 0, 0),
+            }
+            : [
+                new TrRmTypeDefRow(2, 3, 0x0A, 1, 2, 0, 0, 1, 1, 0, 0),
+                new TrRmTypeDefRow(2, 4, leafFlags, 3, 1, 0, 0, 2, 1, 0, 0),
+                new TrRmTypeDefRow(2, 4, leafFlags, 4, 1, 0, 0, 3, 1, 0, 0),
+            ];
+        var fieldCount = uncalledEqualityImports ? 3 : 4;
         var typeDefBytes = TrRmTypeDefTableWriter.Encode(typeDefRows,
-            strings, modules, fieldCount: 4, genericParamCount: 0,
+            strings, modules, fieldCount, genericParamCount: 0,
             layoutCount: 3, contractCount: 0, schema: schema);
         var typeDefs = new TrRmTypeDefTableReader(typeDefBytes, 3, strings,
-            modules, 4, 0, 3, 0);
-        var fieldRows = new[] {
-            new TrRmFieldDefRow(1, 5, 2, 2),
-            new TrRmFieldDefRow(1, 6, 3, 2),
-            new TrRmFieldDefRow(2, 7, 0xF200_0008, 2),
-            new TrRmFieldDefRow(3, 7, 0xF200_0008, 2),
-        };
+            modules, fieldCount, 0, 3, 0);
+        var fieldRows = uncalledEqualityImports
+            ? [
+                new TrRmFieldDefRow(1, 7, 0xF200_0008, 2),
+                new TrRmFieldDefRow(2, 7, 0xF200_0008, 2),
+                new TrRmFieldDefRow(3, 7, 0xF200_0008, 2),
+            ]
+            : [
+                new TrRmFieldDefRow(1, 5, 2, 2),
+                new TrRmFieldDefRow(1, 6, 3, 2),
+                new TrRmFieldDefRow(2, 7, 0xF200_0008, 2),
+                new TrRmFieldDefRow(3, 7, 0xF200_0008, 2),
+            ];
         var fieldBytes = TrRmFieldDefTableWriter.Encode(fieldRows, strings,
             typeDefs, typeSpecs);
-        var fields = new TrRmFieldDefTableReader(fieldBytes, 4, strings,
+        var fields = new TrRmFieldDefTableReader(fieldBytes, fieldCount, strings,
             typeDefs, typeSpecs);
         var targetProfiles = new TrRmTargetProfileTableReader([], 0);
-        var layoutRows = new[] {
-            new TrRmLayoutRow(1, 0, 0, 0, 0, 0, 1, 2),
-            new TrRmLayoutRow(2, 0, 0, 0, 0, 0, 3, 1),
-            new TrRmLayoutRow(3, 0, 0, 0, 0, 0, 4, 1),
-        };
+        var layoutRows = uncalledEqualityImports
+            ? [
+                new TrRmLayoutRow(1, 0, 0, 0, 0, 0, 1, 1),
+                new TrRmLayoutRow(2, 0, 0, 0, 0, 0, 2, 1),
+                new TrRmLayoutRow(3, 0, 0, 0, 0, 0, 3, 1),
+            ]
+            : [
+                new TrRmLayoutRow(1, 0, 0, 0, 0, 0, 1, 2),
+                new TrRmLayoutRow(2, 0, 0, 0, 0, 0, 3, 1),
+                new TrRmLayoutRow(3, 0, 0, 0, 0, 0, 4, 1),
+            ];
         var layoutBytes = TrRmLayoutTableWriter.Encode(layoutRows, typeDefs,
-            targetProfiles, layoutFieldCount: 4);
+            targetProfiles, fieldCount);
         var layouts = new TrRmLayoutTableReader(layoutBytes, 3, typeDefs,
-            targetProfiles, 4);
-        var layoutFieldRows = new[] {
-            new TrRmLayoutFieldRow(1, 0, 1),
-            new TrRmLayoutFieldRow(1, 1, 2),
-            new TrRmLayoutFieldRow(2, 0, 3),
-            new TrRmLayoutFieldRow(3, 0, 4),
-        };
+            targetProfiles, fieldCount);
+        var layoutFieldRows = uncalledEqualityImports
+            ? [
+                new TrRmLayoutFieldRow(1, 0, 1),
+                new TrRmLayoutFieldRow(2, 0, 2),
+                new TrRmLayoutFieldRow(3, 0, 3),
+            ]
+            : [
+                new TrRmLayoutFieldRow(1, 0, 1),
+                new TrRmLayoutFieldRow(1, 1, 2),
+                new TrRmLayoutFieldRow(2, 0, 3),
+                new TrRmLayoutFieldRow(3, 0, 4),
+            ];
         var layoutFieldBytes = TrRmLayoutFieldTableWriter.Encode(
             layoutFieldRows, layouts, typeDefs, fields);
         var moduleRefBytes = new byte[12];
@@ -2893,7 +2980,7 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
             new(0x0011, 0, checked((uint)typeSpecRows.Length),
                 typeSpecBytes),
             new(0x0013, 0, 3, typeDefBytes),
-            new(0x0014, 0, 4, fieldBytes),
+            new(0x0014, 0, checked((uint)fieldCount), fieldBytes),
             new(0x0015, 0, 3, layoutBytes),
             new(0x001C, 0, 2, importBytes),
             new(0x001D, 0, 1, exportBytes),
@@ -2985,7 +3072,8 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
         bool useRequestedLayoutForImports = false,
         string? fieldExportKey = null, uint fieldFlags = 2,
         string? additionalFieldExportKey = null,
-        string? localDependencyExportKey = null)
+        string? localDependencyExportKey = null,
+        string? importedTypeName = null)
     {
         var seedCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
@@ -3026,7 +3114,7 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
         {
             names.Add((importIdentity, 1));
             importIdentityRow = names.Count;
-            names.Add(("Leaf", 1));
+            names.Add((importedTypeName ?? "Leaf", 1));
             leafNameRow = names.Count;
             names.Add((importKey!, 1));
             importKeyRow = names.Count;
@@ -3191,7 +3279,7 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
         sections.Add(new TrRmSection(0x0015, 0,
             checked((uint)typeDefCount), layoutBytes));
         sections.Add(new TrRmSection(0x0023, 0,
-            checked((uint)typeDefCount), layoutFieldBytes));
+            checked((uint)fieldCount), layoutFieldBytes));
         if (importCount != 0)
         {
             var moduleRefBytes = new byte[12];
