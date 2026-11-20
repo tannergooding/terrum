@@ -415,13 +415,15 @@ public static partial class TrRmExecutableCompiler
             }
 
             var typeDefRow = checked((int)(definition & 0x00FF_FFFF));
+            var nominalKind = rootTables.TypeDefs.GetKind(typeDefRow);
             if (rootTables.TypeDefs.GetOwnerModule(typeDefRow)
                     != rootModuleRow
-                || rootTables.TypeDefs.GetKind(typeDefRow) != 2
+                || (nominalKind != 2
+                    && !(isClassTypeBindingViews && nominalKind == 1))
                 || (rootTables.TypeDefs.GetFlags(typeDefRow) & 3) != 2)
             {
                 throw Invalid(
-                    "A selected C1 TypeDef Export does not identify a local public class.");
+                    "A selected C1 TypeDef Export does not identify a local public class or admitted struct.");
             }
 
             if (rootTables.TypeDefs.GetGenericRange(typeDefRow).Count != 0)
@@ -754,13 +756,31 @@ public static partial class TrRmExecutableCompiler
             = new Dictionary<int, List<string>>();
         foreach (var typeDefRow in selectedTypeDefs.Keys)
         {
+            var identity = new BoundGenericNominalTypeIdentity(
+                moduleIdentity, moduleIdentity,
+                0x1300_0000u | checked((uint)typeDefRow));
             AddClassTypeBindingEqualityEndpoint(
-                new BoundGenericNominalTypeIdentity(moduleIdentity,
-                    moduleIdentity,
-                    0x1300_0000u | checked((uint)typeDefRow)),
+                identity,
                 new BoundStandardTypeDefBindingEqualityEndpoint(
                     rootSnapshot,
                     0x1300_0000u | checked((uint)typeDefRow), 0, null));
+            if (rootTables.TypeDefs.GetKind(typeDefRow) == 1)
+            {
+                if (directStructTypeDefRows.Add(typeDefRow))
+                {
+                    if (directStructTypeDefRows.Count
+                        > BoundGenericNominalTypeTypes.MaximumCount)
+                    {
+                        throw Unsupported(
+                            "The C1 selected struct TypeDef roots exceed the registered nominal type limit.");
+                    }
+
+                    pendingDirectStructTypeDefRows.Enqueue(typeDefRow);
+                }
+
+                continue;
+            }
+
             if (localClassTypeDefRows.Add(typeDefRow))
             {
                 pendingLocalClassTypeDefRows.Enqueue(typeDefRow);
@@ -1236,6 +1256,18 @@ public static partial class TrRmExecutableCompiler
                 bindingsByActualType, rootTables, providerIdentity,
                 providerModuleRow, typeDefRow,
                 GetSnapshot(0, providerModuleRow));
+            if (selectedTypeDefs.TryGetValue(typeDefRow,
+                    out var selectedExportKeys))
+            {
+                var identity = new BoundGenericNominalTypeIdentity(
+                    providerIdentity, providerIdentity,
+                    0x1300_0000u | checked((uint)typeDefRow));
+                var definitionIndex = definitionsByIdentity[identity];
+                typeDefinitions[definitionIndex] = typeDefinitions[
+                    definitionIndex] with {
+                    SelectedExportKeys = [.. selectedExportKeys],
+                };
+            }
         }
         foreach (var typeDefRow in directStructTypeDefRows)
         {
@@ -1247,6 +1279,18 @@ public static partial class TrRmExecutableCompiler
                 bindingsByActualType, rootTables, providerIdentity,
                 providerModuleRow, typeDefRow,
                 GetSnapshot(0, providerModuleRow));
+            if (selectedTypeDefs.TryGetValue(typeDefRow,
+                    out var selectedExportKeys))
+            {
+                var identity = new BoundGenericNominalTypeIdentity(
+                    providerIdentity, providerIdentity,
+                    0x1300_0000u | checked((uint)typeDefRow));
+                var definitionIndex = definitionsByIdentity[identity];
+                typeDefinitions[definitionIndex] = typeDefinitions[
+                    definitionIndex] with {
+                    SelectedExportKeys = [.. selectedExportKeys],
+                };
+            }
         }
         foreach (var binding in typeProviderBindings)
         {
@@ -1330,7 +1374,11 @@ public static partial class TrRmExecutableCompiler
                 throw Invalid(
                     "A C1 nominal provider definition has an unexpected identity.");
             }
-            definition = definition with { Provider = providerSnapshot };
+            definition = definition with {
+                Provider = providerSnapshot,
+                ExportKeys = GetStandardTypeExportKeys(tables,
+                    providerModuleRow, typeDefRow),
+            };
             if (definition.NominalKind is 1 or 2
                 && (!definition.Formals.IsEmpty
                     || tables.TypeDefs.GetContractRange(typeDefRow).Count
@@ -1358,6 +1406,11 @@ public static partial class TrRmExecutableCompiler
             BoundGenericNominalTypeIdentity>();
         foreach (var typeDefRow in selectedTypeDefs.Keys)
         {
+            if (rootTables.TypeDefs.GetKind(typeDefRow) != 2)
+            {
+                continue;
+            }
+
             var identity = new BoundGenericNominalTypeIdentity(
                 moduleIdentity, moduleIdentity,
                 0x1300_0000u | checked((uint)typeDefRow));
@@ -1947,12 +2000,22 @@ public static partial class TrRmExecutableCompiler
                 }
                 typeDefinitions[existingIndex] = existing with {
                     ProviderExpectations = expectations.ToImmutable(),
+                    ExportKeys = [
+                        .. existing.ExportKeys
+                            .Concat(typeDefinition.ExportKeys)
+                            .Distinct(StringComparer.Ordinal),
+                    ],
                     TypeDefBindingEqualityGroups =
                         BoundGenericNominalTypeContract
                             .MergeTypeDefBindingEqualityGroups(
                                 existing.TypeDefBindingEqualityGroups,
                                 typeDefinition
                                     .TypeDefBindingEqualityGroups),
+                    SelectedExportKeys = [
+                        .. existing.SelectedExportKeys
+                            .Concat(typeDefinition.SelectedExportKeys)
+                            .Distinct(StringComparer.Ordinal),
+                    ],
                 };
             }
             else
@@ -1999,6 +2062,29 @@ public static partial class TrRmExecutableCompiler
             genericNominalTypeInstances.Add(
                 new BoundGenericNominalTypeInstance(
                     declaration.Declaration.Identity, [], 0));
+        }
+
+        foreach (var typeDefRow in selectedTypeDefs.Keys)
+        {
+            if (rootTables.TypeDefs.GetKind(typeDefRow) != 1)
+            {
+                continue;
+            }
+
+            var identity = new BoundGenericNominalTypeIdentity(
+                moduleIdentity, moduleIdentity,
+                0x1300_0000u | checked((uint)typeDefRow));
+            if (!genericNominalTypeInstances.Any(instance =>
+                    instance.Definition == identity
+                    && instance.Arguments.IsEmpty
+                    && instance.Qualifiers == 0
+                    && instance.TypeSpecReference == 0
+                    && instance.TypeSpecProviderIdentity is null
+                    && instance.TypeSpecForm == 0))
+            {
+                genericNominalTypeInstances.Add(
+                    new BoundGenericNominalTypeInstance(identity, [], 0));
+            }
         }
 
         if (isClassTypeBindingViews)

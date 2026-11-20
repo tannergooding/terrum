@@ -104,6 +104,7 @@ public sealed record BoundGenericNominalTypeDefinition(
         TypeDefBindingEqualityGroups { get; init; } = [];
     internal BoundSourceTypeProviderSnapshot? Provider { get; init; }
     internal ImmutableArray<string> ExportKeys { get; init; } = [];
+    internal ImmutableArray<string> SelectedExportKeys { get; init; } = [];
 }
 
 /// <summary>One ordered type or constant substitution for a generic nominal formal.</summary>
@@ -517,6 +518,15 @@ internal static class BoundGenericNominalTypeContract
                 || definition.ExportKeys.Any(static key => !IsValidText(key))
                 || definition.ExportKeys.Distinct(StringComparer.Ordinal)
                     .Count() != definition.ExportKeys.Length
+                || definition.SelectedExportKeys.IsDefault
+                || definition.SelectedExportKeys.Any(static key =>
+                    !IsValidText(key))
+                || definition.SelectedExportKeys.Distinct(
+                    StringComparer.Ordinal).Count()
+                    != definition.SelectedExportKeys.Length
+                || definition.SelectedExportKeys.Any(key =>
+                    !definition.ExportKeys.Contains(key,
+                        StringComparer.Ordinal))
                 || (definition.Provider is
                         BoundSourceTypeProviderSnapshot provider
                     && (!IsValidText(provider.SchemaIdentity)

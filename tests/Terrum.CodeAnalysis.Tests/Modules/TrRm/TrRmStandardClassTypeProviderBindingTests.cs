@@ -219,6 +219,85 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
             string.Join(Environment.NewLine, compilation.Diagnostics));
     }
 
+    [Test]
+    public void ComposesStructOnlyRootWithClassFieldExpectation()
+    {
+        var schemaIdentity
+            = StandardGenericMethodSchema
+                .C1M1Construction2ClassTypeBindingViews;
+        var provider = CreateClassArtifact("Provider", "Leaf", "LeafKey",
+            0xF200_0008, schemaIdentity);
+        SetTypeDefFlags(provider, 0x06);
+        var root = CreateRootArtifact("Root", "Box", "BoxKey",
+            0xF200_0008, schemaIdentity);
+        var classReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, root), "Root",
+            [new TrRmStandardArtifactInput(schemaIdentity, provider)],
+            ["BoxKey"]);
+        var structReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, provider),
+            "Provider", [], ["LeafKey"]);
+
+        var composed = TrRmExecutableCompiler.CreateStandardReferenceSet(
+            [classReference, structReference]);
+        var leaf = composed.GenericNominalTypeDefinitions.Single(
+            static definition => definition.Name == "Leaf");
+        Assert.That(leaf.NominalKind, Is.EqualTo(1));
+        Assert.That(leaf.SelectedExportKeys, Is.EqualTo(["LeafKey"]));
+        Assert.That(leaf.ProviderExpectations, Has.Length.EqualTo(1));
+        Assert.That(leaf.TypeDefBindingEqualityGroups,
+            Has.Length.EqualTo(1));
+        Assert.That(leaf.TypeDefBindingEqualityGroups[0].Endpoints,
+            Has.Length.EqualTo(2));
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public void Use(Box box, Leaf leaf) {}"), composed);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
+    public void ReemitsSelectedDirectStructRootsWithClassViews()
+    {
+        var schemaIdentity
+            = StandardGenericMethodSchema
+                .C1M1Construction2ClassTypeBindingViews;
+        var root = CreateArtifact("Root", "Box", "BoxKey", 0,
+            schemaIdentity, null, null, null,
+            localDependencyTypeName: "Leaf",
+            localDependencyExportKey: "LeafKey");
+        SetTypeDefFlags(root, 0x06, typeDefRow: 2);
+
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, root), "Root",
+            [], ["BoxKey", "LeafKey"]);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public void Use(Box box, Leaf leaf) {}"), reference);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)compilation.Program!, "RootReemitted",
+            schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var tables = ReadTables(artifact, schemaIdentity);
+        Assert.That(tables.TypeDefs.Count, Is.EqualTo(2));
+        Assert.That(tables.TypeDefs.GetKind(1), Is.EqualTo(2));
+        Assert.That(tables.TypeDefs.GetKind(2), Is.EqualTo(1));
+        Assert.That(tables.Exports.GetExportsForModule(1)
+                .Select(static export => export.Key),
+            Is.EquivalentTo(["BoxKey", "LeafKey", "Use"]));
+
+        var reloadedReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, artifact),
+                "RootReemitted", [], ["BoxKey", "LeafKey"]);
+        var reloadedCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("public void Use(Box box, Leaf leaf) {}"),
+            reloadedReference);
+        Assert.That(reloadedCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                reloadedCompilation.Diagnostics));
+    }
+
     [TestCase(
         StandardGenericMethodSchema.C1M1Construction2ClassTypeBindingViews)]
     [TestCase(
@@ -2847,7 +2926,8 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
         string? localDependencyTypeName = null,
         bool useRequestedLayoutForImports = false,
         string? fieldExportKey = null, uint fieldFlags = 2,
-        string? additionalFieldExportKey = null)
+        string? additionalFieldExportKey = null,
+        string? localDependencyExportKey = null)
     {
         var seedCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
@@ -2900,6 +2980,12 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
         }
         names.Add((exportKey, 1));
         var exportKeyRow = names.Count;
+        var localDependencyExportKeyRow = 0;
+        if (localDependencyExportKey is not null)
+        {
+            names.Add((localDependencyExportKey, 1));
+            localDependencyExportKeyRow = names.Count;
+        }
         var fieldExportKeyRow = 0;
         if (fieldExportKey is not null)
         {
@@ -3061,12 +3147,20 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
             sections.Add(new TrRmSection(0x001C, 0, 1, importBytes));
         }
 
-        var exportCount = 1 + (fieldExportKey is null ? 0 : 1)
+        var exportCount = 1 + (localDependencyExportKey is null ? 0 : 1)
+            + (fieldExportKey is null ? 0 : 1)
             + (additionalFieldExportKey is null ? 0 : 1);
         var exportBytes = new byte[checked(exportCount * 8)];
         Write(exportBytes, 0, 0x1300_0001);
         Write(exportBytes, 4, checked((uint)exportKeyRow));
         var exportOffset = 8;
+        if (localDependencyExportKey is not null)
+        {
+            Write(exportBytes, exportOffset, 0x1300_0002);
+            Write(exportBytes, exportOffset + 4,
+                checked((uint)localDependencyExportKeyRow));
+            exportOffset += 8;
+        }
         if (fieldExportKey is not null)
         {
             Write(exportBytes, exportOffset, 0x1400_0001);

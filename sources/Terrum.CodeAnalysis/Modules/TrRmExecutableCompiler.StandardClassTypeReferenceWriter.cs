@@ -9497,6 +9497,10 @@ public static partial class TrRmExecutableCompiler
                         ? definition.ProviderExpectations.IsEmpty
                             && !relationNominalIdentities.Contains(
                                 definition.Identity)
+                            && (definition.Provider is not
+                                    BoundSourceTypeProviderSnapshot provider
+                                || !SourceTypeSnapshotsMatch(provider,
+                                    rootDeclarations[0].Declaration.Provider))
                         : definition.NominalKind != 2
                             || (!classIdentities.Contains(
                                     definition.Identity)
@@ -9847,6 +9851,42 @@ public static partial class TrRmExecutableCompiler
         {
             typeDefViewsByOldRow.Add(typeDefRow,
                 ToC1M1TypeDefEmissionView(rootTables, typeDefRow, view));
+        }
+        foreach (var definition in program.GenericNominalTypeDefinitions)
+        {
+            if (definition.NominalKind != 1
+                || !definition.ProviderExpectations.IsEmpty
+                || definition.Provider is not
+                    BoundSourceTypeProviderSnapshot provider
+                || !SourceTypeSnapshotsMatch(provider, rootSnapshot))
+            {
+                continue;
+            }
+
+            var typeDefRow = GetTypeDefRow(definition.Identity.DefinitionId);
+            if (rootTables.TypeDefs.GetOwnerModule(typeDefRow)
+                    != rootModuleRow
+                || rootTables.TypeDefs.GetKind(typeDefRow) != 1
+                || rootTables.TypeDefs.GetGenericRange(typeDefRow).Count != 0
+                || rootTables.TypeDefs.GetContractRange(typeDefRow).Count
+                    != 0
+                || !GetStandardTypeExportKeys(rootTables, rootModuleRow,
+                        typeDefRow).AsSpan()
+                    .SequenceEqual(definition.ExportKeys.AsSpan()))
+            {
+                throw Invalid(
+                    "A direct class-context struct TypeDef no longer matches its retained provider view.");
+            }
+
+            var view = CreateC1M1TypeDefEmissionView(rootTables,
+                rootSnapshot, typeDefRow);
+            if (typeDefViewsByOldRow.ContainsKey(typeDefRow))
+            {
+                continue;
+            }
+
+            typeDefViewsByOldRow.Add(typeDefRow, view);
+            exportsByOldRow.Add(typeDefRow, definition.ExportKeys);
         }
         var nominalTypeImportRows = new SortedSet<int>();
         foreach (var definition in program.GenericNominalTypeDefinitions)

@@ -560,7 +560,9 @@ public static partial class TrRmExecutableCompiler
                         "A G1 generic nominal TypeDef identity has conflicting declarations.");
                 }
                 if (!definition.ProviderExpectations.IsDefaultOrEmpty
-                    || !definition.TypeDefBindingEqualityGroups.IsDefaultOrEmpty)
+                    || !definition.TypeDefBindingEqualityGroups.IsDefaultOrEmpty
+                    || !definition.ExportKeys.IsDefaultOrEmpty
+                    || !definition.SelectedExportKeys.IsDefaultOrEmpty)
                 {
                     var existingDefinition
                         = GenericNominalTypeDefinitions[existingIndex];
@@ -587,10 +589,16 @@ public static partial class TrRmExecutableCompiler
                                             .TypeDefBindingEqualityGroups),
                             Provider = existingDefinition.Provider
                                 ?? definition.Provider,
-                            ExportKeys = existingDefinition.ExportKeys
-                                    .IsDefaultOrEmpty
-                                ? definition.ExportKeys
-                                : existingDefinition.ExportKeys,
+                            ExportKeys = [
+                                .. existingDefinition.ExportKeys
+                                    .Concat(definition.ExportKeys)
+                                    .Distinct(StringComparer.Ordinal),
+                            ],
+                            SelectedExportKeys = [
+                                .. existingDefinition.SelectedExportKeys
+                                    .Concat(definition.SelectedExportKeys)
+                                    .Distinct(StringComparer.Ordinal),
+                            ],
                         };
                 }
                 return;

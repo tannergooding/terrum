@@ -64,7 +64,14 @@ public static partial class TrRmExecutableCompiler
         }
 
         if (selectedReferences.Any(static reference =>
-                !reference.StandardClassDeclarations.IsEmpty))
+                !reference.StandardClassDeclarations.IsEmpty
+                || reference.GenericNominalTypeDefinitions.Any(
+                    static definition =>
+                        definition.Provider is
+                            BoundSourceTypeProviderSnapshot provider
+                        && StandardGenericMethodSchema
+                            .IsClassTypeBindingViews(
+                                provider.SchemaIdentity))))
         {
             return CreateTypeOnlyClassReferenceSet(
                 selectedReferences);
@@ -554,13 +561,41 @@ public static partial class TrRmExecutableCompiler
             CompilationReference[] references)
     {
         var runtimePolicy = references[0].RuntimePolicy;
-        if (references[0].StandardClassDeclarations.IsEmpty)
+        string? GetClassSchemaIdentity(CompilationReference reference)
+        {
+            var classDeclaration = reference.StandardClassDeclarations
+                .FirstOrDefault();
+            if (classDeclaration is not null)
+            {
+                return classDeclaration.Declaration.Provider.SchemaIdentity;
+            }
+
+            var definition = reference.GenericNominalTypeDefinitions
+                .FirstOrDefault(static candidate =>
+                    candidate.Provider is not null
+                    || !candidate.ProviderExpectations.IsDefaultOrEmpty);
+            if (definition is null)
+            {
+                return null;
+            }
+
+            return definition.Provider?.SchemaIdentity
+                ?? definition.ProviderExpectations.FirstOrDefault()
+                    ?.Provider.SchemaIdentity;
+        }
+
+        var classSchemaIdentity = references
+            .Select(GetClassSchemaIdentity)
+            .FirstOrDefault(static identity => identity is not null);
+        if (classSchemaIdentity is null
+            || references.Any(reference =>
+                !StringComparer.Ordinal.Equals(
+                    GetClassSchemaIdentity(reference),
+                    classSchemaIdentity)))
         {
             throw Unsupported(
-                "A class reference set cannot mix Standard class and non-class references.");
+                "A class reference set requires one exact class-bearing schema selection for every input.");
         }
-        var classSchemaIdentity = references[0]
-            .StandardClassDeclarations[0].Declaration.Provider.SchemaIdentity;
         if (!IsSupportedClassTypeOnlySchema(classSchemaIdentity))
         {
             throw Unsupported(
@@ -575,6 +610,18 @@ public static partial class TrRmExecutableCompiler
             .Select(static declaration =>
                 declaration.Declaration.Identity)
             .ToHashSet();
+        var selectedStructIdentities = references
+            .SelectMany(static reference =>
+                reference.GenericNominalTypeDefinitions)
+            .Where(static definition => definition.NominalKind == 1
+                && !definition.SelectedExportKeys.IsDefaultOrEmpty)
+            .Select(static definition => definition.Identity)
+            .ToHashSet();
+        if (selectedClassIdentities.Count == 0)
+        {
+            throw Unsupported(
+                "A class-bearing type reference set requires at least one selected class root.");
+        }
         var classHandleTypeDependencies
             = new HashSet<BoundGenericNominalTypeIdentity>();
         var classFieldStructTypeDependencies
@@ -692,6 +739,19 @@ public static partial class TrRmExecutableCompiler
             foreach (var definition
                 in reference.GenericNominalTypeDefinitions)
             {
+                if (definition.NominalKind == 1
+                    && !definition.SelectedExportKeys.IsDefaultOrEmpty)
+                {
+                    var provider = definition.Provider
+                        ?? throw Invalid(
+                            "A selected struct TypeDef root lost its provider snapshot.");
+                    AddClassTypeBindingEqualityEndpoint(
+                        definition.Identity,
+                        new BoundStandardTypeDefBindingEqualityEndpoint(
+                            provider, definition.Identity.DefinitionId, 0,
+                            null));
+                }
+
                 foreach (var group
                     in definition.TypeDefBindingEqualityGroups)
                 {
@@ -1234,6 +1294,7 @@ public static partial class TrRmExecutableCompiler
                     "A composed class layout contains a duplicate structure TypeDef identity.");
             }
         }
+        structureDefinitionIdentities.UnionWith(selectedStructIdentities);
         structureDefinitionIdentities.UnionWith(
             classFieldStructTypeDependencies);
 
@@ -1410,7 +1471,15 @@ public static partial class TrRmExecutableCompiler
                         BoundStandardEnumDeclarationContract.SnapshotsMatch(
                             expectation.Binding.UsingModule, provider)
                         || BoundStandardEnumDeclarationContract.SnapshotsMatch(
-                            expectation.Binding.Provider, provider)));
+                            expectation.Binding.Provider, provider)))
+                || references[referenceIndex]
+                    .GenericNominalTypeDefinitions.Any(definition =>
+                        definition.NominalKind == 1
+                        && !definition.SelectedExportKeys.IsDefaultOrEmpty
+                        && definition.Provider is
+                            BoundSourceTypeProviderSnapshot structProvider
+                        && BoundStandardEnumDeclarationContract
+                            .SnapshotsMatch(structProvider, provider));
 
         static bool SameEnumSite(BoundStandardEnumTypeSite left,
             BoundStandardEnumTypeSite right)
@@ -1723,7 +1792,18 @@ public static partial class TrRmExecutableCompiler
                             && StringComparer.Ordinal.Equals(
                                 declaration.Declaration.Identity
                                     .ModuleIdentity,
-                                providerIdentity))));
+                                providerIdentity))))
+                || references[referenceIndex]
+                    .GenericNominalTypeDefinitions.Any(definition =>
+                        definition.NominalKind == 1
+                        && !definition.SelectedExportKeys.IsDefaultOrEmpty
+                        && StringComparer.Ordinal.Equals(
+                            definition.Identity.ModuleIdentity,
+                            providerIdentity)
+                        && definition.Provider is
+                            BoundSourceTypeProviderSnapshot provider
+                        && StringComparer.Ordinal.Equals(
+                            provider.ModuleIdentity, providerIdentity));
         PrimitiveType RemapClassFieldType(int referenceIndex,
             PrimitiveType type,
             BoundSourceTypeProviderSnapshot classProvider)
@@ -1974,6 +2054,14 @@ public static partial class TrRmExecutableCompiler
                 throw Invalid(
                     "Selected Standard class references require the same runtime policy.");
             }
+            var hasSelectedClassRoot
+                = reference.StandardClassDeclarations.Any(
+                    static declaration =>
+                        !declaration.SelectedExportKeys.IsDefaultOrEmpty);
+            var hasSelectedStructRoot
+                = reference.GenericNominalTypeDefinitions.Any(
+                    static definition => definition.NominalKind == 1
+                        && !definition.SelectedExportKeys.IsDefaultOrEmpty);
             if (reference.RequiresSourceGrant
                 || reference.InvocationProfileId is not null
                 || !reference.Functions.IsEmpty
@@ -2001,16 +2089,12 @@ public static partial class TrRmExecutableCompiler
                 || !reference.CoreEvaluationFormIdentitySelections.IsEmpty
                 || !reference.CoreEvaluationFormSchemaProviders.IsEmpty
                 || !reference.SpanTypes.IsEmpty
-                || reference.StandardClassDeclarations.IsEmpty
                 || reference.GenericNominalTypeDefinitions.IsEmpty
                 || reference.GenericNominalTypeInstances.IsEmpty
-                || reference.StandardClassDeclarations.Any(declaration =>
-                    !StringComparer.Ordinal.Equals(
-                        declaration.Declaration.Provider.SchemaIdentity,
-                        classSchemaIdentity)))
+                || (!hasSelectedClassRoot && !hasSelectedStructRoot))
             {
                 throw Unsupported(
-                    "Type-only class composition requires selected class TypeDefs without member, interface, runtime, or other type-family obligations.");
+                    "Type-only class composition requires selected class or struct TypeDefs without member, interface, runtime, or other type-family obligations.");
             }
 
             var sourceDefinitions = reference.GenericNominalTypeDefinitions;
@@ -2110,6 +2194,11 @@ public static partial class TrRmExecutableCompiler
                     definitions[existingIndex] = existing with {
                         ProviderExpectations
                             = providerExpectations.ToImmutable(),
+                        ExportKeys = [
+                            .. existing.ExportKeys
+                                .Concat(definition.ExportKeys)
+                                .Distinct(StringComparer.Ordinal),
+                        ],
                         TypeDefBindingEqualityGroups =
                             BoundGenericNominalTypeContract
                                 .MergeTypeDefBindingEqualityGroups(
@@ -2117,6 +2206,11 @@ public static partial class TrRmExecutableCompiler
                                         .TypeDefBindingEqualityGroups,
                                     definition
                                         .TypeDefBindingEqualityGroups),
+                        SelectedExportKeys = [
+                            .. existing.SelectedExportKeys
+                                .Concat(definition.SelectedExportKeys)
+                                .Distinct(StringComparer.Ordinal),
+                        ],
                     };
                 }
                 else
