@@ -96,15 +96,18 @@ provider Modules and binds queries against both roots in memory. The EN1
 declaration emitter can emit and reload one bounded query function whose
 primitive class layout roots span distinct providers. Reference composition
 also remaps direct inline-struct dependencies with scalar and selected enum
-fields across distinct providers and same-provider class-handle fields when
-both class TypeDefs are selected. EN1 admits selected enum providers and
-imported enum/struct closures owned by multiple selected class roots in a
-multi-provider query. It retains typed enum and struct TypeDef Imports and
-each root's provider FieldDef imports. Regressions are unverified under the
-active hold. Enum views merge by exact provider site and retain selected
-aliases. Pointer/other non-scalar struct dependencies, cross-provider or
-unselected class-handle dependencies and broader multi-function/provider
-dependency closure remain open.
+fields across distinct providers and class-handle fields when their exact
+provider TypeDefs are selected roots or imported dependencies. EN1 reconciles
+direct and imported class views, preserves provider expectations, and remaps
+class TypeSpec and TypeDef Import rows by root-provider identity. It admits
+selected enum providers and imported enum/struct closures owned by multiple
+selected class roots in a multi-provider query. It retains typed enum and
+struct TypeDef Imports and each root's provider FieldDef imports. Compatible
+and conflicting cross-provider class-handle query/reload regressions are
+added but remain unverified under the active hold. Enum views merge by exact
+provider site and retain selected aliases. Pointer/other non-scalar struct
+dependencies, unselected class-handle dependencies and broader
+multi-function/provider dependency closure remain open.
 
 Other proposals remain unapproved unless their owner and approval status say
 otherwise; see the [proposal index](../proposals/README.md).

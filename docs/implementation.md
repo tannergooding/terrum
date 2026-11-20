@@ -1820,6 +1820,11 @@ local/imported class-handle FieldDef TypeSpecs with their exact root
 TypeSpec/provider identities. Nested structs preserve unknown class ownership
 and are rejected by Copy-sensitive verification. These class and struct routes
 are unverified under the active hold and do not cover PI1 property carriers.
+Type-only class reference composition now reconciles imported class-handle
+FieldDefs with selected direct provider roots across Modules, preserving exact
+provider expectations and remapping class TypeSpec/TypeDef Import rows by root
+provider identity. Parent-only and multi-root query/reload cases and conflicting
+provider rejection are covered by added regressions, unverified under the hold.
 Provisional EN1 type+field-key reference selection now retains selected local
 class fields and fields in the selected inline-struct closure, preserving
 caller key order so new query imports use the first explicit alias while
@@ -1843,7 +1848,7 @@ execution is established.
 Broader Body composition, provider
 replacement and nontrivial dependency remapping, optional folding, additional
 class representations, runtime/AOT and CLI support remain open.
-No end-to-end EN1 support is implemented.
+Full end-to-end EN1 support remains incomplete.
 These source-bound definitions are not generally interoperable: source-authored
 generic classes and complete nominal conformance rules remain unsupported.
 Generic method formals retain verified nominal interface constraints with

@@ -982,10 +982,14 @@ public static partial class TrRmExecutableCompiler
         bool IsSelectedClassProvider(int referenceIndex,
             BoundSourceTypeProviderSnapshot provider)
             => references[referenceIndex].StandardClassDeclarations.Any(
-                declaration => declaration.Expectations.IsEmpty
-                    && !declaration.SelectedExportKeys.IsDefaultOrEmpty
-                    && BoundStandardEnumDeclarationContract.SnapshotsMatch(
-                        declaration.Declaration.Provider, provider));
+                declaration =>
+                    (declaration.Expectations.IsEmpty
+                        && !declaration.SelectedExportKeys.IsDefaultOrEmpty
+                        && BoundStandardEnumDeclarationContract.SnapshotsMatch(
+                            declaration.Declaration.Provider, provider))
+                    || declaration.Expectations.Any(expectation =>
+                        BoundStandardEnumDeclarationContract.SnapshotsMatch(
+                            expectation.Binding.UsingModule, provider)));
 
         static bool SameEnumSite(BoundStandardEnumTypeSite left,
             BoundStandardEnumTypeSite right)
@@ -1278,6 +1282,8 @@ public static partial class TrRmExecutableCompiler
             structuresResult = remappedStructures.MoveToImmutable();
         }
 
+        var classHandleTypeDependencies
+            = new HashSet<BoundGenericNominalTypeIdentity>();
         var genericNominalInstanceMaps = new int[references.Length][];
         PrimitiveType RemapClassFieldType(int referenceIndex,
             PrimitiveType type,
@@ -1320,20 +1326,52 @@ public static partial class TrRmExecutableCompiler
                 var sourceDefinition = sourceDefinitions.FirstOrDefault(
                     definition =>
                         definition.Identity == sourceInstance.Definition);
+                if (sourceDefinition is null
+                    || sourceDefinition.NominalKind != 2
+                    || !classHandleTypeDependencies.Contains(
+                        sourceInstance.Definition))
+                {
+                    throw Unsupported(
+                        "Class FieldDefs can only retain selected class TypeDef handle dependencies.");
+                }
+
                 var classDeclaration
                     = references[referenceIndex]
                         .StandardClassDeclarations.SingleOrDefault(
                             declaration =>
                                 declaration.Declaration.Identity
-                                == sourceInstance.Definition);
-                if (sourceDefinition is null
-                    || sourceDefinition.NominalKind != 2
-                    || classDeclaration is null
-                    || !SameA2SourceTypeProviderSnapshot(classProvider,
-                        classDeclaration.Declaration.Provider))
+                                == sourceInstance.Definition)
+                    ?? throw Invalid(
+                        "A class handle field lost its selected class declaration view.");
+                var classView = classDeclaration.Declaration;
+                var hasDirectClassView
+                    = classDeclaration.Expectations.IsEmpty
+                    && SameA2SourceTypeProviderSnapshot(classProvider,
+                        classView.Provider);
+                var hasImportedClassView
+                    = !classDeclaration.Expectations.IsDefaultOrEmpty
+                    && classDeclaration.Expectations.Any(expectation =>
+                        IsSelectedClassProvider(referenceIndex,
+                            expectation.Binding.UsingModule)
+                        && SameA2SourceTypeProviderSnapshot(
+                            expectation.Binding.Provider,
+                            classView.Provider)
+                        && expectation.Binding.ProviderDefinitionId
+                            == sourceInstance.Definition.DefinitionId
+                        && sourceDefinition.Provider is
+                            BoundSourceTypeProviderSnapshot provider
+                        && SameA2SourceTypeProviderSnapshot(provider,
+                            classView.Provider)
+                        && sourceDefinition.ProviderExpectations.Any(
+                            typeExpectation =>
+                                BoundGenericNominalTypeContract
+                                    .AreEquivalentProviderExpectations(
+                                        typeExpectation,
+                                        expectation.Binding)));
+                if (!hasDirectClassView && !hasImportedClassView)
                 {
                     throw Unsupported(
-                        "Class FieldDefs can only retain direct class TypeDef handle dependencies.");
+                        "Class FieldDefs require a selected class handle with an exact direct or imported provider view.");
                 }
 
                 return BoundGenericNominalTypeTypes.Type(
@@ -1410,6 +1448,53 @@ public static partial class TrRmExecutableCompiler
             .Select(static declaration =>
                 declaration.Declaration.Identity)
             .ToHashSet();
+        for (var referenceIndex = 0;
+            referenceIndex < references.Length; referenceIndex++)
+        {
+            var reference = references[referenceIndex];
+            foreach (var declaration in reference.StandardClassDeclarations)
+            {
+                if (declaration.SelectedExportKeys.IsDefaultOrEmpty)
+                {
+                    continue;
+                }
+
+                foreach (var field in declaration.Declaration.Fields)
+                {
+                    if (!BoundGenericNominalTypeTypes.IsType(field.Type))
+                    {
+                        continue;
+                    }
+
+                    var instanceIndex
+                        = BoundGenericNominalTypeTypes.Index(field.Type);
+                    if ((uint)instanceIndex
+                        >= (uint)reference.GenericNominalTypeInstances.Length)
+                    {
+                        throw Invalid(
+                            "A selected class FieldDef has an invalid nominal type instance.");
+                    }
+
+                    var instance
+                        = reference.GenericNominalTypeInstances[instanceIndex];
+                    var definition
+                        = reference.GenericNominalTypeDefinitions
+                            .FirstOrDefault(candidate =>
+                                candidate.Identity == instance.Definition);
+                    if (definition is null)
+                    {
+                        throw Invalid(
+                            "A selected class FieldDef has no nominal TypeDef definition.");
+                    }
+
+                    if (definition.NominalKind == 2)
+                    {
+                        _ = classHandleTypeDependencies.Add(
+                            definition.Identity);
+                    }
+                }
+            }
+        }
         var providerSnapshots = new Dictionary<
             (string SchemaIdentity, string ModuleIdentity),
             BoundSourceTypeProviderSnapshot>();
@@ -1480,15 +1565,33 @@ public static partial class TrRmExecutableCompiler
                     = definition.NominalKind == 1
                         && structureDefinitionIdentities.Contains(
                             definition.Identity);
+                var hasDirectProvider
+                    = definition.ProviderExpectations.IsDefaultOrEmpty
+                        && StringComparer.Ordinal.Equals(
+                            definition.Identity.ProviderIdentity,
+                            definition.Identity.ModuleIdentity);
+                var hasSelectedImportedClassProvider
+                    = isClassDefinition
+                        && classHandleTypeDependencies.Contains(
+                            definition.Identity)
+                        && !definition.ProviderExpectations
+                            .IsDefaultOrEmpty
+                        && definition.Provider is
+                            BoundSourceTypeProviderSnapshot provider
+                        && definition.ProviderExpectations.All(expectation =>
+                            IsSelectedClassProvider(referenceIndex,
+                                expectation.UsingModule)
+                            && SameA2SourceTypeProviderSnapshot(
+                                expectation.Provider, provider)
+                            && expectation.ProviderDefinitionId
+                                == definition.Identity.DefinitionId);
                 if ((!isClassDefinition && !isStructureDefinition)
                     || !definition.Formals.IsEmpty
-                    || !definition.ProviderExpectations.IsEmpty
-                    || !StringComparer.Ordinal.Equals(
-                        definition.Identity.ProviderIdentity,
-                        definition.Identity.ModuleIdentity))
+                    || (!hasDirectProvider
+                        && !hasSelectedImportedClassProvider))
                 {
                     throw Unsupported(
-                        "Type-only class composition currently requires directly selected nongeneric class TypeDefs without imported nominal expectations.");
+                        "Type-only class composition requires direct TypeDefs or selected imported class-handle TypeDefs.");
                 }
 
                 if (definitionIndexes.TryGetValue(definition.Identity,
@@ -1501,6 +1604,24 @@ public static partial class TrRmExecutableCompiler
                         throw Invalid(
                             "Views of one Standard class TypeDef disagree on the actual provider definition.");
                     }
+
+                    var providerExpectations
+                        = existing.ProviderExpectations.ToBuilder();
+                    foreach (var expectation in
+                        definition.ProviderExpectations)
+                    {
+                        if (!providerExpectations.Any(candidate =>
+                                BoundGenericNominalTypeContract
+                                    .AreEquivalentProviderExpectations(
+                                        candidate, expectation)))
+                        {
+                            providerExpectations.Add(expectation);
+                        }
+                    }
+                    definitions[existingIndex] = existing with {
+                        ProviderExpectations
+                            = providerExpectations.ToImmutable(),
+                    };
                 }
                 else
                 {
@@ -1526,6 +1647,14 @@ public static partial class TrRmExecutableCompiler
                 var hasDirectTypeSpec = instance.TypeSpecReference == 0
                     && instance.TypeSpecProviderIdentity is null
                     && instance.TypeSpecForm == 0;
+                var instanceDefinition = sourceDefinitions.FirstOrDefault(
+                    definition =>
+                        definition.Identity == instance.Definition);
+                var instanceClassDeclaration
+                    = reference.StandardClassDeclarations.SingleOrDefault(
+                        declaration =>
+                            declaration.Declaration.Identity
+                            == instance.Definition);
                 var hasLocalClassTypeSpec
                     = instance.TypeSpecReference != 0
                         && instance.TypeSpecForm == 0x02
@@ -1535,9 +1664,34 @@ public static partial class TrRmExecutableCompiler
                         && sourceDefinitions.Any(definition =>
                             definition.Identity == instance.Definition
                             && definition.NominalKind == 2);
+                var hasImportedClassTypeSpec = false;
+                if (instance.TypeSpecReference != 0
+                    && instance.TypeSpecForm == 0x03
+                    && instance.TypeSpecProviderIdentity is
+                        string typeSpecProviderIdentity
+                    && instanceDefinition?.NominalKind == 2
+                    && instanceClassDeclaration is not null)
+                {
+                    hasImportedClassTypeSpec
+                        = instanceClassDeclaration.Expectations.Any(
+                            expectation =>
+                                StringComparer.Ordinal.Equals(
+                                    expectation.Binding.UsingModule
+                                        .ModuleIdentity,
+                                    typeSpecProviderIdentity)
+                                && IsSelectedClassProvider(referenceIndex,
+                                    expectation.Binding.UsingModule)
+                                && SameA2SourceTypeProviderSnapshot(
+                                    expectation.Binding.Provider,
+                                    instanceClassDeclaration.Declaration
+                                        .Provider)
+                                && expectation.Binding.ProviderDefinitionId
+                                    == instance.Definition.DefinitionId);
+                }
                 if (!instance.Arguments.IsEmpty
                     || instance.Qualifiers != 0
-                    || (!hasDirectTypeSpec && !hasLocalClassTypeSpec)
+                    || (!hasDirectTypeSpec && !hasLocalClassTypeSpec
+                        && !hasImportedClassTypeSpec)
                     || !definitionIndexes.ContainsKey(instance.Definition))
                 {
                     throw Unsupported(
@@ -1578,23 +1732,56 @@ public static partial class TrRmExecutableCompiler
                                 declaration.Declaration.Provider),
                         })],
                 };
+                if (!definitionIndexes.TryGetValue(view.Identity,
+                        out var typeDefinitionIndex))
+                {
+                    throw Invalid(
+                        "A selected class declaration lost its nominal TypeDef definition.");
+                }
+
+                var typeDefinition = definitions[typeDefinitionIndex];
+                var hasSelectedImportedClassView
+                    = classHandleTypeDependencies.Contains(view.Identity)
+                        && !declaration.Expectations.IsDefaultOrEmpty
+                        && declaration.Expectations.All(expectation =>
+                            IsSelectedClassProvider(referenceIndex,
+                                expectation.Binding.UsingModule)
+                            && SameA2SourceTypeProviderSnapshot(
+                                expectation.Binding.Provider,
+                                view.Provider)
+                            && expectation.Binding.ProviderDefinitionId
+                                == view.Identity.DefinitionId
+                            && typeDefinition.ProviderExpectations.Any(
+                                typeExpectation =>
+                                    BoundGenericNominalTypeContract
+                                        .AreEquivalentProviderExpectations(
+                                            typeExpectation,
+                                            expectation.Binding)));
+                var isSelectedClassRoot
+                    = !declaration.SelectedExportKeys.IsDefaultOrEmpty
+                        || selectedClassIdentities.Contains(view.Identity);
                 var remappedDeclaration = declaration with {
                     Declaration = view,
                 };
                 if (!StringComparer.Ordinal.Equals(view.Provider.SchemaIdentity,
                         classSchemaIdentity)
                     || !definitionIndexes.ContainsKey(view.Identity)
-                    || !declaration.Expectations.IsEmpty
-                    || (declaration.SelectedExportKeys.IsDefaultOrEmpty
-                        && !selectedClassIdentities.Contains(view.Identity))
-                    || declaration.ExportKeys.IsDefaultOrEmpty
+                    || (!isSelectedClassRoot
+                        && !hasSelectedImportedClassView)
+                    || (declaration.ExportKeys.IsDefaultOrEmpty
+                        && !hasSelectedImportedClassView)
                     || !view.Methods.IsEmpty)
                 {
                     throw Unsupported(
-                        "Type-only class composition requires selected class roots with scalar, inline-struct or retained class-handle fields and without methods or imported class roots.");
+                        "Type-only class composition requires selected class roots or exact imported class-handle dependencies without methods.");
                 }
 
                 AddProviderSnapshot(view.Provider);
+                foreach (var expectation in declaration.Expectations)
+                {
+                    AddProviderSnapshot(expectation.Binding.UsingModule);
+                    AddProviderSnapshot(expectation.Binding.Provider);
+                }
                 var nameIdentity = (view.Namespace, view.Name);
                 if (declarationIndexes.TryGetValue(view.Identity,
                         out var existingIndex))
@@ -1686,11 +1873,69 @@ public static partial class TrRmExecutableCompiler
                         existing.SelectedExportKeys);
                     AddDistinct(selectedKeys,
                         declaration.SelectedExportKeys);
+                    var classExpectations
+                        = existing.Expectations.ToBuilder();
+                    foreach (var expectation in declaration.Expectations)
+                    {
+                        var existingExpectationIndex = -1;
+                        for (var expectationIndex = 0;
+                            expectationIndex < classExpectations.Count;
+                            expectationIndex++)
+                        {
+                            var candidate
+                                = classExpectations[expectationIndex];
+                            if (candidate.Binding.ImportRow
+                                    == expectation.Binding.ImportRow
+                                && SameA2SourceTypeProviderSnapshot(
+                                    candidate.Binding.UsingModule,
+                                    expectation.Binding.UsingModule))
+                            {
+                                existingExpectationIndex
+                                    = expectationIndex;
+                                break;
+                            }
+                        }
+
+                        if (existingExpectationIndex < 0)
+                        {
+                            classExpectations.Add(expectation);
+                            continue;
+                        }
+
+                        var existingExpectation
+                            = classExpectations[
+                                existingExpectationIndex];
+                        if (existingExpectation.Binding
+                                .ExpectedDefinitionId
+                                != expectation.Binding.ExpectedDefinitionId
+                            || existingExpectation.Binding
+                                .ProviderDefinitionId
+                                != expectation.Binding.ProviderDefinitionId
+                            || !StringComparer.Ordinal.Equals(
+                                existingExpectation.Binding.ProducerIdentity,
+                                expectation.Binding.ProducerIdentity)
+                            || !StringComparer.Ordinal.Equals(
+                                existingExpectation.Binding.ExportKey,
+                                expectation.Binding.ExportKey)
+                            || existingExpectation.Binding.TargetRequirement
+                                != expectation.Binding.TargetRequirement
+                            || existingExpectation.Binding.RuntimePolicy
+                                != expectation.Binding.RuntimePolicy
+                            || !SameA2SourceTypeProviderSnapshot(
+                                existingExpectation.Binding.Provider,
+                                expectation.Binding.Provider))
+                        {
+                            throw Invalid(
+                                "Views of one Standard class TypeDef disagree on an imported provider expectation.");
+                        }
+                    }
+
                     declarations[existingIndex] = existing with {
                         Declaration = existingView with {
                             Fields = mergedFields.MoveToImmutable(),
                         },
                         SelectedExportKeys = [.. selectedKeys],
+                        Expectations = classExpectations.ToImmutable(),
                     };
                 }
                 else

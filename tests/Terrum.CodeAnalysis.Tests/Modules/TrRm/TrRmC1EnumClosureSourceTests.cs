@@ -4316,6 +4316,216 @@ internal sealed class TrRmC1EnumClosureSourceTests
     }
 
     [Test]
+    public void ComposesCrossProviderClassHandleDependencies()
+    {
+        var schemaIdentity
+            = $"{s_schemaIdentities[0]}-class-instance-layout-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+
+        (TrRmStandardArtifactInput Input,
+            CompilationReference Reference) CreateClassProvider(
+                string moduleIdentity, string fieldType)
+        {
+            var tree = SyntaxTree.Parse($$"""
+                namespace Demo {
+                    public class Beta {
+                        public {{fieldType}} Id;
+                    }
+                }
+                """);
+            var compilation = Compilation.CreateLibrary(tree);
+            Assert.That(compilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            var program = (BoundProgram)compilation.Program!;
+            var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+                .Single(static node =>
+                    node.Kind == SyntaxKind.ClassDeclaration);
+            var fieldDeclaration = classDeclaration.Children
+                .OfType<SyntaxNode>()
+                .Single(static node =>
+                    node.Kind == SyntaxKind.FieldDeclaration);
+            var classIndex = program.SourceClassProgramAssociation!
+                .Declarations.Single(declaration =>
+                    declaration.Span == classDeclaration.Span).ClassIndex;
+            var classExport = new TrRmSourceClassExport(program, classIndex,
+                classDeclaration.Span, "type.beta", [
+                    new TrRmSourceClassMemberExport(0,
+                        fieldDeclaration.Span, "field.beta.id"),
+                ]);
+            var artifact = TrRmExecutableCompiler.EmitStandard(program,
+                moduleIdentity, schemaIdentity, targetRequirement, [], [],
+                [classExport], []);
+            var input = new TrRmStandardArtifactInput(schemaIdentity,
+                artifact);
+            return (input,
+                TrRmExecutableCompiler.CreateStandardReference(input,
+                    moduleIdentity, [], ["type.beta"], [
+                        "field.beta.id",
+                    ]));
+        }
+
+        var beta = CreateClassProvider("BetaProvider", "int32");
+        var parentTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public class Parent {
+                    public Beta Value;
+                }
+            }
+            """);
+        var parentCompilation = Compilation.CreateLibrary(parentTree,
+            beta.Reference);
+        Assert.That(parentCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                parentCompilation.Diagnostics));
+        var parentProgram = (BoundProgram)parentCompilation.Program!;
+        var parentDeclaration = parentTree.Root.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var parentField = parentDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.FieldDeclaration);
+        var parentClassIndex = parentProgram.SourceClassProgramAssociation!
+            .Declarations.Single(declaration =>
+                declaration.Span == parentDeclaration.Span).ClassIndex;
+        var parentExport = new TrRmSourceClassExport(parentProgram,
+            parentClassIndex, parentDeclaration.Span, "type.parent", [
+                new TrRmSourceClassMemberExport(0, parentField.Span,
+                    "field.parent.value"),
+            ]);
+        var parentArtifact = TrRmExecutableCompiler.EmitStandard(
+            parentProgram, "AlphaProvider", schemaIdentity,
+            targetRequirement, [], [], [parentExport], []);
+        var parentInput = new TrRmStandardArtifactInput(schemaIdentity,
+            parentArtifact);
+        var parentReference = TrRmExecutableCompiler.CreateStandardReference(
+            parentInput, "AlphaProvider", [beta.Input], ["type.parent"],
+            ["field.parent.value"]);
+        var parentOnlyReference
+            = TrRmExecutableCompiler.CreateStandardReferenceSet([
+                parentReference,
+            ]);
+        var parentOnlyQuery = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Demo;
+                nint ParentOffset() {
+                    return unsafe(offsetof(Parent, Value));
+                }
+                """), parentOnlyReference, new CompilationOptions {
+                LayoutCoreRegistration
+                    = LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(parentOnlyQuery.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                parentOnlyQuery.Diagnostics));
+        var parentOnlyArtifact = TrRmExecutableCompiler.EmitStandard(
+            parentOnlyQuery.Program!, "ParentOnlyConsumer",
+            schemaIdentity, targetRequirement);
+        var parentOnlyTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                parentOnlyArtifact, SchemaFor(schemaIdentity), null,
+                usesNativePointerLoads: false,
+                standardSchemaIdentity: schemaIdentity));
+        Assert.That(Enumerable.Range(1, parentOnlyTables.Imports.Count)
+            .Select(parentOnlyTables.Imports.GetBindingForImportRow)
+            .Any(static binding =>
+                binding.ProducerIdentity == "BetaProvider"
+                && binding.ExportKey == "type.beta"),
+            Is.True);
+        var parentOnlyLoaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                parentOnlyArtifact), "ParentOnlyConsumer",
+            [parentInput, beta.Input]);
+        var parentOnlyReemitted = TrRmExecutableCompiler.EmitStandard(
+            parentOnlyLoaded, "ParentOnlyConsumer", schemaIdentity,
+            targetRequirement);
+        _ = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                parentOnlyReemitted), "ParentOnlyConsumer",
+            [parentInput, beta.Input]);
+
+        var reference = TrRmExecutableCompiler.CreateStandardReferenceSet(
+            [parentReference, beta.Reference]);
+        var parent = reference.StandardClassDeclarations.Single(
+            static declaration =>
+                declaration.Declaration.Name == "Parent");
+        var importedBeta = reference.StandardClassDeclarations.Single(
+            static declaration =>
+                declaration.Declaration.Name == "Beta");
+        var parentFieldType = parent.Declaration.Fields.Single().Type;
+        Assert.That(BoundGenericNominalTypeTypes.IsType(parentFieldType),
+            Is.True);
+        Assert.That(reference.GenericNominalTypeInstances[
+                BoundGenericNominalTypeTypes.Index(parentFieldType)]
+                .Definition,
+            Is.EqualTo(importedBeta.Declaration.Identity));
+        Assert.That(importedBeta.Expectations, Has.Length.EqualTo(1));
+        Assert.That(importedBeta.SelectedExportKeys,
+            Is.EqualTo(["type.beta"]));
+
+        var queryCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Demo;
+                nint CombinedOffset() {
+                    return unsafe(offsetof(Parent, Value))
+                        + unsafe(offsetof(Beta, Id));
+                }
+                """), reference, new CompilationOptions {
+                LayoutCoreRegistration
+                    = LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(queryCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                queryCompilation.Diagnostics));
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            queryCompilation.Program!, "ClassHandleConsumer",
+            schemaIdentity, targetRequirement);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                consumerArtifact, SchemaFor(schemaIdentity), null,
+                usesNativePointerLoads: false,
+                standardSchemaIdentity: schemaIdentity));
+        var imports = Enumerable.Range(1, tables.Imports.Count)
+            .Select(tables.Imports.GetBindingForImportRow).ToArray();
+        Assert.That(imports.Any(static binding =>
+                binding.ProducerIdentity == "BetaProvider"
+                && binding.ExportKey == "type.beta"),
+            Is.True);
+        Assert.That(imports.Any(static binding =>
+                binding.ProducerIdentity == "AlphaProvider"
+                && binding.ExportKey == "type.parent"),
+            Is.True);
+        Assert.That(imports.Any(static binding =>
+                binding.ProducerIdentity == "AlphaProvider"
+                && binding.ExportKey == "field.parent.value"),
+            Is.True);
+        Assert.That(imports.Any(static binding =>
+                binding.ProducerIdentity == "BetaProvider"
+                && binding.ExportKey == "field.beta.id"),
+            Is.True);
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
+            "ClassHandleConsumer", [parentInput, beta.Input]);
+        var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
+            "ClassHandleConsumer", schemaIdentity, targetRequirement);
+        var reloaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+            "ClassHandleConsumer", [parentInput, beta.Input]);
+        Assert.That(reloaded.Functions.Single().Name,
+            Is.EqualTo("CombinedOffset"));
+
+        var incompatibleBeta
+            = CreateClassProvider("BetaProvider", "int64");
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReferenceSet([
+                parentReference, incompatibleBeta.Reference,
+            ]));
+    }
+
+    [Test]
     public void ComposesClassQueryRootsWithImportedStructFieldProviders()
     {
         var schemaIdentity

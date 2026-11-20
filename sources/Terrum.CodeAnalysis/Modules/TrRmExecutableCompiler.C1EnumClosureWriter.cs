@@ -393,14 +393,67 @@ public static partial class TrRmExecutableCompiler
                         instanceIndex].Definition);
             }
         }
+        var selectedClassHandleTypeIdentities
+            = new HashSet<BoundGenericNominalTypeIdentity>();
+        foreach (var declaration in standardClassDeclarations)
+        {
+            if (declaration.SelectedExportKeys.IsDefaultOrEmpty
+                && !classQueryRootIdentities.Contains(
+                    declaration.Declaration.Identity))
+            {
+                continue;
+            }
+
+            foreach (var field in declaration.Declaration.Fields)
+            {
+                if (!BoundGenericNominalTypeTypes.IsType(field.Type))
+                {
+                    continue;
+                }
+
+                var instanceIndex
+                    = BoundGenericNominalTypeTypes.Index(field.Type);
+                if ((uint)instanceIndex
+                    >= (uint)program.GenericNominalTypeInstances.Length)
+                {
+                    throw Invalid(
+                        "A selected class FieldDef has an invalid nominal type instance.");
+                }
+
+                var instance
+                    = program.GenericNominalTypeInstances[instanceIndex];
+                var definition
+                    = program.GenericNominalTypeDefinitions.FirstOrDefault(
+                        candidate =>
+                            candidate.Identity == instance.Definition);
+                if (definition is null)
+                {
+                    throw Invalid(
+                        "A selected class FieldDef has no nominal TypeDef definition.");
+                }
+
+                if (definition.NominalKind == 2)
+                {
+                    _ = selectedClassHandleTypeIdentities.Add(
+                        definition.Identity);
+                }
+            }
+        }
         bool IsSelectedClassQueryRootProvider(
             BoundSourceTypeProviderSnapshot provider)
             => standardClassDeclarations.Any(declaration =>
-                classQueryRootIdentities.Contains(
-                    declaration.Declaration.Identity)
-                && declaration.Expectations.IsEmpty
-                && BoundStandardEnumDeclarationContract.SnapshotsMatch(
-                    declaration.Declaration.Provider, provider));
+                (classQueryFunction is null
+                    || classQueryRootIdentities.Contains(
+                            declaration.Declaration.Identity))
+                && ((!declaration.SelectedExportKeys.IsDefaultOrEmpty
+                            && BoundStandardEnumDeclarationContract
+                                .SnapshotsMatch(
+                                    declaration.Declaration.Provider, provider))
+                        || declaration.Expectations.Any(expectation =>
+                            BoundStandardEnumDeclarationContract
+                                .SnapshotsMatch(
+                                    expectation.Binding.UsingModule,
+                                    provider))));
 
         bool HasStandardClassTypeSpecProvider(
             BoundGenericNominalTypeInstance instance)
@@ -877,8 +930,20 @@ public static partial class TrRmExecutableCompiler
                     && standardClassDeclarations.Where(declaration =>
                             classQueryRootIdentities.Contains(
                                 declaration.Declaration.Identity))
-                        .All(static declaration =>
-                            declaration.Expectations.IsEmpty);
+                        .All(declaration =>
+                            (!declaration.SelectedExportKeys
+                                .IsDefaultOrEmpty
+                                && IsSelectedClassQueryRootProvider(
+                                    declaration.Declaration.Provider)
+                                && declaration.Expectations.All(
+                                    expectation =>
+                                        IsSelectedClassQueryRootProvider(
+                                            expectation.Binding.UsingModule)))
+                            || (!declaration.Expectations.IsDefaultOrEmpty
+                                && declaration.Expectations.All(
+                                    expectation =>
+                                        IsSelectedClassQueryRootProvider(
+                                            expectation.Binding.UsingModule))));
             if (importedStructRootProvider is not null)
             {
                 rootSnapshot = importedStructRootProvider;
@@ -915,28 +980,27 @@ public static partial class TrRmExecutableCompiler
                     continue;
                 }
 
-                if (declaration.Expectations.IsEmpty)
+                if (!declaration.SelectedExportKeys.IsDefaultOrEmpty)
                 {
-                    if (!declaration.SelectedExportKeys.IsEmpty
-                        || StringComparer.Ordinal.Equals(
-                            declaration.Declaration.Provider.ModuleIdentity,
-                            moduleIdentity))
+                    classRootProviders.Add(
+                        declaration.Declaration.Provider);
+                }
+                else if (declaration.Expectations.IsEmpty
+                    && StringComparer.Ordinal.Equals(
+                        declaration.Declaration.Provider.ModuleIdentity,
+                        moduleIdentity))
+                {
+                    classRootProviders.Add(
+                        declaration.Declaration.Provider);
+                }
+
+                foreach (var expectation in declaration.Expectations)
+                {
+                    if (IsSelectedClassQueryRootProvider(
+                            expectation.Binding.UsingModule))
                     {
                         classRootProviders.Add(
-                            declaration.Declaration.Provider);
-                    }
-                }
-                else
-                {
-                    foreach (var expectation in declaration.Expectations)
-                    {
-                        if (StringComparer.Ordinal.Equals(
-                                expectation.Binding.UsingModule.ModuleIdentity,
-                                moduleIdentity))
-                        {
-                            classRootProviders.Add(
-                                expectation.Binding.UsingModule);
-                        }
+                            expectation.Binding.UsingModule);
                     }
                 }
             }
@@ -964,153 +1028,254 @@ public static partial class TrRmExecutableCompiler
                 rootSnapshot ??= provider;
             }
 
-            foreach (var declaration in standardClassDeclarations)
+            ImmutableArray<C1EnumClosureRootImport> GetClassRootImports(
+                BoundStandardClassDeclaration declaration)
             {
-                var classView = declaration.Declaration;
-                if (declaration.Expectations.IsEmpty)
-                {
-                    if (rootSnapshot is null
-                        || (!allowMultipleClassQueryProviders
-                            && !SameA2SourceTypeProviderSnapshot(rootSnapshot,
-                                classView.Provider))
-                        || (classQueryFunction is not null
-                            && !classQueryRootIdentities.Contains(
-                                classView.Identity)))
-                    {
-                        continue;
-                    }
-
-                    if ((classView.Identity.DefinitionId >> 24) != 0x13
-                        || (classView.Identity.DefinitionId
-                            & 0x00FF_FFFF) == 0)
-                    {
-                        throw Invalid(
-                            "An EN1 class root has an invalid TypeDef identity.");
-                    }
-
-                    var rootTypeDefRow = checked((int)(
-                        classView.Identity.DefinitionId & 0x00FF_FFFF));
-                    if (StringComparer.Ordinal.Equals(
-                            classView.Provider.ModuleIdentity, moduleIdentity))
-                    {
-                        standardClassEmissions.Add(
-                            new C1EnumClosureStandardClassEmission(
-                                classView, declaration.ExportKeys, null,
-                                rootTypeDefRow, []));
-                    }
-                    else if (declaration.SelectedExportKeys.IsEmpty)
-                    {
-                        standardClassEmissions.Add(
-                            new C1EnumClosureStandardClassEmission(
-                                classView, [], null, rootTypeDefRow, []));
-                    }
-                    else
-                    {
-                        if (declaration.SelectedExportKeys.Any(key =>
-                                !declaration.ExportKeys.Contains(key,
-                                    StringComparer.Ordinal)))
-                        {
-                            throw Invalid(
-                                "An EN1 selected class TypeDef key is absent from its provider declaration.");
-                        }
-
-                        var typeImport = new C1EnumClosureImport(
-                            classView.Provider.ModuleIdentity,
-                            declaration.SelectedExportKeys[0],
-                            classView.Provider.TargetRequirement,
-                            classView.Provider.RuntimePolicy);
-                        var fieldExpectations
-                            = ImmutableArray.CreateBuilder<
-                                BoundStandardClassFieldExpectation>();
-                        foreach (var field in classView.Fields)
-                        {
-                            if (field.SelectedExportKeys.IsEmpty)
-                            {
-                                continue;
-                            }
-                            if ((field.Flags & 3) != 2
-                                || (field.Flags & 8) != 0
-                                || field.SelectedExportKeys.Any(key =>
-                                    !field.ExportKeys.Contains(key,
-                                        StringComparer.Ordinal)))
-                            {
-                                throw Invalid(
-                                    "An EN1 imported class query selects an invalid FieldDef key.");
-                            }
-
-                            fieldExpectations.Add(
-                                new BoundStandardClassFieldExpectation(
-                                    0, 0, field.DefinitionId,
-                                    field.OwnerDefinitionId,
-                                    field.DefinitionId,
-                                    field.OwnerDefinitionId,
-                                    field.SelectedExportKeys[0],
-                                    classView.Provider));
-                        }
-
-                        standardClassEmissions.Add(
-                            new C1EnumClosureStandardClassEmission(
-                                classView, [], typeImport with {
-                                    RootImportRow = 0,
-                                },
-                                rootTypeDefRow,
-                                fieldExpectations.ToImmutable()));
-                    }
-                    continue;
-                }
-
+                var rootImports = new List<C1EnumClosureRootImport>();
                 foreach (var expectation in declaration.Expectations)
                 {
                     var binding = expectation.Binding;
-                    if (rootSnapshot is null)
+                    if (!IsSelectedClassQueryRootProvider(
+                            binding.UsingModule))
                     {
-                        continue;
-                    }
-                    if (!SameA2SourceTypeProviderSnapshot(
-                            rootSnapshot, binding.UsingModule))
-                    {
-                        continue;
+                        throw Unsupported(
+                            "An EN1 class TypeDef Import is not owned by a selected class query root.");
                     }
 
-                    var expectedView = expectation.ExpectedDeclaration;
                     if ((binding.ExpectedDefinitionId >> 24) != 0x13
                         || (binding.ExpectedDefinitionId
                             & 0x00FF_FFFF) == 0
                         || binding.ImportRow <= 0
-                        || !SameA2SourceTypeProviderSnapshot(rootSnapshot!,
-                            expectedView.Provider)
                         || !SameA2SourceTypeProviderSnapshot(
-                            classView.Provider, binding.Provider)
+                            binding.UsingModule,
+                            expectation.ExpectedDeclaration.Provider)
+                        || !SameA2SourceTypeProviderSnapshot(
+                            binding.Provider,
+                            declaration.Declaration.Provider)
                         || binding.ProviderDefinitionId
-                            != classView.Identity.DefinitionId)
+                            != declaration.Declaration.Identity.DefinitionId
+                        || binding.ExpectedDefinitionId
+                            != expectation.ExpectedDeclaration.Identity
+                                .DefinitionId)
                     {
                         throw Invalid(
                             "An EN1 class TypeDef Import lost its expected or provider identity.");
                     }
 
-                    standardClassEmissions.Add(
-                        new C1EnumClosureStandardClassEmission(
-                            expectedView, [], new C1EnumClosureImport(
-                                binding.ProducerIdentity, binding.ExportKey,
-                                binding.TargetRequirement,
-                                binding.RuntimePolicy,
-                                binding.ImportRow),
-                            checked((int)(binding.ExpectedDefinitionId
-                                & 0x00FF_FFFF),
-                            expectation.FieldExpectations) {
-                            MethodExpectations
-                                = expectation.MethodExpectations,
-                        });
+                    var rootImport = new C1EnumClosureRootImport(
+                        binding.UsingModule.ModuleIdentity,
+                        binding.ImportRow);
+                    if (!rootImports.Contains(rootImport))
+                    {
+                        rootImports.Add(rootImport);
+                    }
                 }
+
+                return [.. rootImports];
             }
 
-            standardClassEmissions.Sort(static (left, right)
-                => left.RootTypeDefRow.CompareTo(right.RootTypeDefRow));
+            ImmutableArray<BoundStandardClassFieldExpectation>
+                GetDirectClassFieldExpectations(
+                    BoundStandardClassTypeView classView)
+            {
+                var fieldExpectations = ImmutableArray.CreateBuilder<
+                    BoundStandardClassFieldExpectation>();
+                foreach (var field in classView.Fields)
+                {
+                    if (field.SelectedExportKeys.IsEmpty)
+                    {
+                        continue;
+                    }
+                    if ((field.Flags & 3) != 2
+                        || (field.Flags & 8) != 0
+                        || field.SelectedExportKeys.Any(key =>
+                            !field.ExportKeys.Contains(key,
+                                StringComparer.Ordinal)))
+                    {
+                        throw Invalid(
+                            "An EN1 imported class query selects an invalid FieldDef key.");
+                    }
+
+                    fieldExpectations.Add(
+                        new BoundStandardClassFieldExpectation(
+                            0, 0, field.DefinitionId,
+                            field.OwnerDefinitionId,
+                            field.DefinitionId,
+                            field.OwnerDefinitionId,
+                            field.SelectedExportKeys[0],
+                            classView.Provider));
+                }
+
+                return fieldExpectations.ToImmutable();
+            }
+
+            foreach (var declaration in standardClassDeclarations)
+            {
+                var classView = declaration.Declaration;
+                var isClassQueryRoot = classQueryRootIdentities.Contains(
+                    classView.Identity);
+                var isSelectedHandleDependency
+                    = selectedClassHandleTypeIdentities.Contains(
+                        classView.Identity);
+                if (classQueryFunction is not null
+                    && !isClassQueryRoot
+                    && !isSelectedHandleDependency)
+                {
+                    continue;
+                }
+
+                if (rootSnapshot is null
+                    || (!allowMultipleClassQueryProviders
+                        && !SameA2SourceTypeProviderSnapshot(rootSnapshot,
+                            classView.Provider)
+                        && !isSelectedHandleDependency
+                        && !(isClassQueryRoot
+                            && !declaration.Expectations.IsDefaultOrEmpty)))
+                {
+                    continue;
+                }
+
+                if ((classView.Identity.DefinitionId >> 24) != 0x13
+                    || (classView.Identity.DefinitionId
+                        & 0x00FF_FFFF) == 0)
+                {
+                    throw Invalid(
+                        "An EN1 class root has an invalid TypeDef identity.");
+                }
+
+                var rootTypeDefRow = checked((int)(
+                    classView.Identity.DefinitionId & 0x00FF_FFFF));
+                if (!declaration.Expectations.IsDefaultOrEmpty
+                    && declaration.Expectations.Any(expectation =>
+                        !expectation.MethodExpectations.IsDefaultOrEmpty))
+                {
+                    foreach (var expectation in declaration.Expectations)
+                    {
+                        var binding = expectation.Binding;
+                        if (rootSnapshot is null
+                            || !SameA2SourceTypeProviderSnapshot(
+                                rootSnapshot, binding.UsingModule))
+                        {
+                            continue;
+                        }
+
+                        var expectedView = expectation.ExpectedDeclaration;
+                        if ((binding.ExpectedDefinitionId >> 24) != 0x13
+                            || (binding.ExpectedDefinitionId
+                                & 0x00FF_FFFF) == 0
+                            || binding.ImportRow <= 0
+                            || !SameA2SourceTypeProviderSnapshot(
+                                rootSnapshot, expectedView.Provider)
+                            || !SameA2SourceTypeProviderSnapshot(
+                                classView.Provider, binding.Provider)
+                            || binding.ProviderDefinitionId
+                                != classView.Identity.DefinitionId
+                            || binding.ExpectedDefinitionId
+                                != expectedView.Identity.DefinitionId)
+                        {
+                            throw Invalid(
+                                "An EN1 class TypeDef Import lost its expected or provider identity.");
+                        }
+
+                        standardClassEmissions.Add(
+                            new C1EnumClosureStandardClassEmission(
+                                expectedView, [],
+                                new C1EnumClosureImport(
+                                    binding.ProducerIdentity,
+                                    binding.ExportKey,
+                                    binding.TargetRequirement,
+                                    binding.RuntimePolicy,
+                                    binding.ImportRow,
+                                    binding.UsingModule.ModuleIdentity),
+                                checked((int)(binding.ExpectedDefinitionId
+                                    & 0x00FF_FFFF)),
+                                expectation.FieldExpectations) {
+                                MethodExpectations
+                                    = expectation.MethodExpectations,
+                            });
+                    }
+
+                    continue;
+                }
+
+                if (StringComparer.Ordinal.Equals(
+                        classView.Provider.ModuleIdentity, moduleIdentity))
+                {
+                    if (!declaration.Expectations.IsEmpty)
+                    {
+                        throw Unsupported(
+                            "An EN1 local class TypeDef cannot retain imported class expectations.");
+                    }
+
+                    standardClassEmissions.Add(
+                        new C1EnumClosureStandardClassEmission(
+                            classView, declaration.ExportKeys, null,
+                            rootTypeDefRow, []));
+                    continue;
+                }
+
+                C1EnumClosureImport typeImport;
+                ImmutableArray<C1EnumClosureRootImport> rootImports;
+                if (!declaration.SelectedExportKeys.IsDefaultOrEmpty)
+                {
+                    if (declaration.ExportKeys.IsDefaultOrEmpty
+                        || declaration.SelectedExportKeys.Any(key =>
+                            !declaration.ExportKeys.Contains(key,
+                                StringComparer.Ordinal)))
+                    {
+                        throw Invalid(
+                            "An EN1 selected class TypeDef key is absent from its provider declaration.");
+                    }
+
+                    rootImports = GetClassRootImports(declaration);
+                    typeImport = new C1EnumClosureImport(
+                        classView.Provider.ModuleIdentity,
+                        declaration.SelectedExportKeys[0],
+                        classView.Provider.TargetRequirement,
+                        classView.Provider.RuntimePolicy,
+                        RootImports: rootImports);
+                }
+                else if (!declaration.Expectations.IsDefaultOrEmpty
+                    && (isSelectedHandleDependency || isClassQueryRoot))
+                {
+                    rootImports = GetClassRootImports(declaration);
+                    var binding = declaration.Expectations[0].Binding;
+                    typeImport = new C1EnumClosureImport(
+                        binding.ProducerIdentity, binding.ExportKey,
+                        binding.TargetRequirement, binding.RuntimePolicy,
+                        RootImports: rootImports);
+                }
+                else
+                {
+                    throw Unsupported(
+                        "An EN1 class handle dependency has no exact selected TypeDef Import.");
+                }
+
+                standardClassEmissions.Add(
+                    new C1EnumClosureStandardClassEmission(
+                        classView, [], typeImport,
+                        rootTypeDefRow,
+                        GetDirectClassFieldExpectations(classView)));
+            }
+
+            standardClassEmissions.Sort(static (left, right) =>
+            {
+                var providerOrder = StringComparer.Ordinal.Compare(
+                    left.View.Provider.ModuleIdentity,
+                    right.View.Provider.ModuleIdentity);
+                return providerOrder != 0
+                    ? providerOrder
+                    : left.RootTypeDefRow.CompareTo(right.RootTypeDefRow);
+            });
             for (var index = 1;
                 index < standardClassEmissions.Count; index++)
             {
-                if (standardClassEmissions[index - 1].RootTypeDefRow
-                    == standardClassEmissions[index].RootTypeDefRow)
+                var previous = standardClassEmissions[index - 1];
+                var current = standardClassEmissions[index];
+                if (StringComparer.Ordinal.Equals(
+                        previous.View.Provider.ModuleIdentity,
+                        current.View.Provider.ModuleIdentity)
+                    && previous.RootTypeDefRow == current.RootTypeDefRow)
                 {
                     throw Invalid(
                         "EN1 class re-emission contains duplicate root TypeDef views.");
@@ -3120,7 +3285,8 @@ public static partial class TrRmExecutableCompiler
         var importRowByStructureIndex = new Dictionary<int, int>();
         var importRowByRootStructureImport
             = new Dictionary<(string ModuleIdentity, int ImportRow), int>();
-        var importRowByRootClassImport = new Dictionary<int, int>();
+        var importRowByRootClassImport
+            = new Dictionary<(string ModuleIdentity, int ImportRow), int>();
         var importRowByRootClassIdentity
             = new Dictionary<BoundGenericNominalTypeIdentity, int>();
         var rootProviderClassTypeDefs
@@ -3163,6 +3329,16 @@ public static partial class TrRmExecutableCompiler
                     item.emission.RootTypeDefRow))
                 .ToDictionary(static item =>
                         item.emission.RootTypeDefRow,
+                    static item => item.typeDefRow);
+        var typeDefRowByProviderClassTypeDef
+            = standardClassDeclarationsByTypeDef
+                .Select((emission, ordinal) => (emission,
+                    typeDefRow: emittedEnums.Count
+                        + retainedClassIndexes.Count + ordinal + 1))
+                .ToDictionary(static item => (
+                        item.emission.View.Provider.ModuleIdentity,
+                        checked((int)(item.emission.View.Identity
+                            .DefinitionId & 0x00FF_FFFF))),
                     static item => item.typeDefRow);
         var typeDefRowByRootClassIdentity
             = standardClassDeclarationsByTypeDef
@@ -3451,6 +3627,14 @@ public static partial class TrRmExecutableCompiler
                     var oldReferenceRow = checked((int)type.Row);
                     uint newReferenceRow;
                     if (type.Form == 0x02
+                        && typeDefRowByProviderClassTypeDef.TryGetValue((
+                            sourceProvider.ModuleIdentity,
+                            oldReferenceRow), out var providerTypeDefRow))
+                    {
+                        newReferenceRow
+                            = checked((uint)providerTypeDefRow);
+                    }
+                    else if (type.Form == 0x02
                         && rootSnapshot is not null
                         && SameA2SourceTypeProviderSnapshot(rootSnapshot,
                             sourceProvider)
@@ -3460,11 +3644,10 @@ public static partial class TrRmExecutableCompiler
                         newReferenceRow = checked((uint)classTypeDefRow);
                     }
                     else if (type.Form == 0x03
-                        && rootSnapshot is not null
-                        && SameA2SourceTypeProviderSnapshot(rootSnapshot,
-                            sourceProvider)
                         && importRowByRootClassImport.TryGetValue(
-                            oldReferenceRow, out var classImportRow))
+                            (sourceProvider.ModuleIdentity,
+                                oldReferenceRow),
+                            out var classImportRow))
                     {
                         newReferenceRow = checked((uint)classImportRow);
                     }
@@ -4105,7 +4288,12 @@ public static partial class TrRmExecutableCompiler
                         typeImport.ProducerIdentity)
                     || !BoundEnumTypes.IsValidModuleDeclarationKey(
                         typeImport.ExportKey)
-                    || typeImport.RootImportRow < 0)
+                    || typeImport.RootImportRow < 0
+                    || (!typeImport.RootImports.IsDefaultOrEmpty
+                        && typeImport.RootImports.Any(rootImport =>
+                            !BoundEnumTypes.IsValidModuleDeclarationKey(
+                                rootImport.ProviderIdentity)
+                            || rootImport.ImportRow <= 0)))
                 {
                     throw Invalid(
                         "An EN1 class TypeDef Import has an invalid provider or root identity.");
@@ -4127,14 +4315,32 @@ public static partial class TrRmExecutableCompiler
                 importRows.Add(new TrRmImportRow(moduleRefRow,
                     AddString(typeImport.ExportKey),
                     0x1300_0000u | checked((uint)typeDefRow)));
-                if (typeImport.RootImportRow > 0
-                    && SameA2SourceTypeProviderSnapshot(rootSnapshot!,
-                        emission.View.Provider)
-                    && !importRowByRootClassImport.TryAdd(
-                        typeImport.RootImportRow, importRows.Count))
+                if (!typeImport.RootImports.IsDefaultOrEmpty)
                 {
-                    throw Invalid(
-                        "An EN1 class TypeDef Import row was emitted more than once.");
+                    foreach (var rootImport in typeImport.RootImports)
+                    {
+                        if (!importRowByRootClassImport.TryAdd((
+                                rootImport.ProviderIdentity,
+                                rootImport.ImportRow), importRows.Count))
+                        {
+                            throw Invalid(
+                                "An EN1 class TypeDef Import row was emitted more than once for one root provider.");
+                        }
+                    }
+                }
+                else if (typeImport.RootImportRow > 0)
+                {
+                    var rootProviderIdentity
+                        = typeImport.RootImportProviderIdentity
+                            ?? rootSnapshot?.ModuleIdentity;
+                    if (rootProviderIdentity is null
+                        || !importRowByRootClassImport.TryAdd((
+                            rootProviderIdentity,
+                            typeImport.RootImportRow), importRows.Count))
+                    {
+                        throw Invalid(
+                            "An EN1 class TypeDef Import row was emitted more than once.");
+                    }
                 }
                 _ = importRowByRootClassIdentity.TryAdd(
                     emission.View.Identity, importRows.Count);
@@ -4445,13 +4651,26 @@ public static partial class TrRmExecutableCompiler
         foreach (var emission in standardClassDeclarationsByTypeDef)
         {
             var classView = emission.View;
+            var isClassQueryRoot = classQueryRootIdentities.Contains(
+                classView.Identity);
+            var isSelectedHandleDependency
+                = selectedClassHandleTypeIdentities.Contains(
+                    classView.Identity);
+            var isImportedClassQueryRoot
+                = isClassQueryRoot
+                    && emission.Import is C1EnumClosureImport typeImport
+                    && !typeImport.RootImports.IsDefaultOrEmpty;
             if (standardClassRootTables is null
+                || !standardClassRootTablesByProvider.ContainsKey(
+                    classView.Provider.ModuleIdentity)
                 || (!allowMultipleClassQueryProviders
                     && !SameA2SourceTypeProviderSnapshot(rootSnapshot!,
-                        classView.Provider))
+                        classView.Provider)
+                    && !isSelectedHandleDependency
+                    && !isImportedClassQueryRoot)
                 || (classQueryFunction is not null
-                    && !classQueryRootIdentities.Contains(
-                        classView.Identity))
+                    && !isClassQueryRoot
+                    && !isSelectedHandleDependency)
                 || classView.Layouts.Length != 1)
             {
                 throw Unsupported(
@@ -5691,7 +5910,9 @@ public static partial class TrRmExecutableCompiler
                         .GetTypeSpecRef(instance.TypeSpecReference);
                     if (sourceType.Form == 0x03
                         && importRowByRootClassImport.TryGetValue(
-                            sourceType.Row, out var importedRootRow))
+                            (provider.ModuleIdentity,
+                                checked((int)sourceType.Row)),
+                            out var importedRootRow))
                     {
                         typeReference
                             = TrRmTypeSpecTableWriter.Reference(0x03,
