@@ -6397,6 +6397,25 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             new TrRmStandardArtifactInput(schemaIdentity,
                 moduleRefPermutedReemission),
             "StructMethodConsumer", providers);
+        var importPermutedConsumer = PermuteStandardImportAndModuleRefRows(
+            consumerArtifact,
+            TrRmArtifactSchema
+                .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft);
+        var importPermutedProgram = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                importPermutedConsumer),
+            "StructMethodConsumer", providers);
+        Assert.That(importPermutedProgram.Functions.Single(
+                static function => function.Name == "ReadNested")
+                .ReturnType,
+            Is.EqualTo(PrimitiveType.Int32));
+        var importPermutedReemission = TrRmExecutableCompiler.EmitStandard(
+            importPermutedProgram, "StructMethodConsumer", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        _ = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                importPermutedReemission),
+            "StructMethodConsumer", providers);
 
         var rootMethodCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
@@ -10371,6 +10390,144 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             C1M1Construction2ClassParameterDefaultsSchemaIdentity,
             TrRmModuleTableReader.WindowsX64NativeTargetRequirement, [], [],
             classExports);
+    }
+
+    private static byte[] PermuteStandardImportAndModuleRefRows(
+        byte[] artifact, TrRmArtifactSchema schema)
+    {
+        var index = new TrRmArtifactIndex(artifact, schema);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(index);
+        if (tables.Imports.Count < 2
+            || tables.ModuleRefs.Count < 2
+            || !index.TryGetSection(0x0010, out var moduleRefSection,
+                out var moduleRefCount)
+            || !index.TryGetSection(0x001C, out var importSection,
+                out var importCount)
+            || !index.TryGetSection(0x0011, out var typeSpecSection,
+                out var typeSpecCount)
+            || !index.TryGetSection(0x0020, out var bodySection,
+                out var bodyCount)
+            || index.TryGetSection(0x004B, out _, out var fieldPathCount)
+                && fieldPathCount != 0
+            || moduleRefCount != tables.ModuleRefs.Count
+            || importCount != tables.Imports.Count
+            || typeSpecCount != tables.TypeSpecs.Count
+            || bodyCount != tables.Bodies.Count)
+        {
+            throw new InvalidOperationException(
+                "The import permutation fixture requires multiple ModuleRefs and Imports without FieldPaths.");
+        }
+
+        var newModuleRefRowByOld = new int[moduleRefCount + 1];
+        var moduleRefBytes = moduleRefSection.ToArray();
+        for (var destination = 0;
+            destination < moduleRefCount; destination++)
+        {
+            var source = moduleRefCount - destination - 1;
+            newModuleRefRowByOld[source + 1] = destination + 1;
+            moduleRefSection.Span.Slice(source * 12, 12).CopyTo(
+                moduleRefBytes.AsSpan(destination * 12, 12));
+        }
+
+        var newImportRowByOld = new int[importCount + 1];
+        var importBytes = new byte[importSection.Length];
+        for (var oldRow = 1; oldRow <= importCount; oldRow++)
+        {
+            var newRow = importCount - oldRow + 1;
+            newImportRowByOld[oldRow] = newRow;
+            var sourceOffset = (oldRow - 1) * 12;
+            var destinationOffset = (newRow - 1) * 12;
+            importSection.Span.Slice(sourceOffset, 12).CopyTo(
+                importBytes.AsSpan(destinationOffset, 12));
+            var oldModuleRefRow = checked((int)
+                BinaryPrimitives.ReadUInt32LittleEndian(
+                    importBytes.AsSpan(destinationOffset)));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                importBytes.AsSpan(destinationOffset),
+                checked((uint)newModuleRefRowByOld[oldModuleRefRow]));
+        }
+
+        var typeSpecRows = new ReadOnlyMemory<byte>[typeSpecCount];
+        for (var row = 1; row <= typeSpecCount; row++)
+        {
+            var typeSpec = tables.TypeSpecs.GetRow(row).ToArray();
+            if (typeSpec[0] == 0x03)
+            {
+                var oldImportRow = checked((int)
+                    BinaryPrimitives.ReadUInt32LittleEndian(
+                        typeSpec.AsSpan(2)));
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    typeSpec.AsSpan(2),
+                    checked((uint)newImportRowByOld[oldImportRow]));
+            }
+
+            typeSpecRows[row - 1] = typeSpec;
+        }
+
+        var bodyRows = new ReadOnlyMemory<byte>[bodyCount];
+        for (var bodyRow = 1; bodyRow <= bodyCount; bodyRow++)
+        {
+            var bodyBytes = tables.Bodies.GetRow(bodyRow).ToArray();
+            var body = tables.Bodies.GetRegisterBody(bodyRow,
+                tables.Contracts.Count);
+            var position = 5;
+            for (var map = 0; map < 5; map++)
+            {
+                if ((body.MapMask & (1 << map)) != 0)
+                {
+                    position += sizeof(uint);
+                }
+            }
+            position += 3 * sizeof(uint);
+            position += (body.HomeCount * 8)
+                + (body.TypeCount * sizeof(uint))
+                + (body.MethodCount * sizeof(uint));
+            for (var fieldMapIndex = 0;
+                fieldMapIndex < body.FieldCount; fieldMapIndex++)
+            {
+                var tokenOffset = position
+                    + (fieldMapIndex * sizeof(uint));
+                var token = BinaryPrimitives.ReadUInt32LittleEndian(
+                    bodyBytes.AsSpan(tokenOffset));
+                if ((token >> 24) == 0x1C)
+                {
+                    var oldImportRow = checked((int)(
+                        token & 0x00FF_FFFF));
+                    var newImportRow = checked((uint)
+                        newImportRowByOld[oldImportRow]);
+                    BinaryPrimitives.WriteUInt32LittleEndian(
+                        bodyBytes.AsSpan(tokenOffset),
+                        0x1C00_0000u | newImportRow);
+                }
+            }
+
+            bodyRows[bodyRow - 1] = bodyBytes;
+        }
+
+        var typeSpecBytes = TrRmVariableTableWriter.EncodeBlobs(typeSpecRows);
+        var bodyBytesEncoded = TrRmVariableTableWriter.EncodeBlobs(bodyRows);
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var sectionIndex = 0; sectionIndex < index.SectionCount;
+            sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var recordCount);
+            var sectionBytes = kind switch {
+                0x0010 => moduleRefBytes,
+                0x0011 => typeSpecBytes,
+                0x001C => importBytes,
+                0x0020 => bodyBytesEncoded,
+                _ => bytes.ToArray(),
+            };
+            sections.Add(new TrRmSection(kind, flags,
+                checked((uint)recordCount), sectionBytes));
+        }
+
+        var result = TrRmArtifactWriter.Encode(sections, schema);
+        _ = TrRmStructuralMetadataValidator.ValidateC1AndGetExecutionTables(
+            new TrRmArtifactIndex(result, schema));
+        return result;
     }
 
     private static byte[] ReverseStandardModuleRefRows(byte[] artifact,
