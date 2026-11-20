@@ -772,10 +772,8 @@ public static partial class TrRmExecutableCompiler
             var structureProvidersFitQueryRoots
                 = program.Structures.All(static structure =>
                     structure.StandardTypeOrigin is not null)
-                    && structureProviderIdentities.Length <= 1
-                    && (structureProviderIdentities.Length == 0
-                        || classQueryRootProviderIdentities.Contains(
-                            structureProviderIdentities[0]));
+                    && structureProviderIdentities.All(
+                        classQueryRootProviderIdentities.Contains);
             var enumProviderIdentities = program.EnumDefinitions
                 .Select(definition =>
                     definition.Identity
@@ -1788,8 +1786,16 @@ public static partial class TrRmExecutableCompiler
                 }
                 else if (directForeignStructure)
                 {
-                    if (!SameA2SourceTypeProviderSnapshot(rootSnapshot,
-                            origin.Provider)
+                    if (!IsSelectedC1EnumClosureSchemaIdentity(
+                            origin.Provider.SchemaIdentity)
+                        || !StringComparer.Ordinal.Equals(
+                            origin.Provider.SchemaIdentity, schemaIdentity)
+                        || GetForeignInvocationSchema(
+                            origin.Provider.SchemaIdentity) != schema
+                        || origin.Provider.TargetRequirement
+                            != moduleTargetRequirement
+                        || origin.Provider.RuntimePolicy
+                            != (uint)program.RuntimePolicy
                         || !origin.IsLookupRoot
                         || origin.ExportKeys.IsDefaultOrEmpty
                         || origin.SelectedExportKeys.IsDefaultOrEmpty
@@ -1872,8 +1878,8 @@ public static partial class TrRmExecutableCompiler
 
                     if (directForeignStructure)
                     {
-                        if (!SameA2SourceTypeProviderSnapshot(rootSnapshot,
-                                fieldOrigin.Provider)
+                        if (!SameA2SourceTypeProviderSnapshot(
+                                origin.Provider, fieldOrigin.Provider)
                             || fieldOrigin.ExportKeys.IsDefaultOrEmpty
                             || fieldOrigin.SelectedExportKeys
                                 .IsDefaultOrEmpty
@@ -2692,12 +2698,18 @@ public static partial class TrRmExecutableCompiler
         }
 
         var structureIndexByRootTypeDefRow
-            = new Dictionary<int, int>(rootTypeDefRowByStructureIndex.Count);
+            = new Dictionary<(string ModuleIdentity, int TypeDefRow), int>(
+                rootTypeDefRowByStructureIndex.Count);
         foreach (var (structureIndex, typeDefRow)
             in rootTypeDefRowByStructureIndex)
         {
+            var origin = program.Structures[structureIndex]
+                .StandardTypeOrigin
+                ?? throw Invalid(
+                    "An EN1 struct TypeSpec remap lost its provider origin.");
             if (typeDefRow <= 0
-                || !structureIndexByRootTypeDefRow.TryAdd(typeDefRow,
+                || !structureIndexByRootTypeDefRow.TryAdd((
+                    origin.Provider.ModuleIdentity, typeDefRow),
                     structureIndex))
             {
                 throw Invalid(
@@ -2920,7 +2932,8 @@ public static partial class TrRmExecutableCompiler
         var importRowByEnumIndex = new Dictionary<int, int>();
         var enumIndexByRootEnumImport = new Dictionary<int, int>();
         var importRowByStructureIndex = new Dictionary<int, int>();
-        var importRowByRootStructureImport = new Dictionary<int, int>();
+        var importRowByRootStructureImport
+            = new Dictionary<(string ModuleIdentity, int ImportRow), int>();
         var importRowByRootClassImport = new Dictionary<int, int>();
         var importRowByRootClassIdentity
             = new Dictionary<BoundGenericNominalTypeIdentity, int>();
@@ -3297,11 +3310,10 @@ public static partial class TrRmExecutableCompiler
                         newReferenceRow = checked((uint)enumImportRow);
                     }
                     else if (type.Form == 0x02 && type.Qualifiers == 0
-                        && rootSnapshot is not null
-                        && SameA2SourceTypeProviderSnapshot(rootSnapshot,
-                            sourceProvider)
                         && structureIndexByRootTypeDefRow.TryGetValue(
-                            oldReferenceRow, out var structureIndex))
+                            (sourceProvider.ModuleIdentity,
+                                oldReferenceRow),
+                            out var structureIndex))
                     {
                         encodedTypeSpec = FieldTypeSpecReference(
                             (PrimitiveType)(100 + structureIndex));
@@ -3310,11 +3322,8 @@ public static partial class TrRmExecutableCompiler
                         return encodedTypeSpec;
                     }
                     else if (type.Form == 0x03 && type.Qualifiers == 0
-                        && rootSnapshot is not null
-                        && SameA2SourceTypeProviderSnapshot(rootSnapshot,
-                            sourceProvider)
                         && importRowByRootStructureImport.TryGetValue(
-                            oldReferenceRow,
+                            (sourceProvider.ModuleIdentity, oldReferenceRow),
                             out var structureImportRow))
                     {
                         newReferenceRow
@@ -3941,9 +3950,12 @@ public static partial class TrRmExecutableCompiler
                 _ = importRowByStructureIndex.TryAdd(structureIndex,
                     importRows.Count);
                 if (typeImport.RootImportRow != 0
-                    && (typeImport.RootImportRow < 0
+                    && (rootSnapshot is null
+                        || typeImport.RootImportRow < 0
                         || !importRowByRootStructureImport.TryAdd(
-                            typeImport.RootImportRow, importRows.Count)))
+                            (rootSnapshot.ModuleIdentity,
+                                typeImport.RootImportRow),
+                            importRows.Count)))
                 {
                     throw Invalid(
                         "An EN1 struct TypeDef Import row was emitted more than once.");

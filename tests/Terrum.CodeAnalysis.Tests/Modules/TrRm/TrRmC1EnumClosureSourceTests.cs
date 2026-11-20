@@ -2775,9 +2775,11 @@ internal sealed class TrRmC1EnumClosureSourceTests
 
         var betaTree = SyntaxTree.Parse("""
             namespace Demo {
-                public enum Tone : int16 { Light = 1 }
+                public struct Record {
+                    public int64 Value;
+                }
                 public class Beta {
-                    public Tone Value;
+                    public Record Data;
                 }
             }
             """);
@@ -2791,37 +2793,56 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var betaField = betaDeclaration.Children.OfType<SyntaxNode>()
             .Single(static node =>
                 node.Kind == SyntaxKind.FieldDeclaration);
+        var betaStruct = betaTree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.StructDeclaration);
+        var betaStructField = betaStruct.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.FieldDeclaration);
         var betaClassIndex = betaProgram.SourceClassProgramAssociation!
             .Declarations.Single(declaration =>
                 declaration.Span == betaDeclaration.Span).ClassIndex;
         var betaClassExport = new TrRmSourceClassExport(betaProgram,
             betaClassIndex, betaDeclaration.Span, "type.beta", [
                 new TrRmSourceClassMemberExport(0, betaField.Span,
-                    "field.beta.value"),
+                    "field.beta.data"),
             ]);
         var betaArtifact = TrRmExecutableCompiler.EmitStandard(betaProgram,
-            "BetaProvider", schemaIdentity, targetRequirement, [], [],
+            "BetaProvider", schemaIdentity, targetRequirement, [
+                new TrRmSourceTypeExport("Demo", "Record",
+                    "type.record") {
+                    FieldExports = [
+                        new TrRmSourceFieldExport("Value",
+                            "field.record.value"),
+                    ],
+                },
+            ], [],
             [betaClassExport], []);
         var betaInput = new TrRmStandardArtifactInput(schemaIdentity,
             betaArtifact);
         var betaReference = TrRmExecutableCompiler.CreateStandardReference(
-            betaInput, "BetaProvider", [], ["type.beta"],
-            ["field.beta.value"]);
+            betaInput, "BetaProvider", [],
+            ["type.beta", "type.record"],
+            ["field.beta.data", "field.record.value"]);
         var reference = TrRmExecutableCompiler.CreateStandardReferenceSet(
             [alphaReference, betaReference]);
 
-        Assert.That(reference.Structures, Has.Length.EqualTo(1));
+        Assert.That(reference.Structures, Has.Length.EqualTo(2));
         Assert.That((int)reference.StandardClassDeclarations.Single(
             static declaration =>
                 declaration.Declaration.Name == "Alpha")
             .Declaration.Fields.Single().Type, Is.EqualTo(100));
+        Assert.That((int)reference.StandardClassDeclarations.Single(
+            static declaration =>
+                declaration.Declaration.Name == "Beta")
+            .Declaration.Fields.Single().Type, Is.EqualTo(101));
 
         var consumer = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
                 using Demo;
                 nint CombinedOffset() {
                     return unsafe(offsetof(Alpha, Data.Value))
-                        + unsafe(offsetof(Beta, Value));
+                        + unsafe(offsetof(Beta, Data.Value));
                 }
                 """), reference, new CompilationOptions {
                 LayoutCoreRegistration
@@ -2840,7 +2861,7 @@ internal sealed class TrRmC1EnumClosureSourceTests
         Assert.That(tables.TargetLayoutDependencies.Count,
             Is.EqualTo(2));
         Assert.That(tables.TargetLayoutDependencyFields.Count,
-            Is.EqualTo(3));
+            Is.EqualTo(4));
         Assert.That(tables.ModuleRefs.Count, Is.EqualTo(2));
         var imports = Enumerable.Range(1, tables.Imports.Count)
             .Select(tables.Imports.GetBindingForImportRow).ToArray();
@@ -2851,6 +2872,14 @@ internal sealed class TrRmC1EnumClosureSourceTests
         Assert.That(imports.Any(static binding =>
                 binding.ProducerIdentity == "AlphaStructProvider"
                 && binding.ExportKey == "field.payload.value"),
+            Is.True);
+        Assert.That(imports.Any(static binding =>
+                binding.ProducerIdentity == "BetaProvider"
+                && binding.ExportKey == "type.record"),
+            Is.True);
+        Assert.That(imports.Any(static binding =>
+                binding.ProducerIdentity == "BetaProvider"
+                && binding.ExportKey == "field.record.value"),
             Is.True);
         var loaded = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(schemaIdentity, artifact),

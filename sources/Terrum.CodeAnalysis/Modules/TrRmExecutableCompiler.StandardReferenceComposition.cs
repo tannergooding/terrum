@@ -596,7 +596,27 @@ public static partial class TrRmExecutableCompiler
                     reference.StandardQuerySourceAssociation));
         }
 
+        var directStructureComposition
+            = structureReferences.Count > 1
+                && structureReferences.All(reference =>
+                    reference.NativePointerTypes.IsEmpty
+                    && reference.StandardQuerySourceAssociation is null
+                    && reference.Structures.All(structure =>
+                        structure.StandardTypeOrigin is
+                            BoundStandardTypeOrigin origin
+                        && origin.Expectations.IsDefaultOrEmpty
+                        && origin.IsLookupRoot
+                        && !origin.SelectedExportKeys.IsDefaultOrEmpty
+                        && origin.ExpectedDeclaration is not null
+                        && StringComparer.Ordinal.Equals(
+                            origin.Provider.SchemaIdentity,
+                            classSchemaIdentity)
+                        && structure.Fields.All(field =>
+                            (int)field.Type < 100
+                            && IsStandardClassTypeOnlyComposedFieldType(
+                                field.Type))));
         if (structureReferences.Count > 1
+            && !directStructureComposition
             && structureReferences.Any(static reference =>
                 reference.StandardQuerySourceAssociation is null))
         {
@@ -604,17 +624,53 @@ public static partial class TrRmExecutableCompiler
                 "Multi-provider inline struct composition requires retained provider closures for every structure reference.");
         }
 
-        CompilationReference? structureReferenceSet
-            = structureReferences.Count switch {
+        CompilationReference? structureReferenceSet = null;
+        ImmutableArray<BoundStruct> structuresResult;
+        ImmutableArray<NativePointerTypeDefinition>
+            nativePointerTypesResult;
+        BoundStandardQuerySourceAssociation?
+            standardQuerySourceAssociation;
+        if (directStructureComposition)
+        {
+            var mergedDirectStructures
+                = ImmutableArray.CreateBuilder<BoundStruct>();
+            var directStructureIndexes = new Dictionary<(
+                string ModuleIdentity, uint DefinitionId), int>();
+            foreach (var structureReference in structureReferences)
+            {
+                foreach (var structure in structureReference.Structures)
+                {
+                    var origin = structure.StandardTypeOrigin!;
+                    var key = (origin.Provider.ModuleIdentity,
+                        origin.DefinitionId);
+                    if (!directStructureIndexes.TryAdd(key,
+                            mergedDirectStructures.Count))
+                    {
+                        throw Unsupported(
+                            "Direct inline-struct composition currently requires distinct provider TypeDefs.");
+                    }
+
+                    mergedDirectStructures.Add(structure);
+                }
+            }
+
+            structuresResult = mergedDirectStructures.MoveToImmutable();
+            nativePointerTypesResult = [];
+            standardQuerySourceAssociation = null;
+        }
+        else
+        {
+            structureReferenceSet = structureReferences.Count switch {
                 0 => null,
                 1 => structureReferences[0],
                 _ => CreateStandardReferenceSet(structureReferences),
             };
-        var structuresResult = structureReferenceSet?.Structures ?? [];
-        var nativePointerTypesResult
-            = structureReferenceSet?.NativePointerTypes ?? [];
-        var standardQuerySourceAssociation
-            = structureReferenceSet?.StandardQuerySourceAssociation;
+            structuresResult = structureReferenceSet?.Structures ?? [];
+            nativePointerTypesResult
+                = structureReferenceSet?.NativePointerTypes ?? [];
+            standardQuerySourceAssociation
+                = structureReferenceSet?.StandardQuerySourceAssociation;
+        }
         var structureIndexByProviderIdentity = new Dictionary<(
             string ModuleIdentity, uint DefinitionId), int>();
         var structureDefinitionIdentities
@@ -796,7 +852,8 @@ public static partial class TrRmExecutableCompiler
         var enumDefinitionsResult = enumDefinitionsBuilder.MoveToImmutable();
 
         PrimitiveType RemapClassFieldType(int referenceIndex,
-            PrimitiveType type)
+            PrimitiveType type,
+            BoundSourceTypeProviderSnapshot classProvider)
         {
             if (BoundEnumTypes.IsType(type))
             {
@@ -829,6 +886,18 @@ public static partial class TrRmExecutableCompiler
                 && structureIndex
                     < references[referenceIndex].Structures.Length)
             {
+                var structureOrigin
+                    = references[referenceIndex]
+                        .Structures[structureIndex].StandardTypeOrigin
+                        ?? throw Invalid(
+                            "A class FieldDef structure type lost its provider origin.");
+                if (!SameA2SourceTypeProviderSnapshot(classProvider,
+                        structureOrigin.Provider))
+                {
+                    throw Unsupported(
+                        "A composed class inline-struct field must refer to a direct structure from the same provider Module.");
+                }
+
                 return (PrimitiveType)(100
                     + structureMaps[referenceIndex][structureIndex]);
             }
@@ -1012,7 +1081,8 @@ public static partial class TrRmExecutableCompiler
                     Fields = [.. declaration.Declaration.Fields.Select(
                         field => field with {
                             Type = RemapClassFieldType(referenceIndex,
-                                field.Type),
+                                field.Type,
+                                declaration.Declaration.Provider),
                         })],
                 };
                 var remappedDeclaration = declaration with {
