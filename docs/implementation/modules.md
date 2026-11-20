@@ -273,6 +273,16 @@ identities for callable local and imported MethodDef proxies and preserve the
 implicit-reference flag for caller adaptation.
 Body-04, Body-05 and compact field-access re-emission regressions are added but
 remain unverified under the validation hold.
+A separate still-unapproved method/type-selection API now has a provisional
+single-Module implementation for classless C1M1/CM1/CM1AR1 Copy-evidence
+artifacts. It combines explicitly selected top-level methods with local
+Blittable Copy struct and FieldDef roots in one source reference, including
+nested struct signatures and field lookup. The regression is unverified;
+co-located/external provider Modules, Imports, FieldDef-edge retention,
+source-free FieldMap/FieldPath remapping, CLI selection and runtime
+qualification remain open. The current loader still requires the whole
+single-Module TypeDef/method closure to fit its bounded Blittable-struct path;
+selected-root-only loading for unrelated declarations remains open.
 Compiler-owned source-class anchors and explicit member-key capture are
 implemented, but complete bodyful
 local class member/MethodDef closure, provider

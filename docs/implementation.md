@@ -140,7 +140,15 @@ local and imported class roots and exposes exported nongeneric top-level
 function views with the bounded unit, scalar, class-handle and plain
 checked-reference signature forms; producer/reference/downstream-call and
 source-free provider/reload regressions are added but remain unverified
-under the active hold. Exact Construction-2 source-free re-emission now
+under the active hold. A separate still-unapproved method/type-selection
+proposal now has a combined source-reference API for one classless
+single-Module Copy-evidence artifact, with explicit method, TypeDef, and
+FieldDef keys and local nested Copy structs. Its regressions remain
+unverified; multiple Modules, provider Imports, source-free FieldMap/FieldPath
+remapping, CLI selection, and runtime qualification remain open. The loader
+still requires the whole single-Module TypeDef/method closure to fit its
+bounded Blittable-struct path.
+Exact Construction-2 source-free re-emission now
 preserves bodyful exported nongeneric top-level MethodDefs whose Bodies fit
 the existing C1M1 remapper (kinds 01-05), including TypeSpec, Effects,
 Dependency and ExportKey remapping. It also retains supported non-exported

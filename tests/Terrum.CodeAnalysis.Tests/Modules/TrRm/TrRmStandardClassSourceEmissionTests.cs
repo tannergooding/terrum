@@ -6002,6 +6002,196 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
+    public void LinksTopLevelConstruction2MethodImportsWithValueStructTypes()
+    {
+        var schemaIdentity
+            = C1M1Construction2ClassParameterDefaultsCopyEvidenceSchemaIdentity;
+        var layoutOptions = new CompilationOptions {
+            LayoutCoreRegistration
+                = LayoutCoreRegistrationTestData.Create(),
+        };
+        var providerTree = SyntaxTree.Parse("""
+            namespace Demo {
+                [Blittable] [Layout(LayoutKind.Sequential)]
+                public struct Other {
+                    public int32 Value;
+                }
+                [Blittable] [Layout(LayoutKind.Sequential)]
+                public struct Record {
+                    public Other Nested;
+                    public int32 Value;
+                }
+                public int32 Read(Record value) { return 7; }
+            }
+            """);
+        var providerCompilation = Compilation.CreateLibrary(providerTree,
+            layoutOptions);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var providerProgram = (BoundProgram)providerCompilation.Program!;
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, "StructMethodProvider", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement, [], [
+                new TrRmSourceTypeExport("Demo", "Record", "type.record") {
+                    FieldExports = [
+                        new TrRmSourceFieldExport("Nested",
+                            "field.record.nested"),
+                        new TrRmSourceFieldExport("Value",
+                            "field.record.value"),
+                    ],
+                },
+                new TrRmSourceTypeExport("Demo", "Other", "type.other") {
+                    FieldExports = [
+                        new TrRmSourceFieldExport("Value",
+                            "field.other.value"),
+                    ],
+                },
+            ], []);
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var providerReference
+            = TrRmExecutableCompiler.CreateStandardReference(providerInput,
+                "StructMethodProvider", [], ["Read"], [
+                    new TrRmStandardExportKeySelection(
+                        "StructMethodProvider", "type.record"),
+                    new TrRmStandardExportKeySelection(
+                        "StructMethodProvider", "type.other"),
+                ], [
+                    new TrRmStandardExportKeySelection(
+                        "StructMethodProvider", "field.record.nested"),
+                    new TrRmStandardExportKeySelection(
+                        "StructMethodProvider", "field.record.value"),
+                    new TrRmStandardExportKeySelection(
+                        "StructMethodProvider", "field.other.value"),
+                ]);
+        Assert.Throws<ArgumentException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(providerInput,
+                "StructMethodProvider", [], ["Read"], [
+                    new TrRmStandardExportKeySelection(
+                        "StructMethodProvider", "type.record"),
+                ], []));
+
+        var fieldAccessTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public int32 ReadNested(Record value) {
+                    return value.Nested.Value;
+                }
+            }
+            """);
+        var fieldAccessCompilation = Compilation.CreateLibrary(
+            fieldAccessTree, providerReference);
+        Assert.That(fieldAccessCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                fieldAccessCompilation.Diagnostics));
+        var unselectedFieldReference
+            = TrRmExecutableCompiler.CreateStandardReference(providerInput,
+                "StructMethodProvider", [], ["Read"], [
+                    new TrRmStandardExportKeySelection(
+                        "StructMethodProvider", "type.record"),
+                    new TrRmStandardExportKeySelection(
+                        "StructMethodProvider", "type.other"),
+                ], []);
+        var unselectedFieldCompilation = Compilation.CreateLibrary(
+            fieldAccessTree, unselectedFieldReference);
+        Assert.That(unselectedFieldCompilation.HasErrors, Is.True);
+
+        var consumerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                namespace Demo {
+                    public int32 Forward(Record value, Other unused) {
+                        return Read(value);
+                    }
+                }
+                """), providerReference);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerProgram = (BoundProgram)consumerCompilation.Program!;
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            consumerProgram, "StructMethodConsumer", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var consumerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            consumerArtifact);
+        var linkedProgram = TrRmExecutableCompiler.LoadStandard(consumerInput,
+            "StructMethodConsumer", [providerInput]);
+        var forward = linkedProgram.Functions.Single(
+            static function => function.Name == "Forward");
+        var call = (BoundCall)((BoundReturn)forward.Body.Statements.Single())
+            .Value!;
+        var read = linkedProgram.Functions[call.Function];
+        var recordType = forward.Variables[0].Type;
+        Assert.That(read.IsExternal, Is.False);
+        Assert.That(call.Arguments[0].Type, Is.EqualTo(recordType));
+        Assert.That(read.Variables[0].Type, Is.EqualTo(recordType));
+        Assert.That((int)recordType, Is.GreaterThanOrEqualTo(100));
+        var record = linkedProgram.Structures[(int)recordType - 100];
+        Assert.That(record.Fields, Has.Length.EqualTo(2));
+        var nestedType = record.Fields.Single(
+            static field => field.Name == "Nested").Type;
+        var otherType = forward.Variables[1].Type;
+        Assert.That(nestedType, Is.EqualTo(otherType));
+        Assert.That(nestedType, Is.Not.EqualTo(recordType));
+        Assert.That(linkedProgram.Structures[(int)nestedType - 100].Fields
+            .Single().Name, Is.EqualTo("Value"));
+        Assert.That(record.Fields.Single(
+            static field => field.Name == "Value").Type,
+            Is.EqualTo(PrimitiveType.Int32));
+        Assert.That(linkedProgram.Structures[(int)otherType - 100].Fields
+            .Single().Name, Is.EqualTo("Value"));
+
+        var incompatibleProviderTree = SyntaxTree.Parse("""
+            namespace Demo {
+                [Blittable] [Layout(LayoutKind.Sequential)]
+                public struct Record {
+                    public Other Nested;
+                    public int64 Value;
+                }
+                [Blittable] [Layout(LayoutKind.Sequential)]
+                public struct Other {
+                    public int32 Value;
+                }
+                public int32 Read(Record value) { return 7; }
+            }
+            """);
+        var incompatibleProviderCompilation
+            = Compilation.CreateLibrary(incompatibleProviderTree,
+                layoutOptions);
+        Assert.That(incompatibleProviderCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                incompatibleProviderCompilation.Diagnostics));
+        var incompatibleProviderProgram
+            = (BoundProgram)incompatibleProviderCompilation.Program!;
+        var incompatibleProviderArtifact
+            = TrRmExecutableCompiler.EmitStandard(
+                incompatibleProviderProgram, "StructMethodProvider",
+                schemaIdentity,
+                TrRmModuleTableReader.WindowsX64NativeTargetRequirement, [],
+                [
+                    new TrRmSourceTypeExport("Demo", "Record",
+                        "type.record") {
+                        FieldExports = [
+                            new TrRmSourceFieldExport("Nested",
+                                "field.record.nested"),
+                            new TrRmSourceFieldExport("Value",
+                                "field.record.value"),
+                        ],
+                    },
+                    new TrRmSourceTypeExport("Demo", "Other", "type.other") {
+                        FieldExports = [
+                            new TrRmSourceFieldExport("Value",
+                                "field.other.value"),
+                        ],
+                    },
+                ], []);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(consumerInput,
+                "StructMethodConsumer", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        incompatibleProviderArtifact),
+                ]));
+    }
+
+    [Test]
     public void EmitsAndReemitsUnitCallsToForwardedModuleFunctions()
     {
         var providerTree = SyntaxTree.Parse("""

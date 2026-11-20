@@ -908,7 +908,9 @@ public static partial class TrRmExecutableCompiler
             standardSchemaIdentity: schemaIdentity,
             selectedModuleImports: selectedMethodImports,
             selectedModuleRow: module.ModuleRow,
-            standardClassQueryProgram: classTypeProgram,
+            standardClassQueryProgram
+                = classTypeProgram.StandardClassDeclarations.IsEmpty
+                    ? null : classTypeProgram,
             standardConstruction2MethodLinking: true,
             nominalClassTypesByTypeSpecReference:
                 nominalClassTypesByTypeSpecReference);

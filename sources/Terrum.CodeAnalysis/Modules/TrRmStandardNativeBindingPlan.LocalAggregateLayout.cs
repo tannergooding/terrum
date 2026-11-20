@@ -232,6 +232,8 @@ internal sealed partial class TrRmStandardNativeBindingPlan
         private readonly record struct FunctionOrigin(ModuleOrigin Module, int FunctionIndex);
         private readonly record struct TypeOrigin(ModuleOrigin Module, uint DefinitionId);
         private readonly record struct LocalTypeOrigin(ModuleOrigin Module, PrimitiveType Type);
+        private readonly record struct LocalStructureTypeOrigin(
+            LocalTypeOrigin LocalType, TypeOrigin ProviderType);
 
         private readonly BoundStandardMethodProviderClosure _closure;
         private readonly bool _initializationReferenceLocalFieldLayout;
@@ -251,6 +253,10 @@ internal sealed partial class TrRmStandardNativeBindingPlan
         private readonly Dictionary<TypeOrigin, PrimitiveType> _nominalTypes = [];
         private readonly Dictionary<LocalTypeOrigin, PrimitiveType> _types = [];
         private readonly HashSet<LocalTypeOrigin> _pendingTypes = [];
+        private readonly List<LocalStructureTypeOrigin>
+            _localStructureTypeOrigins = [];
+        private readonly Dictionary<LocalTypeOrigin, BoundStruct>
+            _construction2LocalStructureDeclarations = [];
         private readonly List<(BoundStandardMethodProviderModule Module, int Index)> _structures = [];
         private readonly List<BoundNativeFixedArrayType> _arrays = [];
         private readonly Dictionary<(PrimitiveType ElementType, ulong ElementCount), int> _arrayIndexes = [];
@@ -288,66 +294,155 @@ internal sealed partial class TrRmStandardNativeBindingPlan
         {
             var modulesByArtifact = _closure.Modules.ToLookup(
                 static module => module.ArtifactIndex);
+            var modulesByIdentityAndRow = _closure.Modules.ToDictionary(
+                static module => (module.Identity, module.ModuleRow));
+            var typeProviderTablesByArtifact = new Dictionary<int,
+                TrRmStructuralMetadataValidator.ValidatedExecutionTables>();
+            var providerSnapshotsByModule
+                = new Dictionary<ModuleOrigin, ImmutableArray<byte>>();
+            BoundStandardMethodProviderModule GetTypeProviderModule(
+                BoundSourceTypeProviderSnapshot provider)
+            {
+                if (!modulesByIdentityAndRow.TryGetValue((
+                        provider.ModuleIdentity, provider.ModuleRow),
+                        out var selectedModule)
+                    || selectedModule.TargetRequirement
+                        != provider.TargetRequirement
+                    || selectedModule.RuntimePolicy != provider.RuntimePolicy
+                    || (uint)selectedModule.ArtifactIndex
+                        >= (uint)_closure.Artifacts.Length)
+                {
+                    throw new InvalidDataException(
+                        "A Construction-2 struct provider snapshot is outside the checked Module closure.");
+                }
+
+                var location = Location(selectedModule);
+                var artifact = _closure.Artifacts[
+                    selectedModule.ArtifactIndex];
+                if (!StringComparer.Ordinal.Equals(
+                        artifact.SchemaIdentity, provider.SchemaIdentity))
+                {
+                    throw new InvalidDataException(
+                        "A Construction-2 struct provider snapshot changed its schema identity.");
+                }
+
+                if (providerSnapshotsByModule.TryGetValue(location,
+                        out var previousSnapshot))
+                {
+                    if (previousSnapshot != provider.ArtifactSnapshot
+                        && !previousSnapshot.AsSpan().SequenceEqual(
+                            provider.ArtifactSnapshot.AsSpan()))
+                    {
+                        throw new InvalidDataException(
+                            "A Construction-2 struct provider Module has conflicting artifact snapshots.");
+                    }
+                }
+                else
+                {
+                    if (!artifact.ArtifactSnapshot.AsSpan().SequenceEqual(
+                            provider.ArtifactSnapshot.AsSpan()))
+                    {
+                        throw new InvalidDataException(
+                            "A Construction-2 struct provider snapshot changed its selected artifact.");
+                    }
+
+                    providerSnapshotsByModule.Add(location,
+                        provider.ArtifactSnapshot);
+                }
+
+                return selectedModule;
+            }
+
+            TrRmStructuralMetadataValidator.ValidatedExecutionTables
+                GetTypeProviderTables(
+                    int artifactIndex)
+            {
+                if (typeProviderTablesByArtifact.TryGetValue(
+                        artifactIndex, out var existingTables))
+                {
+                    return existingTables;
+                }
+
+                if ((uint)artifactIndex
+                    >= (uint)_closure.Artifacts.Length)
+                {
+                    throw new InvalidDataException(
+                        "A Construction-2 struct provider has an invalid artifact origin.");
+                }
+
+                var artifact = _closure.Artifacts[artifactIndex];
+                var index = TrRmExecutableCompiler
+                    .CreateForeignInvocationIndex(
+                        artifact.ArtifactSnapshot.ToArray(),
+                        artifact.SchemaIdentity);
+                var tables = TrRmExecutableCompiler
+                    .ValidateForeignInvocationArtifact(index,
+                        artifact.SchemaIdentity,
+                        createA3ResourceLedger: false);
+                typeProviderTablesByArtifact.Add(artifactIndex, tables);
+                return tables;
+            }
+
             foreach (var artifact in _closure.Artifacts)
             {
-                var artifactIndex
-                    = _construction2MethodLinking
-                    ? TrRmExecutableCompiler.CreateForeignInvocationIndex(
-                        artifact.ArtifactSnapshot.ToArray(),
-                        artifact.SchemaIdentity)
-                    : _nativeParameterContracts
-                    ? _generalPredicateGraphsInitializationReferenceBodies
-                        ? TrRmArtifactIndex
-                            .ForInitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft(
-                                artifact.ArtifactSnapshot.AsSpan())
-                        : TrRmArtifactIndex
-                            .ForInitializationReferencePointerLoadNativeParameterDraft(
-                                artifact.ArtifactSnapshot.AsSpan())
-                    : _standardNativePointerLoads
-                    ? _generalPredicateGraphsInitializationReferenceBodies
-                        ? TrRmArtifactIndex
-                            .ForGeneralPredicateGraphsNativePointerLoadsDraft(
-                                artifact.ArtifactSnapshot.AsSpan())
-                        : TrRmArtifactIndex.ForNativePointerLoadsDraft(
-                            artifact.ArtifactSnapshot.AsSpan())
-                    : _generalPredicateGraphsInitializationReferenceBodies
-                    ? TrRmArtifactIndex.ForGeneralPredicateGraphsDraft(
-                        artifact.ArtifactSnapshot.AsSpan())
-                    : _initializationReferenceLocalFieldLayout
-                    ? _nestedInitializationReferenceFieldDestinations
-                        ? TrRmArtifactIndex
-                            .ForInitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft(
-                                artifact.ArtifactSnapshot.AsSpan())
-                        : TrRmArtifactIndex
-                            .ForInitializationReferenceLocalFieldLayoutDraft(
-                                artifact.ArtifactSnapshot.AsSpan())
-                    : TrRmArtifactIndex.ForLocalAggregateLayoutDraft(
-                        artifact.ArtifactSnapshot.AsSpan());
-                var tables
-                    = _construction2MethodLinking
-                    ? TrRmExecutableCompiler
-                        .ValidateForeignInvocationArtifact(artifactIndex,
-                        artifact.SchemaIdentity,
-                        createA3ResourceLedger: false)
-                    : _nativeParameterContracts
-                    ? _generalPredicateGraphsInitializationReferenceBodies
-                        ? TrRmStructuralMetadataValidator
-                            .ValidateInitializationReferenceGeneralPredicatePointerLoadNativeParameterDraftAndGetExecutionTables(
-                                artifactIndex)
-                        : TrRmStructuralMetadataValidator
-                            .ValidateInitializationReferencePointerLoadNativeParameterDraftAndGetExecutionTables(
-                                artifactIndex)
-                    : _generalPredicateGraphsInitializationReferenceBodies
-                    ? TrRmStructuralMetadataValidator
-                        .ValidateGeneralPredicateGraphsDraftAndGetExecutionTables(
-                            artifactIndex)
-                    : _initializationReferenceLocalFieldLayout
-                        || _standardNativePointerLoads
-                    ? TrRmStructuralMetadataValidator
-                        .ValidateAndGetExecutionTables(artifactIndex)
-                    : TrRmStructuralMetadataValidator
-                        .ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraftAndGetExecutionTables(
-                            artifactIndex);
+                TrRmStructuralMetadataValidator.ValidatedExecutionTables tables;
+                if (_construction2MethodLinking)
+                {
+                    tables = GetTypeProviderTables(artifact.ArtifactIndex);
+                }
+                else
+                {
+                    var artifactIndex = _nativeParameterContracts
+                        ? _generalPredicateGraphsInitializationReferenceBodies
+                            ? TrRmArtifactIndex
+                                .ForInitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft(
+                                    artifact.ArtifactSnapshot.AsSpan())
+                            : TrRmArtifactIndex
+                                .ForInitializationReferencePointerLoadNativeParameterDraft(
+                                    artifact.ArtifactSnapshot.AsSpan())
+                        : _standardNativePointerLoads
+                            ? _generalPredicateGraphsInitializationReferenceBodies
+                                ? TrRmArtifactIndex
+                                    .ForGeneralPredicateGraphsNativePointerLoadsDraft(
+                                        artifact.ArtifactSnapshot.AsSpan())
+                                : TrRmArtifactIndex.ForNativePointerLoadsDraft(
+                                    artifact.ArtifactSnapshot.AsSpan())
+                            : _generalPredicateGraphsInitializationReferenceBodies
+                                ? TrRmArtifactIndex
+                                    .ForGeneralPredicateGraphsDraft(
+                                        artifact.ArtifactSnapshot.AsSpan())
+                                : _initializationReferenceLocalFieldLayout
+                                    ? _nestedInitializationReferenceFieldDestinations
+                                        ? TrRmArtifactIndex
+                                            .ForInitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft(
+                                                artifact.ArtifactSnapshot.AsSpan())
+                                        : TrRmArtifactIndex
+                                            .ForInitializationReferenceLocalFieldLayoutDraft(
+                                                artifact.ArtifactSnapshot.AsSpan())
+                                    : TrRmArtifactIndex
+                                        .ForLocalAggregateLayoutDraft(
+                                            artifact.ArtifactSnapshot.AsSpan());
+                    tables = _nativeParameterContracts
+                        ? _generalPredicateGraphsInitializationReferenceBodies
+                            ? TrRmStructuralMetadataValidator
+                                .ValidateInitializationReferenceGeneralPredicatePointerLoadNativeParameterDraftAndGetExecutionTables(
+                                    artifactIndex)
+                            : TrRmStructuralMetadataValidator
+                                .ValidateInitializationReferencePointerLoadNativeParameterDraftAndGetExecutionTables(
+                                    artifactIndex)
+                        : _generalPredicateGraphsInitializationReferenceBodies
+                            ? TrRmStructuralMetadataValidator
+                                .ValidateGeneralPredicateGraphsDraftAndGetExecutionTables(
+                                    artifactIndex)
+                            : _initializationReferenceLocalFieldLayout
+                                || _standardNativePointerLoads
+                                ? TrRmStructuralMetadataValidator
+                                    .ValidateAndGetExecutionTables(
+                                        artifactIndex)
+                                : TrRmStructuralMetadataValidator
+                                    .ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraftAndGetExecutionTables(
+                                        artifactIndex);
+                }
                 foreach (var module in modulesByArtifact[artifact.ArtifactIndex])
                 {
                     var location = Location(module);
@@ -362,25 +457,192 @@ internal sealed partial class TrRmStandardNativeBindingPlan
                         _construction2MethodLinking);
                     var (typeStart, typeEnd) = tables.Modules.GetTypeDefRange(
                         module.ModuleRow);
-                    if (!_construction2MethodLinking
-                        && typeEnd - typeStart
+                    if (!_construction2MethodLinking)
+                    {
+                        if (typeEnd - typeStart
                             != module.Program.Structures.Length)
-                    {
-                        throw new InvalidDataException(
-                            "The L1 native type map lost its Module-owned TypeDef range.");
+                        {
+                            throw new InvalidDataException(
+                                "The L1 native type map lost its Module-owned TypeDef range.");
+                        }
+
+                        for (var index = 0;
+                            index < module.Program.Structures.Length; index++)
+                        {
+                            _declarations.Add(new TypeOrigin(location,
+                                0x1300_0000u
+                                    | checked((uint)(typeStart + index))),
+                                (module, index));
+                        }
                     }
-                    if (_construction2MethodLinking
-                        && !module.Program.Structures.IsEmpty)
+                    else
                     {
-                        throw new NotSupportedException(
-                            "Construction-2 Method linking initially requires class-handle and scalar types without value-struct remapping.");
-                    }
-                    for (var index = 0; !_construction2MethodLinking
-                        && index < module.Program.Structures.Length; index++)
-                    {
-                        _declarations.Add(new TypeOrigin(location,
-                            0x1300_0000u | checked((uint)(typeStart + index))),
-                            (module, index));
+                        if (module.Program.Structures.Any(
+                                static structure =>
+                                    structure.StandardTypeOrigin is null)
+                            && (typeEnd - typeStart
+                                    != module.Program.Structures.Length
+                                || Enumerable.Range(typeStart,
+                                    typeEnd - typeStart).Any(typeDefRow =>
+                                    tables.TypeDefs.GetKind(typeDefRow) != 1
+                                    || !tables.Layouts
+                                        .HasBlittableLayout(typeDefRow, 1, 1))))
+                        {
+                            throw new NotSupportedException(
+                                "Construction-2 local value types require an exact Blittable struct Module range.");
+                        }
+
+                        for (var index = 0;
+                            index < module.Program.Structures.Length; index++)
+                        {
+                            var structure = module.Program.Structures[index];
+                            var origin = structure.StandardTypeOrigin;
+                            if (origin is null)
+                            {
+                                var typeDefRow = checked(typeStart + index);
+                                var typeDefId = 0x1300_0000u
+                                    | checked((uint)typeDefRow);
+                                var (methodStart, methodEnd)
+                                    = tables.TypeDefs.GetMethodRange(
+                                        typeDefRow);
+                                if (tables.TypeDefs.GetGenericRange(
+                                        typeDefRow).Count != 0
+                                    || tables.TypeDefs.HasDeclaredUnique(
+                                        typeDefRow)
+                                    || methodStart != methodEnd)
+                                {
+                                    throw new NotSupportedException(
+                                        "Construction-2 value-type linking requires non-generic, non-unique structs without owned Methods.");
+                                }
+
+                                var artifactSnapshot = _closure.Artifacts[
+                                    module.ArtifactIndex].ArtifactSnapshot
+                                    .ToArray();
+                                var providerSnapshot
+                                    = TrRmExecutableCompiler
+                                        .CreateA2SourceTypeProviderSnapshot(
+                                            tables, artifactSnapshot,
+                                            _closure.Artifacts[
+                                                module.ArtifactIndex]
+                                                .SchemaIdentity,
+                                            module.ModuleRow);
+                                var typeExportKeys
+                                    = ImmutableArray.CreateBuilder<string>();
+                                foreach (var (definitionId, exportKey) in
+                                    tables.Exports.GetExportsForModule(
+                                        module.ModuleRow))
+                                {
+                                    if (definitionId == typeDefId)
+                                    {
+                                        typeExportKeys.Add(exportKey);
+                                    }
+                                }
+
+                                var expectedDeclaration = structure with {
+                                    Fields = [.. structure.Fields.Select(
+                                        static field => field with {
+                                            StandardFieldOrigin = null,
+                                        })],
+                                    StandardTypeOrigin = null,
+                                    StandardLayoutOnly = false,
+                                };
+                                var localType = new LocalTypeOrigin(location,
+                                    (PrimitiveType)(100 + index));
+                                var structureWithOrigin = structure with {
+                                    StandardTypeOrigin =
+                                        new BoundStandardTypeOrigin(
+                                            providerSnapshot, typeDefId,
+                                            typeExportKeys.ToImmutable(),
+                                            false, [], providerSnapshot,
+                                            expectedDeclaration,
+                                            module.Program
+                                                .NativeFixedArrayTypes,
+                                            module.Program.NativePointerTypes) {
+                                            SelectedExportKeys = [],
+                                        },
+                                    StandardLayoutOnly = false,
+                                    DeclaredCopyEvidence
+                                        = tables.Schema
+                                            .SupportsDeclaredCopyEvidence()
+                                            ? tables.TypeDefs.HasDeclaredCopy(
+                                                typeDefRow)
+                                            : structure.DeclaredCopyEvidence,
+                                };
+                                _construction2LocalStructureDeclarations
+                                    .Add(localType, structureWithOrigin);
+                                var providerTypeOrigin = new TypeOrigin(
+                                    location, 0x1300_0000u
+                                        | checked((uint)typeDefRow));
+                                if (_declarations.TryGetValue(
+                                        providerTypeOrigin,
+                                        out var existingDeclaration))
+                                {
+                                    if (Location(existingDeclaration.Module)
+                                        == location)
+                                    {
+                                        throw new InvalidDataException(
+                                            "A Construction-2 Module repeats one local struct TypeDef origin.");
+                                    }
+
+                                    _declarations[providerTypeOrigin]
+                                        = (module, index);
+                                }
+                                else
+                                {
+                                    _declarations.Add(providerTypeOrigin,
+                                        (module, index));
+                                }
+
+                                _localStructureTypeOrigins.Add(
+                                    new LocalStructureTypeOrigin(
+                                        localType,
+                                        providerTypeOrigin));
+                                continue;
+                            }
+
+                            if (origin.ExpectedDeclaration is null
+                                || (origin.DefinitionId >> 24) != 0x13
+                                || (origin.DefinitionId & 0x00FF_FFFF) == 0)
+                            {
+                                throw new NotSupportedException(
+                                    "Construction-2 value-type linking requires exact standard struct TypeDef origins.");
+                            }
+
+                            var providerModule
+                                = GetTypeProviderModule(origin.Provider);
+                            var providerTypeDefRow = checked((int)(
+                                origin.DefinitionId & 0x00FF_FFFF));
+                            var providerTables = GetTypeProviderTables(
+                                providerModule.ArtifactIndex);
+                            if (providerTypeDefRow
+                                    > providerTables.TypeDefs.Count
+                                || providerTables.TypeDefs.GetKind(
+                                    providerTypeDefRow) != 1
+                                || providerTables.TypeDefs.GetOwnerModule(
+                                    providerTypeDefRow)
+                                    != providerModule.ModuleRow)
+                            {
+                                throw new InvalidDataException(
+                                    "A Construction-2 struct origin does not select its provider-owned TypeDef.");
+                            }
+
+                            var providerTypeOrigin = new TypeOrigin(
+                                Location(providerModule),
+                                origin.DefinitionId);
+                            if (!_declarations.TryGetValue(
+                                    providerTypeOrigin, out _)
+                                || Location(module)
+                                    == Location(providerModule))
+                            {
+                                _declarations[providerTypeOrigin]
+                                    = (module, index);
+                            }
+                            _localStructureTypeOrigins.Add(
+                                new LocalStructureTypeOrigin(
+                                    new LocalTypeOrigin(location,
+                                        (PrimitiveType)(100 + index)),
+                                    providerTypeOrigin));
+                        }
                     }
 
                     for (var methodRow = module.MethodDefStart;
@@ -439,6 +701,20 @@ internal sealed partial class TrRmStandardNativeBindingPlan
                     edge.ActualDefinitionId);
                 if (_construction2MethodLinking)
                 {
+                    if (_declarations.ContainsKey(actual))
+                    {
+                        if (_typeProviders.TryGetValue(expected,
+                                out var previousProvider)
+                            && previousProvider != actual)
+                        {
+                            throw new InvalidDataException(
+                                "A Construction-2 struct TypeDef Import has conflicting provider origins.");
+                        }
+
+                        _typeProviders[expected] = actual;
+                        continue;
+                    }
+
                     var actualModule = _modules[actual.Module];
                     var actualIdentity
                         = new BoundGenericNominalTypeIdentity(
@@ -476,7 +752,7 @@ internal sealed partial class TrRmStandardNativeBindingPlan
                 _typeProviders[expected] = actual;
             }
 
-            foreach (var (origin, declaration) in _declarations)
+            PrimitiveType GetOrAddStructureType(TypeOrigin origin)
             {
                 var actual = ResolveTypeOrigin(origin);
                 if (!_nominalTypes.TryGetValue(actual, out var type))
@@ -490,8 +766,35 @@ internal sealed partial class TrRmStandardNativeBindingPlan
                     _nominalTypes.Add(actual, type);
                     _structures.Add(_declarations[actual]);
                 }
-                _types.Add(new LocalTypeOrigin(origin.Module,
-                    (PrimitiveType)(100 + declaration.Index)), type);
+
+                return type;
+            }
+
+            if (_construction2MethodLinking)
+            {
+                foreach (var localType in _localStructureTypeOrigins)
+                {
+                    var type = GetOrAddStructureType(
+                        localType.ProviderType);
+                    if (_types.TryGetValue(localType.LocalType,
+                            out var previousType)
+                        && previousType != type)
+                    {
+                        throw new InvalidDataException(
+                            "A Construction-2 local struct TypeSpec has conflicting provider origins.");
+                    }
+
+                    _types[localType.LocalType] = type;
+                }
+            }
+            else
+            {
+                foreach (var (origin, declaration) in _declarations)
+                {
+                    var type = GetOrAddStructureType(origin);
+                    _types.Add(new LocalTypeOrigin(origin.Module,
+                        (PrimitiveType)(100 + declaration.Index)), type);
+                }
             }
 
             foreach (var edge in _closure.MethodEdges)
@@ -526,12 +829,33 @@ internal sealed partial class TrRmStandardNativeBindingPlan
             for (var index = 0; index < _structures.Count; index++)
             {
                 var (module, sourceIndex) = _structures[index];
+                var sourceStructure = module.Program.Structures[
+                    sourceIndex];
+                if (_construction2MethodLinking
+                    && _construction2LocalStructureDeclarations.TryGetValue(
+                        new LocalTypeOrigin(Location(module),
+                            (PrimitiveType)(100 + sourceIndex)),
+                        out var localStructure)
+                    )
+                {
+                    sourceStructure = localStructure;
+                }
+
                 var structure = BoundTreeTraversal.RewriteTypes(
-                    module.Program.Structures[sourceIndex],
+                    sourceStructure,
                     type => MapType(module, type));
-                structures.Add(structure with {
-                    Name = $"__trrm_l1_type_{index}",
-                });
+                if (_construction2MethodLinking)
+                {
+                    structure = structure with {
+                        StandardLayoutOnly = false,
+                    };
+                }
+
+                structures.Add(_construction2MethodLinking
+                    ? structure
+                    : structure with {
+                        Name = $"__trrm_l1_type_{index}",
+                    });
             }
 
             // Reserve root names before allocating backend-only provider names.

@@ -6519,7 +6519,7 @@ public static partial class TrRmExecutableCompiler
                 program.CoreEvaluationFormSchemaProviders);
     }
 
-    private static BoundSourceTypeProviderSnapshot
+    internal static BoundSourceTypeProviderSnapshot
         CreateA2SourceTypeProviderSnapshot(
         TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
         byte[] artifact, string schemaIdentity, int moduleRow)
