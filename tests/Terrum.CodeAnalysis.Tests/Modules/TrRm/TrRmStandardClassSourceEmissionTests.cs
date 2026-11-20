@@ -6399,6 +6399,205 @@ internal sealed class TrRmStandardClassSourceEmissionTests
     }
 
     [Test]
+    public void PublishesFirstTypeAndFieldAliasesAsNewDependencies()
+    {
+        var schemaIdentity
+            = C1M1Construction2ClassParameterDefaultsCopyEvidenceSchemaIdentity;
+        var layoutOptions = new CompilationOptions {
+            LayoutCoreRegistration
+                = LayoutCoreRegistrationTestData.Create(),
+        };
+        byte[] EmitAliasProvider(bool splitNonRepresentativeAliases)
+        {
+            var tree = SyntaxTree.Parse("""
+                namespace Demo {
+                    [Blittable] [Layout(LayoutKind.Sequential)]
+                    public struct Record {
+                        public int32 Data;
+                        public int32 Alternate;
+                    }
+                    [Blittable] [Layout(LayoutKind.Sequential)]
+                    public struct OtherRecord {
+                        public int32 Data;
+                        public int32 Alternate;
+                    }
+                    public int32 Read(Record value) { return value.Data; }
+                }
+                """);
+            var compilation = Compilation.CreateLibrary(tree,
+                layoutOptions);
+            Assert.That(compilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            var program = (BoundProgram)compilation.Program!;
+            var recordExportKey = splitNonRepresentativeAliases
+                ? "type.record.alias" : "type.record";
+            var otherRecordExportKey = splitNonRepresentativeAliases
+                ? "type.record" : "type.other";
+            var recordDataExportKey = splitNonRepresentativeAliases
+                ? "field.record.data.alias" : "field.record.data";
+            var recordAlternateExportKey = splitNonRepresentativeAliases
+                ? "field.record.data" : "field.record.alternate";
+            var artifact = TrRmExecutableCompiler.EmitStandard(program,
+                "StructAliasProvider",
+                schemaIdentity,
+                TrRmModuleTableReader.WindowsX64NativeTargetRequirement, [
+                    new TrRmSourceTypeExport("Demo", "Record",
+                        recordExportKey) {
+                        FieldExports = [
+                            new TrRmSourceFieldExport("Data",
+                                recordDataExportKey),
+                            new TrRmSourceFieldExport("Alternate",
+                                recordAlternateExportKey),
+                        ],
+                    },
+                    new TrRmSourceTypeExport("Demo", "OtherRecord",
+                        otherRecordExportKey) {
+                        FieldExports = [
+                            new TrRmSourceFieldExport("Data",
+                                "field.other.data"),
+                            new TrRmSourceFieldExport("Alternate",
+                                "field.other.alternate"),
+                        ],
+                    },
+                ], [], []);
+            if (!splitNonRepresentativeAliases)
+            {
+                artifact = AddStructExportAlias(artifact, "type.record",
+                    "type.record.alias");
+                artifact = AddStructExportAlias(artifact,
+                    "field.record.data", "field.record.data.alias");
+            }
+
+            return AddMethodExportAlias(artifact, "Read", "ReadAlias",
+                TrRmArtifactSchema
+                    .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft);
+        }
+
+        var providerArtifact = EmitAliasProvider(
+            splitNonRepresentativeAliases: false);
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, "StructAliasProvider", [], ["ReadAlias", "Read"],
+            [
+                new TrRmStandardExportKeySelection("StructAliasProvider",
+                    "type.record.alias"),
+                new TrRmStandardExportKeySelection("StructAliasProvider",
+                    "type.record"),
+            ], [
+                new TrRmStandardExportKeySelection("StructAliasProvider",
+                    "field.record.data.alias"),
+                new TrRmStandardExportKeySelection("StructAliasProvider",
+                    "field.record.data"),
+            ]);
+        var consumerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                namespace Demo {
+                    public int32 Forward(Record value) {
+                        return Read(value);
+                    }
+                    public int32 ForwardAlias(Record value) {
+                        return ReadAlias(value);
+                    }
+                    public int32 ReadData(Record value) {
+                        return value.Data;
+                    }
+                }
+                """), reference);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerProgram = (BoundProgram)consumerCompilation.Program!;
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            consumerProgram, "StructAliasConsumer", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], []);
+        var consumerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            consumerArtifact);
+        var consumerTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                consumerArtifact,
+                TrRmArtifactSchema
+                    .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft));
+        var imports = Enumerable.Range(1, consumerTables.Imports.Count)
+            .Select(row => (
+                Kind: consumerTables.Imports
+                        .GetExpectedDefinitionForImportRow(row) >> 24,
+                ExportKey: consumerTables.Imports
+                        .GetBindingForImportRow(row).ExportKey,
+                ExpectedDefinitionId: consumerTables.Imports
+                        .GetExpectedDefinitionForImportRow(row)))
+            .ToArray();
+        Assert.That(imports.Where(static import => import.Kind == 0x13)
+            .Select(static import => import.ExportKey),
+            Is.EqualTo(["type.record.alias"]));
+        Assert.That(imports.Where(static import => import.Kind == 0x14)
+            .Select(static import => import.ExportKey),
+            Is.EqualTo(["field.record.data.alias"]));
+        var methodImports = imports.Where(static import =>
+            import.Kind == 0x16).ToArray();
+        Assert.That(methodImports.Select(static import => import.ExportKey),
+            Is.EquivalentTo(["Read", "ReadAlias"]));
+        Assert.That(methodImports.Select(
+                static import => import.ExpectedDefinitionId).Distinct()
+                .Count(),
+            Is.EqualTo(2));
+
+        var consumerReference = TrRmExecutableCompiler.CreateStandardReference(
+            consumerInput, "StructAliasConsumer", [providerInput]);
+        var sourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), consumerReference);
+        Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceFreeCompilation.Diagnostics));
+        var sourceFreeArtifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)sourceFreeCompilation.Program!,
+            "StructAliasConsumerReemitted", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var sourceFreeTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                sourceFreeArtifact,
+                TrRmArtifactSchema
+                    .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft));
+        Assert.That(Enumerable.Range(1, sourceFreeTables.Imports.Count)
+                .Where(row => sourceFreeTables.Imports
+                    .GetExpectedDefinitionForImportRow(row) >> 24 == 0x13)
+                .Select(row => sourceFreeTables.Imports
+                    .GetBindingForImportRow(row).ExportKey),
+            Is.EqualTo(["type.record.alias"]));
+        Assert.That(Enumerable.Range(1, sourceFreeTables.Imports.Count)
+                .Where(row => sourceFreeTables.Imports
+                    .GetExpectedDefinitionForImportRow(row) >> 24 == 0x14)
+                .Select(row => sourceFreeTables.Imports
+                    .GetBindingForImportRow(row).ExportKey),
+            Is.EqualTo(["field.record.data.alias"]));
+        Assert.That(Enumerable.Range(1, sourceFreeTables.Imports.Count)
+                .Where(row => sourceFreeTables.Imports
+                    .GetExpectedDefinitionForImportRow(row) >> 24 == 0x16)
+                .Select(row => sourceFreeTables.Imports
+                    .GetBindingForImportRow(row).ExportKey),
+            Is.EquivalentTo(["Read", "ReadAlias"]));
+        var originalLinkedProgram = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, sourceFreeArtifact),
+            "StructAliasConsumerReemitted", [providerInput]);
+        Assert.That(originalLinkedProgram.Functions.Single(
+                static function => function.Name == "ReadData")
+                .ReturnType,
+            Is.EqualTo(PrimitiveType.Int32));
+
+        var splitAliasProviderInput = new TrRmStandardArtifactInput(
+            schemaIdentity, EmitAliasProvider(
+                splitNonRepresentativeAliases: true));
+        var replacementLinkedProgram = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, sourceFreeArtifact),
+            "StructAliasConsumerReemitted", [splitAliasProviderInput]);
+        Assert.That(replacementLinkedProgram.Functions.Single(
+                static function => function.Name == "ReadData")
+                .ReturnType,
+            Is.EqualTo(PrimitiveType.Int32));
+    }
+
+    [Test]
     public void EmitsAndReemitsUnitCallsToForwardedModuleFunctions()
     {
         var providerTree = SyntaxTree.Parse("""
@@ -9684,6 +9883,18 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         string originalExportKey, string aliasExportKey,
         TrRmArtifactSchema schema = TrRmArtifactSchema
             .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsDraft)
+        => AddExportAlias(artifact, originalExportKey, aliasExportKey,
+            schema);
+
+    private static byte[] AddStructExportAlias(byte[] artifact,
+        string originalExportKey, string aliasExportKey)
+        => AddExportAlias(artifact, originalExportKey, aliasExportKey,
+            TrRmArtifactSchema
+                .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft);
+
+    private static byte[] AddExportAlias(byte[] artifact,
+        string originalExportKey, string aliasExportKey,
+        TrRmArtifactSchema schema)
     {
         var index = new TrRmArtifactIndex(artifact, schema);
         var tables = TrRmStructuralMetadataValidator
@@ -9691,10 +9902,14 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         if (index.TryGetSection(0x0010, out _, out _)
             || index.TryGetSection(0x001C, out _, out _)
             || !tables.Exports.TryGetDefinitionForKey(1,
-                originalExportKey, out var methodDefinition))
+                originalExportKey, out var definition)
+            || (definition >> 24) is not (0x13 or 0x14 or 0x16)
+            || tables.Exports.GetExportsForModule(1).Any(export =>
+                StringComparer.Ordinal.Equals(export.ExportKey,
+                    aliasExportKey)))
         {
             throw new InvalidOperationException(
-                "The provider artifact cannot accept a method export alias.");
+                "The provider artifact cannot accept the selected ExportKey alias.");
         }
 
         var textRows = new List<(string Text, int Encoding)>(
@@ -9717,17 +9932,16 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             ? count : 0;
         var featureCount = index.TryGetSection(0x0004, out _, out count)
             ? count : 0;
-
         var existingExports = tables.Exports.GetExportsForModule(1);
         var exportRows = new List<TrRmExportRow>(
             existingExports.Length + 1);
-        foreach (var (definition, exportKey) in existingExports)
+        foreach (var (exportDefinition, exportKey) in existingExports)
         {
-            var keyStringRow = AddString(exportKey);
-            exportRows.Add(new TrRmExportRow(definition, keyStringRow));
+            exportRows.Add(new TrRmExportRow(exportDefinition,
+                AddString(exportKey)));
         }
 
-        exportRows.Add(new TrRmExportRow(methodDefinition, aliasStringRow));
+        exportRows.Add(new TrRmExportRow(definition, aliasStringRow));
         var stringBytes = TrRmStringTableWriter.EncodeTextRows(textRows);
         var strings = new TrRmStringTableReader(stringBytes, textRows.Count);
         var modules = new TrRmModuleTableReader(moduleSection, moduleCount,

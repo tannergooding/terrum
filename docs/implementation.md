@@ -149,8 +149,11 @@ TypeDef/FieldDef edges are retained, and new type/field uses select the first
 explicit key under the separate unapproved alias-publication proposal. A
 public regression now covers a consumer-to-method-provider-to-nested-struct
 provider chain, nested FieldMap loading, unchanged source-free artifact
-retention/reload, and incompatible replacement; it remains unverified under
-the active hold. Co-located non-first Modules, deeper chains/diamonds,
+retention/reload, and incompatible replacement. A second regression covers
+first-list type/field alias representatives, independent method-view keys,
+source-free re-emission, and provider replacement that splits omitted aliases.
+Both remain unverified under the active hold. Co-located non-first Modules,
+deeper chains/diamonds, alias removal and retained shared-expectation groups,
 multiple using-Module contexts for one expected TypeDef, row remapping under
 provider replacement, CLI selection, and runtime qualification remain open.
 The loader still requires the whole validated Module-set TypeDef/method

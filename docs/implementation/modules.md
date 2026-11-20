@@ -274,7 +274,6 @@ implicit-reference flag for caller adaptation.
 Body-04, Body-05 and compact field-access re-emission regressions are added but
 remain unverified under the validation hold.
 A separate still-unapproved method/type-selection API now has a provisional
-A separate still-unapproved method/type-selection API now has a provisional
 classless root-Module implementation for the three Construction-2
 Copy-evidence agreements. It combines explicitly selected top-level methods
 with Module-qualified Blittable Copy struct and FieldDef roots across the
@@ -283,11 +282,14 @@ admitted only when the root has MethodDef closure work; validated TypeDef and
 FieldDef edges are retained, and new type/field uses select the first explicit
 key under the separate unapproved alias-publication proposal. A public
 consumer-to-method-provider-to-nested-struct-provider regression now covers
-nested FieldMap loading and unchanged source-free artifact retention/reload;
-it remains unverified under the active hold. Co-located non-first Modules,
-deeper chains/diamonds, multiple using-Module contexts for one expected
-TypeDef, source-free row remapping under provider replacement, CLI selection
-and runtime qualification remain open. The loader still requires the whole
+nested FieldMap loading and unchanged source-free artifact retention/reload.
+A second regression covers first-list type/field alias representatives,
+independent method-view keys, source-free re-emission and provider replacement
+that splits omitted aliases. Both remain unverified under the active hold.
+Co-located non-first Modules, deeper chains/diamonds, alias removal and
+retained shared-expectation groups, multiple using-Module contexts for one
+expected TypeDef, source-free row remapping under provider replacement, CLI
+selection and runtime qualification remain open. The loader still requires the whole
 validated Module-set TypeDef/method closure to fit its bounded
 Blittable-struct path; selected-root-only loading for unrelated declarations
 remains open. Snapshot-preserving source-free emission does not establish row

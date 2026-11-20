@@ -214,12 +214,15 @@ or permission to reuse machine code after its dependencies change.
 
 The combined factory now validates Module-qualified selections and projects
 the first explicit type/field key as the representative, while retaining each
-method view's own key. The initial supplied-provider chain and source-free
-path have public regression coverage added but remain unverified under the
-active hold. Co-located non-first Modules, deeper chains/diamonds, multiple
-using-Module contexts for one expected TypeDef, and representative replacement
-cases remain open. Emitting all selected type/field aliases into one expected
-DefId is not a valid workaround for current C2 admission.
+method view's own key. Public regressions now cover the initial supplied-
+provider chain, source-free remapping, and a type/field alias selection whose
+nonrepresentative keys split under replacement while the selected keys and
+method views remain intact. They remain unverified under the active hold.
+Alias removal, invalid nonrepresentative selections, pre-existing shared
+expectation groups, co-located non-first Modules, deeper chains/diamonds, and
+multiple using-Module contexts for one expected TypeDef remain open. Emitting
+all selected type/field aliases into one expected DefId is not a valid
+workaround for current C2 admission.
 The [implementation boundary](../implementation/modules.md) and
 [gap index](../implementation/conformance-gaps.md) record unverified combined
 reference/remapping/replacement work. Neither they nor adjacent method-alias
@@ -250,7 +253,7 @@ These are future checks through public APIs, not results from this draft:
 |---|---|
 | Positive selection/publication | Select type/field aliases in an order different from provider Export rows. Produce one source identity and one exact representative Import per new grouped declaration; inspect actual emitted triples. Method calls through two views keep their respective keys and independent expected methods. |
 | Negative capture | Missing, wrong-kind/case/Module, duplicate or inaccessible selections reject even for a nonrepresentative alias. No missing child/field key is inferred; public layout grants no field selection. |
-| Replacement: source-only alias | After source-free publication, remove or retarget only the nonrepresentative type/field alias. Accept this consumer's binding when all retained contracts/correspondences still hold, without claiming whole-provider compatibility; the original blanket alias-split test must not reject solely for that omitted alias. A fresh source-reference request still rechecks every requested key. |
+| Replacement: source-only alias | A public regression now source-free re-emits the consumer and accepts a provider where its nonrepresentative type/field keys split while retained representative and method keys still satisfy their contracts. It remains unverified. Also cover removal rather than splitting, and require fresh source-reference requests to validate every submitted key. |
 | Replacement: used dependencies | Remove a retained callable/representative key, lose Copy, change nested nominal signature/layout/pack/alignment, unsafe contract or field owner/ordinal: reject without substituting a surviving alias. Independently keyed method aliases may split only while every retained contract and type correspondence passes. |
 | Retained equality | Supply an admitted common-expected-MethodDef alias group; re-emit/remap it, then split its provider targets. Reject before affected use. Separate expected rows alone do not add a group. Unsupported shared TypeDef/FieldDef input still refuses rather than being “repaired” by this policy. |
 | Re-encoding | Permute consumer/provider definitions, Export/Import rows and Body maps; source-free re-emit/reload and pack. Retain chosen keys, original expectations, existing shared proxies, FieldPath/owner contexts and source locations. Never choose a representative again from output row order. |
