@@ -5723,6 +5723,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     public Payload(int32 value) { Value = value; }
                 }
                 public void Ping() {}
+                public int32 Answer() { return 42; }
             }
             """);
         var providerCompilation = Compilation.CreateLibrary(providerTree);
@@ -5746,6 +5747,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                     public Box(int32 value) { Value = value; }
                 }
                 public void Forward() { Ping(); }
+                public int32 ForwardAnswer() { return Answer(); }
             }
             """);
         var forwarderCompilation = Compilation.CreateLibrary(forwarderTree,
@@ -5783,6 +5785,27 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 forwardBody.MethodMap),
             Is.EqualTo(0x1600_0000u
                 | checked((uint)pingExpectedMethodRow)));
+        var answerImportRow = Enumerable.Range(1,
+                forwarderTables.Imports.Count)
+            .Single(row => forwarderTables.Imports
+                .GetBindingForImportRow(row).ExportKey == "Answer");
+        var answerExpectedMethodRow = checked((int)(
+            forwarderTables.Imports
+                .GetExpectedDefinitionForImportRow(answerImportRow)
+            & 0x00FF_FFFF));
+        Assert.That(forwarderTables.Exports.TryGetDefinitionForKey(1,
+            "ForwardAnswer", out var forwardAnswerDefinition), Is.True);
+        var forwardAnswerMethodRow = checked((int)(
+            forwardAnswerDefinition & 0x00FF_FFFF));
+        var forwardAnswerBody = forwarderTables.Bodies.GetRegisterBody(
+            forwarderTables.Methods.GetBodyRow(forwardAnswerMethodRow),
+            forwarderTables.Contracts.Count);
+        Assert.That(forwardAnswerBody.MethodMap.Length,
+            Is.EqualTo(sizeof(uint)));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                forwardAnswerBody.MethodMap),
+            Is.EqualTo(0x1600_0000u
+                | checked((uint)answerExpectedMethodRow)));
 
         var forwarderReference
             = TrRmExecutableCompiler.CreateStandardReference(
@@ -5822,9 +5845,32 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 reemittedForwardBody.MethodMap),
             Is.EqualTo(0x1600_0000u
                 | checked((uint)reemittedPingMethodRow)));
+        var reemittedAnswerImportRow = Enumerable.Range(1,
+                reemittedTables.Imports.Count)
+            .Single(row => reemittedTables.Imports
+                .GetBindingForImportRow(row).ExportKey == "Answer");
+        var reemittedAnswerMethodRow = checked((int)(
+            reemittedTables.Imports.GetExpectedDefinitionForImportRow(
+                reemittedAnswerImportRow) & 0x00FF_FFFF));
+        Assert.That(reemittedTables.Exports.TryGetDefinitionForKey(1,
+            "ForwardAnswer", out var reemittedForwardAnswerDefinition),
+            Is.True);
+        var reemittedForwardAnswerMethodRow = checked((int)(
+            reemittedForwardAnswerDefinition & 0x00FF_FFFF));
+        var reemittedForwardAnswerBody = reemittedTables.Bodies
+            .GetRegisterBody(reemittedTables.Methods.GetBodyRow(
+                reemittedForwardAnswerMethodRow),
+                reemittedTables.Contracts.Count);
+        Assert.That(reemittedForwardAnswerBody.MethodMap.Length,
+            Is.EqualTo(sizeof(uint)));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                reemittedForwardAnswerBody.MethodMap),
+            Is.EqualTo(0x1600_0000u
+                | checked((uint)reemittedAnswerMethodRow)));
 
         var downstream = Compilation.CreateLibrary(SyntaxTree.Parse("""
             public void InvokeForward() { Forward(); }
+            public int32 InvokeForwardAnswer() { return ForwardAnswer(); }
             """), TrRmExecutableCompiler.CreateStandardReference(
                 new TrRmStandardArtifactInput(providerSchema, reemitted),
                 "UnitFunctionForwarderReemitted", [providerInput]));

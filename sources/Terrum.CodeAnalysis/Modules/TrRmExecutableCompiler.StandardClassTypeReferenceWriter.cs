@@ -11255,12 +11255,21 @@ public static partial class TrRmExecutableCompiler
                         var targetSignatureRow
                             = rootTables.Methods.GetSignature(
                                 oldTargetMethodRow);
-                        var targetResultTypeSpec
-                            = rootTables.TypeSpecs.GetTypeSpecRef(
-                                rootTables.Signatures
-                                    .GetResultTypeSpec(targetSignatureRow));
+                        var targetResultTypeSpecReference
+                            = rootTables.Signatures.GetResultTypeSpec(
+                                targetSignatureRow);
+                        var targetResultMatches
+                            = targetFunction.ReturnType
+                                == PrimitiveType.Void
+                                ? IsUnitTypeSpec(rootTables.TypeSpecs,
+                                    targetResultTypeSpecReference)
+                                : TryGetC1M1ClassScalarType(rootTables,
+                                    targetResultTypeSpecReference,
+                                    out var targetResultType)
+                                    && targetResultType
+                                        == targetFunction.ReturnType;
                         if (targetFunction.ReturnType
-                                != PrimitiveType.Void
+                                != function.ReturnType
                             || targetFunction.ParameterCount != 0
                             || !targetFunction.Variables.IsEmpty
                             || !targetFunction.IsModuleReference
@@ -11279,7 +11288,8 @@ public static partial class TrRmExecutableCompiler
                             || targetFunction.HasNativeExport
                             || !directCall.Arguments.IsEmpty
                             || !directCall.DefaultedArguments.IsDefaultOrEmpty
-                            || directCall.Type != PrimitiveType.Void
+                            || directCall.Type != function.ReturnType
+                            || !targetResultMatches
                             || directCall.InterfaceCallIdentity is not null
                             || directCall.GenericMethodCall is not null
                             || directCall.ImportedGenericMethodCall is not null
@@ -11296,9 +11306,6 @@ public static partial class TrRmExecutableCompiler
                                 .GetReceiverTypeSpec(targetSignatureRow) != 0
                             || rootTables.Signatures.GetGenericCount(
                                 targetSignatureRow) != 0
-                            || !IsUnitTypeSpec(rootTables.TypeSpecs,
-                                rootTables.Signatures.GetResultTypeSpec(
-                                    targetSignatureRow))
                             || rootTables.Signatures.GetParamRange(
                                 targetSignatureRow).Count != 0
                             || rootTables.Contracts.GetEffectsMask(
@@ -11325,16 +11332,16 @@ public static partial class TrRmExecutableCompiler
                                 .GetDependencyContracts(oldTargetMethodRow)
                                 .IsEmpty
                             || rootTables.StandardNativeImports
-                                .HasImportForMethod(oldTargetMethodRow)
-                            || targetResultTypeSpec.IsRow)
+                                .HasImportForMethod(oldTargetMethodRow))
                         {
                             throw Unsupported(
-                                "A local class-reference function can call only a safe, zero-argument, unit-returning forwarded top-level MethodDef.");
+                                "A local class-reference function can call only a safe, zero-argument, unit- or fixed-scalar-returning forwarded top-level MethodDef.");
                         }
 
                         bodyRows.Add(
-                            EncodeC1M1MetadataClassDirectModuleUnitCallBody(
-                                targetMethodRow, schema));
+                            EncodeC1M1MetadataClassDirectModuleCallBody(
+                                targetMethodRow, function.ReturnType,
+                                schema));
                     }
                     else
                     {
@@ -12511,13 +12518,18 @@ public static partial class TrRmExecutableCompiler
                 : schema.UsesGeneralPredicateGraphs());
     }
 
-    private static byte[] EncodeC1M1MetadataClassDirectModuleUnitCallBody(
-        int targetMethodDefRow, TrRmArtifactSchema schema)
+    private static byte[] EncodeC1M1MetadataClassDirectModuleCallBody(
+        int targetMethodDefRow, PrimitiveType resultType,
+        TrRmArtifactSchema schema)
     {
         if (!schema.UsesObjectConstruction()
-            || targetMethodDefRow is <= 0 or > 0xFF_FFFF)
+            || targetMethodDefRow is <= 0 or > 0xFF_FFFF
+            || (resultType != PrimitiveType.Void
+                && !TryGetC1M1SourceScalarTypeSpecReference(
+                    resultType, out _)))
         {
-            throw new ArgumentOutOfRangeException(nameof(targetMethodDefRow));
+            throw Unsupported(
+                "A forwarded module-call Body requires a Construction-2 unit or fixed-scalar result.");
         }
 
         var targetMethodToken
@@ -12525,14 +12537,19 @@ public static partial class TrRmExecutableCompiler
         var maps = TrRmRegisterBodyMapBuilder.Create([], [
             targetMethodToken,
         ]);
-        var callSite = TrRmRegisterBodyRecordWriter.EncodeCallSite(1, 0,
+        var isUnitResult = resultType == PrimitiveType.Void;
+        var callSite = TrRmRegisterBodyRecordWriter.EncodeCallSite(1,
+            isUnitResult ? (byte)0 : (byte)1,
             maps.GetMethodMapIndex(targetMethodToken), 0, [], [],
             schema: schema);
         ReadOnlyMemory<byte>[] records = [
             new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 },
             new(callSite),
         ];
-        var code = new byte[] { 0xE0, 0, 1, 0, 0x18, 0 };
+        var code = new byte[] {
+            0xE0, 0, 1, 0,
+            isUnitResult ? (byte)0x18 : (byte)0x17, 0,
+        };
         return TrRmRegisterBodyWriter.Encode(default, maps.TypeMap,
             maps.MethodMap, default, default, [
                 new TrRmRegisterBodyBlock(0,
