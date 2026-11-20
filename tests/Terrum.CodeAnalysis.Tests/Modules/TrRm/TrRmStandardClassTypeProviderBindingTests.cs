@@ -3079,10 +3079,10 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
     private static TrRmStructuralMetadataValidator.ValidatedExecutionTables
         ReadTables(byte[] artifact, string schemaIdentity)
     {
-        var index = StringComparer.Ordinal.Equals(schemaIdentity,
-                C1SchemaIdentity)
-            ? TrRmArtifactIndex.ForC1Draft(artifact)
-            : TrRmArtifactIndex.ForC1M1Draft(artifact);
+        var index = new TrRmArtifactIndex(artifact,
+            TrRmExecutableCompiler.GetForeignInvocationSchema(
+                schemaIdentity),
+            standardSchemaIdentity: schemaIdentity);
         return TrRmStructuralMetadataValidator
             .ValidateC1AndGetExecutionTables(index);
     }
@@ -3096,10 +3096,10 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
     private static TrRmSection? TryGetSection(byte[] artifact,
         string schemaIdentity, ushort kind)
     {
-        var index = StringComparer.Ordinal.Equals(schemaIdentity,
-                C1SchemaIdentity)
-            ? TrRmArtifactIndex.ForC1Draft(artifact)
-            : TrRmArtifactIndex.ForC1M1Draft(artifact);
+        var index = new TrRmArtifactIndex(artifact,
+            TrRmExecutableCompiler.GetForeignInvocationSchema(
+                schemaIdentity),
+            standardSchemaIdentity: schemaIdentity);
         return index.TryGetSection(kind, out var bytes, out var count)
             ? new TrRmSection(kind, 0, checked((uint)count),
                 bytes.ToArray())
