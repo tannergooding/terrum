@@ -6444,6 +6444,52 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 exportPermutedReemission),
             "StructMethodConsumer", exportPermutedProviders);
 
+        var relocatedIncompatibleProviderCTree = SyntaxTree.Parse("""
+            namespace Demo {
+                [Blittable] [Layout(LayoutKind.Sequential)]
+                public struct Extra {
+                    public int32 Value;
+                }
+                [Blittable] [Layout(LayoutKind.Sequential)]
+                public struct Leaf {
+                    public int64 Value;
+                }
+            }
+            """);
+        var relocatedIncompatibleProviderCCompilation
+            = Compilation.CreateLibrary(relocatedIncompatibleProviderCTree,
+                layoutOptions);
+        Assert.That(relocatedIncompatibleProviderCCompilation.HasErrors,
+            Is.False,
+            string.Join(Environment.NewLine,
+                relocatedIncompatibleProviderCCompilation.Diagnostics));
+        var relocatedIncompatibleProviderCArtifact
+            = TrRmExecutableCompiler.EmitStandard(
+                (BoundProgram)relocatedIncompatibleProviderCCompilation.Program!,
+                "StructMethodProviderC", schemaIdentity,
+                TrRmModuleTableReader.WindowsX64NativeTargetRequirement, [
+                    new TrRmSourceTypeExport("Demo", "Extra",
+                        "type.extra") {
+                        FieldExports = [
+                            new TrRmSourceFieldExport("Value",
+                                "field.extra.value"),
+                        ],
+                    },
+                    new TrRmSourceTypeExport("Demo", "Leaf", "type.leaf") {
+                        FieldExports = [
+                            new TrRmSourceFieldExport("Value",
+                                "field.leaf.value"),
+                        ],
+                    },
+                ], [], []);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(consumerInput,
+                "StructMethodConsumer", [
+                    providerBInput,
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        relocatedIncompatibleProviderCArtifact),
+                ]));
+
         var rootMethodCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
                 namespace Demo {
