@@ -125,7 +125,9 @@ and existing/absent-output preservation on schema mismatch before malformed
 stdin source acquisition are also covered; all remain unverified under the
 active hold. The external-provider CLI output is additionally source-free
 loaded, byte-for-byte re-emitted and reloaded against the same provider chain;
-that regression remains unverified as well.
+that regression remains unverified as well. The co-located Module-2 method
+root/Module-1 type-field case receives the same source-free load/re-emission/
+reload coverage.
 Versions 1 and 2, the
 publication manifests and artifact-command provider whitelist are unchanged.
 Artifact commands accept exact per-artifact schema identities and a root

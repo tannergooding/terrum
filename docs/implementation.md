@@ -179,6 +179,8 @@ failures, broader source/provider isolation and CLI qualification remain open.
 The external-provider CLI output is source-free loaded, byte-for-byte
 re-emitted and reloaded against the same method/type provider chain; this
 regression is also unverified under the active hold.
+The co-located Module-2 method root and Module-1 type/field selection are
+likewise source-free loaded, re-emitted and reloaded; validation remains held.
 The loader still requires the whole validated Module-set TypeDef/method
 closure to fit its bounded Blittable-struct path. Snapshot-preserving
 source-free emission does not establish general row remapping under provider

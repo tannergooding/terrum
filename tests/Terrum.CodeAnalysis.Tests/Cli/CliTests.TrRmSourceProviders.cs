@@ -1271,6 +1271,28 @@ internal sealed partial class CliTests
                         tables.Imports.GetModuleRefForImportRow(importRow)),
                     Is.EqualTo(expectedModuleIdentity));
             }
+
+            var consumerInput = new TrRmStandardArtifactInput(schemaIdentity,
+                File.ReadAllBytes(consumerArtifact));
+            var providers = new[] {
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    providerArtifactBytes),
+            };
+            var linkedProgram = TrRmExecutableCompiler.LoadStandard(
+                consumerInput, consumerIdentity, providers);
+            var sourceFreeArtifact = TrRmExecutableCompiler.EmitStandard(
+                linkedProgram, consumerIdentity, schemaIdentity,
+                TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+            Assert.That(sourceFreeArtifact,
+                Is.EqualTo(consumerInput.Artifact.ToArray()));
+            var reloadedProgram = TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    sourceFreeArtifact),
+                consumerIdentity, providers);
+            Assert.That(reloadedProgram.Functions.Single(
+                    static function => function.Name == "ReadData")
+                    .ReturnType,
+                Is.EqualTo(PrimitiveType.Int32));
         }
         finally
         {
