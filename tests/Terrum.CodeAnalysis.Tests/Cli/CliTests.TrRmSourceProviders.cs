@@ -1449,6 +1449,28 @@ internal sealed partial class CliTests
                     Is.EqualTo("TRM2001"));
             }
             Assert.That(File.Exists(consumerArtifact), Is.False);
+
+            await File.WriteAllTextAsync(providerSelections,
+                providerConfiguration, new UTF8Encoding(false))
+                .ConfigureAwait(true);
+            var (invalidSourceExit, invalidSourceOutput,
+                invalidSourceError) = await RunAsync(
+                    Encoding.UTF8.GetBytes("public void Invalid("),
+                    "compile-trrm", "-", "--identity", consumerIdentity,
+                    "--trrm-schema", schemaIdentity,
+                    "--trrm-source-providers", providerSelections,
+                    "--library", "-o", consumerArtifact, "--runtime",
+                    "fail-fast", "--json").ConfigureAwait(false);
+            Assert.That(invalidSourceExit, Is.EqualTo(1),
+                $"{invalidSourceOutput}{Environment.NewLine}{invalidSourceError}");
+            Assert.That(invalidSourceError, Is.Empty);
+            using (var document = JsonDocument.Parse(invalidSourceOutput))
+            {
+                Assert.That(document.RootElement
+                        .GetProperty("diagnostics").GetArrayLength(),
+                    Is.GreaterThan(0));
+            }
+            Assert.That(File.Exists(consumerArtifact), Is.False);
         }
         finally
         {
