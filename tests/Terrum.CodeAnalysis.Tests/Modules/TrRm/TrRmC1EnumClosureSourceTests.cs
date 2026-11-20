@@ -4182,6 +4182,181 @@ internal sealed class TrRmC1EnumClosureSourceTests
     }
 
     [Test]
+    public void ComposesClassQueryRootsWithImportedStructFieldProviders()
+    {
+        var schemaIdentity
+            = s_initializerCopyEvidenceSchemaIdentities[2];
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        var layoutOptions = new CompilationOptions {
+            LayoutCoreRegistration
+                = LayoutCoreRegistrationTestData.Create(),
+        };
+        var leafTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public struct Leaf {
+                    public int32 Id;
+                    public uint8 Tail;
+                }
+            }
+            """);
+        var leafCompilation = Compilation.CreateLibrary(leafTree,
+            layoutOptions);
+        Assert.That(leafCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, leafCompilation.Diagnostics));
+        var leafProgram = (BoundProgram)leafCompilation.Program!;
+        var leafExport = new TrRmSourceTypeExport("Demo", "Leaf",
+            "type.leaf") {
+            FieldExports = [
+                new TrRmSourceFieldExport("Id", "field.leaf.id"),
+                new TrRmSourceFieldExport("Tail", "field.leaf.tail"),
+            ],
+        };
+        var leafArtifact = TrRmExecutableCompiler.EmitStandard(leafProgram,
+            "LeafProvider", schemaIdentity, targetRequirement,
+            [leafExport], [], [], []);
+        var leafInput = new TrRmStandardArtifactInput(schemaIdentity,
+            leafArtifact);
+        var leafReference = TrRmExecutableCompiler.CreateStandardReference(
+            leafInput, "LeafProvider", [], ["type.leaf"], [
+                "field.leaf.id", "field.leaf.tail",
+            ]);
+
+        var alphaTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public struct Wrapper {
+                    public Leaf Child;
+                }
+                public class Alpha {
+                    public Wrapper Data;
+                }
+            }
+            """);
+        var alphaCompilation = Compilation.CreateLibrary(alphaTree,
+            leafReference, layoutOptions);
+        Assert.That(alphaCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                alphaCompilation.Diagnostics));
+        var alphaProgram = (BoundProgram)alphaCompilation.Program!;
+        var alphaClassDeclaration = alphaTree.Root.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var alphaField = alphaClassDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.FieldDeclaration);
+        var alphaClassIndex = alphaProgram.SourceClassProgramAssociation!
+            .Declarations.Single(declaration =>
+                declaration.Span == alphaClassDeclaration.Span).ClassIndex;
+        var alphaClassExport = new TrRmSourceClassExport(alphaProgram,
+            alphaClassIndex, alphaClassDeclaration.Span, "type.alpha", [
+                new TrRmSourceClassMemberExport(0, alphaField.Span,
+                    "field.alpha.data"),
+            ]);
+        var wrapperExport = new TrRmSourceTypeExport("Demo", "Wrapper",
+            "type.wrapper") {
+            FieldExports = [
+                new TrRmSourceFieldExport("Child",
+                    "field.wrapper.child"),
+            ],
+        };
+        var alphaArtifact = TrRmExecutableCompiler.EmitStandard(
+            alphaProgram, "AlphaProvider", schemaIdentity,
+            targetRequirement, [wrapperExport], [], [alphaClassExport], []);
+        var alphaInput = new TrRmStandardArtifactInput(schemaIdentity,
+            alphaArtifact);
+        var alphaReference = TrRmExecutableCompiler.CreateStandardReference(
+            alphaInput, "AlphaProvider", [leafInput], [
+                "type.alpha", "type.wrapper",
+            ], ["field.alpha.data", "field.wrapper.child"]);
+        Assert.That(alphaReference.Structures.Single(
+                static structure => structure.Name == "Demo.Leaf")
+                .StandardTypeOrigin!.Expectations, Has.Length.EqualTo(1));
+
+        var betaTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public class Beta {
+                    public int32 Value;
+                }
+            }
+            """);
+        var betaCompilation = Compilation.CreateLibrary(betaTree);
+        Assert.That(betaCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, betaCompilation.Diagnostics));
+        var betaProgram = (BoundProgram)betaCompilation.Program!;
+        var betaClassDeclaration = betaTree.Root.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var betaField = betaClassDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.FieldDeclaration);
+        var betaClassIndex = betaProgram.SourceClassProgramAssociation!
+            .Declarations.Single(declaration =>
+                declaration.Span == betaClassDeclaration.Span).ClassIndex;
+        var betaClassExport = new TrRmSourceClassExport(betaProgram,
+            betaClassIndex, betaClassDeclaration.Span, "type.beta", [
+                new TrRmSourceClassMemberExport(0, betaField.Span,
+                    "field.beta.value"),
+            ]);
+        var betaArtifact = TrRmExecutableCompiler.EmitStandard(betaProgram,
+            "BetaProvider", schemaIdentity, targetRequirement, [], [],
+            [betaClassExport], []);
+        var betaInput = new TrRmStandardArtifactInput(schemaIdentity,
+            betaArtifact);
+        var betaReference = TrRmExecutableCompiler.CreateStandardReference(
+            betaInput, "BetaProvider", [], ["type.beta"],
+            ["field.beta.value"]);
+        var reference = TrRmExecutableCompiler.CreateStandardReferenceSet(
+            [alphaReference, betaReference]);
+
+        var consumer = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Demo;
+                nint CombinedOffset() {
+                    return unsafe(offsetof(Alpha, Data.Child.Tail))
+                        + unsafe(offsetof(Beta, Value));
+                }
+                """), reference, layoutOptions);
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            consumer.Program!, "ImportedStructLayoutConsumer",
+            schemaIdentity, targetRequirement);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                artifact, SchemaFor(schemaIdentity), null,
+                usesNativePointerLoads: false,
+                standardSchemaIdentity: schemaIdentity));
+        Assert.That(tables.TargetLayoutDependencies.Count,
+            Is.EqualTo(2));
+        Assert.That(tables.TargetLayoutDependencyFields.Count,
+            Is.EqualTo(4));
+        var imports = Enumerable.Range(1, tables.Imports.Count)
+            .Select(tables.Imports.GetBindingForImportRow).ToArray();
+        Assert.That(imports.Any(static binding =>
+                binding.ProducerIdentity == "LeafProvider"
+                && binding.ExportKey == "type.leaf"),
+            Is.True);
+        Assert.That(imports.Any(static binding =>
+                binding.ProducerIdentity == "LeafProvider"
+                && binding.ExportKey == "field.leaf.tail"),
+            Is.True);
+        Assert.That(imports.Any(static binding =>
+                binding.ProducerIdentity == "AlphaProvider"
+                && binding.ExportKey == "field.wrapper.child"),
+            Is.True);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "ImportedStructLayoutConsumer",
+            [alphaInput, leafInput, betaInput]);
+        Assert.That(loaded.Functions.Single().Name,
+            Is.EqualTo("CombinedOffset"));
+    }
+
+    [Test]
     public void LowersEN1ClassQueryAcrossImportedStructProviders()
     {
         Assume.That(OperatingSystem.IsWindows()

@@ -769,11 +769,61 @@ public static partial class TrRmExecutableCompiler
                     && BoundStandardEnumDeclarationContract.SnapshotsMatch(
                         declaration.Declaration.Provider, provider));
 
+            BoundSourceTypeProviderSnapshot? importedStructRootProvider
+                = null;
+            bool IsRetainedClassLayoutStructure(BoundStruct structure)
+            {
+                var origin = structure.StandardTypeOrigin;
+                if (origin is null
+                    || origin.ExpectedDeclaration is null
+                    || origin.ExportKeys.IsDefault
+                    || origin.SelectedExportKeys.IsDefault
+                    || !origin.AdditionalExpectedDeclarations.IsDefaultOrEmpty
+                    || !StringComparer.Ordinal.Equals(
+                        origin.Provider.SchemaIdentity, schemaIdentity))
+                {
+                    return false;
+                }
+
+                if (origin.Expectations.IsDefaultOrEmpty)
+                {
+                    return origin.IsLookupRoot
+                        && !origin.SelectedExportKeys.IsDefaultOrEmpty
+                        && IsSelectedClassQueryRootProvider(origin.Provider);
+                }
+
+                if (origin.IsLookupRoot
+                    || !origin.SelectedExportKeys.IsEmpty)
+                {
+                    return false;
+                }
+
+                foreach (var expectation in origin.Expectations)
+                {
+                    var binding = expectation;
+                    if (!IsSelectedClassQueryRootProvider(
+                            binding.UsingModule)
+                        || !BoundStandardEnumDeclarationContract
+                            .SnapshotsMatch(binding.Provider,
+                                origin.Provider)
+                        || binding.ProviderDefinitionId
+                            != origin.DefinitionId
+                        || (importedStructRootProvider is not null
+                            && !BoundStandardEnumDeclarationContract
+                                .SnapshotsMatch(importedStructRootProvider,
+                                    binding.UsingModule)))
+                    {
+                        return false;
+                    }
+
+                    importedStructRootProvider ??= binding.UsingModule;
+                }
+
+                return true;
+            }
+
             var structureProvidersFitQueryRoots
-                = program.Structures.All(static structure =>
-                    structure.StandardTypeOrigin is not null
-                    && IsSelectedClassQueryRootProvider(
-                        structure.StandardTypeOrigin.Provider));
+                = program.Structures.All(IsRetainedClassLayoutStructure);
             var enumProvidersFitQueryRoots = true;
             foreach (var definition in program.EnumDefinitions)
             {
@@ -831,7 +881,11 @@ public static partial class TrRmExecutableCompiler
                                 declaration.Declaration.Identity))
                         .All(static declaration =>
                             declaration.Expectations.IsEmpty);
-            if (allowMultipleClassQueryProviders
+            if (importedStructRootProvider is not null)
+            {
+                rootSnapshot = importedStructRootProvider;
+            }
+            else if (allowMultipleClassQueryProviders
                 && !program.Structures.IsEmpty)
             {
                 rootSnapshot = program.Structures[0].StandardTypeOrigin!
@@ -1260,10 +1314,26 @@ public static partial class TrRmExecutableCompiler
                 foreach (var structure in program.Structures)
                 {
                     var origin = structure.StandardTypeOrigin!;
+                    var hasRootOwnedImport
+                        = rootSnapshot is
+                            BoundSourceTypeProviderSnapshot selectedRoot
+                            && !origin.Expectations.IsDefaultOrEmpty
+                            && origin.Expectations.Any(expectation =>
+                                BoundStandardEnumDeclarationContract
+                                    .SnapshotsMatch(
+                                        expectation.UsingModule,
+                                        selectedRoot)
+                                && BoundStandardEnumDeclarationContract
+                                    .SnapshotsMatch(
+                                        expectation.Provider,
+                                        origin.Provider)
+                                && expectation.ProviderDefinitionId
+                                    == origin.DefinitionId);
                     if (rootSnapshot is not null
                         && !SameA2SourceTypeProviderSnapshot(rootSnapshot,
                             origin.Provider)
-                        && !allowMultipleClassQueryProviders)
+                        && !allowMultipleClassQueryProviders
+                        && !hasRootOwnedImport)
                     {
                         throw Unsupported(
                             "Mixed EN1 struct and enum re-emission cannot combine root Modules.");
@@ -2013,7 +2083,11 @@ public static partial class TrRmExecutableCompiler
                     selectedRootSnapshot.SchemaIdentity)
                 || !StringComparer.Ordinal.Equals(
                     fieldProviderClosure.RootModuleIdentity,
-                    moduleIdentity)
+                    selectedRootSnapshot.ModuleIdentity)
+                || (classQueryFunction is null
+                    && !StringComparer.Ordinal.Equals(
+                        fieldProviderClosure.RootModuleIdentity,
+                        moduleIdentity))
                 || fieldProviderClosure.RootModuleRow
                     != selectedRootSnapshot.ModuleRow
                 || fieldProviderClosure.TargetRequirement

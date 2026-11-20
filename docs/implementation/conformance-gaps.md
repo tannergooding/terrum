@@ -97,12 +97,14 @@ declaration emitter can emit and reload one bounded query function whose
 primitive class layout roots span distinct providers. Reference composition
 also remaps direct inline-struct dependencies with scalar and selected enum
 fields across distinct providers. EN1 admits selected enum providers and
-imported-enum closures owned by multiple selected class roots in a
-multi-provider query, retaining one typed enum Import and each root's
-provider TypeDef/FieldDef Imports. Regressions are unverified under the active
-hold. Enum views merge by exact provider site and retain selected aliases.
-Pointer/other non-scalar or imported struct dependencies, class-valued fields
-and broader multi-function/provider dependency closure remain open.
+imported-enum closures owned by multiple selected class roots, plus one
+class-root-owned imported-struct closure, in a multi-provider query. It
+retains the typed enum Import and each root's provider TypeDef/FieldDef
+Imports. Regressions are unverified under the active hold. Enum views merge
+by exact provider site and retain selected aliases. Pointer/other non-scalar
+struct dependencies, imported-struct closures owned by multiple class roots,
+class-valued fields and broader multi-function/provider dependency closure
+remain open.
 
 Other proposals remain unapproved unless their owner and approval status say
 otherwise; see the [proposal index](../proposals/README.md).
