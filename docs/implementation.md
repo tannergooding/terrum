@@ -191,8 +191,10 @@ but unverified. Duplicate provider paths, source/provider role aliases,
 absent-output preservation for malformed configurations, and byte-identical
 provider inputs with duplicate Module identities rejected before malformed
 stdin are also covered.
-Symlink/parent-link aliases, other absent-output
-failures, broader source/provider isolation and CLI qualification remain open.
+Windows file-symlink and parent-directory-symlink provider aliases have
+isolated CLI regressions; they remain unverified and skip explicitly if
+symlink creation is unavailable. Other absent-output failures, broader
+source/provider isolation and CLI qualification remain open.
 The external-provider CLI output is source-free loaded, byte-for-byte
 re-emitted and reloaded against the same method/type provider chain; this
 regression is also unverified under the active hold.

@@ -1442,6 +1442,152 @@ internal sealed partial class CliTests
         }
     }
 
+    [TestCase(false)]
+    [TestCase(true)]
+    public async Task CompileTrRmRejectsVersionThreeProviderLinkAliasesAsync(
+        bool useParentLink)
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-initializer-copy-evidence-1";
+        const string providerIdentity = "source-provider-cli-link-provider";
+        const string consumerIdentity = "source-provider-cli-link-consumer";
+        var providerDirectory = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"source-provider-cli-link-provider-{Guid.NewGuid():N}");
+        var providerPath = Path.Combine(providerDirectory, "provider.trrm");
+        var providerAlias = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"source-provider-cli-link-alias-{Guid.NewGuid():N}.trrm");
+        var providerLinkDirectory = Path.Combine(
+            TestArtifactPaths.DirectoryPath,
+            $"source-provider-cli-link-directory-{Guid.NewGuid():N}");
+        var providerSelections = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"source-provider-cli-link-{Guid.NewGuid():N}.json");
+        var outputPath = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"source-provider-cli-link-output-{Guid.NewGuid():N}.trrm");
+        var providerDirectoryCreated = false;
+        try
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                Assert.Ignore(
+                    "Provider link identity is qualified on Windows.");
+            }
+
+            var compilation = Compilation.CreateLibrary(
+                SyntaxTree.Parse("public void Ping() {}"));
+            Assert.That(compilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            Directory.CreateDirectory(providerDirectory);
+            providerDirectoryCreated = true;
+            await File.WriteAllBytesAsync(providerPath,
+                TrRmExecutableCompiler.EmitStandard(
+                    (BoundProgram)compilation.Program!, providerIdentity,
+                    schemaIdentity,
+                    TrRmModuleTableReader
+                        .WindowsX64NativeTargetRequirement))
+                .ConfigureAwait(true);
+            if (useParentLink)
+            {
+                try
+                {
+                    Directory.CreateSymbolicLink(providerLinkDirectory,
+                        providerDirectory);
+                }
+                catch (UnauthorizedAccessException exception)
+                {
+                    Assert.Ignore(
+                        $"Creating a directory symlink is unavailable: {exception.Message}");
+                }
+                catch (IOException exception)
+                {
+                    Assert.Ignore(
+                        $"Creating a directory symlink is unavailable: {exception.Message}");
+                }
+
+                providerAlias = Path.Combine(providerLinkDirectory,
+                    Path.GetFileName(providerPath));
+            }
+            else
+            {
+                try
+                {
+                    File.CreateSymbolicLink(providerAlias, providerPath);
+                }
+                catch (UnauthorizedAccessException exception)
+                {
+                    Assert.Ignore(
+                        $"Creating a file symlink is unavailable: {exception.Message}");
+                }
+                catch (IOException exception)
+                {
+                    Assert.Ignore(
+                        $"Creating a file symlink is unavailable: {exception.Message}");
+                }
+            }
+
+            var configuration = JsonSerializer.Serialize(new {
+                schemaVersion = 3,
+                providers = new[] {
+                    new { schemaIdentity, path = providerPath },
+                    new { schemaIdentity, path = providerAlias },
+                },
+                references = new[] {
+                    new {
+                        providerInputOrdinal = 0,
+                        moduleIdentity = providerIdentity,
+                        methodExportKeys = new[] { "Ping" },
+                        typeExportKeys = Array.Empty<object>(),
+                        fieldExportKeys = Array.Empty<object>(),
+                    },
+                },
+            });
+            await File.WriteAllTextAsync(providerSelections, configuration,
+                new UTF8Encoding(false)).ConfigureAwait(true);
+            var preserved = new byte[] { 0x31, 0x72, 0x6D };
+            await File.WriteAllBytesAsync(outputPath, preserved)
+                .ConfigureAwait(true);
+            var (exitCode, output, error) = await RunAsync(
+                Encoding.UTF8.GetBytes("invalid Terrum source"),
+                "compile-trrm", "-", "--identity", consumerIdentity,
+                "--trrm-schema", schemaIdentity,
+                "--trrm-source-providers", providerSelections,
+                "--library", "-o", outputPath, "--runtime", "fail-fast",
+                "--json").ConfigureAwait(false);
+            Assert.That(exitCode, Is.EqualTo(2),
+                $"{output}{Environment.NewLine}{error}");
+            Assert.That(error, Is.Empty);
+            using (var document = JsonDocument.Parse(output))
+            {
+                Assert.That(document.RootElement
+                        .GetProperty("diagnostic").GetProperty("code")
+                        .GetString(),
+                    Is.EqualTo("TRM2002"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(outputPath)
+                .ConfigureAwait(true), Is.EqualTo(preserved));
+        }
+        finally
+        {
+            if (File.Exists(providerAlias))
+            {
+                await TestFileCleanup.DeleteWithRetryAsync(providerAlias)
+                    .ConfigureAwait(true);
+            }
+            if (Directory.Exists(providerLinkDirectory))
+            {
+                Directory.Delete(providerLinkDirectory);
+            }
+            await TestFileCleanup.DeleteWithRetryAsync(providerSelections)
+                .ConfigureAwait(true);
+            if (providerDirectoryCreated)
+            {
+                await TestFileCleanup.DeleteDirectoryWithRetryAsync(
+                    providerDirectory).ConfigureAwait(true);
+            }
+            await TestFileCleanup.DeleteWithRetryAsync(outputPath)
+                .ConfigureAwait(true);
+        }
+    }
+
     [Test]
     public async Task CompileTrRmSelectsNonFirstCoLocatedMethodProviderModuleAsync()
     {
