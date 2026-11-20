@@ -2728,8 +2728,12 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 public struct Leaf {
                     public int32 Value;
                 }
+                public class Child {
+                    public int32 Id;
+                }
                 public struct Payload {
                     public Leaf Header;
+                    public Child Handle;
                 }
                 public class Alpha {
                     public Payload Data;
@@ -2743,8 +2747,11 @@ internal sealed class TrRmC1EnumClosureSourceTests
         var providerProgram = (BoundProgram)providerCompilation.Program!;
         var classDeclaration = providerTree.Root.Children
             .OfType<SyntaxNode>()
-            .Single(static node =>
-                node.Kind == SyntaxKind.ClassDeclaration);
+            .Single(node =>
+                node.Kind == SyntaxKind.ClassDeclaration
+                && node.Children.OfType<SyntaxTokenElement>().Any(token =>
+                    token.Token.Kind == TokenKind.Identifier
+                    && token.Token.Name == "Alpha"));
         var classField = classDeclaration.Children.OfType<SyntaxNode>()
             .Single(static node =>
                 node.Kind == SyntaxKind.FieldDeclaration);
@@ -2755,6 +2762,27 @@ internal sealed class TrRmC1EnumClosureSourceTests
             classIndex, classDeclaration.Span, "type.alpha", [
                 new TrRmSourceClassMemberExport(0, classField.Span,
                     "field.alpha.data"),
+            ]);
+        var childClassDeclaration = providerTree.Root.Children
+            .OfType<SyntaxNode>()
+            .Single(node =>
+                node.Kind == SyntaxKind.ClassDeclaration
+                && node.Children.OfType<SyntaxTokenElement>().Any(token =>
+                    token.Token.Kind == TokenKind.Identifier
+                    && token.Token.Name == "Child"));
+        var childClassField = childClassDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.FieldDeclaration);
+        var childClassIndex = providerProgram
+            .SourceClassProgramAssociation!.Declarations.Single(
+                declaration =>
+                    declaration.Span == childClassDeclaration.Span)
+            .ClassIndex;
+        var childClassExport = new TrRmSourceClassExport(providerProgram,
+            childClassIndex, childClassDeclaration.Span, "type.child", [
+                new TrRmSourceClassMemberExport(0, childClassField.Span,
+                    "field.child.id"),
             ]);
         var providerArtifact = TrRmExecutableCompiler.EmitStandard(
             providerProgram, "AlphaStructProvider", schemaIdentity,
@@ -2772,15 +2800,15 @@ internal sealed class TrRmC1EnumClosureSourceTests
                             "field.payload.header"),
                     ],
                 },
-            ], [], [classExport], []);
+            ], [], [classExport, childClassExport], []);
         var alphaInput = new TrRmStandardArtifactInput(schemaIdentity,
             providerArtifact);
         var alphaReference = TrRmExecutableCompiler.CreateStandardReference(
             alphaInput, "AlphaStructProvider", [], [
-                "type.alpha", "type.leaf", "type.payload",
+                "type.alpha", "type.child", "type.leaf", "type.payload",
             ], [
                 "field.alpha.data", "field.leaf.value",
-                "field.payload.header",
+                "field.payload.header", "field.child.id",
             ]);
 
         var betaTree = SyntaxTree.Parse("""
@@ -2850,6 +2878,18 @@ internal sealed class TrRmC1EnumClosureSourceTests
             Is.EqualTo("Demo.Payload"));
         Assert.That(reference.Structures[(int)betaDataType - 100].Name,
             Is.EqualTo("Demo.Record"));
+        var childDeclaration = reference.StandardClassDeclarations.Single(
+            static declaration =>
+                declaration.Declaration.Name == "Child");
+        var payloadHandleType = reference.Structures.Single(
+            static structure => structure.Name == "Demo.Payload")
+            .Fields.Single(static field => field.Name == "Handle").Type;
+        Assert.That(BoundGenericNominalTypeTypes.IsType(payloadHandleType),
+            Is.True);
+        Assert.That(reference.GenericNominalTypeInstances[
+                BoundGenericNominalTypeTypes.Index(payloadHandleType)]
+                .Definition,
+            Is.EqualTo(childDeclaration.Declaration.Identity));
 
         var consumer = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
@@ -2877,6 +2917,27 @@ internal sealed class TrRmC1EnumClosureSourceTests
         Assert.That(tables.TargetLayoutDependencyFields.Count,
             Is.EqualTo(5));
         Assert.That(tables.ModuleRefs.Count, Is.EqualTo(2));
+        var payloadTypeDefRow = Enumerable.Range(
+                1, tables.TypeDefs.Count)
+            .Single(row =>
+                tables.TypeDefs.GetName(row) == "Payload"
+                && tables.Modules.GetIdentity(
+                    tables.TypeDefs.GetOwnerModule(row))
+                    == "InlineStructConsumer");
+        var payloadFieldRange
+            = tables.TypeDefs.GetFieldRange(payloadTypeDefRow);
+        var payloadHandleFieldRow = Enumerable.Range(
+                payloadFieldRange.Start,
+                payloadFieldRange.End - payloadFieldRange.Start)
+            .Single(row => tables.Fields.GetName(row) == "Handle");
+        var payloadHandleTypeSpec = tables.TypeSpecs.GetTypeSpecRef(
+            tables.Fields.GetTypeSpecRef(payloadHandleFieldRow));
+        Assert.That(payloadHandleTypeSpec.Form, Is.EqualTo((byte)0x03));
+        var payloadHandleImport = tables.Imports
+            .GetBindingForImportRow(payloadHandleTypeSpec.Row);
+        Assert.That(payloadHandleImport.ProducerIdentity,
+            Is.EqualTo("AlphaStructProvider"));
+        Assert.That(payloadHandleImport.ExportKey, Is.EqualTo("type.child"));
         var imports = Enumerable.Range(1, tables.Imports.Count)
             .Select(tables.Imports.GetBindingForImportRow).ToArray();
         Assert.That(imports.Any(static binding =>
@@ -2908,6 +2969,39 @@ internal sealed class TrRmC1EnumClosureSourceTests
             "InlineStructConsumer", [alphaInput, betaInput]);
         Assert.That(loaded.Functions.Single().Name,
             Is.EqualTo("CombinedOffset"));
+        var loadedPayload = loaded.Structures.Single(
+            static structure => structure.Name == "Demo.Payload");
+        var loadedHandleType = loadedPayload.Fields.Single(
+            static field => field.Name == "Handle").Type;
+        Assert.That(BoundGenericNominalTypeTypes.IsType(loadedHandleType),
+            Is.True);
+        var loadedChild = loaded.StandardClassDeclarations.Single(
+            static declaration =>
+                declaration.Declaration.Name == "Child");
+        Assert.That(loaded.GenericNominalTypeInstances[
+                BoundGenericNominalTypeTypes.Index(loadedHandleType)]
+                .Definition,
+            Is.EqualTo(loadedChild.Declaration.Identity));
+        var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(loaded,
+            "InlineStructConsumerRemapped", schemaIdentity,
+            targetRequirement);
+        var reloaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                reemittedArtifact), "InlineStructConsumerRemapped",
+            [alphaInput, betaInput]);
+        var reloadedPayload = reloaded.Structures.Single(
+            static structure => structure.Name == "Demo.Payload");
+        var reloadedHandleType = reloadedPayload.Fields.Single(
+            static field => field.Name == "Handle").Type;
+        Assert.That(BoundGenericNominalTypeTypes.IsType(reloadedHandleType),
+            Is.True);
+        var reloadedChild = reloaded.StandardClassDeclarations.Single(
+            static declaration =>
+                declaration.Declaration.Name == "Child");
+        Assert.That(reloaded.GenericNominalTypeInstances[
+                BoundGenericNominalTypeTypes.Index(reloadedHandleType)]
+                .Definition,
+            Is.EqualTo(reloadedChild.Declaration.Identity));
     }
 
     [Test]

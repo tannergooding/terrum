@@ -1833,8 +1833,10 @@ Module and duplicate-identity rejection cases are added but unverified under
 the hold. The packed path now retains class TypeDef Import expectations and
 selected FieldDef alias Imports in their owning Module, with imported-class
 query/re-emission coverage added but unverified. Non-class/struct Imports,
-class Methods, and class handles nested through inline-struct fields remain
-open.
+class Methods, and unselected class dependencies nested through inline-struct
+fields remain open. Selected direct class-handle TypeSpecs inside composed
+inline structs now survive reference composition and source-free
+query/load/re-emission; the added regression remains unverified under the hold.
 Provisional EN1 type+field-key reference selection now retains selected local
 class fields and fields in the selected inline-struct closure, preserving
 caller key order so new query imports use the first explicit alias while

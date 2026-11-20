@@ -427,28 +427,13 @@ public static partial class TrRmExecutableCompiler
                         declaration.Declaration.Identity));
         var visitedClassIdentities
             = new HashSet<BoundGenericNominalTypeIdentity>();
-        while (pendingClassIdentities.TryDequeue(
-            out var classIdentity))
+        var visitedStructureIndexes = new HashSet<int>();
+        void IncludeClassHandleFieldType(PrimitiveType type)
         {
-            if (!visitedClassIdentities.Add(classIdentity))
+            if (BoundGenericNominalTypeTypes.IsType(type))
             {
-                continue;
-            }
-
-            var declaration
-                = standardClassDeclarations.SingleOrDefault(candidate =>
-                    candidate.Declaration.Identity == classIdentity)
-                    ?? throw Invalid(
-                        "A selected class handle dependency has no provider declaration view.");
-            foreach (var field in declaration.Declaration.Fields)
-            {
-                if (!BoundGenericNominalTypeTypes.IsType(field.Type))
-                {
-                    continue;
-                }
-
                 var instanceIndex
-                    = BoundGenericNominalTypeTypes.Index(field.Type);
+                    = BoundGenericNominalTypeTypes.Index(type);
                 if ((uint)instanceIndex
                     >= (uint)program.GenericNominalTypeInstances.Length)
                 {
@@ -475,6 +460,50 @@ public static partial class TrRmExecutableCompiler
                     pendingClassIdentities.Enqueue(
                         definition.Identity);
                 }
+
+                return;
+            }
+
+            if (BoundEnumTypes.IsType(type)
+                || BoundSpanTypeTypes.IsType(type)
+                || ManagedClassTypes.IsClass(type)
+                || NativePointerTypes.IsType(type)
+                || NativeFixedArrayTypes.IsType(type)
+                || NativeFunctionPointerTypes.IsType(type)
+                || CheckedReferenceTypes.IsType(type))
+            {
+                return;
+            }
+
+            var structureIndex = (int)type - 100;
+            if ((uint)structureIndex >= (uint)program.Structures.Length
+                || !visitedStructureIndexes.Add(structureIndex))
+            {
+                return;
+            }
+
+            foreach (var field in program.Structures[structureIndex].Fields)
+            {
+                IncludeClassHandleFieldType(field.Type);
+            }
+        }
+
+        while (pendingClassIdentities.TryDequeue(
+            out var classIdentity))
+        {
+            if (!visitedClassIdentities.Add(classIdentity))
+            {
+                continue;
+            }
+
+            var declaration
+                = standardClassDeclarations.SingleOrDefault(candidate =>
+                    candidate.Declaration.Identity == classIdentity)
+                    ?? throw Invalid(
+                        "A selected class handle dependency has no provider declaration view.");
+            foreach (var field in declaration.Declaration.Fields)
+            {
+                IncludeClassHandleFieldType(field.Type);
             }
         }
         bool IsSelectedClassQueryRootProvider(
@@ -3761,6 +3790,13 @@ public static partial class TrRmExecutableCompiler
                         checked((int)(item.emission.View.Identity
                             .DefinitionId & 0x00FF_FFFF))),
                     static item => item.typeDefRow);
+        var classIdentityByProviderClassTypeDef
+            = standardClassDeclarationsByTypeDef
+                .ToDictionary(static emission => (
+                        emission.View.Provider.ModuleIdentity,
+                        TypeDefRow: checked((int)(emission.View.Identity
+                            .DefinitionId & 0x00FF_FFFF))),
+                    static emission => emission.View.Identity);
         var typeDefRowByRootClassIdentity
             = standardClassDeclarationsByTypeDef
                 .Select((emission, ordinal) => (emission,
@@ -4111,6 +4147,20 @@ public static partial class TrRmExecutableCompiler
                                 oldReferenceRow))
                         : sourceProvider.ModuleIdentity;
                     if (type.Form == 0x02
+                        && !StringComparer.Ordinal.Equals(
+                            typeDefProviderIdentity, moduleIdentity)
+                        && !packedClassModuleIdentities.Contains(
+                            typeDefProviderIdentity)
+                        && classIdentityByProviderClassTypeDef.TryGetValue((
+                            typeDefProviderIdentity, oldReferenceRow),
+                            out var importedClassIdentity)
+                        && importRowByRootClassIdentity.TryGetValue(
+                            importedClassIdentity, out var importedClassRow))
+                    {
+                        newForm = 0x03;
+                        newReferenceRow = checked((uint)importedClassRow);
+                    }
+                    else if (type.Form == 0x02
                         && typeDefRowByProviderClassTypeDef.TryGetValue((
                             typeDefProviderIdentity,
                             oldReferenceRow), out var providerTypeDefRow))
@@ -6448,6 +6498,16 @@ public static partial class TrRmExecutableCompiler
                         typeReference
                             = TrRmTypeSpecTableWriter.Reference(0x03,
                                 checked((uint)importedRootRow));
+                    }
+                    else if (sourceType.Form == 0x02
+                        && !packedClassModuleIdentities.Contains(
+                            provider.ModuleIdentity)
+                        && importRowByRootClassIdentity.TryGetValue(
+                            identity, out var importedRootTypeRow))
+                    {
+                        typeReference
+                            = TrRmTypeSpecTableWriter.Reference(0x03,
+                                checked((uint)importedRootTypeRow));
                     }
                     else if (sourceType.Form == 0x02
                         && typeDefRow == checked((int)(

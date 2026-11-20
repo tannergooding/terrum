@@ -567,6 +567,116 @@ public static partial class TrRmExecutableCompiler
                 "The selected Standard class schema is not supported by the bounded type-only composer.");
         }
 
+        var selectedClassIdentities = references
+            .SelectMany(static reference =>
+                reference.StandardClassDeclarations)
+            .Where(static declaration =>
+                !declaration.SelectedExportKeys.IsDefaultOrEmpty)
+            .Select(static declaration =>
+                declaration.Declaration.Identity)
+            .ToHashSet();
+        var classHandleTypeDependencies
+            = new HashSet<BoundGenericNominalTypeIdentity>();
+        for (var referenceIndex = 0;
+            referenceIndex < references.Length; referenceIndex++)
+        {
+            var reference = references[referenceIndex];
+            var pendingClassIdentities
+                = new Queue<BoundGenericNominalTypeIdentity>(
+                    reference.StandardClassDeclarations
+                        .Where(static declaration =>
+                            !declaration.SelectedExportKeys
+                                .IsDefaultOrEmpty)
+                        .Select(static declaration =>
+                            declaration.Declaration.Identity));
+            var visitedClassIdentities
+                = new HashSet<BoundGenericNominalTypeIdentity>();
+            var visitedStructureIndexes = new HashSet<int>();
+
+            void IncludeClassHandleType(PrimitiveType type)
+            {
+                if (BoundGenericNominalTypeTypes.IsType(type))
+                {
+                    var instanceIndex
+                        = BoundGenericNominalTypeTypes.Index(type);
+                    if ((uint)instanceIndex
+                        >= (uint)reference.GenericNominalTypeInstances.Length)
+                    {
+                        throw Invalid(
+                            "A selected class or struct FieldDef has an invalid nominal type instance.");
+                    }
+
+                    var instance
+                        = reference.GenericNominalTypeInstances[
+                            instanceIndex];
+                    var definition
+                        = reference.GenericNominalTypeDefinitions
+                            .FirstOrDefault(candidate =>
+                                candidate.Identity
+                                == instance.Definition);
+                    if (definition is null)
+                    {
+                        throw Invalid(
+                            "A selected class or struct FieldDef has no nominal TypeDef definition.");
+                    }
+
+                    if (definition.NominalKind == 2)
+                    {
+                        _ = classHandleTypeDependencies.Add(
+                            definition.Identity);
+                        pendingClassIdentities.Enqueue(
+                            definition.Identity);
+                    }
+
+                    return;
+                }
+
+                if (BoundEnumTypes.IsType(type)
+                    || BoundSpanTypeTypes.IsType(type)
+                    || ManagedClassTypes.IsClass(type)
+                    || NativePointerTypes.IsType(type)
+                    || NativeFixedArrayTypes.IsType(type)
+                    || NativeFunctionPointerTypes.IsType(type)
+                    || CheckedReferenceTypes.IsType(type))
+                {
+                    return;
+                }
+
+                var structureIndex = (int)type - 100;
+                if ((uint)structureIndex >= (uint)reference.Structures.Length
+                    || !visitedStructureIndexes.Add(structureIndex))
+                {
+                    return;
+                }
+
+                foreach (var field in reference.Structures[
+                    structureIndex].Fields)
+                {
+                    IncludeClassHandleType(field.Type);
+                }
+            }
+
+            while (pendingClassIdentities.TryDequeue(
+                out var classIdentity))
+            {
+                if (!visitedClassIdentities.Add(classIdentity))
+                {
+                    continue;
+                }
+
+                var declaration
+                    = reference.StandardClassDeclarations.SingleOrDefault(
+                        candidate =>
+                            candidate.Declaration.Identity == classIdentity)
+                        ?? throw Invalid(
+                            "A selected class handle dependency has no provider declaration view.");
+                foreach (var field in declaration.Declaration.Fields)
+                {
+                    IncludeClassHandleType(field.Type);
+                }
+            }
+        }
+
         var structureReferences = new List<CompilationReference>();
         var structureReferenceIndexes = new List<int>();
         for (var referenceIndex = 0;
@@ -596,6 +706,85 @@ public static partial class TrRmExecutableCompiler
                 nativePointerTypes: reference.NativePointerTypes,
                 standardQuerySourceAssociation:
                     reference.StandardQuerySourceAssociation));
+        }
+
+        bool IsSelectedClassHandleInStructure(int referenceIndex,
+            BoundSourceTypeProviderSnapshot ownerProvider,
+            PrimitiveType type)
+        {
+            if (!BoundGenericNominalTypeTypes.IsType(type))
+            {
+                return false;
+            }
+
+            var reference = references[referenceIndex];
+            var instanceIndex = BoundGenericNominalTypeTypes.Index(type);
+            if ((uint)instanceIndex
+                >= (uint)reference.GenericNominalTypeInstances.Length)
+            {
+                return false;
+            }
+
+            var instance
+                = reference.GenericNominalTypeInstances[instanceIndex];
+            var definition = reference.GenericNominalTypeDefinitions
+                .FirstOrDefault(candidate =>
+                    candidate.Identity == instance.Definition);
+            var declaration = reference.StandardClassDeclarations
+                .SingleOrDefault(candidate =>
+                    candidate.Declaration.Identity == instance.Definition);
+            if (definition is null || definition.NominalKind != 2
+                || declaration is null
+                || (!selectedClassIdentities.Contains(instance.Definition)
+                    && !classHandleTypeDependencies.Contains(
+                        instance.Definition))
+                || !instance.Arguments.IsEmpty
+                || instance.Qualifiers != 0
+                || !StringComparer.Ordinal.Equals(
+                    instance.TypeSpecProviderIdentity,
+                    ownerProvider.ModuleIdentity))
+            {
+                return false;
+            }
+
+            var classView = declaration.Declaration;
+            if (!StringComparer.Ordinal.Equals(
+                    classView.Identity.ProviderIdentity,
+                    classView.Provider.ModuleIdentity)
+                || !StringComparer.Ordinal.Equals(
+                    classView.Identity.ModuleIdentity,
+                    classView.Provider.ModuleIdentity))
+            {
+                return false;
+            }
+
+            if (instance.TypeSpecForm == 0x02)
+            {
+                return true;
+            }
+
+            return instance.TypeSpecForm == 0x03
+                && declaration.Expectations.Any(expectation =>
+                    StringComparer.Ordinal.Equals(
+                        expectation.Binding.UsingModule.ModuleIdentity,
+                        ownerProvider.ModuleIdentity)
+                    && SameA2SourceTypeProviderSnapshot(
+                        expectation.Binding.UsingModule, ownerProvider)
+                    && SameA2SourceTypeProviderSnapshot(
+                        expectation.Binding.Provider, classView.Provider)
+                    && expectation.Binding.ProviderDefinitionId
+                        == instance.Definition.DefinitionId
+                    && definition.Provider is
+                        BoundSourceTypeProviderSnapshot provider
+                    && SameA2SourceTypeProviderSnapshot(provider,
+                        classView.Provider)
+                    && !definition.ProviderExpectations.IsDefaultOrEmpty
+                    && definition.ProviderExpectations.Any(
+                        typeExpectation =>
+                            BoundGenericNominalTypeContract
+                                .AreEquivalentProviderExpectations(
+                                    typeExpectation,
+                                    expectation.Binding)));
         }
 
         bool IsDirectStructureFieldType(int referenceIndex,
@@ -635,8 +824,13 @@ public static partial class TrRmExecutableCompiler
                                 == occurrence.Declaration.Site.DefinitionId);
             }
 
-            if (BoundGenericNominalTypeTypes.IsType(type)
-                || BoundSpanTypeTypes.IsType(type)
+            if (BoundGenericNominalTypeTypes.IsType(type))
+            {
+                return IsSelectedClassHandleInStructure(referenceIndex,
+                    ownerProvider, type);
+            }
+
+            if (BoundSpanTypeTypes.IsType(type)
                 || ManagedClassTypes.IsClass(type)
                 || NativePointerTypes.IsType(type)
                 || NativeFixedArrayTypes.IsType(type)
@@ -661,7 +855,7 @@ public static partial class TrRmExecutableCompiler
                     nestedOrigin.Provider);
         }
 
-        var directStructureComposition = structureReferences.Count > 1;
+        var directStructureComposition = structureReferences.Count != 0;
         for (var referencePosition = 0;
             directStructureComposition
                 && referencePosition < structureReferences.Count;
@@ -869,8 +1063,12 @@ public static partial class TrRmExecutableCompiler
                         return type;
                     }
 
-                    if (BoundGenericNominalTypeTypes.IsType(type)
-                        || BoundSpanTypeTypes.IsType(type)
+                    if (BoundGenericNominalTypeTypes.IsType(type))
+                    {
+                        return type;
+                    }
+
+                    if (BoundSpanTypeTypes.IsType(type)
                         || ManagedClassTypes.IsClass(type)
                         || NativePointerTypes.IsType(type)
                         || NativeFixedArrayTypes.IsType(type)
@@ -1284,8 +1482,6 @@ public static partial class TrRmExecutableCompiler
             structuresResult = remappedStructures.MoveToImmutable();
         }
 
-        var classHandleTypeDependencies
-            = new HashSet<BoundGenericNominalTypeIdentity>();
         var genericNominalInstanceMaps = new int[references.Length][];
         bool IsSelectedClassTypeSpecProvider(int referenceIndex,
             string providerIdentity)
@@ -1350,8 +1546,10 @@ public static partial class TrRmExecutableCompiler
                         definition.Identity == sourceInstance.Definition);
                 if (sourceDefinition is null
                     || sourceDefinition.NominalKind != 2
-                    || !classHandleTypeDependencies.Contains(
-                        sourceInstance.Definition))
+                    || (!classHandleTypeDependencies.Contains(
+                            sourceInstance.Definition)
+                        && !selectedClassIdentities.Contains(
+                            sourceInstance.Definition)))
                 {
                     throw Unsupported(
                         "Class FieldDefs can only retain selected class TypeDef handle dependencies.");
@@ -1471,80 +1669,6 @@ public static partial class TrRmExecutableCompiler
         var declarationIndexes = new Dictionary<
             BoundGenericNominalTypeIdentity, int>();
         var declarationNames = new HashSet<(string Namespace, string Name)>();
-        var selectedClassIdentities = references
-            .SelectMany(static reference =>
-                reference.StandardClassDeclarations)
-            .Where(static declaration =>
-                !declaration.SelectedExportKeys.IsDefaultOrEmpty)
-            .Select(static declaration =>
-                declaration.Declaration.Identity)
-            .ToHashSet();
-        for (var referenceIndex = 0;
-            referenceIndex < references.Length; referenceIndex++)
-        {
-            var reference = references[referenceIndex];
-            var pendingClassIdentities
-                = new Queue<BoundGenericNominalTypeIdentity>(
-                    reference.StandardClassDeclarations
-                        .Where(static declaration =>
-                            !declaration.SelectedExportKeys
-                                .IsDefaultOrEmpty)
-                        .Select(static declaration =>
-                            declaration.Declaration.Identity));
-            var visitedClassIdentities
-                = new HashSet<BoundGenericNominalTypeIdentity>();
-            while (pendingClassIdentities.TryDequeue(
-                out var classIdentity))
-            {
-                if (!visitedClassIdentities.Add(classIdentity))
-                {
-                    continue;
-                }
-
-                var declaration
-                    = reference.StandardClassDeclarations.SingleOrDefault(
-                        candidate =>
-                            candidate.Declaration.Identity == classIdentity)
-                        ?? throw Invalid(
-                            "A selected class handle dependency has no provider declaration view.");
-                foreach (var field in declaration.Declaration.Fields)
-                {
-                    if (!BoundGenericNominalTypeTypes.IsType(field.Type))
-                    {
-                        continue;
-                    }
-
-                    var instanceIndex
-                        = BoundGenericNominalTypeTypes.Index(field.Type);
-                    if ((uint)instanceIndex
-                        >= (uint)reference.GenericNominalTypeInstances.Length)
-                    {
-                        throw Invalid(
-                            "A selected class FieldDef has an invalid nominal type instance.");
-                    }
-
-                    var instance
-                        = reference.GenericNominalTypeInstances[instanceIndex];
-                    var definition
-                        = reference.GenericNominalTypeDefinitions
-                            .FirstOrDefault(candidate =>
-                                candidate.Identity == instance.Definition);
-                    if (definition is null)
-                    {
-                        throw Invalid(
-                            "A selected class FieldDef has no nominal TypeDef definition.");
-                    }
-
-                    if (definition.NominalKind == 2)
-                    {
-                        _ = classHandleTypeDependencies.Add(
-                            definition.Identity);
-                        pendingClassIdentities.Enqueue(
-                            definition.Identity);
-                    }
-                }
-            }
-        }
         var retainedClassIdentities
             = new HashSet<BoundGenericNominalTypeIdentity>(
                 selectedClassIdentities);
@@ -2066,6 +2190,59 @@ public static partial class TrRmExecutableCompiler
                 throw Unsupported(
                     "Class composition requires a retained source declaration for every nominal TypeDef.");
             }
+        }
+
+        if (directStructureComposition)
+        {
+            var remappedStructures = structuresResult.ToBuilder();
+            for (var structureIndex = 0;
+                structureIndex < directStructureCompositionSources.Count;
+                structureIndex++)
+            {
+                var (referenceIndex, _) =
+                    directStructureCompositionSources[structureIndex];
+                var structure = remappedStructures[structureIndex];
+                var origin = structure.StandardTypeOrigin!;
+                PrimitiveType RemapClassHandle(PrimitiveType type)
+                    => BoundGenericNominalTypeTypes.IsType(type)
+                        ? RemapClassFieldType(referenceIndex, type,
+                            origin.Provider)
+                        : type;
+
+                BoundStructField RemapField(BoundStructField field)
+                {
+                    var fieldOrigin = field.StandardFieldOrigin;
+                    if (fieldOrigin?.ExpectedDeclaration
+                        is BoundStructField expectedField)
+                    {
+                        fieldOrigin = fieldOrigin with {
+                            ExpectedDeclaration = expectedField with {
+                                Type = RemapClassHandle(expectedField.Type),
+                                StandardFieldOrigin = null,
+                            },
+                        };
+                    }
+
+                    return field with {
+                        Type = RemapClassHandle(field.Type),
+                        StandardFieldOrigin = fieldOrigin,
+                    };
+                }
+
+                var expectedDeclaration
+                    = origin.ExpectedDeclaration! with {
+                        Fields = [.. origin.ExpectedDeclaration.Fields
+                            .Select(RemapField)],
+                    };
+                remappedStructures[structureIndex] = structure with {
+                    Fields = [.. structure.Fields.Select(RemapField)],
+                    StandardTypeOrigin = origin with {
+                        ExpectedDeclaration = expectedDeclaration,
+                    },
+                };
+            }
+
+            structuresResult = remappedStructures.MoveToImmutable();
         }
 
         var definitionTable = definitions.ToImmutable();
