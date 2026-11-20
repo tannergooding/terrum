@@ -6031,7 +6031,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         var providerProgram = (BoundProgram)providerCompilation.Program!;
         var providerArtifact = TrRmExecutableCompiler.EmitStandard(
             providerProgram, "StructMethodProvider", schemaIdentity,
-            TrRmModuleTableReader.WindowsX64NativeTargetRequirement, [], [
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement, [
                 new TrRmSourceTypeExport("Demo", "Record", "type.record") {
                     FieldExports = [
                         new TrRmSourceFieldExport("Nested",
@@ -6046,7 +6046,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                             "field.other.value"),
                     ],
                 },
-            ], []);
+            ], [], []);
         var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
             providerArtifact);
         var providerReference
@@ -6112,7 +6112,8 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         var consumerProgram = (BoundProgram)consumerCompilation.Program!;
         var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
             consumerProgram, "StructMethodConsumer", schemaIdentity,
-            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], []);
         var consumerInput = new TrRmStandardArtifactInput(schemaIdentity,
             consumerArtifact);
         var linkedProgram = TrRmExecutableCompiler.LoadStandard(consumerInput,
@@ -6188,8 +6189,7 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             = TrRmExecutableCompiler.EmitStandard(
                 incompatibleProviderProgram, "StructMethodProvider",
                 schemaIdentity,
-                TrRmModuleTableReader.WindowsX64NativeTargetRequirement, [],
-                [
+                TrRmModuleTableReader.WindowsX64NativeTargetRequirement, [
                     new TrRmSourceTypeExport("Demo", "Record",
                         "type.record") {
                         FieldExports = [
@@ -6205,12 +6205,196 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                                 "field.other.value"),
                         ],
                     },
-                ], []);
+                ], [], []);
         Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.LoadStandard(consumerInput,
                 "StructMethodConsumer", [
                     new TrRmStandardArtifactInput(schemaIdentity,
                         incompatibleProviderArtifact),
+                ]));
+    }
+
+    [Test]
+    public void LinksTopLevelConstruction2MethodsAcrossNestedStructProviders()
+    {
+        var schemaIdentity
+            = C1M1Construction2ClassParameterDefaultsCopyEvidenceSchemaIdentity;
+        var layoutOptions = new CompilationOptions {
+            LayoutCoreRegistration
+                = LayoutCoreRegistrationTestData.Create(),
+        };
+        var providerCTree = SyntaxTree.Parse("""
+            namespace Demo {
+                [Blittable] [Layout(LayoutKind.Sequential)]
+                public struct Leaf {
+                    public int32 Value;
+                }
+            }
+            """);
+        var providerCCompilation = Compilation.CreateLibrary(providerCTree,
+            layoutOptions);
+        Assert.That(providerCCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCCompilation.Diagnostics));
+        var providerCProgram = (BoundProgram)providerCCompilation.Program!;
+        var providerCArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerCProgram, "StructMethodProviderC", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement, [
+                new TrRmSourceTypeExport("Demo", "Leaf", "type.leaf") {
+                    FieldExports = [
+                        new TrRmSourceFieldExport("Value",
+                            "field.leaf.value"),
+                    ],
+                },
+            ], [], []);
+        var providerCInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerCArtifact);
+        var providerCReference = TrRmExecutableCompiler
+            .CreateStandardReference(providerCInput,
+                "StructMethodProviderC", [], ["type.leaf"],
+                ["field.leaf.value"]);
+
+        var providerBTree = SyntaxTree.Parse("""
+            namespace Demo {
+                [Blittable] [Layout(LayoutKind.Sequential)]
+                public struct Record {
+                    public Leaf Data;
+                }
+                public int32 Read(Record value) {
+                    return value.Data.Value;
+                }
+            }
+            """);
+        var providerBCompilation = Compilation.CreateLibrary(providerBTree,
+            providerCReference, layoutOptions);
+        Assert.That(providerBCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerBCompilation.Diagnostics));
+        var providerBProgram = (BoundProgram)providerBCompilation.Program!;
+        var providerBArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerBProgram, "StructMethodProviderB", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement, [
+                new TrRmSourceTypeExport("Demo", "Record", "type.record") {
+                    FieldExports = [
+                        new TrRmSourceFieldExport("Data",
+                            "field.record.data"),
+                    ],
+                },
+            ], [], []);
+        var providerBInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerBArtifact);
+        var providerBReference = TrRmExecutableCompiler
+            .CreateStandardReference(providerBInput,
+                "StructMethodProviderB", [providerCInput], ["Read"], [
+                new TrRmStandardExportKeySelection(
+                    "StructMethodProviderB", "type.record"),
+                new TrRmStandardExportKeySelection(
+                    "StructMethodProviderC", "type.leaf"),
+            ], [
+                new TrRmStandardExportKeySelection(
+                    "StructMethodProviderB", "field.record.data"),
+                new TrRmStandardExportKeySelection(
+                    "StructMethodProviderC", "field.leaf.value"),
+                ]);
+        var consumerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                namespace Demo {
+                    public int32 Forward(Record value) {
+                        return Read(value);
+                    }
+                    public int32 ReadNested(Record value) {
+                        return value.Data.Value;
+                    }
+                }
+                """), providerBReference);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerProgram = (BoundProgram)consumerCompilation.Program!;
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            consumerProgram, "StructMethodConsumer", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+            [], [], []);
+        var consumerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            consumerArtifact);
+        var providers = new[] { providerBInput, providerCInput };
+        var linkedProgram = TrRmExecutableCompiler.LoadStandard(consumerInput,
+            "StructMethodConsumer", providers);
+
+        var recordType = linkedProgram.Functions.Single(
+            static function => function.Name == "Forward")
+            .Variables[0].Type;
+        var record = linkedProgram.Structures[(int)recordType - 100];
+        Assert.That(record.Name, Is.EqualTo("Record"));
+        Assert.That(record.Fields, Has.Length.EqualTo(1));
+        Assert.That(record.Fields[0].Name, Is.EqualTo("Data"));
+        var leafType = record.Fields[0].Type;
+        var leaf = linkedProgram.Structures[(int)leafType - 100];
+        Assert.That(leaf.Name, Is.EqualTo("Leaf"));
+        Assert.That(leaf.Fields, Has.Length.EqualTo(1));
+        Assert.That(leaf.Fields[0].Name, Is.EqualTo("Value"));
+        Assert.That(leaf.Fields[0].Type, Is.EqualTo(PrimitiveType.Int32));
+
+        foreach (var functionName in new[] { "Read", "ReadNested" })
+        {
+            var function = linkedProgram.Functions.Single(
+                function => function.Name == functionName);
+            var returnStatement = (BoundReturn)function.Body.Statements.Single();
+            var leafValueRead = (BoundFieldRead)returnStatement.Value!;
+            var recordDataRead = (BoundFieldRead)leafValueRead.Receiver;
+            Assert.That(function.Variables[0].Type, Is.EqualTo(recordType));
+            Assert.That(recordDataRead.Field, Is.Zero);
+            Assert.That(recordDataRead.Type, Is.EqualTo(leafType));
+            Assert.That(leafValueRead.Field, Is.Zero);
+            Assert.That(leafValueRead.Type, Is.EqualTo(PrimitiveType.Int32));
+        }
+
+        var reemittedArtifact = TrRmExecutableCompiler.EmitStandard(
+            linkedProgram, "StructMethodConsumer", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        Assert.That(reemittedArtifact, Is.EqualTo(consumerArtifact));
+        var reloadedProgram = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, reemittedArtifact),
+            "StructMethodConsumer", providers);
+        Assert.That(reloadedProgram.Functions.Single(
+                static function => function.Name == "ReadNested")
+                .ReturnType,
+            Is.EqualTo(PrimitiveType.Int32));
+
+        var incompatibleProviderCTree = SyntaxTree.Parse("""
+            namespace Demo {
+                [Blittable] [Layout(LayoutKind.Sequential)]
+                public struct Leaf {
+                    public int64 Value;
+                }
+            }
+            """);
+        var incompatibleProviderCCompilation = Compilation.CreateLibrary(
+            incompatibleProviderCTree, layoutOptions);
+        Assert.That(incompatibleProviderCCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                incompatibleProviderCCompilation.Diagnostics));
+        var incompatibleProviderCProgram
+            = (BoundProgram)incompatibleProviderCCompilation.Program!;
+        var incompatibleProviderCArtifact
+            = TrRmExecutableCompiler.EmitStandard(
+                incompatibleProviderCProgram, "StructMethodProviderC",
+                schemaIdentity,
+                TrRmModuleTableReader.WindowsX64NativeTargetRequirement, [
+                    new TrRmSourceTypeExport("Demo", "Leaf",
+                        "type.leaf") {
+                        FieldExports = [
+                            new TrRmSourceFieldExport("Value",
+                                "field.leaf.value"),
+                        ],
+                    },
+                ], [], []);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(consumerInput,
+                "StructMethodConsumer", [
+                    providerBInput,
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        incompatibleProviderCArtifact),
                 ]));
     }
 

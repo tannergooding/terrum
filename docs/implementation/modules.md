@@ -274,18 +274,24 @@ implicit-reference flag for caller adaptation.
 Body-04, Body-05 and compact field-access re-emission regressions are added but
 remain unverified under the validation hold.
 A separate still-unapproved method/type-selection API now has a provisional
-single-Module implementation for classless C1M1/CM1/CM1AR1 Copy-evidence
-artifacts. It combines explicitly selected top-level methods with local
-Blittable Copy struct and FieldDef roots in one source reference, including
-nested struct signatures and field lookup. The regression is unverified;
-co-located/external provider Modules, Imports, FieldDef-edge retention,
-source-free FieldMap/FieldPath remapping, CLI selection and runtime
-qualification remain open. The current loader still requires the whole
-single-Module TypeDef/method closure to fit its bounded Blittable-struct path;
-selected-root-only loading for unrelated declarations remains open.
-Construction-2 method loading also retains validated TypeDef/FieldDef
-provider edges so an unchanged source-free emission can preserve the original
-artifact; this is not row remapping for provider replacement.
+A separate still-unapproved method/type-selection API now has a provisional
+classless root-Module implementation for the three Construction-2
+Copy-evidence agreements. It combines explicitly selected top-level methods
+with Module-qualified Blittable Copy struct and FieldDef roots across the
+validated provider set. Construction-2 provider Modules with Imports are
+admitted only when the root has MethodDef closure work; validated TypeDef and
+FieldDef edges are retained, and new type/field uses select the first explicit
+key under the separate unapproved alias-publication proposal. A public
+consumer-to-method-provider-to-nested-struct-provider regression now covers
+nested FieldMap loading and unchanged source-free artifact retention/reload;
+it remains unverified under the active hold. Co-located non-first Modules,
+deeper chains/diamonds, multiple using-Module contexts for one expected
+TypeDef, source-free row remapping under provider replacement, CLI selection
+and runtime qualification remain open. The loader still requires the whole
+validated Module-set TypeDef/method closure to fit its bounded
+Blittable-struct path; selected-root-only loading for unrelated declarations
+remains open. Snapshot-preserving source-free emission does not establish row
+remapping for provider replacement.
 Compiler-owned source-class anchors and explicit member-key capture are
 implemented, but complete bodyful
 local class member/MethodDef closure, provider

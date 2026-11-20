@@ -5,6 +5,13 @@ missing-contract workflow, pending later review.** This document approves
 neither an API nor its dependencies, changes no accepted specification, and
 claims no implementation or execution qualification.
 
+The separate unapproved
+[alias-publication proposal](standard-trrm-c1-source-reference-alias-publication.md)
+recommends representative-only new TypeDef/FieldDef dependencies and
+supersedes the original alias-preservation candidate below. The provisional
+implementation follows that recommendation; it does not change this proposal's
+unapproved status or preserve source-only aliases as replacement obligations.
+
 ## Finding and recommendation
 
 The wire-level composition is already defined: a MethodDef expectation can
@@ -178,13 +185,15 @@ Explicit type selections are lookup roots; other required nodes stay
 closure-only. Distinct actual equal-named types remain distinct and diagnose
 ordinary ambiguity; no dictionary insertion or selection order chooses one.
 
-Distinct selected type/field aliases resolve to one actual declaration while
-retaining **every** key, original expectation and same-definition obligation.
-For a newly created type/field use only, choose the first explicitly supplied
-alias in its list after establishing that equality. Existing Imports retain
-their own keys; method calls through an alias keep that alias. Export-row
-order, declaration names, equal layout and a uniquely available but
-unselected key are never selectors.
+Validate every explicitly selected alias against its captured provider
+snapshot. For each actual type or field, a newly created use selects the first
+explicit key in that selection list; remaining selected aliases do not become
+replacement dependencies. Existing Imports retain their exact keys,
+expectations and any shared-expected-DefId equality they already encode.
+Method calls through an alias keep that callable-view key. Export-row order,
+declaration names, equal layout and a uniquely available but unselected key
+are never selectors. See the separate alias-publication proposal for the
+unapproved representative-only policy and its replacement cases.
 
 Walk the complete finite method signature/Body/contract and type/field/Layout
 dependency graph, including uncalled retained edges:
@@ -271,13 +280,16 @@ actual code/load lifetimes; metadata success is not a new aggregate foreign
 ABI or independently precompiled-provider agreement.
 
 Replacement resolves retained keys against the new selected snapshot and
-checks the complete graph, including alias equalities and stronger facts
-used by specialization. Compatible row relocation is permitted after those
-checks; identical Module/key text or bytes are not proof. Changed nominal
-origins, split aliases, incompatible method/field contracts, Copy loss or
-changed retained inline layout reject before affected use. Source is not
-rebound to a new overload/default set. Updating metadata does not patch
-already generated native code; live replacement remains outside scope.
+checks the complete graph, including pre-existing alias equalities and
+stronger facts used by specialization. A source-only alias omitted by
+representative selection may be removed or split when no retained edge or
+relied-on fact requires it; a fresh reference request still validates every
+selected key. Compatible row relocation is permitted after those checks;
+identical Module/key text or bytes are not proof. Changed retained nominal
+origins, shared-expected-DefId targets, method/field contracts, Copy facts or
+inline layout reject before affected use. Source is not rebound to a new
+overload/default set. Updating metadata does not patch already generated
+native code; live replacement remains outside scope.
 
 ## Wire preservation, failures and unsupported work
 
@@ -346,11 +358,11 @@ semantic decisions. Required future checks through public APIs:
 | Class | Required outcome |
 |---|---|
 | Positive | Classless provider with opaque explicit keys (source-spellable for called method views), nested Copy structs and a real method Body; compile a caller that exercises a nested scalar field, emit, source-free reload and retain exact method/type/field origins. No dummy class/native anchor. |
-| Positive: aliases | Select two type and field aliases and method aliases in non-export-row order. One actual identity, every original view/key retained, explicit-list representative only for new type/field uses. |
-| Cross-provider | Method Module A imports B's struct; B depends on C's nested struct/field. Select declaring Module/key pairs, exercise chains/diamonds and co-located non-first Modules. Repeated keys/names across Modules never merge identities; check every incoming expectation. |
+| Positive: aliases | Validate all selected type/field aliases in non-export-row order; publish the first explicit type/field key as the new dependency. Method aliases retain their callable-view keys, and pre-existing shared-expected-DefId relationships remain intact. |
+| Cross-provider | A public-API regression now exercises a consumer method Module, a method provider importing a nested struct/field from another Module, FieldMap loading, and unchanged source-free re-emission/reload. It is unverified under the active hold. Add co-located non-first Modules, deeper chains/diamonds, and distinct expected-TypeDef contexts; preserve each incoming expectation. |
 | Negative: selection | Omit a required newly imported type/child/field key even when uniquely exported; wrong case/kind/Module/owner, proxy re-export and private/static field selections reject. Provider presence, public layout and adding a type root alone select no field. |
 | Negative: retained edges | Invalid uncalled MethodDef/TypeDef/FieldDef Import, missing owner binding or mismatch behind a shared/cyclic dependency rejects before use. A prior comparison cannot hide a later obligation. |
-| Replacement | Accept compatible TypeDef/FieldDef/MethodDef and Import/Export row relocation with preserved keys/contexts. Reject changed nested field type, layout/pack/alignment/variant, Copy, method mode/unsafe contract, selected nominal origin or alias splitting, including changes in C under unchanged A/B bytes. |
+| Replacement | Accept compatible TypeDef/FieldDef/MethodDef and Import/Export row relocation with preserved retained keys/contexts. Accept removal or splitting of an omitted source-only type/field alias when no other retained obligation depends on it. Reject changed nested field type, layout/pack/alignment/variant, Copy, method mode/unsafe contract, selected nominal origin or an already-retained shared-expectation split, including changes in C under unchanged A/B bytes. |
 | Transformation | Permute all affected consumer/provider rows and Body maps, pack/re-emit/reload without source. Preserve Module ownership, source maps, FieldPath steps, every original expectation and method call argument/result identity. Never compare raw row numbers across snapshots. |
 | Boundary | Empty field selection and scalar-only methods; empty/unit-field structs retain nominal identity and logical unit positions. Null/empty/duplicate inputs, multiple aliases, zero/maximum schema-owned map indexes, checked row/count/resource limits and invalid inline cycles fail or succeed under their exact existing domains without truncation. |
 | Isolation | Wrong/unsupported schema even on an unused provider, unamended parent Copy bits, duplicate/conflicting Module snapshots, unsupported retained contracts and caller mutation cannot yield partial success. Existing type-only set routes and CLI files keep their old admission/selection. |

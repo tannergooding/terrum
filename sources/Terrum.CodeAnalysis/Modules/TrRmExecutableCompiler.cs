@@ -944,7 +944,8 @@ public static partial class TrRmExecutableCompiler
                 || StringComparer.Ordinal.Equals(schemaIdentity,
                     StandardC1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsInitializerCopyEvidenceSchemaIdentity);
         if ((requiresSourceClassExports && sourceClassExports is null
-                && program.StandardClassDeclarations.IsEmpty)
+                && program.StandardClassDeclarations.IsEmpty
+                && program.StandardFieldProviderClosure is null)
             || (sourceClassExports is not null
                 && !StringComparer.Ordinal.Equals(schemaIdentity,
                     StandardC1M1SchemaIdentity)

@@ -141,16 +141,22 @@ function views with the bounded unit, scalar, class-handle and plain
 checked-reference signature forms; producer/reference/downstream-call and
 source-free provider/reload regressions are added but remain unverified
 under the active hold. A separate still-unapproved method/type-selection
-proposal now has a combined source-reference API for one classless
-single-Module Copy-evidence artifact, with explicit method, TypeDef, and
-FieldDef keys and local nested Copy structs. Its regressions remain
-unverified; multiple Modules, provider Imports, source-free FieldMap/FieldPath
-remapping, CLI selection, and runtime qualification remain open. The loader
-still requires the whole single-Module TypeDef/method closure to fit its
-bounded Blittable-struct path. Construction-2 method loading now retains
-validated TypeDef/FieldDef provider edges for unchanged source-free artifact
-re-emission; this snapshot-preserving path does not establish row remapping
-under provider replacement.
+proposal now has a combined source-reference API with one classless root
+Module, explicit method keys, and Module-qualified TypeDef/FieldDef selections
+across its validated provider set. Construction-2 provider Modules with
+Imports are admitted only when the root has MethodDef closure work; validated
+TypeDef/FieldDef edges are retained, and new type/field uses select the first
+explicit key under the separate unapproved alias-publication proposal. A
+public regression now covers a consumer-to-method-provider-to-nested-struct
+provider chain, nested FieldMap loading, unchanged source-free artifact
+retention/reload, and incompatible replacement; it remains unverified under
+the active hold. Co-located non-first Modules, deeper chains/diamonds,
+multiple using-Module contexts for one expected TypeDef, row remapping under
+provider replacement, CLI selection, and runtime qualification remain open.
+The loader still requires the whole validated Module-set TypeDef/method
+closure to fit its bounded Blittable-struct path. Snapshot-preserving
+source-free emission does not establish row remapping under provider
+replacement.
 Exact Construction-2 source-free re-emission now
 preserves bodyful exported nongeneric top-level MethodDefs whose Bodies fit
 the existing C1M1 remapper (kinds 01-05), including TypeSpec, Effects,

@@ -13,8 +13,9 @@ namespace Terrum.CodeAnalysis.Modules;
 public static partial class TrRmExecutableCompiler
 {
     /// <summary>
-    /// Creates one source reference from explicitly selected top-level methods,
-    /// struct types, and fields in one classless Construction-2 Module.
+    /// Creates one source reference from top-level methods in one classless
+    /// Construction-2 Module and explicitly selected Module-qualified struct
+    /// and field roots across its exact provider set.
     /// </summary>
     /// <param name="input">The complete provider artifact and its exact schema selection.</param>
     /// <param name="moduleIdentity">The exact identity of the Module that publishes the methods.</param>
@@ -148,139 +149,267 @@ public static partial class TrRmExecutableCompiler
             TrRmStandardExportKeySelection[] typeExportKeys,
             TrRmStandardExportKeySelection[] fieldExportKeys)
     {
-        if (artifacts.Length != 1 || schemaIdentities.Length != 1
-            || !IsC1M1MethodTypeSchemaIdentity(schemaIdentities[0]))
+        if (artifacts.Length == 0
+            || artifacts.Length != schemaIdentities.Length
+            || schemaIdentities.Any(schemaIdentity =>
+                !IsC1M1MethodTypeSchemaIdentity(schemaIdentity))
+            || schemaIdentities.Any(schemaIdentity =>
+                !StringComparer.Ordinal.Equals(schemaIdentity,
+                    schemaIdentities[0])))
         {
             throw Unsupported(
-                "The combined method/type reference requires one exact Construction-2 Copy-evidence artifact.");
-        }
-
-        if (typeExportKeys.Any(selection =>
-                !StringComparer.Ordinal.Equals(selection.ModuleIdentity,
-                    moduleIdentity))
-            || fieldExportKeys.Any(selection =>
-                !StringComparer.Ordinal.Equals(selection.ModuleIdentity,
-                    moduleIdentity)))
-        {
-            throw Unsupported(
-                "The initial combined method/type reference requires type and field selections from the method Module.");
+                "The combined method/type reference requires exact matching Construction-2 Copy-evidence selections for every artifact.");
         }
 
         var moduleValidation = ValidateStandardInputModules(artifacts,
             schemaIdentities, moduleIdentity, a3LayoutResourceLedger: null);
-        if (moduleValidation.Modules.Length != 1
-            || moduleValidation.Modules[0].ArtifactIndex != 0
-            || moduleValidation.Modules[0].ModuleRow
-                != moduleValidation.RootModuleRow)
+        var tablesByArtifact = new Dictionary<int,
+            TrRmStructuralMetadataValidator.ValidatedExecutionTables>();
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables GetTables(
+            int artifactIndex)
         {
-            throw Unsupported(
-                "The initial combined method/type reference requires one selected Module.");
+            if (tablesByArtifact.TryGetValue(artifactIndex,
+                    out var existingTables))
+            {
+                return existingTables;
+            }
+
+            var index = CreateForeignInvocationIndex(
+                artifacts[artifactIndex], schemaIdentities[artifactIndex]);
+            var result = ValidateForeignInvocationArtifact(index,
+                schemaIdentities[artifactIndex],
+                createA3ResourceLedger: false);
+            tablesByArtifact.Add(artifactIndex, result);
+            return result;
         }
 
-        var tables = ValidateForeignInvocationArtifact(
-            CreateForeignInvocationIndex(artifacts[0],
-                schemaIdentities[0]), schemaIdentities[0], null,
-            createA3ResourceLedger: false);
+        var tables = GetTables(0);
         var moduleRow = moduleValidation.RootModuleRow;
+        var rootModule = moduleValidation.Modules.SingleOrDefault(module =>
+            module.ArtifactIndex == 0 && module.ModuleRow == moduleRow)
+            ?? throw Invalid(
+                "The combined method/type reference lost its selected root Module.");
         var (targetRequirement, runtimePolicy)
             = tables.Modules.GetRequirements(moduleRow);
-        var (typeDefStart, typeDefEnd)
-            = tables.Modules.GetTypeDefRange(moduleRow);
         if (targetRequirement
                 != TrRmModuleTableReader.WindowsX64NativeTargetRequirement
-            || runtimePolicy != 0
-            || tables.Imports.Count != 0
-            || tables.ModuleRefs.Count != 0
-            || tables.Modules.Count != 1
-            || moduleRow != 1
-            || typeDefStart <= 0 || typeDefEnd < typeDefStart
-            || Enumerable.Range(typeDefStart,
-                typeDefEnd - typeDefStart)
-                .Any(typeDefRow =>
-                    tables.TypeDefs.GetKind(typeDefRow) != 1))
+            || runtimePolicy != 0)
         {
             throw Unsupported(
-                "The initial combined method/type reference requires a classless Windows x64 Module without Imports.");
+                "The combined method/type reference requires a Windows x64 fail-fast root Module.");
         }
 
-        var program = LoadLocalAggregateLayoutProviderClosure(artifacts,
-            schemaIdentities, moduleIdentity, moduleValidation, [],
+        var moduleByIdentity = moduleValidation.Modules.ToDictionary(
+            static module => module.Identity, StringComparer.Ordinal);
+        var moduleByLocation = moduleValidation.Modules.ToDictionary(
+            static module => (module.ArtifactIndex, module.ModuleRow));
+        var typeProgramByLocation
+            = new Dictionary<(int ArtifactIndex, int ModuleRow),
+                BoundStandardMethodProviderModule>();
+        foreach (var module in moduleValidation.Modules)
+        {
+            var moduleTables = GetTables(module.ArtifactIndex);
+            var (moduleTargetRequirement, moduleRuntimePolicy)
+                = moduleTables.Modules.GetRequirements(module.ModuleRow);
+            var (typeDefStart, typeDefEnd)
+                = moduleTables.Modules.GetTypeDefRange(module.ModuleRow);
+            if (moduleTargetRequirement
+                    != TrRmModuleTableReader.WindowsX64NativeTargetRequirement
+                || moduleRuntimePolicy != 0
+                || (typeDefStart == 0) != (typeDefEnd == 0)
+                || typeDefEnd < typeDefStart
+                || Enumerable.Range(typeDefStart,
+                    typeDefEnd - typeDefStart).Any(typeDefRow =>
+                    moduleTables.TypeDefs.GetKind(typeDefRow) != 1))
+            {
+                throw Unsupported(
+                    "The initial combined method/type reference requires classless Windows x64 Modules.");
+            }
+        }
+
+        var classProviderValidation
+            = TrRmFixedArrayProviderBindingValidator
+                .ValidateC1M1ClassImports(tables, artifacts,
+                    schemaIdentities, moduleValidation.Modules, moduleRow);
+        var linkedProgram = LoadLocalAggregateLayoutProviderClosure(
+            artifacts, schemaIdentities, moduleIdentity, moduleValidation,
+            classProviderValidation.TypeBindings,
+            classProviderValidation.FieldBindings,
             construction2MethodLinking: true);
+        var fieldProviderValidation
+            = new TrRmStandardFieldProviderValidation(
+                classProviderValidation.TypeBindings,
+                classProviderValidation.FieldBindings,
+                classProviderValidation.MethodBindings);
+        var program = RetainStandardFieldProviderClosure(linkedProgram,
+            fieldProviderValidation, artifacts, schemaIdentities,
+            moduleValidation.Modules, moduleRow, moduleIdentity);
         var methodProviderClosure
             = program.StandardMethodProviderClosure
                 ?? throw Invalid(
                     "The selected Module has no retained MethodDef origin map.");
-        var rootProviderModule = methodProviderClosure.Modules.SingleOrDefault(
-            module => module.ArtifactIndex == 0
-                && module.ModuleRow == moduleValidation.RootModuleRow)
-            ?? throw Invalid(
+        foreach (var module in methodProviderClosure.Modules)
+        {
+            typeProgramByLocation.Add((module.ArtifactIndex,
+                module.ModuleRow), module);
+            var moduleTables = GetTables(module.ArtifactIndex);
+            var (typeDefStart, typeDefEnd)
+                = moduleTables.Modules.GetTypeDefRange(module.ModuleRow);
+            if ((typeDefStart == 0) != (typeDefEnd == 0)
+                || typeDefEnd < typeDefStart
+                || typeDefEnd - typeDefStart
+                    != module.Program.Structures.Length)
+            {
+                throw Unsupported(
+                    "The combined method/type reference requires TypeDef-aligned Blittable struct Modules.");
+            }
+        }
+
+        if (!typeProgramByLocation.TryGetValue((0, moduleRow),
+                out var rootProviderModule))
+        {
+            throw Invalid(
                 "The selected MethodDef origin map lost its root Module.");
+        }
+
         var (methodStart, methodEnd)
             = tables.Modules.GetMethodDefRange(moduleRow);
-        if (typeDefEnd - typeDefStart
-                != rootProviderModule.Program.Structures.Length
-            || Enumerable.Range(typeDefStart, typeDefEnd - typeDefStart)
-                .Any(typeDefRow =>
-                    tables.TypeDefs.GetKind(typeDefRow) != 1))
+        var providerSnapshots = new Dictionary<
+            (int ArtifactIndex, int ModuleRow),
+            BoundSourceTypeProviderSnapshot>();
+        BoundSourceTypeProviderSnapshot GetProviderSnapshot(
+            TrRmStandardModuleSelection module)
         {
-            throw Unsupported(
-                "The initial combined method/type reference requires a TypeDef-aligned struct Module.");
-        }
-
-        var providerSnapshot = CreateA2SourceTypeProviderSnapshot(tables,
-            artifacts[0], schemaIdentities[0], moduleRow);
-        var allTypeExports = new Dictionary<int, List<string>>();
-        var allFieldExports = new Dictionary<int, List<string>>();
-        foreach (var (definition, exportKey) in
-            tables.Exports.GetExportsForModule(moduleRow))
-        {
-            var kind = definition >> 24;
-            var row = checked((int)(definition & 0x00FF_FFFF));
-            var exports = kind switch {
-                0x13 => allTypeExports,
-                0x14 => allFieldExports,
-                _ => null,
-            };
-            if (exports is null)
+            var key = (module.ArtifactIndex, module.ModuleRow);
+            if (providerSnapshots.TryGetValue(key, out var existingSnapshot))
             {
-                continue;
+                return existingSnapshot;
             }
 
-            if (!exports.TryGetValue(row, out var keys))
+            var snapshot = CreateA2SourceTypeProviderSnapshot(
+                GetTables(module.ArtifactIndex),
+                artifacts[module.ArtifactIndex],
+                schemaIdentities[module.ArtifactIndex], module.ModuleRow);
+            if (!StringComparer.Ordinal.Equals(snapshot.ModuleIdentity,
+                    module.Identity))
             {
-                keys = [];
-                exports.Add(row, keys);
+                throw Invalid(
+                    "A selected type provider snapshot has a different Module identity.");
             }
-            keys.Add(exportKey);
+
+            providerSnapshots.Add(key, snapshot);
+            return snapshot;
         }
 
-        var selectedTypeKeysByRow = new Dictionary<int, List<string>>();
+        var exportsByDefinition = new Dictionary<
+            (int ArtifactIndex, int ModuleRow, uint DefinitionId),
+            List<string>>();
+        foreach (var module in moduleValidation.Modules)
+        {
+            foreach (var (definition, exportKey) in
+                GetTables(module.ArtifactIndex).Exports.GetExportsForModule(
+                    module.ModuleRow))
+            {
+                var key = (module.ArtifactIndex, module.ModuleRow,
+                    definition);
+                if (!exportsByDefinition.TryGetValue(key,
+                        out var keys))
+                {
+                    keys = [];
+                    exportsByDefinition.Add(key, keys);
+                }
+
+                keys.Add(exportKey);
+            }
+        }
+
+        ImmutableArray<string> GetExportKeys(
+            TrRmStandardModuleSelection module, uint definition)
+            => exportsByDefinition.TryGetValue(
+                (module.ArtifactIndex, module.ModuleRow, definition),
+                out var keys)
+                ? [.. keys] : [];
+
+        var canonicalStructureByOrigin = new Dictionary<
+            (string ModuleIdentity, uint DefinitionId), int>();
+        for (var structureIndex = 0;
+            structureIndex < program.Structures.Length; structureIndex++)
+        {
+            var origin = program.Structures[structureIndex]
+                .StandardTypeOrigin;
+            if (origin is null
+                || (origin.DefinitionId >> 24) != 0x13
+                || !moduleByIdentity.TryGetValue(
+                    origin.Provider.ModuleIdentity,
+                    out var providerModule)
+                || providerModule.ModuleRow != origin.Provider.ModuleRow
+                || providerModule.TargetRequirement
+                    != origin.Provider.TargetRequirement
+                || providerModule.RuntimePolicy
+                    != origin.Provider.RuntimePolicy
+                || !StringComparer.Ordinal.Equals(
+                    schemaIdentities[providerModule.ArtifactIndex],
+                    origin.Provider.SchemaIdentity)
+                || !origin.Provider.ArtifactSnapshot.AsSpan()
+                    .SequenceEqual(artifacts[providerModule.ArtifactIndex]))
+            {
+                throw Invalid(
+                    "A canonical Construction-2 struct has no exact provider TypeDef origin.");
+            }
+
+            var originKey = (origin.Provider.ModuleIdentity,
+                origin.DefinitionId);
+            if (!canonicalStructureByOrigin.TryAdd(originKey,
+                    structureIndex))
+            {
+                throw Invalid(
+                    "The combined method/type reference has duplicate canonical struct origins.");
+            }
+        }
+
+        var selectedTypeKeysByOrigin = new Dictionary<
+            (string ModuleIdentity, uint DefinitionId), List<string>>();
         foreach (var selection in typeExportKeys)
         {
-            if (!tables.Exports.TryGetDefinitionForKey(moduleRow,
-                    selection.ExportKey, out var definition)
+            if (!moduleByIdentity.TryGetValue(selection.ModuleIdentity,
+                    out var selectedModule))
+            {
+                throw new ArgumentException(
+                    "A selected type Module identity is not present in the supplied provider set.",
+                    nameof(typeExportKeys));
+            }
+
+            var selectedTables = GetTables(selectedModule.ArtifactIndex);
+            if (!selectedTables.Exports.TryGetDefinitionForKey(
+                    selectedModule.ModuleRow, selection.ExportKey,
+                    out var definition)
                 || (definition >> 24) != 0x13)
             {
                 throw new ArgumentException(
-                    "A selected ExportKey does not identify a TypeDef in the selected Module.",
+                    "A selected ExportKey does not identify a TypeDef in its selected Module.",
                     nameof(typeExportKeys));
             }
 
             var typeDefRow = checked((int)(definition & 0x00FF_FFFF));
-            var (fieldStart, fieldEnd) = tables.TypeDefs.GetFieldRange(
-                typeDefRow);
+            var (fieldStart, fieldEnd)
+                = selectedTables.TypeDefs.GetFieldRange(typeDefRow);
             var (methodRangeStart, methodRangeEnd)
-                = tables.TypeDefs.GetMethodRange(typeDefRow);
+                = selectedTables.TypeDefs.GetMethodRange(typeDefRow);
+            var (typeDefStart, typeDefEnd)
+                = selectedTables.Modules.GetTypeDefRange(
+                    selectedModule.ModuleRow);
             if (typeDefRow < typeDefStart || typeDefRow >= typeDefEnd
-                || tables.TypeDefs.GetOwnerModule(typeDefRow) != moduleRow
-                || tables.Imports.IsExpectedDefinition(definition)
-                || tables.TypeDefs.GetKind(typeDefRow) != 1
-                || (tables.TypeDefs.GetFlags(typeDefRow) & 3) != 2
-                || tables.TypeDefs.GetGenericRange(typeDefRow).Count != 0
-                || tables.TypeDefs.HasDeclaredUnique(typeDefRow)
+                || selectedTables.TypeDefs.GetOwnerModule(typeDefRow)
+                    != selectedModule.ModuleRow
+                || selectedTables.Imports.IsExpectedDefinition(definition)
+                || selectedTables.TypeDefs.GetKind(typeDefRow) != 1
+                || (selectedTables.TypeDefs.GetFlags(typeDefRow) & 3) != 2
+                || selectedTables.TypeDefs.GetGenericRange(typeDefRow)
+                    .Count != 0
+                || selectedTables.TypeDefs.HasDeclaredUnique(typeDefRow)
                 || methodRangeStart != methodRangeEnd
-                || !tables.TypeDefs.HasDeclaredCopy(typeDefRow)
-                || !tables.Layouts.HasBlittableLayout(typeDefRow,
+                || !selectedTables.TypeDefs.HasDeclaredCopy(typeDefRow)
+                || !selectedTables.Layouts.HasBlittableLayout(typeDefRow,
                     TrRmTargetProfileTableReader.WindowsX64NativeProfileId,
                     TrRmTargetProfileTableReader
                         .WindowsX64NativeProfileRuleRevision))
@@ -289,9 +418,17 @@ public static partial class TrRmExecutableCompiler
                     "A selected TypeDef Export does not identify a local public nongeneric Copy struct with the required Blittable layout.");
             }
 
-            var structureIndex = typeDefRow - typeDefStart;
-            var structure
-                = rootProviderModule.Program.Structures[structureIndex];
+            var originKey = (selectedModule.Identity, definition);
+            if (!canonicalStructureByOrigin.TryGetValue(originKey,
+                    out var structureIndex))
+            {
+                throw Invalid(
+                    "A selected TypeDef Export is outside the checked struct closure.");
+            }
+
+            var structure = program.Structures[structureIndex];
+            var providerSnapshot = GetProviderSnapshot(selectedModule);
+            var typeOrigin = structure.StandardTypeOrigin!;
             if (structure.IsPrivate || structure.IsInternal
                 || structure.IsUnique
                 || structure.CleanupMethod is not null
@@ -300,49 +437,74 @@ public static partial class TrRmExecutableCompiler
                 || structure.BlittableTargetRequirement
                     != FixedLayoutStorage.WindowsX64TargetRequirement
                 || structure.DeclaredCopyEvidence != true
+                || !StringComparer.Ordinal.Equals(
+                    typeOrigin.Provider.ModuleIdentity,
+                    selectedModule.Identity)
+                || typeOrigin.DefinitionId != definition
+                || !SameA2SourceTypeProviderSnapshot(
+                    typeOrigin.Provider, providerSnapshot)
                 || fieldEnd - fieldStart != structure.Fields.Length)
             {
                 throw Invalid(
                     "A selected struct lost its exact provider origin, Copy evidence, or Blittable field layout.");
             }
 
-            if (!selectedTypeKeysByRow.TryGetValue(typeDefRow,
+            if (!selectedTypeKeysByOrigin.TryGetValue(originKey,
                     out var selectedKeys))
             {
                 selectedKeys = [];
-                selectedTypeKeysByRow.Add(typeDefRow, selectedKeys);
+                selectedTypeKeysByOrigin.Add(originKey, selectedKeys);
             }
             selectedKeys.Add(selection.ExportKey);
         }
 
         var selectedFieldKeysByOwner = new Dictionary<
-            (int TypeDefRow, int FieldOrdinal), List<string>>();
+            (int StructureIndex, int FieldOrdinal), List<string>>();
         foreach (var selection in fieldExportKeys)
         {
-            if (!tables.Exports.TryGetDefinitionForKey(moduleRow,
-                    selection.ExportKey, out var definition)
+            if (!moduleByIdentity.TryGetValue(selection.ModuleIdentity,
+                    out var selectedModule))
+            {
+                throw new ArgumentException(
+                    "A selected field Module identity is not present in the supplied provider set.",
+                    nameof(fieldExportKeys));
+            }
+
+            var selectedTables = GetTables(selectedModule.ArtifactIndex);
+            if (!selectedTables.Exports.TryGetDefinitionForKey(
+                    selectedModule.ModuleRow, selection.ExportKey,
+                    out var definition)
                 || (definition >> 24) != 0x14)
             {
                 throw new ArgumentException(
-                    "A selected ExportKey does not identify a FieldDef in the selected Module.",
+                    "A selected ExportKey does not identify a FieldDef in its selected Module.",
                     nameof(fieldExportKeys));
             }
 
             var fieldRow = checked((int)(definition & 0x00FF_FFFF));
-            var ownerTypeDefRow = tables.Fields.GetOwnerTypeDef(fieldRow);
+            var ownerTypeDefRow = selectedTables.Fields.GetOwnerTypeDef(
+                fieldRow);
+            var ownerDefinitionId = 0x1300_0000u
+                | checked((uint)ownerTypeDefRow);
+            var ownerOrigin = (selectedModule.Identity, ownerDefinitionId);
+            var (typeDefStart, typeDefEnd)
+                = selectedTables.Modules.GetTypeDefRange(
+                    selectedModule.ModuleRow);
             var (fieldStart, fieldEnd)
-                = tables.TypeDefs.GetFieldRange(ownerTypeDefRow);
-            var fieldFlags = tables.Fields.GetFlags(fieldRow);
-            if (!selectedTypeKeysByRow.ContainsKey(ownerTypeDefRow)
-                || tables.TypeDefs.GetOwnerModule(ownerTypeDefRow)
-                    != moduleRow
-                || tables.TypeDefs.GetKind(ownerTypeDefRow) != 1
-                || tables.Imports.IsExpectedDefinition(
-                    0x1300_0000u | checked((uint)ownerTypeDefRow))
+                = selectedTables.TypeDefs.GetFieldRange(ownerTypeDefRow);
+            var fieldFlags = selectedTables.Fields.GetFlags(fieldRow);
+            if (!selectedTypeKeysByOrigin.ContainsKey(ownerOrigin)
+                || ownerTypeDefRow < typeDefStart
+                || ownerTypeDefRow >= typeDefEnd
+                || selectedTables.TypeDefs.GetOwnerModule(ownerTypeDefRow)
+                    != selectedModule.ModuleRow
+                || selectedTables.TypeDefs.GetKind(ownerTypeDefRow) != 1
+                || selectedTables.Imports.IsExpectedDefinition(
+                    ownerDefinitionId)
                 || (fieldFlags & 3) != 2
                 || (fieldFlags & 8) != 0
                 || fieldRow < fieldStart || fieldRow >= fieldEnd
-                || tables.Fields.GetOwnerTypeDef(fieldRow)
+                || selectedTables.Fields.GetOwnerTypeDef(fieldRow)
                     != ownerTypeDefRow)
             {
                 throw new ArgumentException(
@@ -351,18 +513,16 @@ public static partial class TrRmExecutableCompiler
             }
 
             var fieldOrdinal = fieldRow - fieldStart;
-            var ownerIndex = ownerTypeDefRow - typeDefStart;
-            if ((uint)ownerIndex >= (uint)rootProviderModule
-                    .Program.Structures.Length
+            if (!canonicalStructureByOrigin.TryGetValue(ownerOrigin,
+                    out var ownerIndex)
                 || (uint)fieldOrdinal
-                    >= (uint)rootProviderModule
-                        .Program.Structures[ownerIndex].Fields.Length)
+                    >= (uint)program.Structures[ownerIndex].Fields.Length)
             {
                 throw Invalid(
                     "A selected FieldDef is outside its loaded owner.");
             }
 
-            var key = (ownerTypeDefRow, fieldOrdinal);
+            var key = (ownerIndex, fieldOrdinal);
             if (!selectedFieldKeysByOwner.TryGetValue(key,
                     out var selectedKeys))
             {
@@ -372,11 +532,109 @@ public static partial class TrRmExecutableCompiler
             selectedKeys.Add(selection.ExportKey);
         }
 
+        var typeExpectationsByOrigin = new Dictionary<
+            (string ModuleIdentity, uint DefinitionId),
+            List<BoundSourceTypeExpectation>>();
+        foreach (var edge in methodProviderClosure.TypeEdges)
+        {
+            if (!moduleByLocation.TryGetValue(
+                    (edge.ConsumerArtifactIndex, edge.ConsumerModuleRow),
+                    out var usingModule)
+                || !moduleByLocation.TryGetValue(
+                    (edge.ProviderArtifactIndex, edge.ProviderModuleRow),
+                    out var providerModule))
+            {
+                throw Invalid(
+                    "A retained TypeDef provider edge is outside the checked Module directory.");
+            }
+
+            if ((edge.ExpectedDefinitionId >> 24) != 0x13
+                || (edge.ActualDefinitionId >> 24) != 0x13
+                || !StringComparer.Ordinal.Equals(edge.ProducerIdentity,
+                    providerModule.Identity)
+                || edge.TargetRequirement
+                    != providerModule.TargetRequirement
+                || edge.RuntimePolicy != providerModule.RuntimePolicy)
+            {
+                throw Invalid(
+                    "A retained TypeDef provider edge has an invalid identity or requirement.");
+            }
+
+            var originKey = (providerModule.Identity,
+                edge.ActualDefinitionId);
+            if (!typeExpectationsByOrigin.TryGetValue(originKey,
+                    out var expectations))
+            {
+                expectations = [];
+                typeExpectationsByOrigin.Add(originKey, expectations);
+            }
+
+            expectations.Add(new BoundSourceTypeExpectation(
+                GetProviderSnapshot(usingModule), edge.ImportRow,
+                edge.ExpectedDefinitionId, edge.ProducerIdentity,
+                edge.ExportKey, edge.TargetRequirement, edge.RuntimePolicy,
+                GetProviderSnapshot(providerModule),
+                edge.ActualDefinitionId));
+        }
+
+        PrimitiveType RemapModuleType(
+            BoundStandardMethodProviderModule module, PrimitiveType type)
+        {
+            if (IsCombinedMethodScalarOrUnit(type))
+            {
+                return type;
+            }
+
+            var localStructureIndex = (int)type - 100;
+            if ((uint)localStructureIndex
+                >= (uint)module.Program.Structures.Length
+                || !moduleByLocation.TryGetValue(
+                    (module.ArtifactIndex, module.ModuleRow),
+                    out var selectedModule))
+            {
+                throw Unsupported(
+                    "A selected method signature uses an unsupported type family.");
+            }
+
+            var localStructure
+                = module.Program.Structures[localStructureIndex];
+            var localOrigin = localStructure.StandardTypeOrigin;
+            (string ModuleIdentity, uint DefinitionId) origin;
+            if (localOrigin is not null)
+            {
+                origin = (localOrigin.Provider.ModuleIdentity,
+                    localOrigin.DefinitionId);
+            }
+            else
+            {
+                var moduleTables = GetTables(module.ArtifactIndex);
+                var (typeDefStart, typeDefEnd)
+                    = moduleTables.Modules.GetTypeDefRange(
+                        module.ModuleRow);
+                if (typeDefEnd - typeDefStart
+                    != module.Program.Structures.Length)
+                {
+                    throw Invalid(
+                        "A local method TypeSpec does not map to its Module-owned TypeDef range.");
+                }
+
+                var typeDefRow = typeDefStart + localStructureIndex;
+                origin = (selectedModule.Identity,
+                    0x1300_0000u | checked((uint)typeDefRow));
+            }
+
+            return canonicalStructureByOrigin.TryGetValue(origin,
+                    out var structureIndex)
+                ? (PrimitiveType)(100 + structureIndex)
+                : throw Invalid(
+                    "A method struct TypeSpec is outside the checked provider closure.");
+        }
+
         var selectedStructures = new HashSet<int>();
         var pendingStructures = new Stack<int>();
-        foreach (var typeDefRow in selectedTypeKeysByRow.Keys)
+        foreach (var origin in selectedTypeKeysByOrigin.Keys)
         {
-            var structureIndex = typeDefRow - typeDefStart;
+            var structureIndex = canonicalStructureByOrigin[origin];
             _ = selectedStructures.Add(structureIndex);
             pendingStructures.Push(structureIndex);
         }
@@ -456,14 +714,9 @@ public static partial class TrRmExecutableCompiler
                     continue;
                 }
 
-                var structureIndex = (int)variable.Type - 100;
-                if ((uint)structureIndex
-                    >= (uint)rootProviderModule.Program.Structures.Length)
-                {
-                    throw Unsupported(
-                        "A selected method parameter uses an unsupported type family.");
-                }
-
+                var parameterType = RemapModuleType(rootProviderModule,
+                    variable.Type);
+                var structureIndex = (int)parameterType - 100;
                 _ = selectedStructures.Add(structureIndex);
                 pendingStructures.Push(structureIndex);
             }
@@ -472,8 +725,9 @@ public static partial class TrRmExecutableCompiler
                     defaultValue.ParameterOrdinal >= 0
                     && defaultValue.ParameterOrdinal
                         < function.ParameterCount
-                    && (int)function.Variables[
-                        defaultValue.ParameterOrdinal].Type >= 100))
+                    && (int)RemapModuleType(rootProviderModule,
+                        function.Variables[
+                            defaultValue.ParameterOrdinal].Type) >= 100))
             {
                 throw Unsupported(
                     "The combined method/type reference does not admit struct-valued parameter defaults.");
@@ -484,16 +738,27 @@ public static partial class TrRmExecutableCompiler
 
         while (pendingStructures.TryPop(out var structureIndex))
         {
-            var typeDefRow = typeDefStart + structureIndex;
-            if (!selectedTypeKeysByRow.ContainsKey(typeDefRow))
+            if ((uint)structureIndex
+                >= (uint)program.Structures.Length)
+            {
+                throw Invalid(
+                    "A selected method/type closure refers to an unknown canonical struct.");
+            }
+
+            var structure = program.Structures[structureIndex];
+            var origin = structure.StandardTypeOrigin
+                ?? throw Invalid(
+                    "A selected struct has no retained provider TypeDef origin.");
+            var originKey = (origin.Provider.ModuleIdentity,
+                origin.DefinitionId);
+            if (!selectedTypeKeysByOrigin.ContainsKey(originKey)
+                && !typeExpectationsByOrigin.ContainsKey(originKey))
             {
                 throw new ArgumentException(
-                    "Every selected method and nested struct dependency requires an explicit TypeDef ExportKey selection.",
+                    "Every provider-local method and nested struct dependency that requires a new Import needs an explicit TypeDef ExportKey selection.",
                     nameof(typeExportKeys));
             }
 
-            var structure
-                = rootProviderModule.Program.Structures[structureIndex];
             foreach (var field in structure.Fields)
             {
                 if (IsCombinedMethodScalarOrUnit(field.Type))
@@ -503,7 +768,7 @@ public static partial class TrRmExecutableCompiler
 
                 var nestedStructureIndex = (int)field.Type - 100;
                 if ((uint)nestedStructureIndex
-                    >= (uint)rootProviderModule.Program.Structures.Length)
+                    >= (uint)program.Structures.Length)
                 {
                     throw Unsupported(
                         "The selected struct closure contains an unsupported field type family.");
@@ -527,7 +792,7 @@ public static partial class TrRmExecutableCompiler
                 projectedIndex);
         }
 
-        PrimitiveType RemapType(PrimitiveType type)
+        PrimitiveType RemapCanonicalType(PrimitiveType type)
         {
             if (IsCombinedMethodScalarOrUnit(type))
             {
@@ -535,8 +800,7 @@ public static partial class TrRmExecutableCompiler
             }
 
             var structureIndex = (int)type - 100;
-            if ((uint)structureIndex >= (uint)rootProviderModule
-                    .Program.Structures.Length
+            if ((uint)structureIndex >= (uint)program.Structures.Length
                 || !projectedIndexByStructure.TryGetValue(structureIndex,
                     out var projectedIndex))
             {
@@ -547,28 +811,228 @@ public static partial class TrRmExecutableCompiler
             return (PrimitiveType)(100 + projectedIndex);
         }
 
+        PrimitiveType RemapMethodType(PrimitiveType type)
+            => RemapCanonicalType(
+                RemapModuleType(rootProviderModule, type));
+
+        void AddTypeExpectation(
+            Dictionary<(string ModuleIdentity, int ModuleRow, int ImportRow,
+                uint ExpectedDefinitionId), BoundSourceTypeExpectation>
+                expectationsByImport,
+            BoundSourceTypeExpectation expectation)
+        {
+            var key = (expectation.UsingModule.ModuleIdentity,
+                expectation.UsingModule.ModuleRow, expectation.ImportRow,
+                expectation.ExpectedDefinitionId);
+            if (expectationsByImport.TryGetValue(key,
+                    out var existingExpectation))
+            {
+                if (!StringComparer.Ordinal.Equals(
+                        existingExpectation.ProducerIdentity,
+                        expectation.ProducerIdentity)
+                    || !StringComparer.Ordinal.Equals(
+                        existingExpectation.ExportKey,
+                        expectation.ExportKey)
+                    || existingExpectation.TargetRequirement
+                        != expectation.TargetRequirement
+                    || existingExpectation.RuntimePolicy
+                        != expectation.RuntimePolicy
+                    || existingExpectation.ProviderDefinitionId
+                        != expectation.ProviderDefinitionId
+                    || !SameA2SourceTypeProviderSnapshot(
+                        existingExpectation.UsingModule,
+                        expectation.UsingModule)
+                    || !SameA2SourceTypeProviderSnapshot(
+                        existingExpectation.Provider,
+                        expectation.Provider))
+                {
+                    throw Invalid(
+                        "A retained TypeDef Import row has conflicting provider expectations.");
+                }
+
+                return;
+            }
+
+            expectationsByImport.Add(key, expectation);
+        }
+
         var projectedStructures
             = ImmutableArray.CreateBuilder<BoundStruct>(
                 structureOrder.Length);
         foreach (var structureIndex in structureOrder)
         {
-            var typeDefRow = typeDefStart + structureIndex;
-            var original
-                = rootProviderModule.Program.Structures[structureIndex];
-            var (fieldStart, _) = tables.TypeDefs.GetFieldRange(typeDefRow);
-            var remappedFields = ImmutableArray.CreateBuilder<
-                BoundStructField>(original.Fields.Length);
-            for (var fieldOrdinal = 0;
-                fieldOrdinal < original.Fields.Length; fieldOrdinal++)
+            var original = program.Structures[structureIndex];
+            var originalTypeOrigin = original.StandardTypeOrigin
+                ?? throw Invalid(
+                    "A selected struct lost its provider TypeDef origin.");
+            var typeOriginKey = (originalTypeOrigin.Provider.ModuleIdentity,
+                originalTypeOrigin.DefinitionId);
+            if (!moduleByIdentity.TryGetValue(
+                    originalTypeOrigin.Provider.ModuleIdentity,
+                    out var providerModule))
             {
-                var originalField = original.Fields[fieldOrdinal];
+                throw Invalid(
+                    "A selected struct provider is outside the checked Module directory.");
+            }
+
+            var providerTables = GetTables(providerModule.ArtifactIndex);
+            var typeDefRow = checked((int)(
+                originalTypeOrigin.DefinitionId & 0x00FF_FFFF));
+            var (typeDefStart, typeDefEnd)
+                = providerTables.Modules.GetTypeDefRange(
+                    providerModule.ModuleRow);
+            var (fieldStart, fieldEnd)
+                = providerTables.TypeDefs.GetFieldRange(typeDefRow);
+            var providerSnapshot = GetProviderSnapshot(providerModule);
+            var selectedTypeKeys
+                = selectedTypeKeysByOrigin.TryGetValue(typeOriginKey,
+                    out var selectedKeys)
+                    ? ImmutableArray.Create(selectedKeys[0])
+                    : ImmutableArray<string>.Empty;
+            var projectionSource = original;
+            BoundStandardMethodProviderModule? projectionModule = null;
+            var typeExpectations
+                = ImmutableArray<BoundSourceTypeExpectation>.Empty;
+            var referenceRoot = providerSnapshot;
+            var originExportKeys = GetExportKeys(providerModule,
+                originalTypeOrigin.DefinitionId);
+            if (selectedTypeKeys.IsEmpty)
+            {
+                var expectationsByImport = new Dictionary<(
+                    string ModuleIdentity, int ModuleRow, int ImportRow,
+                    uint ExpectedDefinitionId), BoundSourceTypeExpectation>();
+                if (!originalTypeOrigin.Expectations.IsDefaultOrEmpty)
+                {
+                    foreach (var expectation in
+                        originalTypeOrigin.Expectations)
+                    {
+                        AddTypeExpectation(expectationsByImport,
+                            expectation);
+                    }
+                }
+
+                if (typeExpectationsByOrigin.TryGetValue(typeOriginKey,
+                        out var retainedExpectations))
+                {
+                    foreach (var expectation in retainedExpectations)
+                    {
+                        AddTypeExpectation(expectationsByImport,
+                            expectation);
+                    }
+                }
+
+                typeExpectations
+                    = [.. expectationsByImport.Values];
+                if (typeExpectations.IsEmpty)
+                {
+                    throw new NotSupportedException(
+                        "A closure-only imported struct requires retained TypeDef Import expectations.");
+                }
+
+                var firstExpectation = typeExpectations[0];
+                if (typeExpectations.Any(expectation =>
+                        !SameA2SourceTypeProviderSnapshot(
+                            expectation.UsingModule,
+                            firstExpectation.UsingModule)
+                        || expectation.ExpectedDefinitionId
+                            != firstExpectation.ExpectedDefinitionId
+                        || !SameA2SourceTypeProviderSnapshot(
+                            expectation.Provider, providerSnapshot)
+                        || expectation.ProviderDefinitionId
+                            != originalTypeOrigin.DefinitionId))
+                {
+                    throw new NotSupportedException(
+                        "A closure-only struct with multiple using-Module or expected-TypeDef contexts requires contextual TypeDef cloning.");
+                }
+
+                if (!moduleByIdentity.TryGetValue(
+                        firstExpectation.UsingModule.ModuleIdentity,
+                        out var expectationModule)
+                    || expectationModule.ModuleRow
+                        != firstExpectation.UsingModule.ModuleRow
+                    || !typeProgramByLocation.TryGetValue((
+                        expectationModule.ArtifactIndex,
+                        expectationModule.ModuleRow),
+                        out projectionModule))
+                {
+                    throw Invalid(
+                        "A retained struct TypeDef expectation has no loaded using Module.");
+                }
+
+                var expectedTypeDefRow = checked((int)(
+                    firstExpectation.ExpectedDefinitionId & 0x00FF_FFFF));
+                var expectationTables = GetTables(
+                    expectationModule.ArtifactIndex);
+                var (expectedTypeDefStart, expectedTypeDefEnd)
+                    = expectationTables.Modules.GetTypeDefRange(
+                        expectationModule.ModuleRow);
+                if ((firstExpectation.ExpectedDefinitionId >> 24) != 0x13
+                    || expectedTypeDefRow < expectedTypeDefStart
+                    || expectedTypeDefRow >= expectedTypeDefEnd
+                    || expectedTypeDefEnd - expectedTypeDefStart
+                        != projectionModule.Program.Structures.Length)
+                {
+                    throw Invalid(
+                        "A retained struct TypeDef expectation is outside its using Module.");
+                }
+
+                var expectedStructure = projectionModule.Program.Structures[
+                    expectedTypeDefRow - expectedTypeDefStart];
+                var expectedOrigin = expectedStructure.StandardTypeOrigin;
+                if (expectedOrigin is null
+                    || expectedOrigin.DefinitionId
+                        != originalTypeOrigin.DefinitionId
+                    || !SameA2SourceTypeProviderSnapshot(
+                        expectedOrigin.Provider, providerSnapshot))
+                {
+                    throw Invalid(
+                        "A retained struct TypeDef expectation does not map to the canonical provider identity.");
+                }
+
+                projectionSource
+                    = expectedOrigin.ExpectedDeclaration
+                        ?? expectedStructure;
+                referenceRoot = firstExpectation.UsingModule;
+                originExportKeys = [
+                    .. typeExpectations.Select(static expectation =>
+                            expectation.ExportKey)
+                        .Distinct(StringComparer.Ordinal),
+                ];
+            }
+
+            if ((originalTypeOrigin.DefinitionId >> 24) != 0x13
+                || typeDefRow < typeDefStart || typeDefRow >= typeDefEnd
+                || providerTables.TypeDefs.GetOwnerModule(typeDefRow)
+                    != providerModule.ModuleRow
+                || providerTables.TypeDefs.GetKind(typeDefRow) != 1
+                || !SameA2SourceTypeProviderSnapshot(
+                    originalTypeOrigin.Provider, providerSnapshot)
+                || fieldEnd - fieldStart != original.Fields.Length
+                || projectionSource.Fields.Length != original.Fields.Length)
+            {
+                throw Invalid(
+                    "A canonical struct origin does not match its provider-owned TypeDef and fields.");
+            }
+
+            PrimitiveType RemapProjectionType(PrimitiveType type)
+                => projectionModule is null
+                    ? RemapCanonicalType(type)
+                    : RemapModuleType(projectionModule, type);
+
+            var remappedFields = ImmutableArray.CreateBuilder<
+                BoundStructField>(projectionSource.Fields.Length);
+            for (var fieldOrdinal = 0;
+                fieldOrdinal < projectionSource.Fields.Length;
+                fieldOrdinal++)
+            {
+                var originalField = projectionSource.Fields[fieldOrdinal];
                 var field = originalField with {
-                    Type = RemapType(originalField.Type),
+                    Type = RemapProjectionType(originalField.Type),
                     StandardFieldOrigin = null,
                 };
                 if (selectedFieldKeysByOwner.TryGetValue(
-                        (typeDefRow, fieldOrdinal),
-                        out var selectedKeys))
+                        (structureIndex, fieldOrdinal),
+                        out var selectedFieldKeys))
                 {
                     var fieldRow = fieldStart + fieldOrdinal;
                     var fieldDefinitionId = 0x1400_0000u
@@ -576,51 +1040,116 @@ public static partial class TrRmExecutableCompiler
                     var expectedField = field with {
                         StandardFieldOrigin = null,
                     };
+                    var existingOrigin
+                        = originalField.StandardFieldOrigin;
+                    if (existingOrigin is not null
+                        && (existingOrigin.DefinitionId
+                                != fieldDefinitionId
+                            || !SameA2SourceTypeProviderSnapshot(
+                                existingOrigin.Provider,
+                                providerSnapshot)))
+                    {
+                        throw Invalid(
+                            "A selected FieldDef conflicts with its retained provider origin.");
+                    }
+
+                    var selectedKeys
+                        = ImmutableArray.Create(selectedFieldKeys[0]);
+                    var allFieldExportKeys = GetExportKeys(
+                        providerModule, fieldDefinitionId);
+                    BoundStandardFieldOrigin fieldOrigin;
+                    if (existingOrigin is null)
+                    {
+                        fieldOrigin = new BoundStandardFieldOrigin(
+                            providerSnapshot, fieldDefinitionId,
+                            allFieldExportKeys, true, expectedField) {
+                            SelectedExportKeys = selectedKeys,
+                            AdditionalExpectedDeclarations = [],
+                        };
+                    }
+                    else
+                    {
+                        var additionalExpected
+                            = existingOrigin.AdditionalExpectedDeclarations;
+                        fieldOrigin = existingOrigin with {
+                            ExportKeys = allFieldExportKeys,
+                            IsLookupRoot = true,
+                            ExpectedDeclaration = expectedField,
+                            SelectedExportKeys = selectedKeys,
+                            AdditionalExpectedDeclarations
+                                = additionalExpected.IsDefaultOrEmpty
+                                    ? []
+                                    : [.. additionalExpected.Select(
+                                        expected => expected with {
+                                            Type = RemapProjectionType(
+                                                expected.Type),
+                                            StandardFieldOrigin = null,
+                                        })],
+                        };
+                    }
                     field = field with {
-                        StandardFieldOrigin =
-                            new BoundStandardFieldOrigin(
-                                providerSnapshot, fieldDefinitionId,
-                                [.. allFieldExports[fieldRow]], true,
-                                expectedField) {
-                                SelectedExportKeys = [.. selectedKeys],
-                                AdditionalExpectedDeclarations = [],
-                            },
+                        StandardFieldOrigin = fieldOrigin,
+                    };
+                }
+                else if (originalField.StandardFieldOrigin is
+                         BoundStandardFieldOrigin existingOrigin)
+                {
+                    BoundStructField? expectedField
+                        = existingOrigin.ExpectedDeclaration is
+                            BoundStructField priorExpected
+                            ? priorExpected with {
+                                Type = RemapProjectionType(
+                                    priorExpected.Type),
+                                StandardFieldOrigin = null,
+                            }
+                            : null;
+                    var additionalExpected
+                        = existingOrigin.AdditionalExpectedDeclarations;
+                    field = field with {
+                        StandardFieldOrigin = existingOrigin with {
+                            IsLookupRoot = false,
+                            ExpectedDeclaration = expectedField,
+                            SelectedExportKeys = [],
+                            AdditionalExpectedDeclarations
+                                = additionalExpected.IsDefaultOrEmpty
+                                    ? []
+                                    : [.. additionalExpected.Select(
+                                        expected => expected with {
+                                            Type = RemapProjectionType(
+                                                expected.Type),
+                                            StandardFieldOrigin = null,
+                                        })],
+                        },
                     };
                 }
 
                 remappedFields.Add(field);
             }
 
-            var expectedDeclaration = original with {
+            var declaredCopyEvidence
+                = providerTables.TypeDefs.HasDeclaredCopy(typeDefRow);
+            var expectedDeclaration = projectionSource with {
                 Fields = [.. remappedFields.Select(static field => field with {
                     StandardFieldOrigin = null,
                 })],
                 StandardTypeOrigin = null,
                 StandardLayoutOnly = false,
-                DeclaredCopyEvidence
-                    = tables.TypeDefs.HasDeclaredCopy(typeDefRow),
+                DeclaredCopyEvidence = declaredCopyEvidence,
             };
-            var typeDefinitionId = 0x1300_0000u
-                | checked((uint)typeDefRow);
-            var selectedTypeKeys = selectedTypeKeysByRow.TryGetValue(
-                typeDefRow, out var selectedKeys)
-                ? ImmutableArray.CreateRange(selectedKeys)
-                : ImmutableArray<string>.Empty;
-            projectedStructures.Add(original with {
+            projectedStructures.Add(projectionSource with {
                 Fields = remappedFields.MoveToImmutable(),
-                StandardTypeOrigin = new BoundStandardTypeOrigin(
-                    providerSnapshot, typeDefinitionId,
-                    [.. allTypeExports[typeDefRow]],
-                    selectedTypeKeysByRow.ContainsKey(typeDefRow),
-                    [],
-                    ReferenceRoot: providerSnapshot,
-                    ExpectedDeclaration: expectedDeclaration) {
+                StandardTypeOrigin = originalTypeOrigin with {
+                    Expectations = typeExpectations,
+                    ExportKeys = originExportKeys,
+                    IsLookupRoot = !selectedTypeKeys.IsEmpty,
+                    ReferenceRoot = referenceRoot,
+                    ExpectedDeclaration = expectedDeclaration,
                     SelectedExportKeys = selectedTypeKeys,
-                    AdditionalExpectedDeclarations = [],
+                    AdditionalExpectedDeclarations
+                        = originalTypeOrigin.AdditionalExpectedDeclarations,
                 },
                 StandardLayoutOnly = true,
-                DeclaredCopyEvidence
-                    = tables.TypeDefs.HasDeclaredCopy(typeDefRow),
+                DeclaredCopyEvidence = declaredCopyEvidence,
             });
         }
 
@@ -637,7 +1166,7 @@ public static partial class TrRmExecutableCompiler
                 IndexedBody = null,
             };
             signature = BoundTreeTraversal.RewriteTypes(signature,
-                RemapType);
+                RemapMethodType);
             projectedFunctions.Add(signature with {
                 Name = exportKey,
                 Body = new BoundBlock([], default),
@@ -657,8 +1186,32 @@ public static partial class TrRmExecutableCompiler
             Structures = structures,
         };
         SemanticVerifier.VerifyLibraryReferences(projectedProgram);
+        var sourceProviderClosures
+            = ImmutableArray.CreateBuilder<
+                BoundStandardFieldProviderClosure>();
+        if (program.StandardQuerySourceAssociation is
+            BoundStandardQuerySourceAssociation existingAssociation)
+        {
+            sourceProviderClosures.AddRange(
+                existingAssociation.ProviderClosures);
+        }
+        if (program.StandardFieldProviderClosure is
+                BoundStandardFieldProviderClosure fieldProviderClosure
+            && !sourceProviderClosures.Any(closure =>
+                ReferenceEquals(closure, fieldProviderClosure)))
+        {
+            sourceProviderClosures.Add(fieldProviderClosure);
+        }
+
+        var standardQuerySourceAssociation
+            = sourceProviderClosures.Count == 0
+                ? null
+                : new BoundStandardQuerySourceAssociation(
+                    sourceProviderClosures.ToImmutable());
         return new CompilationReference(structures, functions,
-            (BoundRuntimePolicy)runtimePolicy);
+            (BoundRuntimePolicy)runtimePolicy,
+            standardQuerySourceAssociation:
+                standardQuerySourceAssociation);
     }
 
     private static bool IsCombinedMethodScalarOrUnit(PrimitiveType type)

@@ -693,18 +693,8 @@ public static partial class TrRmExecutableCompiler
             coreContractFailureIdentitySelections);
         var rootModuleRow = moduleValidation.RootModuleRow;
         var construction2MethodLinking
-            = schemaIdentities.Length != 0
-                && schemaIdentities.All(schemaIdentity =>
-                    StringComparer.Ordinal.Equals(schemaIdentity,
-                        schemaIdentities[0]))
-                && (IsSelectedC1ClassConstructionSchemaIdentity(
-                        schemaIdentities[0])
-                    || StandardGenericMethodSchema
-                        .IsCM1ClassParameterDefaults(schemaIdentities[0]))
-                && GetForeignInvocationSchema(schemaIdentities[0])
-                    .UsesObjectConstruction()
-                && !IsSelectedC1ClassInstanceLayoutSchemaIdentity(
-                    schemaIdentities[0]);
+            = IsConstruction2MethodProviderClosureSchemaSet(
+                schemaIdentities);
         var includesInitializationReferenceNestedFieldDestinations
             = schemaIdentities.Length != 0
                 && schemaIdentities.All(schemaIdentity =>
@@ -4631,6 +4621,9 @@ public static partial class TrRmExecutableCompiler
                 && schemaIdentities.All(static schemaIdentity =>
                     StringComparer.Ordinal.Equals(schemaIdentity,
                         StandardLocalAggregateLayoutSchemaIdentity));
+        var includesConstruction2MethodProviderClosure
+            = IsConstruction2MethodProviderClosureSchemaSet(
+                schemaIdentities);
         var includesLayoutQueryProviderClosure
             = schemaIdentities.Length != 0
                 && schemaIdentities.All(static schemaIdentity =>
@@ -4645,6 +4638,8 @@ public static partial class TrRmExecutableCompiler
                     schemaIdentities[0]);
         var identities = new HashSet<string>(StringComparer.Ordinal);
         var rootModuleRow = 0;
+        var rootHasConstruction2MethodWork = false;
+        var hasConstruction2ProviderModuleImports = false;
         var moduleSelections
             = ImmutableArray.CreateBuilder<TrRmStandardModuleSelection>();
         for (var index = 0; index < artifacts.Length; index++)
@@ -4809,6 +4804,12 @@ public static partial class TrRmExecutableCompiler
                     = tables.Modules.GetModuleRefRange(moduleRow);
                 var isSelectedRoot = index == 0
                     && moduleRow == rootModuleRow;
+                if (isSelectedRoot
+                    && includesConstruction2MethodProviderClosure)
+                {
+                    rootHasConstruction2MethodWork
+                        = methodEnd != methodStart;
+                }
                 var isA2TypeOnlyModule
                     = (schemaIdentities[index] is
                         StandardForeignInvocationStorageFixedArraySchemaIdentity
@@ -4824,11 +4825,17 @@ public static partial class TrRmExecutableCompiler
                 if (!isSelectedRoot && moduleRefEnd != moduleRefStart
                     && !isA2TypeOnlyModule && !includesFProviderClosure
                     && !includesL1MethodProviderClosure
+                    && !includesConstruction2MethodProviderClosure
                     && !includesInitializationReferenceLocalFieldLayout
                     && !includesLayoutQueryProviderClosure)
                 {
                     throw Unsupported(
                         "Provider Imports require a supported exact provider closure or an A2 type-only Module.");
+                }
+                if (!isSelectedRoot && moduleRefEnd != moduleRefStart
+                    && includesConstruction2MethodProviderClosure)
+                {
+                    hasConstruction2ProviderModuleImports = true;
                 }
 
                 if (isA2TypeOnlyModule)
@@ -4871,7 +4878,8 @@ public static partial class TrRmExecutableCompiler
 
                 if (!isSelectedRoot && methodEnd != methodStart
                     && !includesFProviderClosure
-                    && !includesL1MethodProviderClosure)
+                    && !includesL1MethodProviderClosure
+                    && !includesConstruction2MethodProviderClosure)
                 {
                     if (includesInitializationReferenceBodyClosure)
                     {
@@ -4962,9 +4970,31 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
+        if (hasConstruction2ProviderModuleImports
+            && !rootHasConstruction2MethodWork)
+        {
+            throw Unsupported(
+                "Construction-2 provider Module Imports require a root MethodDef closure.");
+        }
+
         return new StandardModuleValidation(rootModuleRow,
             moduleSelections.ToImmutable(), hasNativeOutputProviderImports);
     }
+
+    private static bool IsConstruction2MethodProviderClosureSchemaSet(
+        string[] schemaIdentities)
+        => schemaIdentities.Length != 0
+            && schemaIdentities.All(schemaIdentity =>
+                StringComparer.Ordinal.Equals(schemaIdentity,
+                    schemaIdentities[0]))
+            && (IsSelectedC1ClassConstructionSchemaIdentity(
+                    schemaIdentities[0])
+                || StandardGenericMethodSchema
+                    .IsCM1ClassParameterDefaults(schemaIdentities[0]))
+            && GetForeignInvocationSchema(schemaIdentities[0])
+                .UsesObjectConstruction()
+            && !IsSelectedC1ClassInstanceLayoutSchemaIdentity(
+                schemaIdentities[0]);
 
     private static bool IsSelectedConstruction2SchemaIdentity(
         string schemaIdentity)
