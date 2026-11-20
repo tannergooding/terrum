@@ -179,12 +179,15 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
             Is.EquivalentTo(["RootA", "RootB"]));
     }
 
-    [Test]
-    public void ComposesDirectStructFieldDependenciesForClassTypeViews()
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsClassTypeBindingViews)]
+    public void ComposesDirectStructFieldDependenciesForClassTypeViews(
+        string schemaIdentity)
     {
-        var schemaIdentity
-            = StandardGenericMethodSchema
-                .C1M1Construction2ClassTypeBindingViews;
         var rootA = CreateArtifact("RootA", "BoxA", "BoxAKey", 0,
             schemaIdentity, null, null, null,
             localDependencyTypeName: "Leaf");
@@ -219,12 +222,15 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
             string.Join(Environment.NewLine, compilation.Diagnostics));
     }
 
-    [Test]
-    public void ComposesStructOnlyRootWithClassFieldExpectation()
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsClassTypeBindingViews)]
+    public void ComposesStructOnlyRootWithClassFieldExpectation(
+        string schemaIdentity)
     {
-        var schemaIdentity
-            = StandardGenericMethodSchema
-                .C1M1Construction2ClassTypeBindingViews;
         var provider = CreateClassArtifact("Provider", "Leaf", "LeafKey",
             0xF200_0008, schemaIdentity);
         SetTypeDefFlags(provider, 0x06);
@@ -255,21 +261,28 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
             string.Join(Environment.NewLine, compilation.Diagnostics));
     }
 
-    [Test]
-    public void ReemitsSelectedDirectStructRootsWithClassViews()
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsClassTypeBindingViews)]
+    public void ReemitsSelectedDirectStructRootsWithClassViews(
+        string schemaIdentity)
     {
-        var schemaIdentity
-            = StandardGenericMethodSchema
-                .C1M1Construction2ClassTypeBindingViews;
         var root = CreateArtifact("Root", "Box", "BoxKey", 0,
             schemaIdentity, null, null, null,
             localDependencyTypeName: "Leaf",
             localDependencyExportKey: "LeafKey");
         SetTypeDefFlags(root, 0x06, typeDefRow: 2);
 
-        var reference = TrRmExecutableCompiler.CreateStandardReference(
-            new TrRmStandardArtifactInput(schemaIdentity, root), "Root",
-            [], ["BoxKey", "LeafKey"]);
+        var input = new TrRmStandardArtifactInput(schemaIdentity, root);
+        var classReference = TrRmExecutableCompiler.CreateStandardReference(
+            input, "Root", [], ["BoxKey"]);
+        var structReference = TrRmExecutableCompiler.CreateStandardReference(
+            input, "Root", [], ["LeafKey"]);
+        var reference = TrRmExecutableCompiler.CreateStandardReferenceSet(
+            [classReference, structReference]);
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             "public void Use(Box box, Leaf leaf) {}"), reference);
         Assert.That(compilation.HasErrors, Is.False,
