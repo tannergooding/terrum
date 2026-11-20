@@ -2710,6 +2710,148 @@ internal sealed class TrRmC1EnumClosureSourceTests
     }
 
     [Test]
+    public void ComposesClassLayoutReferencesWithInlineStructFields()
+    {
+        var schemaIdentity
+            = $"{s_schemaIdentities[0]}-class-instance-layout-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        var providerTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public struct Payload {
+                    public int32 Value;
+                }
+                public class Alpha {
+                    public Payload Data;
+                }
+            }
+            """);
+        var providerCompilation = Compilation.CreateLibrary(providerTree);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerProgram = (BoundProgram)providerCompilation.Program!;
+        var classDeclaration = providerTree.Root.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var classField = classDeclaration.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.FieldDeclaration);
+        var classIndex = providerProgram.SourceClassProgramAssociation!
+            .Declarations.Single(declaration =>
+                declaration.Span == classDeclaration.Span).ClassIndex;
+        var classExport = new TrRmSourceClassExport(providerProgram,
+            classIndex, classDeclaration.Span, "type.alpha", [
+                new TrRmSourceClassMemberExport(0, classField.Span,
+                    "field.alpha.data"),
+            ]);
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, "AlphaStructProvider", schemaIdentity,
+            targetRequirement, [
+                new TrRmSourceTypeExport("Demo", "Payload",
+                    "type.payload") {
+                    FieldExports = [
+                        new TrRmSourceFieldExport("Value",
+                            "field.payload.value"),
+                    ],
+                },
+            ], [], [classExport], []);
+        var alphaInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var alphaReference = TrRmExecutableCompiler.CreateStandardReference(
+            alphaInput, "AlphaStructProvider", [], [
+                "type.alpha", "type.payload",
+            ], [
+                "field.alpha.data", "field.payload.value",
+            ]);
+
+        var betaTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public class Beta {
+                    public int32 Value;
+                }
+            }
+            """);
+        var betaCompilation = Compilation.CreateLibrary(betaTree);
+        Assert.That(betaCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, betaCompilation.Diagnostics));
+        var betaProgram = (BoundProgram)betaCompilation.Program!;
+        var betaDeclaration = betaTree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var betaField = betaDeclaration.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.FieldDeclaration);
+        var betaClassIndex = betaProgram.SourceClassProgramAssociation!
+            .Declarations.Single(declaration =>
+                declaration.Span == betaDeclaration.Span).ClassIndex;
+        var betaClassExport = new TrRmSourceClassExport(betaProgram,
+            betaClassIndex, betaDeclaration.Span, "type.beta", [
+                new TrRmSourceClassMemberExport(0, betaField.Span,
+                    "field.beta.value"),
+            ]);
+        var betaArtifact = TrRmExecutableCompiler.EmitStandard(betaProgram,
+            "BetaProvider", schemaIdentity, targetRequirement, [], [],
+            [betaClassExport], []);
+        var betaInput = new TrRmStandardArtifactInput(schemaIdentity,
+            betaArtifact);
+        var betaReference = TrRmExecutableCompiler.CreateStandardReference(
+            betaInput, "BetaProvider", [], ["type.beta"],
+            ["field.beta.value"]);
+        var reference = TrRmExecutableCompiler.CreateStandardReferenceSet(
+            [alphaReference, betaReference]);
+
+        Assert.That(reference.Structures, Has.Length.EqualTo(1));
+        Assert.That((int)reference.StandardClassDeclarations.Single(
+            static declaration =>
+                declaration.Declaration.Name == "Alpha")
+            .Declaration.Fields.Single().Type, Is.EqualTo(100));
+
+        var consumer = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Demo;
+                nint CombinedOffset() {
+                    return unsafe(offsetof(Alpha, Data.Value))
+                        + unsafe(offsetof(Beta, Value));
+                }
+                """), reference, new CompilationOptions {
+                LayoutCoreRegistration
+                    = LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            consumer.Program!, "InlineStructConsumer", schemaIdentity,
+            targetRequirement);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                artifact, SchemaFor(schemaIdentity), null,
+                usesNativePointerLoads: false,
+                standardSchemaIdentity: schemaIdentity));
+        Assert.That(tables.TargetLayoutDependencies.Count,
+            Is.EqualTo(2));
+        Assert.That(tables.TargetLayoutDependencyFields.Count,
+            Is.EqualTo(3));
+        Assert.That(tables.ModuleRefs.Count, Is.EqualTo(2));
+        var imports = Enumerable.Range(1, tables.Imports.Count)
+            .Select(tables.Imports.GetBindingForImportRow).ToArray();
+        Assert.That(imports.Any(static binding =>
+                binding.ProducerIdentity == "AlphaStructProvider"
+                && binding.ExportKey == "type.payload"),
+            Is.True);
+        Assert.That(imports.Any(static binding =>
+                binding.ProducerIdentity == "AlphaStructProvider"
+                && binding.ExportKey == "field.payload.value"),
+            Is.True);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "InlineStructConsumer", [alphaInput, betaInput]);
+        Assert.That(loaded.Functions.Single().Name,
+            Is.EqualTo("CombinedOffset"));
+    }
+
+    [Test]
     public void UsesFirstExplicitAliasesForEN1ClassQueryBodies()
     {
         var schemaIdentity

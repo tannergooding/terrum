@@ -755,16 +755,44 @@ public static partial class TrRmExecutableCompiler
                     "EN1 class re-emission does not retain PI1 property and initialized-state declarations.");
             }
 
+            var classQueryRootProviderIdentities
+                = standardClassDeclarations
+                    .Where(declaration =>
+                        classQueryRootIdentities.Contains(
+                            declaration.Declaration.Identity))
+                    .Select(static declaration =>
+                        declaration.Declaration.Provider.ModuleIdentity)
+                    .ToHashSet(StringComparer.Ordinal);
+            var structureProviderIdentities = program.Structures
+                .Where(static structure =>
+                    structure.StandardTypeOrigin is not null)
+                .Select(static structure =>
+                    structure.StandardTypeOrigin!.Provider.ModuleIdentity)
+                .Distinct(StringComparer.Ordinal).ToArray();
+            var structureProvidersFitQueryRoots
+                = program.Structures.All(static structure =>
+                    structure.StandardTypeOrigin is not null)
+                    && structureProviderIdentities.Length <= 1
+                    && (structureProviderIdentities.Length == 0
+                        || classQueryRootProviderIdentities.Contains(
+                            structureProviderIdentities[0]));
             allowMultipleClassQueryProviders
                 = classQueryRootIdentities.Count > 1
-                    && program.Structures.IsEmpty
                     && program.EnumDefinitions.IsEmpty
                     && program.Classes.IsEmpty
+                    && structureProvidersFitQueryRoots
                     && standardClassDeclarations.Where(declaration =>
                             classQueryRootIdentities.Contains(
                                 declaration.Declaration.Identity))
                         .All(static declaration =>
                             declaration.Expectations.IsEmpty);
+            if (allowMultipleClassQueryProviders
+                && !program.Structures.IsEmpty)
+            {
+                rootSnapshot = program.Structures[0].StandardTypeOrigin!
+                    .Provider;
+            }
+
             var classRootProviders
                 = new List<BoundSourceTypeProviderSnapshot>();
             foreach (var declaration in standardClassDeclarations)
@@ -1611,6 +1639,10 @@ public static partial class TrRmExecutableCompiler
                 var origin = structure.StandardTypeOrigin
                     ?? throw Invalid(
                         "A mixed EN1 struct re-emission lost its TypeDef origin.");
+                var directForeignStructure
+                    = origin.Expectations.IsDefaultOrEmpty
+                        && !StringComparer.Ordinal.Equals(
+                            origin.Provider.ModuleIdentity, moduleIdentity);
                 if (rootSnapshot is null
                     || origin.ExportKeys.IsDefault
                     || origin.SelectedExportKeys.IsDefault
@@ -1694,6 +1726,36 @@ public static partial class TrRmExecutableCompiler
                         typeImports);
                     sourceStructExportsByIndex.Add(structureIndex, []);
                 }
+                else if (directForeignStructure)
+                {
+                    if (!SameA2SourceTypeProviderSnapshot(rootSnapshot,
+                            origin.Provider)
+                        || !origin.IsLookupRoot
+                        || origin.ExportKeys.IsDefaultOrEmpty
+                        || origin.SelectedExportKeys.IsDefaultOrEmpty
+                        || origin.SelectedExportKeys.Any(key =>
+                            !origin.ExportKeys.Contains(key,
+                                StringComparer.Ordinal))
+                        || (origin.DefinitionId >> 24) != 0x13
+                        || (origin.DefinitionId & 0x00FF_FFFF) == 0)
+                    {
+                        throw Unsupported(
+                            "An EN1 foreign inline structure requires an exact selected TypeDef ExportKey.");
+                    }
+
+                    var typeImport = new C1EnumClosureImport(
+                        origin.Provider.ModuleIdentity,
+                        origin.SelectedExportKeys[0],
+                        origin.Provider.TargetRequirement,
+                        origin.Provider.RuntimePolicy);
+                    sourceStructImportsByIndex.Add(structureIndex, [
+                        typeImport,
+                    ]);
+                    sourceStructExportsByIndex.Add(structureIndex, []);
+                    rootTypeDefRowByStructureIndex.Add(structureIndex,
+                        checked((int)(origin.DefinitionId
+                            & 0x00FF_FFFF)));
+                }
                 else
                 {
                     if (!SameA2SourceTypeProviderSnapshot(
@@ -1748,7 +1810,34 @@ public static partial class TrRmExecutableCompiler
                             "Mixed EN1 struct re-emission cannot weaken its retained FieldDef snapshot.");
                     }
 
-                    if (SameA2SourceTypeProviderSnapshot(rootSnapshot,
+                    if (directForeignStructure)
+                    {
+                        if (!SameA2SourceTypeProviderSnapshot(rootSnapshot,
+                                fieldOrigin.Provider)
+                            || fieldOrigin.ExportKeys.IsDefaultOrEmpty
+                            || fieldOrigin.SelectedExportKeys
+                                .IsDefaultOrEmpty
+                            || fieldOrigin.SelectedExportKeys.Any(key =>
+                                !fieldOrigin.ExportKeys.Contains(key,
+                                    StringComparer.Ordinal))
+                            || fieldOrigin.SelectedExportKeys.Any(key =>
+                                !BoundEnumTypes.IsValidModuleDeclarationKey(
+                                    key)))
+                        {
+                            throw Unsupported(
+                                "An EN1 foreign inline structure FieldDef requires an exact selected provider ExportKey.");
+                        }
+
+                        sourceStructFieldImportsByIndex.Add(
+                            (structureIndex, fieldIndex), [
+                                new C1EnumClosureImport(
+                                    fieldOrigin.Provider.ModuleIdentity,
+                                    fieldOrigin.SelectedExportKeys[0],
+                                    fieldOrigin.Provider.TargetRequirement,
+                                    fieldOrigin.Provider.RuntimePolicy),
+                            ]);
+                    }
+                    else if (SameA2SourceTypeProviderSnapshot(rootSnapshot,
                             fieldOrigin.Provider))
                     {
                         if (!origin.Expectations.IsDefaultOrEmpty
@@ -2775,9 +2864,18 @@ public static partial class TrRmExecutableCompiler
         var importRowByRootClassImport = new Dictionary<int, int>();
         var importRowByRootClassIdentity
             = new Dictionary<BoundGenericNominalTypeIdentity, int>();
-        var ambiguousRootClassTypeDefRows
+        var rootProviderClassTypeDefs
             = standardClassDeclarationsByTypeDef
-                .GroupBy(static emission => emission.RootTypeDefRow)
+                .Select((emission, ordinal) => (emission,
+                    typeDefRow: emittedEnums.Count
+                        + retainedClassIndexes.Count + ordinal + 1))
+                .Where(item => rootSnapshot is not null
+                    && SameA2SourceTypeProviderSnapshot(rootSnapshot,
+                        item.emission.View.Provider))
+                .ToArray();
+        var ambiguousRootClassTypeDefRows
+            = rootProviderClassTypeDefs
+                .GroupBy(static item => item.emission.RootTypeDefRow)
                 .Where(static group => group.Count() > 1)
                 .Select(static group => group.Key).ToHashSet();
         var standardClassFieldRowsByIdentity = new Dictionary<(
@@ -2801,10 +2899,7 @@ public static partial class TrRmExecutableCompiler
             .ToDictionary(static item => item.classIndex,
                 static item => item.typeDefRow);
         var typeDefRowByRootClassTypeDef
-            = standardClassDeclarationsByTypeDef
-                .Select((emission, ordinal) => (emission,
-                    typeDefRow: emittedEnums.Count
-                        + retainedClassIndexes.Count + ordinal + 1))
+            = rootProviderClassTypeDefs
                 .Where(item => !ambiguousRootClassTypeDefRows.Contains(
                     item.emission.RootTypeDefRow))
                 .ToDictionary(static item =>
@@ -3637,6 +3732,8 @@ public static partial class TrRmExecutableCompiler
                     AddString(typeImport.ExportKey),
                     0x1300_0000u | checked((uint)typeDefRow)));
                 if (typeImport.RootImportRow > 0
+                    && SameA2SourceTypeProviderSnapshot(rootSnapshot!,
+                        emission.View.Provider)
                     && !importRowByRootClassImport.TryAdd(
                         typeImport.RootImportRow, importRows.Count))
                 {

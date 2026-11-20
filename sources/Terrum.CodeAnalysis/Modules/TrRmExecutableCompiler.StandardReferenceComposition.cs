@@ -125,10 +125,14 @@ public static partial class TrRmExecutableCompiler
         var isNestedFieldPathReference
             = StringComparer.Ordinal.Equals(sourceSchemaIdentity,
                 StandardInitReferenceBodiesNestedFieldDestinationsSchemaIdentity);
-        if (!isLayoutQueriesReference && !isNestedFieldPathReference)
+        var isClassInstanceLayoutReference
+            = IsSelectedC1ClassInstanceLayoutSchemaIdentity(
+                sourceSchemaIdentity);
+        if (!isLayoutQueriesReference && !isNestedFieldPathReference
+            && !isClassInstanceLayoutReference)
         {
             throw Unsupported(
-                "Reference composition requires exact LayoutQueries or nested FieldPath selections.");
+                "Reference composition requires an exact LayoutQueries, nested FieldPath or class-instance-layout selection.");
         }
 
         var providerModules = ValidateStandardQueryProviderClosures(
@@ -563,6 +567,145 @@ public static partial class TrRmExecutableCompiler
                 "The selected Standard class schema is not supported by the bounded type-only composer.");
         }
 
+        var structureReferences = new List<CompilationReference>();
+        for (var referenceIndex = 0;
+            referenceIndex < references.Length; referenceIndex++)
+        {
+            var reference = references[referenceIndex];
+            if (reference.Structures.IsEmpty)
+            {
+                continue;
+            }
+
+            if (!IsSelectedC1ClassInstanceLayoutSchemaIdentity(
+                    classSchemaIdentity)
+                || reference.StandardClassDeclarations.IsEmpty
+                || !StringComparer.Ordinal.Equals(
+                    reference.StandardClassDeclarations[0]
+                        .Declaration.Provider.SchemaIdentity,
+                    classSchemaIdentity))
+            {
+                throw Unsupported(
+                    "Class layout composition with inline struct dependencies requires the exact class-instance-layout schema.");
+            }
+
+            structureReferences.Add(new CompilationReference(
+                reference.Structures, [], runtimePolicy,
+                nativePointerTypes: reference.NativePointerTypes,
+                standardQuerySourceAssociation:
+                    reference.StandardQuerySourceAssociation));
+        }
+
+        if (structureReferences.Count > 1
+            && structureReferences.Any(static reference =>
+                reference.StandardQuerySourceAssociation is null))
+        {
+            throw Unsupported(
+                "Multi-provider inline struct composition requires retained provider closures for every structure reference.");
+        }
+
+        CompilationReference? structureReferenceSet
+            = structureReferences.Count switch {
+                0 => null,
+                1 => structureReferences[0],
+                _ => CreateStandardReferenceSet(structureReferences),
+            };
+        var structuresResult = structureReferenceSet?.Structures ?? [];
+        var nativePointerTypesResult
+            = structureReferenceSet?.NativePointerTypes ?? [];
+        var standardQuerySourceAssociation
+            = structureReferenceSet?.StandardQuerySourceAssociation;
+        var structureIndexByProviderIdentity = new Dictionary<(
+            string ModuleIdentity, uint DefinitionId), int>();
+        var structureDefinitionIdentities
+            = new HashSet<BoundGenericNominalTypeIdentity>();
+        for (var structureIndex = 0;
+            structureIndex < structuresResult.Length; structureIndex++)
+        {
+            var origin = structuresResult[structureIndex]
+                .StandardTypeOrigin
+                ?? throw Invalid(
+                    "A composed class layout structure lost its provider origin.");
+            var key = (origin.Provider.ModuleIdentity,
+                origin.DefinitionId);
+            if (!structureIndexByProviderIdentity.TryAdd(key,
+                    structureIndex)
+                || !structureDefinitionIdentities.Add(
+                    new BoundGenericNominalTypeIdentity(
+                        origin.Provider.ModuleIdentity,
+                        origin.Provider.ModuleIdentity,
+                        origin.DefinitionId)))
+            {
+                throw Invalid(
+                    "A composed class layout contains a duplicate structure TypeDef identity.");
+            }
+        }
+
+        var structureMaps = new int[references.Length][];
+        for (var referenceIndex = 0;
+            referenceIndex < references.Length; referenceIndex++)
+        {
+            var sourceStructures = references[referenceIndex].Structures;
+            var map = new int[sourceStructures.Length];
+            for (var structureIndex = 0;
+                structureIndex < sourceStructures.Length; structureIndex++)
+            {
+                var origin = sourceStructures[structureIndex]
+                    .StandardTypeOrigin
+                    ?? throw Invalid(
+                        "A selected class layout structure lost its provider origin.");
+                if (!structureIndexByProviderIdentity.TryGetValue(
+                        (origin.Provider.ModuleIdentity,
+                            origin.DefinitionId),
+                        out map[structureIndex]))
+                {
+                    throw Invalid(
+                        "A selected class layout structure is absent from the composed type closure.");
+                }
+            }
+
+            structureMaps[referenceIndex] = map;
+        }
+
+        PrimitiveType RemapClassFieldType(int referenceIndex,
+            PrimitiveType type)
+        {
+            if (BoundEnumTypes.IsType(type)
+                || BoundGenericNominalTypeTypes.IsType(type)
+                || BoundSpanTypeTypes.IsType(type)
+                || ManagedClassTypes.IsClass(type)
+                || NativePointerTypes.IsType(type)
+                || NativeFixedArrayTypes.IsType(type)
+                || NativeFunctionPointerTypes.IsType(type)
+                || CheckedReferenceTypes.IsType(type))
+            {
+                throw Unsupported(
+                    "Class reference composition does not yet admit enum, class, pointer or other non-inline-struct field identities.");
+            }
+
+            var structureIndex = (int)type - 100;
+            if (structureIndex >= 0
+                && structureIndex
+                    < references[referenceIndex].Structures.Length)
+            {
+                return (PrimitiveType)(100
+                    + structureMaps[referenceIndex][structureIndex]);
+            }
+            if (structureIndex >= 0)
+            {
+                throw Unsupported(
+                    "A class FieldDef references a structure outside its selected provider closure.");
+            }
+
+            if (!IsStandardClassTypeOnlyComposedFieldType(type))
+            {
+                throw Unsupported(
+                    "Class reference composition requires scalar or inline-struct field types.");
+            }
+
+            return type;
+        }
+
         var definitions
             = ImmutableArray.CreateBuilder<
                 BoundGenericNominalTypeDefinition>();
@@ -593,11 +736,11 @@ public static partial class TrRmExecutableCompiler
             }
             if (reference.RequiresSourceGrant
                 || reference.InvocationProfileId is not null
-                || !reference.Structures.IsEmpty
                 || !reference.Functions.IsEmpty
                 || !reference.Classes.IsEmpty
                 || !reference.NativeFunctionPointerSignatures.IsEmpty
-                || !reference.NativePointerTypes.IsEmpty
+                || (reference.Structures.IsEmpty
+                    && !reference.NativePointerTypes.IsEmpty)
                 || !reference.NativeFixedArrayTypes.IsEmpty
                 || !reference.EnumDefinitions.IsEmpty
                 || !reference.CheckedReferenceTypes.IsEmpty
@@ -614,7 +757,8 @@ public static partial class TrRmExecutableCompiler
                 || reference.NativeOutputCoreRegistration is not null
                 || !reference.GenericMethodImports.IsEmpty
                 || !reference.RetainedGenericMethodRoots.IsEmpty
-                || reference.StandardQuerySourceAssociation is not null
+                || (reference.Structures.IsEmpty
+                    && reference.StandardQuerySourceAssociation is not null)
                 || !reference.CoreEvaluationFormIdentitySelections.IsEmpty
                 || !reference.CoreEvaluationFormSchemaProviders.IsEmpty
                 || !reference.SpanTypes.IsEmpty
@@ -643,7 +787,12 @@ public static partial class TrRmExecutableCompiler
 
             foreach (var definition in sourceDefinitions)
             {
-                if (definition.NominalKind != 2
+                var isClassDefinition = definition.NominalKind == 2;
+                var isStructureDefinition
+                    = definition.NominalKind == 1
+                        && structureDefinitionIdentities.Contains(
+                            definition.Identity);
+                if ((!isClassDefinition && !isStructureDefinition)
                     || !definition.Formals.IsEmpty
                     || !definition.ProviderExpectations.IsEmpty
                     || !StringComparer.Ordinal.Equals(
@@ -719,19 +868,26 @@ public static partial class TrRmExecutableCompiler
 
             foreach (var declaration in reference.StandardClassDeclarations)
             {
-                var view = declaration.Declaration;
+                var view = declaration.Declaration with {
+                    Fields = [.. declaration.Declaration.Fields.Select(
+                        field => field with {
+                            Type = RemapClassFieldType(referenceIndex,
+                                field.Type),
+                        })],
+                };
+                var remappedDeclaration = declaration with {
+                    Declaration = view,
+                };
                 if (!StringComparer.Ordinal.Equals(view.Provider.SchemaIdentity,
                         classSchemaIdentity)
                     || !definitionIndexes.ContainsKey(view.Identity)
                     || !declaration.Expectations.IsEmpty
                     || declaration.SelectedExportKeys.IsDefaultOrEmpty
                     || declaration.ExportKeys.IsDefaultOrEmpty
-                    || view.Fields.Any(field =>
-                        !IsStandardClassTypeOnlyComposedFieldType(field.Type))
                     || !view.Methods.IsEmpty)
                 {
                     throw Unsupported(
-                        "Type-only class composition currently requires selected class roots with primitive fields and without methods or imported expectations.");
+                        "Type-only class composition requires selected class roots with scalar or inline-struct fields and without methods or imported expectations.");
                 }
 
                 AddProviderSnapshot(view.Provider);
@@ -843,12 +999,14 @@ public static partial class TrRmExecutableCompiler
 
                     declarationIndexes.Add(view.Identity,
                         declarations.Count);
-                    declarations.Add(declaration);
+                    declarations.Add(remappedDeclaration);
                 }
             }
 
             if (sourceDefinitions.Any(definition =>
-                    !declarationIndexes.ContainsKey(definition.Identity)))
+                    !declarationIndexes.ContainsKey(definition.Identity)
+                    && !structureDefinitionIdentities.Contains(
+                        definition.Identity)))
             {
                 throw Unsupported(
                     "Class composition requires a retained source declaration for every nominal TypeDef.");
@@ -871,15 +1029,28 @@ public static partial class TrRmExecutableCompiler
 
         var mergedProgram = new BoundProgram([], -1) {
             RuntimePolicy = runtimePolicy,
+            Structures = structuresResult,
+            NativePointerTypes = nativePointerTypesResult,
             GenericNominalTypeDefinitions = definitionTable,
             GenericNominalTypeInstances = instanceTable,
             StandardClassDeclarations = declarationTable,
+            StandardQuerySourceAssociation
+                = standardQuerySourceAssociation,
         };
+        if (!NativePointerTypeContract.IsValidTable(
+                nativePointerTypesResult, structuresResult, []))
+        {
+            throw Invalid(
+                "The composed Standard class/struct type closure is invalid.");
+        }
         SemanticVerifier.VerifyLibraryReferences(mergedProgram);
-        return new CompilationReference([], [], runtimePolicy,
+        return new CompilationReference(structuresResult, [], runtimePolicy,
+            nativePointerTypes: nativePointerTypesResult,
             genericNominalTypeDefinitions: definitionTable,
             genericNominalTypeInstances: instanceTable,
-            standardClassDeclarations: declarationTable);
+            standardClassDeclarations: declarationTable,
+            standardQuerySourceAssociation:
+                standardQuerySourceAssociation);
 
         void AddProviderSnapshot(BoundSourceTypeProviderSnapshot provider)
         {
@@ -969,7 +1140,9 @@ public static partial class TrRmExecutableCompiler
         if (!StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardLayoutQueriesSchemaIdentity)
             && !StringComparer.Ordinal.Equals(schemaIdentity,
-                StandardInitReferenceBodiesNestedFieldDestinationsSchemaIdentity))
+                StandardInitReferenceBodiesNestedFieldDestinationsSchemaIdentity)
+            && !IsSelectedC1ClassInstanceLayoutSchemaIdentity(
+                schemaIdentity))
         {
             throw Unsupported(
                 "A retained Standard provider closure has an unsupported exact schema.");
