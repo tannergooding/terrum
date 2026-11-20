@@ -179,6 +179,46 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
             Is.EquivalentTo(["RootA", "RootB"]));
     }
 
+    [Test]
+    public void ComposesDirectStructFieldDependenciesForClassTypeViews()
+    {
+        var schemaIdentity
+            = StandardGenericMethodSchema
+                .C1M1Construction2ClassTypeBindingViews;
+        var rootA = CreateArtifact("RootA", "BoxA", "BoxAKey", 0,
+            schemaIdentity, null, null, null,
+            localDependencyTypeName: "Leaf");
+        var rootB = CreateArtifact("RootB", "BoxB", "BoxBKey", 0,
+            schemaIdentity, null, null, null,
+            localDependencyTypeName: "Leaf");
+        SetTypeDefFlags(rootA, 0x06, typeDefRow: 2);
+        SetTypeDefFlags(rootB, 0x06, typeDefRow: 2);
+
+        var referenceA = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, rootA), "RootA",
+            [], ["BoxAKey"]);
+        var referenceB = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, rootB), "RootB",
+            [], ["BoxBKey"]);
+        var composed = TrRmExecutableCompiler.CreateStandardReferenceSet(
+            [referenceA, referenceB]);
+        var leaves = composed.GenericNominalTypeDefinitions.Where(
+            static definition => definition.Name == "Leaf").ToArray();
+        Assert.That(leaves.Select(static definition =>
+                definition.Identity.ModuleIdentity),
+            Is.EquivalentTo(["RootA", "RootB"]));
+        Assert.That(leaves.All(static definition =>
+                definition.NominalKind == 1),
+            Is.True);
+        Assert.That(composed.StandardClassDeclarations.Select(
+                static declaration => declaration.Declaration.Name),
+            Is.EquivalentTo(["BoxA", "BoxB"]));
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public void Use(BoxA first, BoxB second) {}"), composed);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
     [TestCase(
         StandardGenericMethodSchema.C1M1Construction2ClassTypeBindingViews)]
     [TestCase(

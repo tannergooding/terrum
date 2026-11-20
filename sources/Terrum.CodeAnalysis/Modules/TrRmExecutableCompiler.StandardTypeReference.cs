@@ -2072,6 +2072,7 @@ public static partial class TrRmExecutableCompiler
 
                     int providerArtifactIndex;
                     int providerModuleRow;
+                    int actualTypeDefRow;
                     int typeSpecImportRow = 0;
                     uint actualDefinitionId;
                     if (typeSpec.Form == 0x03)
@@ -2097,6 +2098,7 @@ public static partial class TrRmExecutableCompiler
                         providerArtifactIndex
                             = binding.ProviderArtifactIndex;
                         providerModuleRow = binding.ProviderModuleRow;
+                        actualTypeDefRow = binding.ProviderTypeDefRow;
                         actualDefinitionId = binding.ActualDefinitionId;
                         if (binding.ProviderTypeDefRow <= 0
                             || actualDefinitionId
@@ -2114,6 +2116,7 @@ public static partial class TrRmExecutableCompiler
                             = providerModule.ArtifactIndex;
                         providerModuleRow = tables.TypeDefs
                             .GetOwnerModule(typeDefRow);
+                        actualTypeDefRow = typeDefRow;
                         actualDefinitionId = expectedDefinitionId;
                     }
 
@@ -2124,18 +2127,37 @@ public static partial class TrRmExecutableCompiler
                     var identity = new BoundGenericNominalTypeIdentity(
                         actualModule.Identity, actualModule.Identity,
                         actualDefinitionId);
-                    if (nominalKind == 1
-                        && !definitionsByIdentity.ContainsKey(identity))
+                    var actualTables = GetC1M1Tables(artifacts,
+                        schemaIdentities, providerArtifactIndex);
+                    var actualSnapshot = GetSnapshot(providerArtifactIndex,
+                        providerModuleRow);
+                    if (!definitionsByIdentity.ContainsKey(identity))
                     {
-                        throw Unsupported(
-                            "A class struct field dependency is outside the retained nominal TypeDef closure.");
+                        AddTypeDefinition(typeDefinitions,
+                            definitionsByIdentity, bindingsByActualType,
+                            actualTables, actualModule.Identity,
+                            providerModuleRow, actualTypeDefRow,
+                            actualSnapshot);
                     }
                     if (nominalKind == 2
                         && !classDeclarations.Any(candidate =>
                             candidate.Declaration.Identity == identity))
                     {
-                        throw Unsupported(
-                            "A class handle field dependency is outside the retained class TypeDef closure.");
+                        var classView = CreateStandardClassTypeView(
+                            actualTables, identity, actualSnapshot,
+                            actualTypeDefRow);
+                        ImmutableArray<BoundStandardClassExpectation>
+                            expectations
+                            = classExpectationsByActualType.TryGetValue(
+                                identity, out var actualExpectations)
+                                ? [.. actualExpectations]
+                                : [];
+                        classDeclarations.Add(
+                            new BoundStandardClassDeclaration(classView,
+                                GetStandardTypeExportKeys(actualTables,
+                                    providerModuleRow, actualTypeDefRow),
+                                expectations));
+                        _ = classIdentities.Add(identity);
                     }
                     if (nominalKind == 2
                         && typeSpec.Qualifiers != 0
