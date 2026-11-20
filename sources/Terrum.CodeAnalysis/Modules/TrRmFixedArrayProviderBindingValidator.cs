@@ -1040,17 +1040,28 @@ internal static class TrRmFixedArrayProviderBindingValidator
                         .ValidatedExecutionTables tables,
                     int expectedTypeDefRow)
             {
-                if (tables.TypeDefs.GetKind(expectedTypeDefRow) != 1
-                    || !tables.TypeDefs.HasDeclaredCopy(expectedTypeDefRow)
-                    || tables.TypeDefs.HasDeclaredUnique(expectedTypeDefRow)
+                var typeDefKind
+                    = tables.TypeDefs.GetKind(expectedTypeDefRow);
+                var allowsClassTypeDefs = TrRmExecutableCompiler
+                    .IsSelectedClassTypeDefBindingEqualitySchemaIdentity(
+                        _schemaIdentities[artifactIndex]);
+                if (typeDefKind is not (1 or 2)
+                    || (!allowsClassTypeDefs && typeDefKind != 1)
                     || tables.TypeDefs
                         .GetGenericRange(expectedTypeDefRow).Count != 0
-                    || !tables.Layouts.HasBlittableLayout(
-                        expectedTypeDefRow,
-                        TrRmTargetProfileTableReader
-                            .WindowsX64NativeProfileId,
-                        TrRmTargetProfileTableReader
-                            .WindowsX64NativeProfileRuleRevision))
+                    || tables.TypeDefs.GetContractRange(expectedTypeDefRow)
+                        .Count != 0
+                    || (!allowsClassTypeDefs
+                        && (!tables.TypeDefs.HasDeclaredCopy(
+                                expectedTypeDefRow)
+                            || tables.TypeDefs.HasDeclaredUnique(
+                                expectedTypeDefRow)
+                            || !tables.Layouts.HasBlittableLayout(
+                                expectedTypeDefRow,
+                                TrRmTargetProfileTableReader
+                                    .WindowsX64NativeProfileId,
+                                TrRmTargetProfileTableReader
+                                    .WindowsX64NativeProfileRuleRevision)))
                 {
                     throw InvalidBinding();
                 }

@@ -221,6 +221,18 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
             Is.EqualTo(2u));
         Assert.That(tables.TypeDefBindingEqualities.GetRightTypeDef(1),
             Is.EqualTo(3u));
+
+        var reloadedReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "RootReemitted",
+            [new TrRmStandardArtifactInput(schemaIdentity, provider)],
+            ["BoxKey"]);
+        var reloadedLeaf = reloadedReference.StandardClassDeclarations.Single(
+            static declaration =>
+                declaration.Declaration.Name == "Leaf");
+        Assert.That(reloadedLeaf.Expectations, Has.Length.EqualTo(2));
+        Assert.That(reloadedLeaf.TypeDefBindingEqualityGroups,
+            Has.Length.EqualTo(1));
     }
 
     [Test]
