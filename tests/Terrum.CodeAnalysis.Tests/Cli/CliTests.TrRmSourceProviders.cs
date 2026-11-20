@@ -939,6 +939,9 @@ internal sealed partial class CliTests
             TestArtifactPaths.DirectoryPath,
             $"source-provider-cli-scalar-manifest-{Guid.NewGuid():N}.trrm");
         string? providerHardLink = null;
+        string? manifestProviderHardLink = null;
+        string? sourceOutputPath = null;
+        string? sourceOutputHardLink = null;
         try
         {
             var providerCompilation = Compilation.CreateLibrary(
@@ -1162,6 +1165,70 @@ internal sealed partial class CliTests
                 await AssertAliasFailureAsync("-", providerSelections,
                     providerArtifact, providerArtifact).ConfigureAwait(true);
 
+                manifestProviderHardLink = Path.Combine(
+                    TestArtifactPaths.DirectoryPath,
+                    $"source-provider-cli-scalar-manifest-provider-{Guid.NewGuid():N}.trrm");
+                await File.WriteAllTextAsync(providerSelections,
+                    providerConfiguration, new UTF8Encoding(false))
+                    .ConfigureAwait(true);
+                if (!CreateHardLink(manifestProviderHardLink,
+                        providerSelections, IntPtr.Zero))
+                {
+                    throw new IOException(
+                        "Could not create the manifest provider test hard link.",
+                        new System.ComponentModel.Win32Exception(
+                            System.Runtime.InteropServices.Marshal
+                                .GetLastWin32Error()));
+                }
+
+                await File.WriteAllTextAsync(providerSelections,
+                    JsonSerializer.Serialize(new {
+                        schemaVersion = 3,
+                        providers = new[] {
+                            new {
+                                schemaIdentity,
+                                path = manifestProviderHardLink,
+                            },
+                        },
+                        references = new[] {
+                            new {
+                                providerInputOrdinal = 0,
+                                moduleIdentity = providerIdentity,
+                                methodExportKeys = new[] { "Ping" },
+                                typeExportKeys = Array.Empty<object>(),
+                                fieldExportKeys = Array.Empty<object>(),
+                            },
+                        },
+                    }), new UTF8Encoding(false)).ConfigureAwait(true);
+                await AssertAliasFailureAsync("-", providerSelections,
+                    consumerArtifact, consumerArtifact).ConfigureAwait(true);
+
+                sourceOutputPath = Path.Combine(
+                    TestArtifactPaths.DirectoryPath,
+                    $"source-provider-cli-scalar-source-{Guid.NewGuid():N}.tr");
+                sourceOutputHardLink = Path.Combine(
+                    TestArtifactPaths.DirectoryPath,
+                    $"source-provider-cli-scalar-source-output-{Guid.NewGuid():N}.trrm");
+                await File.WriteAllTextAsync(sourceOutputPath,
+                    "public void Main() {}", new UTF8Encoding(false))
+                    .ConfigureAwait(true);
+                if (!CreateHardLink(sourceOutputHardLink, sourceOutputPath,
+                        IntPtr.Zero))
+                {
+                    throw new IOException(
+                        "Could not create the source output test hard link.",
+                        new System.ComponentModel.Win32Exception(
+                            System.Runtime.InteropServices.Marshal
+                                .GetLastWin32Error()));
+                }
+
+                await File.WriteAllTextAsync(providerSelections,
+                    providerConfiguration, new UTF8Encoding(false))
+                    .ConfigureAwait(true);
+                await AssertAliasFailureAsync(sourceOutputPath,
+                    providerSelections, sourceOutputHardLink,
+                    sourceOutputPath).ConfigureAwait(true);
+
                 await File.WriteAllTextAsync(providerSelections,
                     providerConfiguration, new UTF8Encoding(false))
                     .ConfigureAwait(true);
@@ -1178,6 +1245,29 @@ internal sealed partial class CliTests
                                 .GetLastWin32Error()));
                 }
 
+                await File.WriteAllTextAsync(providerSelections,
+                    JsonSerializer.Serialize(new {
+                        schemaVersion = 3,
+                        providers = new[] {
+                            new { schemaIdentity, path = providerArtifact },
+                            new { schemaIdentity, path = providerHardLink },
+                        },
+                        references = new[] {
+                            new {
+                                providerInputOrdinal = 0,
+                                moduleIdentity = providerIdentity,
+                                methodExportKeys = new[] { "Ping" },
+                                typeExportKeys = Array.Empty<object>(),
+                                fieldExportKeys = Array.Empty<object>(),
+                            },
+                        },
+                    }), new UTF8Encoding(false)).ConfigureAwait(true);
+                await AssertAliasFailureAsync("-", providerSelections,
+                    consumerArtifact, consumerArtifact).ConfigureAwait(true);
+
+                await File.WriteAllTextAsync(providerSelections,
+                    providerConfiguration, new UTF8Encoding(false))
+                    .ConfigureAwait(true);
                 await AssertAliasFailureAsync("-", providerSelections,
                     providerHardLink, providerArtifact).ConfigureAwait(true);
             }
@@ -1319,6 +1409,21 @@ internal sealed partial class CliTests
         }
         finally
         {
+            if (manifestProviderHardLink is not null)
+            {
+                await TestFileCleanup.DeleteWithRetryAsync(
+                    manifestProviderHardLink).ConfigureAwait(true);
+            }
+            if (sourceOutputHardLink is not null)
+            {
+                await TestFileCleanup.DeleteWithRetryAsync(sourceOutputHardLink)
+                    .ConfigureAwait(true);
+            }
+            if (sourceOutputPath is not null)
+            {
+                await TestFileCleanup.DeleteWithRetryAsync(sourceOutputPath)
+                    .ConfigureAwait(true);
+            }
             await TestFileCleanup.DeleteWithRetryAsync(providerSelections)
                 .ConfigureAwait(true);
             await TestFileCleanup.DeleteWithRetryAsync(manifestOutputAlias)
