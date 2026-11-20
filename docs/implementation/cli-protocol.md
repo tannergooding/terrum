@@ -120,9 +120,10 @@ under the exact three Copy-evidence schemas. Its strict reader, schema pairing
 and single-call dispatch are implemented. End-to-end CLI regressions cover all
 three schemas, an external type provider, a method provider at nonzero
 providerInputOrdinal, scalar-only empty selections and a non-first
-co-located method Module; they remain unverified under the active hold.
-Manifest/source/output/provider alias collision regressions are also added
-but remain unverified.
+co-located method Module. Manifest/source/output/provider alias collisions
+and existing/absent-output preservation on schema mismatch before malformed
+stdin source acquisition are also covered; all remain unverified under the
+active hold.
 Versions 1 and 2, the
 publication manifests and artifact-command provider whitelist are unchanged.
 Artifact commands accept exact per-artifact schema identities and a root

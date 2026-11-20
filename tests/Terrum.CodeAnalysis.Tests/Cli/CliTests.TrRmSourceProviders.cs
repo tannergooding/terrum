@@ -859,6 +859,27 @@ internal sealed partial class CliTests
             }
             Assert.That(await File.ReadAllBytesAsync(consumerArtifact)
                 .ConfigureAwait(true), Is.EqualTo(retained));
+            await TestFileCleanup.DeleteWithRetryAsync(consumerArtifact)
+                .ConfigureAwait(true);
+            var (absentExit, absentOutput, absentError)
+                = await RunAsync(
+                    Encoding.UTF8.GetBytes("public int32 Invalid("),
+                    "compile-trrm", "-", "--identity", consumerIdentity,
+                    "--trrm-schema", schemaIdentity,
+                    "--trrm-source-providers", providerSelections,
+                    "--library", "-o", consumerArtifact, "--runtime",
+                    "fail-fast", "--json").ConfigureAwait(false);
+            Assert.That(absentExit, Is.EqualTo(2),
+                $"{absentOutput}{Environment.NewLine}{absentError}");
+            Assert.That(absentError, Is.Empty);
+            using (var document = JsonDocument.Parse(absentOutput))
+            {
+                Assert.That(document.RootElement
+                        .GetProperty("diagnostic").GetProperty("code")
+                        .GetString(),
+                    Is.EqualTo("TRM2000"));
+            }
+            Assert.That(File.Exists(consumerArtifact), Is.False);
         }
         finally
         {
