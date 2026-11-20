@@ -168,6 +168,35 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
         StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsClassTypeBindingViews)]
     [TestCase(
         StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsClassTypeBindingViews)]
+    public void RejectsMixedClassAndStructEqualityEndpoints(
+        string schemaIdentity)
+    {
+        var provider = CreateRelocatedClassProvider("Provider",
+            schemaIdentity);
+        SetTypeDefFlags(provider, 0x06, typeDefRow: 2);
+        var tables = ReadTables(provider, schemaIdentity);
+        var prefixDefinition = tables.Exports.GetExportsForModule(1)
+            .Single(static export => export.ExportKey == "PrefixKey")
+            .Definition;
+        var leafDefinition = tables.Exports.GetExportsForModule(1)
+            .Single(static export => export.ExportKey == "LeafKey")
+            .Definition;
+        var artifact = AddTypeDefBindingEquality(provider, schemaIdentity, 1,
+            prefixDefinition & 0x00FF_FFFF,
+            leafDefinition & 0x00FF_FFFF);
+
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, artifact),
+                "Provider", [], ["PrefixKey", "LeafKey"]));
+    }
+
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsClassTypeBindingViews)]
+    [TestCase(
+        StandardGenericMethodSchema.C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsAssociatedRelationConstraintsClassTypeBindingViews)]
     public void ComposesDistinctClassViewsOfOneProviderType(
         string schemaIdentity)
     {
@@ -2894,6 +2923,49 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
             new TrRmStandardArtifactInput(schemaIdentity, consumer), "Root",
             [new TrRmStandardArtifactInput(schemaIdentity, provider)],
             ["BoxKey"]);
+
+    private static byte[] AddTypeDefBindingEquality(byte[] artifact,
+        string schemaIdentity, uint ownerModule, uint leftTypeDef,
+        uint rightTypeDef)
+    {
+        var schema
+            = TrRmExecutableCompiler.GetForeignInvocationSchema(
+                schemaIdentity);
+        var sourceIndex = new TrRmArtifactIndex(artifact, schema, null,
+            standardSchemaIdentity: schemaIdentity);
+        var equalityBytes = new byte[12];
+        BinaryPrimitives.WriteUInt32LittleEndian(equalityBytes, ownerModule);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            equalityBytes.AsSpan(4, 4), leftTypeDef);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            equalityBytes.AsSpan(8, 4), rightTypeDef);
+        var sections = new List<TrRmSection>(
+            sourceIndex.SectionCount + 1);
+        var inserted = false;
+        for (var sectionIndex = 0;
+            sectionIndex < sourceIndex.SectionCount; sectionIndex++)
+        {
+            sourceIndex.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var recordCount);
+            if (!inserted && kind > 0x0067)
+            {
+                sections.Add(new TrRmSection(0x0067, 0, 1,
+                    equalityBytes));
+                inserted = true;
+            }
+
+            sections.Add(new TrRmSection(kind, flags,
+                checked((uint)recordCount), bytes.ToArray()));
+        }
+
+        if (!inserted)
+        {
+            sections.Add(new TrRmSection(0x0067, 0, 1, equalityBytes));
+        }
+
+        return TrRmArtifactWriter.Encode(sections, schema,
+            standardSchemaIdentity: schemaIdentity);
+    }
 
     private static byte[] CreateRootArtifact(string moduleIdentity,
         string typeName, string exportKey, uint expectedLeafFieldType,
