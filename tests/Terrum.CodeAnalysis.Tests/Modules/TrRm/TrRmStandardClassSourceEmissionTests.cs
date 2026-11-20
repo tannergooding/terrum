@@ -7525,6 +7525,9 @@ internal sealed class TrRmStandardClassSourceEmissionTests
             (BoundProgram)compilation.Program!,
             "ContextualNestedMethodRootReemitted", schemaIdentity,
             TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        reemittedArtifact
+            = PermuteContextualModuleRefAndImportRows(reemittedArtifact,
+                schemaIdentity);
         var reemittedTables = TrRmStructuralMetadataValidator
             .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
                 reemittedArtifact,
@@ -7532,9 +7535,18 @@ internal sealed class TrRmStandardClassSourceEmissionTests
                 null, standardSchemaIdentity: schemaIdentity));
         Assert.That(reemittedTables.TypeDefBindingEqualities.Count,
             Is.EqualTo(2));
+        var reloadedProviders = new[] {
+            new TrRmStandardArtifactInput(schemaIdentity,
+                ReverseStandardExportRows(providerArtifact,
+                    TrRmArtifactSchema
+                        .C1M1Construction2InitializerCopyEvidenceDraft)),
+            innerInput,
+            wrapperAInput,
+            wrapperBInput,
+        };
         var reloadedReference = TrRmExecutableCompiler.CreateStandardReference(
             new TrRmStandardArtifactInput(schemaIdentity, reemittedArtifact),
-            "ContextualNestedMethodRootReemitted", providers,
+            "ContextualNestedMethodRootReemitted", reloadedProviders,
             ["Read"], typeSelections, []);
         var reloadedLeaf = reloadedReference.Structures.Single(
             static structure => structure.Name == "Demo.Leaf");
@@ -11705,6 +11717,108 @@ internal sealed class TrRmStandardClassSourceEmissionTests
         => AddExportAlias(artifact, originalExportKey, aliasExportKey,
             TrRmArtifactSchema
                 .C1M1Construction2ParameterLabelsReceiverAccessClassParameterDefaultsInitializerCopyEvidenceDraft);
+
+    private static byte[] PermuteContextualModuleRefAndImportRows(
+        byte[] artifact, string schemaIdentity)
+    {
+        var schema = TrRmArtifactSchema
+            .C1M1Construction2InitializerCopyEvidenceDraft;
+        var index = new TrRmArtifactIndex(artifact, schema, null,
+            standardSchemaIdentity: schemaIdentity);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(index);
+        if (tables.Modules.Count != 1
+            || tables.ModuleRefs.Count < 2
+            || tables.Imports.Count < 2
+            || tables.TypeSpecs.Count == 0
+            || tables.Bodies.Count != 0
+            || !index.TryGetSection(0x0010, out var moduleRefSection,
+                out var moduleRefCount)
+            || !index.TryGetSection(0x0011, out var typeSpecSection,
+                out var typeSpecCount)
+            || !index.TryGetSection(0x001C, out var importSection,
+                out var importCount)
+            || moduleRefCount != tables.ModuleRefs.Count
+            || importCount != tables.Imports.Count
+            || typeSpecCount != tables.TypeSpecs.Count
+            || index.TryGetSection(0x004B, out _, out var fieldPathCount)
+                && fieldPathCount != 0)
+        {
+            throw new InvalidOperationException(
+                "The contextual ModuleRef/Import permutation requires multiple provider references and no Bodies or FieldPaths.");
+        }
+
+        var newModuleRefRowByOld = new int[moduleRefCount + 1];
+        var moduleRefBytes = new byte[moduleRefSection.Length];
+        for (var oldRow = 1; oldRow <= moduleRefCount; oldRow++)
+        {
+            var newRow = moduleRefCount - oldRow + 1;
+            newModuleRefRowByOld[oldRow] = newRow;
+            moduleRefSection.Span.Slice((oldRow - 1) * 12, 12).CopyTo(
+                moduleRefBytes.AsSpan((newRow - 1) * 12, 12));
+        }
+
+        var newImportRowByOld = new int[importCount + 1];
+        var importBytes = new byte[importSection.Length];
+        for (var oldRow = 1; oldRow <= importCount; oldRow++)
+        {
+            var newRow = importCount - oldRow + 1;
+            newImportRowByOld[oldRow] = newRow;
+            var sourceOffset = (oldRow - 1) * 12;
+            var destinationOffset = (newRow - 1) * 12;
+            importSection.Span.Slice(sourceOffset, 12).CopyTo(
+                importBytes.AsSpan(destinationOffset, 12));
+            var oldModuleRefRow = checked((int)
+                BinaryPrimitives.ReadUInt32LittleEndian(
+                    importBytes.AsSpan(destinationOffset, 4)));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                importBytes.AsSpan(destinationOffset, 4),
+                checked((uint)newModuleRefRowByOld[oldModuleRefRow]));
+        }
+
+        var typeSpecRows = new ReadOnlyMemory<byte>[typeSpecCount];
+        for (var row = 1; row <= typeSpecCount; row++)
+        {
+            var typeSpec = tables.TypeSpecs.GetRow(row).ToArray();
+            if (typeSpec[0] == 0x03)
+            {
+                var oldImportRow = checked((int)
+                    BinaryPrimitives.ReadUInt32LittleEndian(
+                        typeSpec.AsSpan(2)));
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    typeSpec.AsSpan(2),
+                    checked((uint)newImportRowByOld[oldImportRow]));
+            }
+
+            typeSpecRows[row - 1] = typeSpec;
+        }
+
+        var typeSpecBytes
+            = TrRmVariableTableWriter.EncodeBlobs(typeSpecRows);
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var sectionIndex = 0;
+            sectionIndex < index.SectionCount; sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var recordCount);
+            var sectionBytes = kind switch {
+                0x0010 => moduleRefBytes,
+                0x0011 => typeSpecBytes,
+                0x001C => importBytes,
+                _ => bytes.ToArray(),
+            };
+            sections.Add(new TrRmSection(kind, flags,
+                checked((uint)recordCount), sectionBytes));
+        }
+
+        var result = TrRmArtifactWriter.Encode(sections, schema,
+            standardSchemaIdentity: schemaIdentity);
+        _ = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                new TrRmArtifactIndex(result, schema, null,
+                    standardSchemaIdentity: schemaIdentity));
+        return result;
+    }
 
     private static byte[] ReverseStandardImportRows(
         byte[] artifact, string schemaIdentity)
