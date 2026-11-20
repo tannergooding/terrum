@@ -559,7 +559,8 @@ public static partial class TrRmExecutableCompiler
                     throw Invalid(
                         "A G1 generic nominal TypeDef identity has conflicting declarations.");
                 }
-                if (!definition.ProviderExpectations.IsDefaultOrEmpty)
+                if (!definition.ProviderExpectations.IsDefaultOrEmpty
+                    || !definition.TypeDefBindingEqualityGroups.IsDefaultOrEmpty)
                 {
                     var existingDefinition
                         = GenericNominalTypeDefinitions[existingIndex];
@@ -577,6 +578,13 @@ public static partial class TrRmExecutableCompiler
                                                             existingExpectation,
                                                             expectation))),
                             ],
+                            TypeDefBindingEqualityGroups =
+                                BoundGenericNominalTypeContract
+                                    .MergeTypeDefBindingEqualityGroups(
+                                        existingDefinition
+                                            .TypeDefBindingEqualityGroups,
+                                        definition
+                                            .TypeDefBindingEqualityGroups),
                             Provider = existingDefinition.Provider
                                 ?? definition.Provider,
                             ExportKeys = existingDefinition.ExportKeys

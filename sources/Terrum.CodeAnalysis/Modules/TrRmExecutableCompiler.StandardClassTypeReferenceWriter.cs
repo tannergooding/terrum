@@ -10647,57 +10647,68 @@ public static partial class TrRmExecutableCompiler
         if (IsSelectedClassTypeDefBindingEqualitySchemaIdentity(
                 schemaIdentity))
         {
+            void AddTypeDefBindingEqualityGroup(
+                BoundStandardTypeDefBindingEqualityGroup group)
+            {
+                if (group.OwnerModule is
+                        BoundSourceTypeProviderSnapshot ownerModule
+                    && !SourceTypeSnapshotsMatch(ownerModule, rootSnapshot))
+                {
+                    throw Unsupported(
+                        "C1M1 class equality groups require one retained owner Module partition.");
+                }
+
+                var typeDefRows = new SortedSet<int>();
+                foreach (var endpoint in group.Endpoints)
+                {
+                    if (!SourceTypeSnapshotsMatch(endpoint.OwnerModule,
+                            rootSnapshot))
+                    {
+                        throw Unsupported(
+                            "C1M1 class equality endpoints require one retained TypeDef Module partition.");
+                    }
+
+                    var oldTypeDefRow = GetTypeDefRow(
+                        endpoint.TypeDefDefinitionId);
+                    if (!typeDefRowMap.TryGetValue(oldTypeDefRow,
+                            out var typeDefRow)
+                        || !typeDefRows.Add(typeDefRow))
+                    {
+                        throw new InvalidDataException(
+                            "A class equality endpoint was not emitted as one distinct TypeDef view.");
+                    }
+                }
+
+                if (typeDefRows.Count < 2)
+                {
+                    throw new InvalidDataException(
+                        "A class equality group has fewer than two destination TypeDef views.");
+                }
+
+                using var typeDefEnumerator = typeDefRows.GetEnumerator();
+                _ = typeDefEnumerator.MoveNext();
+                var leftTypeDef = checked((uint)typeDefEnumerator.Current);
+                while (typeDefEnumerator.MoveNext())
+                {
+                    typeDefBindingEqualityRows.Add(
+                        new TrRmTypeDefBindingEqualityRow(1, leftTypeDef,
+                            checked((uint)typeDefEnumerator.Current)));
+                }
+            }
+
             foreach (var declaration in program.StandardClassDeclarations)
             {
                 foreach (var group
                     in declaration.TypeDefBindingEqualityGroups)
                 {
-                    if (group.OwnerModule is
-                            BoundSourceTypeProviderSnapshot ownerModule
-                        && !SourceTypeSnapshotsMatch(ownerModule,
-                            rootSnapshot))
-                    {
-                        throw Unsupported(
-                            "C1M1 class equality groups require one retained owner Module partition.");
-                    }
-
-                    var typeDefRows = new SortedSet<int>();
-                    foreach (var endpoint in group.Endpoints)
-                    {
-                        if (!SourceTypeSnapshotsMatch(endpoint.OwnerModule,
-                                rootSnapshot))
-                        {
-                            throw Unsupported(
-                                "C1M1 class equality endpoints require one retained TypeDef Module partition.");
-                        }
-
-                        var oldTypeDefRow = GetTypeDefRow(
-                            endpoint.TypeDefDefinitionId);
-                        if (!typeDefRowMap.TryGetValue(oldTypeDefRow,
-                                out var typeDefRow)
-                            || !typeDefRows.Add(typeDefRow))
-                        {
-                            throw new InvalidDataException(
-                                "A class equality endpoint was not emitted as one distinct TypeDef view.");
-                        }
-                    }
-
-                    if (typeDefRows.Count < 2)
-                    {
-                        throw new InvalidDataException(
-                            "A class equality group has fewer than two destination TypeDef views.");
-                    }
-
-                    using var typeDefEnumerator = typeDefRows.GetEnumerator();
-                    _ = typeDefEnumerator.MoveNext();
-                    var leftTypeDef = checked((uint)typeDefEnumerator.Current);
-                    while (typeDefEnumerator.MoveNext())
-                    {
-                        typeDefBindingEqualityRows.Add(
-                            new TrRmTypeDefBindingEqualityRow(1,
-                                leftTypeDef,
-                                checked((uint)typeDefEnumerator.Current)));
-                    }
+                    AddTypeDefBindingEqualityGroup(group);
+                }
+            }
+            foreach (var definition in program.GenericNominalTypeDefinitions)
+            {
+                foreach (var group in definition.TypeDefBindingEqualityGroups)
+                {
+                    AddTypeDefBindingEqualityGroup(group);
                 }
             }
 

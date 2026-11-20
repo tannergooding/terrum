@@ -233,6 +233,9 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
         Assert.That(reloadedLeaf.Expectations, Has.Length.EqualTo(2));
         Assert.That(reloadedLeaf.TypeDefBindingEqualityGroups,
             Has.Length.EqualTo(1));
+        Assert.That(reloadedLeaf.TypeDefBindingEqualityGroups[0].OwnerModule?
+                .ModuleIdentity,
+            Is.EqualTo("RootReemitted"));
     }
 
     [Test]
@@ -258,6 +261,42 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
             static definition => definition.Name == "Leaf");
         Assert.That(leaf.NominalKind, Is.EqualTo(1));
         Assert.That(leaf.ProviderExpectations, Has.Length.EqualTo(2));
+        Assert.That(leaf.TypeDefBindingEqualityGroups,
+            Has.Length.EqualTo(1));
+
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public void Use(Box value) {}"), reference);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)compilation.Program!, "StructEqualityReemitted",
+            schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var tables = ReadTables(artifact, schemaIdentity);
+        Assert.That(tables.TypeDefBindingEqualities.Count, Is.EqualTo(1));
+        Assert.That(tables.TypeDefs.GetKind(2), Is.EqualTo(1));
+        Assert.That(tables.TypeDefs.GetKind(3), Is.EqualTo(1));
+        Assert.That(leaf.TypeDefBindingEqualityGroups,
+            Has.Length.EqualTo(1));
+
+        var reloadedReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, artifact),
+                "StructEqualityReemitted",
+                [new TrRmStandardArtifactInput(schemaIdentity, provider)],
+                ["BoxKey"]);
+        var reloadedLeaf = reloadedReference.GenericNominalTypeDefinitions
+            .Single(static definition => definition.Name == "Leaf");
+        Assert.That(reloadedLeaf.NominalKind, Is.EqualTo(1));
+        Assert.That(reloadedLeaf.ProviderExpectations, Has.Length.EqualTo(2));
+        Assert.That(reloadedLeaf.TypeDefBindingEqualityGroups,
+            Has.Length.EqualTo(1));
+        var reloadedCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("public void Use(Box value) {}"),
+            reloadedReference);
+        Assert.That(reloadedCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                reloadedCompilation.Diagnostics));
     }
 
     [Test]
@@ -2607,6 +2646,7 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
             3, 0, 0, featureCount);
 
         var typeSpecRows = new ReadOnlyMemory<byte>[] {
+            TrRmTypeSpecTableWriter.Builtin(0x08),
             TrRmTypeSpecTableWriter.Reference(0x03, 1),
             TrRmTypeSpecTableWriter.Reference(0x03, 2),
         };
@@ -2627,8 +2667,8 @@ internal sealed class TrRmStandardClassTypeProviderBindingTests
         var typeDefs = new TrRmTypeDefTableReader(typeDefBytes, 3, strings,
             modules, 4, 0, 3, 0);
         var fieldRows = new[] {
-            new TrRmFieldDefRow(1, 5, 1, 2),
-            new TrRmFieldDefRow(1, 6, 2, 2),
+            new TrRmFieldDefRow(1, 5, 2, 2),
+            new TrRmFieldDefRow(1, 6, 3, 2),
             new TrRmFieldDefRow(2, 7, 0xF200_0008, 2),
             new TrRmFieldDefRow(3, 7, 0xF200_0008, 2),
         };

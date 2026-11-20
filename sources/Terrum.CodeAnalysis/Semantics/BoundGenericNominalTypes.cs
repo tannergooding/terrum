@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.IO;
 using System.Linq;
 using System.Text;
 
@@ -99,6 +100,8 @@ public sealed record BoundGenericNominalTypeDefinition(
     internal PrimitiveType? TransparentConstantCarrierType { get; init; }
     internal ImmutableArray<BoundSourceTypeExpectation> ProviderExpectations
         { get; init; } = [];
+    internal ImmutableArray<BoundStandardTypeDefBindingEqualityGroup>
+        TypeDefBindingEqualityGroups { get; init; } = [];
     internal BoundSourceTypeProviderSnapshot? Provider { get; init; }
     internal ImmutableArray<string> ExportKeys { get; init; } = [];
 }
@@ -281,7 +284,10 @@ public sealed record BoundGenericNominalTypeInstance(
     BoundGenericNominalTypeIdentity Definition,
     ImmutableArray<BoundGenericNominalTypeArgument> Arguments,
     byte Qualifiers, uint TypeSpecReference = 0,
-    string? TypeSpecProviderIdentity = null, byte TypeSpecForm = 0);
+    string? TypeSpecProviderIdentity = null, byte TypeSpecForm = 0)
+{
+    internal int TypeSpecImportRow { get; init; }
+}
 
 /// <summary>Maps compilation-local nominal TypeDef identities carried by <see cref="PrimitiveType"/>.</summary>
 public static class BoundGenericNominalTypeTypes
@@ -397,6 +403,64 @@ internal static class BoundGenericNominalTypeContract
             right.UsingModule)
         && AreEquivalentProviderSnapshots(left.Provider, right.Provider);
 
+    internal static ImmutableArray<BoundStandardTypeDefBindingEqualityGroup>
+        MergeTypeDefBindingEqualityGroups(
+            ImmutableArray<BoundStandardTypeDefBindingEqualityGroup> left,
+            ImmutableArray<BoundStandardTypeDefBindingEqualityGroup> right)
+    {
+        if (left.IsDefault || right.IsDefault
+            || left.Any(static group => group is null)
+            || right.Any(static group => group is null))
+        {
+            throw new InvalidDataException(
+                "A nominal TypeDef equality group table is uninitialized.");
+        }
+
+        var merged = left.ToBuilder();
+        foreach (var group in right)
+        {
+            if (!merged.Any(candidate =>
+                    AreEquivalentTypeDefBindingEqualityGroups(candidate,
+                        group)))
+            {
+                merged.Add(group);
+            }
+        }
+
+        return merged.ToImmutable();
+    }
+
+    private static bool AreEquivalentTypeDefBindingEqualityGroups(
+        BoundStandardTypeDefBindingEqualityGroup left,
+        BoundStandardTypeDefBindingEqualityGroup right)
+    {
+        if (left.Endpoints.IsDefault || right.Endpoints.IsDefault
+            || left.Endpoints.Length != right.Endpoints.Length
+            || (left.OwnerModule is null) != (right.OwnerModule is null)
+            || (left.OwnerModule is
+                    BoundSourceTypeProviderSnapshot leftOwner
+                && right.OwnerModule is
+                    BoundSourceTypeProviderSnapshot rightOwner
+                && !AreEquivalentProviderSnapshots(leftOwner, rightOwner)))
+        {
+            return false;
+        }
+
+        return left.Endpoints.All(endpoint =>
+            right.Endpoints.Any(candidate =>
+                endpoint.TypeDefDefinitionId
+                    == candidate.TypeDefDefinitionId
+                && endpoint.ImportRow == candidate.ImportRow
+                && StringComparer.Ordinal.Equals(endpoint.ExportKey,
+                    candidate.ExportKey)
+                && endpoint.OwnerModule is
+                    BoundSourceTypeProviderSnapshot endpointOwner
+                && candidate.OwnerModule is
+                    BoundSourceTypeProviderSnapshot candidateOwner
+                && AreEquivalentProviderSnapshots(endpointOwner,
+                    candidateOwner)));
+    }
+
     private static bool AreEquivalentProviderSnapshots(
         BoundSourceTypeProviderSnapshot left,
         BoundSourceTypeProviderSnapshot right) =>
@@ -448,6 +512,7 @@ internal static class BoundGenericNominalTypeContract
                             && transparentCarrier
                                 != PrimitiveType.Bool)))
                 || definition.ProviderExpectations.IsDefault
+                || definition.TypeDefBindingEqualityGroups.IsDefault
                 || definition.ExportKeys.IsDefault
                 || definition.ExportKeys.Any(static key => !IsValidText(key))
                 || definition.ExportKeys.Distinct(StringComparer.Ordinal)
@@ -460,13 +525,16 @@ internal static class BoundGenericNominalTypeContract
                         || provider.ModuleIdentity
                             != definition.Identity.ModuleIdentity
                         || provider.ArtifactSnapshot.IsDefaultOrEmpty
-                        || definition.ExportKeys.IsEmpty
+                        || (definition.ExportKeys.IsEmpty
+                            && !definition.ProviderExpectations.IsEmpty)
                         || definition.ProviderExpectations.Any(
                             expectation =>
                                 !AreEquivalentProviderSnapshots(provider,
                                     expectation.Provider))))
                 || definition.ProviderExpectations.Any(expectation =>
                     !IsValidProviderExpectation(definition, expectation))
+                || definition.TypeDefBindingEqualityGroups.Any(group =>
+                    !IsValidTypeDefBindingEqualityGroup(definition, group))
                 || !identities.Add(definition.Identity))
             {
                 return false;
@@ -488,6 +556,10 @@ internal static class BoundGenericNominalTypeContract
                         definition.ConstraintCount, definition.AssociatedRelationCount));
             }
             analysisRows += definition.Formals.Length;
+            foreach (var group in definition.TypeDefBindingEqualityGroups)
+            {
+                analysisRows += group.Endpoints.Length;
+            }
             if (analysisRows > SemanticVerifier.MaximumAnalysisVisits)
             {
                 return false;
@@ -551,6 +623,108 @@ internal static class BoundGenericNominalTypeContract
             && IsValidText(usingModule.SchemaIdentity)
             && IsValidText(usingModule.ModuleIdentity)
             && !usingModule.ArtifactSnapshot.IsDefaultOrEmpty;
+    }
+
+    private static bool IsValidProviderSnapshot(
+        BoundSourceTypeProviderSnapshot snapshot)
+        => snapshot is not null
+            && snapshot.ArtifactSnapshot is { IsDefault: false, Length: > 0 }
+            && IsValidText(snapshot.SchemaIdentity)
+            && snapshot.ModuleRow > 0
+            && IsValidText(snapshot.ModuleIdentity)
+            && snapshot.Features is { IsDefault: false }
+            && snapshot.TargetProfiles is { IsDefault: false };
+
+    private static bool IsValidTypeDefBindingEqualityGroup(
+        BoundGenericNominalTypeDefinition definition,
+        BoundStandardTypeDefBindingEqualityGroup group)
+    {
+        if (group is null || group.Endpoints.IsDefault
+            || group.Endpoints.Length < 2
+            || definition.NominalKind is not (1 or 2)
+            || definition.ProviderExpectations.IsDefault)
+        {
+            return false;
+        }
+
+        var provider = definition.Provider
+            ?? definition.ProviderExpectations.FirstOrDefault()?.Provider
+            ?? group.Endpoints[0].OwnerModule;
+        if (!IsValidProviderSnapshot(provider)
+            || !StandardGenericMethodSchema.IsClassTypeBindingViews(
+                provider.SchemaIdentity)
+            || !StringComparer.Ordinal.Equals(provider.ModuleIdentity,
+                definition.Identity.ModuleIdentity)
+            || definition.ProviderExpectations.Any(expectation =>
+                !AreEquivalentProviderSnapshots(expectation.Provider,
+                    provider))
+            || (group.OwnerModule is
+                    BoundSourceTypeProviderSnapshot groupOwner
+                && (!IsValidProviderSnapshot(groupOwner)
+                    || !StringComparer.Ordinal.Equals(
+                        groupOwner.SchemaIdentity,
+                        provider.SchemaIdentity))))
+        {
+            return false;
+        }
+
+        var previousEndpoints
+            = new List<BoundStandardTypeDefBindingEqualityEndpoint>();
+        foreach (var endpoint in group.Endpoints)
+        {
+            if (endpoint.OwnerModule is not
+                    BoundSourceTypeProviderSnapshot ownerModule
+                || !IsValidProviderSnapshot(ownerModule)
+                || !StringComparer.Ordinal.Equals(
+                    ownerModule.SchemaIdentity, provider.SchemaIdentity)
+                || (endpoint.TypeDefDefinitionId >> 24) != 0x13
+                || (endpoint.TypeDefDefinitionId & 0x00FF_FFFF) == 0
+                || previousEndpoints.Any(previous =>
+                    previous.TypeDefDefinitionId
+                        == endpoint.TypeDefDefinitionId
+                    && previous.ImportRow == endpoint.ImportRow
+                    && StringComparer.Ordinal.Equals(previous.ExportKey,
+                        endpoint.ExportKey)
+                    && AreEquivalentProviderSnapshots(
+                        previous.OwnerModule, ownerModule)))
+            {
+                return false;
+            }
+            previousEndpoints.Add(endpoint);
+
+            if (endpoint.ImportRow == 0)
+            {
+                if (endpoint.ExportKey is not null
+                    || endpoint.TypeDefDefinitionId
+                        != definition.Identity.DefinitionId
+                    || !AreEquivalentProviderSnapshots(ownerModule,
+                        provider)
+                    || !StringComparer.Ordinal.Equals(
+                        definition.Identity.ProviderIdentity,
+                        ownerModule.ModuleIdentity))
+                {
+                    return false;
+                }
+                continue;
+            }
+
+            if (endpoint.ImportRow < 0
+                || endpoint.ExportKey is not string exportKey
+                || !IsValidText(exportKey)
+                || !definition.ProviderExpectations.Any(expectation =>
+                    expectation.ImportRow == endpoint.ImportRow
+                    && expectation.ExpectedDefinitionId
+                        == endpoint.TypeDefDefinitionId
+                    && StringComparer.Ordinal.Equals(
+                        expectation.ExportKey, exportKey)
+                    && AreEquivalentProviderSnapshots(
+                        expectation.UsingModule, ownerModule)))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     internal static bool IsValidCoreTaskSelection(

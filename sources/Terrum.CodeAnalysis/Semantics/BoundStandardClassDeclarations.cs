@@ -113,12 +113,12 @@ internal sealed record BoundStandardClassExpectation(
 }
 
 internal readonly record struct
-    BoundStandardClassTypeDefBindingEqualityEndpoint(
+    BoundStandardTypeDefBindingEqualityEndpoint(
         BoundSourceTypeProviderSnapshot OwnerModule,
         uint TypeDefDefinitionId, int ImportRow, string? ExportKey);
 
-internal sealed record BoundStandardClassTypeDefBindingEqualityGroup(
-    ImmutableArray<BoundStandardClassTypeDefBindingEqualityEndpoint>
+internal sealed record BoundStandardTypeDefBindingEqualityGroup(
+    ImmutableArray<BoundStandardTypeDefBindingEqualityEndpoint>
         Endpoints)
 {
     internal BoundSourceTypeProviderSnapshot? OwnerModule { get; init; }
@@ -142,7 +142,7 @@ internal sealed record BoundStandardClassDeclaration(
     ImmutableArray<BoundStandardClassExpectation> Expectations)
 {
     internal ImmutableArray<string> SelectedExportKeys { get; init; } = [];
-    internal ImmutableArray<BoundStandardClassTypeDefBindingEqualityGroup>
+    internal ImmutableArray<BoundStandardTypeDefBindingEqualityGroup>
         TypeDefBindingEqualityGroups { get; init; } = [];
 }
 
@@ -527,7 +527,7 @@ internal static class BoundStandardClassDeclarationContract
                 }
 
                 var previousEndpoints
-                    = new List<BoundStandardClassTypeDefBindingEqualityEndpoint>();
+                    = new List<BoundStandardTypeDefBindingEqualityEndpoint>();
                 foreach (var endpoint in group.Endpoints)
                 {
                     if (endpoint.OwnerModule is null

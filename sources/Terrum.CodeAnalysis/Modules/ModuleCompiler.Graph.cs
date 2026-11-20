@@ -123,6 +123,13 @@ public static partial class ModuleCompiler
                     genericNominalDefinitions[existingIndex]
                         = existingDefinition with {
                             ProviderExpectations = expectations,
+                            TypeDefBindingEqualityGroups =
+                                BoundGenericNominalTypeContract
+                                    .MergeTypeDefBindingEqualityGroups(
+                                        existingDefinition
+                                            .TypeDefBindingEqualityGroups,
+                                        definition
+                                            .TypeDefBindingEqualityGroups),
                             Provider = existingDefinition.Provider
                                 ?? definition.Provider,
                             ExportKeys = existingDefinition.ExportKeys

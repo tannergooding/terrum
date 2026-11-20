@@ -484,6 +484,26 @@ public static partial class TrRmExecutableCompiler
 
         var rootSnapshot = CreateA2SourceTypeProviderSnapshot(rootTables,
             artifacts[0], schemaIdentities[0], rootModuleRow);
+        var snapshotsByModule = new Dictionary<(int ArtifactIndex,
+            int ModuleRow), BoundSourceTypeProviderSnapshot> {
+            [(0, rootModuleRow)] = rootSnapshot,
+        };
+        BoundSourceTypeProviderSnapshot GetSnapshot(int artifactIndex,
+            int moduleRow)
+        {
+            var key = (artifactIndex, moduleRow);
+            if (!snapshotsByModule.TryGetValue(key, out var snapshot))
+            {
+                var tables = GetC1M1Tables(artifacts, schemaIdentities,
+                    artifactIndex);
+                snapshot = CreateA2SourceTypeProviderSnapshot(tables,
+                    artifacts[artifactIndex],
+                    schemaIdentities[artifactIndex], moduleRow);
+                snapshotsByModule.Add(key, snapshot);
+            }
+
+            return snapshot;
+        }
 
         var bindingsByActualType = new Dictionary<
             BoundGenericNominalTypeIdentity,
@@ -493,13 +513,16 @@ public static partial class TrRmExecutableCompiler
             List<BoundStandardClassExpectation>>();
         var classTypeBindingEqualityEndpointsByActualType
             = new Dictionary<BoundGenericNominalTypeIdentity,
-                List<BoundStandardClassTypeDefBindingEqualityEndpoint>>();
+                List<BoundStandardTypeDefBindingEqualityEndpoint>>();
+        var loadedTypeDefBindingEqualityGroupsByActualType
+            = new Dictionary<BoundGenericNominalTypeIdentity,
+                List<BoundStandardTypeDefBindingEqualityGroup>>();
         var createsClassTypeBindingEquality
             = StandardGenericMethodSchema.IsClassTypeBindingViews(
                 schemaIdentities[0]);
         void AddClassTypeBindingEqualityEndpoint(
             BoundGenericNominalTypeIdentity actualIdentity,
-            BoundStandardClassTypeDefBindingEqualityEndpoint endpoint)
+            BoundStandardTypeDefBindingEqualityEndpoint endpoint)
         {
             if (!createsClassTypeBindingEquality)
             {
@@ -725,6 +748,8 @@ public static partial class TrRmExecutableCompiler
 
         var localClassTypeDefRows = new SortedSet<int>();
         var pendingLocalClassTypeDefRows = new Queue<int>();
+        var directStructTypeDefRows = new SortedSet<int>();
+        var pendingDirectStructTypeDefRows = new Queue<int>();
         var selectedPackedClassTypeKeys
             = new Dictionary<int, List<string>>();
         foreach (var typeDefRow in selectedTypeDefs.Keys)
@@ -733,12 +758,66 @@ public static partial class TrRmExecutableCompiler
                 new BoundGenericNominalTypeIdentity(moduleIdentity,
                     moduleIdentity,
                     0x1300_0000u | checked((uint)typeDefRow)),
-                new BoundStandardClassTypeDefBindingEqualityEndpoint(
+                new BoundStandardTypeDefBindingEqualityEndpoint(
                     rootSnapshot,
                     0x1300_0000u | checked((uint)typeDefRow), 0, null));
             if (localClassTypeDefRows.Add(typeDefRow))
             {
                 pendingLocalClassTypeDefRows.Enqueue(typeDefRow);
+            }
+        }
+        if (createsClassTypeBindingEquality)
+        {
+            var equalityTable = rootTables.TypeDefBindingEqualities;
+            for (var equalityRow = 1; equalityRow <= equalityTable.Count;
+                equalityRow++)
+            {
+                var endpointRows = new[] {
+                    checked((int)equalityTable.GetLeftTypeDef(equalityRow)),
+                    checked((int)equalityTable.GetRightTypeDef(equalityRow)),
+                };
+                foreach (var endpointRow in endpointRows)
+                {
+                    var definitionId = 0x1300_0000u
+                        | checked((uint)endpointRow);
+                    var endpointKind
+                        = rootTables.TypeDefs.GetKind(endpointRow);
+                    if (rootTables.Imports.IsExpectedDefinition(definitionId))
+                    {
+                        continue;
+                    }
+                    if (endpointKind == 1)
+                    {
+                        if (directStructTypeDefRows.Add(endpointRow))
+                        {
+                            if (directStructTypeDefRows.Count
+                                > BoundGenericNominalTypeTypes.MaximumCount)
+                            {
+                                throw Unsupported(
+                                    "The C1 class struct TypeDef equality closure exceeds the registered nominal type limit.");
+                            }
+
+                            pendingDirectStructTypeDefRows.Enqueue(
+                                endpointRow);
+                        }
+                        continue;
+                    }
+                    if (endpointKind != 2
+                        || !localClassTypeDefRows.Add(endpointRow))
+                    {
+                        continue;
+                    }
+
+                    if (localClassTypeDefRows.Count
+                        > ManagedClassTypes.OptionalFirst
+                            - ManagedClassTypes.First)
+                    {
+                        throw Unsupported(
+                            "The C1 class TypeDef equality closure exceeds the registered class limit.");
+                    }
+
+                    pendingLocalClassTypeDefRows.Enqueue(endpointRow);
+                }
             }
         }
         if (isEN1)
@@ -822,7 +901,7 @@ public static partial class TrRmExecutableCompiler
                     new BoundGenericNominalTypeIdentity(
                         packedModuleIdentity, packedModuleIdentity,
                         packedTypeDefDefinitionId),
-                    new BoundStandardClassTypeDefBindingEqualityEndpoint(
+                    new BoundStandardTypeDefBindingEqualityEndpoint(
                         GetSnapshot(0, providerModuleRow),
                         packedTypeDefDefinitionId, 0, null));
 
@@ -1024,7 +1103,7 @@ public static partial class TrRmExecutableCompiler
                             providerModule.Identity, providerModule.Identity,
                             importBinding.ProviderDefinitionId);
                     AddClassTypeBindingEqualityEndpoint(actualIdentity,
-                        new BoundStandardClassTypeDefBindingEqualityEndpoint(
+                        new BoundStandardTypeDefBindingEqualityEndpoint(
                             rootSnapshot, expectedDefinitionId, importRow,
                             importBinding.ExportKey));
                 }
@@ -1043,7 +1122,9 @@ public static partial class TrRmExecutableCompiler
                 = rootTables.TypeDefs.GetOwnerModule(typeDefRow);
             var kind = rootTables.TypeDefs.GetKind(typeDefRow);
             if (typeDefModuleRow != rootModuleRow
-                && (!isEN1 || kind != 2
+                && (!(isEN1 && kind == 2
+                        || createsClassTypeBindingEquality
+                            && (kind is 1 or 2))
                     || rootTables.Modules.GetRequirements(
                         typeDefModuleRow)
                         != rootTables.Modules.GetRequirements(rootModuleRow)))
@@ -1075,7 +1156,7 @@ public static partial class TrRmExecutableCompiler
                     new BoundGenericNominalTypeIdentity(
                         directModuleIdentity, directModuleIdentity,
                         definitionId),
-                    new BoundStandardClassTypeDefBindingEqualityEndpoint(
+                    new BoundStandardTypeDefBindingEqualityEndpoint(
                         GetSnapshot(0, typeDefModuleRow), definitionId, 0,
                         null));
 
@@ -1100,6 +1181,18 @@ public static partial class TrRmExecutableCompiler
                         == 0)
                 || (isEN1 && kind == 4))
             {
+                if (createsClassTypeBindingEquality && kind == 1
+                    && directStructTypeDefRows.Add(typeDefRow))
+                {
+                    if (directStructTypeDefRows.Count
+                        > BoundGenericNominalTypeTypes.MaximumCount)
+                    {
+                        throw Unsupported(
+                            "The C1 class struct TypeDef closure exceeds the registered nominal type limit.");
+                    }
+
+                    pendingDirectStructTypeDefRows.Enqueue(typeDefRow);
+                }
                 return;
             }
 
@@ -1107,17 +1200,21 @@ public static partial class TrRmExecutableCompiler
                 "The C1 class TypeSpec closure supports only non-generic local structs, enum Types and local classes.");
         }
 
-        while (pendingLocalClassTypeDefRows.TryDequeue(
-            out var localClassTypeDefRow))
+        while (pendingLocalClassTypeDefRows.Count != 0
+            || pendingDirectStructTypeDefRows.Count != 0)
         {
+            var typeDefRow = pendingLocalClassTypeDefRows.TryDequeue(
+                    out var localClassTypeDefRow)
+                ? localClassTypeDefRow
+                : pendingDirectStructTypeDefRows.Dequeue();
             if (--remainingClassTypeVisits < 0)
             {
                 throw Unsupported(
-                    "The C1 local class TypeDef closure exceeds its traversal limit.");
+                    "The C1 local class/struct TypeDef closure exceeds its traversal limit.");
             }
 
             var (fieldStart, fieldEnd)
-                = rootTables.TypeDefs.GetFieldRange(localClassTypeDefRow);
+                = rootTables.TypeDefs.GetFieldRange(typeDefRow);
             for (var fieldRow = fieldStart; fieldRow < fieldEnd; fieldRow++)
             {
                 VisitClassFieldTypeSpec(
@@ -1137,7 +1234,19 @@ public static partial class TrRmExecutableCompiler
                 providerModuleRow);
             AddTypeDefinition(typeDefinitions, definitionsByIdentity,
                 bindingsByActualType, rootTables, providerIdentity,
-                providerModuleRow, typeDefRow);
+                providerModuleRow, typeDefRow,
+                GetSnapshot(0, providerModuleRow));
+        }
+        foreach (var typeDefRow in directStructTypeDefRows)
+        {
+            var providerModuleRow = rootTables.TypeDefs.GetOwnerModule(
+                typeDefRow);
+            var providerIdentity = rootTables.Modules.GetIdentity(
+                providerModuleRow);
+            AddTypeDefinition(typeDefinitions, definitionsByIdentity,
+                bindingsByActualType, rootTables, providerIdentity,
+                providerModuleRow, typeDefRow,
+                GetSnapshot(0, providerModuleRow));
         }
         foreach (var binding in typeProviderBindings)
         {
@@ -1162,10 +1271,12 @@ public static partial class TrRmExecutableCompiler
             AddTypeDefinition(typeDefinitions, definitionsByIdentity,
                 bindingsByActualType, providerTables,
                 providerModule.Identity, binding.ProviderModuleRow,
-                binding.ProviderTypeDefRow);
+                binding.ProviderTypeDefRow,
+                GetSnapshot(binding.ProviderArtifactIndex,
+                    binding.ProviderModuleRow));
         }
 
-        static void AddTypeDefinition(
+        void AddTypeDefinition(
             ImmutableArray<BoundGenericNominalTypeDefinition>.Builder
                 typeDefinitions,
             Dictionary<BoundGenericNominalTypeIdentity, int>
@@ -1173,7 +1284,8 @@ public static partial class TrRmExecutableCompiler
             Dictionary<BoundGenericNominalTypeIdentity,
                 List<BoundSourceTypeExpectation>> bindingsByActualType,
             TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
-            string moduleIdentity, int providerModuleRow, int typeDefRow)
+            string moduleIdentity, int providerModuleRow, int typeDefRow,
+            BoundSourceTypeProviderSnapshot providerSnapshot)
         {
             var identity = new BoundGenericNominalTypeIdentity(
                 moduleIdentity, moduleIdentity,
@@ -1187,8 +1299,10 @@ public static partial class TrRmExecutableCompiler
                 moduleIdentity, [], moduleRow: providerModuleRow,
                 onlyTypeDefRow: typeDefRow);
             BoundGenericNominalTypeDefinition definition;
+            var nominalKind = tables.TypeDefs.GetKind(typeDefRow);
             if (definitions.Length == 0
-                && tables.TypeDefs.GetKind(typeDefRow) == 2
+                && (nominalKind == 2
+                    || createsClassTypeBindingEquality && nominalKind == 1)
                 && tables.TypeDefs.GetGenericRange(typeDefRow).Count == 0
                 && tables.TypeDefs.GetContractRange(typeDefRow).Count == 0
                 && !tables.Exports.TryGetExportKeyForDefinition(
@@ -1196,7 +1310,7 @@ public static partial class TrRmExecutableCompiler
             {
                 definition = new BoundGenericNominalTypeDefinition(
                     identity, tables.TypeDefs.GetNamespace(typeDefRow),
-                    tables.TypeDefs.GetName(typeDefRow), 2, [],
+                    tables.TypeDefs.GetName(typeDefRow), nominalKind, [],
                     tables.TypeSpecs.Count, tables.ConstantSources.Count,
                     tables.Constraints.Count,
                     tables.AssociatedRelations.Count);
@@ -1216,6 +1330,7 @@ public static partial class TrRmExecutableCompiler
                 throw Invalid(
                     "A C1 nominal provider definition has an unexpected identity.");
             }
+            definition = definition with { Provider = providerSnapshot };
             if (definition.NominalKind is 1 or 2
                 && (!definition.Formals.IsEmpty
                     || tables.TypeDefs.GetContractRange(typeDefRow).Count
@@ -1503,24 +1618,256 @@ public static partial class TrRmExecutableCompiler
 
         if (createsClassTypeBindingEquality)
         {
+            var equalityTable = rootTables.TypeDefBindingEqualities;
+            var equalityGraphs = new Dictionary<(
+                int OwnerModuleRow,
+                BoundGenericNominalTypeIdentity ActualIdentity),
+                Dictionary<int, HashSet<int>>>();
+            var equalityEndpoints = new Dictionary<(
+                int OwnerModuleRow,
+                BoundGenericNominalTypeIdentity ActualIdentity),
+                Dictionary<int,
+                    BoundStandardTypeDefBindingEqualityEndpoint>>();
+
+            (BoundGenericNominalTypeIdentity ActualIdentity, byte Kind,
+                BoundStandardTypeDefBindingEqualityEndpoint Endpoint)
+                ResolveClassEqualityEndpoint(int typeDefRow)
+            {
+                var ownerModuleRow = rootTables.TypeDefs.GetOwnerModule(
+                    typeDefRow);
+                var definitionId = 0x1300_0000u
+                    | checked((uint)typeDefRow);
+                var ownerSnapshot = GetSnapshot(0, ownerModuleRow);
+                var kind = rootTables.TypeDefs.GetKind(typeDefRow);
+                if (!rootTables.Imports.IsExpectedDefinition(definitionId))
+                {
+                    var moduleIdentity = rootTables.Modules.GetIdentity(
+                        ownerModuleRow);
+                    return (
+                        new BoundGenericNominalTypeIdentity(moduleIdentity,
+                            moduleIdentity, definitionId),
+                        kind,
+                        new BoundStandardTypeDefBindingEqualityEndpoint(
+                            ownerSnapshot, definitionId, 0, null));
+                }
+
+                var bindings = typeProviderBindings.Where(binding =>
+                        binding.ConsumerArtifactIndex == 0
+                        && binding.ConsumerModuleRow == ownerModuleRow
+                        && binding.ExpectedTypeDefRow == typeDefRow)
+                    .ToArray();
+                if (bindings.Length != 1)
+                {
+                    throw Unsupported(
+                        "A retained class TypeDef equality endpoint has no unique selected provider binding.");
+                }
+
+                var binding = bindings[0];
+                var providerModule = moduleValidation.Modules.Single(module =>
+                    module.ArtifactIndex == binding.ProviderArtifactIndex
+                    && module.ModuleRow == binding.ProviderModuleRow);
+                var providerDefinitionId = 0x1300_0000u
+                    | checked((uint)binding.ProviderTypeDefRow);
+                return (
+                    new BoundGenericNominalTypeIdentity(
+                        providerModule.Identity, providerModule.Identity,
+                        providerDefinitionId),
+                    kind,
+                    new BoundStandardTypeDefBindingEqualityEndpoint(
+                        ownerSnapshot, definitionId, binding.ImportRow,
+                        binding.ExportKey));
+            }
+
+            static bool SameEqualityEndpoint(
+                BoundStandardTypeDefBindingEqualityEndpoint left,
+                BoundStandardTypeDefBindingEqualityEndpoint right)
+                => left.TypeDefDefinitionId
+                        == right.TypeDefDefinitionId
+                    && left.ImportRow == right.ImportRow
+                    && StringComparer.Ordinal.Equals(left.ExportKey,
+                        right.ExportKey)
+                    && SameA2SourceTypeProviderSnapshot(left.OwnerModule,
+                        right.OwnerModule);
+
+            for (var row = 1; row <= equalityTable.Count; row++)
+            {
+                var ownerModuleRow = checked((int)
+                    equalityTable.GetOwnerModule(row));
+                var leftTypeDefRow = checked((int)
+                    equalityTable.GetLeftTypeDef(row));
+                var rightTypeDefRow = checked((int)
+                    equalityTable.GetRightTypeDef(row));
+                var leftEndpoint
+                    = ResolveClassEqualityEndpoint(leftTypeDefRow);
+                var rightEndpoint
+                    = ResolveClassEqualityEndpoint(rightTypeDefRow);
+                if (leftEndpoint.Kind != rightEndpoint.Kind
+                    || leftEndpoint.ActualIdentity
+                        != rightEndpoint.ActualIdentity)
+                {
+                    throw Invalid(
+                        "A class-bearing TypeDef equality component changed its checked actual TypeDef.");
+                }
+
+                if (leftEndpoint.Kind is not (1 or 2))
+                {
+                    throw Invalid(
+                        "A class-bearing TypeDef equality row has an unsupported endpoint kind.");
+                }
+
+                var graphKey = (
+                    OwnerModuleRow: ownerModuleRow,
+                    ActualIdentity: leftEndpoint.ActualIdentity);
+                if (!equalityGraphs.TryGetValue(graphKey, out var graph))
+                {
+                    graph = [];
+                    equalityGraphs.Add(graphKey, graph);
+                    equalityEndpoints.Add(graphKey, []);
+                }
+
+                if (!graph.TryGetValue(leftTypeDefRow,
+                        out var leftNeighbors))
+                {
+                    leftNeighbors = [];
+                    graph.Add(leftTypeDefRow, leftNeighbors);
+                }
+                if (!graph.TryGetValue(rightTypeDefRow,
+                        out var rightNeighbors))
+                {
+                    rightNeighbors = [];
+                    graph.Add(rightTypeDefRow, rightNeighbors);
+                }
+                leftNeighbors.Add(rightTypeDefRow);
+                rightNeighbors.Add(leftTypeDefRow);
+
+                var endpoints = equalityEndpoints[graphKey];
+                if ((endpoints.TryGetValue(leftTypeDefRow,
+                         out var existingLeft)
+                        && !SameEqualityEndpoint(existingLeft,
+                            leftEndpoint.Endpoint))
+                    || (endpoints.TryGetValue(rightTypeDefRow,
+                            out var existingRight)
+                        && !SameEqualityEndpoint(existingRight,
+                            rightEndpoint.Endpoint)))
+                {
+                    throw Invalid(
+                        "A class-bearing TypeDef equality endpoint changed its retained Import context.");
+                }
+                endpoints[leftTypeDefRow] = leftEndpoint.Endpoint;
+                endpoints[rightTypeDefRow] = rightEndpoint.Endpoint;
+            }
+
+            foreach (var (graphKey, graph) in equalityGraphs)
+            {
+                var visited = new HashSet<int>();
+                foreach (var firstTypeDefRow in graph.Keys.Order())
+                {
+                    if (!visited.Add(firstTypeDefRow))
+                    {
+                        continue;
+                    }
+
+                    var componentRows = new List<int>();
+                    var pendingRows = new Queue<int>();
+                    pendingRows.Enqueue(firstTypeDefRow);
+                    while (pendingRows.TryDequeue(out var typeDefRow))
+                    {
+                        componentRows.Add(typeDefRow);
+                        foreach (var neighbor in graph[typeDefRow])
+                        {
+                            if (visited.Add(neighbor))
+                            {
+                                pendingRows.Enqueue(neighbor);
+                            }
+                        }
+                    }
+
+                    if (componentRows.Count < 2)
+                    {
+                        continue;
+                    }
+
+                    var endpoints = equalityEndpoints[graphKey];
+                    var group = new BoundStandardTypeDefBindingEqualityGroup(
+                        [.. componentRows.Order().Select(typeDefRow =>
+                            endpoints[typeDefRow])]) {
+                        OwnerModule = GetSnapshot(0,
+                            graphKey.OwnerModuleRow),
+                    };
+                    if (!loadedTypeDefBindingEqualityGroupsByActualType
+                            .TryGetValue(graphKey.ActualIdentity,
+                                out var groups))
+                    {
+                        groups = [];
+                        loadedTypeDefBindingEqualityGroupsByActualType.Add(
+                            graphKey.ActualIdentity, groups);
+                    }
+
+                    groups.Add(group);
+                }
+            }
+
             for (var declarationIndex = 0;
                 declarationIndex < classDeclarations.Count;
                 declarationIndex++)
             {
                 var declaration = classDeclarations[declarationIndex];
-                if (!classTypeBindingEqualityEndpointsByActualType.TryGetValue(
+                var groups = declaration.TypeDefBindingEqualityGroups
+                    .ToBuilder();
+                if (loadedTypeDefBindingEqualityGroupsByActualType.TryGetValue(
                         declaration.Declaration.Identity,
-                        out var endpoints)
-                    || endpoints.Count < 2)
+                        out var loadedGroups))
+                {
+                    groups.AddRange(loadedGroups);
+                }
+
+                if (classTypeBindingEqualityEndpointsByActualType.TryGetValue(
+                        declaration.Declaration.Identity,
+                        out var sourceEndpoints)
+                    && sourceEndpoints.Count >= 2
+                    && !groups.Any(group =>
+                        group.Endpoints.Length == sourceEndpoints.Count
+                        && sourceEndpoints.All(endpoint =>
+                            group.Endpoints.Any(candidate =>
+                                SameEqualityEndpoint(candidate, endpoint)))))
+                {
+                    groups.Add(
+                        new BoundStandardTypeDefBindingEqualityGroup(
+                            [.. sourceEndpoints]));
+                }
+
+                if (groups.Count != declaration.TypeDefBindingEqualityGroups
+                        .Length)
+                {
+                    classDeclarations[declarationIndex] = declaration with {
+                        TypeDefBindingEqualityGroups = groups.ToImmutable(),
+                    };
+                }
+            }
+
+            foreach (var (actualIdentity, groups)
+                in loadedTypeDefBindingEqualityGroupsByActualType)
+            {
+                if (classDeclarations.Any(declaration =>
+                        declaration.Declaration.Identity == actualIdentity))
                 {
                     continue;
                 }
+                if (!definitionsByIdentity.TryGetValue(actualIdentity,
+                        out var definitionIndex)
+                    || typeDefinitions[definitionIndex].NominalKind != 1)
+                {
+                    throw Unsupported(
+                        "A retained struct TypeDef equality group has no complete nominal definition carrier.");
+                }
 
-                classDeclarations[declarationIndex] = declaration with {
-                    TypeDefBindingEqualityGroups = [
-                        new BoundStandardClassTypeDefBindingEqualityGroup(
-                            [.. endpoints]),
-                    ],
+                var definition = typeDefinitions[definitionIndex];
+                var definitionGroups
+                    = definition.TypeDefBindingEqualityGroups.ToBuilder();
+                definitionGroups.AddRange(groups);
+                typeDefinitions[definitionIndex] = definition with {
+                    TypeDefBindingEqualityGroups
+                        = definitionGroups.ToImmutable(),
                 };
             }
         }
@@ -1566,7 +1913,8 @@ public static partial class TrRmExecutableCompiler
 
                 AddTypeDefinition(typeDefinitions, definitionsByIdentity,
                     bindingsByActualType, rootTables, moduleIdentity,
-                    rootModuleRow, binding.ExpectedTypeDefRow);
+                    rootModuleRow, binding.ExpectedTypeDefRow,
+                    rootSnapshot);
             }
         }
 
@@ -1599,6 +1947,12 @@ public static partial class TrRmExecutableCompiler
                 }
                 typeDefinitions[existingIndex] = existing with {
                     ProviderExpectations = expectations.ToImmutable(),
+                    TypeDefBindingEqualityGroups =
+                        BoundGenericNominalTypeContract
+                            .MergeTypeDefBindingEqualityGroups(
+                                existing.TypeDefBindingEqualityGroups,
+                                typeDefinition
+                                    .TypeDefBindingEqualityGroups),
                 };
             }
             else
@@ -1645,6 +1999,213 @@ public static partial class TrRmExecutableCompiler
             genericNominalTypeInstances.Add(
                 new BoundGenericNominalTypeInstance(
                     declaration.Declaration.Identity, [], 0));
+        }
+
+        if (isClassTypeBindingViews)
+        {
+            var classFieldTypeSpecInstanceIndexes = new Dictionary<(
+                BoundGenericNominalTypeIdentity Identity,
+                string TypeSpecProviderIdentity,
+                uint TypeSpecReference), int>();
+
+            BoundStandardClassTypeView DecodeClassFieldTypes(
+                BoundStandardClassTypeView view)
+            {
+                var providerModule = moduleValidation.Modules.Single(
+                    module => module.ModuleRow == view.Provider.ModuleRow
+                        && StringComparer.Ordinal.Equals(module.Identity,
+                            view.Provider.ModuleIdentity)
+                        && StringComparer.Ordinal.Equals(
+                            schemaIdentities[module.ArtifactIndex],
+                            view.Provider.SchemaIdentity)
+                        && artifacts[module.ArtifactIndex].AsSpan()
+                            .SequenceEqual(
+                                view.Provider.ArtifactSnapshot.AsSpan()));
+                var tables = GetC1M1Tables(artifacts, schemaIdentities,
+                    providerModule.ArtifactIndex);
+                var fields = view.Fields.ToBuilder();
+                for (var fieldIndex = 0; fieldIndex < fields.Count;
+                    fieldIndex++)
+                {
+                    var field = fields[fieldIndex];
+                    var typeSpec = tables.TypeSpecs.GetTypeSpecRef(
+                        field.TypeSpecReference);
+                    if (typeSpec.Qualifiers == 0
+                        && (typeSpec.Form is 0x01 or 0x0F)
+                        && TrRmConstantSourceValueValidator
+                            .TryGetBoundScalarType(typeSpec.TypeCode,
+                                out var scalarType)
+                        && scalarType != PrimitiveType.Void)
+                    {
+                        fields[fieldIndex] = field with {
+                            Type = scalarType,
+                        };
+                        continue;
+                    }
+
+                    if (!typeSpec.IsRow
+                        || typeSpec.Form is not (0x02 or 0x03)
+                        || typeSpec.Qualifiers > 1)
+                    {
+                        throw Unsupported(
+                            "The C1 class TypeDef equality projection supports scalar and nongeneric nominal field types.");
+                    }
+
+                    var typeDefRow = tables.TypeSpecs.GetNominalTypeDefRow(
+                        field.TypeSpecReference, tables.TypeDefs,
+                        tables.Imports);
+                    var expectedDefinitionId = 0x1300_0000u
+                        | checked((uint)typeDefRow);
+                    var nominalKind = tables.TypeDefs.GetKind(typeDefRow);
+                    if (nominalKind is not (1 or 2))
+                    {
+                        throw Unsupported(
+                            "The C1 class TypeDef equality projection supports only class and struct field dependencies.");
+                    }
+                    if (typeSpec.Form == 0x02
+                        && tables.Imports.IsExpectedDefinition(
+                            expectedDefinitionId))
+                    {
+                        throw Invalid(
+                            "A direct class FieldDef TypeSpec cannot name an expected TypeDef stub.");
+                    }
+
+                    int providerArtifactIndex;
+                    int providerModuleRow;
+                    int typeSpecImportRow = 0;
+                    uint actualDefinitionId;
+                    if (typeSpec.Form == 0x03)
+                    {
+                        typeSpecImportRow = checked((int)typeSpec.Row);
+                        var bindings = typeProviderBindings.Where(candidate =>
+                                candidate.ConsumerArtifactIndex
+                                    == providerModule.ArtifactIndex
+                                && candidate.ConsumerModuleRow
+                                    == providerModule.ModuleRow
+                                && candidate.ImportRow
+                                    == typeSpecImportRow
+                                && candidate.ExpectedTypeDefRow
+                                    == typeDefRow)
+                            .ToArray();
+                        if (bindings.Length != 1)
+                        {
+                            throw Invalid(
+                                "A class FieldDef TypeSpec has no exact checked Import binding.");
+                        }
+                        var binding = bindings[0];
+
+                        providerArtifactIndex
+                            = binding.ProviderArtifactIndex;
+                        providerModuleRow = binding.ProviderModuleRow;
+                        actualDefinitionId = binding.ActualDefinitionId;
+                        if (binding.ProviderTypeDefRow <= 0
+                            || actualDefinitionId
+                                != (0x1300_0000u
+                                    | checked((uint)
+                                        binding.ProviderTypeDefRow)))
+                        {
+                            throw Invalid(
+                                "A class FieldDef TypeSpec binding has an invalid provider TypeDef.");
+                        }
+                    }
+                    else
+                    {
+                        providerArtifactIndex
+                            = providerModule.ArtifactIndex;
+                        providerModuleRow = tables.TypeDefs
+                            .GetOwnerModule(typeDefRow);
+                        actualDefinitionId = expectedDefinitionId;
+                    }
+
+                    var actualModule = moduleValidation.Modules.Single(
+                        module => module.ArtifactIndex
+                                == providerArtifactIndex
+                            && module.ModuleRow == providerModuleRow);
+                    var identity = new BoundGenericNominalTypeIdentity(
+                        actualModule.Identity, actualModule.Identity,
+                        actualDefinitionId);
+                    if (nominalKind == 1
+                        && !definitionsByIdentity.ContainsKey(identity))
+                    {
+                        throw Unsupported(
+                            "A class struct field dependency is outside the retained nominal TypeDef closure.");
+                    }
+                    if (nominalKind == 2
+                        && !classDeclarations.Any(candidate =>
+                            candidate.Declaration.Identity == identity))
+                    {
+                        throw Unsupported(
+                            "A class handle field dependency is outside the retained class TypeDef closure.");
+                    }
+                    if (nominalKind == 2
+                        && typeSpec.Qualifiers != 0
+                        && (!classDeclarations.Single(candidate =>
+                                candidate.Declaration.Identity == identity)
+                            .Declaration.TryGetDeclaredMutability(
+                                out var isMutable)
+                            || !isMutable))
+                    {
+                        throw Unsupported(
+                            "A writable class field TypeSpec requires a mutable class provider.");
+                    }
+
+                    var key = (identity, view.Provider.ModuleIdentity,
+                        field.TypeSpecReference);
+                    if (!classFieldTypeSpecInstanceIndexes.TryGetValue(key,
+                            out var instanceIndex))
+                    {
+                        if (genericNominalTypeInstances.Count
+                            >= BoundGenericNominalTypeTypes.MaximumCount)
+                        {
+                            throw Unsupported(
+                                "The C1 class field nominal instance limit was exceeded.");
+                        }
+
+                        instanceIndex = genericNominalTypeInstances.Count;
+                        genericNominalTypeInstances.Add(
+                            new BoundGenericNominalTypeInstance(identity, [],
+                                typeSpec.Qualifiers,
+                                field.TypeSpecReference,
+                                view.Provider.ModuleIdentity,
+                                typeSpec.Form) {
+                                TypeSpecImportRow = typeSpecImportRow,
+                            });
+                        classFieldTypeSpecInstanceIndexes.Add(key,
+                            instanceIndex);
+                    }
+
+                    fields[fieldIndex] = field with {
+                        Type = BoundGenericNominalTypeTypes.Type(
+                            instanceIndex),
+                    };
+                }
+
+                return view with { Fields = fields.ToImmutable() };
+            }
+
+            for (var declarationIndex = 0;
+                declarationIndex < classDeclarations.Count;
+                declarationIndex++)
+            {
+                var declaration = classDeclarations[declarationIndex];
+                var expectations = declaration.Expectations.ToBuilder();
+                for (var expectationIndex = 0;
+                    expectationIndex < expectations.Count;
+                    expectationIndex++)
+                {
+                    var expectation = expectations[expectationIndex];
+                    expectations[expectationIndex] = expectation with {
+                        ExpectedDeclaration = DecodeClassFieldTypes(
+                            expectation.ExpectedDeclaration),
+                    };
+                }
+
+                classDeclarations[declarationIndex] = declaration with {
+                    Declaration = DecodeClassFieldTypes(
+                        declaration.Declaration),
+                    Expectations = expectations.ToImmutable(),
+                };
+            }
         }
 
         var classMethodTypeSpecInstanceIndexes = new Dictionary<(
@@ -2278,7 +2839,11 @@ public static partial class TrRmExecutableCompiler
                 genericNominalTypeInstances.Add(
                     new BoundGenericNominalTypeInstance(identity, [],
                         typeSpec.Qualifiers, typeSpecReference,
-                        moduleIdentity, typeSpec.Form));
+                        moduleIdentity, typeSpec.Form) {
+                        TypeSpecImportRow = typeSpec.Form == 0x03
+                            ? checked((int)typeSpec.Row)
+                            : 0,
+                    });
                 classMethodTypeSpecInstanceIndexes.Add(key, instanceIndex);
             }
 
@@ -4162,7 +4727,11 @@ public static partial class TrRmExecutableCompiler
                             classTypeIdentity, [],
                             qualifierSource.Qualifiers,
                             typeSpecReference, typeSpecProviderIdentity,
-                            typeSpecForm));
+                            typeSpecForm) {
+                            TypeSpecImportRow = typeSpecForm == 0x03
+                                ? checked((int)type.Row)
+                                : 0,
+                        });
                     classTypeInstanceIndexes.Add(key, instanceIndex);
                 }
 
@@ -4681,7 +5250,11 @@ public static partial class TrRmExecutableCompiler
                     classIdentity, [],
                     qualifierSource.Qualifiers,
                     typeSpecReference, provider.ModuleIdentity,
-                    typeSpecForm));
+                    typeSpecForm) {
+                    TypeSpecImportRow = typeSpecForm == 0x03
+                        ? checked((int)type.Row)
+                        : 0,
+                });
                 classTypeInstanceIndexes.Add(key, instanceIndex);
             }
 
